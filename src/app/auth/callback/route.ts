@@ -4,21 +4,46 @@ import { createClient } from '@/lib/supabase/server'
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/dashboard'
+  const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
+  const isLocalEnv = process.env.NODE_ENV === 'development'
 
   if (code) {
     const supabase = await createClient()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) {
-      const forwardedHost = request.headers.get('x-forwarded-host')
-      const isLocalEnv = process.env.NODE_ENV === 'development'
-      if (isLocalEnv) {
-        return NextResponse.redirect(`${origin}${next}`)
-      } else if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${next}`)
-      } else {
-        return NextResponse.redirect(`${origin}${next}`)
+    const { error, data } = await supabase.auth.exchangeCodeForSession(code)
+
+    if (!error && data.user) {
+      // Check if user has a profile (existing user vs new registration)
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('workspace_id')
+        .eq('id', data.user.id)
+        .single()
+
+      if (profile?.workspace_id) {
+        // Existing user → redirect to their tenant workspace
+        const { data: ws } = await supabase
+          .from('workspaces')
+          .select('slug')
+          .eq('id', profile.workspace_id)
+          .single()
+
+        if (ws?.slug) {
+          if (isLocalEnv) {
+            return NextResponse.redirect(`${origin}/dashboard`)
+          }
+          return NextResponse.redirect(`https://${ws.slug}.${baseDomain}/dashboard`)
+        }
       }
+
+      // New user → redirect to onboarding
+      if (isLocalEnv) {
+        return NextResponse.redirect(`${origin}/onboarding`)
+      }
+      const forwardedHost = request.headers.get('x-forwarded-host')
+      if (forwardedHost) {
+        return NextResponse.redirect(`https://${forwardedHost}/onboarding`)
+      }
+      return NextResponse.redirect(`${origin}/onboarding`)
     }
   }
 

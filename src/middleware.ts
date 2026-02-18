@@ -47,9 +47,11 @@ export async function middleware(request: NextRequest) {
     // Always allow auth callback
     if (pathname.startsWith('/auth/callback')) return supabaseResponse
 
-    // Not authenticated → login
+    // Not authenticated → login on marketing domain
     if (!user) {
-      const loginUrl = new URL('/login', request.url)
+      const loginUrl = IS_DEV
+        ? new URL('/login', request.url)
+        : new URL(`https://${BASE_DOMAIN}/login`)
       loginUrl.searchParams.set('redirectTo', pathname)
       return NextResponse.redirect(loginUrl)
     }
@@ -66,30 +68,41 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith('/auth/callback')) return supabaseResponse
   if (pathname === '/registro') return supabaseResponse
 
+  // Onboarding route — allow for authenticated users without profile
+  if (pathname === '/onboarding') {
+    if (!user) {
+      return NextResponse.redirect(new URL('/registro', request.url))
+    }
+    return supabaseResponse
+  }
+
   // Login page
   if (pathname === '/login') {
     if (user) {
-      // Authenticated → redirect to tenant subdomain
+      // Authenticated → check if has workspace → redirect to tenant subdomain
       const { data: profile } = await supabase
         .from('profiles')
-        .select('org_id')
+        .select('workspace_id')
         .eq('id', user.id)
         .single()
 
-      if (profile?.org_id) {
-        const { data: org } = await supabase
+      if (profile?.workspace_id) {
+        const { data: ws } = await supabase
           .from('workspaces')
           .select('slug')
-          .eq('id', profile.org_id)
+          .eq('id', profile.workspace_id)
           .single()
 
-        if (org?.slug) {
+        if (ws?.slug) {
           if (IS_DEV) {
             return NextResponse.redirect(new URL('/dashboard', request.url))
           }
-          return NextResponse.redirect(`https://${org.slug}.${BASE_DOMAIN}/dashboard`)
+          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/dashboard`)
         }
       }
+
+      // User exists but no profile → onboarding
+      return NextResponse.redirect(new URL('/onboarding', request.url))
     }
     return supabaseResponse
   }
@@ -99,30 +112,33 @@ export async function middleware(request: NextRequest) {
     if (user) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('org_id')
+        .select('workspace_id')
         .eq('id', user.id)
         .single()
 
-      if (profile?.org_id) {
-        const { data: org } = await supabase
+      if (profile?.workspace_id) {
+        const { data: ws } = await supabase
           .from('workspaces')
           .select('slug')
-          .eq('id', profile.org_id)
+          .eq('id', profile.workspace_id)
           .single()
 
-        if (org?.slug) {
+        if (ws?.slug) {
           if (IS_DEV) {
             return NextResponse.redirect(new URL('/dashboard', request.url))
           }
-          return NextResponse.redirect(`https://${org.slug}.${BASE_DOMAIN}/dashboard`)
+          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/dashboard`)
         }
       }
+
+      // User exists but no profile → onboarding
+      return NextResponse.redirect(new URL('/onboarding', request.url))
     }
     return supabaseResponse
   }
 
   // Protected app routes — redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/pipeline', '/proyectos', '/numeros', '/gastos', '/config']
+  const protectedPaths = ['/dashboard', '/pipeline', '/proyectos', '/numeros', '/gastos', '/config', '/story-mode']
   if (protectedPaths.some(p => pathname.startsWith(p)) && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', pathname)
