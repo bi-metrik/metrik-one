@@ -21,6 +21,7 @@ import {
 } from './actions'
 import type { Opportunity } from '@/types/database'
 import OpportunityModal from './opportunity-modal'
+import OpportunityDetail from './opportunity-detail'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
   const [lostModal, setLostModal] = useState<{ id: string; name: string } | null>(null)
   const [selectedReason, setSelectedReason] = useState('')
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
+  const [selectedOpp, setSelectedOpp] = useState<OpportunityWithClient | null>(null)
   const [isPending, startTransition] = useTransition()
 
   // Group by stage
@@ -240,7 +242,8 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                     return (
                       <div
                         key={opp.id}
-                        className="group relative rounded-lg border bg-background p-3 transition-shadow hover:shadow-md"
+                        className="group relative cursor-pointer rounded-lg border bg-background p-3 transition-shadow hover:shadow-md"
+                        onClick={() => setSelectedOpp(opp)}
                       >
                         {/* Client name */}
                         {opp.clients?.name && (
@@ -361,7 +364,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
               </p>
             ) : (
               groupedByStage('won').map((opp) => (
-                <div key={opp.id} className="rounded-lg border border-green-200 bg-white p-3 dark:border-green-900 dark:bg-green-950/30">
+                <div key={opp.id} className="cursor-pointer rounded-lg border border-green-200 bg-white p-3 transition-shadow hover:shadow-md dark:border-green-900 dark:bg-green-950/30" onClick={() => setSelectedOpp(opp)}>
                   {opp.clients?.name && (
                     <p className="mb-1 text-xs text-muted-foreground">{opp.clients.name}</p>
                   )}
@@ -401,7 +404,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
               groupedByStage('lost').map((opp) => {
                 const reason = LOST_REASONS.find((r) => r.value === opp.lost_reason)
                 return (
-                  <div key={opp.id} className="group relative rounded-lg border border-red-200 bg-white p-3 dark:border-red-900 dark:bg-red-950/30">
+                  <div key={opp.id} className="group relative cursor-pointer rounded-lg border border-red-200 bg-white p-3 transition-shadow hover:shadow-md dark:border-red-900 dark:bg-red-950/30" onClick={() => setSelectedOpp(opp)}>
                     {opp.clients?.name && (
                       <p className="mb-1 text-xs text-muted-foreground">{opp.clients.name}</p>
                     )}
@@ -489,6 +492,20 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
           defaultStage={createStage}
           onClose={() => setShowCreateModal(false)}
           onCreated={handleOpportunityCreated}
+        />
+      )}
+
+      {/* Opportunity Detail Panel — Sprint 3: includes Cotización Flash */}
+      {selectedOpp && (
+        <OpportunityDetail
+          opportunity={selectedOpp}
+          onClose={() => setSelectedOpp(null)}
+          onUpdated={(updated) => {
+            setOpportunities((prev) =>
+              prev.map((o) => (o.id === updated.id ? updated : o))
+            )
+            setSelectedOpp(null)
+          }}
         />
       )}
     </div>

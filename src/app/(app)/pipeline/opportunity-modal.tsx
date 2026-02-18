@@ -4,6 +4,7 @@ import { useState, useTransition, useRef, useEffect } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createOpportunity, createCompletedOpportunity, STAGE_CONFIG, type PipelineStage } from './actions'
+import CotizacionFlash from './cotizacion-flash'
 import type { Opportunity } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
@@ -152,7 +153,7 @@ export default function OpportunityModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center">
-      <div className="w-full max-w-md rounded-t-2xl border bg-background p-6 shadow-xl sm:rounded-2xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-2xl border bg-background p-6 shadow-xl sm:rounded-2xl">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Nueva oportunidad</h2>
@@ -221,6 +222,12 @@ export default function OpportunityModal({
                 onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
               />
             </div>
+
+            {/* Cotización Flash — D32, D50: real-time fiscal breakdown */}
+            {(() => {
+              const numValue = parseFloat(estimatedValue.replace(/[^0-9]/g, ''))
+              return numValue > 0 ? <CotizacionFlash valorBruto={numValue} /> : null
+            })()}
           </div>
 
           {/* 4. Timing — 3 options */}
