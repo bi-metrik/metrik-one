@@ -1,6 +1,7 @@
 'use server'
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient as createServerClient } from '@/lib/supabase/server'
+import { createClient } from '@supabase/supabase-js'
 
 interface OnboardingData {
   fullName: string
@@ -17,16 +18,22 @@ interface OnboardingResult {
 
 export async function completeOnboarding(data: OnboardingData): Promise<OnboardingResult> {
   try {
-    // 1. Verify authenticated user
-    const supabase = await createClient()
+    // 1. Verify authenticated user (uses cookies to read session)
+    const supabase = await createServerClient()
     const { data: { user }, error: authError } = await supabase.auth.getUser()
 
     if (authError || !user) {
       return { success: false, error: 'Sesión expirada. Inicia sesión de nuevo.' }
     }
 
-    // 2. Check user doesn't already have a profile
-    const serviceClient = await createServiceClient()
+    // 2. Service client — direct connection, no cookies, bypasses RLS
+    const serviceClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    )
+
+    // 3. Check user doesn't already have a profile
     const { data: existingProfile } = await serviceClient
       .from('profiles')
       .select('id')
@@ -37,7 +44,7 @@ export async function completeOnboarding(data: OnboardingData): Promise<Onboardi
       return { success: false, error: 'Ya tienes una cuenta configurada.' }
     }
 
-    // 3. Create workspace using service role (bypasses RLS)
+    // 4. Create workspace using service role (bypasses RLS)
     const { data: workspace, error: wsError } = await serviceClient
       .from('workspaces')
       .insert({
@@ -50,11 +57,11 @@ export async function completeOnboarding(data: OnboardingData): Promise<Onboardi
       .single()
 
     if (wsError) {
-      console.error('Workspace creation error:', wsError)
-      return { success: false, error: 'Error creando tu espacio de trabajo.' }
+      console.error('Workspace creation error:', JSON.stringify(wsError))
+      return { success: false, error: `Error creando tu espacio de trabajo: ${wsError.message}` }
     }
 
-    // 4. Create profile linked to workspace
+    // 5. Create profile linked to workspace
     const { error: profileError } = await serviceClient
       .from('profiles')
       .insert({
@@ -65,10 +72,10 @@ export async function completeOnboarding(data: OnboardingData): Promise<Onboardi
       })
 
     if (profileError) {
-      console.error('Profile creation error:', profileError)
+      console.error('Profile creation error:', JSON.stringify(profileError))
       // Cleanup: remove orphan workspace
       await serviceClient.from('workspaces').delete().eq('id', workspace.id)
-      return { success: false, error: 'Error creando tu perfil.' }
+      return { success: false, error: `Error creando tu perfil: ${profileError.message}` }
     }
 
     return { success: true, slug: workspace.slug }
