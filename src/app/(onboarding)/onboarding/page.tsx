@@ -1,9 +1,9 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
+import { completeOnboarding } from './actions'
 
 const PROFESSIONS = [
   { value: 'arquitecto', label: 'Arquitectura' },
@@ -69,56 +69,29 @@ export default function OnboardingPage() {
     setLoading(true)
     setError('')
 
-    try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
+    // Server action — uses service role to bypass RLS
+    const result = await completeOnboarding({
+      fullName: fullName.trim(),
+      businessName: businessName.trim(),
+      profession,
+      yearsIndependent,
+    })
 
-      if (!user) {
-        setError('Sesión expirada. Inicia sesión de nuevo.')
-        return
-      }
-
-      // 1. Create workspace
-      const { data: workspace, error: wsError } = await supabase
-        .from('workspaces')
-        .insert({
-          name: businessName.trim(),
-          profession,
-          years_independent: yearsIndependent,
-          onboarding_completed: true,
-        })
-        .select()
-        .single()
-
-      if (wsError) throw wsError
-
-      // 2. Create profile linked to workspace
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          id: user.id,
-          workspace_id: workspace.id,
-          full_name: fullName.trim(),
-          role: 'owner',
-        })
-
-      if (profileError) throw profileError
-
-      // 3. Redirect to story mode
-      const slug = workspace.slug
-      const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
-      const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-
-      if (isDev) {
-        router.push('/story-mode')
-      } else {
-        window.location.href = `https://${slug}.${baseDomain}/story-mode`
-      }
-    } catch (err: unknown) {
-      console.error('Onboarding error:', err)
-      setError(err instanceof Error ? err.message : 'Error creando tu cuenta. Intenta de nuevo.')
-    } finally {
+    if (!result.success) {
+      setError(result.error || 'Error creando tu cuenta.')
       setLoading(false)
+      return
+    }
+
+    // Redirect to story mode on the tenant subdomain
+    const slug = result.slug!
+    const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+
+    if (isDev) {
+      router.push('/story-mode')
+    } else {
+      window.location.href = `https://${slug}.${baseDomain}/story-mode`
     }
   }
 
