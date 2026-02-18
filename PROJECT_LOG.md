@@ -19,13 +19,48 @@
 
 | Campo | Valor |
 |-------|-------|
-| **Sprint** | 2 — Pipeline + Opportunity |
+| **Sprint** | 3 — Cotización Flash + Fiscal |
 | **Fase** | Deliver |
 | **Status** | 🟢 Desplegado — Esperando QA |
 
 ---
 
 ## Historial de Sprints
+
+### Sprint 3: Cotización Flash + Fiscal
+
+| Campo | Valor |
+|-------|-------|
+| Fechas | 18/02/2026 |
+| Decisiones | D32, D33, D34, D50, D51, D84, D86, D93, D94 |
+| QA | ⏳ Pendiente Mauricio |
+
+**Entregables:**
+- [x] Motor de cálculos fiscales colombianos (`src/lib/fiscal/calculos.ts`)
+  - ReteFuente honorarios (11% declarante / 10% no declarante)
+  - IVA general (19%)
+  - ReteICA Bogotá (9.66‰)
+  - ReteIVA (15% del IVA)
+  - Topes en UVT, defaults conservadores (D51)
+- [x] Cotización Flash widget — cálculo en vivo (D32, D50)
+  - 3 bloques: Cliente paga → Te retienen → Te consignan (D86)
+  - Se muestra en modal de creación mientras Ana escribe el valor
+  - Se muestra en detalle de oportunidad
+- [x] Vista detalle oportunidad — panel lateral slide-in
+  - Datos clave + Cotización Flash + acciones de etapa
+  - Clic en cualquier card del Kanban abre el detalle
+- [x] Warning perfil fiscal incompleto (D34)
+- [x] Disclaimer fiscal obligatorio (D93)
+- [x] Parámetros desde tabla fiscal_params (D94) — UVT $49.799
+
+**Archivos creados/modificados:**
+- `src/lib/fiscal/calculos.ts` — Motor de cálculos fiscales + formatters + disclaimer
+- `src/app/(app)/pipeline/cotizacion-flash.tsx` — Widget 3 bloques en vivo
+- `src/app/(app)/pipeline/opportunity-detail.tsx` — Panel lateral detalle
+- `src/app/(app)/pipeline/pipeline-board.tsx` — Cards clickeables + detalle
+- `src/app/(app)/pipeline/opportunity-modal.tsx` — Flash integrada en creación
+
+---
 
 ### Sprint 2: Pipeline + Opportunity
 
