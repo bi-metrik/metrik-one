@@ -15,6 +15,7 @@ import {
   User,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import FAB from './fab'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -202,6 +203,9 @@ export default function AppShell({
           <div className="p-6">{children}</div>
         </main>
       </div>
+
+      {/* D43: FAB visible en todas las pantallas */}
+      <FAB />
     </div>
   )
 }
