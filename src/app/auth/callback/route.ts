@@ -20,19 +20,10 @@ export async function GET(request: Request) {
         .single()
 
       if (profile?.workspace_id) {
-        // Existing user → redirect to their tenant workspace
-        const { data: ws } = await supabase
-          .from('workspaces')
-          .select('slug')
-          .eq('id', profile.workspace_id)
-          .single()
-
-        if (ws?.slug) {
-          if (isLocalEnv) {
-            return NextResponse.redirect(`${origin}/dashboard`)
-          }
-          return NextResponse.redirect(`https://${ws.slug}.${baseDomain}/dashboard`)
-        }
+        // Existing user → redirect to dashboard
+        // TODO: Once wildcard SSL is configured, use subdomain redirect:
+        // return NextResponse.redirect(`https://${ws.slug}.${baseDomain}/dashboard`)
+        return NextResponse.redirect(`${origin}/dashboard`)
       }
 
       // New user → redirect to onboarding

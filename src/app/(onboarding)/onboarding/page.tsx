@@ -83,16 +83,10 @@ export default function OnboardingPage() {
       return
     }
 
-    // Redirect to story mode on the tenant subdomain
-    const slug = result.slug!
-    const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
-    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-
-    if (isDev) {
-      router.push('/story-mode')
-    } else {
-      window.location.href = `https://${slug}.${baseDomain}/story-mode`
-    }
+    // Redirect to story mode
+    // TODO: Once wildcard SSL is configured, use subdomain redirect:
+    // window.location.href = `https://${result.slug}.${baseDomain}/story-mode`
+    router.push('/story-mode')
   }
 
   return (
