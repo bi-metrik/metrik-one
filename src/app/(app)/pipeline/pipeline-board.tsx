@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import Link from 'next/link'
 import {
   Plus,
   ChevronRight,
@@ -388,7 +389,9 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                                 <p className="mb-1 text-xs text-muted-foreground">{opp.clients.name}</p>
                               )}
                               {/* Opportunity name */}
-                              <p className="text-sm font-medium leading-tight">{opp.name}</p>
+                              <Link href={`/pipeline/${opp.id}`} className="text-sm font-medium leading-tight hover:underline" onClick={e => e.stopPropagation()}>
+                                {opp.name}
+                              </Link>
                               {/* Value */}
                               <p className="mt-1.5 text-sm font-semibold text-primary">
                                 {formatCurrency(opp.estimated_value)}
