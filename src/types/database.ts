@@ -121,11 +121,15 @@ export type Database = {
           id: string
           workspace_id: string
           name: string
+          razon_social: string | null
           nit: string | null
+          digito_verificacion: string | null
           person_type: string | null
           tax_regime: string | null
           gran_contribuyente: boolean
           agente_retenedor: boolean
+          regimen_simple: boolean
+          sector: string | null
           contact_name: string | null
           contact_phone: string | null
           email: string | null
@@ -140,11 +144,15 @@ export type Database = {
           id?: string
           workspace_id: string
           name: string
+          razon_social?: string | null
           nit?: string | null
+          digito_verificacion?: string | null
           person_type?: string | null
           tax_regime?: string | null
           gran_contribuyente?: boolean
           agente_retenedor?: boolean
+          regimen_simple?: boolean
+          sector?: string | null
           contact_name?: string | null
           contact_phone?: string | null
           email?: string | null
@@ -817,8 +825,11 @@ export type Database = {
           contact_type: string
           source: string | null
           city: string | null
+          country: string | null
           notes: string | null
           status: string
+          promoter_id: string | null
+          referred_by_id: string | null
           created_at: string
           updated_at: string
         }
@@ -834,8 +845,11 @@ export type Database = {
           contact_type?: string
           source?: string | null
           city?: string | null
+          country?: string | null
           notes?: string | null
           status?: string
+          promoter_id?: string | null
+          referred_by_id?: string | null
         }
         Update: Partial<Database['public']['Tables']['contacts']['Insert']>
         Relationships: []
@@ -861,6 +875,42 @@ export type Database = {
           created_by?: string | null
         }
         Update: Partial<Database['public']['Tables']['notes']['Insert']>
+        Relationships: []
+      }
+      promoters: {
+        Row: {
+          id: string
+          workspace_id: string
+          name: string
+          email: string | null
+          phone: string | null
+          status: string
+          commission_pct: number
+          bank_name: string | null
+          bank_account: string | null
+          referrals_count: number
+          won_projects: number
+          accumulated_commission: number
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          name: string
+          email?: string | null
+          phone?: string | null
+          status?: string
+          commission_pct?: number
+          bank_name?: string | null
+          bank_account?: string | null
+          referrals_count?: number
+          won_projects?: number
+          accumulated_commission?: number
+          notes?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['promoters']['Insert']>
         Relationships: []
       }
     }
@@ -916,3 +966,4 @@ export type BankBalance = Tables<'bank_balances'>
 export type MonthlyTarget = Tables<'monthly_targets'>
 export type Contact = Tables<'contacts'>
 export type Note = Tables<'notes'>
+export type Promoter = Tables<'promoters'>

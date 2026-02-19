@@ -14,6 +14,7 @@ import {
   LogOut,
   User,
   Users,
+  UserPlus,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import FAB from './fab'
@@ -34,6 +35,7 @@ const ALL_NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin', 'operator', 'read_only'] },
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
   { href: '/contactos', label: 'Contactos', icon: Users, roles: ['owner', 'admin'] },
+  { href: '/promotores', label: 'Promotores', icon: UserPlus, roles: ['owner', 'admin'] },
   { href: '/pipeline', label: 'Pipeline', icon: Funnel, roles: ['owner', 'admin'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
   { href: '/config', label: 'Configuración', icon: Settings, roles: ['owner', 'admin', 'operator'] },
