@@ -2,33 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-
-// ── Types ──────────────────────────────────────────────
-
-export type PipelineStage = 'lead' | 'prospect' | 'quotation' | 'negotiation' | 'won' | 'lost'
-
-export const STAGE_CONFIG: Record<PipelineStage, { label: string; probability: number; color: string }> = {
-  lead:        { label: 'Lead',        probability: 10,  color: 'bg-blue-500' },
-  prospect:    { label: 'Prospecto',   probability: 25,  color: 'bg-indigo-500' },
-  quotation:   { label: 'Cotización',  probability: 50,  color: 'bg-yellow-500' },
-  negotiation: { label: 'Negociación', probability: 75,  color: 'bg-orange-500' },
-  won:         { label: 'Ganada',      probability: 100, color: 'bg-green-500' },
-  lost:        { label: 'Perdida',     probability: 0,   color: 'bg-red-500' },
-}
-
-export const PIPELINE_STAGES: PipelineStage[] = ['lead', 'prospect', 'quotation', 'negotiation', 'won', 'lost']
-export const ACTIVE_STAGES: PipelineStage[] = ['lead', 'prospect', 'quotation', 'negotiation']
-
-export const LOST_REASONS = [
-  { value: 'price', label: 'Precio muy alto' },
-  { value: 'timing', label: 'No es el momento' },
-  { value: 'competition', label: 'Eligieron a otro' },
-  { value: 'no_budget', label: 'No tienen presupuesto' },
-  { value: 'ghosting', label: 'No me respondieron' },
-  { value: 'not_a_fit', label: 'No era para mí' },
-] as const
-
-export type LostReason = typeof LOST_REASONS[number]['value']
+import { STAGE_CONFIG, type PipelineStage } from './pipeline-config'
 
 // ── Fetch opportunities ────────────────────────────────
 
@@ -45,15 +19,29 @@ export async function getOpportunities() {
 
   if (!profile) return { opportunities: [], error: 'Sin perfil' }
 
-  const { data: opportunities, error } = await supabase
+  const workspaceId = profile.workspace_id
+
+  // Fetch opportunities and clients separately (FK join not supported by generated types)
+  const { data: rawOpportunities, error } = await supabase
     .from('opportunities')
-    .select('*, clients(name)')
-    .eq('workspace_id', profile.workspace_id)
+    .select('*')
+    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
 
   if (error) return { opportunities: [], error: error.message }
 
-  return { opportunities: opportunities || [], error: null }
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('workspace_id', workspaceId)
+
+  const clientMap = new Map((clients || []).map(c => [c.id, c.name]))
+  const opportunities = (rawOpportunities || []).map(opp => ({
+    ...opp,
+    clients: opp.client_id ? { name: clientMap.get(opp.client_id) || '' } : null,
+  }))
+
+  return { opportunities, error: null }
 }
 
 // ── Create opportunity ─────────────────────────────────
@@ -66,176 +54,186 @@ interface CreateOpportunityInput {
 }
 
 export async function createOpportunity(input: CreateOpportunityInput) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { success: false, error: 'No autenticado' }
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'No autenticado' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('workspace_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile) return { success: false, error: 'Sin perfil' }
-
-  const workspaceId = profile.workspace_id
-
-  // D29: Create client inline — upsert by name
-  let clientId: string | null = null
-  if (input.clientName.trim()) {
-    // Check if client already exists
-    const { data: existingClient } = await supabase
-      .from('clients')
-      .select('id')
-      .eq('workspace_id', workspaceId)
-      .ilike('name', input.clientName.trim())
-      .limit(1)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('workspace_id')
+      .eq('id', user.id)
       .single()
 
-    if (existingClient) {
-      clientId = existingClient.id
-    } else {
-      // D30: NIT optional — create client with just name
-      const { data: newClient, error: clientErr } = await supabase
+    if (!profile) return { success: false, error: 'Sin perfil' }
+
+    const workspaceId = profile.workspace_id
+
+    // D29: Create client inline — upsert by name
+    let clientId: string | null = null
+    if (input.clientName.trim()) {
+      // Check if client already exists
+      const { data: existingClient } = await supabase
         .from('clients')
-        .insert({ workspace_id: workspaceId, name: input.clientName.trim() })
         .select('id')
+        .eq('workspace_id', workspaceId)
+        .ilike('name', input.clientName.trim())
+        .limit(1)
         .single()
 
-      if (clientErr) return { success: false, error: `Error creando cliente: ${clientErr.message}` }
-      clientId = newClient.id
+      if (existingClient) {
+        clientId = existingClient.id
+      } else {
+        // D30: NIT optional — create client with just name
+        const { data: newClient, error: clientErr } = await supabase
+          .from('clients')
+          .insert({ workspace_id: workspaceId, name: input.clientName.trim() })
+          .select('id')
+          .single()
+
+        if (clientErr) return { success: false, error: `Error creando cliente: ${clientErr.message}` }
+        clientId = newClient!.id
+      }
     }
-  }
 
-  // Probability from stage config
-  const probability = STAGE_CONFIG[input.stage].probability
+    // Probability from stage config
+    const probability = STAGE_CONFIG[input.stage].probability
 
-  // Create opportunity
-  const { data: opportunity, error: oppErr } = await supabase
-    .from('opportunities')
-    .insert({
-      workspace_id: workspaceId,
-      client_id: clientId,
-      name: input.name.trim(),
-      estimated_value: input.estimatedValue,
-      stage: input.stage,
-      probability,
-    })
-    .select()
-    .single()
-
-  if (oppErr) return { success: false, error: `Error creando oportunidad: ${oppErr.message}` }
-
-  // D48: If stage is 'won', auto-create project (D176: active, not draft)
-  let projectId: string | null = null
-  if (input.stage === 'won') {
-    const { data: project, error: projErr } = await supabase
-      .from('projects')
+    // Create opportunity
+    const { data: opportunity, error: oppErr } = await supabase
+      .from('opportunities')
       .insert({
         workspace_id: workspaceId,
         client_id: clientId,
-        opportunity_id: opportunity.id,
         name: input.name.trim(),
-        approved_budget: input.estimatedValue,
-        status: 'active',
+        estimated_value: input.estimatedValue,
+        stage: input.stage,
+        probability,
       })
-      .select('id')
+      .select()
       .single()
 
-    if (projErr) {
-      console.error('Project creation error:', projErr)
-      // Don't fail the opportunity — project can be created later
-    } else {
-      projectId = project.id
+    if (oppErr) return { success: false, error: `Error creando oportunidad: ${oppErr.message}` }
+
+    // D48: If stage is 'won', auto-create project (D176: active, not draft)
+    let projectId: string | null = null
+    if (input.stage === 'won') {
+      const { data: project, error: projErr } = await supabase
+        .from('projects')
+        .insert({
+          workspace_id: workspaceId,
+          client_id: clientId,
+          opportunity_id: opportunity!.id,
+          name: input.name.trim(),
+          approved_budget: input.estimatedValue,
+          status: 'active',
+        })
+        .select('id')
+        .single()
+
+      if (projErr) {
+        console.error('Project creation error:', projErr)
+        // Don't fail the opportunity — project can be created later
+      } else {
+        projectId = project!.id
+      }
     }
+
+    revalidatePath('/pipeline')
+    revalidatePath('/dashboard')
+    revalidatePath('/proyectos')
+
+    return { success: true, opportunityId: opportunity!.id, projectId }
+  } catch (err) {
+    console.error('createOpportunity unexpected error:', err)
+    return { success: false, error: 'Error inesperado creando oportunidad' }
   }
-
-  revalidatePath('/pipeline')
-  revalidatePath('/dashboard')
-  revalidatePath('/proyectos')
-
-  return { success: true, opportunityId: opportunity.id, projectId }
 }
 
 // ── Create opportunity + completed project (Ya entregué) ──
 
 export async function createCompletedOpportunity(input: Omit<CreateOpportunityInput, 'stage'>) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { success: false, error: 'No autenticado' }
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'No autenticado' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('workspace_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile) return { success: false, error: 'Sin perfil' }
-
-  const workspaceId = profile.workspace_id
-
-  // Create/find client
-  let clientId: string | null = null
-  if (input.clientName.trim()) {
-    const { data: existingClient } = await supabase
-      .from('clients')
-      .select('id')
-      .eq('workspace_id', workspaceId)
-      .ilike('name', input.clientName.trim())
-      .limit(1)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('workspace_id')
+      .eq('id', user.id)
       .single()
 
-    if (existingClient) {
-      clientId = existingClient.id
-    } else {
-      const { data: newClient, error: clientErr } = await supabase
+    if (!profile) return { success: false, error: 'Sin perfil' }
+
+    const workspaceId = profile.workspace_id
+
+    // Create/find client
+    let clientId: string | null = null
+    if (input.clientName.trim()) {
+      const { data: existingClient } = await supabase
         .from('clients')
-        .insert({ workspace_id: workspaceId, name: input.clientName.trim() })
         .select('id')
+        .eq('workspace_id', workspaceId)
+        .ilike('name', input.clientName.trim())
+        .limit(1)
         .single()
 
-      if (clientErr) return { success: false, error: `Error creando cliente: ${clientErr.message}` }
-      clientId = newClient.id
+      if (existingClient) {
+        clientId = existingClient.id
+      } else {
+        const { data: newClient, error: clientErr } = await supabase
+          .from('clients')
+          .insert({ workspace_id: workspaceId, name: input.clientName.trim() })
+          .select('id')
+          .single()
+
+        if (clientErr) return { success: false, error: `Error creando cliente: ${clientErr.message}` }
+        clientId = newClient!.id
+      }
     }
+
+    // Create opportunity as won
+    const { data: opportunity, error: oppErr } = await supabase
+      .from('opportunities')
+      .insert({
+        workspace_id: workspaceId,
+        client_id: clientId,
+        name: input.name.trim(),
+        estimated_value: input.estimatedValue,
+        stage: 'won',
+        probability: 100,
+      })
+      .select()
+      .single()
+
+    if (oppErr) return { success: false, error: `Error creando oportunidad: ${oppErr.message}` }
+
+    // Create project as completed
+    const { error: projErr } = await supabase
+      .from('projects')
+      .insert({
+        workspace_id: workspaceId,
+        client_id: clientId,
+        opportunity_id: opportunity!.id,
+        name: input.name.trim(),
+        approved_budget: input.estimatedValue,
+        status: 'completed',
+        progress_pct: 100,
+        closed_at: new Date().toISOString(),
+      })
+
+    if (projErr) console.error('Project creation error:', projErr)
+
+    revalidatePath('/pipeline')
+    revalidatePath('/dashboard')
+    revalidatePath('/proyectos')
+
+    return { success: true, opportunityId: opportunity!.id }
+  } catch (err) {
+    console.error('createCompletedOpportunity unexpected error:', err)
+    return { success: false, error: 'Error inesperado creando oportunidad' }
   }
-
-  // Create opportunity as won
-  const { data: opportunity, error: oppErr } = await supabase
-    .from('opportunities')
-    .insert({
-      workspace_id: workspaceId,
-      client_id: clientId,
-      name: input.name.trim(),
-      estimated_value: input.estimatedValue,
-      stage: 'won',
-      probability: 100,
-    })
-    .select()
-    .single()
-
-  if (oppErr) return { success: false, error: `Error creando oportunidad: ${oppErr.message}` }
-
-  // Create project as completed
-  const { error: projErr } = await supabase
-    .from('projects')
-    .insert({
-      workspace_id: workspaceId,
-      client_id: clientId,
-      opportunity_id: opportunity.id,
-      name: input.name.trim(),
-      approved_budget: input.estimatedValue,
-      status: 'completed',
-      progress_pct: 100,
-      closed_at: new Date().toISOString(),
-    })
-
-  if (projErr) console.error('Project creation error:', projErr)
-
-  revalidatePath('/pipeline')
-  revalidatePath('/dashboard')
-  revalidatePath('/proyectos')
-
-  return { success: true, opportunityId: opportunity.id }
 }
 
 // ── Move opportunity to new stage ──────────────────────

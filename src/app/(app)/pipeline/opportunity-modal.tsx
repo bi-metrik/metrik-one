@@ -3,7 +3,8 @@
 import { useState, useTransition, useRef, useEffect } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { createOpportunity, createCompletedOpportunity, STAGE_CONFIG, type PipelineStage } from './actions'
+import { createOpportunity, createCompletedOpportunity } from './actions'
+import { STAGE_CONFIG, type PipelineStage } from './pipeline-config'
 import CotizacionFlash from './cotizacion-flash'
 import type { Opportunity } from '@/types/database'
 

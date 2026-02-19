@@ -16,9 +16,11 @@ import {
   STAGE_CONFIG,
   ACTIVE_STAGES,
   LOST_REASONS,
+  type PipelineStage,
+} from './pipeline-config'
+import {
   moveOpportunity,
   reactivateOpportunity,
-  type PipelineStage,
 } from './actions'
 import type { Opportunity } from '@/types/database'
 
