@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Search, Trophy, CheckCircle2, Clock } from 'lucide-react'
 import OpportunityModal from '../pipeline/opportunity-modal'
 import type { Opportunity } from '@/types/database'
@@ -134,14 +135,14 @@ export default function DashboardClient({
               { label: 'Proyectos', href: '/proyectos', ready: false },
               { label: 'Configuración', href: '/config', ready: false },
             ].map((item) => (
-              <a
+              <Link
                 key={item.label}
                 href={item.href}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${item.ready ? 'bg-green-500' : 'bg-muted-foreground/30'}`} />
                 {item.label}
-              </a>
+              </Link>
             ))}
           </div>
         </div>

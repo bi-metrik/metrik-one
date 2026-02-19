@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import {
   Plus,
   ChevronRight,
@@ -53,6 +53,12 @@ function getNextStage(current: PipelineStage): PipelineStage | null {
 
 export default function PipelineBoard({ initialOpportunities }: PipelineBoardProps) {
   const [opportunities, setOpportunities] = useState(initialOpportunities)
+
+  // Sync state when server re-renders with fresh data (e.g. FAB creation + router.refresh)
+  useEffect(() => {
+    setOpportunities(initialOpportunities)
+  }, [initialOpportunities])
+
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createStage, setCreateStage] = useState<PipelineStage>('lead')
   const [lostModal, setLostModal] = useState<{ id: string; name: string } | null>(null)

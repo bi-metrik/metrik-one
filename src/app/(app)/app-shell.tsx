@@ -199,7 +199,7 @@ export default function AppShell({
         )}
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto min-h-0">
+        <main className="flex-1 overflow-auto min-h-0">
           <div className="p-6">{children}</div>
         </main>
       </div>
