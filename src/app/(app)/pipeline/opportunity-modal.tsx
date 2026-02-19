@@ -78,7 +78,8 @@ export default function OpportunityModal({
       return
     }
 
-    const value = parseFloat(estimatedValue.replace(/[^0-9.]/g, ''))
+    // Remove ALL non-digit chars (dots are thousand separators in es-CO, not decimals)
+    const value = parseInt(estimatedValue.replace(/[^0-9]/g, ''), 10)
     if (!value || value <= 0) {
       setError('¿Cuánto vale el trabajo?')
       return

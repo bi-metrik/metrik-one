@@ -259,7 +259,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                         </p>
 
                         {/* Actions */}
-                        <div className="mt-2 flex items-center gap-1">
+                        <div className="mt-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           {/* Advance button */}
                           {next && (
                             <button
@@ -418,7 +418,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                       <p className="mt-1 text-xs text-red-500">{reason.label}</p>
                     )}
                     {/* D173: Reactivate */}
-                    <div className="mt-2 flex gap-1">
+                    <div className="mt-2 flex gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => handleReactivate(opp.id, 'lead')}
                         disabled={isPending}

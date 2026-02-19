@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef, useEffect } from 'react'
 import {
   X,
   ChevronRight,
@@ -9,6 +9,8 @@ import {
   DollarSign,
   User2,
   Briefcase,
+  Pencil,
+  Check,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import CotizacionFlash from './cotizacion-flash'
@@ -21,6 +23,7 @@ import {
 import {
   moveOpportunity,
   reactivateOpportunity,
+  updateOpportunity,
 } from './actions'
 import type { Opportunity } from '@/types/database'
 
@@ -50,11 +53,142 @@ function formatDate(date: string): string {
   })
 }
 
+function formatCurrencyInput(digits: string): string {
+  if (!digits) return ''
+  const num = parseInt(digits, 10)
+  return num.toLocaleString('es-CO')
+}
+
 function getNextStage(current: PipelineStage): PipelineStage | null {
   const idx = ACTIVE_STAGES.indexOf(current as PipelineStage)
   if (idx === -1 || idx >= ACTIVE_STAGES.length - 1) return null
   return ACTIVE_STAGES[idx + 1]
 }
+
+// ── Inline editable field ─────────────────────────────
+
+function EditableText({
+  value,
+  onSave,
+  className = '',
+  inputClassName = '',
+  placeholder = '',
+}: {
+  value: string
+  onSave: (newValue: string) => void
+  className?: string
+  inputClassName?: string
+  placeholder?: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [editing])
+
+  const save = () => {
+    if (draft.trim() && draft.trim() !== value) {
+      onSave(draft.trim())
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') save()
+          if (e.key === 'Escape') { setDraft(value); setEditing(false) }
+        }}
+        className={`w-full rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${inputClassName}`}
+        placeholder={placeholder}
+      />
+    )
+  }
+
+  return (
+    <div
+      className={`group/edit flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 -mx-2 transition-colors hover:bg-accent ${className}`}
+      onClick={() => { setDraft(value); setEditing(true) }}
+    >
+      <span className="flex-1">{value || placeholder}</span>
+      <Pencil className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 group-hover/edit:opacity-100 transition-opacity" />
+    </div>
+  )
+}
+
+function EditableValue({
+  value,
+  onSave,
+}: {
+  value: number
+  onSave: (newValue: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value.toLocaleString('es-CO'))
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [editing])
+
+  const save = () => {
+    const num = parseInt(draft.replace(/[^0-9]/g, ''), 10)
+    if (num > 0 && num !== value) {
+      onSave(num)
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div className="relative">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => {
+            const digits = e.target.value.replace(/[^0-9]/g, '')
+            setDraft(formatCurrencyInput(digits))
+          }}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save()
+            if (e.key === 'Escape') { setDraft(value.toLocaleString('es-CO')); setEditing(false) }
+          }}
+          inputMode="numeric"
+          className="w-full rounded-md border border-input bg-background pl-6 pr-2 py-1 text-lg font-bold text-primary ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="group/edit flex cursor-pointer items-center gap-1.5 rounded-md transition-colors hover:bg-accent px-1 py-0.5 -mx-1"
+      onClick={() => { setDraft(value.toLocaleString('es-CO')); setEditing(true) }}
+    >
+      <p className="text-lg font-bold text-primary">
+        {formatCurrency(value)}
+      </p>
+      <Pencil className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 group-hover/edit:opacity-100 transition-opacity" />
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────
 
 export default function OpportunityDetail({
   opportunity,
@@ -105,6 +239,30 @@ export default function OpportunityDetail({
     })
   }
 
+  const handleFieldSave = (field: 'name' | 'clientName' | 'estimatedValue', value: string | number) => {
+    startTransition(async () => {
+      const input: { id: string; name?: string; clientName?: string; estimatedValue?: number } = { id: opportunity.id }
+
+      if (field === 'name') input.name = value as string
+      if (field === 'clientName') input.clientName = value as string
+      if (field === 'estimatedValue') input.estimatedValue = value as number
+
+      const result = await updateOpportunity(input)
+      if (!result.success) {
+        toast.error(result.error || 'Error actualizando')
+        return
+      }
+
+      const updated = { ...opportunity }
+      if (field === 'name') updated.name = value as string
+      if (field === 'clientName') updated.clients = { name: value as string }
+      if (field === 'estimatedValue') updated.estimated_value = value as number
+
+      onUpdated(updated)
+      toast.success('Actualizado')
+    })
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-end bg-black/50" onClick={onClose}>
       <div
@@ -130,27 +288,35 @@ export default function OpportunityDetail({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="space-y-6">
-            {/* Title + client */}
+            {/* Title + client — editable */}
             <div>
-              {opportunity.clients?.name && (
-                <div className="mb-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <User2 className="h-3.5 w-3.5" />
-                  {opportunity.clients.name}
-                </div>
-              )}
-              <h2 className="text-xl font-bold">{opportunity.name}</h2>
+              <EditableText
+                value={opportunity.clients?.name || ''}
+                onSave={(v) => handleFieldSave('clientName', v)}
+                className="mb-1 text-sm text-muted-foreground"
+                placeholder="Agregar cliente"
+              />
+              <EditableText
+                value={opportunity.name}
+                onSave={(v) => handleFieldSave('name', v)}
+                className="text-xl font-bold"
+                inputClassName="text-xl font-bold"
+              />
             </div>
 
-            {/* Key info */}
+            {/* Key info — editable value */}
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-lg border p-3">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <DollarSign className="h-3.5 w-3.5" />
                   Valor estimado
                 </div>
-                <p className="mt-1 text-lg font-bold text-primary">
-                  {formatCurrency(opportunity.estimated_value)}
-                </p>
+                <div className="mt-1">
+                  <EditableValue
+                    value={opportunity.estimated_value}
+                    onSave={(v) => handleFieldSave('estimatedValue', v)}
+                  />
+                </div>
               </div>
               <div className="rounded-lg border p-3">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

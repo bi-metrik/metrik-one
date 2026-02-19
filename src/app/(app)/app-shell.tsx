@@ -58,9 +58,9 @@ export default function AppShell({
     .toUpperCase()
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Desktop Sidebar */}
-      <aside className="hidden w-64 flex-col border-r bg-card md:flex">
+      <aside className="hidden w-64 shrink-0 flex-col border-r bg-card md:flex">
         {/* Logo + workspace */}
         <div className="flex h-14 items-center border-b px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
@@ -199,7 +199,7 @@ export default function AppShell({
         )}
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto min-h-0">
           <div className="p-6">{children}</div>
         </main>
       </div>

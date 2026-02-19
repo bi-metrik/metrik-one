@@ -363,3 +363,81 @@ export async function reactivateOpportunity(opportunityId: string, targetStage: 
   revalidatePath('/pipeline')
   return { success: true }
 }
+
+// ── Update opportunity fields ─────────────────────────
+
+interface UpdateOpportunityInput {
+  id: string
+  name?: string
+  estimatedValue?: number
+  clientName?: string
+}
+
+export async function updateOpportunity(input: UpdateOpportunityInput) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'No autenticado' }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('workspace_id')
+      .eq('id', user.id)
+      .single()
+
+    if (!profile) return { success: false, error: 'Sin perfil' }
+
+    const workspaceId = profile.workspace_id
+
+    // Build update payload
+    const updateData: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    }
+
+    if (input.name !== undefined) updateData.name = input.name.trim()
+    if (input.estimatedValue !== undefined) updateData.estimated_value = input.estimatedValue
+
+    // Handle client name change
+    let newClientId: string | undefined
+    if (input.clientName !== undefined && input.clientName.trim()) {
+      const { data: existingClient } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .ilike('name', input.clientName.trim())
+        .limit(1)
+        .single()
+
+      if (existingClient) {
+        newClientId = existingClient.id
+      } else {
+        const { data: newClient, error: clientErr } = await supabase
+          .from('clients')
+          .insert({ workspace_id: workspaceId, name: input.clientName.trim() })
+          .select('id')
+          .single()
+
+        if (clientErr) return { success: false, error: `Error creando cliente: ${clientErr.message}` }
+        newClientId = newClient!.id
+      }
+      updateData.client_id = newClientId
+    }
+
+    const { error: updateErr } = await supabase
+      .from('opportunities')
+      .update(updateData)
+      .eq('id', input.id)
+      .eq('workspace_id', workspaceId)
+
+    if (updateErr) return { success: false, error: `Error actualizando: ${updateErr.message}` }
+
+    revalidatePath('/pipeline')
+    revalidatePath('/dashboard')
+    revalidatePath('/proyectos')
+
+    return { success: true, clientId: newClientId }
+  } catch (err) {
+    console.error('updateOpportunity unexpected error:', err)
+    return { success: false, error: 'Error inesperado actualizando' }
+  }
+}
