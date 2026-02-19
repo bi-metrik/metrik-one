@@ -120,7 +120,7 @@ export default function AppShell({
       </aside>
 
       {/* Mobile header */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b px-4 md:hidden">
           <Link href="/dashboard" className="text-lg font-bold">
             MéTRIK <span className="font-normal text-muted-foreground">ONE</span>
