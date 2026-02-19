@@ -323,21 +323,12 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Pipeline</h1>
-            <div className="mt-1 flex items-center gap-4 text-sm text-muted-foreground">
-              <span>Total: <strong className="text-foreground">{formatCurrency(pipelineTotal)}</strong></span>
-              <span>Ponderado: <strong className="text-foreground">{formatCurrency(pipelineWeighted)}</strong></span>
-            </div>
+        <div>
+          <h1 className="text-2xl font-bold">Pipeline</h1>
+          <div className="mt-1 flex items-center gap-4 text-sm text-muted-foreground">
+            <span>Total: <strong className="text-foreground">{formatCurrency(pipelineTotal)}</strong></span>
+            <span>Ponderado: <strong className="text-foreground">{formatCurrency(pipelineWeighted)}</strong></span>
           </div>
-          <button
-            onClick={() => openCreate('lead')}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" />
-            Nueva oportunidad
-          </button>
         </div>
 
         {/* Kanban Board */}
