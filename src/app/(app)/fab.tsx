@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Plus, X, Funnel, Receipt } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import OpportunityModal from './pipeline/opportunity-modal'
+import ExpenseModal from './gastos/expense-modal'
 import type { Opportunity } from '@/types/database'
 
 type OpportunityWithClient = Opportunity & {
@@ -12,18 +13,25 @@ type OpportunityWithClient = Opportunity & {
 
 /**
  * FAB — D43: Floating Action Button visible en todas las pantallas
- * Sprint 2: solo "Nueva oportunidad" funcional
- * Sprint 4: se habilita "Registrar gasto"
+ * Sprint 2: "Nueva oportunidad"
+ * Sprint 4: "Registrar gasto" habilitado
  */
 export default function FAB() {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [showOppModal, setShowOppModal] = useState(false)
+  const [showExpenseModal, setShowExpenseModal] = useState(false)
 
   const handleOppCreated = (_opp: OpportunityWithClient) => {
     setShowOppModal(false)
     setOpen(false)
     router.push('/pipeline')
+    router.refresh()
+  }
+
+  const handleExpenseCreated = () => {
+    setShowExpenseModal(false)
+    setOpen(false)
     router.refresh()
   }
 
@@ -48,13 +56,15 @@ export default function FAB() {
               Nueva oportunidad
             </button>
 
-            {/* Registrar gasto — Sprint 4 placeholder */}
+            {/* Registrar gasto — Sprint 4: FUNCTIONAL */}
             <button
-              disabled
-              className="flex items-center gap-3 rounded-full border bg-background py-2.5 pl-4 pr-5 text-sm font-medium opacity-40 shadow-lg"
-              title="Disponible en Sprint 4"
+              onClick={() => {
+                setOpen(false)
+                setShowExpenseModal(true)
+              }}
+              className="flex items-center gap-3 rounded-full border bg-background py-2.5 pl-4 pr-5 text-sm font-medium shadow-lg transition-colors hover:bg-accent"
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-white">
                 <Receipt className="h-4 w-4" />
               </div>
               Registrar gasto
@@ -87,6 +97,14 @@ export default function FAB() {
           defaultStage="lead"
           onClose={() => setShowOppModal(false)}
           onCreated={handleOppCreated}
+        />
+      )}
+
+      {/* Expense Modal — Sprint 4 */}
+      {showExpenseModal && (
+        <ExpenseModal
+          onClose={() => setShowExpenseModal(false)}
+          onCreated={handleExpenseCreated}
         />
       )}
     </>
