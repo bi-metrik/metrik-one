@@ -39,6 +39,8 @@ import {
 import type { Opportunity } from '@/types/database'
 import OpportunityModal from './opportunity-modal'
 import OpportunityDetail from './opportunity-detail'
+import { getQuotesForOpportunity } from './[id]/cotizaciones/actions'
+import type { Quote } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -167,8 +169,17 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
   const [selectedReason, setSelectedReason] = useState('')
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [selectedOpp, setSelectedOpp] = useState<OpportunityWithClient | null>(null)
+  const [selectedOppQuotes, setSelectedOppQuotes] = useState<Quote[]>([])
   const [isPending, startTransition] = useTransition()
   const [activeOpp, setActiveOpp] = useState<OpportunityWithClient | null>(null)
+
+  // Fetch quotes when opening detail panel
+  const openOppDetail = async (opp: OpportunityWithClient) => {
+    setSelectedOpp(opp)
+    setSelectedOppQuotes([]) // Reset while loading
+    const quotes = await getQuotesForOpportunity(opp.id)
+    setSelectedOppQuotes(quotes)
+  }
 
   // dnd-kit sensors — require 8px movement before dragging starts (to allow clicks)
   const sensors = useSensors(
@@ -382,7 +393,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                           <DraggableCard key={opp.id} opp={opp} stage={stage}>
                             <div
                               className="group relative cursor-pointer rounded-lg border bg-background p-3 transition-shadow hover:shadow-md"
-                              onClick={() => setSelectedOpp(opp)}
+                              onClick={() => openOppDetail(opp)}
                             >
                               {/* Client name */}
                               {opp.clients?.name && (
@@ -507,7 +518,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                     <DraggableCard key={opp.id} opp={opp} stage="won">
                       <div
                         className="cursor-pointer rounded-lg border border-green-200 bg-white p-3 transition-shadow hover:shadow-md dark:border-green-900 dark:bg-green-950/30"
-                        onClick={() => setSelectedOpp(opp)}
+                        onClick={() => openOppDetail(opp)}
                       >
                         {opp.clients?.name && (
                           <p className="mb-1 text-xs text-muted-foreground">{opp.clients.name}</p>
@@ -552,7 +563,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                       <DraggableCard key={opp.id} opp={opp} stage="lost">
                         <div
                           className="group relative cursor-pointer rounded-lg border border-red-200 bg-white p-3 transition-shadow hover:shadow-md dark:border-red-900 dark:bg-red-950/30"
-                          onClick={() => setSelectedOpp(opp)}
+                          onClick={() => openOppDetail(opp)}
                         >
                           {opp.clients?.name && (
                             <p className="mb-1 text-xs text-muted-foreground">{opp.clients.name}</p>
@@ -659,6 +670,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
         <Portal>
           <OpportunityDetail
             opportunity={selectedOpp}
+            quotes={selectedOppQuotes}
             onClose={() => setSelectedOpp(null)}
             onUpdated={(updated) => {
               setOpportunities((prev) =>

@@ -18,6 +18,20 @@ async function getWorkspace() {
   return { supabase, workspaceId: profile.workspace_id, role: profile.role, userId: user.id }
 }
 
+export async function getQuotesForOpportunity(opportunityId: string) {
+  const ctx = await getWorkspace()
+  if (!ctx) return []
+
+  const { data } = await ctx.supabase
+    .from('quotes')
+    .select('*')
+    .eq('opportunity_id', opportunityId)
+    .eq('workspace_id', ctx.workspaceId)
+    .order('created_at', { ascending: false })
+
+  return data || []
+}
+
 export async function createQuote(opportunityId: string, formData: {
   description?: string
   total_price: number

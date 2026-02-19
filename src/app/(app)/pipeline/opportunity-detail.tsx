@@ -11,6 +11,13 @@ import {
   Briefcase,
   Pencil,
   Check,
+  Plus,
+  FileText,
+  Send,
+  Copy,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import CotizacionFlash from './cotizacion-flash'
@@ -25,7 +32,23 @@ import {
   reactivateOpportunity,
   updateOpportunity,
 } from './actions'
-import type { Opportunity } from '@/types/database'
+import {
+  createQuote,
+  sendQuote,
+  acceptQuote,
+  rejectQuote,
+  reopenQuote,
+  duplicateQuote,
+} from './[id]/cotizaciones/actions'
+import {
+  getEstadoBadgeColor,
+  ESTADO_LABELS,
+  getAccionesDisponibles,
+  isEditable,
+  type EstadoCotizacion,
+  type AccionCotizacion,
+} from '@/lib/cotizaciones/state-machine'
+import type { Opportunity, Quote } from '@/types/database'
 
 type OpportunityWithClient = Opportunity & {
   clients: { name: string } | null
@@ -33,8 +56,21 @@ type OpportunityWithClient = Opportunity & {
 
 interface OpportunityDetailProps {
   opportunity: OpportunityWithClient
+  quotes?: Quote[]
   onClose: () => void
   onUpdated: (updated: OpportunityWithClient) => void
+}
+
+// ── Line item for detailed quotes ──
+interface LineItem {
+  id: string
+  description: string
+  quantity: number
+  unit_price: number
+}
+
+function newLineItem(): LineItem {
+  return { id: crypto.randomUUID(), description: '', quantity: 1, unit_price: 0 }
 }
 
 function formatCurrency(value: number): string {
@@ -192,12 +228,112 @@ function EditableValue({
 
 export default function OpportunityDetail({
   opportunity,
+  quotes: initialQuotes = [],
   onClose,
   onUpdated,
 }: OpportunityDetailProps) {
   const [isPending, startTransition] = useTransition()
   const [lostReason, setLostReason] = useState('')
   const [showLostOptions, setShowLostOptions] = useState(false)
+
+  // ── Cotizaciones state ──
+  const [quotes, setQuotes] = useState<Quote[]>(initialQuotes)
+  const [showQuoteForm, setShowQuoteForm] = useState(false)
+  const [quoteMode, setQuoteMode] = useState<'quick' | 'detailed'>('quick')
+  const [quoteForm, setQuoteForm] = useState({ description: '', total_price: '', estimated_cost: '', valid_days: '15' })
+  const [lineItems, setLineItems] = useState<LineItem[]>([newLineItem()])
+  const [expandedQuote, setExpandedQuote] = useState<string | null>(null)
+  const lineItemsTotal = lineItems.reduce((sum, li) => sum + (li.quantity * li.unit_price), 0)
+
+  // Fetch quotes on mount
+  useEffect(() => {
+    if (initialQuotes.length === 0) {
+      // Load quotes for this opportunity
+      import('./[id]/cotizaciones/actions').then(async (mod) => {
+        // We don't have a getQuotes action, so we'll rely on what's passed
+      })
+    }
+  }, [initialQuotes])
+
+  const resetQuoteForm = () => {
+    setQuoteForm({ description: '', total_price: '', estimated_cost: '', valid_days: '15' })
+    setLineItems([newLineItem()])
+    setShowQuoteForm(false)
+    setQuoteMode('quick')
+  }
+
+  const handleCreateQuote = () => {
+    if (quoteMode === 'detailed') {
+      const validItems = lineItems.filter(li => li.description.trim() && li.unit_price > 0)
+      if (validItems.length === 0) { toast.error('Agrega al menos un ítem con descripción y precio'); return }
+      const descLines = validItems.map(li =>
+        `${li.description} (${li.quantity} × ${formatCurrency(li.unit_price)})`
+      ).join('\n')
+
+      startTransition(async () => {
+        const res = await createQuote(opportunity.id, {
+          description: descLines,
+          total_price: lineItemsTotal,
+          estimated_cost: Number(quoteForm.estimated_cost) || undefined,
+          valid_days: Number(quoteForm.valid_days) || 15,
+          mode: 'detailed',
+        })
+        if (res.success && res.quote) {
+          setQuotes(prev => [res.quote!, ...prev])
+          toast.success('Cotización detallada creada')
+          resetQuoteForm()
+        } else { toast.error(res.error || 'Error') }
+      })
+    } else {
+      const price = Number(quoteForm.total_price)
+      if (!price || price <= 0) { toast.error('Precio es requerido'); return }
+
+      startTransition(async () => {
+        const res = await createQuote(opportunity.id, {
+          description: quoteForm.description || undefined,
+          total_price: price,
+          estimated_cost: Number(quoteForm.estimated_cost) || undefined,
+          valid_days: Number(quoteForm.valid_days) || 15,
+          mode: 'quick',
+        })
+        if (res.success && res.quote) {
+          setQuotes(prev => [res.quote!, ...prev])
+          toast.success('Cotización creada')
+          resetQuoteForm()
+        } else { toast.error(res.error || 'Error') }
+      })
+    }
+  }
+
+  const handleQuoteAction = (quoteId: string, action: AccionCotizacion) => {
+    startTransition(async () => {
+      let res: { success?: boolean; error?: string; quote?: Quote; projectId?: string }
+      switch (action) {
+        case 'send':
+          res = await sendQuote(quoteId, opportunity.id)
+          if (res.success) { setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'enviada', sent_at: new Date().toISOString() } : q)); toast.success('Cotización enviada') }
+          break
+        case 'accept':
+          res = await acceptQuote(quoteId, opportunity.id)
+          if (res.success) { setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'aceptada', accepted_at: new Date().toISOString() } : q)); toast.success('Cotización aceptada. Proyecto creado.') }
+          break
+        case 'reject':
+          res = await rejectQuote(quoteId, opportunity.id)
+          if (res.success) { setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'rechazada' } : q)); toast.success('Cotización rechazada') }
+          break
+        case 'reopen':
+          res = await reopenQuote(quoteId, opportunity.id)
+          if (res.success) { setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'enviada' } : q)); toast.success('Cotización reabierta') }
+          break
+        case 'duplicate':
+          res = await duplicateQuote(quoteId, opportunity.id)
+          if (res.success && res.quote) { setQuotes(prev => [res.quote!, ...prev]); toast.success('Cotización duplicada') }
+          break
+        default: return
+      }
+      if (res! && !res!.success && res!.error) toast.error(res!.error)
+    })
+  }
 
   const stage = opportunity.stage as PipelineStage
   const config = STAGE_CONFIG[stage]
@@ -334,6 +470,182 @@ export default function OpportunityDetail({
               valorBruto={opportunity.estimated_value}
               hasFiscalProfile={false}
             />
+
+            {/* ── Cotizaciones Section ── */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Cotizaciones {quotes.length > 0 && `(${quotes.length})`}
+                </p>
+                {!showQuoteForm && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => { resetQuoteForm(); setQuoteMode('quick'); setShowQuoteForm(true) }}
+                      className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
+                    >
+                      <Plus className="h-3 w-3" /> Rápida
+                    </button>
+                    <button
+                      onClick={() => { resetQuoteForm(); setQuoteMode('detailed'); setShowQuoteForm(true) }}
+                      className="flex items-center gap-1 rounded-md border border-primary px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/5"
+                    >
+                      <FileText className="h-3 w-3" /> Detallada
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Quote creation form */}
+              {showQuoteForm && (
+                <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-medium">
+                      {quoteMode === 'quick' ? 'Cotización rápida' : 'Cotización detallada'}
+                    </p>
+                    <button
+                      onClick={() => setQuoteMode(quoteMode === 'quick' ? 'detailed' : 'quick')}
+                      className="text-[10px] text-primary hover:underline"
+                    >
+                      Cambiar a {quoteMode === 'quick' ? 'detallada' : 'rápida'}
+                    </button>
+                  </div>
+
+                  {quoteMode === 'quick' ? (
+                    <div className="space-y-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Descripción</label>
+                        <input type="text" value={quoteForm.description} onChange={e => setQuoteForm({ ...quoteForm, description: e.target.value })} className="mt-0.5 w-full rounded-md border bg-background px-2 py-1.5 text-sm" placeholder="Ej: Diseño de marca" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground">Precio total *</label>
+                          <input type="number" value={quoteForm.total_price} onChange={e => setQuoteForm({ ...quoteForm, total_price: e.target.value })} className="mt-0.5 w-full rounded-md border bg-background px-2 py-1.5 text-sm" placeholder="0" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground">Costo estimado</label>
+                          <input type="number" value={quoteForm.estimated_cost} onChange={e => setQuoteForm({ ...quoteForm, estimated_cost: e.target.value })} className="mt-0.5 w-full rounded-md border bg-background px-2 py-1.5 text-sm" placeholder="0" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="space-y-1.5">
+                        <div className="grid grid-cols-[1fr_60px_90px_24px] gap-1.5 text-[9px] font-medium text-muted-foreground">
+                          <span>Descripción</span>
+                          <span className="text-center">Cant.</span>
+                          <span className="text-right">P. unit.</span>
+                          <span></span>
+                        </div>
+                        {lineItems.map(li => (
+                          <div key={li.id} className="grid grid-cols-[1fr_60px_90px_24px] gap-1.5">
+                            <input type="text" value={li.description} onChange={e => setLineItems(prev => prev.map(l => l.id === li.id ? { ...l, description: e.target.value } : l))} className="rounded-md border bg-background px-2 py-1 text-xs" placeholder="Ítem..." />
+                            <input type="number" min="1" value={li.quantity || ''} onChange={e => setLineItems(prev => prev.map(l => l.id === li.id ? { ...l, quantity: Number(e.target.value) || 1 } : l))} className="rounded-md border bg-background px-1 py-1 text-center text-xs" />
+                            <input type="number" value={li.unit_price || ''} onChange={e => setLineItems(prev => prev.map(l => l.id === li.id ? { ...l, unit_price: Number(e.target.value) || 0 } : l))} className="rounded-md border bg-background px-1 py-1 text-right text-xs" placeholder="0" />
+                            <button onClick={() => { if (lineItems.length > 1) setLineItems(prev => prev.filter(l => l.id !== li.id)) }} disabled={lineItems.length <= 1} className="flex items-center justify-center rounded-md hover:bg-accent disabled:opacity-30">
+                              <Trash2 className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          </div>
+                        ))}
+                        <button onClick={() => setLineItems(prev => [...prev, newLineItem()])} className="flex items-center gap-1 text-[10px] text-primary hover:underline">
+                          <Plus className="h-2.5 w-2.5" /> Agregar ítem
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md bg-primary/5 px-2 py-1.5">
+                        <span className="text-xs font-medium">Total</span>
+                        <span className="text-xs font-bold">{formatCurrency(lineItemsTotal)}</span>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Costo estimado (opcional)</label>
+                        <input type="number" value={quoteForm.estimated_cost} onChange={e => setQuoteForm({ ...quoteForm, estimated_cost: e.target.value })} className="mt-0.5 w-full rounded-md border bg-background px-2 py-1.5 text-sm" placeholder="0" />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2">
+                    <button onClick={resetQuoteForm} className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] hover:bg-accent">
+                      <X className="h-2.5 w-2.5" /> Cancelar
+                    </button>
+                    <button onClick={handleCreateQuote} disabled={isPending} className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                      <Check className="h-2.5 w-2.5" /> Crear borrador
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Quotes list */}
+              {quotes.length === 0 && !showQuoteForm ? (
+                <div className="rounded-lg border border-dashed p-4 text-center">
+                  <FileText className="mx-auto h-6 w-6 text-muted-foreground/30" />
+                  <p className="mt-1 text-xs text-muted-foreground">Sin cotizaciones aún</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {quotes.map(q => {
+                    const status = q.status as EstadoCotizacion
+                    const actions = getAccionesDisponibles(status).filter(a => a !== 'view' && a !== 'edit')
+                    const isExpanded = expandedQuote === q.id
+                    const isDetailed = q.mode === 'detailed'
+                    return (
+                      <div key={q.id} className="rounded-lg border">
+                        <div
+                          className="flex items-center gap-2 p-2 cursor-pointer hover:bg-accent/30"
+                          onClick={() => setExpandedQuote(isExpanded ? null : q.id)}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium ${getEstadoBadgeColor(status)}`}>
+                                {ESTADO_LABELS[status]}
+                              </span>
+                              {isDetailed && (
+                                <span className="shrink-0 rounded-full bg-purple-100 px-1 py-0.5 text-[8px] font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                                  Detallada
+                                </span>
+                              )}
+                              <p className="text-xs font-medium truncate">{q.description?.split('\n')[0] || 'Cotización'}</p>
+                            </div>
+                            <p className="mt-0.5 text-[10px] text-muted-foreground">
+                              {formatCurrency(q.total_price)} · {new Date(q.created_at).toLocaleDateString('es-CO')}
+                            </p>
+                          </div>
+                          {isExpanded ? <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
+                        </div>
+                        {isExpanded && (
+                          <div className="border-t p-2 space-y-2">
+                            {isDetailed && q.description && (
+                              <div className="space-y-0.5 rounded-md border p-2">
+                                <p className="text-[9px] font-medium text-muted-foreground uppercase">Desglose</p>
+                                {q.description.split('\n').map((line, i) => (
+                                  <p key={i} className="text-[11px]">{line}</p>
+                                ))}
+                              </div>
+                            )}
+                            {!isDetailed && q.description && <p className="text-xs text-muted-foreground">{q.description}</p>}
+                            <div className="flex flex-wrap gap-1">
+                              {actions.map(action => {
+                                const iconMap: Record<string, typeof Send> = { send: Send, accept: Check, reject: X, reopen: RotateCcw, duplicate: Copy }
+                                const labelMap: Record<string, string> = { send: 'Enviar', accept: 'Aceptar', reject: 'Rechazar', reopen: 'Reabrir', duplicate: 'Duplicar' }
+                                const colorMap: Record<string, string> = { send: 'text-blue-600', accept: 'text-green-600', reject: 'text-red-600', reopen: 'text-amber-600', duplicate: 'text-muted-foreground' }
+                                const Icon = iconMap[action] || FileText
+                                return (
+                                  <button
+                                    key={action}
+                                    onClick={(e) => { e.stopPropagation(); handleQuoteAction(q.id, action) }}
+                                    disabled={isPending}
+                                    className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent disabled:opacity-50 ${colorMap[action] || ''}`}
+                                  >
+                                    <Icon className="h-2.5 w-2.5" /> {labelMap[action] || action}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Stage actions */}
             {stage !== 'won' && stage !== 'lost' && (
