@@ -19,6 +19,7 @@ import {
   type EstadoCotizacion,
 } from '@/lib/cotizaciones/state-machine'
 import CotizacionesList from './cotizaciones/cotizaciones-list'
+import NotesSection from '@/components/notes-section'
 
 interface OpportunityDetailClientProps {
   opportunity: {
@@ -170,10 +171,7 @@ export default function OpportunityDetailClient({
 
       {activeTab === 'notas' && (
         <div className="rounded-xl border bg-card p-6">
-          <div className="text-center text-muted-foreground">
-            <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground/30" />
-            <p className="mt-2 text-sm">Las notas estarán disponibles en Sprint C.</p>
-          </div>
+          <NotesSection entityType="opportunity" entityId={opp.id} />
         </div>
       )}
     </div>

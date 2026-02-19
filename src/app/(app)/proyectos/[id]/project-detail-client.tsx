@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, Clock, Receipt, FileText, BarChart3,
+  ArrowLeft, Clock, Receipt, FileText, BarChart3, MessageSquare,
   Plus, Loader2, AlertTriangle, Check, Pause, Play,
   X, RotateCcw, Lock,
 } from 'lucide-react'
@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { updateProjectStatus, addTimeEntry, addInvoice, recordPayment } from '../actions'
 import { createExpense, getExpenseCategories } from '../../gastos/actions'
 import type { Project, Expense, TimeEntry, Invoice, Payment, ExpenseCategory } from '@/types/database'
+import NotesSection from '@/components/notes-section'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.
   closed: { label: 'Cerrado', color: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400', icon: Lock },
 }
 
-type Tab = 'info' | 'hours' | 'expenses' | 'cobros' | 'budget'
+type Tab = 'info' | 'hours' | 'expenses' | 'cobros' | 'budget' | 'notas'
 
 // ── REWORK_REASONS (D178) ──────────────────────────────
 
@@ -265,6 +266,7 @@ export default function ProjectDetailClient({
     { key: 'expenses', label: 'Gastos', icon: Receipt },
     { key: 'cobros', label: 'Cobros', icon: FileText },
     { key: 'budget', label: 'Presupuesto', icon: BarChart3 },
+    { key: 'notas', label: 'Notas', icon: MessageSquare },
   ]
 
   return (
@@ -682,6 +684,23 @@ export default function ProjectDetailClient({
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Notas Tab (F19) ── */}
+        {activeTab === 'notas' && (
+          <div className="rounded-xl border bg-card p-6">
+            <NotesSection
+              entityType="project"
+              entityId={project.id}
+              {...(project.opportunity_id ? {
+                inheritedFrom: {
+                  entityType: 'opportunity',
+                  entityId: project.opportunity_id,
+                  label: 'Oportunidad',
+                }
+              } : {})}
+            />
           </div>
         )}
 
