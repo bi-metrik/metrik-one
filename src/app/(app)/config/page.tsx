@@ -19,7 +19,7 @@ export default async function ConfigPage() {
   const workspaceId = profile.workspace_id
 
   // Parallel fetches
-  const [fixedResult, categoriesResult, fiscalResult, teamCountResult] = await Promise.all([
+  const [fixedResult, categoriesResult, fiscalResult, teamCountResult, staffResult, bankAccountsResult, monthlyTargetsResult] = await Promise.all([
     supabase
       .from('fixed_expenses')
       .select('*')
@@ -44,12 +44,38 @@ export default async function ConfigPage() {
       .from('profiles')
       .select('id', { count: 'exact' })
       .eq('workspace_id', workspaceId),
+
+    // F7: Staff
+    supabase
+      .from('staff')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('is_active', true)
+      .order('full_name'),
+
+    // F18: Bank accounts
+    supabase
+      .from('bank_accounts')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('created_at'),
+
+    // F25: Monthly targets (current year)
+    supabase
+      .from('monthly_targets')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('year', new Date().getFullYear())
+      .order('month'),
   ])
 
   const fixedExpenses = fixedResult.data || []
   const categories = categoriesResult.data || []
   const fiscalProfile = fiscalResult.data
   const teamMemberCount = teamCountResult.count || 1
+  const staffMembers = staffResult.data || []
+  const bankAccounts = bankAccountsResult.data || []
+  const monthlyTargets = monthlyTargetsResult.data || []
 
   // Build category map for fixed expenses
   const catMap = new Map(categories.map(c => [c.id, c.name]))
@@ -110,6 +136,42 @@ export default async function ConfigPage() {
         ? `${teamMemberCount} miembros`
         : 'Solo tú',
     },
+    // F7: Personal
+    {
+      key: 'personal',
+      label: 'Personal',
+      description: `${staffMembers.length} persona${staffMembers.length !== 1 ? 's' : ''} registrada${staffMembers.length !== 1 ? 's' : ''}`,
+      status: staffMembers.length >= 1
+        ? 'complete' as const
+        : 'pending' as const,
+      statusLabel: staffMembers.length > 0
+        ? `${staffMembers.length} activo${staffMembers.length !== 1 ? 's' : ''}`
+        : 'Sin configurar',
+    },
+    // F18: Cuentas bancarias
+    {
+      key: 'cuentas-bancarias',
+      label: 'Cuentas bancarias',
+      description: 'Registra tus cuentas para seguimiento de caja',
+      status: bankAccounts.filter(a => a.is_active).length >= 1
+        ? 'complete' as const
+        : 'pending' as const,
+      statusLabel: bankAccounts.filter(a => a.is_active).length > 0
+        ? `${bankAccounts.filter(a => a.is_active).length} cuenta${bankAccounts.filter(a => a.is_active).length !== 1 ? 's' : ''}`
+        : 'Sin configurar',
+    },
+    // F25: Metas mensuales
+    {
+      key: 'metas-mensuales',
+      label: 'Metas mensuales',
+      description: `Metas de venta y cobro ${new Date().getFullYear()}`,
+      status: monthlyTargets.length >= 1
+        ? 'complete' as const
+        : 'pending' as const,
+      statusLabel: monthlyTargets.length > 0
+        ? `${monthlyTargets.length} meses configurados`
+        : 'Sin configurar',
+    },
   ]
 
   return (
@@ -120,6 +182,9 @@ export default async function ConfigPage() {
       totalFixedExpenses={totalFixed}
       fiscalProfile={fiscalProfile}
       currentUserRole={profile.role}
+      staffMembers={staffMembers}
+      bankAccounts={bankAccounts}
+      monthlyTargets={monthlyTargets}
     />
   )
 }

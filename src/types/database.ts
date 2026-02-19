@@ -184,6 +184,7 @@ export type Database = {
           id: string
           workspace_id: string
           client_id: string | null
+          contact_id: string | null
           name: string
           estimated_value: number
           stage: string
@@ -198,6 +199,7 @@ export type Database = {
           id?: string
           workspace_id: string
           client_id?: string | null
+          contact_id?: string | null
           name: string
           estimated_value?: number
           stage?: string
@@ -236,6 +238,7 @@ export type Database = {
           workspace_id: string
           client_id: string | null
           opportunity_id: string | null
+          project_id: string | null
           mode: string
           description: string | null
           total_price: number
@@ -249,6 +252,8 @@ export type Database = {
           sent_at: string | null
           accepted_at: string | null
           valid_until: string | null
+          valid_days: number | null
+          rejected_reason: string | null
           notes: string | null
           created_at: string
           updated_at: string
@@ -258,6 +263,7 @@ export type Database = {
           workspace_id: string
           client_id?: string | null
           opportunity_id?: string | null
+          project_id?: string | null
           mode?: string
           description?: string | null
           total_price?: number
@@ -271,6 +277,8 @@ export type Database = {
           sent_at?: string | null
           accepted_at?: string | null
           valid_until?: string | null
+          valid_days?: number | null
+          rejected_reason?: string | null
           notes?: string | null
         }
         Update: Partial<Database['public']['Tables']['quotes']['Insert']>
@@ -349,6 +357,9 @@ export type Database = {
           entry_date: string
           hours: number
           activity: string | null
+          category: string | null
+          start_time: string | null
+          end_time: string | null
           source: string
           created_at: string
         }
@@ -360,6 +371,9 @@ export type Database = {
           entry_date?: string
           hours: number
           activity?: string | null
+          category?: string | null
+          start_time?: string | null
+          end_time?: string | null
           source?: string
         }
         Update: Partial<Database['public']['Tables']['time_entries']['Insert']>
@@ -421,6 +435,9 @@ export type Database = {
           id: string
           workspace_id: string
           project_id: string
+          client_id: string | null
+          invoice_type: string
+          invoice_number: string | null
           concept: string
           gross_amount: number
           due_date: string | null
@@ -433,6 +450,9 @@ export type Database = {
           id?: string
           workspace_id: string
           project_id: string
+          client_id?: string | null
+          invoice_type?: string
+          invoice_number?: string | null
           concept: string
           gross_amount: number
           due_date?: string | null
@@ -691,6 +711,158 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['audit_log']['Insert']>
         Relationships: []
       }
+      staff: {
+        Row: {
+          id: string
+          workspace_id: string
+          full_name: string
+          position: string | null
+          department: string | null
+          contract_type: string
+          salary: number
+          phone_whatsapp: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          full_name: string
+          position?: string | null
+          department?: string | null
+          contract_type?: string
+          salary?: number
+          phone_whatsapp?: string | null
+          is_active?: boolean
+        }
+        Update: Partial<Database['public']['Tables']['staff']['Insert']>
+        Relationships: []
+      }
+      bank_accounts: {
+        Row: {
+          id: string
+          workspace_id: string
+          bank_name: string
+          account_name: string
+          account_type: string
+          is_primary: boolean
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          bank_name: string
+          account_name?: string
+          account_type?: string
+          is_primary?: boolean
+          is_active?: boolean
+        }
+        Update: Partial<Database['public']['Tables']['bank_accounts']['Insert']>
+        Relationships: []
+      }
+      bank_balances: {
+        Row: {
+          id: string
+          workspace_id: string
+          account_id: string
+          balance: number
+          notes: string | null
+          recorded_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          account_id: string
+          balance: number
+          notes?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['bank_balances']['Insert']>
+        Relationships: []
+      }
+      monthly_targets: {
+        Row: {
+          id: string
+          workspace_id: string
+          year: number
+          month: number
+          sales_target: number
+          collection_target: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          year: number
+          month: number
+          sales_target?: number
+          collection_target?: number
+        }
+        Update: Partial<Database['public']['Tables']['monthly_targets']['Insert']>
+        Relationships: []
+      }
+      contacts: {
+        Row: {
+          id: string
+          workspace_id: string
+          client_id: string | null
+          full_name: string
+          email: string | null
+          phone: string | null
+          company: string | null
+          position: string | null
+          contact_type: string
+          source: string | null
+          city: string | null
+          notes: string | null
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          client_id?: string | null
+          full_name: string
+          email?: string | null
+          phone?: string | null
+          company?: string | null
+          position?: string | null
+          contact_type?: string
+          source?: string | null
+          city?: string | null
+          notes?: string | null
+          status?: string
+        }
+        Update: Partial<Database['public']['Tables']['contacts']['Insert']>
+        Relationships: []
+      }
+      notes: {
+        Row: {
+          id: string
+          workspace_id: string
+          entity_type: string
+          entity_id: string
+          note_type: string
+          content: string
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          entity_type: string
+          entity_id: string
+          note_type?: string
+          content: string
+          created_by?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['notes']['Insert']>
+        Relationships: []
+      }
     }
     Views: Record<string, never>
     Functions: {
@@ -738,3 +910,9 @@ export type HealthScore = Tables<'health_scores'>
 export type Testimonial = Tables<'testimonials'>
 export type TeamInvitation = Tables<'team_invitations'>
 export type AuditLog = Tables<'audit_log'>
+export type Staff = Tables<'staff'>
+export type BankAccount = Tables<'bank_accounts'>
+export type BankBalance = Tables<'bank_balances'>
+export type MonthlyTarget = Tables<'monthly_targets'>
+export type Contact = Tables<'contacts'>
+export type Note = Tables<'notes'>

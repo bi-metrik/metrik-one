@@ -7,7 +7,10 @@ import { useRouter } from 'next/navigation'
 import { createFixedExpense, deleteFixedExpense, toggleFixedExpense } from '../gastos/actions'
 import WizardFelipe from './wizard-felipe'
 import TeamSection from './team-section'
-import type { ExpenseCategory, FixedExpense, FiscalProfile } from '@/types/database'
+import StaffSection from './staff-section'
+import BankAccountsSection from './bank-accounts-section'
+import MonthlyTargetsSection from './monthly-targets-section'
+import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -29,6 +32,9 @@ interface ConfigClientProps {
   totalFixedExpenses: number
   fiscalProfile: FiscalProfile | null
   currentUserRole?: string
+  staffMembers?: Staff[]
+  bankAccounts?: BankAccount[]
+  monthlyTargets?: MonthlyTarget[]
 }
 
 // ── Component ──────────────────────────────────────────
@@ -40,6 +46,9 @@ export default function ConfigClient({
   totalFixedExpenses: initialTotal,
   fiscalProfile,
   currentUserRole = 'owner',
+  staffMembers = [],
+  bankAccounts = [],
+  monthlyTargets = [],
 }: ConfigClientProps) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -415,6 +424,30 @@ export default function ConfigClient({
       {activeSection === 'mi-equipo' && (
         <div className="space-y-4 rounded-xl border bg-card p-6">
           <TeamSection currentUserRole={currentUserRole} />
+        </div>
+      )}
+
+      {/* ── F7: Personal Section ── */}
+      {activeSection === 'personal' && (
+        <div className="space-y-4 rounded-xl border bg-card p-6">
+          <StaffSection initialData={staffMembers} />
+        </div>
+      )}
+
+      {/* ── F18: Cuentas Bancarias Section ── */}
+      {activeSection === 'cuentas-bancarias' && (
+        <div className="space-y-4 rounded-xl border bg-card p-6">
+          <BankAccountsSection initialData={bankAccounts} />
+        </div>
+      )}
+
+      {/* ── F25: Metas Mensuales Section ── */}
+      {activeSection === 'metas-mensuales' && (
+        <div className="space-y-4 rounded-xl border bg-card p-6">
+          <MonthlyTargetsSection
+            initialData={monthlyTargets}
+            initialYear={new Date().getFullYear()}
+          />
         </div>
       )}
     </div>

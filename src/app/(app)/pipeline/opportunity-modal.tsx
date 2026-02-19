@@ -117,6 +117,7 @@ export default function OpportunityModal({
         id: result.opportunityId!,
         workspace_id: '',
         client_id: null,
+        contact_id: null,
         name: oppName.trim(),
         estimated_value: value,
         stage: finalStage,
