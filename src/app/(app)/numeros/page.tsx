@@ -31,6 +31,13 @@ export default async function NumerosPage() {
     projectsResult,
     paymentsResult,
     fiscalResult,
+    // Sprint 12: Extra data for maturity indicators
+    categoriesResult,
+    waCollabsResult,
+    invoicesResult,
+    // Sprint 12: Previous months data for comparisons
+    prevMonthExpenses,
+    prevMonthPayments,
   ] = await Promise.all([
     supabase
       .from('expenses')
@@ -67,6 +74,50 @@ export default async function NumerosPage() {
       .select('is_complete, is_estimated')
       .eq('workspace_id', workspaceId)
       .single(),
+
+    // Sprint 12: Categories with fixed expenses
+    supabase
+      .from('expense_categories')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .eq('is_active', true),
+
+    // Sprint 12: WA collaborators count
+    supabase
+      .from('wa_collaborators')
+      .select('id', { count: 'exact' })
+      .eq('workspace_id', workspaceId)
+      .eq('is_active', true),
+
+    // Sprint 12: Invoices count
+    supabase
+      .from('invoices')
+      .select('id', { count: 'exact' })
+      .eq('workspace_id', workspaceId),
+
+    // Sprint 12: Previous month expenses
+    (() => {
+      const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const prevMonthStr = `${prevStart.getFullYear()}-${String(prevStart.getMonth() + 1).padStart(2, '0')}`
+      return supabase
+        .from('expenses')
+        .select('amount')
+        .eq('workspace_id', workspaceId)
+        .gte('expense_date', `${prevMonthStr}-01`)
+        .lt('expense_date', monthStart)
+    })(),
+
+    // Sprint 12: Previous month payments
+    (() => {
+      const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const prevMonthStr = `${prevStart.getFullYear()}-${String(prevStart.getMonth() + 1).padStart(2, '0')}`
+      return supabase
+        .from('payments')
+        .select('net_received')
+        .eq('workspace_id', workspaceId)
+        .gte('payment_date', `${prevMonthStr}-01`)
+        .lt('payment_date', monthStart)
+    })(),
   ])
 
   const expenses = expensesResult.data || []
@@ -96,6 +147,50 @@ export default async function NumerosPage() {
   // D52: First visit = no expenses AND no fixed expenses AND no payments
   const isFirstVisit = !hasExpenses && !hasFixedExpenses && !hasPayments && !hasOpportunities
 
+  // Sprint 12: Previous month data
+  const prevExpensesTotal = (prevMonthExpenses.data || []).reduce((s, e) => s + e.amount, 0)
+  const prevPaymentsTotal = (prevMonthPayments.data || []).reduce((s, p) => s + p.net_received, 0)
+  const hasPreviousMonth = prevExpensesTotal > 0 || prevPaymentsTotal > 0
+
+  // Sprint 12: Build months array for comparison (simplified — 2 months)
+  const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+
+  const monthlyData = hasPreviousMonth ? [
+    {
+      month: `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`,
+      monthLabel: MONTH_LABELS[prevMonthDate.getMonth()],
+      ingresos: prevPaymentsTotal,
+      gastos: prevExpensesTotal,
+      margen: prevPaymentsTotal > 0 ? ((prevPaymentsTotal - prevExpensesTotal) / prevPaymentsTotal) * 100 : 0,
+      proyectos: 0, // Simplified for now
+      oportunidades: 0,
+      hoursLogged: 0,
+    },
+    {
+      month: currentMonth,
+      monthLabel: MONTH_LABELS[now.getMonth()],
+      ingresos: totalPaymentsMonth + totalWonValue,
+      gastos: totalExpensesMonth,
+      margen: (totalPaymentsMonth + totalWonValue) > 0
+        ? (((totalPaymentsMonth + totalWonValue) - totalExpensesMonth) / (totalPaymentsMonth + totalWonValue)) * 100
+        : 0,
+      proyectos: activeProjects.length,
+      oportunidades: wonOpps.length,
+      hoursLogged: 0, // Would need time_entries query
+    },
+  ] : []
+
+  // Sprint 12: Maturity data (D82)
+  const questionsComplete = [hasExpenses, hasFixedExpenses, hasPayments, hasOpportunities, fiscalResult.data?.is_complete].filter(Boolean).length
+  const maturityData = {
+    questionsComplete,
+    projectsClosed: completedProjects.length,
+    fixedExpenseCategories: categoriesResult.data?.length || 0,
+    waCollaborators: waCollabsResult.count || 0,
+    invoicesRegistered: invoicesResult.count || 0,
+  }
+
   const data = {
     totalExpensesMonth,
     totalFixedExpenses,
@@ -117,5 +212,12 @@ export default async function NumerosPage() {
     puntoEquilibrio: totalFixedExpenses,
   }
 
-  return <NumerosClient data={data} isFirstVisit={isFirstVisit} />
+  return (
+    <NumerosClient
+      data={data}
+      isFirstVisit={isFirstVisit}
+      monthlyData={monthlyData}
+      maturityData={maturityData}
+    />
+  )
 }

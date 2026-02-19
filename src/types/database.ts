@@ -638,6 +638,34 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['testimonials']['Insert']>
         Relationships: []
       }
+      team_invitations: {
+        Row: {
+          id: string
+          workspace_id: string
+          email: string
+          role: string
+          invited_by: string
+          token: string
+          status: string
+          accepted_at: string | null
+          expires_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          email: string
+          role?: string
+          invited_by: string
+          token?: string
+          status?: string
+          accepted_at?: string | null
+          expires_at?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['team_invitations']['Insert']>
+        Relationships: []
+      }
       audit_log: {
         Row: {
           id: string
@@ -708,4 +736,5 @@ export type Notification = Tables<'notifications'>
 export type Referral = Tables<'referrals'>
 export type HealthScore = Tables<'health_scores'>
 export type Testimonial = Tables<'testimonials'>
+export type TeamInvitation = Tables<'team_invitations'>
 export type AuditLog = Tables<'audit_log'>

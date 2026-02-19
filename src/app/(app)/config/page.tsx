@@ -10,7 +10,7 @@ export default async function ConfigPage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('workspace_id')
+    .select('workspace_id, role')
     .eq('id', user.id)
     .single()
 
@@ -19,7 +19,7 @@ export default async function ConfigPage() {
   const workspaceId = profile.workspace_id
 
   // Parallel fetches
-  const [fixedResult, categoriesResult, fiscalResult] = await Promise.all([
+  const [fixedResult, categoriesResult, fiscalResult, teamCountResult] = await Promise.all([
     supabase
       .from('fixed_expenses')
       .select('*')
@@ -38,11 +38,18 @@ export default async function ConfigPage() {
       .select('*')
       .eq('workspace_id', workspaceId)
       .single(),
+
+    // Sprint 9: Team member count
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact' })
+      .eq('workspace_id', workspaceId),
   ])
 
   const fixedExpenses = fixedResult.data || []
   const categories = categoriesResult.data || []
   const fiscalProfile = fiscalResult.data
+  const teamMemberCount = teamCountResult.count || 1
 
   // Build category map for fixed expenses
   const catMap = new Map(categories.map(c => [c.id, c.name]))
@@ -91,6 +98,18 @@ export default async function ConfigPage() {
       status: 'pending' as const,
       statusLabel: 'Próximamente',
     },
+    // Sprint 9: Mi equipo
+    {
+      key: 'mi-equipo',
+      label: 'Mi equipo',
+      description: `${teamMemberCount} miembro${teamMemberCount !== 1 ? 's' : ''} en el workspace`,
+      status: teamMemberCount > 1
+        ? 'complete' as const
+        : 'pending' as const,
+      statusLabel: teamMemberCount > 1
+        ? `${teamMemberCount} miembros`
+        : 'Solo tú',
+    },
   ]
 
   return (
@@ -100,6 +119,7 @@ export default async function ConfigPage() {
       categories={categories}
       totalFixedExpenses={totalFixed}
       fiscalProfile={fiscalProfile}
+      currentUserRole={profile.role}
     />
   )
 }

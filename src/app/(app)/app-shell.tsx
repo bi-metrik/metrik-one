@@ -25,14 +25,28 @@ interface AppShellProps {
   role: string
 }
 
-// Sidebar items — D42: 4 items + Dashboard
-const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/numeros', label: 'Números', icon: BarChart3 },
-  { href: '/pipeline', label: 'Pipeline', icon: Funnel },
-  { href: '/proyectos', label: 'Proyectos', icon: FolderKanban },
-  { href: '/config', label: 'Configuración', icon: Settings },
+// D169: Sidebar adaptativo por rol
+// Dueño/Admin: Dashboard + Números + Pipeline + Proyectos + Configuración
+// Operador: Dashboard + Proyectos (asignados) + Config reducida
+// Lectura: Dashboard + Números (solo lectura)
+const ALL_NAV_ITEMS = [
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin', 'operator', 'read_only'] },
+  { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/pipeline', label: 'Pipeline', icon: Funnel, roles: ['owner', 'admin'] },
+  { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
+  { href: '/config', label: 'Configuración', icon: Settings, roles: ['owner', 'admin', 'operator'] },
 ]
+
+function getNavItemsForRole(role: string) {
+  return ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  owner: 'Dueño',
+  admin: 'Admin',
+  operator: 'Operador',
+  read_only: 'Lectura',
+}
 
 export default function AppShell({
   children,
@@ -57,6 +71,8 @@ export default function AppShell({
     .join('')
     .toUpperCase()
 
+  const navItems = getNavItemsForRole(role)
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Desktop Sidebar */}
@@ -76,9 +92,9 @@ export default function AppShell({
           <p className="text-xs text-muted-foreground">{workspaceSlug}.metrikone.co</p>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation — D169: filtered by role */}
         <nav className="flex-1 space-y-1 p-3">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
             const Icon = item.icon
             return (
@@ -106,7 +122,7 @@ export default function AppShell({
             </div>
             <div className="flex-1 overflow-hidden">
               <p className="truncate text-sm font-medium">{fullName}</p>
-              <p className="text-xs capitalize text-muted-foreground">{role}</p>
+              <p className="text-xs text-muted-foreground">{ROLE_LABELS[role] || role}</p>
             </div>
             <button
               onClick={handleSignOut}
@@ -155,7 +171,7 @@ export default function AppShell({
               </div>
 
               <nav className="space-y-1">
-                {NAV_ITEMS.map((item) => {
+                {navItems.map((item) => {
                   const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                   const Icon = item.icon
                   return (
@@ -183,7 +199,7 @@ export default function AppShell({
                   </div>
                   <div>
                     <p className="text-sm font-medium">{fullName}</p>
-                    <p className="text-xs capitalize text-muted-foreground">{role}</p>
+                    <p className="text-xs text-muted-foreground">{ROLE_LABELS[role] || role}</p>
                   </div>
                 </div>
                 <button
@@ -204,8 +220,8 @@ export default function AppShell({
         </main>
       </div>
 
-      {/* D43: FAB visible en todas las pantallas */}
-      <FAB />
+      {/* D43: FAB visible — D169: role-adaptive */}
+      <FAB role={role} />
     </div>
   )
 }

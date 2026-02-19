@@ -8,6 +8,9 @@ import {
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { saveNumerosSetup } from '../gastos/actions'
+import MonthlyComparison from './monthly-comparison'
+import MaturityIndicators from './maturity-indicators'
+import { generateCSV, downloadCSV } from '@/lib/export-csv'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -47,9 +50,30 @@ interface NumerosData {
   puntoEquilibrio: number
 }
 
+interface MonthlyData {
+  month: string
+  monthLabel: string
+  ingresos: number
+  gastos: number
+  margen: number
+  proyectos: number
+  oportunidades: number
+  hoursLogged: number
+}
+
+interface MaturityData {
+  questionsComplete: number
+  projectsClosed: number
+  fixedExpenseCategories: number
+  waCollaborators: number
+  invoicesRegistered: number
+}
+
 interface NumerosClientProps {
   data: NumerosData | null
   isFirstVisit: boolean  // D52: show setup prompt
+  monthlyData?: MonthlyData[]  // Sprint 12: monthly comparisons
+  maturityData?: MaturityData  // Sprint 12: maturity indicators
 }
 
 // ── Formatters ─────────────────────────────────────────
@@ -236,7 +260,7 @@ function QuestionCard({ q }: { q: NumerosQuestion }) {
 
 // ── Main Component ─────────────────────────────────────
 
-export default function NumerosClient({ data, isFirstVisit }: NumerosClientProps) {
+export default function NumerosClient({ data, isFirstVisit, monthlyData, maturityData }: NumerosClientProps) {
   const [showSetup, setShowSetup] = useState(isFirstVisit)
 
   if (showSetup) {
@@ -453,6 +477,64 @@ export default function NumerosClient({ data, isFirstVisit }: NumerosClientProps
         {questions.map((q) => (
           <QuestionCard key={q.id} q={q} />
         ))}
+      </div>
+
+      {/* Sprint 12: Monthly Comparison — D83 */}
+      {monthlyData && monthlyData.length >= 2 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-bold">Comparativo mensual</h2>
+          <MonthlyComparison months={monthlyData} />
+        </div>
+      )}
+
+      {/* Sprint 12: Maturity Indicators — D82 */}
+      {maturityData && (
+        <MaturityIndicators data={maturityData} />
+      )}
+
+      {/* Sprint 12: CSV Export — D70 */}
+      <div className="flex justify-center">
+        <button
+          onClick={() => {
+            // Quick export of current Números summary
+            const csvData = [
+              {
+                indicador: 'Ingresos del mes',
+                valor: data.ingresosMonth,
+                estado: data.hasPayments ? 'Datos reales' : 'Sin datos',
+              },
+              {
+                indicador: 'Gastos del mes',
+                valor: data.gastosMonth,
+                estado: data.hasExpenses ? 'Datos reales' : 'Sin datos',
+              },
+              {
+                indicador: 'Gastos fijos',
+                valor: data.totalFixedExpenses,
+                estado: data.hasFixedExpenses ? 'Configurado' : 'Sin configurar',
+              },
+              {
+                indicador: 'Pipeline activo',
+                valor: data.pipelineValue,
+                estado: data.hasOpportunities ? 'Activo' : 'Vacío',
+              },
+              {
+                indicador: 'Proyectos activos',
+                valor: data.activeProjectsCount,
+                estado: data.activeProjectsCount > 0 ? 'Activo' : 'Sin proyectos',
+              },
+            ]
+            const csv = generateCSV(csvData, [
+              { header: 'Indicador', accessor: (r) => r.indicador },
+              { header: 'Valor', accessor: (r) => r.valor },
+              { header: 'Estado', accessor: (r) => r.estado },
+            ])
+            downloadCSV(csv, `numeros-${new Date().toISOString().slice(0, 10)}`)
+          }}
+          className="inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          Exportar CSV
+        </button>
       </div>
 
       {/* D40: Breadcrumbs — "Esto es un resultado, no un módulo" */}

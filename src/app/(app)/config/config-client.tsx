@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { createFixedExpense, deleteFixedExpense, toggleFixedExpense } from '../gastos/actions'
 import WizardFelipe from './wizard-felipe'
+import TeamSection from './team-section'
 import type { ExpenseCategory, FixedExpense, FiscalProfile } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
@@ -27,6 +28,7 @@ interface ConfigClientProps {
   categories: ExpenseCategory[]
   totalFixedExpenses: number
   fiscalProfile: FiscalProfile | null
+  currentUserRole?: string
 }
 
 // ── Component ──────────────────────────────────────────
@@ -37,6 +39,7 @@ export default function ConfigClient({
   categories,
   totalFixedExpenses: initialTotal,
   fiscalProfile,
+  currentUserRole = 'owner',
 }: ConfigClientProps) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -405,6 +408,13 @@ export default function ConfigClient({
               Próximamente. Se calcula automáticamente con tus datos de proyectos y horas.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* ── Sprint 9: Mi Equipo Section ── */}
+      {activeSection === 'mi-equipo' && (
+        <div className="space-y-4 rounded-xl border bg-card p-6">
+          <TeamSection currentUserRole={currentUserRole} />
         </div>
       )}
     </div>

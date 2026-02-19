@@ -11,16 +11,30 @@ type OpportunityWithClient = Opportunity & {
   clients: { name: string } | null
 }
 
+interface FABProps {
+  role?: string
+}
+
 /**
  * FAB — D43: Floating Action Button visible en todas las pantallas
  * Sprint 2: "Nueva oportunidad"
  * Sprint 4: "Registrar gasto" habilitado
+ * Sprint 9: Role-adaptive (D169)
+ *   Dueño/Admin: Gasto + Oportunidad
+ *   Operador: Gasto (solo)
+ *   Lectura: FAB oculto
  */
-export default function FAB() {
+export default function FAB({ role = 'owner' }: FABProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [showOppModal, setShowOppModal] = useState(false)
   const [showExpenseModal, setShowExpenseModal] = useState(false)
+
+  // D169: read_only → no FAB
+  if (role === 'read_only') return null
+
+  const canCreateOpportunity = role === 'owner' || role === 'admin'
+  const canRegisterExpense = role === 'owner' || role === 'admin' || role === 'operator'
 
   const handleOppCreated = (_opp: OpportunityWithClient) => {
     setShowOppModal(false)
@@ -42,33 +56,37 @@ export default function FAB() {
         {/* Quick actions menu */}
         {open && (
           <div className="mb-2 space-y-2 animate-in fade-in slide-in-from-bottom-4 duration-200">
-            {/* Nueva oportunidad */}
-            <button
-              onClick={() => {
-                setOpen(false)
-                setShowOppModal(true)
-              }}
-              className="flex items-center gap-3 rounded-full border bg-background py-2.5 pl-4 pr-5 text-sm font-medium shadow-lg transition-colors hover:bg-accent"
-            >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                <Funnel className="h-4 w-4" />
-              </div>
-              Nueva oportunidad
-            </button>
+            {/* Nueva oportunidad — only owner/admin */}
+            {canCreateOpportunity && (
+              <button
+                onClick={() => {
+                  setOpen(false)
+                  setShowOppModal(true)
+                }}
+                className="flex items-center gap-3 rounded-full border bg-background py-2.5 pl-4 pr-5 text-sm font-medium shadow-lg transition-colors hover:bg-accent"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                  <Funnel className="h-4 w-4" />
+                </div>
+                Nueva oportunidad
+              </button>
+            )}
 
-            {/* Registrar gasto — Sprint 4: FUNCTIONAL */}
-            <button
-              onClick={() => {
-                setOpen(false)
-                setShowExpenseModal(true)
-              }}
-              className="flex items-center gap-3 rounded-full border bg-background py-2.5 pl-4 pr-5 text-sm font-medium shadow-lg transition-colors hover:bg-accent"
-            >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-white">
-                <Receipt className="h-4 w-4" />
-              </div>
-              Registrar gasto
-            </button>
+            {/* Registrar gasto — owner/admin/operator */}
+            {canRegisterExpense && (
+              <button
+                onClick={() => {
+                  setOpen(false)
+                  setShowExpenseModal(true)
+                }}
+                className="flex items-center gap-3 rounded-full border bg-background py-2.5 pl-4 pr-5 text-sm font-medium shadow-lg transition-colors hover:bg-accent"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-white">
+                  <Receipt className="h-4 w-4" />
+                </div>
+                Registrar gasto
+              </button>
+            )}
           </div>
         )}
 
