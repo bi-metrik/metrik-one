@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Trash2, Phone, Briefcase, X, Check } from 'lucide-react'
+import { toast } from 'sonner'
 import type { Staff } from '@/types/database'
 import { createStaffMember, updateStaffMember, deleteStaffMember } from './staff-actions'
 
@@ -20,6 +22,7 @@ const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
 export default function StaffSection({ initialData }: StaffSectionProps) {
+  const router = useRouter()
   const [staff, setStaff] = useState<Staff[]>(initialData)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -44,21 +47,11 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     setSaving(true)
     const res = await createStaffMember(form)
     if (res.success) {
-      // Refresh - re-fetch would be ideal, but for now we optimistically update
-      setStaff(prev => [...prev, {
-        id: crypto.randomUUID(),
-        workspace_id: '',
-        full_name: form.full_name,
-        position: form.position || null,
-        department: form.department || null,
-        contract_type: form.contract_type,
-        salary: form.salary,
-        phone_whatsapp: form.phone_whatsapp || null,
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }])
+      toast.success('Personal agregado')
       resetForm()
+      router.refresh()
+    } else {
+      toast.error(res.error || 'Error al crear')
     }
     setSaving(false)
   }
@@ -75,12 +68,11 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
       phone_whatsapp: form.phone_whatsapp || null,
     })
     if (res.success) {
-      setStaff(prev => prev.map(s =>
-        s.id === editingId
-          ? { ...s, ...form, position: form.position || null, department: form.department || null, phone_whatsapp: form.phone_whatsapp || null }
-          : s
-      ))
+      toast.success('Personal actualizado')
       resetForm()
+      router.refresh()
+    } else {
+      toast.error(res.error || 'Error al actualizar')
     }
     setSaving(false)
   }
@@ -90,6 +82,9 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     const res = await deleteStaffMember(id)
     if (res.success) {
       setStaff(prev => prev.filter(s => s.id !== id))
+      toast.success('Personal eliminado')
+    } else {
+      toast.error(res.error || 'Error al eliminar')
     }
   }
 

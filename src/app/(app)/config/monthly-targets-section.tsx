@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Save } from 'lucide-react'
+import { toast } from 'sonner'
 import type { MonthlyTarget } from '@/types/database'
 import { bulkUpsertMonthlyTargets } from './monthly-targets-actions'
 
@@ -24,6 +26,7 @@ interface MonthRow {
 }
 
 export default function MonthlyTargetsSection({ initialData, initialYear }: MonthlyTargetsSectionProps) {
+  const router = useRouter()
   const [year, setYear] = useState(initialYear)
   const [isPending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
@@ -53,8 +56,12 @@ export default function MonthlyTargetsSection({ initialData, initialYear }: Mont
     startTransition(async () => {
       const res = await bulkUpsertMonthlyTargets(year, grid)
       if (res.success) {
+        toast.success('Metas guardadas')
         setSaved(true)
         setTimeout(() => setSaved(false), 2000)
+        router.refresh()
+      } else {
+        toast.error('Error al guardar metas')
       }
     })
   }

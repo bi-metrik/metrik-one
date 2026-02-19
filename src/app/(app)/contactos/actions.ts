@@ -125,8 +125,8 @@ export async function createOpportunityFromContact(contactId: string) {
 
   if (!contact) return { error: 'Contacto no encontrado' }
 
-  // Create opportunity linked to contact
-  const { data: opp, error } = await ctx.supabase
+  // Create opportunity linked to this contact
+  const { data: opp, error: oppErr } = await ctx.supabase
     .from('opportunities')
     .insert({
       workspace_id: ctx.workspaceId,
@@ -141,12 +141,14 @@ export async function createOpportunityFromContact(contactId: string) {
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (oppErr) return { error: oppErr.message }
 
-  // Update contact status
+  if (!opp) return { error: 'Error al crear oportunidad' }
+
+  // Update contact status to convertido
   await ctx.supabase
     .from('contacts')
-    .update({ status: 'en_conversacion' })
+    .update({ status: 'convertido' })
     .eq('id', contactId)
 
   revalidatePath('/contactos')

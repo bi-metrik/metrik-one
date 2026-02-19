@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Trash2, Star, X, Check, TrendingUp } from 'lucide-react'
+import { toast } from 'sonner'
 import type { BankAccount } from '@/types/database'
 import { createBankAccount, updateBankAccount, deleteBankAccount, recordBalance } from './bank-accounts-actions'
 
@@ -19,6 +21,7 @@ const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
 export default function BankAccountsSection({ initialData }: BankAccountsSectionProps) {
+  const router = useRouter()
   const [accounts, setAccounts] = useState<BankAccount[]>(initialData)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -42,18 +45,11 @@ export default function BankAccountsSection({ initialData }: BankAccountsSection
     setSaving(true)
     const res = await createBankAccount(form)
     if (res.success) {
-      setAccounts(prev => [...prev, {
-        id: crypto.randomUUID(),
-        workspace_id: '',
-        bank_name: form.bank_name,
-        account_name: form.account_name,
-        account_type: form.account_type,
-        is_primary: form.is_primary,
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }])
+      toast.success('Cuenta creada')
       resetForm()
+      router.refresh()
+    } else {
+      toast.error(res.error || 'Error al crear cuenta')
     }
     setSaving(false)
   }
@@ -63,10 +59,11 @@ export default function BankAccountsSection({ initialData }: BankAccountsSection
     setSaving(true)
     const res = await updateBankAccount(editingId, form)
     if (res.success) {
-      setAccounts(prev => prev.map(a =>
-        a.id === editingId ? { ...a, ...form } : a
-      ))
+      toast.success('Cuenta actualizada')
       resetForm()
+      router.refresh()
+    } else {
+      toast.error(res.error || 'Error al actualizar')
     }
     setSaving(false)
   }
@@ -76,19 +73,31 @@ export default function BankAccountsSection({ initialData }: BankAccountsSection
     const res = await deleteBankAccount(id)
     if (res.success) {
       setAccounts(prev => prev.filter(a => a.id !== id))
+      toast.success('Cuenta eliminada')
+    } else {
+      toast.error(res.error || 'Error al eliminar')
     }
   }
 
   const handleRecordBalance = async () => {
     if (!balanceForm) return
+    const balanceValue = parseFloat(balanceForm.balance.replace(/[^0-9.-]/g, ''))
+    if (isNaN(balanceValue)) {
+      toast.error('Ingresa un saldo válido')
+      return
+    }
     setSaving(true)
     const res = await recordBalance({
       account_id: balanceForm.accountId,
-      balance: Number(balanceForm.balance),
+      balance: balanceValue,
       notes: balanceForm.notes || undefined,
     })
     if (res.success) {
+      toast.success('Saldo registrado')
       setBalanceForm(null)
+      router.refresh()
+    } else {
+      toast.error(res.error || 'Error al registrar saldo')
     }
     setSaving(false)
   }
