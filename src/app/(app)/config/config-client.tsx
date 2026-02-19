@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Check, ChevronRight, Plus, Trash2, Loader2, AlertCircle, X } from 'lucide-react'
+import { Check, ChevronRight, Plus, Trash2, Loader2, AlertCircle, X, Shield } from 'lucide-react'
 import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
 import { createFixedExpense, deleteFixedExpense, toggleFixedExpense } from '../gastos/actions'
-import type { ExpenseCategory, FixedExpense } from '@/types/database'
+import WizardFelipe from './wizard-felipe'
+import type { ExpenseCategory, FixedExpense, FiscalProfile } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -24,6 +26,7 @@ interface ConfigClientProps {
   fixedExpenses: FixedExpenseWithCategory[]
   categories: ExpenseCategory[]
   totalFixedExpenses: number
+  fiscalProfile: FiscalProfile | null
 }
 
 // ── Component ──────────────────────────────────────────
@@ -33,10 +36,13 @@ export default function ConfigClient({
   fixedExpenses: initialFixedExpenses,
   categories,
   totalFixedExpenses: initialTotal,
+  fiscalProfile,
 }: ConfigClientProps) {
+  const router = useRouter()
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const [fixedExpenses, setFixedExpenses] = useState(initialFixedExpenses)
   const [totalFixed, setTotalFixed] = useState(initialTotal)
+  const [checklist, setChecklist] = useState(initialChecklist)
 
   // ── Fixed Expenses Section ──
 
@@ -136,6 +142,27 @@ export default function ConfigClient({
     })
   }
 
+  // ── Wizard Felipe handlers ──
+
+  const handleWizardComplete = (result: { isComplete: boolean; isEstimated: boolean }) => {
+    // Update checklist status optimistically
+    setChecklist(prev => prev.map(item =>
+      item.key === 'perfil-fiscal'
+        ? {
+            ...item,
+            status: result.isComplete ? 'complete' as const : 'partial' as const,
+            statusLabel: result.isComplete ? 'Completo' : 'Estimado',
+          }
+        : item
+    ))
+    setActiveSection(null)
+    router.refresh()
+  }
+
+  const handleWizardSkip = () => {
+    setActiveSection(null)
+  }
+
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
@@ -144,6 +171,16 @@ export default function ConfigClient({
     partial: 'bg-yellow-500',
     pending: 'bg-muted-foreground/30',
   }
+
+  // Fiscal profile summary for the "already configured" view
+  const fiscalSummary = fiscalProfile && (fiscalProfile.is_complete || fiscalProfile.is_estimated) ? {
+    personType: fiscalProfile.person_type === 'juridica' ? 'Persona Jurídica' : 'Persona Natural',
+    regime: fiscalProfile.tax_regime === 'simple' ? 'Simple (SIMPLE)' : 'Ordinario',
+    iva: fiscalProfile.iva_responsible ? 'Responsable (19%)' : 'No responsable',
+    city: fiscalProfile.ica_city || 'Bogotá',
+    icaRate: fiscalProfile.ica_rate || 9.66,
+    isEstimated: fiscalProfile.is_estimated,
+  } : null
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
@@ -156,7 +193,7 @@ export default function ConfigClient({
 
       {/* D241: Checklist de estado */}
       <div className="space-y-2">
-        {initialChecklist.map((item) => (
+        {checklist.map((item) => (
           <button
             key={item.key}
             onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
@@ -184,6 +221,70 @@ export default function ConfigClient({
           </button>
         ))}
       </div>
+
+      {/* ── Perfil Fiscal Section — Wizard Felipe ── */}
+      {activeSection === 'perfil-fiscal' && (
+        <div className="space-y-4 rounded-xl border bg-card p-6">
+          {fiscalSummary ? (
+            /* Already configured — show summary + edit option */
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold">Perfil fiscal</h3>
+                  {fiscalSummary.isEstimated && (
+                    <div className="flex items-center gap-1 mt-1">
+                      <Shield className="h-3 w-3 text-amber-500" />
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
+                        Algunos valores son estimados
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    // Switch to wizard mode for re-editing
+                    setChecklist(prev => prev.map(item =>
+                      item.key === 'perfil-fiscal'
+                        ? { ...item, status: 'pending' as const, statusLabel: 'Editando...' }
+                        : item
+                    ))
+                  }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Editar
+                </button>
+              </div>
+
+              <div className="space-y-2 rounded-lg border p-4">
+                <SummaryRow label="Tipo persona" value={fiscalSummary.personType} />
+                <SummaryRow label="Régimen" value={fiscalSummary.regime} estimated={fiscalSummary.isEstimated && !fiscalProfile?.tax_regime} />
+                <SummaryRow label="IVA" value={fiscalSummary.iva} />
+                <SummaryRow label="Declarante" value={fiscalProfile?.is_declarante ? 'Sí' : 'No'} />
+                <SummaryRow label="Ciudad ICA" value={`${fiscalSummary.city} (${fiscalSummary.icaRate}‰)`} />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Valores estimados con base en parámetros fiscales 2026. Consulta tu contador para cálculos definitivos.
+              </p>
+            </div>
+          ) : (
+            /* Not configured — show Wizard Felipe */
+            <WizardFelipe
+              onComplete={handleWizardComplete}
+              onSkip={handleWizardSkip}
+              initialData={fiscalProfile ? {
+                personType: (fiscalProfile.person_type as 'natural' | 'juridica') || undefined,
+                taxRegime: (fiscalProfile.tax_regime as 'ordinario' | 'simple') || undefined,
+                ivaResponsible: fiscalProfile.iva_responsible ?? undefined,
+                isDeclarante: fiscalProfile.is_declarante ?? true,
+                selfWithholder: fiscalProfile.self_withholder ?? false,
+                icaCity: fiscalProfile.ica_city || '',
+                icaRate: fiscalProfile.ica_rate || 9.66,
+              } : undefined}
+            />
+          )}
+        </div>
+      )}
 
       {/* ── Gastos Fijos Section ── */}
       {activeSection === 'gastos-fijos' && (
@@ -295,7 +396,7 @@ export default function ConfigClient({
           <div>
             <h3 className="font-semibold">Mi tarifa</h3>
             <p className="text-sm text-muted-foreground">
-              D244: Tu ingreso esperado / horas trabajadas = costo hora.
+              Tu ingreso esperado ÷ horas trabajadas = costo hora.
             </p>
           </div>
           <div className="rounded-lg border border-dashed p-6 text-center">
@@ -306,27 +407,32 @@ export default function ConfigClient({
           </div>
         </div>
       )}
+    </div>
+  )
+}
 
-      {/* ── Perfil Fiscal Section ── */}
-      {activeSection === 'perfil-fiscal' && (
-        <div className="space-y-4 rounded-xl border bg-card p-6">
-          <div>
-            <h3 className="font-semibold">Perfil fiscal</h3>
-            <p className="text-sm text-muted-foreground">
-              Configura tu perfil para que las cotizaciones y retenciones sean precisas.
-            </p>
-          </div>
-          <div className="rounded-lg border border-dashed p-6 text-center">
-            <AlertCircle className="mx-auto h-8 w-8 text-muted-foreground/30" />
-            <p className="mt-2 text-sm text-muted-foreground">
-              Sprint 6: Wizard Felipe te guiará paso a paso.
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Mientras tanto, los cálculos usan valores conservadores por defecto.
-            </p>
-          </div>
-        </div>
-      )}
+// ── Sub-Components ──────────────────────────────────────
+
+function SummaryRow({
+  label,
+  value,
+  estimated = false,
+}: {
+  label: string
+  value: string
+  estimated?: boolean
+}) {
+  return (
+    <div className="flex items-center justify-between py-1">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm font-medium">{value}</span>
+        {estimated && (
+          <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+            estimado
+          </span>
+        )}
+      </div>
     </div>
   )
 }

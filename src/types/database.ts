@@ -72,6 +72,8 @@ export type Database = {
           is_complete: boolean
           is_estimated: boolean
           nudge_count: number
+          iva_responsible: boolean
+          is_declarante: boolean
           created_at: string
           updated_at: string
         }
@@ -87,6 +89,8 @@ export type Database = {
           is_complete?: boolean
           is_estimated?: boolean
           nudge_count?: number
+          iva_responsible?: boolean
+          is_declarante?: boolean
         }
         Update: Partial<Database['public']['Tables']['fiscal_profiles']['Insert']>
         Relationships: []

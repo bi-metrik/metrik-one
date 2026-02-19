@@ -89,7 +89,7 @@ export default async function ConfigPage() {
       label: 'Mi tarifa',
       description: 'Ingreso esperado ÷ horas = costo hora',
       status: 'pending' as const,
-      statusLabel: 'Sprint 5+',
+      statusLabel: 'Próximamente',
     },
   ]
 
@@ -99,6 +99,7 @@ export default async function ConfigPage() {
       fixedExpenses={fixedWithCat}
       categories={categories}
       totalFixedExpenses={totalFixed}
+      fiscalProfile={fiscalProfile}
     />
   )
 }
