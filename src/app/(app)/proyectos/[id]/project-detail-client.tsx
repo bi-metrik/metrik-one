@@ -5,8 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, Clock, Receipt, FileText, BarChart3, MessageSquare,
-  Plus, Loader2, AlertTriangle, Check, Pause, Play,
-  X, RotateCcw, Lock,
+  Plus, Loader2, AlertTriangle, Check, Pause, Play, X, RotateCcw, Lock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateProjectStatus, addTimeEntry, addInvoice, recordPayment } from '../actions'
@@ -704,90 +703,31 @@ export default function ProjectDetailClient({
           </div>
         )}
 
-        {/* ── Budget vs Real Tab (D88) ── */}
+        {/* ── Budget vs Real Tab (D88 + F13) ── */}
         {activeTab === 'budget' && (
           <div className="space-y-4">
             <div className="rounded-lg border p-4">
               <h3 className="font-semibold mb-4">Presupuesto vs Real</h3>
               <div className="space-y-4">
                 {/* Budget bar */}
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-muted-foreground">Presupuesto</span>
-                    <span className="font-medium">{fmt(summary.budget)}</span>
-                  </div>
-                  <div className="h-3 rounded-full bg-muted">
-                    <div className="h-3 rounded-full bg-primary" style={{ width: '100%' }} />
-                  </div>
-                </div>
-
-                {/* Actual cost bar */}
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-muted-foreground">Gastos ejecutados</span>
-                    <span className="font-medium">{fmt(summary.totalExpenses)}</span>
-                  </div>
-                  <div className="h-3 rounded-full bg-muted">
-                    <div
-                      className={`h-3 rounded-full ${
-                        summary.budget > 0 && summary.totalExpenses > summary.budget
-                          ? 'bg-red-500' : 'bg-green-500'
-                      }`}
-                      style={{
-                        width: summary.budget > 0
-                          ? `${Math.min(100, (summary.totalExpenses / summary.budget) * 100)}%`
-                          : '0%'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Rework if any */}
+                <BudgetBar label="Presupuesto" value={summary.budget} max={summary.budget} color="bg-primary" />
+                <BudgetBar
+                  label="Gastos ejecutados"
+                  value={summary.totalExpenses}
+                  max={summary.budget}
+                  color={summary.budget > 0 && summary.totalExpenses > summary.budget ? 'bg-red-500' : 'bg-green-500'}
+                />
                 {summary.reworkExpenses > 0 && (
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-orange-600">Costos reproceso</span>
-                      <span className="font-medium text-orange-600">{fmt(summary.reworkExpenses)}</span>
-                    </div>
-                    <div className="h-3 rounded-full bg-muted">
-                      <div
-                        className="h-3 rounded-full bg-orange-500"
-                        style={{
-                          width: summary.budget > 0
-                            ? `${Math.min(100, (summary.reworkExpenses / summary.budget) * 100)}%`
-                            : '0%'
-                        }}
-                      />
-                    </div>
-                  </div>
+                  <BudgetBar label="Costos reproceso" value={summary.reworkExpenses} max={summary.budget} color="bg-orange-500" labelColor="text-orange-600" />
                 )}
-
-                {/* Collection bar */}
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-muted-foreground">Cobrado</span>
-                    <span className="font-medium text-green-600">{fmt(summary.totalCollected)}</span>
-                  </div>
-                  <div className="h-3 rounded-full bg-muted">
-                    <div
-                      className="h-3 rounded-full bg-green-500"
-                      style={{
-                        width: summary.budget > 0
-                          ? `${Math.min(100, (summary.totalCollected / summary.budget) * 100)}%`
-                          : '0%'
-                      }}
-                    />
-                  </div>
-                </div>
+                <BudgetBar label="Cobrado" value={summary.totalCollected} max={summary.budget} color="bg-green-500" valueColor="text-green-600" />
               </div>
 
-              {/* D180: Cierre muestra margen original vs real */}
+              {/* D180: Margin comparison */}
               <div className="mt-6 grid grid-cols-2 gap-4 rounded-lg bg-muted/50 p-4">
                 <div className="text-center">
                   <p className="text-xs text-muted-foreground">Margen presupuestado</p>
-                  <p className="mt-1 text-xl font-bold">
-                    {summary.budget > 0 ? '100%' : '—'}
-                  </p>
+                  <p className="mt-1 text-xl font-bold">{summary.budget > 0 ? '100%' : '—'}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-xs text-muted-foreground">Margen real</p>
@@ -797,6 +737,80 @@ export default function ProjectDetailClient({
                 </div>
               </div>
             </div>
+
+            {/* F13: Category breakdown */}
+            {expenses.length > 0 && (
+              <div className="rounded-lg border p-4">
+                <h3 className="font-semibold mb-3">Desglose por categoría</h3>
+                <div className="space-y-2">
+                  {(() => {
+                    const catMap = new Map<string, number>()
+                    for (const e of expenses) {
+                      const cat = e.categoryName || 'Sin categoría'
+                      catMap.set(cat, (catMap.get(cat) || 0) + e.amount)
+                    }
+                    const sorted = [...catMap.entries()].sort((a, b) => b[1] - a[1])
+                    const maxCat = sorted[0]?.[1] || 0
+                    return sorted.map(([cat, total]) => (
+                      <div key={cat}>
+                        <div className="flex justify-between text-xs mb-0.5">
+                          <span className="text-muted-foreground">{cat}</span>
+                          <span className="font-medium">{fmt(total)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted">
+                          <div
+                            className="h-2 rounded-full bg-primary/60"
+                            style={{ width: maxCat > 0 ? `${(total / maxCat) * 100}%` : '0%' }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* F13: Fiscal overlay */}
+            {summary.totalCollected > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900/30 dark:bg-amber-950/10">
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <Receipt className="h-4 w-4 text-amber-600" />
+                  Estimación fiscal
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Retefuente (~11%)</p>
+                    <p className="font-medium text-red-600">{fmt(summary.totalCollected * 0.11)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Seg. social (~11.4%)</p>
+                    <p className="font-medium text-red-600">{fmt(summary.totalCollected * 0.4 * 0.285)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Neto estimado</p>
+                    <p className="font-medium text-green-600">
+                      {fmt(summary.totalCollected - (summary.totalCollected * 0.11) - (summary.totalCollected * 0.4 * 0.285))}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Margen neto</p>
+                    <p className={`font-medium ${
+                      summary.totalCollected > 0
+                        ? ((summary.totalCollected - (summary.totalCollected * 0.11) - (summary.totalCollected * 0.4 * 0.285) - summary.totalExpenses) / summary.totalCollected * 100) >= 0
+                          ? 'text-green-600' : 'text-red-600'
+                        : ''
+                    }`}>
+                      {summary.totalCollected > 0
+                        ? `${((summary.totalCollected - (summary.totalCollected * 0.11) - (summary.totalCollected * 0.4 * 0.285) - summary.totalExpenses) / summary.totalCollected * 100).toFixed(1)}%`
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] text-muted-foreground">
+                  * Estimación conservadora. Consulta configuración fiscal para tu caso.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -840,6 +854,28 @@ export default function ProjectDetailClient({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function BudgetBar({
+  label, value, max, color, labelColor, valueColor,
+}: {
+  label: string; value: number; max: number; color: string
+  labelColor?: string; valueColor?: string
+}) {
+  return (
+    <div>
+      <div className="flex justify-between text-sm mb-1">
+        <span className={labelColor || 'text-muted-foreground'}>{label}</span>
+        <span className={`font-medium ${valueColor || ''}`}>{fmt(value)}</span>
+      </div>
+      <div className="h-3 rounded-full bg-muted">
+        <div
+          className={`h-3 rounded-full ${color}`}
+          style={{ width: max > 0 ? `${Math.min(100, (value / max) * 100)}%` : (label === 'Presupuesto' ? '100%' : '0%') }}
+        />
+      </div>
     </div>
   )
 }
