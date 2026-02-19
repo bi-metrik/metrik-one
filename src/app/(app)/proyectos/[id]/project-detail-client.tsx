@@ -417,7 +417,7 @@ export default function ProjectDetailClient({
                 </div>
                 <div>
                   <p className="text-muted-foreground">Creado</p>
-                  <p className="font-medium">{fmtDate(project.created_at.split('T')[0])}</p>
+                  <p className="font-medium">{fmtDate((project.created_at ?? '').split('T')[0])}</p>
                 </div>
                 {project.rework_reason && (
                   <div className="col-span-2">

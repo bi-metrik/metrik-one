@@ -93,8 +93,8 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
       full_name: s.full_name,
       position: s.position || '',
       department: s.department || '',
-      contract_type: s.contract_type,
-      salary: s.salary,
+      contract_type: s.contract_type ?? 'Prestación de servicios',
+      salary: s.salary ?? 0,
       phone_whatsapp: s.phone_whatsapp || '',
     })
     setEditingId(s.id)
@@ -236,7 +236,7 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-sm font-medium">{fmt(s.salary)}</p>
+                <p className="text-sm font-medium">{fmt(s.salary ?? 0)}</p>
                 <p className="text-[10px] text-muted-foreground">
                   {CONTRACT_TYPES.find(ct => ct.value === s.contract_type)?.label || s.contract_type}
                 </p>

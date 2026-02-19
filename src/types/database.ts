@@ -7,963 +7,1905 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.1"
+  }
   public: {
     Tables: {
-      workspaces: {
+      audit_log: {
         Row: {
+          action: string
+          created_at: string | null
           id: string
-          slug: string
-          name: string
-          subscription_status: string
-          subscription_started_at: string | null
-          subscription_expires_at: string | null
-          trial_ends_at: string | null
-          profession: string | null
-          years_independent: number | null
-          onboarding_completed: boolean
-          created_at: string
-          updated_at: string
+          new_data: Json | null
+          old_data: Json | null
+          record_id: string | null
+          table_name: string
+          user_id: string | null
+          workspace_id: string
         }
         Insert: {
+          action: string
+          created_at?: string | null
           id?: string
-          slug?: string
-          name: string
-          subscription_status?: string
-          subscription_started_at?: string | null
-          subscription_expires_at?: string | null
-          trial_ends_at?: string | null
-          profession?: string | null
-          years_independent?: number | null
-          onboarding_completed?: boolean
-        }
-        Update: Partial<Database['public']['Tables']['workspaces']['Insert']>
-        Relationships: []
-      }
-      profiles: {
-        Row: {
-          id: string
+          new_data?: Json | null
+          old_data?: Json | null
+          record_id?: string | null
+          table_name: string
+          user_id?: string | null
           workspace_id: string
-          full_name: string | null
-          role: string
-          avatar_url: string | null
-          created_at: string
-          updated_at: string
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          id?: string
+          new_data?: Json | null
+          old_data?: Json | null
+          record_id?: string | null
+          table_name?: string
+          user_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bank_accounts: {
+        Row: {
+          account_name: string | null
+          account_type: string | null
+          bank_name: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          is_primary: boolean | null
+          updated_at: string | null
+          workspace_id: string
         }
         Insert: {
-          id: string
+          account_name?: string | null
+          account_type?: string | null
+          bank_name: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_primary?: boolean | null
+          updated_at?: string | null
           workspace_id: string
-          full_name?: string | null
-          role?: string
-          avatar_url?: string | null
         }
-        Update: Partial<Database['public']['Tables']['profiles']['Insert']>
+        Update: {
+          account_name?: string | null
+          account_type?: string | null
+          bank_name?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_primary?: boolean | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_accounts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bank_balances: {
+        Row: {
+          account_id: string
+          balance: number
+          id: string
+          notes: string | null
+          recorded_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          balance: number
+          id?: string
+          notes?: string | null
+          recorded_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          balance?: number
+          id?: string
+          notes?: string | null
+          recorded_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_balances_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_balances_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_sessions: {
+        Row: {
+          context: Json | null
+          expires_at: string | null
+          id: string
+          intent: string | null
+          started_at: string | null
+          state: string | null
+          user_phone: string
+          workspace_id: string
+        }
+        Insert: {
+          context?: Json | null
+          expires_at?: string | null
+          id?: string
+          intent?: string | null
+          started_at?: string | null
+          state?: string | null
+          user_phone: string
+          workspace_id: string
+        }
+        Update: {
+          context?: Json | null
+          expires_at?: string | null
+          id?: string
+          intent?: string | null
+          started_at?: string | null
+          state?: string | null
+          user_phone?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_sessions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          address: string | null
+          agente_retenedor: boolean | null
+          city: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string | null
+          digito_verificacion: string | null
+          email: string | null
+          gran_contribuyente: boolean | null
+          id: string
+          is_active: boolean | null
+          name: string
+          nit: string | null
+          notes: string | null
+          person_type: string | null
+          razon_social: string | null
+          regimen_simple: boolean | null
+          sector: string | null
+          tax_regime: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          address?: string | null
+          agente_retenedor?: boolean | null
+          city?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          digito_verificacion?: string | null
+          email?: string | null
+          gran_contribuyente?: boolean | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          nit?: string | null
+          notes?: string | null
+          person_type?: string | null
+          razon_social?: string | null
+          regimen_simple?: boolean | null
+          sector?: string | null
+          tax_regime?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          address?: string | null
+          agente_retenedor?: boolean | null
+          city?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          digito_verificacion?: string | null
+          email?: string | null
+          gran_contribuyente?: boolean | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          nit?: string | null
+          notes?: string | null
+          person_type?: string | null
+          razon_social?: string | null
+          regimen_simple?: boolean | null
+          sector?: string | null
+          tax_regime?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clients_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contacts: {
+        Row: {
+          city: string | null
+          client_id: string | null
+          company: string | null
+          contact_type: string | null
+          country: string | null
+          created_at: string | null
+          email: string | null
+          full_name: string
+          id: string
+          notes: string | null
+          phone: string | null
+          position: string | null
+          promoter_id: string | null
+          referred_by_id: string | null
+          source: string | null
+          status: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          city?: string | null
+          client_id?: string | null
+          company?: string | null
+          contact_type?: string | null
+          country?: string | null
+          created_at?: string | null
+          email?: string | null
+          full_name: string
+          id?: string
+          notes?: string | null
+          phone?: string | null
+          position?: string | null
+          promoter_id?: string | null
+          referred_by_id?: string | null
+          source?: string | null
+          status?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          city?: string | null
+          client_id?: string | null
+          company?: string | null
+          contact_type?: string | null
+          country?: string | null
+          created_at?: string | null
+          email?: string | null
+          full_name?: string
+          id?: string
+          notes?: string | null
+          phone?: string | null
+          position?: string | null
+          promoter_id?: string | null
+          referred_by_id?: string | null
+          source?: string | null
+          status?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_promoter_id_fkey"
+            columns: ["promoter_id"]
+            isOneToOne: false
+            referencedRelation: "promoters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_referred_by_id_fkey"
+            columns: ["referred_by_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expense_categories: {
+        Row: {
+          created_at: string | null
+          deduction_pct: number | null
+          id: string
+          is_active: boolean | null
+          is_deductible: string
+          name: string
+          sort_order: number | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          deduction_pct?: number | null
+          id?: string
+          is_active?: boolean | null
+          is_deductible?: string
+          name: string
+          sort_order?: number | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          deduction_pct?: number | null
+          id?: string
+          is_active?: boolean | null
+          is_deductible?: string
+          name?: string
+          sort_order?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_categories_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expenses: {
+        Row: {
+          amount: number
+          category_id: string
+          created_at: string | null
+          description: string | null
+          expense_date: string
+          id: string
+          is_rework: boolean | null
+          project_id: string | null
+          source: string | null
+          support_url: string | null
+          workspace_id: string
+        }
+        Insert: {
+          amount: number
+          category_id: string
+          created_at?: string | null
+          description?: string | null
+          expense_date?: string
+          id?: string
+          is_rework?: boolean | null
+          project_id?: string | null
+          source?: string | null
+          support_url?: string | null
+          workspace_id: string
+        }
+        Update: {
+          amount?: number
+          category_id?: string
+          created_at?: string | null
+          description?: string | null
+          expense_date?: string
+          id?: string
+          is_rework?: boolean | null
+          project_id?: string | null
+          source?: string | null
+          support_url?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fiscal_params: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          id: string
+          key: string
+          valid_from: string | null
+          valid_to: string | null
+          value: number
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          key: string
+          valid_from?: string | null
+          valid_to?: string | null
+          value: number
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          key?: string
+          valid_from?: string | null
+          valid_to?: string | null
+          value?: number
+        }
         Relationships: []
       }
       fiscal_profiles: {
         Row: {
-          id: string
-          workspace_id: string
-          person_type: string | null
-          tax_regime: string | null
           ciiu: string | null
-          self_withholder: boolean
-          ica_rate: number | null
+          created_at: string | null
           ica_city: string | null
-          is_complete: boolean
-          is_estimated: boolean
-          nudge_count: number
-          iva_responsible: boolean
-          is_declarante: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          person_type?: string | null
-          tax_regime?: string | null
-          ciiu?: string | null
-          self_withholder?: boolean
-          ica_rate?: number | null
-          ica_city?: string | null
-          is_complete?: boolean
-          is_estimated?: boolean
-          nudge_count?: number
-          iva_responsible?: boolean
-          is_declarante?: boolean
-        }
-        Update: Partial<Database['public']['Tables']['fiscal_profiles']['Insert']>
-        Relationships: []
-      }
-      fiscal_params: {
-        Row: {
+          ica_rate: number | null
           id: string
-          key: string
-          value: number
-          description: string | null
-          valid_from: string | null
-          valid_to: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          key: string
-          value: number
-          description?: string | null
-          valid_from?: string | null
-          valid_to?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['fiscal_params']['Insert']>
-        Relationships: []
-      }
-      clients: {
-        Row: {
-          id: string
-          workspace_id: string
-          name: string
-          razon_social: string | null
-          nit: string | null
-          digito_verificacion: string | null
+          is_complete: boolean | null
+          is_declarante: boolean | null
+          is_estimated: boolean | null
+          iva_responsible: boolean | null
+          nudge_count: number | null
           person_type: string | null
+          self_withholder: boolean | null
           tax_regime: string | null
-          gran_contribuyente: boolean
-          agente_retenedor: boolean
-          regimen_simple: boolean
-          sector: string | null
-          contact_name: string | null
-          contact_phone: string | null
-          email: string | null
-          address: string | null
-          city: string | null
-          notes: string | null
-          is_active: boolean
-          created_at: string
-          updated_at: string
+          updated_at: string | null
+          workspace_id: string
         }
         Insert: {
+          ciiu?: string | null
+          created_at?: string | null
+          ica_city?: string | null
+          ica_rate?: number | null
           id?: string
-          workspace_id: string
-          name: string
-          razon_social?: string | null
-          nit?: string | null
-          digito_verificacion?: string | null
+          is_complete?: boolean | null
+          is_declarante?: boolean | null
+          is_estimated?: boolean | null
+          iva_responsible?: boolean | null
+          nudge_count?: number | null
           person_type?: string | null
+          self_withholder?: boolean | null
           tax_regime?: string | null
-          gran_contribuyente?: boolean
-          agente_retenedor?: boolean
-          regimen_simple?: boolean
-          sector?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          email?: string | null
-          address?: string | null
-          city?: string | null
-          notes?: string | null
-          is_active?: boolean
-        }
-        Update: Partial<Database['public']['Tables']['clients']['Insert']>
-        Relationships: []
-      }
-      expense_categories: {
-        Row: {
-          id: string
+          updated_at?: string | null
           workspace_id: string
-          name: string
-          is_deductible: string
-          deduction_pct: number | null
-          sort_order: number | null
-          is_active: boolean
-          created_at: string
         }
-        Insert: {
+        Update: {
+          ciiu?: string | null
+          created_at?: string | null
+          ica_city?: string | null
+          ica_rate?: number | null
           id?: string
-          workspace_id: string
-          name: string
-          is_deductible?: string
-          deduction_pct?: number | null
-          sort_order?: number | null
-          is_active?: boolean
+          is_complete?: boolean | null
+          is_declarante?: boolean | null
+          is_estimated?: boolean | null
+          iva_responsible?: boolean | null
+          nudge_count?: number | null
+          person_type?: string | null
+          self_withholder?: boolean | null
+          tax_regime?: string | null
+          updated_at?: string | null
+          workspace_id?: string
         }
-        Update: Partial<Database['public']['Tables']['expense_categories']['Insert']>
-        Relationships: []
-      }
-      opportunities: {
-        Row: {
-          id: string
-          workspace_id: string
-          client_id: string | null
-          contact_id: string | null
-          name: string
-          estimated_value: number
-          stage: string
-          probability: number
-          source: string | null
-          lost_reason: string | null
-          notes: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          client_id?: string | null
-          contact_id?: string | null
-          name: string
-          estimated_value?: number
-          stage?: string
-          probability?: number
-          source?: string | null
-          lost_reason?: string | null
-          notes?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['opportunities']['Insert']>
-        Relationships: []
-      }
-      opportunity_stage_history: {
-        Row: {
-          id: string
-          workspace_id: string
-          opportunity_id: string
-          from_stage: string | null
-          to_stage: string
-          changed_at: string
-          changed_by: string | null
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          opportunity_id: string
-          from_stage?: string | null
-          to_stage: string
-          changed_by?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['opportunity_stage_history']['Insert']>
-        Relationships: []
-      }
-      quotes: {
-        Row: {
-          id: string
-          workspace_id: string
-          client_id: string | null
-          opportunity_id: string | null
-          project_id: string | null
-          mode: string
-          description: string | null
-          total_price: number
-          estimated_cost: number | null
-          iva_amount: number | null
-          retention_amount: number | null
-          net_amount: number | null
-          profit_amount: number | null
-          margin_pct: number | null
-          status: string
-          sent_at: string | null
-          accepted_at: string | null
-          valid_until: string | null
-          valid_days: number | null
-          rejected_reason: string | null
-          notes: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          client_id?: string | null
-          opportunity_id?: string | null
-          project_id?: string | null
-          mode?: string
-          description?: string | null
-          total_price?: number
-          estimated_cost?: number | null
-          iva_amount?: number | null
-          retention_amount?: number | null
-          net_amount?: number | null
-          profit_amount?: number | null
-          margin_pct?: number | null
-          status?: string
-          sent_at?: string | null
-          accepted_at?: string | null
-          valid_until?: string | null
-          valid_days?: number | null
-          rejected_reason?: string | null
-          notes?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['quotes']['Insert']>
-        Relationships: []
-      }
-      quote_items: {
-        Row: {
-          id: string
-          quote_id: string
-          item_type: string
-          description: string
-          quantity: number
-          unit_price: number
-          total: number
-          sort_order: number | null
-        }
-        Insert: {
-          id?: string
-          quote_id: string
-          item_type: string
-          description: string
-          quantity?: number
-          unit_price?: number
-          sort_order?: number | null
-        }
-        Update: Partial<Database['public']['Tables']['quote_items']['Insert']>
-        Relationships: []
-      }
-      projects: {
-        Row: {
-          id: string
-          workspace_id: string
-          client_id: string | null
-          opportunity_id: string | null
-          quote_id: string | null
-          name: string
-          approved_budget: number | null
-          start_date: string | null
-          estimated_end_date: string | null
-          status: string
-          progress_pct: number
-          rework_reason: string | null
-          rework_cost: number | null
-          closed_at: string | null
-          actual_cost: number | null
-          actual_margin_pct: number | null
-          lessons_learned: string | null
-          notes: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          client_id?: string | null
-          opportunity_id?: string | null
-          quote_id?: string | null
-          name: string
-          approved_budget?: number | null
-          start_date?: string | null
-          estimated_end_date?: string | null
-          status?: string
-          progress_pct?: number
-          rework_reason?: string | null
-          rework_cost?: number | null
-        }
-        Update: Partial<Database['public']['Tables']['projects']['Insert']>
-        Relationships: []
-      }
-      time_entries: {
-        Row: {
-          id: string
-          workspace_id: string
-          project_id: string
-          user_id: string | null
-          entry_date: string
-          hours: number
-          activity: string | null
-          category: string | null
-          start_time: string | null
-          end_time: string | null
-          source: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          project_id: string
-          user_id?: string | null
-          entry_date?: string
-          hours: number
-          activity?: string | null
-          category?: string | null
-          start_time?: string | null
-          end_time?: string | null
-          source?: string
-        }
-        Update: Partial<Database['public']['Tables']['time_entries']['Insert']>
-        Relationships: []
-      }
-      expenses: {
-        Row: {
-          id: string
-          workspace_id: string
-          project_id: string | null
-          category_id: string
-          expense_date: string
-          amount: number
-          description: string | null
-          support_url: string | null
-          is_rework: boolean
-          source: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          project_id?: string | null
-          category_id: string
-          expense_date?: string
-          amount: number
-          description?: string | null
-          support_url?: string | null
-          is_rework?: boolean
-          source?: string
-        }
-        Update: Partial<Database['public']['Tables']['expenses']['Insert']>
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_profiles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       fixed_expenses: {
         Row: {
-          id: string
-          workspace_id: string
           category_id: string | null
+          created_at: string | null
           description: string
+          id: string
+          is_active: boolean | null
           monthly_amount: number
-          is_active: boolean
-          created_at: string
-          updated_at: string
+          updated_at: string | null
+          workspace_id: string
         }
         Insert: {
-          id?: string
-          workspace_id: string
           category_id?: string | null
+          created_at?: string | null
           description: string
+          id?: string
+          is_active?: boolean | null
           monthly_amount: number
-          is_active?: boolean
+          updated_at?: string | null
+          workspace_id: string
         }
-        Update: Partial<Database['public']['Tables']['fixed_expenses']['Insert']>
-        Relationships: []
+        Update: {
+          category_id?: string | null
+          created_at?: string | null
+          description?: string
+          id?: string
+          is_active?: boolean | null
+          monthly_amount?: number
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fixed_expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fixed_expenses_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      health_scores: {
+        Row: {
+          actions_per_week: number | null
+          calculated_at: string | null
+          days_inactive: number | null
+          id: string
+          questions_complete: number | null
+          score: number | null
+          summary_open_rate: number | null
+          wa_collaborators_active: number | null
+          workspace_id: string
+        }
+        Insert: {
+          actions_per_week?: number | null
+          calculated_at?: string | null
+          days_inactive?: number | null
+          id?: string
+          questions_complete?: number | null
+          score?: number | null
+          summary_open_rate?: number | null
+          wa_collaborators_active?: number | null
+          workspace_id: string
+        }
+        Update: {
+          actions_per_week?: number | null
+          calculated_at?: string | null
+          days_inactive?: number | null
+          id?: string
+          questions_complete?: number | null
+          score?: number | null
+          summary_open_rate?: number | null
+          wa_collaborators_active?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "health_scores_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       invoices: {
         Row: {
-          id: string
-          workspace_id: string
-          project_id: string
           client_id: string | null
-          invoice_type: string
-          invoice_number: string | null
           concept: string
-          gross_amount: number
+          created_at: string | null
           due_date: string | null
-          status: string
+          gross_amount: number
+          id: string
+          invoice_number: string | null
+          invoice_type: string | null
           notes: string | null
-          created_at: string
-          updated_at: string
+          project_id: string
+          status: string
+          updated_at: string | null
+          workspace_id: string
         }
         Insert: {
-          id?: string
-          workspace_id: string
-          project_id: string
           client_id?: string | null
-          invoice_type?: string
-          invoice_number?: string | null
           concept: string
-          gross_amount: number
+          created_at?: string | null
           due_date?: string | null
-          status?: string
+          gross_amount: number
+          id?: string
+          invoice_number?: string | null
+          invoice_type?: string | null
           notes?: string | null
+          project_id: string
+          status?: string
+          updated_at?: string | null
+          workspace_id: string
         }
-        Update: Partial<Database['public']['Tables']['invoices']['Insert']>
-        Relationships: []
+        Update: {
+          client_id?: string | null
+          concept?: string
+          created_at?: string | null
+          due_date?: string | null
+          gross_amount?: number
+          id?: string
+          invoice_number?: string | null
+          invoice_type?: string | null
+          notes?: string | null
+          project_id?: string
+          status?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      monthly_targets: {
+        Row: {
+          collection_target: number | null
+          created_at: string | null
+          id: string
+          month: number
+          sales_target: number | null
+          updated_at: string | null
+          workspace_id: string
+          year: number
+        }
+        Insert: {
+          collection_target?: number | null
+          created_at?: string | null
+          id?: string
+          month: number
+          sales_target?: number | null
+          updated_at?: string | null
+          workspace_id: string
+          year: number
+        }
+        Update: {
+          collection_target?: number | null
+          created_at?: string | null
+          id?: string
+          month?: number
+          sales_target?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monthly_targets_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notes: {
+        Row: {
+          content: string
+          created_at: string | null
+          created_by: string | null
+          entity_id: string
+          entity_type: string
+          id: string
+          note_type: string | null
+          workspace_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string | null
+          created_by?: string | null
+          entity_id: string
+          entity_type: string
+          id?: string
+          note_type?: string | null
+          workspace_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string | null
+          created_by?: string | null
+          entity_id?: string
+          entity_type?: string
+          id?: string
+          note_type?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          action_url: string | null
+          created_at: string | null
+          id: string
+          is_read: boolean | null
+          message: string | null
+          title: string
+          type: string
+          user_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          action_url?: string | null
+          created_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          message?: string | null
+          title: string
+          type: string
+          user_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          action_url?: string | null
+          created_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          message?: string | null
+          title?: string
+          type?: string
+          user_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      opportunities: {
+        Row: {
+          client_id: string | null
+          contact_id: string | null
+          created_at: string | null
+          estimated_value: number
+          id: string
+          lost_reason: string | null
+          name: string
+          notes: string | null
+          probability: number
+          source: string | null
+          stage: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          client_id?: string | null
+          contact_id?: string | null
+          created_at?: string | null
+          estimated_value?: number
+          id?: string
+          lost_reason?: string | null
+          name: string
+          notes?: string | null
+          probability?: number
+          source?: string | null
+          stage?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          client_id?: string | null
+          contact_id?: string | null
+          created_at?: string | null
+          estimated_value?: number
+          id?: string
+          lost_reason?: string | null
+          name?: string
+          notes?: string | null
+          probability?: number
+          source?: string | null
+          stage?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opportunities_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opportunities_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opportunities_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      opportunity_stage_history: {
+        Row: {
+          changed_at: string | null
+          changed_by: string | null
+          from_stage: string | null
+          id: string
+          opportunity_id: string
+          to_stage: string
+          workspace_id: string
+        }
+        Insert: {
+          changed_at?: string | null
+          changed_by?: string | null
+          from_stage?: string | null
+          id?: string
+          opportunity_id: string
+          to_stage: string
+          workspace_id: string
+        }
+        Update: {
+          changed_at?: string | null
+          changed_by?: string | null
+          from_stage?: string | null
+          id?: string
+          opportunity_id?: string
+          to_stage?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opportunity_stage_history_opportunity_id_fkey"
+            columns: ["opportunity_id"]
+            isOneToOne: false
+            referencedRelation: "opportunities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opportunity_stage_history_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       payments: {
         Row: {
+          created_at: string | null
           id: string
-          workspace_id: string
           invoice_id: string
           net_received: number
           payment_date: string
           payment_method: string
-          retention_applied: number
-          source: string
           reference: string | null
-          created_at: string
+          retention_applied: number
+          source: string | null
+          workspace_id: string
         }
         Insert: {
+          created_at?: string | null
           id?: string
-          workspace_id: string
           invoice_id: string
           net_received: number
           payment_date?: string
           payment_method?: string
-          retention_applied?: number
-          source?: string
           reference?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['payments']['Insert']>
-        Relationships: []
-      }
-      subscriptions: {
-        Row: {
-          id: string
-          workspace_id: string
-          plan: string
-          status: string
-          payment_provider: string | null
-          payment_method: string | null
-          amount: number | null
-          currency: string
-          current_period_start: string | null
-          current_period_end: string | null
-          cancelled_at: string | null
-          cancel_reason: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          plan: string
-          status?: string
-          payment_provider?: string | null
-          payment_method?: string | null
-          amount?: number | null
-          currency?: string
-        }
-        Update: Partial<Database['public']['Tables']['subscriptions']['Insert']>
-        Relationships: []
-      }
-      bot_sessions: {
-        Row: {
-          id: string
-          workspace_id: string
-          user_phone: string
-          intent: string | null
-          state: string | null
-          context: Json
-          started_at: string
-          expires_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          user_phone: string
-          intent?: string | null
-          state?: string | null
-          context?: Json
-        }
-        Update: Partial<Database['public']['Tables']['bot_sessions']['Insert']>
-        Relationships: []
-      }
-      wa_collaborators: {
-        Row: {
-          id: string
-          workspace_id: string
-          name: string
-          phone: string
-          is_active: boolean
-          requires_approval: boolean
-          consent_accepted_at: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          name: string
-          phone: string
-          is_active?: boolean
-          requires_approval?: boolean
-          consent_accepted_at?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['wa_collaborators']['Insert']>
-        Relationships: []
-      }
-      notifications: {
-        Row: {
-          id: string
-          workspace_id: string
-          user_id: string | null
-          type: string
-          title: string
-          message: string | null
-          action_url: string | null
-          is_read: boolean
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          user_id?: string | null
-          type: string
-          title: string
-          message?: string | null
-          action_url?: string | null
-          is_read?: boolean
-        }
-        Update: Partial<Database['public']['Tables']['notifications']['Insert']>
-        Relationships: []
-      }
-      referrals: {
-        Row: {
-          id: string
-          workspace_id: string
-          referrer_workspace_id: string | null
-          referral_code: string
-          status: string
-          months_rewarded: number
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          referrer_workspace_id?: string | null
-          referral_code: string
-          status?: string
-          months_rewarded?: number
-        }
-        Update: Partial<Database['public']['Tables']['referrals']['Insert']>
-        Relationships: []
-      }
-      health_scores: {
-        Row: {
-          id: string
-          workspace_id: string
-          actions_per_week: number
-          days_inactive: number
-          questions_complete: number
-          wa_collaborators_active: number
-          summary_open_rate: number
-          score: number
-          calculated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          actions_per_week?: number
-          days_inactive?: number
-          questions_complete?: number
-          wa_collaborators_active?: number
-          summary_open_rate?: number
-          score?: number
-        }
-        Update: Partial<Database['public']['Tables']['health_scores']['Insert']>
-        Relationships: []
-      }
-      testimonials: {
-        Row: {
-          id: string
-          workspace_id: string
-          answer_1: string | null
-          answer_2: string | null
-          answer_3: string | null
-          marketing_consent: boolean
-          status: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          answer_1?: string | null
-          answer_2?: string | null
-          answer_3?: string | null
-          marketing_consent?: boolean
-          status?: string
-        }
-        Update: Partial<Database['public']['Tables']['testimonials']['Insert']>
-        Relationships: []
-      }
-      team_invitations: {
-        Row: {
-          id: string
-          workspace_id: string
-          email: string
-          role: string
-          invited_by: string
-          token: string
-          status: string
-          accepted_at: string | null
-          expires_at: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          email: string
-          role?: string
-          invited_by: string
-          token?: string
-          status?: string
-          accepted_at?: string | null
-          expires_at?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['team_invitations']['Insert']>
-        Relationships: []
-      }
-      audit_log: {
-        Row: {
-          id: string
-          workspace_id: string
-          user_id: string | null
-          action: string
-          table_name: string
-          record_id: string | null
-          old_data: Json | null
-          new_data: Json | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          user_id?: string | null
-          action: string
-          table_name: string
-          record_id?: string | null
-          old_data?: Json | null
-          new_data?: Json | null
-        }
-        Update: Partial<Database['public']['Tables']['audit_log']['Insert']>
-        Relationships: []
-      }
-      staff: {
-        Row: {
-          id: string
-          workspace_id: string
-          full_name: string
-          position: string | null
-          department: string | null
-          contract_type: string
-          salary: number
-          phone_whatsapp: string | null
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          full_name: string
-          position?: string | null
-          department?: string | null
-          contract_type?: string
-          salary?: number
-          phone_whatsapp?: string | null
-          is_active?: boolean
-        }
-        Update: Partial<Database['public']['Tables']['staff']['Insert']>
-        Relationships: []
-      }
-      bank_accounts: {
-        Row: {
-          id: string
-          workspace_id: string
-          bank_name: string
-          account_name: string
-          account_type: string
-          is_primary: boolean
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          bank_name: string
-          account_name?: string
-          account_type?: string
-          is_primary?: boolean
-          is_active?: boolean
-        }
-        Update: Partial<Database['public']['Tables']['bank_accounts']['Insert']>
-        Relationships: []
-      }
-      bank_balances: {
-        Row: {
-          id: string
-          workspace_id: string
-          account_id: string
-          balance: number
-          notes: string | null
-          recorded_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          account_id: string
-          balance: number
-          notes?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['bank_balances']['Insert']>
-        Relationships: []
-      }
-      monthly_targets: {
-        Row: {
-          id: string
-          workspace_id: string
-          year: number
-          month: number
-          sales_target: number
-          collection_target: number
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          year: number
-          month: number
-          sales_target?: number
-          collection_target?: number
-        }
-        Update: Partial<Database['public']['Tables']['monthly_targets']['Insert']>
-        Relationships: []
-      }
-      contacts: {
-        Row: {
-          id: string
-          workspace_id: string
-          client_id: string | null
-          full_name: string
-          email: string | null
-          phone: string | null
-          company: string | null
-          position: string | null
-          contact_type: string
-          source: string | null
-          city: string | null
-          country: string | null
-          notes: string | null
-          status: string
-          promoter_id: string | null
-          referred_by_id: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          client_id?: string | null
-          full_name: string
-          email?: string | null
-          phone?: string | null
-          company?: string | null
-          position?: string | null
-          contact_type?: string
+          retention_applied?: number
           source?: string | null
-          city?: string | null
-          country?: string | null
-          notes?: string | null
-          status?: string
-          promoter_id?: string | null
-          referred_by_id?: string | null
-        }
-        Update: Partial<Database['public']['Tables']['contacts']['Insert']>
-        Relationships: []
-      }
-      notes: {
-        Row: {
-          id: string
           workspace_id: string
-          entity_type: string
-          entity_id: string
-          note_type: string
-          content: string
-          created_by: string | null
-          created_at: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          invoice_id?: string
+          net_received?: number
+          payment_date?: string
+          payment_method?: string
+          reference?: string | null
+          retention_applied?: number
+          source?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          full_name: string | null
+          id: string
+          role: string
+          updated_at: string | null
+          workspace_id: string
         }
         Insert: {
-          id?: string
+          avatar_url?: string | null
+          created_at?: string | null
+          full_name?: string | null
+          id: string
+          role?: string
+          updated_at?: string | null
           workspace_id: string
-          entity_type: string
-          entity_id: string
-          note_type?: string
-          content: string
-          created_by?: string | null
         }
-        Update: Partial<Database['public']['Tables']['notes']['Insert']>
-        Relationships: []
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          full_name?: string | null
+          id?: string
+          role?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          actual_cost: number | null
+          actual_margin_pct: number | null
+          approved_budget: number | null
+          client_id: string | null
+          closed_at: string | null
+          created_at: string | null
+          estimated_end_date: string | null
+          id: string
+          lessons_learned: string | null
+          name: string
+          notes: string | null
+          opportunity_id: string | null
+          progress_pct: number | null
+          quote_id: string | null
+          rework_cost: number | null
+          rework_reason: string | null
+          start_date: string | null
+          status: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          actual_cost?: number | null
+          actual_margin_pct?: number | null
+          approved_budget?: number | null
+          client_id?: string | null
+          closed_at?: string | null
+          created_at?: string | null
+          estimated_end_date?: string | null
+          id?: string
+          lessons_learned?: string | null
+          name: string
+          notes?: string | null
+          opportunity_id?: string | null
+          progress_pct?: number | null
+          quote_id?: string | null
+          rework_cost?: number | null
+          rework_reason?: string | null
+          start_date?: string | null
+          status?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          actual_cost?: number | null
+          actual_margin_pct?: number | null
+          approved_budget?: number | null
+          client_id?: string | null
+          closed_at?: string | null
+          created_at?: string | null
+          estimated_end_date?: string | null
+          id?: string
+          lessons_learned?: string | null
+          name?: string
+          notes?: string | null
+          opportunity_id?: string | null
+          progress_pct?: number | null
+          quote_id?: string | null
+          rework_cost?: number | null
+          rework_reason?: string | null
+          start_date?: string | null
+          status?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "projects_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_opportunity_id_fkey"
+            columns: ["opportunity_id"]
+            isOneToOne: false
+            referencedRelation: "opportunities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       promoters: {
         Row: {
-          id: string
-          workspace_id: string
-          name: string
-          email: string | null
-          phone: string | null
-          status: string
-          commission_pct: number
-          bank_name: string | null
+          accumulated_commission: number | null
           bank_account: string | null
-          referrals_count: number
-          won_projects: number
-          accumulated_commission: number
+          bank_name: string | null
+          commission_pct: number | null
+          created_at: string | null
+          email: string | null
+          id: string
+          name: string
           notes: string | null
-          created_at: string
-          updated_at: string
+          phone: string | null
+          referrals_count: number | null
+          status: string
+          updated_at: string | null
+          won_projects: number | null
+          workspace_id: string
         }
         Insert: {
-          id?: string
-          workspace_id: string
-          name: string
-          email?: string | null
-          phone?: string | null
-          status?: string
-          commission_pct?: number
-          bank_name?: string | null
+          accumulated_commission?: number | null
           bank_account?: string | null
-          referrals_count?: number
-          won_projects?: number
-          accumulated_commission?: number
+          bank_name?: string | null
+          commission_pct?: number | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          name: string
           notes?: string | null
+          phone?: string | null
+          referrals_count?: number | null
+          status?: string
+          updated_at?: string | null
+          won_projects?: number | null
+          workspace_id: string
         }
-        Update: Partial<Database['public']['Tables']['promoters']['Insert']>
+        Update: {
+          accumulated_commission?: number | null
+          bank_account?: string | null
+          bank_name?: string | null
+          commission_pct?: number | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          referrals_count?: number | null
+          status?: string
+          updated_at?: string | null
+          won_projects?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "promoters_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_items: {
+        Row: {
+          description: string
+          id: string
+          item_type: string
+          quantity: number
+          quote_id: string
+          sort_order: number | null
+          total: number | null
+          unit_price: number
+        }
+        Insert: {
+          description: string
+          id?: string
+          item_type: string
+          quantity?: number
+          quote_id: string
+          sort_order?: number | null
+          total?: number | null
+          unit_price?: number
+        }
+        Update: {
+          description?: string
+          id?: string
+          item_type?: string
+          quantity?: number
+          quote_id?: string
+          sort_order?: number | null
+          total?: number | null
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_items_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quotes: {
+        Row: {
+          accepted_at: string | null
+          client_id: string | null
+          created_at: string | null
+          description: string | null
+          estimated_cost: number | null
+          id: string
+          iva_amount: number | null
+          margin_pct: number | null
+          mode: string
+          net_amount: number | null
+          notes: string | null
+          opportunity_id: string | null
+          profit_amount: number | null
+          project_id: string | null
+          rejected_reason: string | null
+          retention_amount: number | null
+          sent_at: string | null
+          status: string
+          total_price: number
+          updated_at: string | null
+          valid_days: number | null
+          valid_until: string | null
+          workspace_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          client_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          estimated_cost?: number | null
+          id?: string
+          iva_amount?: number | null
+          margin_pct?: number | null
+          mode?: string
+          net_amount?: number | null
+          notes?: string | null
+          opportunity_id?: string | null
+          profit_amount?: number | null
+          project_id?: string | null
+          rejected_reason?: string | null
+          retention_amount?: number | null
+          sent_at?: string | null
+          status?: string
+          total_price?: number
+          updated_at?: string | null
+          valid_days?: number | null
+          valid_until?: string | null
+          workspace_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          client_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          estimated_cost?: number | null
+          id?: string
+          iva_amount?: number | null
+          margin_pct?: number | null
+          mode?: string
+          net_amount?: number | null
+          notes?: string | null
+          opportunity_id?: string | null
+          profit_amount?: number | null
+          project_id?: string | null
+          rejected_reason?: string | null
+          retention_amount?: number | null
+          sent_at?: string | null
+          status?: string
+          total_price?: number
+          updated_at?: string | null
+          valid_days?: number | null
+          valid_until?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_opportunity_id_fkey"
+            columns: ["opportunity_id"]
+            isOneToOne: false
+            referencedRelation: "opportunities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      referrals: {
+        Row: {
+          created_at: string | null
+          id: string
+          months_rewarded: number | null
+          referral_code: string
+          referrer_workspace_id: string | null
+          status: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          months_rewarded?: number | null
+          referral_code: string
+          referrer_workspace_id?: string | null
+          status?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          months_rewarded?: number | null
+          referral_code?: string
+          referrer_workspace_id?: string | null
+          status?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "referrals_referrer_workspace_id_fkey"
+            columns: ["referrer_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "referrals_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff: {
+        Row: {
+          contract_type: string | null
+          created_at: string | null
+          department: string | null
+          full_name: string
+          id: string
+          is_active: boolean | null
+          phone_whatsapp: string | null
+          position: string | null
+          salary: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          contract_type?: string | null
+          created_at?: string | null
+          department?: string | null
+          full_name: string
+          id?: string
+          is_active?: boolean | null
+          phone_whatsapp?: string | null
+          position?: string | null
+          salary?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          contract_type?: string | null
+          created_at?: string | null
+          department?: string | null
+          full_name?: string
+          id?: string
+          is_active?: boolean | null
+          phone_whatsapp?: string | null
+          position?: string | null
+          salary?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      subscriptions: {
+        Row: {
+          amount: number | null
+          cancel_reason: string | null
+          cancelled_at: string | null
+          created_at: string | null
+          currency: string | null
+          current_period_end: string | null
+          current_period_start: string | null
+          id: string
+          payment_method: string | null
+          payment_provider: string | null
+          plan: string
+          status: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          amount?: number | null
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          created_at?: string | null
+          currency?: string | null
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          payment_method?: string | null
+          payment_provider?: string | null
+          plan: string
+          status?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          amount?: number | null
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          created_at?: string | null
+          currency?: string | null
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          payment_method?: string | null
+          payment_provider?: string | null
+          plan?: string
+          status?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      team_invitations: {
+        Row: {
+          accepted_at: string | null
+          created_at: string | null
+          email: string
+          expires_at: string | null
+          id: string
+          invited_by: string
+          role: string
+          status: string
+          token: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string | null
+          email: string
+          expires_at?: string | null
+          id?: string
+          invited_by: string
+          role?: string
+          status?: string
+          token?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string | null
+          email?: string
+          expires_at?: string | null
+          id?: string
+          invited_by?: string
+          role?: string
+          status?: string
+          token?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_invitations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      testimonials: {
+        Row: {
+          answer_1: string | null
+          answer_2: string | null
+          answer_3: string | null
+          created_at: string | null
+          id: string
+          marketing_consent: boolean | null
+          status: string | null
+          workspace_id: string
+        }
+        Insert: {
+          answer_1?: string | null
+          answer_2?: string | null
+          answer_3?: string | null
+          created_at?: string | null
+          id?: string
+          marketing_consent?: boolean | null
+          status?: string | null
+          workspace_id: string
+        }
+        Update: {
+          answer_1?: string | null
+          answer_2?: string | null
+          answer_3?: string | null
+          created_at?: string | null
+          id?: string
+          marketing_consent?: boolean | null
+          status?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "testimonials_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      time_entries: {
+        Row: {
+          activity: string | null
+          category: string | null
+          created_at: string | null
+          end_time: string | null
+          entry_date: string
+          hours: number
+          id: string
+          project_id: string
+          source: string | null
+          start_time: string | null
+          user_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          activity?: string | null
+          category?: string | null
+          created_at?: string | null
+          end_time?: string | null
+          entry_date?: string
+          hours: number
+          id?: string
+          project_id: string
+          source?: string | null
+          start_time?: string | null
+          user_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          activity?: string | null
+          category?: string | null
+          created_at?: string | null
+          end_time?: string | null
+          entry_date?: string
+          hours?: number
+          id?: string
+          project_id?: string
+          source?: string | null
+          start_time?: string | null
+          user_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "time_entries_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wa_collaborators: {
+        Row: {
+          consent_accepted_at: string | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          phone: string
+          requires_approval: boolean | null
+          workspace_id: string
+        }
+        Insert: {
+          consent_accepted_at?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          phone: string
+          requires_approval?: boolean | null
+          workspace_id: string
+        }
+        Update: {
+          consent_accepted_at?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          phone?: string
+          requires_approval?: boolean | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_collaborators_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspaces: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+          onboarding_completed: boolean | null
+          profession: string | null
+          slug: string
+          subscription_expires_at: string | null
+          subscription_started_at: string | null
+          subscription_status: string
+          trial_ends_at: string | null
+          updated_at: string | null
+          years_independent: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+          onboarding_completed?: boolean | null
+          profession?: string | null
+          slug: string
+          subscription_expires_at?: string | null
+          subscription_started_at?: string | null
+          subscription_status?: string
+          trial_ends_at?: string | null
+          updated_at?: string | null
+          years_independent?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+          onboarding_completed?: boolean | null
+          profession?: string | null
+          slug?: string
+          subscription_expires_at?: string | null
+          subscription_started_at?: string | null
+          subscription_status?: string
+          trial_ends_at?: string | null
+          updated_at?: string | null
+          years_independent?: number | null
+        }
         Relationships: []
       }
     }
-    Views: Record<string, never>
-    Functions: {
-      current_user_workspace_id: {
-        Args: Record<string, never>
-        Returns: string
-      }
+    Views: {
+      [_ in never]: never
     }
-    Enums: Record<string, never>
-    CompositeTypes: Record<string, never>
+    Functions: {
+      current_user_workspace_id: { Args: never; Returns: string }
+      unaccent: { Args: { "": string }; Returns: string }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
 }
 
-// Convenience types
-export type Tables<T extends keyof Database['public']['Tables']> =
-  Database['public']['Tables'][T]['Row']
-export type InsertTables<T extends keyof Database['public']['Tables']> =
-  Database['public']['Tables'][T]['Insert']
-export type UpdateTables<T extends keyof Database['public']['Tables']> =
-  Database['public']['Tables'][T]['Update']
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
-// Commonly used types
-export type Workspace = Tables<'workspaces'>
-export type Profile = Tables<'profiles'>
-export type FiscalProfile = Tables<'fiscal_profiles'>
-export type FiscalParam = Tables<'fiscal_params'>
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
+export type TablesInsert<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
+
+export type TablesUpdate<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
+
+export type Enums<
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  public: {
+    Enums: {},
+  },
+} as const
+
+// ── Type aliases ──────────────────────────────────────────
+
+export type Contact = Tables<'contacts'>
 export type Client = Tables<'clients'>
-export type ExpenseCategory = Tables<'expense_categories'>
+export type Promoter = Tables<'promoters'>
+export type Profile = Tables<'profiles'>
+export type Workspace = Tables<'workspaces'>
 export type Opportunity = Tables<'opportunities'>
-export type OpportunityStageHistory = Tables<'opportunity_stage_history'>
-export type Quote = Tables<'quotes'>
-export type QuoteItem = Tables<'quote_items'>
 export type Project = Tables<'projects'>
-export type TimeEntry = Tables<'time_entries'>
+export type Quote = Tables<'quotes'>
+export type Invoice = Tables<'invoices'>
+export type BankAccount = Tables<'bank_accounts'>
+export type ExpenseCategory = Tables<'expense_categories'>
 export type Expense = Tables<'expenses'>
 export type FixedExpense = Tables<'fixed_expenses'>
-export type Invoice = Tables<'invoices'>
-export type Payment = Tables<'payments'>
-export type Subscription = Tables<'subscriptions'>
-export type BotSession = Tables<'bot_sessions'>
-export type WaCollaborator = Tables<'wa_collaborators'>
-export type Notification = Tables<'notifications'>
-export type Referral = Tables<'referrals'>
-export type HealthScore = Tables<'health_scores'>
-export type Testimonial = Tables<'testimonials'>
-export type TeamInvitation = Tables<'team_invitations'>
-export type AuditLog = Tables<'audit_log'>
+export type FiscalProfile = Tables<'fiscal_profiles'>
 export type Staff = Tables<'staff'>
-export type BankAccount = Tables<'bank_accounts'>
-export type BankBalance = Tables<'bank_balances'>
 export type MonthlyTarget = Tables<'monthly_targets'>
-export type Contact = Tables<'contacts'>
 export type Note = Tables<'notes'>
-export type Promoter = Tables<'promoters'>
+export type TimeEntry = Tables<'time_entries'>
+export type Payment = Tables<'payments'>

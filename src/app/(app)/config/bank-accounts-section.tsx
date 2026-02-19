@@ -104,10 +104,10 @@ export default function BankAccountsSection({ initialData }: BankAccountsSection
 
   const startEdit = (a: BankAccount) => {
     setForm({
-      bank_name: a.bank_name,
-      account_name: a.account_name,
-      account_type: a.account_type,
-      is_primary: a.is_primary,
+      bank_name: a.bank_name ?? '',
+      account_name: a.account_name ?? '',
+      account_type: a.account_type ?? 'Ahorros',
+      is_primary: a.is_primary ?? false,
     })
     setEditingId(a.id)
     setShowForm(true)

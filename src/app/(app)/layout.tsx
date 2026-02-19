@@ -58,9 +58,9 @@ export default async function AppLayout({
       {fiscal && !fiscal.is_complete && (
         <div className="mb-4">
           <FiscalNudge
-            isComplete={fiscal.is_complete}
-            isEstimated={fiscal.is_estimated}
-            nudgeCount={fiscal.nudge_count}
+            isComplete={fiscal.is_complete ?? false}
+            isEstimated={fiscal.is_estimated ?? false}
+            nudgeCount={fiscal.nudge_count ?? 0}
           />
         </div>
       )}

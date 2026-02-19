@@ -49,7 +49,7 @@ interface ProjectForBoard {
   clientName: string | null
   approved_budget: number | null
   rework_reason: string | null
-  created_at: string
+  created_at: string | null
   totalExpenses: number
   totalHours: number
   totalInvoiced: number

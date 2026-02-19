@@ -86,7 +86,7 @@ export default function NotesSection({ entityType, entityId, inheritedFrom }: No
   const allNotes = [
     ...notes.map(n => ({ ...n, inherited: false })),
     ...inheritedNotes.map(n => ({ ...n, inherited: true })),
-  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  ].sort((a, b) => new Date(b.created_at ?? '').getTime() - new Date(a.created_at ?? '').getTime())
 
   if (loading) {
     return (
@@ -146,7 +146,7 @@ export default function NotesSection({ entityType, entityId, inheritedFrom }: No
       ) : (
         <div className="space-y-2">
           {allNotes.map(note => {
-            const typeConfig = getTypeConfig(note.note_type)
+            const typeConfig = getTypeConfig(note.note_type ?? '')
             return (
               <div
                 key={note.id}
@@ -158,7 +158,7 @@ export default function NotesSection({ entityType, entityId, inheritedFrom }: No
                       {typeConfig.label}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
-                      {new Date(note.created_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(note.created_at ?? '').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </span>
                     {note.inherited && inheritedFrom && (
                       <span className="text-[9px] text-muted-foreground italic">

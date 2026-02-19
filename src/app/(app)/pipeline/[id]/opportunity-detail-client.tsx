@@ -30,8 +30,8 @@ interface OpportunityDetailClientProps {
     probability: number
     source: string | null
     notes: string | null
-    created_at: string
-    updated_at: string
+    created_at: string | null
+    updated_at: string | null
     client_id: string | null
     contact_id: string | null
     clients: {
@@ -111,7 +111,7 @@ export default function OpportunityDetailClient({
               <DollarSign className="h-3.5 w-3.5" /> {fmt(opp.estimated_value)}
             </span>
             <span className="flex items-center gap-1">
-              <Calendar className="h-3.5 w-3.5" /> {new Date(opp.created_at).toLocaleDateString('es-CO')}
+              <Calendar className="h-3.5 w-3.5" /> {new Date(opp.created_at ?? '').toLocaleDateString('es-CO')}
             </span>
             <span>{opp.probability}% probabilidad</span>
           </div>
@@ -150,7 +150,7 @@ export default function OpportunityDetailClient({
             <InfoRow label="Etapa" value={STAGE_LABELS[opp.stage] || opp.stage} />
             <InfoRow label="Probabilidad" value={`${opp.probability}%`} />
             <InfoRow label="Fuente" value={opp.source || '—'} />
-            <InfoRow label="Creada" value={new Date(opp.created_at).toLocaleDateString('es-CO')} />
+            <InfoRow label="Creada" value={new Date(opp.created_at ?? '').toLocaleDateString('es-CO')} />
           </div>
           {opp.notes && (
             <div className="rounded-lg border p-3">

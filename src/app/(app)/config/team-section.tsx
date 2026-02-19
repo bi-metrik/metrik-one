@@ -21,7 +21,7 @@ interface TeamMember {
   full_name: string | null
   role: string
   avatar_url: string | null
-  created_at: string
+  created_at: string | null
 }
 
 interface TeamInvitation {
@@ -29,7 +29,7 @@ interface TeamInvitation {
   email: string
   role: string
   status: string
-  created_at: string
+  created_at: string | null
   expires_at: string | null
 }
 

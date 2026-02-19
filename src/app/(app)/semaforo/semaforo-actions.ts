@@ -64,7 +64,7 @@ export async function getSemaforoData(workspaceId: string): Promise<SemaforoData
   const saldosPorCuenta: Record<string, { saldo: number; fecha: Date }> = {}
   for (const bal of bankBalances) {
     if (!saldosPorCuenta[bal.account_id]) {
-      saldosPorCuenta[bal.account_id] = { saldo: bal.balance, fecha: new Date(bal.recorded_at) }
+      saldosPorCuenta[bal.account_id] = { saldo: bal.balance, fecha: new Date(bal.recorded_at ?? '') }
     }
   }
   const saldoReal = Object.values(saldosPorCuenta).reduce((s, b) => s + b.saldo, 0)

@@ -46,8 +46,15 @@ export default async function OpportunityDetailPage({ params }: PageProps) {
 
   // Resolve client data manually
   const opp = oppResult.data
-  const clientData = opp.client_id
+  const rawClient = opp.client_id
     ? (clientsResult.data || []).find(c => c.id === opp.client_id) || null
+    : null
+  const clientData = rawClient
+    ? {
+        ...rawClient,
+        gran_contribuyente: rawClient.gran_contribuyente ?? false,
+        agente_retenedor: rawClient.agente_retenedor ?? false,
+      }
     : null
 
   return (

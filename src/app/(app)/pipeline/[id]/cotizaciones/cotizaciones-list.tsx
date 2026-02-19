@@ -403,7 +403,7 @@ export default function CotizacionesList({
                         <DollarSign className="h-3 w-3" /> {fmt(q.total_price)}
                       </span>
                       {margin !== null && <span>Margen: {margin}%</span>}
-                      <span>{new Date(q.created_at).toLocaleDateString('es-CO')}</span>
+                      <span>{new Date(q.created_at ?? '').toLocaleDateString('es-CO')}</span>
                     </div>
                   </div>
                   {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}

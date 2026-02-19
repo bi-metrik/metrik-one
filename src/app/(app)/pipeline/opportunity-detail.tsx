@@ -460,7 +460,7 @@ export default function OpportunityDetail({
                   Creada
                 </div>
                 <p className="mt-1 text-sm font-medium">
-                  {formatDate(opportunity.created_at)}
+                  {formatDate(opportunity.created_at ?? '')}
                 </p>
               </div>
             </div>
@@ -604,7 +604,7 @@ export default function OpportunityDetail({
                               <p className="text-xs font-medium truncate">{q.description?.split('\n')[0] || 'Cotización'}</p>
                             </div>
                             <p className="mt-0.5 text-[10px] text-muted-foreground">
-                              {formatCurrency(q.total_price)} · {new Date(q.created_at).toLocaleDateString('es-CO')}
+                              {formatCurrency(q.total_price)} · {new Date(q.created_at ?? '').toLocaleDateString('es-CO')}
                             </p>
                           </div>
                           {isExpanded ? <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}

@@ -269,7 +269,7 @@ export default function ConfigClient({
 
               <div className="space-y-2 rounded-lg border p-4">
                 <SummaryRow label="Tipo persona" value={fiscalSummary.personType} />
-                <SummaryRow label="Régimen" value={fiscalSummary.regime} estimated={fiscalSummary.isEstimated && !fiscalProfile?.tax_regime} />
+                <SummaryRow label="Régimen" value={fiscalSummary.regime} estimated={!!(fiscalSummary.isEstimated && !fiscalProfile?.tax_regime)} />
                 <SummaryRow label="IVA" value={fiscalSummary.iva} />
                 <SummaryRow label="Declarante" value={fiscalProfile?.is_declarante ? 'Sí' : 'No'} />
                 <SummaryRow label="Ciudad ICA" value={`${fiscalSummary.city} (${fiscalSummary.icaRate}‰)`} />
@@ -323,7 +323,7 @@ export default function ConfigClient({
               {fixedExpenses.map((fe) => (
                 <div key={fe.id} className={`flex items-center gap-3 rounded-lg border p-3 ${!fe.is_active ? 'opacity-50' : ''}`}>
                   <button
-                    onClick={() => handleToggleFixed(fe.id, fe.is_active)}
+                    onClick={() => handleToggleFixed(fe.id, fe.is_active ?? true)}
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
                       fe.is_active
                         ? 'border-green-500 bg-green-500 text-white'

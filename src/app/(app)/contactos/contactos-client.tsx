@@ -44,7 +44,7 @@ type ContactWithRelations = {
   company: string | null
   client_id: string | null
   position: string | null
-  contact_type: string
+  contact_type: string | null
   source: string | null
   city: string | null
   country: string | null
@@ -52,8 +52,8 @@ type ContactWithRelations = {
   promoter_id: string | null
   referred_by_id: string | null
   status: string
-  created_at: string
-  updated_at: string
+  created_at: string | null
+  updated_at: string | null
   client: { id: string; name: string; nit: string | null; digito_verificacion: string | null; person_type: string | null } | null
   promoter: { id: string; name: string } | null
   referred_by: { id: string; full_name: string; email: string | null } | null
@@ -68,14 +68,14 @@ type ClientWithCount = {
   digito_verificacion: string | null
   person_type: string | null
   sector: string | null
-  agente_retenedor: boolean
-  gran_contribuyente: boolean
-  regimen_simple: boolean
+  agente_retenedor: boolean | null
+  gran_contribuyente: boolean | null
+  regimen_simple: boolean | null
   email: string | null
   city: string | null
   notes: string | null
   contacts_count: number
-  created_at: string
+  created_at: string | null
 }
 
 type PromoterOption = { id: string; name: string }
@@ -587,9 +587,9 @@ export default function ContactosClient({
       digito_verificacion: c.digito_verificacion || '',
       person_type: c.person_type || '',
       sector: c.sector || '',
-      agente_retenedor: c.agente_retenedor,
-      gran_contribuyente: c.gran_contribuyente,
-      regimen_simple: c.regimen_simple,
+      agente_retenedor: c.agente_retenedor ?? false,
+      gran_contribuyente: c.gran_contribuyente ?? false,
+      regimen_simple: c.regimen_simple ?? false,
       email: c.email || '',
       city: c.city || '',
       notes: c.notes || '',
@@ -838,7 +838,7 @@ export default function ContactosClient({
                       </TableCell>
 
                       {/* Tipo */}
-                      <TableCell>{getTypeBadge(c.contact_type)}</TableCell>
+                      <TableCell>{getTypeBadge(c.contact_type ?? '')}</TableCell>
 
                       {/* Ciudad */}
                       <TableCell className="text-sm text-muted-foreground">
