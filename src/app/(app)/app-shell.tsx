@@ -14,12 +14,9 @@ import {
   LogOut,
   User,
   Users,
-  Receipt,
-  Activity,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import FAB from './fab'
-import FloatingTimer from '@/components/timer/floating-timer'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -39,8 +36,6 @@ const ALL_NAV_ITEMS = [
   { href: '/contactos', label: 'Contactos', icon: Users, roles: ['owner', 'admin'] },
   { href: '/pipeline', label: 'Pipeline', icon: Funnel, roles: ['owner', 'admin'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
-  { href: '/facturacion', label: 'Facturación', icon: Receipt, roles: ['owner', 'admin'] },
-  { href: '/semaforo', label: 'Semáforo', icon: Activity, roles: ['owner', 'admin'] },
   { href: '/config', label: 'Configuración', icon: Settings, roles: ['owner', 'admin', 'operator'] },
 ]
 
@@ -227,11 +222,8 @@ export default function AppShell({
         </main>
       </div>
 
-      {/* D43: FAB visible — D169: role-adaptive */}
+      {/* D43: FAB visible — D169: role-adaptive — F23: Timer integrado */}
       <FAB role={role} />
-
-      {/* F23: Floating Timer */}
-      <FloatingTimer />
     </div>
   )
 }

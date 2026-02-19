@@ -1,20 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { FolderKanban, ArrowRight, ChevronRight } from 'lucide-react'
-import Link from 'next/link'
-
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  active: { label: 'Activo', color: 'bg-green-500' },
-  completed: { label: 'Completado', color: 'bg-blue-500' },
-  cancelled: { label: 'Cancelado', color: 'bg-red-500' },
-  paused: { label: 'Pausado', color: 'bg-yellow-500' },
-  rework: { label: 'Reproceso', color: 'bg-orange-500' },
-  closed: { label: 'Cerrado', color: 'bg-gray-500' },
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value)
-}
+import ProyectosBoard from './proyectos-board'
 
 export default async function ProyectosPage() {
   const supabase = await createClient()
@@ -32,80 +18,93 @@ export default async function ProyectosPage() {
 
   const workspaceId = profile.workspace_id
 
-  // Fetch projects
-  const { data: rawProjects } = await supabase
-    .from('projects')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
+  // Parallel fetch: projects, clients, expenses summary, time summary, invoices summary, payments
+  const [projectsRes, clientsRes, expensesRes, timeRes, invoicesRes, paymentsRes] = await Promise.all([
+    supabase
+      .from('projects')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('clients')
+      .select('id, name')
+      .eq('workspace_id', workspaceId),
+    supabase
+      .from('expenses')
+      .select('project_id, amount, is_rework')
+      .eq('workspace_id', workspaceId),
+    supabase
+      .from('time_entries')
+      .select('project_id, hours')
+      .eq('workspace_id', workspaceId),
+    supabase
+      .from('invoices')
+      .select('id, project_id, gross_amount')
+      .eq('workspace_id', workspaceId),
+    supabase
+      .from('payments')
+      .select('invoice_id, net_received')
+      .eq('workspace_id', workspaceId),
+  ])
 
-  // Fetch clients
-  const { data: clients } = await supabase
-    .from('clients')
-    .select('id, name')
-    .eq('workspace_id', workspaceId)
+  const rawProjects = projectsRes.data || []
+  const clientMap = new Map((clientsRes.data || []).map(c => [c.id, c.name]))
 
-  const clientMap = new Map((clients || []).map(c => [c.id, c.name]))
-  const projectList = (rawProjects || []).map(p => ({
-    ...p,
-    clientName: p.client_id ? clientMap.get(p.client_id) || null : null,
-  }))
+  // Build expense totals per project
+  const expenseMap = new Map<string, number>()
+  for (const e of (expensesRes.data || [])) {
+    if (e.project_id) {
+      expenseMap.set(e.project_id, (expenseMap.get(e.project_id) || 0) + e.amount)
+    }
+  }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Proyectos</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Todos tus proyectos nacen del Pipeline. {projectList.length > 0 ? `${projectList.length} proyecto${projectList.length === 1 ? '' : 's'}` : ''}
-        </p>
-      </div>
+  // Build hours totals per project
+  const hoursMap = new Map<string, number>()
+  for (const t of (timeRes.data || [])) {
+    if (t.project_id) {
+      hoursMap.set(t.project_id, (hoursMap.get(t.project_id) || 0) + t.hours)
+    }
+  }
 
-      {projectList.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-12 text-center">
-          <FolderKanban className="mx-auto h-12 w-12 text-muted-foreground/30" />
-          <h3 className="mt-4 text-sm font-medium">Sin proyectos aún</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Cuando marques una oportunidad como &ldquo;Ganada&rdquo; en el Pipeline, tu proyecto aparecerá aquí automáticamente.
-          </p>
-          <Link
-            href="/pipeline"
-            className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-          >
-            Ir al Pipeline
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {projectList.map((project) => {
-            const status = STATUS_LABELS[project.status] || { label: project.status, color: 'bg-gray-500' }
-            return (
-              <Link
-                key={project.id}
-                href={`/proyectos/${project.id}`}
-                className="flex items-center gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50"
-              >
-                <div className="flex-1 min-w-0">
-                  {project.clientName && (
-                    <p className="text-xs text-muted-foreground">{project.clientName}</p>
-                  )}
-                  <p className="font-medium truncate">{project.name}</p>
-                  {project.approved_budget && (
-                    <p className="mt-0.5 text-sm text-muted-foreground">
-                      {formatCurrency(project.approved_budget)}
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${status.color}`} />
-                  <span className="text-xs font-medium text-muted-foreground">{status.label}</span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </div>
-              </Link>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
+  // Build invoice totals per project
+  const invoiceMap = new Map<string, number>()
+  const invoiceToProject = new Map<string, string>()
+  for (const inv of (invoicesRes.data || [])) {
+    if (inv.project_id) {
+      invoiceMap.set(inv.project_id, (invoiceMap.get(inv.project_id) || 0) + inv.gross_amount)
+      invoiceToProject.set(inv.id, inv.project_id)
+    }
+  }
+
+  // Build collected totals per project
+  const collectedMap = new Map<string, number>()
+  for (const pay of (paymentsRes.data || [])) {
+    const projId = invoiceToProject.get(pay.invoice_id)
+    if (projId) {
+      collectedMap.set(projId, (collectedMap.get(projId) || 0) + pay.net_received)
+    }
+  }
+
+  // Assemble projects with summaries for the kanban board
+  const projectsForBoard = rawProjects.map(p => {
+    const totalExpenses = expenseMap.get(p.id) || 0
+    const budget = p.approved_budget || 0
+    return {
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      client_id: p.client_id,
+      clientName: p.client_id ? clientMap.get(p.client_id) || null : null,
+      approved_budget: p.approved_budget,
+      rework_reason: p.rework_reason,
+      created_at: p.created_at,
+      totalExpenses,
+      totalHours: hoursMap.get(p.id) || 0,
+      totalInvoiced: invoiceMap.get(p.id) || 0,
+      totalCollected: collectedMap.get(p.id) || 0,
+      marginPct: budget > 0 ? ((budget - totalExpenses) / budget) * 100 : 0,
+    }
+  })
+
+  return <ProyectosBoard initialProjects={projectsForBoard} />
 }

@@ -2,6 +2,10 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import {
+  VALID_TRANSITIONS as TRANSITIONS_MAP,
+  type ProjectStatus,
+} from '@/lib/projects/config'
 
 // ── Helper: get workspace ──────────────────────────────
 
@@ -121,17 +125,6 @@ export async function getProjectDetail(projectId: string) {
 
 // ── Update project status (state machine D175) ──────────
 
-type ProjectStatus = 'active' | 'paused' | 'completed' | 'rework' | 'cancelled' | 'closed'
-
-const VALID_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
-  active: ['paused', 'completed', 'cancelled'],
-  paused: ['active', 'cancelled'],
-  completed: ['active', 'rework', 'closed'],  // D177, D178
-  rework: ['completed', 'cancelled'],
-  cancelled: ['closed'],
-  closed: [],
-}
-
 export async function updateProjectStatus(
   projectId: string,
   newStatus: ProjectStatus,
@@ -151,7 +144,7 @@ export async function updateProjectStatus(
   if (!project) return { success: false, error: 'Proyecto no encontrado' }
 
   const currentStatus = project.status as ProjectStatus
-  const validTargets = VALID_TRANSITIONS[currentStatus] || []
+  const validTargets = TRANSITIONS_MAP[currentStatus] || []
 
   if (!validTargets.includes(newStatus)) {
     return { success: false, error: `No puedes cambiar de ${currentStatus} a ${newStatus}` }
@@ -159,7 +152,7 @@ export async function updateProjectStatus(
 
   // D178: Rework requires reason
   if (newStatus === 'rework' && !reason) {
-    return { success: false, error: 'Indica la razón del reproceso' }
+    return { success: false, error: 'Indica la razon del reproceso' }
   }
 
   const updateData: Record<string, unknown> = {
@@ -194,6 +187,16 @@ export async function updateProjectStatus(
   return { success: true }
 }
 
+// ── Move project (kanban drag-and-drop) ─────────────────
+
+export async function moveProject(
+  projectId: string,
+  newStatus: ProjectStatus,
+  reworkReason?: string
+) {
+  return updateProjectStatus(projectId, newStatus, reworkReason)
+}
+
 // ── Add time entry ──────────────────────────────────────
 
 export async function addTimeEntry(input: {
@@ -225,32 +228,79 @@ export async function addTimeEntry(input: {
   return { success: true }
 }
 
-// ── Add invoice (cobro programado) ──────────────────────
+// ── Add invoice (cobro programado) — con invoice number ──
 
 export async function addInvoice(input: {
   projectId: string
   concept: string
   grossAmount: number
   dueDate?: string
+  clientId?: string
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: error || 'Error' }
 
-  const { error: insertErr } = await supabase
+  // Generate next invoice number (CC-XXXX)
+  const { count } = await supabase
+    .from('invoices')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+
+  const invoiceNumber = `CC-${String((count || 0) + 1).padStart(4, '0')}`
+
+  const { data: invoice, error: insertErr } = await supabase
     .from('invoices')
     .insert({
       workspace_id: workspaceId,
       project_id: input.projectId,
+      client_id: input.clientId || null,
       concept: input.concept.trim(),
       gross_amount: input.grossAmount,
       due_date: input.dueDate || null,
+      invoice_number: invoiceNumber,
+      invoice_type: 'cuenta_cobro',
       status: 'scheduled',
     })
+    .select('*')
+    .single()
 
   if (insertErr) return { success: false, error: insertErr.message }
 
   revalidatePath(`/proyectos/${input.projectId}`)
   revalidatePath('/numeros')
+  revalidatePath('/facturacion')
+
+  return { success: true, invoice }
+}
+
+// ── Delete invoice (solo scheduled) ──────────────────────
+
+export async function deleteInvoice(invoiceId: string) {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: error || 'Error' }
+
+  // Only allow deleting scheduled invoices
+  const { data: invoice } = await supabase
+    .from('invoices')
+    .select('status, project_id')
+    .eq('id', invoiceId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  if (!invoice) return { success: false, error: 'No encontrada' }
+  if (invoice.status !== 'scheduled') return { success: false, error: 'Solo puedes eliminar cobros pendientes' }
+
+  const { error: delErr } = await supabase
+    .from('invoices')
+    .delete()
+    .eq('id', invoiceId)
+    .eq('workspace_id', workspaceId)
+
+  if (delErr) return { success: false, error: delErr.message }
+
+  revalidatePath(`/proyectos/${invoice.project_id}`)
+  revalidatePath('/numeros')
+  revalidatePath('/facturacion')
 
   return { success: true }
 }

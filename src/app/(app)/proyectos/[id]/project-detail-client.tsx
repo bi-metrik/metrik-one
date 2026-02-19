@@ -6,9 +6,10 @@ import Link from 'next/link'
 import {
   ArrowLeft, Clock, Receipt, FileText, BarChart3, MessageSquare,
   Plus, Loader2, AlertTriangle, Check, Pause, Play, X, RotateCcw, Lock,
+  Trash2, Search,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { updateProjectStatus, addTimeEntry, addInvoice, recordPayment } from '../actions'
+import { updateProjectStatus, addTimeEntry, addInvoice, recordPayment, deleteInvoice } from '../actions'
 import { createExpense, getExpenseCategories } from '../../gastos/actions'
 import type { Project, Expense, TimeEntry, Invoice, Payment, ExpenseCategory } from '@/types/database'
 import NotesSection from '@/components/notes-section'
@@ -103,6 +104,10 @@ export default function ProjectDetailClient({
 
   // Payment form
   const [payAmount, setPayAmount] = useState('')
+
+  // Cobros tab: search + filter
+  const [cobrosSearch, setCobrosSearch] = useState('')
+  const [cobrosFilter, setCobrosFilter] = useState<'all' | 'scheduled' | 'partial' | 'collected'>('all')
 
   const status = STATUS_CONFIG[project.status] || STATUS_CONFIG.active
   const StatusIcon = status.icon
@@ -230,6 +235,20 @@ export default function ProjectDetailClient({
       toast.success('Pago registrado')
       setShowRecordPayment(null)
       setPayAmount('')
+      router.refresh()
+    })
+  }
+
+  // ── Delete invoice ──
+
+  const handleDeleteInvoice = (invoiceId: string) => {
+    startTransition(async () => {
+      const result = await deleteInvoice(invoiceId)
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('Cobro eliminado')
       router.refresh()
     })
   }
@@ -524,167 +543,271 @@ export default function ProjectDetailClient({
           </div>
         )}
 
-        {/* ── Cobros Tab (D182-D184) ── */}
-        {activeTab === 'cobros' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                <span>Facturado: <span className="font-medium text-foreground">{fmt(summary.totalInvoiced)}</span></span>
-                {' · '}
-                <span>Cobrado: <span className="font-medium text-green-600">{fmt(summary.totalCollected)}</span></span>
-                {summary.pendingCollection > 0 && (
-                  <>
-                    {' · '}
-                    <span>Pendiente: <span className="font-medium text-orange-600">{fmt(summary.pendingCollection)}</span></span>
-                  </>
-                )}
-              </div>
-              <button
-                onClick={() => setShowAddInvoice(!showAddInvoice)}
-                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Programar cobro
-              </button>
-            </div>
+        {/* ── Cobros Tab — Full Facturacion (Sprint F) ── */}
+        {activeTab === 'cobros' && (() => {
+          const totalRetentions = payments.reduce((s, p) => s + (p.retention_applied || 0), 0)
+          const now = new Date()
 
-            {showAddInvoice && (
-              <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
-                <input
-                  type="text"
-                  placeholder="Concepto (ej: Anticipo 50%)"
-                  value={invConcept}
-                  onChange={(e) => setInvConcept(e.target.value)}
-                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="Monto bruto"
-                      value={invAmount}
-                      onChange={(e) => handleAmountChange(e.target.value, setInvAmount)}
-                      className="flex h-10 w-full rounded-lg border border-input bg-background pl-7 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  </div>
-                  <input
-                    type="date"
-                    value={invDate}
-                    onChange={(e) => setInvDate(e.target.value)}
-                    className="flex h-10 rounded-lg border border-input bg-background px-3 text-sm"
-                  />
+          // Filter invoices by search + status
+          const filteredInvoices = invoices.filter(inv => {
+            if (cobrosFilter !== 'all' && inv.status !== cobrosFilter) return false
+            if (cobrosSearch) {
+              const q = cobrosSearch.toLowerCase()
+              const matchConcept = inv.concept?.toLowerCase().includes(q)
+              const matchNumber = inv.invoice_number?.toLowerCase().includes(q)
+              if (!matchConcept && !matchNumber) return false
+            }
+            return true
+          })
+
+          return (
+            <div className="space-y-4">
+              {/* Stats cards */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border bg-card p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Facturado</p>
+                  <p className="mt-0.5 text-lg font-bold">{fmt(summary.totalInvoiced)}</p>
                 </div>
+                <div className="rounded-lg border bg-card p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cobrado</p>
+                  <p className="mt-0.5 text-lg font-bold text-green-600">{fmt(summary.totalCollected)}</p>
+                </div>
+                <div className="rounded-lg border bg-card p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pendiente</p>
+                  <p className="mt-0.5 text-lg font-bold text-orange-600">{fmt(summary.pendingCollection)}</p>
+                </div>
+                <div className="rounded-lg border bg-card p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Retenciones</p>
+                  <p className="mt-0.5 text-lg font-bold text-red-500">{fmt(totalRetentions)}</p>
+                </div>
+              </div>
+
+              {/* Add invoice button + form */}
+              <div className="flex items-center justify-between">
+                <div />
                 <button
-                  onClick={handleAddInvoice}
-                  disabled={isPending}
-                  className="flex h-10 w-full items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  onClick={() => setShowAddInvoice(!showAddInvoice)}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                 >
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Programar cobro'}
+                  <Plus className="h-3.5 w-3.5" />
+                  Programar cobro
                 </button>
               </div>
-            )}
 
-            {invoices.length > 0 ? (
-              <div className="space-y-2">
-                {invoices.map((inv) => {
-                  const invPayments = payments.filter(p => p.invoice_id === inv.id)
-                  const collected = invPayments.reduce((s, p) => s + p.net_received, 0)
-                  const isCollected = inv.status === 'collected'
-                  return (
-                    <div key={inv.id} className={`rounded-lg border p-4 ${isCollected ? 'bg-green-50/30 dark:bg-green-950/10' : ''}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">{inv.concept}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Bruto: {fmt(inv.gross_amount)}
-                            {inv.due_date && ` · Vence: ${fmtDate(inv.due_date)}`}
-                          </p>
-                        </div>
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                          isCollected
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                            : inv.status === 'partial'
-                            ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                            : 'bg-muted text-muted-foreground'
-                        }`}>
-                          {isCollected ? 'Cobrado' : inv.status === 'partial' ? 'Parcial' : 'Pendiente'}
-                        </span>
-                      </div>
-
-                      {/* Payments list */}
-                      {invPayments.length > 0 && (
-                        <div className="mt-3 space-y-1 border-t pt-2">
-                          {invPayments.map((pay) => (
-                            <div key={pay.id} className="flex items-center justify-between text-xs">
-                              <span className="text-muted-foreground">{fmtDate(pay.payment_date)}</span>
-                              <span className="font-medium text-green-600">+{fmt(pay.net_received)}</span>
-                            </div>
-                          ))}
-                          {collected < inv.gross_amount * 0.9 && (
-                            <p className="text-xs text-muted-foreground">
-                              Falta: {fmt(inv.gross_amount - collected)}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Record payment */}
-                      {!isCollected && (
-                        <>
-                          {showRecordPayment === inv.id ? (
-                            <div className="mt-3 flex gap-2">
-                              <div className="relative flex-1">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  placeholder="Neto consignado"
-                                  value={payAmount}
-                                  onChange={(e) => handleAmountChange(e.target.value, setPayAmount)}
-                                  className="flex h-9 w-full rounded-lg border border-input bg-background pl-6 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                  onKeyDown={(e) => e.key === 'Enter' && handleRecordPayment()}
-                                />
-                              </div>
-                              <button
-                                onClick={handleRecordPayment}
-                                disabled={isPending}
-                                className="rounded-lg bg-green-600 px-3 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                              >
-                                {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Registrar'}
-                              </button>
-                              <button
-                                onClick={() => { setShowRecordPayment(null); setPayAmount('') }}
-                                className="rounded-lg border px-2 text-xs"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setShowRecordPayment(inv.id)}
-                              className="mt-3 text-xs font-medium text-primary hover:underline"
-                            >
-                              + Registrar pago
-                            </button>
-                          )}
-                        </>
-                      )}
+              {showAddInvoice && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Concepto (ej: Anticipo 50%)"
+                    value={invConcept}
+                    onChange={(e) => setInvConcept(e.target.value)}
+                    className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <div className="flex gap-3">
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Monto bruto"
+                        value={invAmount}
+                        onChange={(e) => handleAmountChange(e.target.value, setInvAmount)}
+                        className="flex h-10 w-full rounded-lg border border-input bg-background pl-7 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
                     </div>
-                  )
-                })}
-              </div>
-            ) : !showAddInvoice && (
-              <div className="rounded-lg border border-dashed p-8 text-center">
-                <FileText className="mx-auto h-8 w-8 text-muted-foreground/30" />
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Sin cobros programados. Programa cuándo te van a pagar.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+                    <input
+                      type="date"
+                      value={invDate}
+                      onChange={(e) => setInvDate(e.target.value)}
+                      className="flex h-10 rounded-lg border border-input bg-background px-3 text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddInvoice}
+                    disabled={isPending}
+                    className="flex h-10 w-full items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Programar cobro'}
+                  </button>
+                </div>
+              )}
+
+              {/* Search + filter pills */}
+              {invoices.length > 0 && (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="relative flex-1 max-w-xs">
+                    <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por concepto o numero..."
+                      value={cobrosSearch}
+                      onChange={(e) => setCobrosSearch(e.target.value)}
+                      className="flex h-9 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </div>
+                  <div className="flex gap-1.5">
+                    {([
+                      { key: 'all', label: 'Todos' },
+                      { key: 'scheduled', label: 'Pendientes' },
+                      { key: 'partial', label: 'Parciales' },
+                      { key: 'collected', label: 'Cobrados' },
+                    ] as const).map(f => (
+                      <button
+                        key={f.key}
+                        onClick={() => setCobrosFilter(f.key)}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                          cobrosFilter === f.key
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Invoice list */}
+              {filteredInvoices.length > 0 ? (
+                <div className="space-y-2">
+                  {filteredInvoices.map((inv) => {
+                    const invPayments = payments.filter(p => p.invoice_id === inv.id)
+                    const collected = invPayments.reduce((s, p) => s + p.net_received, 0)
+                    const isCollected = inv.status === 'collected'
+                    const isOverdue = !isCollected && inv.due_date && new Date(inv.due_date + 'T23:59:59') < now
+
+                    return (
+                      <div key={inv.id} className={`rounded-lg border p-4 ${isCollected ? 'bg-green-50/30 dark:bg-green-950/10' : ''}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              {inv.invoice_number && (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono font-medium text-muted-foreground">
+                                  {inv.invoice_number}
+                                </span>
+                              )}
+                              <p className="text-sm font-medium truncate">{inv.concept}</p>
+                            </div>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              Bruto: {fmt(inv.gross_amount)}
+                              {inv.due_date && ` · Vence: ${fmtDate(inv.due_date)}`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isOverdue && (
+                              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                                Vencida
+                              </span>
+                            )}
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                              isCollected
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                : inv.status === 'partial'
+                                ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                : 'bg-muted text-muted-foreground'
+                            }`}>
+                              {isCollected ? 'Cobrado' : inv.status === 'partial' ? 'Parcial' : 'Pendiente'}
+                            </span>
+                            {/* Delete button — only for scheduled */}
+                            {inv.status === 'scheduled' && (
+                              <button
+                                onClick={() => handleDeleteInvoice(inv.id)}
+                                disabled={isPending}
+                                className="rounded-md p-1 text-muted-foreground/50 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/20 disabled:opacity-50"
+                                title="Eliminar cobro"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Payments list */}
+                        {invPayments.length > 0 && (
+                          <div className="mt-3 space-y-1 border-t pt-2">
+                            {invPayments.map((pay) => (
+                              <div key={pay.id} className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">
+                                  {fmtDate(pay.payment_date)}
+                                  {pay.retention_applied > 0 && (
+                                    <span className="ml-1 text-red-500">(ret: {fmt(pay.retention_applied)})</span>
+                                  )}
+                                </span>
+                                <span className="font-medium text-green-600">+{fmt(pay.net_received)}</span>
+                              </div>
+                            ))}
+                            {collected < inv.gross_amount * 0.9 && (
+                              <p className="text-xs text-muted-foreground">
+                                Falta: {fmt(inv.gross_amount - collected)}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Record payment */}
+                        {!isCollected && (
+                          <>
+                            {showRecordPayment === inv.id ? (
+                              <div className="mt-3 flex gap-2">
+                                <div className="relative flex-1">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="Neto consignado"
+                                    value={payAmount}
+                                    onChange={(e) => handleAmountChange(e.target.value, setPayAmount)}
+                                    className="flex h-9 w-full rounded-lg border border-input bg-background pl-6 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    onKeyDown={(e) => e.key === 'Enter' && handleRecordPayment()}
+                                  />
+                                </div>
+                                <button
+                                  onClick={handleRecordPayment}
+                                  disabled={isPending}
+                                  className="rounded-lg bg-green-600 px-3 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                                >
+                                  {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Registrar'}
+                                </button>
+                                <button
+                                  onClick={() => { setShowRecordPayment(null); setPayAmount('') }}
+                                  className="rounded-lg border px-2 text-xs"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setShowRecordPayment(inv.id)}
+                                className="mt-3 text-xs font-medium text-primary hover:underline"
+                              >
+                                + Registrar pago
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : invoices.length > 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center">
+                  <Search className="mx-auto h-6 w-6 text-muted-foreground/30" />
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    No hay cobros que coincidan con tu busqueda
+                  </p>
+                </div>
+              ) : !showAddInvoice && (
+                <div className="rounded-lg border border-dashed p-8 text-center">
+                  <FileText className="mx-auto h-8 w-8 text-muted-foreground/30" />
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Sin cobros programados. Programa cuando te van a pagar.
+                  </p>
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* ── Notas Tab (F19) ── */}
         {activeTab === 'notas' && (

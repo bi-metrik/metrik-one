@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import DashboardClient from './dashboard-client'
 import { getDashboardData } from './dashboard-actions'
+import { getSemaforoData } from '../semaforo/semaforo-actions'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -30,8 +31,11 @@ export default async function DashboardPage() {
     ? Math.max(0, Math.ceil((new Date(workspace.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0
 
-  // F16 + F17: Financial dashboard data
-  const dashData = await getDashboardData(profile.workspace_id)
+  // Parallel fetch: dashboard data + semáforo data
+  const [dashData, semaforoData] = await Promise.all([
+    getDashboardData(profile.workspace_id),
+    getSemaforoData(profile.workspace_id),
+  ])
 
   return (
     <DashboardClient
@@ -40,6 +44,7 @@ export default async function DashboardPage() {
       subscriptionStatus={workspace.subscription_status}
       trialDaysLeft={trialDaysLeft}
       dashData={dashData}
+      semaforoData={semaforoData}
     />
   )
 }
