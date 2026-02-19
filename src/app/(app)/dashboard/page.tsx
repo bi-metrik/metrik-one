@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import DashboardClient from './dashboard-client'
+import { getDashboardData } from './dashboard-actions'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -29,12 +30,16 @@ export default async function DashboardPage() {
     ? Math.max(0, Math.ceil((new Date(workspace.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0
 
+  // F16 + F17: Financial dashboard data
+  const dashData = await getDashboardData(profile.workspace_id)
+
   return (
     <DashboardClient
       fullName={profile.full_name || 'Usuario'}
       workspaceName={workspace.name}
       subscriptionStatus={workspace.subscription_status}
       trialDaysLeft={trialDaysLeft}
+      dashData={dashData}
     />
   )
 }

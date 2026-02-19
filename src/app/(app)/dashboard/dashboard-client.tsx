@@ -3,12 +3,45 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Search, Trophy, CheckCircle2, Clock } from 'lucide-react'
+import {
+  Search, Trophy, CheckCircle2, Clock,
+  Briefcase, Receipt, Activity, Timer,
+} from 'lucide-react'
 import OpportunityModal from '../pipeline/opportunity-modal'
+import PulsoMes from './pulso-mes'
+import CincoPreguntas from './cinco-preguntas'
 import type { Opportunity } from '@/types/database'
 
 type OpportunityWithClient = Opportunity & {
   clients: { name: string } | null
+}
+
+interface DashData {
+  pulso: {
+    ventasMes: number
+    metaVentas: number
+    cobradoMes: number
+    metaCobros: number
+    gastoTotalMes: number
+    gastosFijosMes: number
+  }
+  preguntas: {
+    caja: number
+    utilidad: number
+    margen: number
+    puntoEquilibrio: number
+    runway: number
+  }
+  stats: {
+    projectsActive: number
+    horasMes: number
+    pendingAmount: number
+    pendingCount: number
+    totalCollected: number
+    totalRetentions: number
+  }
+  hasMetas: boolean
+  hasBankData: boolean
 }
 
 interface DashboardClientProps {
@@ -16,18 +49,25 @@ interface DashboardClientProps {
   workspaceName: string
   subscriptionStatus: string
   trialDaysLeft: number
+  dashData: DashData
+}
+
+const fmtShort = (v: number) => {
+  if (Math.abs(v) >= 1000000) return `$${(v / 1000000).toFixed(1)}M`
+  if (Math.abs(v) >= 1000) return `$${Math.round(v / 1000)}K`
+  return `$${v.toLocaleString('es-CO')}`
 }
 
 /**
- * Dashboard de bienvenida — D14, D49
- * 3 estados rápidos: "Me buscan" / "Ya gané" / "Ya entregué"
- * D172: Creación rápida = atajos
+ * Dashboard principal — F16 (Pulso del Mes) + F17 (Cinco Preguntas)
+ * + Quick actions originales: "Me buscan" / "Ya gané" / "Ya entregué"
  */
 export default function DashboardClient({
   fullName,
   workspaceName,
   subscriptionStatus,
   trialDaysLeft,
+  dashData,
 }: DashboardClientProps) {
   const router = useRouter()
   const firstName = fullName.split(' ')[0]
@@ -45,7 +85,7 @@ export default function DashboardClient({
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
+    <div className="mx-auto max-w-3xl space-y-8">
       {/* Trial banner */}
       {subscriptionStatus === 'trial' && trialDaysLeft > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
@@ -64,6 +104,56 @@ export default function DashboardClient({
         <p className="text-muted-foreground">
           {workspaceName} &mdash; ¿Qué está pasando hoy en tu negocio?
         </p>
+      </div>
+
+      {/* F16: Pulso del Mes */}
+      <PulsoMes
+        ventasMes={dashData.pulso.ventasMes}
+        metaVentas={dashData.pulso.metaVentas}
+        cobradoMes={dashData.pulso.cobradoMes}
+        metaCobros={dashData.pulso.metaCobros}
+        gastoTotalMes={dashData.pulso.gastoTotalMes}
+        gastosFijosMes={dashData.pulso.gastosFijosMes}
+        hasMetas={dashData.hasMetas}
+      />
+
+      {/* F17: Cinco Preguntas */}
+      <CincoPreguntas
+        caja={dashData.preguntas.caja}
+        utilidad={dashData.preguntas.utilidad}
+        margen={dashData.preguntas.margen}
+        puntoEquilibrio={dashData.preguntas.puntoEquilibrio}
+        runway={dashData.preguntas.runway}
+        hasBankData={dashData.hasBankData}
+      />
+
+      {/* Quick stats strip */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Link href="/proyectos" className="rounded-xl border bg-card p-4 hover:bg-accent transition-colors">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Briefcase className="h-3.5 w-3.5" /> Proyectos activos
+          </div>
+          <p className="mt-1 text-2xl font-bold">{dashData.stats.projectsActive}</p>
+        </Link>
+        <Link href="/facturacion" className="rounded-xl border bg-card p-4 hover:bg-accent transition-colors">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Receipt className="h-3.5 w-3.5" /> Pendiente cobro
+          </div>
+          <p className="mt-1 text-2xl font-bold">{fmtShort(dashData.stats.pendingAmount)}</p>
+          <p className="text-[10px] text-muted-foreground">{dashData.stats.pendingCount} factura{dashData.stats.pendingCount !== 1 ? 's' : ''}</p>
+        </Link>
+        <Link href="/numeros" className="rounded-xl border bg-card p-4 hover:bg-accent transition-colors">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Timer className="h-3.5 w-3.5" /> Horas este mes
+          </div>
+          <p className="mt-1 text-2xl font-bold">{dashData.stats.horasMes.toFixed(1)}h</p>
+        </Link>
+        <Link href="/semaforo" className="rounded-xl border bg-card p-4 hover:bg-accent transition-colors">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Activity className="h-3.5 w-3.5" /> Semáforo
+          </div>
+          <p className="mt-1 text-lg font-bold">Ver estado →</p>
+        </Link>
       </div>
 
       {/* Quick-start actions — D49: Dashboard empuja oportunidad, no gasto */}
@@ -118,33 +208,6 @@ export default function DashboardClient({
               </p>
             </div>
           </button>
-        </div>
-      </div>
-
-      {/* Empty state hints */}
-      <div className="rounded-xl border border-dashed border-border p-6">
-        <div className="space-y-4 text-center">
-          <p className="text-sm text-muted-foreground">
-            Tu dashboard se llena con tus datos. Empieza con cualquiera de las acciones de arriba
-            y tus <strong>Números</strong> empezarán a tomar forma.
-          </p>
-          <div className="flex flex-wrap justify-center gap-2">
-            {[
-              { label: 'Pipeline', href: '/pipeline', ready: true },
-              { label: 'Números', href: '/numeros', ready: false },
-              { label: 'Proyectos', href: '/proyectos', ready: false },
-              { label: 'Configuración', href: '/config', ready: false },
-            ].map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${item.ready ? 'bg-green-500' : 'bg-muted-foreground/30'}`} />
-                {item.label}
-              </Link>
-            ))}
-          </div>
         </div>
       </div>
 
