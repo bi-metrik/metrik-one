@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { FolderKanban, ArrowRight } from 'lucide-react'
+import { FolderKanban, ArrowRight, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -8,6 +8,8 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   completed: { label: 'Completado', color: 'bg-blue-500' },
   cancelled: { label: 'Cancelado', color: 'bg-red-500' },
   paused: { label: 'Pausado', color: 'bg-yellow-500' },
+  rework: { label: 'Reproceso', color: 'bg-orange-500' },
+  closed: { label: 'Cerrado', color: 'bg-gray-500' },
 }
 
 function formatCurrency(value: number): string {
@@ -78,8 +80,9 @@ export default async function ProyectosPage() {
           {projectList.map((project) => {
             const status = STATUS_LABELS[project.status] || { label: project.status, color: 'bg-gray-500' }
             return (
-              <div
+              <Link
                 key={project.id}
+                href={`/proyectos/${project.id}`}
                 className="flex items-center gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50"
               >
                 <div className="flex-1 min-w-0">
@@ -96,8 +99,9 @@ export default async function ProyectosPage() {
                 <div className="flex items-center gap-2">
                   <span className={`h-2 w-2 rounded-full ${status.color}`} />
                   <span className="text-xs font-medium text-muted-foreground">{status.label}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </div>
-              </div>
+              </Link>
             )
           })}
         </div>
