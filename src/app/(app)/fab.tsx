@@ -246,7 +246,25 @@ export default function FAB({ role }: FABProps) {
       {/* ── Action menu (card style) ───────────────────── */}
       {open && (
         <div className="fixed bottom-24 right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
-          {/* Timer action (special, at top) */}
+          {/* Active timer row (when running, replaces "Iniciar timer") */}
+          {timer.isRunning && timerLoaded && (
+            <div className="flex items-center gap-2 border-b px-4 py-3">
+              <div className="h-2 w-2 shrink-0 rounded-full bg-green-500 animate-pulse" />
+              <div className="min-w-0 flex-1">
+                <span className="text-xs font-mono font-semibold tabular-nums">{formatTime(elapsed)}</span>
+                <p className="truncate text-[10px] text-muted-foreground">{timer.proyectoNombre}</p>
+              </div>
+              <button
+                onClick={handleStopTimer}
+                disabled={isPending}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 disabled:opacity-50 transition-colors"
+              >
+                <Square className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Timer start action (when not running) */}
           {timerLoaded && projects.length > 0 && !timer.isRunning && (
             <button
               onClick={handleOpenTimer}
@@ -276,8 +294,8 @@ export default function FAB({ role }: FABProps) {
         </div>
       )}
 
-      {/* ── Active timer pill (above FAB) ──────────────── */}
-      {timer.isRunning && timerLoaded && (
+      {/* ── Active timer pill (above FAB — hidden when menu open) ── */}
+      {timer.isRunning && timerLoaded && !open && (
         <div className="fixed bottom-[5.5rem] right-6 z-50 flex items-center gap-2 rounded-full border bg-card pl-3 pr-1.5 py-1.5 shadow-lg">
           <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
           <span className="text-xs font-mono font-semibold tabular-nums">{formatTime(elapsed)}</span>

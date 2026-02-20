@@ -6,7 +6,7 @@ import { Phone, Mail, Search, Users, Trash2, Pencil, Flame } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/pipeline/constants'
-import { deleteContacto } from '../actions'
+import { deleteContacto, updateContactoSegmento } from '../actions'
 import type { Contacto } from '@/types/database'
 
 interface Props {
@@ -72,6 +72,26 @@ export default function ContactosList({ contactos }: Props) {
     if (days < 30) return `Hace ${days} dias`
     if (days < 365) return `Hace ${Math.floor(days / 30)} meses`
     return `Hace ${Math.floor(days / 365)} anos`
+  }
+
+  const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const
+
+  const cycleSegmento = (id: string, currentSegmento: string | null) => {
+    const current = currentSegmento ?? 'sin_contactar'
+    const currentIdx = SEGMENTO_ORDER.indexOf(current as typeof SEGMENTO_ORDER[number])
+    const nextIdx = (currentIdx + 1) % SEGMENTO_ORDER.length
+    const next = SEGMENTO_ORDER[nextIdx]
+    const nextLabel = SEGMENTOS_CONTACTO.find(s => s.value === next)?.label ?? next
+
+    startTransition(async () => {
+      const res = await updateContactoSegmento(id, next)
+      if (res.success) {
+        toast.success(`Segmento: ${nextLabel}`)
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error')
+      }
+    })
   }
 
   const promotorCount = contactos.filter(c => c.rol === 'promotor').length
@@ -172,7 +192,7 @@ export default function ContactosList({ contactos }: Props) {
                 ...(c.telefono ? [{ icon: <Phone className="h-3 w-3" />, text: c.telefono }] : []),
                 ...(c.email ? [{ icon: <Mail className="h-3 w-3" />, text: c.email }] : []),
               ]}
-              badges={segLabel ? [{ label: segLabel, className: segChip }] : undefined}
+              badges={segLabel ? [{ label: segLabel, className: segChip, onClick: () => cycleSegmento(c.id, c.segmento) }] : undefined}
               timeAgo={timeAgo(c.created_at)}
               quickAction={{
                 tooltip: 'Crear oportunidad',

@@ -54,7 +54,7 @@ export interface EntityCardProps {
   /** Additional click handler */
   onClick?: () => void
   /** Small badges shown below summary lines */
-  badges?: { label: string; className?: string }[]
+  badges?: { label: string; className?: string; onClick?: () => void }[]
   /** Relative time text (e.g. "hace 3 dias") */
   timeAgo?: string
   /** Extra className */
@@ -208,11 +208,21 @@ export default function EntityCard({
       {/* ── Badges ── */}
       {badges.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
-          {badges.map((badge, i) => (
-            <span key={i} className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className ?? 'bg-muted text-muted-foreground'}`}>
-              {badge.label}
-            </span>
-          ))}
+          {badges.map((badge, i) =>
+            badge.onClick ? (
+              <button
+                key={i}
+                onClick={(e) => { e.stopPropagation(); e.preventDefault(); badge.onClick!() }}
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium transition-opacity hover:opacity-75 ${badge.className ?? 'bg-muted text-muted-foreground'}`}
+              >
+                {badge.label} ›
+              </button>
+            ) : (
+              <span key={i} className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className ?? 'bg-muted text-muted-foreground'}`}>
+                {badge.label}
+              </span>
+            )
+          )}
         </div>
       )}
 

@@ -104,6 +104,25 @@ export async function deleteContacto(id: string) {
   return { success: true }
 }
 
+export async function updateContactoSegmento(id: string, segmento: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const valid = ['sin_contactar', 'contactado', 'convertido', 'inactivo']
+  if (!valid.includes(segmento)) return { success: false, error: 'Segmento invalido' }
+
+  const { error: dbError } = await supabase
+    .from('contactos')
+    .update({ segmento })
+    .eq('id', id)
+
+  if (dbError) return { success: false, error: dbError.message }
+
+  revalidatePath('/directorio/contactos')
+  revalidatePath(`/directorio/contacto/${id}`)
+  return { success: true }
+}
+
 export async function searchContactos(query: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
