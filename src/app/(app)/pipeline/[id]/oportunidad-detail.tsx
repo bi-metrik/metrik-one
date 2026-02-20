@@ -6,10 +6,11 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, User, ChevronRight, Flame, XCircle,
   Trophy, FileText, Plus, Clock, ShieldAlert, Copy, Send, Check, X,
+  FolderOpen, Link as LinkIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  moveOportunidad, perderOportunidad, ganarOportunidad,
+  moveOportunidad, perderOportunidad, ganarOportunidad, updateOportunidad,
 } from '../actions-v2'
 import { duplicarCotizacion, enviarCotizacion, aceptarCotizacion, rechazarCotizacion } from './cotizaciones/actions-v2'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, RAZONES_PERDIDA, ESTADO_COTIZACION_CONFIG } from '@/lib/pipeline/constants'
@@ -28,6 +29,7 @@ interface OportunidadRow {
   ultima_accion: string | null
   ultima_accion_fecha: string | null
   razon_perdida: string | null
+  carpeta_url: string | null
   contactos: { id: string; nombre: string; telefono: string | null; email: string | null } | null
   empresas: { id: string; nombre: string; sector: string | null; nit: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
 }
@@ -52,6 +54,8 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
   const [showLossModal, setShowLossModal] = useState(false)
   const [showFiscalGate, setShowFiscalGate] = useState(false)
   const [lossReason, setLossReason] = useState('')
+  const [carpetaUrl, setCarpetaUrl] = useState(oportunidad.carpeta_url ?? '')
+  const [carpetaEditing, setCarpetaEditing] = useState(false)
 
   const etapa = oportunidad.etapa as EtapaPipeline
   const etapaConfig = ETAPA_CONFIG[etapa]
@@ -188,6 +192,69 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
           onCancel={() => setShowFiscalGate(false)}
         />
       )}
+
+      {/* Carpeta URL */}
+      <div className="flex items-center gap-2 rounded-lg border p-3">
+        <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
+        {carpetaEditing ? (
+          <div className="flex flex-1 items-center gap-2">
+            <input
+              type="url"
+              value={carpetaUrl}
+              onChange={e => setCarpetaUrl(e.target.value)}
+              placeholder="https://drive.google.com/..."
+              className="flex-1 rounded-md border px-2 py-1 text-xs"
+              autoFocus
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  setCarpetaEditing(false)
+                  startTransition(async () => {
+                    await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
+                    toast.success('Carpeta actualizada')
+                  })
+                }
+                if (e.key === 'Escape') {
+                  setCarpetaEditing(false)
+                  setCarpetaUrl(oportunidad.carpeta_url ?? '')
+                }
+              }}
+            />
+            <button
+              onClick={() => {
+                setCarpetaEditing(false)
+                startTransition(async () => {
+                  await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
+                  toast.success('Carpeta actualizada')
+                })
+              }}
+              className="rounded-md p-1 text-green-600 hover:bg-green-50"
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-between min-w-0">
+            <button
+              onClick={() => setCarpetaEditing(true)}
+              className="text-xs text-muted-foreground hover:text-foreground truncate"
+            >
+              {carpetaUrl ? carpetaUrl : 'Agregar enlace a carpeta...'}
+            </button>
+            {carpetaUrl && (
+              <a
+                href={carpetaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="shrink-0 rounded-md p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                title="Abrir carpeta"
+              >
+                <LinkIcon className="h-3.5 w-3.5" />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Contacto + Empresa info */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

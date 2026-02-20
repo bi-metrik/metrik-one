@@ -265,6 +265,81 @@ export type Database = {
           },
         ]
       }
+      cobros: {
+        Row: {
+          canal_registro: string | null
+          created_at: string | null
+          external_ref: string | null
+          factura_id: string
+          fecha: string
+          id: string
+          monto: number
+          notas: string | null
+          proyecto_id: string
+          workspace_id: string
+        }
+        Insert: {
+          canal_registro?: string | null
+          created_at?: string | null
+          external_ref?: string | null
+          factura_id: string
+          fecha?: string
+          id?: string
+          monto: number
+          notas?: string | null
+          proyecto_id: string
+          workspace_id: string
+        }
+        Update: {
+          canal_registro?: string | null
+          created_at?: string | null
+          external_ref?: string | null
+          factura_id?: string
+          fecha?: string
+          id?: string
+          monto?: number
+          notas?: string | null
+          proyecto_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cobros_factura_id_fkey"
+            columns: ["factura_id"]
+            isOneToOne: false
+            referencedRelation: "facturas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cobros_factura_id_fkey"
+            columns: ["factura_id"]
+            isOneToOne: false
+            referencedRelation: "v_facturas_estado"
+            referencedColumns: ["factura_id"]
+          },
+          {
+            foreignKeyName: "cobros_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cobros_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+          {
+            foreignKeyName: "cobros_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contactos: {
         Row: {
           comision_porcentaje: number | null
@@ -413,6 +488,47 @@ export type Database = {
           },
           {
             foreignKeyName: "contacts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      costos_referencia: {
+        Row: {
+          costo_promedio: number | null
+          horas_promedio: number | null
+          id: string
+          margen_promedio: number | null
+          proyectos_base: number | null
+          tipo_servicio: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          costo_promedio?: number | null
+          horas_promedio?: number | null
+          id?: string
+          margen_promedio?: number | null
+          proyectos_base?: number | null
+          tipo_servicio?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          costo_promedio?: number | null
+          horas_promedio?: number | null
+          id?: string
+          margen_promedio?: number | null
+          proyectos_base?: number | null
+          tipo_servicio?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "costos_referencia_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -666,6 +782,70 @@ export type Database = {
           },
         ]
       }
+      facturas: {
+        Row: {
+          canal_registro: string | null
+          created_at: string | null
+          external_ref: string | null
+          fecha_emision: string
+          id: string
+          monto: number
+          notas: string | null
+          numero_factura: string | null
+          proyecto_id: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          canal_registro?: string | null
+          created_at?: string | null
+          external_ref?: string | null
+          fecha_emision?: string
+          id?: string
+          monto: number
+          notas?: string | null
+          numero_factura?: string | null
+          proyecto_id: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          canal_registro?: string | null
+          created_at?: string | null
+          external_ref?: string | null
+          fecha_emision?: string
+          id?: string
+          monto?: number
+          notas?: string | null
+          numero_factura?: string | null
+          proyecto_id?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "facturas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "facturas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+          {
+            foreignKeyName: "facturas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fiscal_params: {
         Row: {
           created_at: string | null
@@ -814,10 +994,13 @@ export type Database = {
           deducible: boolean | null
           descripcion: string | null
           empresa_id: string | null
+          external_ref: string | null
           fecha: string
+          gasto_fijo_ref_id: string | null
           id: string
           monto: number
           proyecto_id: string | null
+          rubro_id: string | null
           soporte_url: string | null
           workspace_id: string
         }
@@ -828,10 +1011,13 @@ export type Database = {
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
+          external_ref?: string | null
           fecha?: string
+          gasto_fijo_ref_id?: string | null
           id?: string
           monto: number
           proyecto_id?: string | null
+          rubro_id?: string | null
           soporte_url?: string | null
           workspace_id: string
         }
@@ -842,14 +1028,45 @@ export type Database = {
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
+          external_ref?: string | null
           fecha?: string
+          gasto_fijo_ref_id?: string | null
           id?: string
           monto?: number
           proyecto_id?: string | null
+          rubro_id?: string | null
           soporte_url?: string | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "fk_gastos_borrador"
+            columns: ["gasto_fijo_ref_id"]
+            isOneToOne: false
+            referencedRelation: "gastos_fijos_borradores"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_gastos_borrador"
+            columns: ["gasto_fijo_ref_id"]
+            isOneToOne: false
+            referencedRelation: "v_gastos_fijos_mes_actual"
+            referencedColumns: ["borrador_id"]
+          },
+          {
+            foreignKeyName: "fk_gastos_rubro"
+            columns: ["rubro_id"]
+            isOneToOne: false
+            referencedRelation: "proyecto_rubros"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_gastos_rubro"
+            columns: ["rubro_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_rubros_comparativo"
+            referencedColumns: ["rubro_id"]
+          },
           {
             foreignKeyName: "gastos_empresa_id_fkey"
             columns: ["empresa_id"]
@@ -865,7 +1082,119 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "gastos_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+          {
             foreignKeyName: "gastos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gastos_fijos_borradores: {
+        Row: {
+          categoria: string
+          confirmado: boolean | null
+          created_at: string | null
+          fecha_confirmacion: string | null
+          gasto_fijo_config_id: string
+          gasto_id: string | null
+          id: string
+          monto_esperado: number
+          nombre: string
+          periodo: string
+          workspace_id: string
+        }
+        Insert: {
+          categoria: string
+          confirmado?: boolean | null
+          created_at?: string | null
+          fecha_confirmacion?: string | null
+          gasto_fijo_config_id: string
+          gasto_id?: string | null
+          id?: string
+          monto_esperado: number
+          nombre: string
+          periodo: string
+          workspace_id: string
+        }
+        Update: {
+          categoria?: string
+          confirmado?: boolean | null
+          created_at?: string | null
+          fecha_confirmacion?: string | null
+          gasto_fijo_config_id?: string
+          gasto_id?: string | null
+          id?: string
+          monto_esperado?: number
+          nombre?: string
+          periodo?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gastos_fijos_borradores_gasto_fijo_config_id_fkey"
+            columns: ["gasto_fijo_config_id"]
+            isOneToOne: false
+            referencedRelation: "gastos_fijos_config"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gastos_fijos_borradores_gasto_id_fkey"
+            columns: ["gasto_id"]
+            isOneToOne: false
+            referencedRelation: "gastos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gastos_fijos_borradores_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gastos_fijos_config: {
+        Row: {
+          activo: boolean | null
+          categoria: string
+          created_at: string | null
+          id: string
+          monto_referencia: number
+          nombre: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean | null
+          categoria: string
+          created_at?: string | null
+          id?: string
+          monto_referencia: number
+          nombre: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean | null
+          categoria?: string
+          created_at?: string | null
+          id?: string
+          monto_referencia?: number
+          nombre?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gastos_fijos_config_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -955,6 +1284,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "proyectos"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "horas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
           },
           {
             foreignKeyName: "horas_workspace_id_fkey"
@@ -1201,6 +1537,7 @@ export type Database = {
       }
       oportunidades: {
         Row: {
+          carpeta_url: string | null
           contacto_id: string
           created_at: string | null
           descripcion: string
@@ -1217,6 +1554,7 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          carpeta_url?: string | null
           contacto_id: string
           created_at?: string | null
           descripcion: string
@@ -1233,6 +1571,7 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          carpeta_url?: string | null
           contacto_id?: string
           created_at?: string | null
           descripcion?: string
@@ -1639,9 +1978,103 @@ export type Database = {
           },
         ]
       }
+      proyecto_notas: {
+        Row: {
+          canal_registro: string | null
+          contenido: string
+          created_at: string | null
+          id: string
+          proyecto_id: string
+          workspace_id: string
+        }
+        Insert: {
+          canal_registro?: string | null
+          contenido: string
+          created_at?: string | null
+          id?: string
+          proyecto_id: string
+          workspace_id: string
+        }
+        Update: {
+          canal_registro?: string | null
+          contenido?: string
+          created_at?: string | null
+          id?: string
+          proyecto_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proyecto_notas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyecto_notas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+          {
+            foreignKeyName: "proyecto_notas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      proyecto_rubros: {
+        Row: {
+          created_at: string | null
+          id: string
+          nombre: string
+          presupuestado: number
+          proyecto_id: string
+          tipo: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          nombre: string
+          presupuestado: number
+          proyecto_id: string
+          tipo?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          nombre?: string
+          presupuestado?: number
+          proyecto_id?: string
+          tipo?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proyecto_rubros_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyecto_rubros_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+        ]
+      }
       proyectos: {
         Row: {
           avance_porcentaje: number | null
+          canal_creacion: string | null
+          carpeta_url: string | null
+          cierre_snapshot: Json | null
           contacto_id: string | null
           cotizacion_id: string | null
           created_at: string | null
@@ -1650,16 +2083,23 @@ export type Database = {
           fecha_cierre: string | null
           fecha_fin_estimada: string | null
           fecha_inicio: string | null
+          ganancia_estimada: number | null
+          horas_estimadas: number | null
           id: string
+          lecciones_aprendidas: string | null
           nombre: string
           notas_cierre: string | null
           oportunidad_id: string | null
           presupuesto_total: number | null
+          retenciones_estimadas: number | null
           updated_at: string | null
           workspace_id: string
         }
         Insert: {
           avance_porcentaje?: number | null
+          canal_creacion?: string | null
+          carpeta_url?: string | null
+          cierre_snapshot?: Json | null
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -1668,16 +2108,23 @@ export type Database = {
           fecha_cierre?: string | null
           fecha_fin_estimada?: string | null
           fecha_inicio?: string | null
+          ganancia_estimada?: number | null
+          horas_estimadas?: number | null
           id?: string
+          lecciones_aprendidas?: string | null
           nombre: string
           notas_cierre?: string | null
           oportunidad_id?: string | null
           presupuesto_total?: number | null
+          retenciones_estimadas?: number | null
           updated_at?: string | null
           workspace_id: string
         }
         Update: {
           avance_porcentaje?: number | null
+          canal_creacion?: string | null
+          carpeta_url?: string | null
+          cierre_snapshot?: Json | null
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -1686,11 +2133,15 @@ export type Database = {
           fecha_cierre?: string | null
           fecha_fin_estimada?: string | null
           fecha_inicio?: string | null
+          ganancia_estimada?: number | null
+          horas_estimadas?: number | null
           id?: string
+          lecciones_aprendidas?: string | null
           nombre?: string
           notas_cierre?: string | null
           oportunidad_id?: string | null
           presupuesto_total?: number | null
+          retenciones_estimadas?: number | null
           updated_at?: string | null
           workspace_id?: string
         }
@@ -2015,7 +2466,9 @@ export type Database = {
           contract_type: string | null
           created_at: string | null
           department: string | null
+          es_principal: boolean | null
           full_name: string
+          horas_disponibles_mes: number | null
           id: string
           is_active: boolean | null
           phone_whatsapp: string | null
@@ -2028,7 +2481,9 @@ export type Database = {
           contract_type?: string | null
           created_at?: string | null
           department?: string | null
+          es_principal?: boolean | null
           full_name: string
+          horas_disponibles_mes?: number | null
           id?: string
           is_active?: boolean | null
           phone_whatsapp?: string | null
@@ -2041,7 +2496,9 @@ export type Database = {
           contract_type?: string | null
           created_at?: string | null
           department?: string | null
+          es_principal?: boolean | null
           full_name?: string
+          horas_disponibles_mes?: number | null
           id?: string
           is_active?: boolean | null
           phone_whatsapp?: string | null
@@ -2358,7 +2815,172 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_cartera_antiguedad: {
+        Row: {
+          rango_0_30: number | null
+          rango_31_60: number | null
+          rango_61_90: number | null
+          rango_90_plus: number | null
+          total_cartera: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "facturas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_facturas_estado: {
+        Row: {
+          cobrado: number | null
+          created_at: string | null
+          dias_antiguedad: number | null
+          estado_pago: string | null
+          factura_id: string | null
+          fecha_emision: string | null
+          monto: number | null
+          notas: string | null
+          numero_factura: string | null
+          proyecto_id: string | null
+          saldo_pendiente: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "facturas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "facturas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+          {
+            foreignKeyName: "facturas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_gastos_fijos_mes_actual: {
+        Row: {
+          borrador_id: string | null
+          categoria: string | null
+          confirmado: boolean | null
+          fecha_confirmacion: string | null
+          fecha_pago_real: string | null
+          monto_esperado: number | null
+          monto_real: number | null
+          nombre: string | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gastos_fijos_borradores_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_proyecto_financiero: {
+        Row: {
+          avance_porcentaje: number | null
+          canal_creacion: string | null
+          carpeta_url: string | null
+          cartera: number | null
+          cobrado: number | null
+          contacto_nombre: string | null
+          costo_acumulado: number | null
+          costo_horas: number | null
+          cotizacion_id: string | null
+          created_at: string | null
+          empresa_nombre: string | null
+          estado: string | null
+          facturado: number | null
+          fecha_cierre: string | null
+          fecha_fin_estimada: string | null
+          fecha_inicio: string | null
+          ganancia_estimada: number | null
+          ganancia_real: number | null
+          gastos_directos: number | null
+          horas_estimadas: number | null
+          horas_reales: number | null
+          nombre: string | null
+          num_facturas: number | null
+          oportunidad_id: string | null
+          por_facturar: number | null
+          presupuesto_consumido_pct: number | null
+          presupuesto_total: number | null
+          proyecto_id: string | null
+          retenciones_estimadas: number | null
+          updated_at: string | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proyectos_cotizacion_id_fkey"
+            columns: ["cotizacion_id"]
+            isOneToOne: false
+            referencedRelation: "cotizaciones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_oportunidad_id_fkey"
+            columns: ["oportunidad_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_proyecto_rubros_comparativo: {
+        Row: {
+          consumido_pct: number | null
+          diferencia: number | null
+          gastado_real: number | null
+          presupuestado: number | null
+          proyecto_id: string | null
+          rubro_id: string | null
+          rubro_nombre: string | null
+          rubro_tipo: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proyecto_rubros_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyecto_rubros_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+        ]
+      }
     }
     Functions: {
       check_perfil_fiscal_completo: {
@@ -2504,40 +3126,22 @@ export const Constants = {
   },
 } as const
 
-// ── Type aliases ────────────────────────────────────────────
-type TableRow<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row']
-
-// Legacy tables (kept for config compatibility)
-export type Profile = TableRow<'profiles'>
-export type Workspace = TableRow<'workspaces'>
-export type BankAccount = TableRow<'bank_accounts'>
-export type ExpenseCategory = TableRow<'expense_categories'>
-export type FiscalProfile = TableRow<'fiscal_profiles'>
-export type Staff = TableRow<'staff'>
-export type MonthlyTarget = TableRow<'monthly_targets'>
-
-// CRM v2 tables (new model from spec)
-export type Contacto = TableRow<'contactos'>
-export type Empresa = TableRow<'empresas'>
-export type Oportunidad = TableRow<'oportunidades'>
-export type Cotizacion = TableRow<'cotizaciones'>
-export type Item = TableRow<'items'>
-export type Rubro = TableRow<'rubros'>
-export type Servicio = TableRow<'servicios'>
-export type ProyectoV2 = TableRow<'proyectos'>
-export type GastoV2 = TableRow<'gastos'>
-export type Hora = TableRow<'horas'>
-
-// Legacy v1 tables (still referenced by config modules)
-export type Contact = TableRow<'contacts'>
-export type Client = TableRow<'clients'>
-export type Opportunity = TableRow<'opportunities'>
-export type Project = TableRow<'projects'>
-export type Quote = TableRow<'quotes'>
-export type Invoice = TableRow<'invoices'>
-export type Expense = TableRow<'expenses'>
-export type FixedExpense = TableRow<'fixed_expenses'>
-export type Note = TableRow<'notes'>
-export type TimeEntry = TableRow<'time_entries'>
-export type Promoter = TableRow<'promoters'>
-export type Payment = TableRow<'payments'>
+// ── Custom type aliases ─────────────────────────────────
+export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
+export type ExpenseCategory = Database['public']['Tables']['expense_categories']['Row']
+export type FixedExpense = Database['public']['Tables']['fixed_expenses']['Row']
+export type FiscalProfile = Database['public']['Tables']['fiscal_profiles']['Row']
+export type Staff = Database['public']['Tables']['staff']['Row']
+export type MonthlyTarget = Database['public']['Tables']['monthly_targets']['Row']
+export type Servicio = Database['public']['Tables']['servicios']['Row']
+export type Note = Database['public']['Tables']['notes']['Row']
+export type Client = Database['public']['Tables']['clients']['Row']
+export type Empresa = Database['public']['Tables']['empresas']['Row']
+export type Contacto = Database['public']['Tables']['contactos']['Row']
+export type Invoice = Database['public']['Tables']['invoices']['Row']
+export type Payment = Database['public']['Tables']['payments']['Row']
+export type Opportunity = Database['public']['Tables']['opportunities']['Row']
+export type Quote = Database['public']['Tables']['quotes']['Row']
+export type Project = Database['public']['Tables']['projects']['Row']
+export type Expense = Database['public']['Tables']['expenses']['Row']
+export type TimeEntry = Database['public']['Tables']['time_entries']['Row']

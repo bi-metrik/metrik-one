@@ -197,6 +197,53 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     return { success: false, error: 'fiscal_incompleto', needsFiscal: true }
   }
 
+  // Get the workspace ID (we already have supabase from above)
+  const workspaceResult = await getWorkspace()
+  const wsId = workspaceResult.workspaceId
+  if (!wsId) return { success: false, error: 'Sin workspace' }
+
+  // Find best cotización: prefer aceptada, fallback to any
+  const { data: cotizacion } = await supabase
+    .from('cotizaciones')
+    .select('id, modo, valor_total')
+    .eq('oportunidad_id', id)
+    .order('estado', { ascending: true }) // aceptada sorts first alphabetically
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  // Calculate financials from cotización items if available
+  let gananciaEstimada: number | null = null
+  let retencionesEstimadas: number | null = null
+  let horasEstimadas: number | null = null
+  let presupuestoTotal = opp.valor_estimado ?? 0
+
+  if (cotizacion) {
+    presupuestoTotal = cotizacion.valor_total ?? presupuestoTotal
+
+    // Get items + rubros for detailed cotizaciones
+    if (cotizacion.modo === 'detallada') {
+      const { data: rubrosData } = await supabase
+        .from('rubros')
+        .select('tipo, cantidad, item_id, items!inner(cotizacion_id)')
+        .eq('items.cotizacion_id', cotizacion.id)
+
+      if (rubrosData && rubrosData.length > 0) {
+        // Estimate hours from MO rubros
+        horasEstimadas = rubrosData
+          .filter(r => r.tipo === 'mo_propia' || r.tipo === 'mo_terceros')
+          .reduce((sum, r) => sum + (r.cantidad ?? 0), 0) || null
+      }
+    }
+  }
+
+  // Inherit carpeta_url from oportunidad
+  const { data: oppFull } = await supabase
+    .from('oportunidades')
+    .select('carpeta_url')
+    .eq('id', id)
+    .single()
+
   // Move to ganada
   const { error: moveError } = await supabase
     .from('oportunidades')
@@ -209,24 +256,83 @@ export async function ganarOportunidad(id: string, fiscalData?: {
 
   if (moveError) return { success: false, error: moveError.message }
 
-  // Create proyecto
-  const workspaceResult = await getWorkspace()
-  if (workspaceResult.workspaceId) {
-    await supabase.from('proyectos').insert({
-      workspace_id: workspaceResult.workspaceId,
+  // Create proyecto with full data
+  const { data: proyecto, error: projError } = await supabase
+    .from('proyectos')
+    .insert({
+      workspace_id: wsId,
       oportunidad_id: id,
+      cotizacion_id: cotizacion?.id ?? null,
       empresa_id: empresaId,
       contacto_id: opp.contacto_id,
       nombre: opp.descripcion ?? 'Proyecto sin nombre',
       estado: 'en_ejecucion',
-      presupuesto_total: opp.valor_estimado ?? 0,
+      presupuesto_total: presupuestoTotal,
+      ganancia_estimada: gananciaEstimada,
+      retenciones_estimadas: retencionesEstimadas,
+      horas_estimadas: horasEstimadas,
+      carpeta_url: oppFull?.carpeta_url ?? null,
+      canal_creacion: 'app',
     })
+    .select('id')
+    .single()
+
+  if (projError || !proyecto) {
+    return { success: false, error: projError?.message ?? 'Error creando proyecto' }
+  }
+
+  // Create proyecto_rubros from cotización items
+  if (cotizacion) {
+    if (cotizacion.modo === 'detallada') {
+      // Get items with their first rubro type
+      const { data: items } = await supabase
+        .from('items')
+        .select('nombre, subtotal, rubros(tipo)')
+        .eq('cotizacion_id', cotizacion.id)
+
+      if (items && items.length > 0) {
+        const rubrosToInsert = items.map(item => {
+          const firstRubroTipo = Array.isArray(item.rubros) && item.rubros.length > 0
+            ? (item.rubros[0] as { tipo: string }).tipo
+            : null
+          return {
+            proyecto_id: proyecto.id,
+            nombre: item.nombre ?? 'Sin nombre',
+            presupuestado: item.subtotal ?? 0,
+            tipo: mapTipoRubro(firstRubroTipo),
+          }
+        })
+
+        await supabase.from('proyecto_rubros').insert(rubrosToInsert)
+      }
+    } else {
+      // Flash: single "general" rubro
+      await supabase.from('proyecto_rubros').insert({
+        proyecto_id: proyecto.id,
+        nombre: 'General',
+        presupuestado: presupuestoTotal,
+        tipo: 'general',
+      })
+    }
   }
 
   revalidatePath('/pipeline')
   revalidatePath(`/pipeline/${id}`)
   revalidatePath('/proyectos')
-  return { success: true }
+  return { success: true, proyectoId: proyecto.id }
+}
+
+// Helper: map cotización tipo_rubro to proyecto_rubros tipo
+function mapTipoRubro(tipo: string | null): string {
+  const map: Record<string, string> = {
+    mo_propia: 'horas',
+    mo_terceros: 'subcontratacion',
+    materiales: 'materiales',
+    viaticos: 'transporte',
+    software: 'servicios_profesionales',
+    servicios_prof: 'servicios_profesionales',
+  }
+  return map[tipo ?? ''] ?? 'general'
 }
 
 export async function updateOportunidad(id: string, updates: Record<string, unknown>) {
