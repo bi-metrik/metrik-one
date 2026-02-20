@@ -340,6 +340,44 @@ export type Database = {
           },
         ]
       }
+      config_metas: {
+        Row: {
+          created_at: string | null
+          id: string
+          mes: string
+          meta_recaudo_mensual: number | null
+          meta_ventas_mensual: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          mes: string
+          meta_recaudo_mensual?: number | null
+          meta_ventas_mensual?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          mes?: string
+          meta_recaudo_mensual?: number | null
+          meta_ventas_mensual?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "config_metas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contactos: {
         Row: {
           comision_porcentaje: number | null
@@ -2420,6 +2458,50 @@ export type Database = {
           },
         ]
       }
+      saldos_banco: {
+        Row: {
+          created_at: string | null
+          diferencia: number
+          fecha: string | null
+          id: string
+          nota: string | null
+          registrado_via: string
+          saldo_real: number
+          saldo_teorico: number
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          diferencia: number
+          fecha?: string | null
+          id?: string
+          nota?: string | null
+          registrado_via?: string
+          saldo_real: number
+          saldo_teorico: number
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          diferencia?: number
+          fecha?: string | null
+          id?: string
+          nota?: string | null
+          registrado_via?: string
+          saldo_real?: number
+          saldo_teorico?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saldos_banco_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       servicios: {
         Row: {
           activo: boolean | null
@@ -2510,6 +2592,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "staff_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      streaks: {
+        Row: {
+          created_at: string | null
+          id: string
+          semanas_actuales: number | null
+          semanas_record: number | null
+          streak_inicio: string | null
+          tipo: string
+          ultima_actualizacion: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          semanas_actuales?: number | null
+          semanas_record?: number | null
+          streak_inicio?: string | null
+          tipo?: string
+          ultima_actualizacion?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          semanas_actuales?: number | null
+          semanas_record?: number | null
+          streak_inicio?: string | null
+          tipo?: string
+          ultima_actualizacion?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "streaks_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -3126,7 +3252,7 @@ export const Constants = {
   },
 } as const
 
-// ── Custom type aliases ─────────────────────────────────
+// ── Custom type aliases ──────────────────────────────
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type ExpenseCategory = Database['public']['Tables']['expense_categories']['Row']
 export type FixedExpense = Database['public']['Tables']['fixed_expenses']['Row']

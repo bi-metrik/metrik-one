@@ -276,8 +276,8 @@ export default function AppShell({
         </main>
       </div>
 
-      {/* FAB */}
-      <FAB role={role} />
+      {/* FAB — hidden on /numeros (has its own FAB) */}
+      {!pathname.startsWith('/numeros') && <FAB role={role} />}
     </div>
   )
 }
