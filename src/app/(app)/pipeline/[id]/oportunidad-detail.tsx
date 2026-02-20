@@ -5,13 +5,13 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, Building2, User, ChevronRight, Flame, XCircle,
-  Trophy, FileText, Plus, Clock, ShieldAlert, Copy,
+  Trophy, FileText, Plus, Clock, ShieldAlert, Copy, Send, Check, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   moveOportunidad, perderOportunidad, ganarOportunidad,
 } from '../actions-v2'
-import { duplicarCotizacion } from './cotizaciones/actions-v2'
+import { duplicarCotizacion, enviarCotizacion, aceptarCotizacion, rechazarCotizacion } from './cotizaciones/actions-v2'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, RAZONES_PERDIDA, ESTADO_COTIZACION_CONFIG } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { EtapaPipeline, EstadoCotizacion } from '@/lib/pipeline/constants'
@@ -237,52 +237,111 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
           <div className="space-y-2">
             {cotizaciones.map(c => {
               const estadoConfig = ESTADO_COTIZACION_CONFIG[c.estado as EstadoCotizacion]
-              const canDuplicate = c.estado !== 'borrador'
+              const estado = c.estado as EstadoCotizacion
+              const canDuplicate = estado !== 'borrador'
+
+              const handleEstado = (e: React.MouseEvent, action: 'enviar' | 'aceptar' | 'rechazar') => {
+                e.stopPropagation()
+                startTransition(async () => {
+                  const fn = action === 'enviar' ? enviarCotizacion
+                    : action === 'aceptar' ? aceptarCotizacion
+                    : rechazarCotizacion
+                  const label = action === 'enviar' ? 'Enviada'
+                    : action === 'aceptar' ? 'Aceptada'
+                    : 'Rechazada'
+                  const res = await fn(c.id)
+                  if (res.success) {
+                    toast.success(`Cotización ${label.toLowerCase()}`)
+                    router.refresh()
+                  } else {
+                    toast.error(res.error ?? 'Error')
+                  }
+                })
+              }
+
               return (
                 <div
                   key={c.id}
-                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent/50 cursor-pointer"
+                  className="rounded-md border transition-colors hover:bg-accent/50 cursor-pointer"
                   onClick={() => router.push(`/pipeline/${oportunidad.id}/cotizacion/${c.id}`)}
                 >
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-blue-500 shrink-0" />
-                    <div>
-                      <span className="text-sm font-medium">{c.consecutivo || 'Sin consecutivo'}</span>
-                      <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
-                        {c.modo === 'flash' ? 'Flash' : 'Detallada'}
-                      </span>
+                  <div className="flex items-center justify-between p-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium truncate">{c.consecutivo || 'Sin consecutivo'}</span>
+                          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                            {c.modo === 'flash' ? 'Flash' : 'Detallada'}
+                          </span>
+                        </div>
+                        {c.valor_total !== null && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{formatCOP(c.valor_total)}</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {c.valor_total !== null && (
-                      <span className="text-xs font-medium">{formatCOP(c.valor_total)}</span>
-                    )}
-                    {estadoConfig && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig.chipClass}`}>
-                        {estadoConfig.label}
-                      </span>
-                    )}
-                    {canDuplicate && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          startTransition(async () => {
-                            const res = await duplicarCotizacion(c.id)
-                            if (res.success) {
-                              toast.success('Cotización duplicada (borrador)')
-                              router.refresh()
-                            } else {
-                              toast.error(res.error ?? 'Error al duplicar')
-                            }
-                          })
-                        }}
-                        disabled={isPending}
-                        className="rounded-md p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-50"
-                        title="Duplicar cotización"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {estadoConfig && (
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig.chipClass}`}>
+                          {estadoConfig.label}
+                        </span>
+                      )}
+
+                      {/* State actions */}
+                      {estado === 'borrador' && (
+                        <button
+                          onClick={(e) => handleEstado(e, 'enviar')}
+                          disabled={isPending}
+                          className="rounded-md p-1.5 text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-950/30"
+                          title="Enviar cotización"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {estado === 'enviada' && (
+                        <>
+                          <button
+                            onClick={(e) => handleEstado(e, 'aceptar')}
+                            disabled={isPending}
+                            className="rounded-md p-1.5 text-green-600 hover:bg-green-50 disabled:opacity-50 dark:hover:bg-green-950/30"
+                            title="Aceptar cotización"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => handleEstado(e, 'rechazar')}
+                            disabled={isPending}
+                            className="rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
+                            title="Rechazar cotización"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </>
+                      )}
+
+                      {/* Duplicate (only after sent) */}
+                      {canDuplicate && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            startTransition(async () => {
+                              const res = await duplicarCotizacion(c.id)
+                              if (res.success) {
+                                toast.success('Cotización duplicada (borrador)')
+                                router.refresh()
+                              } else {
+                                toast.error(res.error ?? 'Error al duplicar')
+                              }
+                            })
+                          }}
+                          disabled={isPending}
+                          className="rounded-md p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                          title="Duplicar cotización"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )
