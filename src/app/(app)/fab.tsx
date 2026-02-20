@@ -2,13 +2,22 @@
 
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, X, Flame, UserPlus, Receipt } from 'lucide-react'
+import { Plus, X, Flame, UserPlus, Receipt, Clock } from 'lucide-react'
 
 interface FABProps {
   role: string
 }
 
-const FAB_ACTIONS = [
+interface FABAction {
+  label: string
+  icon: typeof Flame
+  roles: string[]
+  color: string
+  href?: string
+  action?: string
+}
+
+const FAB_ACTIONS: FABAction[] = [
   {
     label: 'Nueva oportunidad',
     icon: Flame,
@@ -30,6 +39,13 @@ const FAB_ACTIONS = [
     roles: ['owner', 'admin', 'operator'],
     color: 'bg-emerald-500 hover:bg-emerald-600',
   },
+  {
+    label: 'Iniciar timer',
+    icon: Clock,
+    action: 'timer',
+    roles: ['owner', 'admin', 'operator'],
+    color: 'bg-violet-500 hover:bg-violet-600',
+  },
 ]
 
 export default function FAB({ role }: FABProps) {
@@ -38,9 +54,13 @@ export default function FAB({ role }: FABProps) {
 
   const visibleActions = FAB_ACTIONS.filter(a => a.roles.includes(role))
 
-  const handleAction = useCallback((href: string) => {
+  const handleAction = useCallback((action: FABAction) => {
     setOpen(false)
-    router.push(href)
+    if (action.action === 'timer') {
+      window.dispatchEvent(new Event('metrik-timer-open'))
+    } else if (action.href) {
+      router.push(action.href)
+    }
   }, [router])
 
   if (visibleActions.length === 0) return null
@@ -57,16 +77,16 @@ export default function FAB({ role }: FABProps) {
 
       {/* Action buttons */}
       {open && (
-        <div className="fixed bottom-24 right-6 z-50 flex flex-col-reverse items-end gap-2">
+        <div className="fixed bottom-24 right-6 z-50 flex w-48 flex-col-reverse gap-2">
           {visibleActions.map((action) => {
             const Icon = action.icon
             return (
               <button
-                key={action.href}
-                onClick={() => handleAction(action.href)}
-                className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium text-white shadow-lg transition-all ${action.color}`}
+                key={action.href ?? action.action}
+                onClick={() => handleAction(action)}
+                className={`flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium text-white shadow-lg transition-all ${action.color}`}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-4 w-4 shrink-0" />
                 {action.label}
               </button>
             )

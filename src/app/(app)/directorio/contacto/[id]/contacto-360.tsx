@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, Phone, Mail, Save, Flame } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateContacto } from '../../actions'
-import { FUENTES_ADQUISICION, ROLES_CONTACTO, ETAPA_CONFIG } from '@/lib/pipeline/constants'
+import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO, ETAPA_CONFIG } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Contacto } from '@/types/database'
 import type { EtapaPipeline } from '@/lib/pipeline/constants'
@@ -35,6 +35,7 @@ export default function Contacto360({ contacto, oportunidades }: Props) {
     email: contacto.email ?? '',
     fuente_adquisicion: contacto.fuente_adquisicion ?? '',
     rol: contacto.rol ?? '',
+    segmento: contacto.segmento ?? 'sin_contactar',
     comision_porcentaje: contacto.comision_porcentaje?.toString() ?? '',
   })
 
@@ -134,6 +135,18 @@ export default function Contacto360({ contacto, oportunidades }: Props) {
               <option value="">Sin rol</option>
               {ROLES_CONTACTO.map(r => (
                 <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Segmento</label>
+            <select
+              value={form.segmento}
+              onChange={e => setForm(p => ({ ...p, segmento: e.target.value }))}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              {SEGMENTOS_CONTACTO.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
           </div>

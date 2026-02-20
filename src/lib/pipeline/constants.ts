@@ -59,6 +59,17 @@ export const ROLES_CONTACTO = [
 
 export type RolContacto = typeof ROLES_CONTACTO[number]['value']
 
+// ── Segmentos de contacto ─────────────────────────────────
+
+export const SEGMENTOS_CONTACTO = [
+  { value: 'sin_contactar', label: 'Sin contactar', chipClass: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300' },
+  { value: 'contactado', label: 'Contactado', chipClass: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
+  { value: 'convertido', label: 'Convertido', chipClass: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' },
+  { value: 'inactivo', label: 'Inactivo', chipClass: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300' },
+] as const
+
+export type SegmentoContacto = typeof SEGMENTOS_CONTACTO[number]['value']
+
 // ── Tipos de rubro (6 tipos, §4.6) ──────────────────────────
 
 export const TIPOS_RUBRO = [

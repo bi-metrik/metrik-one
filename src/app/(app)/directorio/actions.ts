@@ -48,6 +48,7 @@ export async function createContacto(formData: FormData) {
       fuente_adquisicion: (formData.get('fuente_adquisicion') as string) || null,
       fuente_detalle: (formData.get('fuente_detalle') as string)?.trim() || null,
       rol: (formData.get('rol') as string) || null,
+      segmento: (formData.get('segmento') as string) || 'sin_contactar',
       comision_porcentaje: formData.get('comision_porcentaje')
         ? parseFloat(formData.get('comision_porcentaje') as string)
         : null,
@@ -66,7 +67,7 @@ export async function updateContacto(id: string, formData: FormData) {
   if (error) return { success: false, error: 'No autenticado' }
 
   const updates: Record<string, unknown> = {}
-  const fields = ['nombre', 'telefono', 'email', 'fuente_adquisicion', 'fuente_detalle', 'rol'] as const
+  const fields = ['nombre', 'telefono', 'email', 'fuente_adquisicion', 'fuente_detalle', 'rol', 'segmento'] as const
   for (const f of fields) {
     const v = formData.get(f) as string | null
     if (v !== null) updates[f] = v.trim() || null

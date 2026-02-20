@@ -310,12 +310,34 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
               const handleEstado = (e: React.MouseEvent, action: 'enviar' | 'aceptar' | 'rechazar') => {
                 e.stopPropagation()
                 startTransition(async () => {
-                  const fn = action === 'enviar' ? enviarCotizacion
-                    : action === 'aceptar' ? aceptarCotizacion
-                    : rechazarCotizacion
-                  const label = action === 'enviar' ? 'Enviada'
-                    : action === 'aceptar' ? 'Aceptada'
-                    : 'Rechazada'
+                  // Special flow: accept → auto-win → create project
+                  if (action === 'aceptar') {
+                    const acceptRes = await aceptarCotizacion(c.id)
+                    if (!acceptRes.success) {
+                      toast.error((acceptRes as { error?: string }).error ?? 'Error')
+                      return
+                    }
+                    toast.success('Cotización aceptada')
+
+                    // Chain: auto-win the oportunidad
+                    const winRes = await ganarOportunidad(oportunidad.id)
+                    if (winRes.success) {
+                      toast.success('Oportunidad ganada! Proyecto creado.')
+                      if ((winRes as { proyectoId?: string }).proyectoId) {
+                        router.push(`/proyectos/${(winRes as { proyectoId?: string }).proyectoId}`)
+                        return
+                      }
+                    } else if ((winRes as { needsFiscal?: boolean }).needsFiscal) {
+                      setShowFiscalGate(true)
+                    } else {
+                      toast.error(winRes.error)
+                    }
+                    router.refresh()
+                    return
+                  }
+
+                  const fn = action === 'enviar' ? enviarCotizacion : rechazarCotizacion
+                  const label = action === 'enviar' ? 'Enviada' : 'Rechazada'
                   const res = await fn(c.id)
                   if (res.success) {
                     toast.success(`Cotización ${label.toLowerCase()}`)

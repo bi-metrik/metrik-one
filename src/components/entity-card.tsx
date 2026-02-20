@@ -53,6 +53,8 @@ export interface EntityCardProps {
   href?: string
   /** Additional click handler */
   onClick?: () => void
+  /** Small badges shown below summary lines */
+  badges?: { label: string; className?: string }[]
   /** Relative time text (e.g. "hace 3 dias") */
   timeAgo?: string
   /** Extra className */
@@ -72,6 +74,7 @@ export default function EntityCard({
   showGreenCheck = false,
   expandableSections = [],
   actions = [],
+  badges = [],
   quickAction,
   primaryAction,
   href,
@@ -198,6 +201,17 @@ export default function EntityCard({
               {line.label && <span className="font-medium text-foreground">{line.label}:</span>}
               <span className="truncate">{line.text}</span>
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Badges ── */}
+      {badges.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {badges.map((badge, i) => (
+            <span key={i} className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className ?? 'bg-muted text-muted-foreground'}`}>
+              {badge.label}
+            </span>
           ))}
         </div>
       )}

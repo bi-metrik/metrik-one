@@ -390,6 +390,7 @@ export type Database = {
           id: string
           nombre: string
           rol: string | null
+          segmento: string | null
           telefono: string | null
           updated_at: string | null
           workspace_id: string
@@ -405,6 +406,7 @@ export type Database = {
           id?: string
           nombre: string
           rol?: string | null
+          segmento?: string | null
           telefono?: string | null
           updated_at?: string | null
           workspace_id: string
@@ -420,6 +422,7 @@ export type Database = {
           id?: string
           nombre?: string
           rol?: string | null
+          segmento?: string | null
           telefono?: string | null
           updated_at?: string | null
           workspace_id?: string
@@ -1290,9 +1293,12 @@ export type Database = {
           created_at: string | null
           descripcion: string | null
           fecha: string
+          fin: string | null
           horas: number
           id: string
+          inicio: string | null
           proyecto_id: string
+          timer_activo: boolean | null
           workspace_id: string
         }
         Insert: {
@@ -1300,9 +1306,12 @@ export type Database = {
           created_at?: string | null
           descripcion?: string | null
           fecha?: string
+          fin?: string | null
           horas: number
           id?: string
+          inicio?: string | null
           proyecto_id: string
+          timer_activo?: boolean | null
           workspace_id: string
         }
         Update: {
@@ -1310,9 +1319,12 @@ export type Database = {
           created_at?: string | null
           descripcion?: string | null
           fecha?: string
+          fin?: string | null
           horas?: number
           id?: string
+          inicio?: string | null
           proyecto_id?: string
+          timer_activo?: boolean | null
           workspace_id?: string
         }
         Relationships: [
@@ -2848,6 +2860,55 @@ export type Database = {
             foreignKeyName: "time_entries_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      timer_activo: {
+        Row: {
+          created_at: string | null
+          descripcion: string | null
+          id: string
+          inicio: string
+          proyecto_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          descripcion?: string | null
+          id?: string
+          inicio?: string
+          proyecto_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          descripcion?: string | null
+          id?: string
+          inicio?: string
+          proyecto_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "timer_activo_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timer_activo_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["proyecto_id"]
+          },
+          {
+            foreignKeyName: "timer_activo_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },

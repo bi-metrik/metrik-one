@@ -1,11 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
-import { FolderOpen } from 'lucide-react'
+import { useState, useEffect, useRef, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { FolderOpen, Play, Square } from 'lucide-react'
+import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
+import { startTimer, stopTimer, type ActiveTimer } from '../timer-actions'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ interface ProyectoFinanciero {
 
 interface Props {
   proyectos: ProyectoFinanciero[]
+  activeTimer: ActiveTimer | null
 }
 
 // ── Filter chips ──────────────────────────────────────
@@ -42,8 +45,12 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 
 // ── Component ─────────────────────────────────────────
 
-export default function ProyectosList({ proyectos }: Props) {
+export default function ProyectosList({ proyectos, activeTimer: serverTimer }: Props) {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('todos')
+  const [timer, setTimer] = useState<ActiveTimer | null>(serverTimer)
+
+  // Sync with server when prop changes (revalidation)
+  useEffect(() => { setTimer(serverTimer) }, [serverTimer])
 
   const filtered = activeFilter === 'todos'
     ? proyectos
@@ -91,7 +98,14 @@ export default function ProyectosList({ proyectos }: Props) {
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map(p => <ProyectoCard key={p.proyecto_id} proyecto={p} />)}
+          {filtered.map(p => (
+            <ProyectoCard
+              key={p.proyecto_id}
+              proyecto={p}
+              activeTimer={timer}
+              onTimerChange={setTimer}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -100,12 +114,25 @@ export default function ProyectosList({ proyectos }: Props) {
 
 // ── Project Card ──────────────────────────────────────
 
-function ProyectoCard({ proyecto: p }: { proyecto: ProyectoFinanciero }) {
+function ProyectoCard({
+  proyecto: p,
+  activeTimer,
+  onTimerChange,
+}: {
+  proyecto: ProyectoFinanciero
+  activeTimer: ActiveTimer | null
+  onTimerChange: (t: ActiveTimer | null) => void
+}) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
   const estado = (p.estado ?? 'en_ejecucion') as EstadoProyecto
   const config = ESTADO_PROYECTO_CONFIG[estado]
   const avance = Math.min(p.avance_porcentaje ?? 0, 100)
   const consumo = Math.min(p.presupuesto_consumido_pct ?? 0, 150)
   const ganancia = p.ganancia_real ?? 0
+
+  const isThisProjectTimer = activeTimer?.proyecto_id === p.proyecto_id
+  const canTimer = estado === 'en_ejecucion'
 
   // Semáforo for presupuesto consumido bar
   const semaforoBar = consumo > 90
@@ -114,15 +141,92 @@ function ProyectoCard({ proyecto: p }: { proyecto: ProyectoFinanciero }) {
       ? 'bg-yellow-500'
       : 'bg-green-500'
 
+  // ── Elapsed time (client tick) ───────────────────
+  const [elapsed, setElapsed] = useState('')
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (isThisProjectTimer && activeTimer?.inicio) {
+      const tick = () => {
+        const secs = Math.floor((Date.now() - new Date(activeTimer.inicio).getTime()) / 1000)
+        const h = Math.floor(secs / 3600)
+        const m = Math.floor((secs % 3600) / 60)
+        const s = secs % 60
+        setElapsed(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`)
+      }
+      tick()
+      intervalRef.current = setInterval(tick, 1000)
+    } else {
+      setElapsed('')
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [isThisProjectTimer, activeTimer?.inicio])
+
+  const handleStartTimer = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!p.proyecto_id) return
+    startTransition(async () => {
+      const res = await startTimer(p.proyecto_id!)
+      if (res.success && res.timer) {
+        onTimerChange(res.timer)
+        toast.success(`Timer iniciado: ${p.nombre}`)
+      } else {
+        toast.error(res.error ?? 'Error al iniciar timer')
+      }
+    })
+  }
+
+  const handleStopTimer = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    startTransition(async () => {
+      const res = await stopTimer()
+      if (res.success) {
+        onTimerChange(null)
+        if (res.descartado) {
+          toast.info('Timer descartado (menos de 1 minuto)')
+        } else {
+          toast.success(`${res.horasRegistradas}h registradas`)
+        }
+      } else {
+        toast.error(res.error ?? 'Error al detener timer')
+      }
+    })
+  }
+
   return (
-    <Link
-      href={`/proyectos/${p.proyecto_id}`}
-      className="block rounded-lg border bg-card p-4 shadow-sm transition-shadow hover:shadow-md"
+    <div
+      onClick={() => router.push(`/proyectos/${p.proyecto_id}`)}
+      className="block cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-shadow hover:shadow-md"
     >
-      {/* Row 1: Name + Status + Value */}
+      {/* Row 1: Name + Timer + Status + Value */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold">{p.nombre ?? 'Sin nombre'}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-sm font-semibold">{p.nombre ?? 'Sin nombre'}</h3>
+            {/* Timer button */}
+            {isThisProjectTimer ? (
+              <button
+                onClick={handleStopTimer}
+                disabled={isPending}
+                className="flex shrink-0 items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 disabled:opacity-50 transition-colors"
+              >
+                <Square className="h-3 w-3" />
+                <span className="text-[10px] font-mono font-medium">{elapsed}</span>
+              </button>
+            ) : canTimer ? (
+              <button
+                onClick={handleStartTimer}
+                disabled={isPending}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-green-100 hover:text-green-600 dark:hover:bg-green-900/30 disabled:opacity-50 transition-colors"
+              >
+                <Play className="h-3 w-3" />
+              </button>
+            ) : null}
+          </div>
           {p.empresa_nombre && (
             <p className="mt-0.5 truncate text-xs text-muted-foreground">{p.empresa_nombre}</p>
           )}
@@ -173,6 +277,6 @@ function ProyectoCard({ proyecto: p }: { proyecto: ProyectoFinanciero }) {
           {ganancia >= 0 ? '+' : ''}{formatCOP(ganancia)}
         </span>
       </div>
-    </Link>
+    </div>
   )
 }

@@ -350,8 +350,19 @@ export async function aceptarCotizacion(id: string) {
 
   if (dbError) return { success: false, error: dbError.message }
 
+  // Get oportunidad_id for chaining accept → win → project
+  const { data: cot } = await supabase
+    .from('cotizaciones')
+    .select('oportunidad_id')
+    .eq('id', id)
+    .single()
+
   revalidatePath('/pipeline')
-  return { success: true }
+  return {
+    success: true,
+    shouldWin: true,
+    oportunidadId: cot?.oportunidad_id ?? null,
+  }
 }
 
 export async function rechazarCotizacion(id: string) {
