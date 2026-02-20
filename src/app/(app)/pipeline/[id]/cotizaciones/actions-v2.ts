@@ -298,6 +298,30 @@ export async function enviarCotizacion(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
+  // Get cotización to find oportunidad_id
+  const { data: cot } = await supabase
+    .from('cotizaciones')
+    .select('oportunidad_id')
+    .eq('id', id)
+    .single()
+
+  if (!cot) return { success: false, error: 'Cotización no encontrada' }
+
+  // Check if there's already an "enviada" cotización for this oportunidad
+  const { data: existente } = await supabase
+    .from('cotizaciones')
+    .select('consecutivo')
+    .eq('oportunidad_id', cot.oportunidad_id)
+    .eq('estado', 'enviada')
+    .maybeSingle()
+
+  if (existente) {
+    return {
+      success: false,
+      error: `Ya existe una cotización enviada (${existente.consecutivo ?? 'sin consecutivo'}). Primero acepta o rechaza esa cotización antes de enviar otra.`,
+    }
+  }
+
   const { error: dbError } = await supabase
     .from('cotizaciones')
     .update({
