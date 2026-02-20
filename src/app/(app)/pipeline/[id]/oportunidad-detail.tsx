@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, Building2, User, ChevronRight, Flame, XCircle,
-  Trophy, FileText, Plus, Clock, ShieldAlert
+  Trophy, FileText, Plus, Clock, ShieldAlert, Copy,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   moveOportunidad, perderOportunidad, ganarOportunidad,
 } from '../actions-v2'
+import { duplicarCotizacion } from './cotizaciones/actions-v2'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, RAZONES_PERDIDA, ESTADO_COTIZACION_CONFIG } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { EtapaPipeline, EstadoCotizacion } from '@/lib/pipeline/constants'
@@ -236,11 +237,12 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
           <div className="space-y-2">
             {cotizaciones.map(c => {
               const estadoConfig = ESTADO_COTIZACION_CONFIG[c.estado as EstadoCotizacion]
+              const canDuplicate = c.estado !== 'borrador'
               return (
-                <Link
+                <div
                   key={c.id}
-                  href={`/pipeline/${oportunidad.id}/cotizacion/${c.id}`}
-                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent/50"
+                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent/50 cursor-pointer"
+                  onClick={() => router.push(`/pipeline/${oportunidad.id}/cotizacion/${c.id}`)}
                 >
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4 text-blue-500 shrink-0" />
@@ -260,8 +262,29 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
                         {estadoConfig.label}
                       </span>
                     )}
+                    {canDuplicate && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          startTransition(async () => {
+                            const res = await duplicarCotizacion(c.id)
+                            if (res.success) {
+                              toast.success('Cotización duplicada (borrador)')
+                              router.refresh()
+                            } else {
+                              toast.error(res.error ?? 'Error al duplicar')
+                            }
+                          })
+                        }}
+                        disabled={isPending}
+                        className="rounded-md p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                        title="Duplicar cotización"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
-                </Link>
+                </div>
               )
             })}
           </div>
