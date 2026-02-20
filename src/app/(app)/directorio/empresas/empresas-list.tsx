@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Search, Trash2, Pencil, ShieldCheck, ShieldAlert, Plus } from 'lucide-react'
+import { Building2, Search, Trash2, Pencil, ShieldCheck, ShieldAlert, Flame } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { formatNit } from '@/lib/contacts/constants'
@@ -124,8 +124,12 @@ export default function EmpresasList({ empresas }: Props) {
                   text: completo ? 'Perfil fiscal completo' : 'Perfil fiscal incompleto',
                 },
               ]}
+              quickAction={{
+                tooltip: 'Crear oportunidad',
+                icon: <Flame className="h-4 w-4" />,
+                onClick: () => router.push(`/nuevo/oportunidad?empresa_id=${e.id}&empresa_nombre=${encodeURIComponent(e.nombre)}`),
+              }}
               actions={[
-                { label: 'Crear oportunidad', icon: <Plus className="h-3 w-3" />, onClick: () => router.push(`/nuevo/oportunidad?empresa_id=${e.id}&empresa_nombre=${encodeURIComponent(e.nombre)}`) },
                 { label: 'Editar', icon: <Pencil className="h-3 w-3" />, onClick: () => router.push(`/directorio/empresa/${e.id}`) },
                 { label: 'Eliminar', icon: <Trash2 className="h-3 w-3" />, variant: 'destructive', onClick: () => handleDelete(e.id, e.nombre) },
               ]}

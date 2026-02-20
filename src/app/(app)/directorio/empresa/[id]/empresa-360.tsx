@@ -45,18 +45,29 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
     nit: empresa.nit ?? '',
     tipo_persona: empresa.tipo_persona ?? '',
     regimen_tributario: empresa.regimen_tributario ?? '',
-    gran_contribuyente: empresa.gran_contribuyente?.toString() ?? '',
-    agente_retenedor: empresa.agente_retenedor?.toString() ?? '',
-    contacto_nombre: empresa.contacto_nombre ?? '',
-    contacto_email: empresa.contacto_email ?? '',
+    gran_contribuyente: empresa.gran_contribuyente ?? false,
+    agente_retenedor: empresa.agente_retenedor ?? false,
   })
 
+  // Track if the boolean fields have been explicitly set (not null in DB)
+  const granContribuyenteSet = empresa.gran_contribuyente !== null
+  const agenteRetenedorSet = empresa.agente_retenedor !== null
+
+  const [granTouched, setGranTouched] = useState(granContribuyenteSet)
+  const [agenteTouched, setAgenteTouched] = useState(agenteRetenedorSet)
+
   const perfilCompleto = !!(form.nit && form.tipo_persona && form.regimen_tributario &&
-    form.gran_contribuyente !== '' && form.agente_retenedor !== '')
+    granTouched && agenteTouched)
 
   const handleSave = () => {
     const fd = new FormData()
-    Object.entries(form).forEach(([k, v]) => fd.set(k, v))
+    fd.set('nombre', form.nombre)
+    fd.set('sector', form.sector)
+    fd.set('nit', form.nit)
+    fd.set('tipo_persona', form.tipo_persona)
+    fd.set('regimen_tributario', form.regimen_tributario)
+    if (granTouched) fd.set('gran_contribuyente', form.gran_contribuyente.toString())
+    if (agenteTouched) fd.set('agente_retenedor', form.agente_retenedor.toString())
     startTransition(async () => {
       const res = await updateEmpresa(empresa.id, fd)
       if (res.success) {
@@ -128,25 +139,6 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
               ))}
             </select>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Contacto</label>
-            <input
-              value={form.contacto_nombre}
-              onChange={e => setForm(p => ({ ...p, contacto_nombre: e.target.value }))}
-              placeholder="Nombre del contacto en la empresa"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Email contacto</label>
-            <input
-              type="email"
-              value={form.contacto_email}
-              onChange={e => setForm(p => ({ ...p, contacto_email: e.target.value }))}
-              placeholder="email@empresa.com"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            />
-          </div>
         </div>
       </div>
 
@@ -194,30 +186,30 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
               ))}
             </select>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Gran contribuyente</label>
-            <select
-              value={form.gran_contribuyente}
-              onChange={e => setForm(p => ({ ...p, gran_contribuyente: e.target.value }))}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            >
-              <option value="">Seleccionar</option>
-              <option value="true">Si</option>
-              <option value="false">No</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Agente retenedor</label>
-            <select
-              value={form.agente_retenedor}
-              onChange={e => setForm(p => ({ ...p, agente_retenedor: e.target.value }))}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            >
-              <option value="">Seleccionar</option>
-              <option value="true">Si</option>
-              <option value="false">No</option>
-            </select>
-          </div>
+          <label className="flex items-center gap-3 rounded-md border bg-background px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors">
+            <input
+              type="checkbox"
+              checked={form.gran_contribuyente}
+              onChange={e => { setForm(p => ({ ...p, gran_contribuyente: e.target.checked })); setGranTouched(true) }}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            <div>
+              <span className="text-sm font-medium">Gran contribuyente</span>
+              {!granTouched && <span className="ml-2 text-[10px] text-amber-600">Sin definir</span>}
+            </div>
+          </label>
+          <label className="flex items-center gap-3 rounded-md border bg-background px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors">
+            <input
+              type="checkbox"
+              checked={form.agente_retenedor}
+              onChange={e => { setForm(p => ({ ...p, agente_retenedor: e.target.checked })); setAgenteTouched(true) }}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            <div>
+              <span className="text-sm font-medium">Agente retenedor</span>
+              {!agenteTouched && <span className="ml-2 text-[10px] text-amber-600">Sin definir</span>}
+            </div>
+          </label>
         </div>
       </div>
 

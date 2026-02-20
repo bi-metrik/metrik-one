@@ -45,6 +45,8 @@ export interface EntityCardProps {
   expandableSections?: ExpandableSection[]
   /** Actions in dropdown menu */
   actions?: CardAction[]
+  /** Quick action icon button shown inline (e.g. + to create oportunidad) */
+  quickAction?: { tooltip: string; onClick: () => void; icon: React.ReactNode }
   /** Primary CTA button */
   primaryAction?: { label: string; onClick: () => void; icon?: React.ReactNode }
   /** Navigate on card click */
@@ -70,6 +72,7 @@ export default function EntityCard({
   showGreenCheck = false,
   expandableSections = [],
   actions = [],
+  quickAction,
   primaryAction,
   href,
   onClick,
@@ -133,6 +136,17 @@ export default function EntityCard({
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${statusColor}`}>
               {statusLabel}
             </span>
+          )}
+
+          {/* Quick action icon */}
+          {quickAction && (
+            <button
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); quickAction.onClick() }}
+              title={quickAction.tooltip}
+              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+            >
+              {quickAction.icon}
+            </button>
           )}
 
           {/* Actions menu */}
