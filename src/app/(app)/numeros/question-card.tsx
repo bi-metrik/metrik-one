@@ -230,34 +230,40 @@ function GaugeBar({ data, empty }: { data: GaugeBarData; empty?: boolean }) {
 // ── Dual Marker Bar (P4: Ventas con PE marker) ───────
 
 function DualMarkerBar({ data, color, empty }: { data: DualMarkerBarData; color?: string; empty?: boolean }) {
-  const maxVal = Math.max(data.target, data.current, 1)
+  const maxVal = Math.max(data.target, data.current, data.marker, 1)
   const pct = (data.current / maxVal) * 100
   const markerPct = (data.marker / maxVal) * 100
 
   return (
     <div>
-      <div className="relative h-2 w-full rounded-full bg-muted overflow-hidden">
+      {/* Bar container — NO overflow-hidden so marker can show */}
+      <div className="relative h-2 w-full rounded-full bg-muted">
+        {/* Fill */}
         {!empty && (
           <div
-            className="h-full rounded-full transition-all duration-500"
+            className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
             style={{
               width: `${Math.min(pct, 100)}%`,
               backgroundColor: color || 'var(--color-primary)',
             }}
           />
         )}
-        {/* PE Marker */}
+        {/* PE Marker — vertical line + triangle */}
         {data.marker > 0 && (
           <div
-            className="absolute top-0 h-full w-0.5 bg-foreground/50"
-            style={{ left: `${Math.min(markerPct, 100)}%` }}
-          />
+            className="absolute -top-0.5 flex flex-col items-center"
+            style={{ left: `${Math.min(markerPct, 100)}%`, transform: 'translateX(-50%)' }}
+          >
+            <div className="h-3 w-[2px] bg-foreground/70 rounded-full" />
+            <div className="text-[8px] leading-none text-foreground/70 mt-px">▲</div>
+          </div>
         )}
       </div>
-      <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+      {/* Labels */}
+      <div className="mt-2.5 flex items-center justify-between text-[10px] text-muted-foreground">
         <span>{formatCOP(data.current)} / {formatCOP(data.target)}</span>
         {data.marker > 0 && (
-          <span className="text-[9px]">▲ {data.markerLabel}</span>
+          <span className="text-[9px] font-medium">{data.markerLabel}</span>
         )}
       </div>
     </div>
