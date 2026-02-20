@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Phone, Mail, Search, Users, Trash2, Pencil } from 'lucide-react'
+import { Phone, Mail, Search, Users, Trash2, Pencil, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO } from '@/lib/pipeline/constants'
@@ -138,6 +138,7 @@ export default function ContactosList({ contactos }: Props) {
             ]}
             timeAgo={timeAgo(c.created_at)}
             actions={[
+              { label: 'Crear oportunidad', icon: <Plus className="h-3 w-3" />, onClick: () => router.push(`/nuevo/oportunidad?contacto_id=${c.id}&contacto_nombre=${encodeURIComponent(c.nombre)}`) },
               { label: 'Editar', icon: <Pencil className="h-3 w-3" />, onClick: () => router.push(`/directorio/contacto/${c.id}`) },
               { label: 'Eliminar', icon: <Trash2 className="h-3 w-3" />, variant: 'destructive', onClick: () => handleDelete(c.id, c.nombre) },
             ]}
