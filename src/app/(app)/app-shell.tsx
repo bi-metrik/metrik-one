@@ -17,7 +17,6 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import FAB from './fab'
-import FloatingTimer from '@/components/timer/floating-timer'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -276,9 +275,6 @@ export default function AppShell({
           <div className="p-6">{children}</div>
         </main>
       </div>
-
-      {/* Floating Timer — visible globally when active */}
-      <FloatingTimer />
 
       {/* FAB — hidden on /numeros (has its own FAB) */}
       {!pathname.startsWith('/numeros') && <FAB role={role} />}
