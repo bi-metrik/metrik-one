@@ -1,42 +1,32 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
-import PipelineBoard from './pipeline-board'
+import { getOportunidades } from './actions-v2'
+import PipelineList from './pipeline-list-v2'
+import Link from 'next/link'
+import { Plus } from 'lucide-react'
 
 export default async function PipelinePage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const oportunidades = await getOportunidades()
 
-  if (!user) redirect('/login')
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold">Pipeline</h1>
+          <p className="text-xs text-muted-foreground">
+            {oportunidades.length} oportunidad{oportunidades.length !== 1 ? 'es' : ''}
+          </p>
+        </div>
+        <Link
+          href="/nuevo/oportunidad"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Nueva oportunidad
+        </Link>
+      </div>
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('workspace_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile) redirect('/onboarding')
-
-  const workspaceId = profile.workspace_id
-
-  // Fetch opportunities
-  const { data: rawOpportunities } = await supabase
-    .from('opportunities')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
-
-  // Fetch clients for this workspace
-  const { data: clients } = await supabase
-    .from('clients')
-    .select('id, name')
-    .eq('workspace_id', workspaceId)
-
-  // Map client names to opportunities
-  const clientMap = new Map((clients || []).map(c => [c.id, c.name]))
-  const opportunities = (rawOpportunities || []).map(opp => ({
-    ...opp,
-    clients: opp.client_id ? { name: clientMap.get(opp.client_id) || '' } : null,
-  }))
-
-  return <PipelineBoard initialOpportunities={opportunities} />
+      {/* List */}
+      <PipelineList oportunidades={oportunidades} />
+    </div>
+  )
 }

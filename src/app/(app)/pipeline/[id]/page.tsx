@@ -1,70 +1,16 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect, notFound } from 'next/navigation'
-import OpportunityDetailClient from './opportunity-detail-client'
+import { getOportunidad } from '../actions-v2'
+import { notFound } from 'next/navigation'
+import OportunidadDetail from './oportunidad-detail'
+import { getCotizaciones } from './cotizaciones/actions-v2'
 
-interface PageProps {
-  params: Promise<{ id: string }>
-}
-
-export default async function OpportunityDetailPage({ params }: PageProps) {
+export default async function OportunidadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('workspace_id, role')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile) redirect('/onboarding')
-
-  // Parallel data fetches
-  const [oppResult, quotesResult, clientsResult] = await Promise.all([
-    supabase
-      .from('opportunities')
-      .select('*')
-      .eq('id', id)
-      .eq('workspace_id', profile.workspace_id)
-      .single(),
-    supabase
-      .from('quotes')
-      .select('*')
-      .eq('opportunity_id', id)
-      .eq('workspace_id', profile.workspace_id)
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('clients')
-      .select('id, name, person_type, tax_regime, gran_contribuyente, agente_retenedor')
-      .eq('workspace_id', profile.workspace_id)
-      .eq('is_active', true)
-      .order('name'),
+  const [oportunidad, cotizaciones] = await Promise.all([
+    getOportunidad(id),
+    getCotizaciones(id),
   ])
 
-  if (!oppResult.data) notFound()
+  if (!oportunidad) notFound()
 
-  // Resolve client data manually
-  const opp = oppResult.data
-  const rawClient = opp.client_id
-    ? (clientsResult.data || []).find(c => c.id === opp.client_id) || null
-    : null
-  const clientData = rawClient
-    ? {
-        ...rawClient,
-        gran_contribuyente: rawClient.gran_contribuyente ?? false,
-        agente_retenedor: rawClient.agente_retenedor ?? false,
-      }
-    : null
-
-  return (
-    <OpportunityDetailClient
-      opportunity={{
-        ...opp,
-        clients: clientData,
-      }}
-      quotes={quotesResult.data || []}
-      clients={(clientsResult.data || []).map(c => ({ id: c.id, name: c.name }))}
-    />
-  )
+  return <OportunidadDetail oportunidad={oportunidad} cotizaciones={cotizaciones} />
 }

@@ -1,39 +1,34 @@
-import { Users } from 'lucide-react'
+import { getContactos } from '../actions'
+import DirectorioTabs from '../directorio-tabs'
+import ContactosList from './contactos-list'
+import Link from 'next/link'
+import { Plus } from 'lucide-react'
 
-export default function ContactosPage() {
+export default async function ContactosPage() {
+  const contactos = await getContactos()
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Directorio</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Gestiona tus contactos y empresas
-        </p>
-      </div>
-
-      <div className="flex items-center gap-2 border-b border-border pb-3">
-        <span className="border-b-2 border-primary px-3 py-1.5 text-sm font-medium text-foreground">
-          Contactos
-        </span>
-        <a href="/directorio/empresas" className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
-          Empresas
-        </a>
-      </div>
-
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16">
-        <Users className="h-12 w-12 text-muted-foreground/50" />
-        <h3 className="mt-4 text-lg font-medium text-foreground">
-          Registra tus contactos para nunca perder un negocio
-        </h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Los contactos que agregues apareceran aqui
-        </p>
-        <a
+    <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold">Directorio</h1>
+          <p className="text-xs text-muted-foreground">Gestiona tus contactos y empresas</p>
+        </div>
+        <Link
           href="/nuevo/contacto"
-          className="mt-4 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
         >
-          + Nuevo contacto
-        </a>
+          <Plus className="h-3.5 w-3.5" />
+          Nuevo contacto
+        </Link>
       </div>
+
+      {/* Tabs */}
+      <DirectorioTabs />
+
+      {/* List */}
+      <ContactosList contactos={contactos} />
     </div>
   )
 }
