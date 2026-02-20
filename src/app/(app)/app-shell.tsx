@@ -5,15 +5,13 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
   BarChart3,
-  Funnel,
+  Flame,
   FolderKanban,
   Settings,
-  LayoutDashboard,
   Menu,
   X,
   LogOut,
   Users,
-  UserPlus,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -30,12 +28,10 @@ interface AppShellProps {
 
 // Sidebar adaptativo por rol
 const ALL_NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin', 'operator', 'read_only'] },
-  { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
-  { href: '/contactos', label: 'Contactos', icon: Users, roles: ['owner', 'admin'] },
-  { href: '/promotores', label: 'Promotores', icon: UserPlus, roles: ['owner', 'admin'] },
-  { href: '/pipeline', label: 'Pipeline', icon: Funnel, roles: ['owner', 'admin'] },
+  { href: '/numeros', label: 'Numeros', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/pipeline', label: 'Pipeline', icon: Flame, roles: ['owner', 'admin'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
+  { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin'] },
   { href: '/config', label: 'Config', icon: Settings, roles: ['owner', 'admin', 'operator'] },
 ]
 
@@ -90,7 +86,7 @@ export default function AppShell({
       >
         {/* Logo */}
         <div className="flex h-14 items-center justify-between px-3">
-          <Link href="/dashboard" className="flex items-center gap-2 overflow-hidden">
+          <Link href="/numeros" className="flex items-center gap-2 overflow-hidden">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-black text-sm" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
               M
             </div>
@@ -189,7 +185,7 @@ export default function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Mobile header */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
-          <Link href="/dashboard" className="flex items-center gap-2">
+          <Link href="/numeros" className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg font-black text-xs" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
               M
             </div>

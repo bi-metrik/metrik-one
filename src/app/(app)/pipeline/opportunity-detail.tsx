@@ -614,7 +614,7 @@ export default function OpportunityDetail({
                             {isDetailed && q.description && (
                               <div className="space-y-0.5 rounded-md border p-2">
                                 <p className="text-[9px] font-medium text-muted-foreground uppercase">Desglose</p>
-                                {q.description.split('\n').map((line, i) => (
+                                {q.description.split('\n').map((line: string, i: number) => (
                                   <p key={i} className="text-[11px]">{line}</p>
                                 ))}
                               </div>

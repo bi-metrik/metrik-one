@@ -58,7 +58,7 @@ export async function middleware(request: NextRequest) {
 
     // Root → dashboard
     if (pathname === '/') {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
+      return NextResponse.redirect(new URL('/numeros', request.url))
     }
 
     return supabaseResponse
@@ -95,9 +95,9 @@ export async function middleware(request: NextRequest) {
 
         if (ws?.slug) {
           if (IS_DEV) {
-            return NextResponse.redirect(new URL('/dashboard', request.url))
+            return NextResponse.redirect(new URL('/numeros', request.url))
           }
-          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/dashboard`)
+          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/numeros`)
         }
       }
 
@@ -125,9 +125,9 @@ export async function middleware(request: NextRequest) {
 
         if (ws?.slug) {
           if (IS_DEV) {
-            return NextResponse.redirect(new URL('/dashboard', request.url))
+            return NextResponse.redirect(new URL('/numeros', request.url))
           }
-          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/dashboard`)
+          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/numeros`)
         }
       }
 
@@ -138,7 +138,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected app routes — redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/pipeline', '/proyectos', '/numeros', '/gastos', '/config', '/story-mode']
+  const protectedPaths = ['/numeros', '/pipeline', '/proyectos', '/directorio', '/nuevo', '/gastos', '/config', '/story-mode']
   if (protectedPaths.some(p => pathname.startsWith(p)) && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', pathname)

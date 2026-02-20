@@ -440,7 +440,7 @@ export default function CotizacionesList({
                         {isDetailed && q.description && (
                           <div className="space-y-1 rounded-md border p-3">
                             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Desglose</p>
-                            {q.description.split('\n').map((line, i) => (
+                            {q.description.split('\n').map((line: string, i: number) => (
                               <p key={i} className="text-xs text-foreground">{line}</p>
                             ))}
                           </div>

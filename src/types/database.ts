@@ -265,6 +265,69 @@ export type Database = {
           },
         ]
       }
+      contactos: {
+        Row: {
+          comision_porcentaje: number | null
+          created_at: string | null
+          email: string | null
+          fuente_adquisicion: string | null
+          fuente_detalle: string | null
+          fuente_promotor_id: string | null
+          fuente_referido_nombre: string | null
+          id: string
+          nombre: string
+          rol: string | null
+          telefono: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          comision_porcentaje?: number | null
+          created_at?: string | null
+          email?: string | null
+          fuente_adquisicion?: string | null
+          fuente_detalle?: string | null
+          fuente_promotor_id?: string | null
+          fuente_referido_nombre?: string | null
+          id?: string
+          nombre: string
+          rol?: string | null
+          telefono?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          comision_porcentaje?: number | null
+          created_at?: string | null
+          email?: string | null
+          fuente_adquisicion?: string | null
+          fuente_detalle?: string | null
+          fuente_promotor_id?: string | null
+          fuente_referido_nombre?: string | null
+          id?: string
+          nombre?: string
+          rol?: string | null
+          telefono?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contactos_fuente_promotor_id_fkey"
+            columns: ["fuente_promotor_id"]
+            isOneToOne: false
+            referencedRelation: "contactos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contactos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           city: string | null
@@ -350,6 +413,147 @@ export type Database = {
           },
           {
             foreignKeyName: "contacts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cotizaciones: {
+        Row: {
+          condiciones_pago: string | null
+          consecutivo: string
+          costo_total: number | null
+          created_at: string | null
+          descripcion: string | null
+          duplicada_de: string | null
+          email_enviado_a: string | null
+          estado: string
+          fecha_envio: string | null
+          fecha_validez: string | null
+          id: string
+          margen_porcentaje: number | null
+          modo: string
+          notas: string | null
+          oportunidad_id: string
+          updated_at: string | null
+          valor_total: number
+          workspace_id: string
+        }
+        Insert: {
+          condiciones_pago?: string | null
+          consecutivo: string
+          costo_total?: number | null
+          created_at?: string | null
+          descripcion?: string | null
+          duplicada_de?: string | null
+          email_enviado_a?: string | null
+          estado?: string
+          fecha_envio?: string | null
+          fecha_validez?: string | null
+          id?: string
+          margen_porcentaje?: number | null
+          modo: string
+          notas?: string | null
+          oportunidad_id: string
+          updated_at?: string | null
+          valor_total?: number
+          workspace_id: string
+        }
+        Update: {
+          condiciones_pago?: string | null
+          consecutivo?: string
+          costo_total?: number | null
+          created_at?: string | null
+          descripcion?: string | null
+          duplicada_de?: string | null
+          email_enviado_a?: string | null
+          estado?: string
+          fecha_envio?: string | null
+          fecha_validez?: string | null
+          id?: string
+          margen_porcentaje?: number | null
+          modo?: string
+          notas?: string | null
+          oportunidad_id?: string
+          updated_at?: string | null
+          valor_total?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cotizaciones_duplicada_de_fkey"
+            columns: ["duplicada_de"]
+            isOneToOne: false
+            referencedRelation: "cotizaciones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cotizaciones_oportunidad_id_fkey"
+            columns: ["oportunidad_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cotizaciones_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      empresas: {
+        Row: {
+          agente_retenedor: boolean | null
+          contacto_email: string | null
+          contacto_nombre: string | null
+          created_at: string | null
+          gran_contribuyente: boolean | null
+          id: string
+          nit: string | null
+          nombre: string
+          regimen_tributario: string | null
+          sector: string | null
+          tipo_persona: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          agente_retenedor?: boolean | null
+          contacto_email?: string | null
+          contacto_nombre?: string | null
+          created_at?: string | null
+          gran_contribuyente?: boolean | null
+          id?: string
+          nit?: string | null
+          nombre: string
+          regimen_tributario?: string | null
+          sector?: string | null
+          tipo_persona?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          agente_retenedor?: boolean | null
+          contacto_email?: string | null
+          contacto_nombre?: string | null
+          created_at?: string | null
+          gran_contribuyente?: boolean | null
+          id?: string
+          nit?: string | null
+          nombre?: string
+          regimen_tributario?: string | null
+          sector?: string | null
+          tipo_persona?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "empresas_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -602,6 +806,73 @@ export type Database = {
           },
         ]
       }
+      gastos: {
+        Row: {
+          canal_registro: string | null
+          categoria: string
+          created_at: string | null
+          deducible: boolean | null
+          descripcion: string | null
+          empresa_id: string | null
+          fecha: string
+          id: string
+          monto: number
+          proyecto_id: string | null
+          soporte_url: string | null
+          workspace_id: string
+        }
+        Insert: {
+          canal_registro?: string | null
+          categoria: string
+          created_at?: string | null
+          deducible?: boolean | null
+          descripcion?: string | null
+          empresa_id?: string | null
+          fecha?: string
+          id?: string
+          monto: number
+          proyecto_id?: string | null
+          soporte_url?: string | null
+          workspace_id: string
+        }
+        Update: {
+          canal_registro?: string | null
+          categoria?: string
+          created_at?: string | null
+          deducible?: boolean | null
+          descripcion?: string | null
+          empresa_id?: string | null
+          fecha?: string
+          id?: string
+          monto?: number
+          proyecto_id?: string | null
+          soporte_url?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gastos_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gastos_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gastos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       health_scores: {
         Row: {
           actions_per_week: number | null
@@ -639,6 +910,54 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "health_scores_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      horas: {
+        Row: {
+          canal_registro: string | null
+          created_at: string | null
+          descripcion: string | null
+          fecha: string
+          horas: number
+          id: string
+          proyecto_id: string
+          workspace_id: string
+        }
+        Insert: {
+          canal_registro?: string | null
+          created_at?: string | null
+          descripcion?: string | null
+          fecha?: string
+          horas: number
+          id?: string
+          proyecto_id: string
+          workspace_id: string
+        }
+        Update: {
+          canal_registro?: string | null
+          created_at?: string | null
+          descripcion?: string | null
+          fecha?: string
+          horas?: number
+          id?: string
+          proyecto_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "horas_proyecto_id_fkey"
+            columns: ["proyecto_id"]
+            isOneToOne: false
+            referencedRelation: "proyectos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "horas_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -712,6 +1031,44 @@ export type Database = {
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      items: {
+        Row: {
+          cotizacion_id: string
+          created_at: string | null
+          id: string
+          nombre: string
+          orden: number
+          servicio_origen_id: string | null
+          subtotal: number | null
+        }
+        Insert: {
+          cotizacion_id: string
+          created_at?: string | null
+          id?: string
+          nombre: string
+          orden?: number
+          servicio_origen_id?: string | null
+          subtotal?: number | null
+        }
+        Update: {
+          cotizacion_id?: string
+          created_at?: string | null
+          id?: string
+          nombre?: string
+          orden?: number
+          servicio_origen_id?: string | null
+          subtotal?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "items_cotizacion_id_fkey"
+            columns: ["cotizacion_id"]
+            isOneToOne: false
+            referencedRelation: "cotizaciones"
             referencedColumns: ["id"]
           },
         ]
@@ -835,6 +1192,79 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      oportunidades: {
+        Row: {
+          contacto_id: string
+          created_at: string | null
+          descripcion: string
+          empresa_id: string
+          etapa: string
+          fecha_cierre_estimada: string | null
+          id: string
+          probabilidad: number
+          razon_perdida: string | null
+          ultima_accion: string | null
+          ultima_accion_fecha: string | null
+          updated_at: string | null
+          valor_estimado: number | null
+          workspace_id: string
+        }
+        Insert: {
+          contacto_id: string
+          created_at?: string | null
+          descripcion: string
+          empresa_id: string
+          etapa?: string
+          fecha_cierre_estimada?: string | null
+          id?: string
+          probabilidad?: number
+          razon_perdida?: string | null
+          ultima_accion?: string | null
+          ultima_accion_fecha?: string | null
+          updated_at?: string | null
+          valor_estimado?: number | null
+          workspace_id: string
+        }
+        Update: {
+          contacto_id?: string
+          created_at?: string | null
+          descripcion?: string
+          empresa_id?: string
+          etapa?: string
+          fecha_cierre_estimada?: string | null
+          id?: string
+          probabilidad?: number
+          razon_perdida?: string | null
+          ultima_accion?: string | null
+          ultima_accion_fecha?: string | null
+          updated_at?: string | null
+          valor_estimado?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oportunidades_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "contactos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "oportunidades_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "oportunidades_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -1209,6 +1639,99 @@ export type Database = {
           },
         ]
       }
+      proyectos: {
+        Row: {
+          avance_porcentaje: number | null
+          contacto_id: string | null
+          cotizacion_id: string | null
+          created_at: string | null
+          empresa_id: string | null
+          estado: string
+          fecha_cierre: string | null
+          fecha_fin_estimada: string | null
+          fecha_inicio: string | null
+          id: string
+          nombre: string
+          notas_cierre: string | null
+          oportunidad_id: string | null
+          presupuesto_total: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          avance_porcentaje?: number | null
+          contacto_id?: string | null
+          cotizacion_id?: string | null
+          created_at?: string | null
+          empresa_id?: string | null
+          estado?: string
+          fecha_cierre?: string | null
+          fecha_fin_estimada?: string | null
+          fecha_inicio?: string | null
+          id?: string
+          nombre: string
+          notas_cierre?: string | null
+          oportunidad_id?: string | null
+          presupuesto_total?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          avance_porcentaje?: number | null
+          contacto_id?: string | null
+          cotizacion_id?: string | null
+          created_at?: string | null
+          empresa_id?: string | null
+          estado?: string
+          fecha_cierre?: string | null
+          fecha_fin_estimada?: string | null
+          fecha_inicio?: string | null
+          id?: string
+          nombre?: string
+          notas_cierre?: string | null
+          oportunidad_id?: string | null
+          presupuesto_total?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proyectos_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "contactos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_cotizacion_id_fkey"
+            columns: ["cotizacion_id"]
+            isOneToOne: false
+            referencedRelation: "cotizaciones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_oportunidad_id_fkey"
+            columns: ["oportunidad_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_items: {
         Row: {
           description: string
@@ -1395,6 +1918,91 @@ export type Database = {
           },
           {
             foreignKeyName: "referrals_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rubros: {
+        Row: {
+          cantidad: number
+          descripcion: string | null
+          id: string
+          item_id: string
+          orden: number
+          tipo: string
+          unidad: string
+          valor_total: number | null
+          valor_unitario: number
+        }
+        Insert: {
+          cantidad?: number
+          descripcion?: string | null
+          id?: string
+          item_id: string
+          orden?: number
+          tipo: string
+          unidad?: string
+          valor_total?: number | null
+          valor_unitario?: number
+        }
+        Update: {
+          cantidad?: number
+          descripcion?: string | null
+          id?: string
+          item_id?: string
+          orden?: number
+          tipo?: string
+          unidad?: string
+          valor_total?: number | null
+          valor_unitario?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rubros_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      servicios: {
+        Row: {
+          activo: boolean | null
+          created_at: string | null
+          id: string
+          nombre: string
+          precio_estandar: number | null
+          rubros_template: Json | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean | null
+          created_at?: string | null
+          id?: string
+          nombre: string
+          precio_estandar?: number | null
+          rubros_template?: Json | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean | null
+          created_at?: string | null
+          id?: string
+          nombre?: string
+          precio_estandar?: number | null
+          rubros_template?: Json | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "servicios_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -1753,7 +2361,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_perfil_fiscal_completo: {
+        Args: { p_empresa_id: string }
+        Returns: boolean
+      }
       current_user_workspace_id: { Args: never; Returns: string }
+      get_next_cotizacion_consecutivo: {
+        Args: { p_workspace_id: string }
+        Returns: string
+      }
       unaccent: { Args: { "": string }; Returns: string }
     }
     Enums: {
@@ -1888,24 +2504,40 @@ export const Constants = {
   },
 } as const
 
-// ── Type aliases ──────────────────────────────────────────
+// ── Type aliases ────────────────────────────────────────────
+type TableRow<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row']
 
-export type Contact = Tables<'contacts'>
-export type Client = Tables<'clients'>
-export type Promoter = Tables<'promoters'>
-export type Profile = Tables<'profiles'>
-export type Workspace = Tables<'workspaces'>
-export type Opportunity = Tables<'opportunities'>
-export type Project = Tables<'projects'>
-export type Quote = Tables<'quotes'>
-export type Invoice = Tables<'invoices'>
-export type BankAccount = Tables<'bank_accounts'>
-export type ExpenseCategory = Tables<'expense_categories'>
-export type Expense = Tables<'expenses'>
-export type FixedExpense = Tables<'fixed_expenses'>
-export type FiscalProfile = Tables<'fiscal_profiles'>
-export type Staff = Tables<'staff'>
-export type MonthlyTarget = Tables<'monthly_targets'>
-export type Note = Tables<'notes'>
-export type TimeEntry = Tables<'time_entries'>
-export type Payment = Tables<'payments'>
+// Legacy tables (kept for config compatibility)
+export type Profile = TableRow<'profiles'>
+export type Workspace = TableRow<'workspaces'>
+export type BankAccount = TableRow<'bank_accounts'>
+export type ExpenseCategory = TableRow<'expense_categories'>
+export type FiscalProfile = TableRow<'fiscal_profiles'>
+export type Staff = TableRow<'staff'>
+export type MonthlyTarget = TableRow<'monthly_targets'>
+
+// CRM v2 tables (new model from spec)
+export type Contacto = TableRow<'contactos'>
+export type Empresa = TableRow<'empresas'>
+export type Oportunidad = TableRow<'oportunidades'>
+export type Cotizacion = TableRow<'cotizaciones'>
+export type Item = TableRow<'items'>
+export type Rubro = TableRow<'rubros'>
+export type Servicio = TableRow<'servicios'>
+export type ProyectoV2 = TableRow<'proyectos'>
+export type GastoV2 = TableRow<'gastos'>
+export type Hora = TableRow<'horas'>
+
+// Legacy v1 tables (still referenced by config modules)
+export type Contact = TableRow<'contacts'>
+export type Client = TableRow<'clients'>
+export type Opportunity = TableRow<'opportunities'>
+export type Project = TableRow<'projects'>
+export type Quote = TableRow<'quotes'>
+export type Invoice = TableRow<'invoices'>
+export type Expense = TableRow<'expenses'>
+export type FixedExpense = TableRow<'fixed_expenses'>
+export type Note = TableRow<'notes'>
+export type TimeEntry = TableRow<'time_entries'>
+export type Promoter = TableRow<'promoters'>
+export type Payment = TableRow<'payments'>
