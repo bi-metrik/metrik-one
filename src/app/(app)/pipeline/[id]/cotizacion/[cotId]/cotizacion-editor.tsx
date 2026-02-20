@@ -5,14 +5,16 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, Send, Copy, Save, Plus, Trash2,
-  ChevronDown, ChevronRight, Lock
+  ChevronDown, ChevronRight, Lock, BookOpen, Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
   addRubro, deleteRubro, recalcularTotales,
+  addItemFromServicio,
 } from '../../cotizaciones/actions-v2'
+import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
@@ -72,6 +74,37 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
   // New item
   const [newItemName, setNewItemName] = useState('')
+
+  // Catalog
+  const [showCatalog, setShowCatalog] = useState(false)
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogItems, setCatalogItems] = useState<{ id: string; nombre: string; precio_estandar: number | null; rubros_template: unknown }[]>([])
+
+  const loadCatalog = async () => {
+    if (catalogItems.length > 0) { setShowCatalog(true); return }
+    setCatalogLoading(true)
+    try {
+      const data = await getServiciosActivos()
+      setCatalogItems(data as { id: string; nombre: string; precio_estandar: number | null; rubros_template: unknown }[])
+      setShowCatalog(true)
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
+
+  const handleAddFromCatalog = (servicioId: string) => {
+    startTransition(async () => {
+      const res = await addItemFromServicio(cotizacion.id, servicioId)
+      if (res.success) {
+        await recalcularTotales(cotizacion.id)
+        setShowCatalog(false)
+        toast.success('Servicio agregado con rubros')
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
 
   // New rubro
   const [addingRubroFor, setAddingRubroFor] = useState<string | null>(null)
@@ -423,24 +456,73 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           ))}
 
-          {/* Add item */}
+          {/* Add item actions */}
           {editable && (
-            <div className="flex gap-2">
-              <input
-                value={newItemName}
-                onChange={e => setNewItemName(e.target.value)}
-                placeholder="Nombre del nuevo item"
-                className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
-                onKeyDown={e => e.key === 'Enter' && handleAddItem()}
-              />
-              <button
-                onClick={handleAddItem}
-                disabled={isPending || !newItemName.trim()}
-                className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Item
-              </button>
+            <div className="space-y-2">
+              {/* Catalog selector */}
+              {showCatalog ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-blue-800">Agregar desde catalogo</span>
+                    <button onClick={() => setShowCatalog(false)} className="text-xs text-blue-600 hover:underline">Cerrar</button>
+                  </div>
+                  {catalogItems.length === 0 ? (
+                    <p className="py-3 text-center text-xs text-muted-foreground">
+                      No tienes servicios en tu catalogo. Crealos en Config → Mis servicios.
+                    </p>
+                  ) : (
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {catalogItems.map(s => {
+                        const tpl = s.rubros_template as { tipo: string; cantidad: number; unidad: string; valor_unitario: number }[] | null
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => handleAddFromCatalog(s.id)}
+                            disabled={isPending}
+                            className="flex w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-medium">{s.nombre}</span>
+                              {tpl && tpl.length > 0 && (
+                                <span className="ml-2 text-[10px] text-muted-foreground">{tpl.length} rubros</span>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-xs font-medium">{formatCOP(s.precio_estandar ?? 0)}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={loadCatalog}
+                  disabled={catalogLoading}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-300 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
+                  Agregar desde catalogo
+                </button>
+              )}
+
+              {/* Manual item */}
+              <div className="flex gap-2">
+                <input
+                  value={newItemName}
+                  onChange={e => setNewItemName(e.target.value)}
+                  placeholder="O escribe el nombre del item..."
+                  className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
+                  onKeyDown={e => e.key === 'Enter' && handleAddItem()}
+                />
+                <button
+                  onClick={handleAddItem}
+                  disabled={isPending || !newItemName.trim()}
+                  className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Item
+                </button>
+              </div>
             </div>
           )}
 

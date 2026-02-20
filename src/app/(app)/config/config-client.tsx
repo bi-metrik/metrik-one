@@ -10,7 +10,8 @@ import TeamSection from './team-section'
 import StaffSection from './staff-section'
 import BankAccountsSection from './bank-accounts-section'
 import MonthlyTargetsSection from './monthly-targets-section'
-import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget } from '@/types/database'
+import ServiciosSection from './servicios-section'
+import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ interface ConfigClientProps {
   staffMembers?: Staff[]
   bankAccounts?: BankAccount[]
   monthlyTargets?: MonthlyTarget[]
+  servicios?: Servicio[]
 }
 
 // ── Component ──────────────────────────────────────────
@@ -49,6 +51,7 @@ export default function ConfigClient({
   staffMembers = [],
   bankAccounts = [],
   monthlyTargets = [],
+  servicios = [],
 }: ConfigClientProps) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -448,6 +451,13 @@ export default function ConfigClient({
             initialData={monthlyTargets}
             initialYear={new Date().getFullYear()}
           />
+        </div>
+      )}
+
+      {/* ── Mis Servicios Section ── */}
+      {activeSection === 'mis-servicios' && (
+        <div className="space-y-4 rounded-xl border bg-card p-6">
+          <ServiciosSection initialData={servicios} />
         </div>
       )}
     </div>

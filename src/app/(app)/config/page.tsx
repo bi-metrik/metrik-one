@@ -19,7 +19,7 @@ export default async function ConfigPage() {
   const workspaceId = profile.workspace_id
 
   // Parallel fetches
-  const [fixedResult, categoriesResult, fiscalResult, teamCountResult, staffResult, bankAccountsResult, monthlyTargetsResult] = await Promise.all([
+  const [fixedResult, categoriesResult, fiscalResult, teamCountResult, staffResult, bankAccountsResult, monthlyTargetsResult, serviciosResult] = await Promise.all([
     supabase
       .from('fixed_expenses')
       .select('*')
@@ -67,6 +67,13 @@ export default async function ConfigPage() {
       .eq('workspace_id', workspaceId)
       .eq('year', new Date().getFullYear())
       .order('month'),
+
+    // Servicios (catalogo)
+    supabase
+      .from('servicios')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('nombre'),
   ])
 
   const fixedExpenses = fixedResult.data || []
@@ -76,6 +83,7 @@ export default async function ConfigPage() {
   const staffMembers = staffResult.data || []
   const bankAccounts = bankAccountsResult.data || []
   const monthlyTargets = monthlyTargetsResult.data || []
+  const servicios = serviciosResult.data || []
 
   // Build category map for fixed expenses
   const catMap = new Map(categories.map(c => [c.id, c.name]))
@@ -172,6 +180,18 @@ export default async function ConfigPage() {
         ? `${monthlyTargets.length} meses configurados`
         : 'Sin configurar',
     },
+    // Servicios (catalogo)
+    {
+      key: 'mis-servicios',
+      label: 'Mis servicios',
+      description: `${servicios.filter(s => s.activo !== false).length} servicio${servicios.filter(s => s.activo !== false).length !== 1 ? 's' : ''} en el catalogo`,
+      status: servicios.filter(s => s.activo !== false).length >= 1
+        ? 'complete' as const
+        : 'pending' as const,
+      statusLabel: servicios.filter(s => s.activo !== false).length > 0
+        ? `${servicios.filter(s => s.activo !== false).length} activo${servicios.filter(s => s.activo !== false).length !== 1 ? 's' : ''}`
+        : 'Sin configurar',
+    },
   ]
 
   return (
@@ -185,6 +205,7 @@ export default async function ConfigPage() {
       staffMembers={staffMembers}
       bankAccounts={bankAccounts}
       monthlyTargets={monthlyTargets}
+      servicios={servicios}
     />
   )
 }

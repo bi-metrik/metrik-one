@@ -173,6 +173,70 @@ export async function deleteItem(id: string) {
   return { success: true }
 }
 
+// ── Add from servicio catalog (deep copy) ─────────
+
+export async function addItemFromServicio(cotizacionId: string, servicioId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  // Get the servicio template
+  const { data: servicio } = await supabase
+    .from('servicios')
+    .select('nombre, precio_estandar, rubros_template')
+    .eq('id', servicioId)
+    .single()
+
+  if (!servicio) return { success: false, error: 'Servicio no encontrado' }
+
+  // Get max order
+  const { data: existing } = await supabase
+    .from('items')
+    .select('orden')
+    .eq('cotizacion_id', cotizacionId)
+    .order('orden', { ascending: false })
+    .limit(1)
+
+  const nextOrden = (existing?.[0]?.orden ?? 0) + 1
+
+  const rubrosTemplate = servicio.rubros_template as {
+    tipo: string; descripcion?: string; cantidad: number; unidad: string; valor_unitario: number
+  }[] | null
+
+  // Calculate subtotal from rubros or use precio_estandar
+  const subtotal = rubrosTemplate && rubrosTemplate.length > 0
+    ? rubrosTemplate.reduce((sum, r) => sum + (r.cantidad * r.valor_unitario), 0)
+    : (servicio.precio_estandar ?? 0)
+
+  // Create item
+  const { data: newItem, error: itemError } = await supabase
+    .from('items')
+    .insert({
+      cotizacion_id: cotizacionId,
+      nombre: servicio.nombre,
+      subtotal,
+      orden: nextOrden,
+    })
+    .select('id')
+    .single()
+
+  if (itemError) return { success: false, error: itemError.message }
+
+  // Deep copy rubros from template
+  if (rubrosTemplate && rubrosTemplate.length > 0 && newItem) {
+    const rubrosToInsert = rubrosTemplate.map(r => ({
+      item_id: newItem.id,
+      tipo: r.tipo,
+      descripcion: r.descripcion || null,
+      cantidad: r.cantidad,
+      unidad: r.unidad,
+      valor_unitario: r.valor_unitario,
+    }))
+    await supabase.from('rubros').insert(rubrosToInsert)
+  }
+
+  return { success: true, id: newItem?.id }
+}
+
 // ── Rubros CRUD ────────────────────────────────
 
 export async function addRubro(itemId: string, rubro: {
