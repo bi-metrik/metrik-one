@@ -44,6 +44,7 @@ export async function getServiciosActivos() {
 export async function createServicio(input: {
   nombre: string
   precio_estandar: number
+  costo_estimado?: number
   rubros_template?: RubroTemplate[]
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -57,6 +58,7 @@ export async function createServicio(input: {
       workspace_id: workspaceId,
       nombre: input.nombre.trim(),
       precio_estandar: input.precio_estandar,
+      costo_estimado: input.costo_estimado ?? 0,
       rubros_template: (input.rubros_template ?? null) as unknown as Json,
       activo: true,
     })
@@ -66,12 +68,14 @@ export async function createServicio(input: {
   if (dbError) return { success: false, error: dbError.message }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true, id: data.id }
 }
 
 export async function updateServicio(id: string, input: {
   nombre?: string
   precio_estandar?: number
+  costo_estimado?: number
   rubros_template?: RubroTemplate[] | null
   activo?: boolean
 }) {
@@ -81,6 +85,7 @@ export async function updateServicio(id: string, input: {
   const updates: Record<string, unknown> = {}
   if (input.nombre !== undefined) updates.nombre = input.nombre.trim()
   if (input.precio_estandar !== undefined) updates.precio_estandar = input.precio_estandar
+  if (input.costo_estimado !== undefined) updates.costo_estimado = input.costo_estimado
   if (input.rubros_template !== undefined) updates.rubros_template = input.rubros_template
   if (input.activo !== undefined) updates.activo = input.activo
 
@@ -92,6 +97,7 @@ export async function updateServicio(id: string, input: {
   if (dbError) return { success: false, error: dbError.message }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 
@@ -107,6 +113,7 @@ export async function deleteServicio(id: string) {
   if (dbError) return { success: false, error: dbError.message }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 

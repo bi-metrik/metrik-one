@@ -1,21 +1,19 @@
 'use client'
 
-import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
   BarChart3,
   Flame,
   FolderKanban,
-  Settings,
-  Menu,
-  X,
+  Briefcase,
   LogOut,
   Users,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { useState } from 'react'
 import FAB from './fab'
 
 interface AppShellProps {
@@ -32,7 +30,7 @@ const ALL_NAV_ITEMS = [
   { href: '/pipeline', label: 'Pipeline', icon: Flame, roles: ['owner', 'admin'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin'] },
-  { href: '/config', label: 'Config', icon: Settings, roles: ['owner', 'admin', 'operator'] },
+  { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'operator'] },
 ]
 
 function getNavItemsForRole(role: string) {
@@ -40,7 +38,7 @@ function getNavItemsForRole(role: string) {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: 'Dueño',
+  owner: 'Dueno',
   admin: 'Admin',
   operator: 'Operador',
   read_only: 'Lectura',
@@ -54,7 +52,6 @@ export default function AppShell({
   role,
 }: AppShellProps) {
   const pathname = usePathname()
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
 
   const handleSignOut = async () => {
@@ -92,7 +89,7 @@ export default function AppShell({
             </div>
             {sidebarExpanded && (
               <span className="text-sm font-semibold tracking-tight whitespace-nowrap" style={{ color: 'var(--sidebar-foreground)' }}>
-                MéTRIK ONE
+                MeTRIK ONE
               </span>
             )}
           </Link>
@@ -162,7 +159,7 @@ export default function AppShell({
                 onClick={handleSignOut}
                 className="rounded-md p-1 transition-colors hover:opacity-80"
                 style={{ color: 'var(--sidebar-muted)' }}
-                title="Cerrar sesión"
+                title="Cerrar sesion"
               >
                 <LogOut className="h-3.5 w-3.5" />
               </button>
@@ -173,7 +170,7 @@ export default function AppShell({
               onClick={handleSignOut}
               className="flex w-full justify-center rounded-md p-1.5 mt-1 transition-colors hover:opacity-80"
               style={{ color: 'var(--sidebar-muted)' }}
-              title="Cerrar sesión"
+              title="Cerrar sesion"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>
@@ -183,97 +180,59 @@ export default function AppShell({
 
       {/* ── Main Area ── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile header */}
+        {/* Mobile header — simplified: logo + avatar/logout */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
           <Link href="/numeros" className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg font-black text-xs" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
               M
             </div>
-            <span className="text-sm font-semibold">MéTRIK ONE</span>
+            <span className="text-sm font-semibold">MeTRIK ONE</span>
           </Link>
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="rounded-md p-2 transition-colors hover:opacity-80"
-            style={{ color: 'var(--sidebar-muted)' }}
-          >
-            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
-        </header>
-
-        {/* Mobile menu overlay */}
-        {mobileMenuOpen && (
-          <div className="fixed inset-0 z-50 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
-            <div className="flex h-14 items-center justify-between px-4" style={{ borderBottom: '1px solid var(--sidebar-border)' }}>
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg font-black text-xs" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
-                  M
-                </div>
-                <span className="text-sm font-semibold">MéTRIK ONE</span>
-              </div>
-              <button
-                onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md p-2 transition-colors hover:opacity-80"
-                style={{ color: 'var(--sidebar-muted)' }}
-              >
-                <X className="h-5 w-5" />
-              </button>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold"
+              style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}
+            >
+              {initials}
             </div>
-
-            <div className="p-4">
-              <div className="mb-4 rounded-lg p-3" style={{ backgroundColor: 'var(--sidebar-accent)' }}>
-                <p className="text-sm font-medium">{workspaceName}</p>
-                <p className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>{workspaceSlug}.metrikone.co</p>
-              </div>
-
-              <nav className="space-y-1">
-                {navItems.map((item) => {
-                  const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
-                  const Icon = item.icon
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors"
-                      style={{
-                        backgroundColor: isActive ? 'var(--sidebar-accent)' : 'transparent',
-                        color: isActive ? 'var(--sidebar-foreground)' : 'var(--sidebar-muted)',
-                      }}
-                    >
-                      <Icon className="h-5 w-5" />
-                      {item.label}
-                    </Link>
-                  )
-                })}
-              </nav>
-
-              <div className="mt-6 pt-4" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
-                <div className="flex items-center gap-3 px-3 py-2">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
-                    {initials}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{fullName}</p>
-                    <p className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>{ROLE_LABELS[role] || role}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleSignOut}
-                  className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors"
-                  style={{ color: 'oklch(0.7 0.15 25)' }}
-                >
-                  <LogOut className="h-5 w-5" />
-                  Cerrar sesión
-                </button>
-              </div>
-            </div>
+            <button
+              onClick={handleSignOut}
+              className="rounded-md p-1.5 transition-colors hover:opacity-80"
+              style={{ color: 'var(--sidebar-muted)' }}
+              title="Cerrar sesion"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
-        )}
+        </header>
 
         {/* Main content */}
         <main className="flex-1 overflow-auto min-h-0 bg-background">
-          <div className="p-6">{children}</div>
+          <div className="p-6 pb-24 md:pb-6">{children}</div>
         </main>
+
+        {/* ── Mobile Bottom Tab Bar ── */}
+        <nav
+          className="flex md:hidden h-14 items-center justify-around border-t border-border bg-background shrink-0"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          {navItems.map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex flex-col items-center gap-0.5 px-1 py-1 text-[10px] font-medium transition-colors ${
+                  isActive ? 'text-primary' : 'text-muted-foreground'
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="truncate max-w-[60px]">{item.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
       </div>
 
       {/* FAB — hidden on /numeros (has its own FAB) */}

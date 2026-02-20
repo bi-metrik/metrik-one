@@ -212,6 +212,8 @@ interface CreateFixedExpenseInput {
   description: string
   monthlyAmount: number
   categoryId?: string
+  diaPago?: number
+  deducible?: boolean
 }
 
 export async function createFixedExpense(input: CreateFixedExpenseInput) {
@@ -235,11 +237,14 @@ export async function createFixedExpense(input: CreateFixedExpenseInput) {
         description: input.description.trim(),
         monthly_amount: input.monthlyAmount,
         category_id: input.categoryId || null,
+        dia_pago: input.diaPago || null,
+        deducible: input.deducible ?? false,
       })
 
     if (error) return { success: false, error: `Error: ${error.message}` }
 
     revalidatePath('/config')
+    revalidatePath('/mi-negocio')
     revalidatePath('/numeros')
 
     return { success: true }
@@ -271,6 +276,7 @@ export async function deleteFixedExpense(id: string) {
   if (error) return { success: false, error: error.message }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   revalidatePath('/numeros')
 
   return { success: true }
@@ -298,6 +304,7 @@ export async function toggleFixedExpense(id: string, isActive: boolean) {
   if (error) return { success: false, error: error.message }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   revalidatePath('/numeros')
 
   return { success: true }

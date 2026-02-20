@@ -113,6 +113,8 @@ export default function ConfigClient({
         is_active: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        deducible: false,
+        dia_pago: null,
         categoryName: newCatId
           ? categories.find(c => c.id === newCatId)?.name || null
           : null,

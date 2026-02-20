@@ -921,6 +921,8 @@ export type Database = {
         Row: {
           ciiu: string | null
           created_at: string | null
+          direccion_fiscal: string | null
+          email_facturacion: string | null
           ica_city: string | null
           ica_rate: number | null
           id: string
@@ -928,8 +930,10 @@ export type Database = {
           is_declarante: boolean | null
           is_estimated: boolean | null
           iva_responsible: boolean | null
+          nit: string | null
           nudge_count: number | null
           person_type: string | null
+          razon_social: string | null
           self_withholder: boolean | null
           tax_regime: string | null
           updated_at: string | null
@@ -938,6 +942,8 @@ export type Database = {
         Insert: {
           ciiu?: string | null
           created_at?: string | null
+          direccion_fiscal?: string | null
+          email_facturacion?: string | null
           ica_city?: string | null
           ica_rate?: number | null
           id?: string
@@ -945,8 +951,10 @@ export type Database = {
           is_declarante?: boolean | null
           is_estimated?: boolean | null
           iva_responsible?: boolean | null
+          nit?: string | null
           nudge_count?: number | null
           person_type?: string | null
+          razon_social?: string | null
           self_withholder?: boolean | null
           tax_regime?: string | null
           updated_at?: string | null
@@ -955,6 +963,8 @@ export type Database = {
         Update: {
           ciiu?: string | null
           created_at?: string | null
+          direccion_fiscal?: string | null
+          email_facturacion?: string | null
           ica_city?: string | null
           ica_rate?: number | null
           id?: string
@@ -962,8 +972,10 @@ export type Database = {
           is_declarante?: boolean | null
           is_estimated?: boolean | null
           iva_responsible?: boolean | null
+          nit?: string | null
           nudge_count?: number | null
           person_type?: string | null
+          razon_social?: string | null
           self_withholder?: boolean | null
           tax_regime?: string | null
           updated_at?: string | null
@@ -983,7 +995,9 @@ export type Database = {
         Row: {
           category_id: string | null
           created_at: string | null
+          deducible: boolean | null
           description: string
+          dia_pago: number | null
           id: string
           is_active: boolean | null
           monthly_amount: number
@@ -993,7 +1007,9 @@ export type Database = {
         Insert: {
           category_id?: string | null
           created_at?: string | null
+          deducible?: boolean | null
           description: string
+          dia_pago?: number | null
           id?: string
           is_active?: boolean | null
           monthly_amount: number
@@ -1003,7 +1019,9 @@ export type Database = {
         Update: {
           category_id?: string | null
           created_at?: string | null
+          deducible?: boolean | null
           description?: string
+          dia_pago?: number | null
           id?: string
           is_active?: boolean | null
           monthly_amount?: number
@@ -2517,6 +2535,7 @@ export type Database = {
       servicios: {
         Row: {
           activo: boolean | null
+          costo_estimado: number | null
           created_at: string | null
           id: string
           nombre: string
@@ -2527,6 +2546,7 @@ export type Database = {
         }
         Insert: {
           activo?: boolean | null
+          costo_estimado?: number | null
           created_at?: string | null
           id?: string
           nombre: string
@@ -2537,6 +2557,7 @@ export type Database = {
         }
         Update: {
           activo?: boolean | null
+          costo_estimado?: number | null
           created_at?: string | null
           id?: string
           nombre?: string
@@ -2568,6 +2589,8 @@ export type Database = {
           phone_whatsapp: string | null
           position: string | null
           salary: number | null
+          tipo_acceso: string | null
+          tipo_vinculo: string | null
           updated_at: string | null
           workspace_id: string
         }
@@ -2583,6 +2606,8 @@ export type Database = {
           phone_whatsapp?: string | null
           position?: string | null
           salary?: number | null
+          tipo_acceso?: string | null
+          tipo_vinculo?: string | null
           updated_at?: string | null
           workspace_id: string
         }
@@ -2598,6 +2623,8 @@ export type Database = {
           phone_whatsapp?: string | null
           position?: string | null
           salary?: number | null
+          tipo_acceso?: string | null
+          tipo_vinculo?: string | null
           updated_at?: string | null
           workspace_id?: string
         }
@@ -2957,8 +2984,12 @@ export type Database = {
       }
       workspaces: {
         Row: {
+          color_primario: string | null
+          color_secundario: string | null
           created_at: string | null
+          equipo_declarado: number | null
           id: string
+          logo_url: string | null
           name: string
           onboarding_completed: boolean | null
           profession: string | null
@@ -2971,8 +3002,12 @@ export type Database = {
           years_independent: number | null
         }
         Insert: {
+          color_primario?: string | null
+          color_secundario?: string | null
           created_at?: string | null
+          equipo_declarado?: number | null
           id?: string
+          logo_url?: string | null
           name: string
           onboarding_completed?: boolean | null
           profession?: string | null
@@ -2985,8 +3020,12 @@ export type Database = {
           years_independent?: number | null
         }
         Update: {
+          color_primario?: string | null
+          color_secundario?: string | null
           created_at?: string | null
+          equipo_declarado?: number | null
           id?: string
+          logo_url?: string | null
           name?: string
           onboarding_completed?: boolean | null
           profession?: string | null

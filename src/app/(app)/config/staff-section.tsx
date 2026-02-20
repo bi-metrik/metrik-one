@@ -13,9 +13,15 @@ interface StaffSectionProps {
 
 const CONTRACT_TYPES = [
   { value: 'fijo', label: 'Contrato fijo' },
-  { value: 'prestacion', label: 'Prestación de servicios' },
+  { value: 'prestacion', label: 'Prestacion de servicios' },
   { value: 'obra', label: 'Obra labor' },
   { value: 'otro', label: 'Otro' },
+]
+
+const TIPO_VINCULO = [
+  { value: 'empleado', label: 'Empleado' },
+  { value: 'contratista', label: 'Contratista' },
+  { value: 'freelance', label: 'Freelance' },
 ]
 
 const fmt = (v: number) =>
@@ -34,10 +40,12 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     contract_type: 'fijo',
     salary: 0,
     phone_whatsapp: '',
+    horas_disponibles_mes: 160,
+    tipo_vinculo: '',
   })
 
   const resetForm = () => {
-    setForm({ full_name: '', position: '', department: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '' })
+    setForm({ full_name: '', position: '', department: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '' })
     setShowForm(false)
     setEditingId(null)
   }
@@ -66,6 +74,8 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
       contract_type: form.contract_type,
       salary: form.salary,
       phone_whatsapp: form.phone_whatsapp || null,
+      horas_disponibles_mes: form.horas_disponibles_mes,
+      tipo_vinculo: form.tipo_vinculo || null,
     })
     if (res.success) {
       toast.success('Personal actualizado')
@@ -93,9 +103,11 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
       full_name: s.full_name,
       position: s.position || '',
       department: s.department || '',
-      contract_type: s.contract_type ?? 'Prestación de servicios',
+      contract_type: s.contract_type ?? 'fijo',
       salary: s.salary ?? 0,
       phone_whatsapp: s.phone_whatsapp || '',
+      horas_disponibles_mes: s.horas_disponibles_mes ?? 160,
+      tipo_vinculo: s.tipo_vinculo || '',
     })
     setEditingId(s.id)
     setShowForm(true)
@@ -188,7 +200,38 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                 placeholder="+57 300 123 4567"
               />
             </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Horas disponibles/mes</label>
+              <input
+                type="number"
+                value={form.horas_disponibles_mes || ''}
+                onChange={e => setForm({ ...form, horas_disponibles_mes: Number(e.target.value) || 160 })}
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                placeholder="160"
+                min={1}
+                max={744}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Tipo vinculo</label>
+              <select
+                value={form.tipo_vinculo}
+                onChange={e => setForm({ ...form, tipo_vinculo: e.target.value })}
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">Sin especificar</option>
+                {TIPO_VINCULO.map(tv => (
+                  <option key={tv.value} value={tv.value}>{tv.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
+          {/* Costo/hora calculado */}
+          {form.salary > 0 && form.horas_disponibles_mes > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Costo/hora: <span className="font-medium text-primary">{fmt(Math.round(form.salary / form.horas_disponibles_mes))}</span>
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <button
               onClick={resetForm}
@@ -240,6 +283,11 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                 <p className="text-[10px] text-muted-foreground">
                   {CONTRACT_TYPES.find(ct => ct.value === s.contract_type)?.label || s.contract_type}
                 </p>
+                {(s.salary ?? 0) > 0 && (s.horas_disponibles_mes ?? 160) > 0 && (
+                  <p className="text-[10px] text-primary">
+                    {fmt(Math.round((s.salary ?? 0) / (s.horas_disponibles_mes ?? 160)))}/h
+                  </p>
+                )}
               </div>
               <div className="flex gap-1">
                 <button onClick={() => startEdit(s)} className="rounded p-1 hover:bg-accent">

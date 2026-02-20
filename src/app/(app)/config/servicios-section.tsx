@@ -30,6 +30,7 @@ export default function ServiciosSection({ initialData }: Props) {
   // New servicio form
   const [nombre, setNombre] = useState('')
   const [precio, setPrecio] = useState('')
+  const [costoEstimado, setCostoEstimado] = useState('')
   const [rubros, setRubros] = useState<RubroTemplate[]>([])
   const [showRubroForm, setShowRubroForm] = useState(false)
   const [newRubro, setNewRubro] = useState<RubroTemplate>({
@@ -43,6 +44,7 @@ export default function ServiciosSection({ initialData }: Props) {
   const resetForm = () => {
     setNombre('')
     setPrecio('')
+    setCostoEstimado('')
     setRubros([])
     setShowRubroForm(false)
     setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: 1, unidad: 'horas', valor_unitario: 0 })
@@ -75,9 +77,11 @@ export default function ServiciosSection({ initialData }: Props) {
     if (precioVal <= 0) { toast.error('Precio debe ser mayor a 0'); return }
 
     startTransition(async () => {
+      const costoVal = Number(costoEstimado) || 0
       const res = await createServicio({
         nombre: nombre.trim(),
         precio_estandar: precioVal,
+        costo_estimado: costoVal,
         rubros_template: rubros.length > 0 ? rubros : undefined,
       })
       if (res.success) {
@@ -96,9 +100,11 @@ export default function ServiciosSection({ initialData }: Props) {
     if (precioVal <= 0) { toast.error('Precio debe ser mayor a 0'); return }
 
     startTransition(async () => {
+      const costoVal = Number(costoEstimado) || 0
       const res = await updateServicio(id, {
         nombre: nombre.trim(),
         precio_estandar: precioVal,
+        costo_estimado: costoVal,
         rubros_template: rubros.length > 0 ? rubros : null,
       })
       if (res.success) {
@@ -140,6 +146,7 @@ export default function ServiciosSection({ initialData }: Props) {
     setEditingId(s.id)
     setNombre(s.nombre)
     setPrecio(s.precio_estandar?.toString() ?? '')
+    setCostoEstimado(s.costo_estimado?.toString() ?? '')
     const tpl = s.rubros_template as RubroTemplate[] | null
     setRubros(tpl ?? [])
     setShowAddForm(true)
@@ -198,6 +205,25 @@ export default function ServiciosSection({ initialData }: Props) {
                 </div>
               </div>
             )}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Costo estimado</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                <input
+                  type="number"
+                  value={costoEstimado}
+                  onChange={e => setCostoEstimado(e.target.value)}
+                  placeholder="500000"
+                  min="0"
+                  className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
+                />
+              </div>
+              {Number(costoEstimado) > 0 && (Number(precio) > 0 || calcPrecioFromRubros() > 0) && (
+                <p className="mt-1 text-xs text-green-600">
+                  Margen: {(((rubros.length > 0 ? calcPrecioFromRubros() : Number(precio)) - Number(costoEstimado)) / (rubros.length > 0 ? calcPrecioFromRubros() : Number(precio)) * 100).toFixed(1)}%
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Rubros template */}
@@ -354,8 +380,15 @@ export default function ServiciosSection({ initialData }: Props) {
                     </div>
                   </button>
 
-                  {/* Price */}
-                  <span className="shrink-0 text-sm font-medium">{formatCOP(s.precio_estandar ?? 0)}</span>
+                  {/* Price + Margin */}
+                  <div className="shrink-0 text-right">
+                    <span className="text-sm font-medium">{formatCOP(s.precio_estandar ?? 0)}</span>
+                    {(s.costo_estimado ?? 0) > 0 && (s.precio_estandar ?? 0) > 0 && (
+                      <p className="text-[10px] text-green-600">
+                        {(((s.precio_estandar ?? 0) - (s.costo_estimado ?? 0)) / (s.precio_estandar ?? 0) * 100).toFixed(1)}% margen
+                      </p>
+                    )}
+                  </div>
 
                   {/* Actions */}
                   <div className="flex shrink-0 items-center gap-1">

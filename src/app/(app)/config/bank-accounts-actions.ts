@@ -63,6 +63,7 @@ export async function createBankAccount(formData: {
 
   if (error) return { error: error.message }
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 
@@ -108,6 +109,7 @@ export async function updateBankAccount(
 
   if (error) return { error: error.message }
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 
@@ -135,6 +137,7 @@ export async function deleteBankAccount(id: string) {
 
   if (error) return { error: error.message }
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 
@@ -165,6 +168,7 @@ export async function recordBalance(formData: {
 
   if (error) return { error: error.message }
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 

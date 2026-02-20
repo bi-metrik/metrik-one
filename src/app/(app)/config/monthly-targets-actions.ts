@@ -78,6 +78,7 @@ export async function upsertMonthlyTarget(formData: {
   }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 
@@ -130,5 +131,6 @@ export async function bulkUpsertMonthlyTargets(
   }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }

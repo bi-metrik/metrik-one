@@ -86,6 +86,7 @@ export async function saveFiscalProfile(wizardData: FiscalWizardData) {
   }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   revalidatePath('/numeros')
   revalidatePath('/pipeline')
 
@@ -123,6 +124,7 @@ export async function skipFiscalSetup() {
   }
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true as const, nudgeCount: newNudgeCount }
 }
 
@@ -145,5 +147,6 @@ export async function incrementNudge() {
     .eq('workspace_id', workspaceId)
 
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true as const, nudgeCount: newCount }
 }

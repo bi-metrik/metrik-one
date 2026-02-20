@@ -31,6 +31,8 @@ export async function createStaffMember(formData: {
   contract_type?: string
   salary?: number
   phone_whatsapp?: string
+  horas_disponibles_mes?: number
+  tipo_vinculo?: string
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -56,10 +58,13 @@ export async function createStaffMember(formData: {
     contract_type: formData.contract_type || 'fijo',
     salary: formData.salary || 0,
     phone_whatsapp: formData.phone_whatsapp || null,
+    horas_disponibles_mes: formData.horas_disponibles_mes ?? 160,
+    tipo_vinculo: formData.tipo_vinculo || null,
   })
 
   if (error) return { error: error.message }
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 
@@ -73,6 +78,8 @@ export async function updateStaffMember(
     salary?: number
     phone_whatsapp?: string | null
     is_active?: boolean
+    horas_disponibles_mes?: number
+    tipo_vinculo?: string | null
   }
 ) {
   const supabase = await createClient()
@@ -98,6 +105,7 @@ export async function updateStaffMember(
 
   if (error) return { error: error.message }
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
 
@@ -125,5 +133,6 @@ export async function deleteStaffMember(id: string) {
 
   if (error) return { error: error.message }
   revalidatePath('/config')
+  revalidatePath('/mi-negocio')
   return { success: true }
 }
