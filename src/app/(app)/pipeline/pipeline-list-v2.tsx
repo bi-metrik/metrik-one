@@ -1,10 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Flame, Building2, User, Search, Clock } from 'lucide-react'
+import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
+import { moveOportunidad } from './actions-v2'
 import type { EtapaPipeline } from '@/lib/pipeline/constants'
 
 interface OportunidadRow {
@@ -27,6 +30,27 @@ interface Props {
 export default function PipelineList({ oportunidades }: Props) {
   const [search, setSearch] = useState('')
   const [etapaFilter, setEtapaFilter] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
+
+  const cycleEtapa = (id: string, currentEtapa: string | null) => {
+    const current = currentEtapa ?? 'lead_nuevo'
+    const currentIdx = ETAPAS_ACTIVAS.indexOf(current as EtapaPipeline)
+    if (currentIdx === -1) return // terminal state — don't cycle
+    const nextIdx = (currentIdx + 1) % ETAPAS_ACTIVAS.length
+    const next = ETAPAS_ACTIVAS[nextIdx]
+    const nextLabel = ETAPA_CONFIG[next]?.label ?? next
+
+    startTransition(async () => {
+      const res = await moveOportunidad(id, next)
+      if (res.success) {
+        toast.success(`Etapa: ${nextLabel}`)
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error')
+      }
+    })
+  }
 
   const filtered = oportunidades.filter(o => {
     const matchSearch = !search ||
@@ -144,6 +168,8 @@ export default function PipelineList({ oportunidades }: Props) {
           const dias = diasSinActividad(o.ultima_accion_fecha ?? o.created_at)
           const stale = dias !== null && dias > 7
 
+          const isActive = ETAPAS_ACTIVAS.includes(o.etapa as EtapaPipeline)
+
           return (
             <EntityCard
               key={o.id}
@@ -151,13 +177,16 @@ export default function PipelineList({ oportunidades }: Props) {
               title={o.descripcion || 'Sin descripcion'}
               subtitle={[empresa?.nombre, contacto?.nombre].filter(Boolean).join(' · ')}
               value={o.valor_estimado ? formatCOP(o.valor_estimado) : undefined}
-              statusLabel={etapaConfig?.label}
-              statusColor={etapaConfig?.chipClass}
               summaryLines={[
                 ...(empresa ? [{ icon: <Building2 className="h-3 w-3" />, text: empresa.nombre }] : []),
                 ...(contacto ? [{ icon: <User className="h-3 w-3" />, text: contacto.nombre }] : []),
                 ...(stale ? [{ icon: <Clock className="h-3 w-3 text-amber-500" />, text: `${dias} dias sin actividad` }] : []),
               ]}
+              badges={etapaConfig ? [{
+                label: etapaConfig.label,
+                className: etapaConfig.chipClass,
+                ...(isActive ? { onClick: () => cycleEtapa(o.id, o.etapa) } : {}),
+              }] : undefined}
               timeAgo={timeAgo(o.created_at)}
             />
           )

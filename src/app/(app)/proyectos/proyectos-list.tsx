@@ -8,6 +8,7 @@ import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import { startTimer, stopTimer, type ActiveTimer } from '../timer-actions'
+import { cambiarEstadoProyecto } from './actions-v2'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -134,6 +135,31 @@ function ProyectoCard({
   const isThisProjectTimer = activeTimer?.proyecto_id === p.proyecto_id
   const canTimer = estado === 'en_ejecucion'
 
+  // Quick cycle: en_ejecucion ↔ pausado (cerrado is terminal)
+  const ESTADO_CYCLE: Record<string, EstadoProyecto | null> = {
+    en_ejecucion: 'pausado',
+    pausado: 'en_ejecucion',
+    cerrado: null,
+  }
+
+  const handleCycleEstado = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!p.proyecto_id) return
+    const next = ESTADO_CYCLE[estado]
+    if (!next) return
+    const nextLabel = ESTADO_PROYECTO_CONFIG[next]?.label ?? next
+    startTransition(async () => {
+      const res = await cambiarEstadoProyecto(p.proyecto_id!, next)
+      if (res.success) {
+        toast.success(`Estado: ${nextLabel}`)
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error')
+      }
+    })
+  }
+
   // Semáforo for presupuesto consumido bar
   const semaforoBar = consumo > 90
     ? 'bg-red-500'
@@ -236,9 +262,19 @@ function ProyectoCard({
             <span className="text-sm font-semibold">{formatCOP(p.presupuesto_total)}</span>
           ) : null}
           {config && (
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${config.chipClass}`}>
-              {config.label}
-            </span>
+            ESTADO_CYCLE[estado] ? (
+              <button
+                onClick={handleCycleEstado}
+                disabled={isPending}
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-opacity hover:opacity-75 disabled:opacity-50 ${config.chipClass}`}
+              >
+                {config.label} ›
+              </button>
+            ) : (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${config.chipClass}`}>
+                {config.label}
+              </span>
+            )
           )}
         </div>
       </div>
