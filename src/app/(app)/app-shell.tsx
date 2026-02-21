@@ -88,6 +88,8 @@ export default function AppShell({
 
   const hasLogo = !!branding?.logoUrl
 
+  const METRIK_ISOTIPO = 'https://hcxyowictswpibzqxwyj.supabase.co/storage/v1/object/public/metrik-landing/Isotipo_Mk.png'
+
   return (
     <div className="flex h-screen overflow-hidden bg-background" style={brandingStyle}>
       {/* ── Desktop Sidebar ── */}
@@ -100,22 +102,18 @@ export default function AppShell({
           color: 'var(--sidebar-foreground)',
         }}
       >
-        {/* Logo */}
+        {/* Sidebar header: Workspace + collapse */}
         <div className="flex h-14 items-center justify-between px-3">
-          <Link href="/numeros" className="flex items-center gap-2 overflow-hidden">
-            {hasLogo ? (
-              <img src={branding!.logoUrl!} alt={workspaceName} className="h-8 w-8 shrink-0 rounded-lg object-cover" />
-            ) : (
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-black text-sm" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
-                M
-              </div>
-            )}
-            {sidebarExpanded && (
-              <span className="text-sm font-semibold tracking-tight whitespace-nowrap" style={{ color: 'var(--sidebar-foreground)' }}>
-                {hasLogo ? workspaceName : 'MeTRIK ONE'}
-              </span>
-            )}
-          </Link>
+          {sidebarExpanded ? (
+            <div className="flex-1 overflow-hidden">
+              <p className="truncate text-xs font-semibold" style={{ color: 'var(--sidebar-foreground)' }}>{workspaceName}</p>
+              <p className="truncate text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{workspaceSlug}.metrikone.co</p>
+            </div>
+          ) : (
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
+              {workspaceName.charAt(0).toUpperCase()}
+            </div>
+          )}
           <button
             onClick={() => setSidebarExpanded(!sidebarExpanded)}
             className="hidden md:flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:opacity-80"
@@ -124,14 +122,6 @@ export default function AppShell({
             {sidebarExpanded ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
         </div>
-
-        {/* Workspace */}
-        {sidebarExpanded && (
-          <div className="mx-3 mb-2 rounded-md px-2 py-2" style={{ backgroundColor: 'var(--sidebar-accent)' }}>
-            <p className="truncate text-xs font-medium" style={{ color: 'var(--sidebar-foreground)' }}>{workspaceName}</p>
-            <p className="truncate text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{workspaceSlug}.metrikone.co</p>
-          </div>
-        )}
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0.5 px-2 py-1 overflow-y-auto">
@@ -151,8 +141,8 @@ export default function AppShell({
                     : 'hover:opacity-90'
                 }`}
                 style={{
-                  backgroundColor: isActive ? 'var(--sidebar-accent)' : 'transparent',
-                  color: isActive ? 'var(--sidebar-foreground)' : 'var(--sidebar-muted)',
+                  backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                  color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
                 }}
               >
                 <Icon className="h-4 w-4 shrink-0" />
@@ -173,7 +163,7 @@ export default function AppShell({
             </div>
             {sidebarExpanded && (
               <div className="flex-1 overflow-hidden min-w-0">
-                <p className="truncate text-xs font-medium" style={{ color: 'var(--sidebar-foreground)' }}>{fullName}</p>
+                <p className="truncate text-xs font-bold" style={{ color: '#ffffff' }}>{fullName}</p>
                 <p className="text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{ROLE_LABELS[role] || role}</p>
               </div>
             )}
@@ -203,17 +193,19 @@ export default function AppShell({
 
       {/* ── Main Area ── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile header — simplified: logo + avatar/logout */}
+        {/* Desktop header — MéTRIK logo top-right */}
+        <header className="hidden md:flex h-12 items-center justify-end border-b border-border bg-background px-6 shrink-0">
+          <Link href="/numeros" className="flex items-center gap-2">
+            <span className="text-sm font-semibold tracking-tight text-foreground">MeTRIK ONE</span>
+            <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
+          </Link>
+        </header>
+
+        {/* Mobile header — MéTRIK logo + avatar/logout */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
           <Link href="/numeros" className="flex items-center gap-2">
-            {hasLogo ? (
-              <img src={branding!.logoUrl!} alt={workspaceName} className="h-7 w-7 shrink-0 rounded-lg object-cover" />
-            ) : (
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg font-black text-xs" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
-                M
-              </div>
-            )}
-            <span className="text-sm font-semibold">{hasLogo ? workspaceName : 'MeTRIK ONE'}</span>
+            <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
+            <span className="text-sm font-semibold">MeTRIK ONE</span>
           </Link>
           <div className="flex items-center gap-2">
             <div
