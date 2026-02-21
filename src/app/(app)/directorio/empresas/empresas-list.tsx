@@ -14,7 +14,7 @@ interface Props {
 }
 
 function isPerfilFiscalCompleto(e: Empresa): boolean {
-  return !!(e.nit && e.tipo_persona && e.regimen_tributario && e.gran_contribuyente !== null && e.agente_retenedor !== null)
+  return !!(e.numero_documento && e.tipo_documento && e.tipo_persona && e.regimen_tributario && e.gran_contribuyente !== null && e.agente_retenedor !== null)
 }
 
 export default function EmpresasList({ empresas }: Props) {
@@ -116,7 +116,7 @@ export default function EmpresasList({ empresas }: Props) {
               isComplete={completo}
               showGreenCheck
               summaryLines={[
-                ...(e.nit ? [{ text: `NIT: ${formatNit(e.nit)}` }] : []),
+                ...(e.numero_documento ? [{ text: `${e.tipo_documento || 'Doc'}: ${formatNit(e.numero_documento)}` }] : []),
                 {
                   icon: completo
                     ? <ShieldCheck className="h-3 w-3 text-green-500" />

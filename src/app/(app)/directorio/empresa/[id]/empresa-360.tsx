@@ -3,10 +3,10 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, Flame, FolderKanban, ShieldCheck, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, Save, Flame, FolderKanban, ShieldCheck, ShieldAlert, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateEmpresa } from '../../actions'
-import { SECTORES_EMPRESA, TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, ETAPA_CONFIG, ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
+import { SECTORES_EMPRESA, TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO, ETAPA_CONFIG, ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import { formatNit, formatCOP } from '@/lib/contacts/constants'
 import type { Empresa } from '@/types/database'
 import type { EtapaPipeline, EstadoProyecto } from '@/lib/pipeline/constants'
@@ -42,7 +42,8 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
   const [form, setForm] = useState({
     nombre: empresa.nombre,
     sector: empresa.sector ?? '',
-    nit: empresa.nit ?? '',
+    numero_documento: empresa.numero_documento ?? '',
+    tipo_documento: empresa.tipo_documento ?? '',
     tipo_persona: empresa.tipo_persona ?? '',
     regimen_tributario: empresa.regimen_tributario ?? '',
     gran_contribuyente: empresa.gran_contribuyente ?? false,
@@ -56,14 +57,15 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
   const [granTouched, setGranTouched] = useState(granContribuyenteSet)
   const [agenteTouched, setAgenteTouched] = useState(agenteRetenedorSet)
 
-  const perfilCompleto = !!(form.nit && form.tipo_persona && form.regimen_tributario &&
+  const perfilCompleto = !!(form.numero_documento && form.tipo_documento && form.tipo_persona && form.regimen_tributario &&
     granTouched && agenteTouched)
 
   const handleSave = () => {
     const fd = new FormData()
     fd.set('nombre', form.nombre)
     fd.set('sector', form.sector)
-    fd.set('nit', form.nit)
+    fd.set('numero_documento', form.numero_documento)
+    fd.set('tipo_documento', form.tipo_documento)
     fd.set('tipo_persona', form.tipo_persona)
     fd.set('regimen_tributario', form.regimen_tributario)
     if (granTouched) fd.set('gran_contribuyente', form.gran_contribuyente.toString())
@@ -144,19 +146,39 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
 
       {/* Perfil fiscal */}
       <div className={`space-y-3 rounded-lg border p-4 ${!perfilCompleto ? 'border-red-200 bg-red-50/30' : ''}`}>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <h2 className="text-sm font-semibold">Perfil fiscal</h2>
           {!perfilCompleto && (
             <span className="text-[10px] text-red-600">Completa este perfil para poder cerrar negocios</span>
           )}
+          {empresa.contacto_id && (
+            <Link href={`/directorio/contacto/${empresa.contacto_id}`} className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 hover:bg-purple-200">
+              <User className="h-3 w-3" /> Persona natural vinculada
+            </Link>
+          )}
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">NIT</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Tipo documento</label>
+            <select
+              value={form.tipo_documento}
+              onChange={e => setForm(p => ({ ...p, tipo_documento: e.target.value }))}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Seleccionar</option>
+              {TIPOS_DOCUMENTO.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              {form.tipo_documento === 'NIT' ? 'NIT' : form.tipo_documento || 'Numero documento'}
+            </label>
             <input
-              value={form.nit}
-              onChange={e => setForm(p => ({ ...p, nit: e.target.value }))}
-              placeholder="900.123.456"
+              value={form.numero_documento}
+              onChange={e => setForm(p => ({ ...p, numero_documento: e.target.value }))}
+              placeholder={form.tipo_documento === 'NIT' ? '900.123.456' : '1.020.456.789'}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             />
           </div>

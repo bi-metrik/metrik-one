@@ -17,7 +17,7 @@ interface OportunidadRow {
   ultima_accion: string | null
   ultima_accion_fecha: string | null
   contactos: { nombre: string } | null
-  empresas: { nombre: string; nit: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
+  empresas: { nombre: string; numero_documento: string | null; tipo_documento: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
 }
 
 interface Props {

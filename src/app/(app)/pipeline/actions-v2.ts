@@ -11,7 +11,7 @@ export async function getOportunidades() {
 
   const { data } = await supabase
     .from('oportunidades')
-    .select('*, contactos(nombre), empresas(nombre, nit, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
+    .select('*, contactos(nombre), empresas(nombre, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
 
@@ -24,7 +24,7 @@ export async function getOportunidad(id: string) {
 
   const { data } = await supabase
     .from('oportunidades')
-    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, sector, nit, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
+    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, sector, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
     .eq('id', id)
     .single()
 
@@ -39,6 +39,7 @@ export async function createOportunidad(input: {
   contacto_fuente?: string
   empresa_nombre?: string
   empresa_sector?: string
+  es_persona_natural?: boolean
   descripcion: string
   valor_estimado: number
 }) {
@@ -63,7 +64,40 @@ export async function createOportunidad(input: {
     if (data) contactoId = data.id
   }
 
-  // Create empresa if new
+  // Handle persona natural: auto-create empresa linked to contacto
+  if (input.es_persona_natural && contactoId) {
+    // Look for existing empresa linked to this contacto
+    const { data: existingEmpresa } = await supabase
+      .from('empresas')
+      .select('id')
+      .eq('contacto_id', contactoId)
+      .maybeSingle()
+
+    if (existingEmpresa) {
+      empresaId = existingEmpresa.id
+    } else {
+      // Get contacto name for empresa
+      let contactName = input.contacto_nombre?.trim() || 'Persona Natural'
+      if (!input.contacto_nombre && contactoId) {
+        const { data: c } = await supabase.from('contactos').select('nombre').eq('id', contactoId).single()
+        if (c) contactName = c.nombre
+      }
+      const { data: newEmpresa } = await supabase
+        .from('empresas')
+        .insert({
+          workspace_id: workspaceId,
+          nombre: contactName,
+          tipo_persona: 'natural',
+          contacto_id: contactoId,
+          tipo_documento: 'CC',
+        })
+        .select('id')
+        .single()
+      if (newEmpresa) empresaId = newEmpresa.id
+    }
+  }
+
+  // Create empresa if new (normal flow, not persona natural)
   if (!empresaId && input.empresa_nombre?.trim()) {
     const { data } = await supabase
       .from('empresas')
@@ -149,7 +183,8 @@ export async function perderOportunidad(id: string, razon: string) {
  */
 export async function ganarOportunidad(id: string, fiscalData?: {
   empresa_id: string
-  nit?: string
+  numero_documento?: string
+  tipo_documento?: string
   tipo_persona?: string
   regimen_tributario?: string
   gran_contribuyente?: boolean
@@ -173,7 +208,8 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   // If fiscal data provided, update empresa first
   if (fiscalData) {
     const updates: Record<string, unknown> = {}
-    if (fiscalData.nit) updates.nit = fiscalData.nit
+    if (fiscalData.numero_documento) updates.numero_documento = fiscalData.numero_documento
+    if (fiscalData.tipo_documento) updates.tipo_documento = fiscalData.tipo_documento
     if (fiscalData.tipo_persona) updates.tipo_persona = fiscalData.tipo_persona
     if (fiscalData.regimen_tributario) updates.regimen_tributario = fiscalData.regimen_tributario
     if (fiscalData.gran_contribuyente !== undefined) updates.gran_contribuyente = fiscalData.gran_contribuyente

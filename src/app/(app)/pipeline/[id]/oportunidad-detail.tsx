@@ -31,7 +31,7 @@ interface OportunidadRow {
   razon_perdida: string | null
   carpeta_url: string | null
   contactos: { id: string; nombre: string; telefono: string | null; email: string | null } | null
-  empresas: { id: string; nombre: string; sector: string | null; nit: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
+  empresas: { id: string; nombre: string; sector: string | null; numero_documento: string | null; tipo_documento: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
 }
 
 interface CotizacionRow {

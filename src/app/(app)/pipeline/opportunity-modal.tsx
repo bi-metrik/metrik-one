@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { createOpportunity, createCompletedOpportunity } from './actions'
 import { STAGE_CONFIG, type PipelineStage } from './pipeline-config'
 import CotizacionFlash from './cotizacion-flash'
-import type { Opportunity } from '@/types/database'
+import type { OpportunityLegacy as Opportunity } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
 

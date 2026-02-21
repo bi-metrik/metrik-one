@@ -11,7 +11,7 @@ import {
 import { toast } from 'sonner'
 import { updateProjectStatus, addTimeEntry, addInvoice, recordPayment, deleteInvoice } from '../actions'
 import { createExpense, getExpenseCategories } from '../../gastos/actions'
-import type { Project, Expense, TimeEntry, Invoice, Payment, ExpenseCategory } from '@/types/database'
+import type { ProjectLegacy as Project, Expense, TimeEntry, Invoice, Payment, ExpenseCategory } from '@/types/database'
 import NotesSection from '@/components/notes-section'
 
 // ── Types ──────────────────────────────────────────────

@@ -36,7 +36,7 @@ import {
   moveOpportunity,
   reactivateOpportunity,
 } from './actions'
-import type { Opportunity } from '@/types/database'
+import type { OpportunityLegacy as Opportunity } from '@/types/database'
 import OpportunityModal from './opportunity-modal'
 import OpportunityDetail from './opportunity-detail'
 import { getQuotesForOpportunity } from './[id]/cotizaciones/actions'

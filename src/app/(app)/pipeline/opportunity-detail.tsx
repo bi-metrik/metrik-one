@@ -48,7 +48,7 @@ import {
   type EstadoCotizacion,
   type AccionCotizacion,
 } from '@/lib/cotizaciones/state-machine'
-import type { Opportunity, Quote } from '@/types/database'
+import type { OpportunityLegacy as Opportunity, Quote } from '@/types/database'
 
 type OpportunityWithClient = Opportunity & {
   clients: { name: string } | null

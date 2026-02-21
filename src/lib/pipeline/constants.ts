@@ -179,3 +179,15 @@ export const REGIMENES_TRIBUTARIOS = [
   { value: 'simple', label: 'Regimen Simple' },
   { value: 'no_responsable', label: 'No Responsable de IVA' },
 ] as const
+
+// ── Tipos de documento de identidad ──────────────────────────
+
+export const TIPOS_DOCUMENTO = [
+  { value: 'CC', label: 'Cedula de Ciudadania' },
+  { value: 'CE', label: 'Cedula de Extranjeria' },
+  { value: 'NIT', label: 'NIT' },
+  { value: 'pasaporte', label: 'Pasaporte' },
+  { value: 'PEP', label: 'PEP' },
+] as const
+
+export type TipoDocumento = typeof TIPOS_DOCUMENTO[number]['value']

@@ -230,7 +230,7 @@ export async function getNumeros(mesRef?: string) {
     // Semáforo: empresas with fiscal data
     supabase
       .from('empresas')
-      .select('id, nit, regimen_tributario')
+      .select('id, numero_documento, regimen_tributario')
       .eq('workspace_id', workspaceId),
 
     // Semáforo: oportunidades activas (recent activity)
@@ -487,7 +487,7 @@ export async function getNumeros(mesRef?: string) {
 interface SemaforoInput {
   gastosFijosCount: number
   metaVentas: number | null
-  empresas: { id: string; nit: string | null; regimen_tributario: string | null }[]
+  empresas: { id: string; numero_documento: string | null; regimen_tributario: string | null }[]
   diasDesdeUltimoSaldo: number | null
   oportunidades: { id: string; updated_at: string | null }[]
   gastosFijosBorradores: { id: string; confirmado: boolean | null }[]
@@ -533,7 +533,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
 
   // 3. Datos fiscales clientes activos (Alto, peso 2)
   const empresasTotal = input.empresas.length
-  const empresasCompletas = input.empresas.filter(e => e.nit && e.regimen_tributario).length
+  const empresasCompletas = input.empresas.filter(e => e.numero_documento && e.regimen_tributario).length
   const pctFiscal = empresasTotal > 0 ? empresasCompletas / empresasTotal : 1
   const fiscalScore = pctFiscal >= 1 ? 'green' : pctFiscal >= 0.7 ? 'yellow' : 'red'
   totalWeight += 2

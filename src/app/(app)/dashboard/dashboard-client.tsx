@@ -15,7 +15,7 @@ import OpportunityModal from '../pipeline/opportunity-modal'
 import PulsoMes from './pulso-mes'
 import CincoPreguntas from './cinco-preguntas'
 import { generarMensajeCobro, getTipoCobro } from '../semaforo/collection-messages'
-import type { Opportunity } from '@/types/database'
+import type { OpportunityLegacy as Opportunity } from '@/types/database'
 import type { SemaforoData } from '../semaforo/semaforo-actions'
 
 type OpportunityWithClient = Opportunity & {

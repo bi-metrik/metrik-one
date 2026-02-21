@@ -59,6 +59,9 @@ export function formatNit(nit: string, dv?: string | null): string {
   return dv ? `${formatted}-${dv}` : formatted
 }
 
+/** Format document number (alias for formatNit) */
+export const formatDocumento = formatNit
+
 /** Clean NIT to digits only */
 export function cleanNit(nit: string): string {
   return nit.replace(/\D/g, '')

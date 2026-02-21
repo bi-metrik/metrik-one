@@ -666,14 +666,16 @@ export type Database = {
         Row: {
           agente_retenedor: boolean | null
           contacto_email: string | null
+          contacto_id: string | null
           contacto_nombre: string | null
           created_at: string | null
           gran_contribuyente: boolean | null
           id: string
-          nit: string | null
           nombre: string
+          numero_documento: string | null
           regimen_tributario: string | null
           sector: string | null
+          tipo_documento: string | null
           tipo_persona: string | null
           updated_at: string | null
           workspace_id: string
@@ -681,14 +683,16 @@ export type Database = {
         Insert: {
           agente_retenedor?: boolean | null
           contacto_email?: string | null
+          contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
           gran_contribuyente?: boolean | null
           id?: string
-          nit?: string | null
           nombre: string
+          numero_documento?: string | null
           regimen_tributario?: string | null
           sector?: string | null
+          tipo_documento?: string | null
           tipo_persona?: string | null
           updated_at?: string | null
           workspace_id: string
@@ -696,19 +700,28 @@ export type Database = {
         Update: {
           agente_retenedor?: boolean | null
           contacto_email?: string | null
+          contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
           gran_contribuyente?: boolean | null
           id?: string
-          nit?: string | null
           nombre?: string
+          numero_documento?: string | null
           regimen_tributario?: string | null
           sector?: string | null
+          tipo_documento?: string | null
           tipo_persona?: string | null
           updated_at?: string | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "empresas_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "contactos"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "empresas_workspace_id_fkey"
             columns: ["workspace_id"]
@@ -3352,7 +3365,7 @@ export const Constants = {
   },
 } as const
 
-// ── Custom type aliases ──────────────────────────────
+// ── Custom type aliases ──────────────────────────────────────
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type ExpenseCategory = Database['public']['Tables']['expense_categories']['Row']
 export type FixedExpense = Database['public']['Tables']['fixed_expenses']['Row']
@@ -3366,8 +3379,10 @@ export type Empresa = Database['public']['Tables']['empresas']['Row']
 export type Contacto = Database['public']['Tables']['contactos']['Row']
 export type Invoice = Database['public']['Tables']['invoices']['Row']
 export type Payment = Database['public']['Tables']['payments']['Row']
-export type Opportunity = Database['public']['Tables']['opportunities']['Row']
+export type Opportunity = Database['public']['Tables']['oportunidades']['Row']
+export type OpportunityLegacy = Database['public']['Tables']['opportunities']['Row']
 export type Quote = Database['public']['Tables']['quotes']['Row']
-export type Project = Database['public']['Tables']['projects']['Row']
+export type Project = Database['public']['Tables']['proyectos']['Row']
+export type ProjectLegacy = Database['public']['Tables']['projects']['Row']
 export type Expense = Database['public']['Tables']['expenses']['Row']
 export type TimeEntry = Database['public']['Tables']['time_entries']['Row']

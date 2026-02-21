@@ -16,7 +16,7 @@ const STEPS = [
 ] as const
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
-type EmpresaResult = { id: string; nombre: string; sector: string | null; nit: string | null }
+type EmpresaResult = { id: string; nombre: string; sector: string | null; numero_documento: string | null }
 
 export default function StepperForm() {
   const router = useRouter()
@@ -39,6 +39,9 @@ export default function StepperForm() {
   const [contactoSearching, setContactoSearching] = useState(false)
   const [contactoFocused, setContactoFocused] = useState(false)
   const contactoInputRef = useRef<HTMLInputElement>(null)
+
+  // Persona natural toggle
+  const [esPersonaNatural, setEsPersonaNatural] = useState(false)
 
   // Step 2 — Empresa
   const [empresaId, setEmpresaId] = useState<string | null>(prefillEmpresaId)
@@ -141,10 +144,14 @@ export default function StepperForm() {
     empresaInputRef.current?.focus()
   }
 
+  // When persona natural, the effective last step shifts
+  const totalSteps = esPersonaNatural ? 2 : 3
+  const trabajoStep = esPersonaNatural ? 1 : 2
+
   const canAdvance = () => {
     if (step === 0) return contactoNombre.trim().length > 0
-    if (step === 1) return empresaNombre.trim().length > 0
-    if (step === 2) return descripcion.trim().length > 0 && Number(valorEstimado) > 0
+    if (step === 1 && !esPersonaNatural) return empresaNombre.trim().length > 0
+    if (step === trabajoStep) return descripcion.trim().length > 0 && Number(valorEstimado) > 0
     return false
   }
 
@@ -152,12 +159,13 @@ export default function StepperForm() {
     startTransition(async () => {
       const res = await createOportunidad({
         contacto_id: contactoId ?? undefined,
-        empresa_id: empresaId ?? undefined,
+        empresa_id: esPersonaNatural ? undefined : (empresaId ?? undefined),
         contacto_nombre: contactoId ? undefined : contactoNombre,
         contacto_telefono: contactoId ? undefined : contactoTelefono,
         contacto_fuente: contactoId ? undefined : contactoFuente,
-        empresa_nombre: empresaId ? undefined : empresaNombre,
-        empresa_sector: empresaId ? undefined : empresaSector,
+        empresa_nombre: esPersonaNatural ? undefined : (empresaId ? undefined : empresaNombre),
+        empresa_sector: esPersonaNatural ? undefined : (empresaId ? undefined : empresaSector),
+        es_persona_natural: esPersonaNatural,
         descripcion,
         valor_estimado: Number(valorEstimado),
       })
@@ -181,25 +189,25 @@ export default function StepperForm() {
         </Link>
         <div>
           <h1 className="text-lg font-bold">Nueva oportunidad</h1>
-          <p className="text-xs text-muted-foreground">Paso {step + 1} de 3</p>
+          <p className="text-xs text-muted-foreground">Paso {step + 1} de {totalSteps}</p>
         </div>
       </div>
 
       {/* Step dots */}
       <div className="flex items-center gap-2">
-        {STEPS.map((s, i) => {
+        {STEPS.filter((_, i) => !(esPersonaNatural && i === 1)).map((s, i) => {
           const Icon = s.icon
           const done = i < step
           const active = i === step
           return (
-            <div key={i} className="flex items-center gap-2 flex-1">
+            <div key={s.label} className="flex items-center gap-2 flex-1">
               <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium ${
                 done ? 'bg-green-100 text-green-700' : active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
               }`}>
                 {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
               </div>
               <span className={`text-xs font-medium ${active ? 'text-foreground' : 'text-muted-foreground'}`}>{s.label}</span>
-              {i < STEPS.length - 1 && <div className="flex-1 h-px bg-border" />}
+              {i < totalSteps - 1 && <div className="flex-1 h-px bg-border" />}
             </div>
           )
         })}
@@ -276,6 +284,23 @@ export default function StepperForm() {
             {!contactoId && contactoNombre.length >= 2 && !contactoSearching && contactoResults.length === 0 && !contactoFocused && (
               <p className="text-xs text-amber-600">Se creara un nuevo contacto con este nombre</p>
             )}
+
+            {/* Persona natural toggle */}
+            {(contactoId || contactoNombre.trim().length >= 2) && (
+              <label className="flex items-center gap-3 rounded-md border bg-background px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={esPersonaNatural}
+                  onChange={e => setEsPersonaNatural(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div>
+                  <span className="text-sm font-medium">Es persona natural</span>
+                  <p className="text-[10px] text-muted-foreground">La empresa es el mismo contacto (freelancer, independiente)</p>
+                </div>
+              </label>
+            )}
+
             {!contactoId && (
               <>
                 <div>
@@ -294,7 +319,7 @@ export default function StepperForm() {
           </div>
         )}
 
-        {step === 1 && (
+        {step === 1 && !esPersonaNatural && (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold">Para que empresa es?</h2>
 
@@ -374,7 +399,7 @@ export default function StepperForm() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === trabajoStep && (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold">Describe el trabajo</h2>
 
@@ -384,10 +409,17 @@ export default function StepperForm() {
                 <User className="h-3 w-3 text-muted-foreground" />
                 <span className="font-medium">{contactoNombre}</span>
               </div>
-              <div className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs">
-                <Building2 className="h-3 w-3 text-muted-foreground" />
-                <span className="font-medium">{empresaNombre}</span>
-              </div>
+              {!esPersonaNatural && (
+                <div className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs">
+                  <Building2 className="h-3 w-3 text-muted-foreground" />
+                  <span className="font-medium">{empresaNombre}</span>
+                </div>
+              )}
+              {esPersonaNatural && (
+                <div className="flex items-center gap-1.5 rounded-md bg-purple-100 px-2.5 py-1 text-xs">
+                  <span className="font-medium text-purple-700">Persona natural</span>
+                </div>
+              )}
             </div>
 
             <div>
@@ -407,7 +439,7 @@ export default function StepperForm() {
 
       <div className="flex gap-2">
         {step > 0 && <button onClick={() => setStep(s => s - 1)} className="flex-1 rounded-lg border py-2.5 text-sm font-medium hover:bg-accent">Anterior</button>}
-        {step < 2 ? (
+        {step < trabajoStep ? (
           <button onClick={() => setStep(s => s + 1)} disabled={!canAdvance()} className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
             Siguiente <ArrowRight className="h-4 w-4" />
           </button>

@@ -39,7 +39,7 @@ export default function MarcaSection({ workspace }: Props) {
       <div>
         <h3 className="font-semibold">Mi marca</h3>
         <p className="text-xs text-muted-foreground mt-1">
-          Personaliza la apariencia de tus cotizaciones y reportes.
+          Personaliza la apariencia de tu app, cotizaciones y reportes. Los colores se aplican al sidebar y elementos de tu interfaz.
         </p>
       </div>
 

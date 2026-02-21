@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Phone, Mail, Save, Flame } from 'lucide-react'
+import { ArrowLeft, Phone, Mail, Save, Flame, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateContacto } from '../../actions'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO, ETAPA_CONFIG } from '@/lib/pipeline/constants'
@@ -24,9 +24,10 @@ interface OportunidadRow {
 interface Props {
   contacto: Contacto
   oportunidades: OportunidadRow[]
+  empresaVinculada: { id: string; nombre: string } | null
 }
 
-export default function Contacto360({ contacto, oportunidades }: Props) {
+export default function Contacto360({ contacto, oportunidades, empresaVinculada }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -65,7 +66,14 @@ export default function Contacto360({ contacto, oportunidades }: Props) {
         </Link>
         <div className="flex-1">
           <h1 className="text-lg font-bold">{contacto.nombre}</h1>
-          <p className="text-xs text-muted-foreground">Vista 360 del contacto</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-muted-foreground">Vista 360 del contacto</p>
+            {empresaVinculada && (
+              <Link href={`/directorio/empresa/${empresaVinculada.id}`} className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 hover:bg-purple-200">
+                <Building2 className="h-3 w-3" /> {empresaVinculada.nombre} (PN)
+              </Link>
+            )}
+          </div>
         </div>
         <button
           onClick={handleSave}

@@ -30,7 +30,7 @@ export default async function AppLayout({
   const [workspaceResult, fiscalResult] = await Promise.all([
     supabase
       .from('workspaces')
-      .select('name, slug')
+      .select('name, slug, color_primario, color_secundario, logo_url')
       .eq('id', profile.workspace_id)
       .single(),
     supabase
@@ -53,6 +53,11 @@ export default async function AppLayout({
       workspaceName={workspace.name}
       workspaceSlug={workspace.slug}
       role={profile.role}
+      branding={{
+        colorPrimario: workspace.color_primario ?? undefined,
+        colorSecundario: workspace.color_secundario ?? undefined,
+        logoUrl: workspace.logo_url ?? undefined,
+      }}
     >
       {/* D235/D236: Fiscal nudge banner — shows when profile incomplete, max 3 nudges */}
       {fiscal && !fiscal.is_complete && (

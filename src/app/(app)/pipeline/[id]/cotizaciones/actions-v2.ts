@@ -22,7 +22,7 @@ export async function getCotizacion(id: string) {
 
   const { data } = await supabase
     .from('cotizaciones')
-    .select('*, oportunidades(id, descripcion, empresa_id, empresas(id, nombre, nit, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor))')
+    .select('*, oportunidades(id, descripcion, empresa_id, empresas(id, nombre, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor))')
     .eq('id', id)
     .single()
 

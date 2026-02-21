@@ -16,12 +16,19 @@ import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import FAB from './fab'
 
+interface BrandingProps {
+  colorPrimario?: string
+  colorSecundario?: string
+  logoUrl?: string
+}
+
 interface AppShellProps {
   children: React.ReactNode
   fullName: string
   workspaceName: string
   workspaceSlug: string
   role: string
+  branding?: BrandingProps
 }
 
 // Sidebar adaptativo por rol
@@ -50,6 +57,7 @@ export default function AppShell({
   workspaceName,
   workspaceSlug,
   role,
+  branding,
 }: AppShellProps) {
   const pathname = usePathname()
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
@@ -69,8 +77,19 @@ export default function AppShell({
 
   const navItems = getNavItemsForRole(role)
 
+  // Dynamic branding: override CSS custom properties when workspace has custom colors
+  const brandingStyle: Record<string, string> = {}
+  if (branding?.colorPrimario) {
+    brandingStyle['--sidebar-primary'] = branding.colorPrimario
+  }
+  if (branding?.colorSecundario) {
+    brandingStyle['--sidebar'] = branding.colorSecundario
+  }
+
+  const hasLogo = !!branding?.logoUrl
+
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-screen overflow-hidden bg-background" style={brandingStyle}>
       {/* ── Desktop Sidebar ── */}
       <aside
         className={`hidden md:flex flex-col shrink-0 transition-all duration-200 ease-in-out ${
@@ -84,12 +103,16 @@ export default function AppShell({
         {/* Logo */}
         <div className="flex h-14 items-center justify-between px-3">
           <Link href="/numeros" className="flex items-center gap-2 overflow-hidden">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-black text-sm" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
-              M
-            </div>
+            {hasLogo ? (
+              <img src={branding!.logoUrl!} alt={workspaceName} className="h-8 w-8 shrink-0 rounded-lg object-cover" />
+            ) : (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-black text-sm" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
+                M
+              </div>
+            )}
             {sidebarExpanded && (
               <span className="text-sm font-semibold tracking-tight whitespace-nowrap" style={{ color: 'var(--sidebar-foreground)' }}>
-                MeTRIK ONE
+                {hasLogo ? workspaceName : 'MeTRIK ONE'}
               </span>
             )}
           </Link>
@@ -183,10 +206,14 @@ export default function AppShell({
         {/* Mobile header — simplified: logo + avatar/logout */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
           <Link href="/numeros" className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg font-black text-xs" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
-              M
-            </div>
-            <span className="text-sm font-semibold">MeTRIK ONE</span>
+            {hasLogo ? (
+              <img src={branding!.logoUrl!} alt={workspaceName} className="h-7 w-7 shrink-0 rounded-lg object-cover" />
+            ) : (
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg font-black text-xs" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
+                M
+              </div>
+            )}
+            <span className="text-sm font-semibold">{hasLogo ? workspaceName : 'MeTRIK ONE'}</span>
           </Link>
           <div className="flex items-center gap-2">
             <div

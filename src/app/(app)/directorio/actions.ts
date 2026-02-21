@@ -178,11 +178,13 @@ export async function createEmpresa(formData: FormData) {
       workspace_id: workspaceId,
       nombre: nombre.trim(),
       sector: (formData.get('sector') as string) || null,
-      nit: (formData.get('nit') as string)?.trim() || null,
+      numero_documento: (formData.get('numero_documento') as string)?.trim() || null,
+      tipo_documento: (formData.get('tipo_documento') as string) || null,
       tipo_persona: (formData.get('tipo_persona') as string) || null,
       regimen_tributario: (formData.get('regimen_tributario') as string) || null,
       gran_contribuyente: formData.get('gran_contribuyente') === 'true',
       agente_retenedor: formData.get('agente_retenedor') === 'true',
+      contacto_id: (formData.get('contacto_id') as string) || null,
       contacto_nombre: (formData.get('contacto_nombre') as string)?.trim() || null,
       contacto_email: (formData.get('contacto_email') as string)?.trim() || null,
     })
@@ -200,7 +202,7 @@ export async function updateEmpresa(id: string, formData: FormData) {
   if (error) return { success: false, error: 'No autenticado' }
 
   const updates: Record<string, unknown> = {}
-  const textFields = ['nombre', 'sector', 'nit', 'tipo_persona', 'regimen_tributario', 'contacto_nombre', 'contacto_email'] as const
+  const textFields = ['nombre', 'sector', 'numero_documento', 'tipo_documento', 'tipo_persona', 'regimen_tributario', 'contacto_id', 'contacto_nombre', 'contacto_email'] as const
   for (const f of textFields) {
     const v = formData.get(f) as string | null
     if (v !== null) updates[f] = v.trim() || null
@@ -244,7 +246,7 @@ export async function searchEmpresas(query: string) {
 
   const { data } = await supabase
     .from('empresas')
-    .select('id, nombre, sector, nit')
+    .select('id, nombre, sector, numero_documento, tipo_documento, contacto_id')
     .eq('workspace_id', workspaceId)
     .ilike('nombre', `%${query}%`)
     .limit(10)
@@ -258,14 +260,15 @@ export async function checkPerfilFiscal(empresaId: string) {
 
   const { data } = await supabase
     .from('empresas')
-    .select('nit, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
+    .select('numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
     .eq('id', empresaId)
     .single()
 
   if (!data) return { complete: false, missing: ['Empresa no encontrada'] }
 
   const missing: string[] = []
-  if (!data.nit) missing.push('NIT')
+  if (!data.numero_documento) missing.push('Documento')
+  if (!data.tipo_documento) missing.push('Tipo de documento')
   if (!data.tipo_persona) missing.push('Tipo de persona')
   if (!data.regimen_tributario) missing.push('Regimen tributario')
   if (data.gran_contribuyente === null) missing.push('Gran contribuyente')
@@ -313,4 +316,19 @@ export async function getProyectosPorEmpresa(empresaId: string) {
     .order('created_at', { ascending: false })
 
   return data ?? []
+}
+
+// ── Vinculo persona natural: empresa <-> contacto ─────────
+
+export async function getEmpresaByContacto(contactoId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return null
+
+  const { data } = await supabase
+    .from('empresas')
+    .select('id, nombre')
+    .eq('contacto_id', contactoId)
+    .maybeSingle()
+
+  return data
 }
