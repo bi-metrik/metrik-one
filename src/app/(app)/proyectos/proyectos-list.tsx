@@ -35,9 +35,12 @@ interface Props {
 
 // ── Filter chips ──────────────────────────────────────
 
-type FilterTab = 'todos' | 'en_ejecucion' | 'pausado' | 'cerrado'
+type FilterTab = 'activos' | 'todos' | 'en_ejecucion' | 'pausado' | 'cerrado'
+
+const ESTADOS_ACTIVOS = ['en_ejecucion', 'pausado']
 
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
+  { key: 'activos', label: 'Activos' },
   { key: 'todos', label: 'Todos' },
   { key: 'en_ejecucion', label: 'En ejecución' },
   { key: 'pausado', label: 'Pausados' },
@@ -47,7 +50,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 // ── Component ─────────────────────────────────────────
 
 export default function ProyectosList({ proyectos, activeTimer: serverTimer }: Props) {
-  const [activeFilter, setActiveFilter] = useState<FilterTab>('todos')
+  const [activeFilter, setActiveFilter] = useState<FilterTab>('activos')
   const [timer, setTimer] = useState<ActiveTimer | null>(serverTimer)
 
   // Sync with server when prop changes (revalidation)
@@ -55,7 +58,9 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
 
   const filtered = activeFilter === 'todos'
     ? proyectos
-    : proyectos.filter(p => p.estado === activeFilter)
+    : activeFilter === 'activos'
+      ? proyectos.filter(p => ESTADOS_ACTIVOS.includes(p.estado ?? ''))
+      : proyectos.filter(p => p.estado === activeFilter)
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -78,11 +83,15 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
             }`}
           >
             {tab.label}
-            {tab.key !== 'todos' && (
+            {tab.key === 'activos' ? (
+              <span className="ml-1 opacity-70">
+                ({proyectos.filter(p => ESTADOS_ACTIVOS.includes(p.estado ?? '')).length})
+              </span>
+            ) : tab.key !== 'todos' ? (
               <span className="ml-1 opacity-70">
                 ({proyectos.filter(p => p.estado === tab.key).length})
               </span>
-            )}
+            ) : null}
           </button>
         ))}
       </div>

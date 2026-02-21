@@ -29,7 +29,7 @@ interface Props {
 
 export default function PipelineList({ oportunidades }: Props) {
   const [search, setSearch] = useState('')
-  const [etapaFilter, setEtapaFilter] = useState<string | null>(null)
+  const [etapaFilter, setEtapaFilter] = useState<string | null>('activas')
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
 
@@ -57,7 +57,9 @@ export default function PipelineList({ oportunidades }: Props) {
       o.descripcion?.toLowerCase().includes(search.toLowerCase()) ||
       (o.contactos as { nombre: string } | null)?.nombre?.toLowerCase().includes(search.toLowerCase()) ||
       (o.empresas as { nombre: string } | null)?.nombre?.toLowerCase().includes(search.toLowerCase())
-    const matchEtapa = !etapaFilter || o.etapa === etapaFilter
+    const matchEtapa = !etapaFilter
+      || (etapaFilter === 'activas' && ETAPAS_ACTIVAS.includes(o.etapa as EtapaPipeline))
+      || o.etapa === etapaFilter
     return matchSearch && matchEtapa
   })
 
@@ -132,6 +134,14 @@ export default function PipelineList({ oportunidades }: Props) {
 
       {/* Filter chips */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
+        <button
+          onClick={() => setEtapaFilter('activas')}
+          className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            etapaFilter === 'activas' ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:bg-accent'
+          }`}
+        >
+          Activas ({activeOps.length})
+        </button>
         <button
           onClick={() => setEtapaFilter(null)}
           className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${

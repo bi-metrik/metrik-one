@@ -102,17 +102,17 @@ export default function AppShell({
           color: 'var(--sidebar-foreground)',
         }}
       >
-        {/* Sidebar header: Workspace + collapse */}
+        {/* Sidebar header: MéTRIK branding + collapse */}
         <div className="flex h-14 items-center justify-between px-3">
           {sidebarExpanded ? (
-            <div className="flex-1 overflow-hidden">
-              <p className="truncate text-xs font-semibold" style={{ color: 'var(--sidebar-foreground)' }}>{workspaceName}</p>
-              <p className="truncate text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{workspaceSlug}.metrikone.co</p>
-            </div>
+            <Link href="/numeros" className="flex items-center gap-2 flex-1 overflow-hidden">
+              <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 shrink-0 object-contain" />
+              <span className="truncate text-sm font-semibold" style={{ color: 'var(--sidebar-foreground)' }}>MeTRIK ONE</span>
+            </Link>
           ) : (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}>
-              {workspaceName.charAt(0).toUpperCase()}
-            </div>
+            <Link href="/numeros" className="flex h-8 w-8 shrink-0 items-center justify-center">
+              <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
+            </Link>
           )}
           <button
             onClick={() => setSidebarExpanded(!sidebarExpanded)}
@@ -193,12 +193,14 @@ export default function AppShell({
 
       {/* ── Main Area ── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Desktop header — MéTRIK logo top-right */}
-        <header className="hidden md:flex h-12 items-center justify-end border-b border-border bg-background px-6 shrink-0">
-          <Link href="/numeros" className="flex items-center gap-2">
-            <span className="text-sm font-semibold tracking-tight text-foreground">MeTRIK ONE</span>
-            <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
-          </Link>
+        {/* Desktop header — workspace brand logo top-right */}
+        <header className="hidden md:flex h-12 items-center justify-between border-b border-border bg-background px-6 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="truncate text-xs font-medium text-muted-foreground">{workspaceName}</p>
+          </div>
+          {hasLogo && (
+            <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
+          )}
         </header>
 
         {/* Mobile header — MéTRIK logo + avatar/logout */}

@@ -63,9 +63,10 @@ export default function StepperForm() {
     if (initialStepSet) return
     if (prefillContactoId && prefillEmpresaId) {
       setStep(2)
-    } else if (prefillContactoId || prefillEmpresaId) {
-      setStep(prefillContactoId ? 1 : 0)
+    } else if (prefillEmpresaId) {
+      setStep(0)
     }
+    // When only prefillContactoId, stay on step 0 so user can toggle persona natural
     setInitialStepSet(true)
   }, [prefillContactoId, prefillEmpresaId, initialStepSet])
 
