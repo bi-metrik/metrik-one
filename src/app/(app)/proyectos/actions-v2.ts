@@ -20,10 +20,10 @@ const TRANSICIONES: Record<EstadoProyectoV2, EstadoProyectoV2[]> = {
 
 export async function crearProyectoInterno(input: {
   nombre: string
-  presupuesto_total?: number
   fecha_inicio?: string
   fecha_fin_estimada?: string
   carpeta_url?: string
+  rubros?: { nombre: string; tipo: string; presupuestado: number }[]
 }): Promise<ActionResult & { proyectoId?: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -32,6 +32,9 @@ export async function crearProyectoInterno(input: {
     return { success: false, error: 'El nombre es obligatorio' }
   }
 
+  // Calculate presupuesto_total from rubros sum
+  const presupuestoTotal = (input.rubros ?? []).reduce((sum, r) => sum + r.presupuestado, 0) || null
+
   const { data, error: dbError } = await supabase
     .from('proyectos')
     .insert({
@@ -39,7 +42,7 @@ export async function crearProyectoInterno(input: {
       nombre: input.nombre.trim(),
       tipo: 'interno',
       estado: 'en_ejecucion',
-      presupuesto_total: input.presupuesto_total ?? null,
+      presupuesto_total: presupuestoTotal,
       fecha_inicio: input.fecha_inicio || new Date().toISOString().split('T')[0],
       fecha_fin_estimada: input.fecha_fin_estimada || null,
       carpeta_url: input.carpeta_url?.trim() || null,
@@ -49,6 +52,17 @@ export async function crearProyectoInterno(input: {
     .single()
 
   if (dbError) return { success: false, error: dbError.message }
+
+  // Insert rubros if any
+  if (input.rubros && input.rubros.length > 0) {
+    const rubrosToInsert = input.rubros.map(r => ({
+      proyecto_id: data.id,
+      nombre: r.nombre,
+      tipo: r.tipo,
+      presupuestado: r.presupuestado,
+    }))
+    await supabase.from('proyecto_rubros').insert(rubrosToInsert)
+  }
 
   revalidatePath('/proyectos')
   return { success: true, proyectoId: data.id }

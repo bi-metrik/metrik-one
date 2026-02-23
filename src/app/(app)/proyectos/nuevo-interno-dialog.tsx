@@ -2,13 +2,24 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, X, Flame } from 'lucide-react'
+import { AlertTriangle, X, Flame, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { formatCOP } from '@/lib/contacts/constants'
+import { TIPOS_RUBRO } from '@/lib/pipeline/constants'
 import { crearProyectoInterno } from './actions-v2'
+
+interface RubroLine {
+  id: string
+  tipo: string
+  nombre: string
+  presupuestado: string
+}
 
 interface Props {
   onClose: () => void
 }
+
+let rubroCounter = 0
 
 export default function NuevoInternoDialog({ onClose }: Props) {
   const router = useRouter()
@@ -17,10 +28,37 @@ export default function NuevoInternoDialog({ onClose }: Props) {
 
   // Form state
   const [nombre, setNombre] = useState('')
-  const [presupuesto, setPresupuesto] = useState('')
   const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().split('T')[0])
   const [fechaFin, setFechaFin] = useState('')
   const [carpetaUrl, setCarpetaUrl] = useState('')
+  const [rubros, setRubros] = useState<RubroLine[]>([])
+
+  const addRubro = () => {
+    rubroCounter++
+    setRubros(prev => [...prev, {
+      id: `new-${rubroCounter}`,
+      tipo: 'mo_propia',
+      nombre: TIPOS_RUBRO[0].label,
+      presupuestado: '',
+    }])
+  }
+
+  const updateRubro = (id: string, field: keyof RubroLine, value: string) => {
+    setRubros(prev => prev.map(r => {
+      if (r.id !== id) return r
+      if (field === 'tipo') {
+        const label = TIPOS_RUBRO.find(t => t.value === value)?.label ?? value
+        return { ...r, tipo: value, nombre: label }
+      }
+      return { ...r, [field]: value }
+    }))
+  }
+
+  const removeRubro = (id: string) => {
+    setRubros(prev => prev.filter(r => r.id !== id))
+  }
+
+  const totalPresupuesto = rubros.reduce((sum, r) => sum + (parseFloat(r.presupuestado) || 0), 0)
 
   const handleSubmit = () => {
     if (!nombre.trim()) {
@@ -28,12 +66,20 @@ export default function NuevoInternoDialog({ onClose }: Props) {
       return
     }
     startTransition(async () => {
+      const rubrosData = rubros
+        .filter(r => parseFloat(r.presupuestado) > 0)
+        .map(r => ({
+          nombre: r.nombre,
+          tipo: r.tipo,
+          presupuestado: parseFloat(r.presupuestado),
+        }))
+
       const res = await crearProyectoInterno({
         nombre: nombre.trim(),
-        presupuesto_total: presupuesto ? parseFloat(presupuesto) : undefined,
         fecha_inicio: fechaInicio || undefined,
         fecha_fin_estimada: fechaFin || undefined,
         carpeta_url: carpetaUrl || undefined,
+        rubros: rubrosData.length > 0 ? rubrosData : undefined,
       })
       if (res.success && res.proyectoId) {
         toast.success('Proyecto interno creado')
@@ -50,7 +96,7 @@ export default function NuevoInternoDialog({ onClose }: Props) {
       <div className="fixed inset-0 bg-black/50" />
       <div
         onClick={e => e.stopPropagation()}
-        className="relative z-10 w-full max-w-md rounded-t-2xl sm:rounded-2xl bg-background p-6 shadow-xl animate-in slide-in-from-bottom-4"
+        className="relative z-10 w-full max-w-md max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-background p-6 shadow-xl animate-in slide-in-from-bottom-4"
       >
         {/* Close button */}
         <button
@@ -115,16 +161,59 @@ export default function NuevoInternoDialog({ onClose }: Props) {
                 />
               </div>
 
-              {/* Presupuesto */}
+              {/* Presupuesto por rubros */}
               <div>
                 <label className="block text-xs font-medium mb-1">Presupuesto estimado</label>
-                <input
-                  type="number"
-                  value={presupuesto}
-                  onChange={e => setPresupuesto(e.target.value)}
-                  placeholder="Opcional — COP"
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                />
+                <p className="text-[10px] text-muted-foreground mb-2">
+                  Clasifica el presupuesto por rubro para hacer seguimiento detallado.
+                </p>
+
+                {rubros.length > 0 && (
+                  <div className="space-y-2 mb-2">
+                    {rubros.map(r => (
+                      <div key={r.id} className="flex items-center gap-2">
+                        <select
+                          value={r.tipo}
+                          onChange={e => updateRubro(r.id, 'tipo', e.target.value)}
+                          className="flex-1 rounded-lg border bg-background px-2 py-1.5 text-xs outline-none"
+                        >
+                          {TIPOS_RUBRO.map(t => (
+                            <option key={t.value} value={t.value}>{t.label}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          value={r.presupuestado}
+                          onChange={e => updateRubro(r.id, 'presupuestado', e.target.value)}
+                          placeholder="$ COP"
+                          className="w-28 rounded-lg border bg-background px-2 py-1.5 text-xs text-right outline-none"
+                        />
+                        <button
+                          onClick={() => removeRubro(r.id)}
+                          className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Total */}
+                    {totalPresupuesto > 0 && (
+                      <div className="flex items-center justify-between rounded-md bg-muted px-3 py-1.5 text-xs">
+                        <span className="text-muted-foreground">Total presupuesto</span>
+                        <span className="font-semibold">{formatCOP(totalPresupuesto)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  onClick={addRubro}
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <Plus className="h-3 w-3" />
+                  Agregar rubro
+                </button>
               </div>
 
               {/* Dates row */}
