@@ -97,7 +97,7 @@ const FEW_SHOT_EXAMPLES = [
   { input: 'Tengo 4.800.000 en el banco', output: '{"intent":"SALDO_BANCARIO","confidence":0.91,"fields":{"amount":4800000}}' },
   { input: '¿Cómo estoy este mes?', output: '{"intent":"MIS_NUMEROS","confidence":0.90,"fields":{}}' },
   { input: '¿Quién me debe?', output: '{"intent":"CARTERA","confidence":0.92,"fields":{}}' },
-  { input: 'Hola', output: '{"intent":"UNCLEAR","confidence":0.3,"fields":{}}' },
+  { input: 'Hola', output: '{"intent":"AYUDA","confidence":0.90,"fields":{}}' },
 ];
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {
@@ -240,14 +240,17 @@ function regexParse(text: string): ParseResult {
   if (/gast[eé]|pagu[eé]|compr[eé]|invert[ií]/i.test(lower)) {
     const amount = parseAmount(lower);
     const entity = extractEntityHint(text);
-    // Extract concept (word after amount or after "en")
-    const conceptMatch = lower.match(/(?:en|de)\s+([a-záéíóúñ\s]{2,30})(?:\s+(?:para|con|del?))?/i);
+    // Extract concept — stop before "con", "para", "del", "de" (prepositions)
+    const conceptMatch = lower.match(/(?:en|de)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})(?:\s+(?:para|con|del?|a)\b|$)/i);
     const concept = conceptMatch ? conceptMatch[1].trim() : undefined;
 
     // Determine if it's project-related (GASTO_DIRECTO) or operational (GASTO_OPERATIVO)
-    const isOperativo = /arriendo|internet|celular|luz|agua|gas|oficina|servicios|n[oó]mina/i.test(lower);
+    // IMPORTANT: \b word boundaries prevent "gas" from matching inside "gasté"
+    const isOperativo = /\b(arriendo|internet|celular|luz|agua|gas|oficina|servicios|n[oó]mina)\b/i.test(lower);
+    // If there's an entity_hint (project/client), it's always a direct expense
+    const intent = (isOperativo && !entity) ? 'GASTO_OPERATIVO' : 'GASTO_DIRECTO';
     return {
-      intent: isOperativo ? 'GASTO_OPERATIVO' : 'GASTO_DIRECTO',
+      intent,
       confidence: 0.85,
       fields: { amount, concept, entity_hint: entity, category_hint: concept },
     };
@@ -257,7 +260,7 @@ function regexParse(text: string): ParseResult {
   if (parseAmount(lower) && /\b(en|para)\b/i.test(lower)) {
     const amount = parseAmount(lower);
     const entity = extractEntityHint(text);
-    const conceptMatch = lower.match(/(?:en)\s+([a-záéíóúñ\s]{2,30})(?:\s+(?:para|con|del?))?/i);
+    const conceptMatch = lower.match(/(?:en)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})(?:\s+(?:para|con|del?|a)\b|$)/i);
     const concept = conceptMatch ? conceptMatch[1].trim() : undefined;
     if (amount && (concept || entity)) {
       return { intent: 'GASTO_DIRECTO', confidence: 0.75, fields: { amount, concept, entity_hint: entity } };

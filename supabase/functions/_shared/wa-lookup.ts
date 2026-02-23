@@ -68,7 +68,7 @@ export function matchCategory(hint: string): string | null {
   const map: Record<string, string[]> = {
     materiales: ['material', 'insumo', 'herramienta', 'ferretería', 'compra'],
     transporte: ['transporte', 'gasolina', 'uber', 'taxi', 'bus', 'peaje', 'parqueadero', 'combustible'],
-    alimentacion: ['almuerzo', 'comida', 'restaurante', 'alimentación', 'café', 'desayuno'],
+    alimentacion: ['almuerzo', 'comida', 'restaurante', 'alimentación', 'café', 'desayuno', 'tinto', 'tintos', 'cafetería', 'onces'],
     servicios_profesionales: ['contador', 'abogado', 'asesor', 'consultor', 'profesional'],
     software: ['software', 'licencia', 'app', 'suscripción', 'hosting', 'dominio', 'nube', 'cloud'],
     arriendo: ['arriendo', 'alquiler', 'servicios', 'internet', 'luz', 'agua', 'gas', 'oficina'],
