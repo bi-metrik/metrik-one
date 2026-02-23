@@ -193,11 +193,11 @@ export default function AppShell({
 
       {/* ── Main Area ── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Desktop header — workspace brand logo top-right */}
+        {/* Desktop header — date left, brand logo right */}
         <header className="hidden md:flex h-12 items-center justify-between border-b border-border bg-background px-6 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <p className="truncate text-xs font-medium text-muted-foreground">{workspaceName}</p>
-          </div>
+          <p className="text-xs font-medium text-muted-foreground capitalize">
+            {new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
           {hasLogo && (
             <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
           )}
