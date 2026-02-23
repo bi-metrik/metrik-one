@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, X, Flame, UserPlus, Receipt, Clock, Play, Square } from 'lucide-react'
+import { Plus, X, Flame, UserPlus, Receipt, Clock, Play, Square, Landmark } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getProyectosActivos,
@@ -41,6 +41,12 @@ const FAB_ACTIONS: FABAction[] = [
     icon: Receipt,
     href: '/nuevo/gasto',
     roles: ['owner', 'admin', 'operator'],
+  },
+  {
+    label: 'Actualizar saldo',
+    icon: Landmark,
+    roles: ['owner', 'admin'],
+    action: 'saldo',
   },
 ]
 
@@ -144,7 +150,11 @@ export default function FAB({ role }: FABProps) {
 
   const handleAction = useCallback((action: FABAction) => {
     setOpen(false)
-    if (action.href) router.push(action.href)
+    if (action.action === 'saldo') {
+      router.push('/numeros?saldo=1')
+    } else if (action.href) {
+      router.push(action.href)
+    }
   }, [router])
 
   const handleOpenTimer = () => {

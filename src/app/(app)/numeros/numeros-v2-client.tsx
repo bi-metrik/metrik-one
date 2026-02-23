@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, Flame, Target, Receipt, Banknote, Plus, X } from 'lucide-react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { formatCOP } from '@/lib/contacts/constants'
 import QuestionCard from './question-card'
 import Semaforo from './semaforo'
@@ -18,12 +18,21 @@ interface Props {
 
 export default function NumerosV2Client({ initialData }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [data, setData] = useState(initialData)
   const [mesRef, setMesRef] = useState(initialData?.mesRef ?? getCurrentMes())
   const [isPending, startTransition] = useTransition()
   const [showFab, setShowFab] = useState(false)
   const [showSaldoDialog, setShowSaldoDialog] = useState(false)
   const [activeDrill, setActiveDrill] = useState<1 | 2 | 3 | 4 | 5 | null>(null)
+
+  // Open saldo dialog when arriving via ?saldo=1
+  useEffect(() => {
+    if (searchParams.get('saldo') === '1') {
+      setShowSaldoDialog(true)
+      router.replace('/numeros', { scroll: false })
+    }
+  }, [searchParams, router])
 
   const navigateMonth = (direction: -1 | 1) => {
     const [y, m] = mesRef.split('-').map(Number)
