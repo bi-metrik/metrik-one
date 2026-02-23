@@ -11,6 +11,25 @@ interface BankAccountsSectionProps {
   initialData: BankAccount[]
 }
 
+const BANCOS_COLOMBIA = [
+  'Bancolombia',
+  'Davivienda',
+  'BBVA',
+  'Banco de Bogotá',
+  'Banco de Occidente',
+  'Banco Popular',
+  'Banco AV Villas',
+  'Banco Caja Social',
+  'Scotiabank Colpatria',
+  'Itaú',
+  'Banco Falabella',
+  'Banco Pichincha',
+  'Banco GNB Sudameris',
+  'Nequi',
+  'Daviplata',
+  'Otro',
+]
+
 const ACCOUNT_TYPES = [
   { value: 'ahorros', label: 'Ahorros' },
   { value: 'corriente', label: 'Corriente' },
@@ -140,13 +159,16 @@ export default function BankAccountsSection({ initialData }: BankAccountsSection
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground">Banco *</label>
-              <input
-                type="text"
+              <select
                 value={form.bank_name}
                 onChange={e => setForm({ ...form, bank_name: e.target.value })}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="Bancolombia"
-              />
+              >
+                <option value="">Seleccionar banco...</option>
+                {BANCOS_COLOMBIA.map(b => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Nombre cuenta</label>

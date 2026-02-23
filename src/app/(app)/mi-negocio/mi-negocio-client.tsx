@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronRight, Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ChevronRight, Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles } from 'lucide-react'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio } from '@/types/database'
 
 // Existing config sections — reused via import
@@ -103,6 +103,15 @@ export default function MiNegocioClient({
   sectionScores,
 }: MiNegocioClientProps) {
   const [activeSection, setActiveSection] = useState<string | null>(null)
+  const [showCelebration, setShowCelebration] = useState(false)
+
+  useEffect(() => {
+    if (progressPct === 100) {
+      setShowCelebration(true)
+      const timer = setTimeout(() => setShowCelebration(false), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [progressPct])
 
   const getStatusEmoji = (score: number, max: number) => {
     if (score >= max) return '✅'
@@ -174,6 +183,23 @@ export default function MiNegocioClient({
           />
         </div>
       </div>
+
+      {/* ── Celebration at 100% ── */}
+      {progressPct === 100 && (
+        <div className={`rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-900 dark:bg-green-950/20 transition-all ${showCelebration ? 'animate-pulse' : ''}`}>
+          <div className="flex items-center gap-3">
+            <Sparkles className="h-6 w-6 text-green-600 dark:text-green-400 shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-green-700 dark:text-green-300">
+                🎉 ¡Tu negocio esta listo!
+              </p>
+              <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                Has completado toda la configuracion. Tus numeros ahora son 100% precisos.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Onboarding Welcome (first visit, no progress) ── */}
       {progressPct === 0 && (

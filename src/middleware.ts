@@ -56,9 +56,16 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl)
     }
 
-    // Root → dashboard
+    // Root → dashboard (if configured) or mi-negocio (if new)
     if (pathname === '/') {
-      return NextResponse.redirect(new URL('/numeros', request.url))
+      const { count } = await supabase
+        .from('config_metas')
+        .select('*', { count: 'exact', head: true })
+
+      if (count && count > 0) {
+        return NextResponse.redirect(new URL('/numeros', request.url))
+      }
+      return NextResponse.redirect(new URL('/mi-negocio', request.url))
     }
 
     return supabaseResponse
