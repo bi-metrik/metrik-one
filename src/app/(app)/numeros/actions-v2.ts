@@ -198,12 +198,12 @@ export async function getNumeros(mesRef?: string) {
       .eq('mes', mesStart)
       .maybeSingle(),
 
-    // Gastos fijos configurados
+    // Gastos fijos configurados (fixed_expenses = same table Mi Negocio uses)
     supabase
-      .from('gastos_fijos_config')
-      .select('monto_referencia')
+      .from('fixed_expenses')
+      .select('monthly_amount')
       .eq('workspace_id', workspaceId)
-      .eq('activo', true),
+      .eq('is_active', true),
 
     // Proyectos cerrados (for margen contribution) — use view
     supabase
@@ -371,7 +371,7 @@ export async function getNumeros(mesRef?: string) {
   }
 
   // Gastos fijos
-  const costosFijosMes = (gastosFijosRes.data ?? []).reduce((s, g) => s + Number(g.monto_referencia), 0)
+  const costosFijosMes = (gastosFijosRes.data ?? []).reduce((s, g) => s + Number(g.monthly_amount), 0)
 
   // Margen contribución (from closed projects)
   const proyectosCerrados = proyectosCerradosRes.data ?? []
@@ -511,10 +511,9 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   let greenWeight = 0
 
   // 1. Gastos fijos configurados (Crítico, peso 3)
-  const gfScore = input.gastosFijosCount >= 3 ? 'green' : input.gastosFijosCount >= 1 ? 'yellow' : 'red'
+  const gfScore = input.gastosFijosCount >= 1 ? 'green' : 'red'
   totalWeight += 3
   if (gfScore === 'green') greenWeight += 3
-  else if (gfScore === 'yellow') greenWeight += 1.5
   pendientes.push({
     label: 'Gastos fijos configurados',
     done: gfScore === 'green',
@@ -531,22 +530,17 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     action: metaScore !== 'green' ? '/config' : undefined,
   })
 
-  // 3. Datos fiscales clientes activos (Alto, peso 2)
+  // 3. Datos fiscales clientes activos (Informativo — no bloquea números)
   const empresasTotal = input.empresas.length
   const empresasCompletas = input.empresas.filter(e => e.numero_documento && e.regimen_tributario).length
-  const pctFiscal = empresasTotal > 0 ? empresasCompletas / empresasTotal : 1
-  const fiscalScore = pctFiscal >= 1 ? 'green' : pctFiscal >= 0.7 ? 'yellow' : 'red'
-  totalWeight += 2
-  if (fiscalScore === 'green') greenWeight += 2
-  else if (fiscalScore === 'yellow') greenWeight += 1
-  if (fiscalScore !== 'green' && empresasTotal > 0) {
+  const fiscalDone = empresasTotal === 0 || empresasCompletas === empresasTotal
+  // No suma al peso — es solo informativo
+  if (!fiscalDone && empresasTotal > 0) {
     pendientes.push({
-      label: `Datos fiscales de ${empresasTotal - empresasCompletas} empresa${empresasTotal - empresasCompletas > 1 ? 's' : ''}`,
+      label: `Datos fiscales de ${empresasTotal - empresasCompletas} empresa${empresasTotal - empresasCompletas > 1 ? 's' : ''} (opcional)`,
       done: false,
       action: '/directorio',
     })
-  } else {
-    pendientes.push({ label: 'Datos fiscales clientes', done: true })
   }
 
   // 4. Saldo bancario actualizado (Alto, peso 2)
