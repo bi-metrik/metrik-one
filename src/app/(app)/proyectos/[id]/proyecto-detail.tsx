@@ -25,6 +25,7 @@ interface Financiero {
   proyecto_id: string | null
   nombre: string | null
   estado: string | null
+  tipo: string | null
   presupuesto_total: number | null
   avance_porcentaje: number | null
   presupuesto_consumido_pct: number | null
@@ -107,6 +108,7 @@ export default function ProyectoDetail({
   const config = ESTADO_PROYECTO_CONFIG[estado]
   const isCerrado = estado === 'cerrado'
   const isPausado = estado === 'pausado'
+  const isInterno = f.tipo === 'interno'
   const proyectoId = f.proyecto_id ?? ''
 
   const consumo = Math.min(f.presupuesto_consumido_pct ?? 0, 150)
@@ -151,7 +153,12 @@ export default function ProyectoDetail({
                 {config.label}
               </span>
             )}
-            {f.empresa_nombre && (
+            {isInterno && (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                Interno
+              </span>
+            )}
+            {!isInterno && f.empresa_nombre && (
               <span className="text-xs text-muted-foreground">{f.empresa_nombre}</span>
             )}
           </div>
@@ -197,38 +204,56 @@ export default function ProyectoDetail({
           )}
         </div>
 
-        {/* Presupuesto consumido (read-only) */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium">Presupuesto consumido</span>
-            <span className="text-xs font-semibold">{consumo}%</span>
+        {/* Presupuesto consumido (read-only) — only if presupuesto exists */}
+        {(f.presupuesto_total ?? 0) > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium">Presupuesto consumido</span>
+              <span className="text-xs font-semibold">{consumo}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div className={`h-full rounded-full ${semaforoBar}`} style={{ width: `${Math.min(consumo, 100)}%` }} />
+            </div>
           </div>
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
-            <div className={`h-full rounded-full ${semaforoBar}`} style={{ width: `${Math.min(consumo, 100)}%` }} />
-          </div>
-        </div>
+        )}
       </div>
 
       {/* ─── Resumen financiero ─── */}
-      <div className="grid grid-cols-2 gap-2">
-        <FinCard label="Presupuesto" value={f.presupuesto_total} />
-        <FinCard label="Costo acumulado" value={f.costo_acumulado} warning={consumo > 90} />
-        <FinCard label="Facturado" value={f.facturado} />
-        <FinCard label="Cobrado" value={f.cobrado} />
-        <FinCard label="Cartera" value={f.cartera} />
-        <FinCard label="Por facturar" value={f.por_facturar} />
-        <div className="col-span-2 rounded-lg border p-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {ganancia >= 0
-              ? <TrendingUp className="h-4 w-4 text-green-600" />
-              : <TrendingDown className="h-4 w-4 text-red-600" />}
-            <span className="text-xs font-medium">Ganancia actual</span>
+      {isInterno ? (
+        /* Interno: Inversión acumulada */
+        <div className="grid grid-cols-2 gap-2">
+          {(f.presupuesto_total ?? 0) > 0 && (
+            <FinCard label="Presupuesto" value={f.presupuesto_total} />
+          )}
+          <FinCard label="Costo horas" value={f.costo_horas} />
+          <FinCard label="Gastos directos" value={f.gastos_directos} />
+          <div className={`${(f.presupuesto_total ?? 0) > 0 ? '' : 'col-span-2'} rounded-lg border border-orange-200 bg-orange-50/50 p-3 dark:border-orange-900 dark:bg-orange-950/20`}>
+            <p className="text-[10px] text-muted-foreground">Inversión total</p>
+            <p className="text-sm font-bold mt-0.5 text-orange-600">{formatCOP(f.costo_acumulado ?? 0)}</p>
           </div>
-          <span className={`text-sm font-bold ${ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {ganancia >= 0 ? '+' : ''}{formatCOP(ganancia)}
-          </span>
         </div>
-      </div>
+      ) : (
+        /* Cliente: Resumen financiero completo */
+        <div className="grid grid-cols-2 gap-2">
+          <FinCard label="Presupuesto" value={f.presupuesto_total} />
+          <FinCard label="Costo acumulado" value={f.costo_acumulado} warning={consumo > 90} />
+          <FinCard label="Facturado" value={f.facturado} />
+          <FinCard label="Cobrado" value={f.cobrado} />
+          <FinCard label="Cartera" value={f.cartera} />
+          <FinCard label="Por facturar" value={f.por_facturar} />
+          <div className="col-span-2 rounded-lg border p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {ganancia >= 0
+                ? <TrendingUp className="h-4 w-4 text-green-600" />
+                : <TrendingDown className="h-4 w-4 text-red-600" />}
+              <span className="text-xs font-medium">Ganancia actual</span>
+            </div>
+            <span className={`text-sm font-bold ${ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {ganancia >= 0 ? '+' : ''}{formatCOP(ganancia)}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ─── Presupuesto vs Real por rubro ─── */}
       {rubros.length > 1 && (
@@ -256,8 +281,8 @@ export default function ProyectoDetail({
         </div>
       )}
 
-      {/* ─── Facturas ─── */}
-      <div className="space-y-2 rounded-lg border p-4">
+      {/* ─── Facturas (only for client projects) ─── */}
+      {!isInterno && <div className="space-y-2 rounded-lg border p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">Facturas ({facturas.length})</h2>
           {!isCerrado && (
@@ -321,7 +346,7 @@ export default function ProyectoDetail({
             })}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* ─── Últimos registros (timeline) ─── */}
       <div className="space-y-2 rounded-lg border p-4">
@@ -381,15 +406,17 @@ export default function ProyectoDetail({
         )}
         {!isCerrado && (
           <>
-            <button
-              onClick={() => setDialog('cobro')}
-              disabled={isPending || facturas.length === 0}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
-              title={facturas.length === 0 ? 'Primero crea una factura' : 'Registrar cobro'}
-            >
-              <Banknote className="h-3.5 w-3.5" />
-              Cobro
-            </button>
+            {!isInterno && (
+              <button
+                onClick={() => setDialog('cobro')}
+                disabled={isPending || facturas.length === 0}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                title={facturas.length === 0 ? 'Primero crea una factura' : 'Registrar cobro'}
+              >
+                <Banknote className="h-3.5 w-3.5" />
+                Cobro
+              </button>
+            )}
             {isPausado ? (
               <button
                 onClick={() => handleEstado('en_ejecucion')}
@@ -419,8 +446,8 @@ export default function ProyectoDetail({
             </button>
           </>
         )}
-        {/* Cobro allowed on closed projects */}
-        {isCerrado && facturas.some(f => f.estado_pago !== 'pagada') && (
+        {/* Cobro allowed on closed client projects */}
+        {!isInterno && isCerrado && facturas.some(f => f.estado_pago !== 'pagada') && (
           <button
             onClick={() => setDialog('cobro')}
             disabled={isPending}
@@ -446,7 +473,7 @@ export default function ProyectoDetail({
           onClose={() => { setDialog(null); router.refresh() }}
         />
       )}
-      {dialog === 'factura' && (
+      {!isInterno && dialog === 'factura' && (
         <FacturaDialog
           proyectoId={proyectoId}
           presupuesto={f.presupuesto_total ?? 0}
@@ -454,7 +481,7 @@ export default function ProyectoDetail({
           onClose={() => { setDialog(null); router.refresh() }}
         />
       )}
-      {dialog === 'cobro' && (
+      {!isInterno && dialog === 'cobro' && (
         <CobroDialog
           facturas={facturas.filter(fa => fa.estado_pago !== 'pagada')}
           onClose={() => { setDialog(null); router.refresh() }}
@@ -464,6 +491,7 @@ export default function ProyectoDetail({
         <CierreDialog
           proyectoId={proyectoId}
           financiero={f}
+          isInterno={isInterno}
           onClose={() => { setDialog(null); router.refresh() }}
         />
       )}

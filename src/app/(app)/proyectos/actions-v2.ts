@@ -16,6 +16,44 @@ const TRANSICIONES: Record<EstadoProyectoV2, EstadoProyectoV2[]> = {
   cerrado: [], // terminal
 }
 
+// ── Crear proyecto interno (§7.9.1) ─────────────────────
+
+export async function crearProyectoInterno(input: {
+  nombre: string
+  presupuesto_total?: number
+  fecha_inicio?: string
+  fecha_fin_estimada?: string
+  carpeta_url?: string
+}): Promise<ActionResult & { proyectoId?: string }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  if (!input.nombre.trim()) {
+    return { success: false, error: 'El nombre es obligatorio' }
+  }
+
+  const { data, error: dbError } = await supabase
+    .from('proyectos')
+    .insert({
+      workspace_id: workspaceId,
+      nombre: input.nombre.trim(),
+      tipo: 'interno',
+      estado: 'en_ejecucion',
+      presupuesto_total: input.presupuesto_total ?? null,
+      fecha_inicio: input.fecha_inicio || new Date().toISOString().split('T')[0],
+      fecha_fin_estimada: input.fecha_fin_estimada || null,
+      carpeta_url: input.carpeta_url?.trim() || null,
+      canal_creacion: 'app',
+    })
+    .select('id')
+    .single()
+
+  if (dbError) return { success: false, error: dbError.message }
+
+  revalidatePath('/proyectos')
+  return { success: true, proyectoId: data.id }
+}
+
 // ── Get projects list (from financial view) ─────────────
 
 export async function getProyectos() {
@@ -170,7 +208,8 @@ export async function updateAvance(id: string, porcentaje: number): Promise<Acti
 export async function cambiarEstadoProyecto(
   id: string,
   nuevoEstado: EstadoProyectoV2,
-  leccionesAprendidas?: string
+  leccionesAprendidas?: string,
+  roi?: { descripcion?: string; retornoEstimado?: number },
 ): Promise<ActionResult & { proyectoId?: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -193,7 +232,7 @@ export async function cambiarEstadoProyecto(
 
   // If closing, do the full closure flow
   if (nuevoEstado === 'cerrado') {
-    return cerrarProyecto(id, leccionesAprendidas)
+    return cerrarProyecto(id, leccionesAprendidas, roi)
   }
 
   const updates: Record<string, unknown> = {
@@ -215,7 +254,11 @@ export async function cambiarEstadoProyecto(
 
 // ── Cerrar proyecto (snapshot §5.5) ─────────────────────
 
-async function cerrarProyecto(id: string, leccionesAprendidas?: string): Promise<ActionResult & { proyectoId?: string }> {
+async function cerrarProyecto(
+  id: string,
+  leccionesAprendidas?: string,
+  roi?: { descripcion?: string; retornoEstimado?: number },
+): Promise<ActionResult & { proyectoId?: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -247,29 +290,34 @@ async function cerrarProyecto(id: string, leccionesAprendidas?: string): Promise
     presupuesto_consumido_pct: fin.presupuesto_consumido_pct,
   }
 
+  const updatePayload: Record<string, unknown> = {
+    estado: 'cerrado',
+    fecha_cierre: new Date().toISOString().split('T')[0],
+    cierre_snapshot: snapshot,
+    lecciones_aprendidas: leccionesAprendidas?.trim() || null,
+    avance_porcentaje: 100,
+    updated_at: new Date().toISOString(),
+  }
+
+  // ROI fields for internal projects
+  if (roi?.descripcion) updatePayload.roi_descripcion = roi.descripcion.trim()
+  if (roi?.retornoEstimado != null) updatePayload.roi_retorno_estimado = roi.retornoEstimado
+
   const { error: dbError } = await supabase
     .from('proyectos')
-    .update({
-      estado: 'cerrado',
-      fecha_cierre: new Date().toISOString().split('T')[0],
-      cierre_snapshot: snapshot,
-      lecciones_aprendidas: leccionesAprendidas?.trim() || null,
-      avance_porcentaje: 100,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
 
-  // Update costos_referencia (feedback loop §5.6)
-  // Get oportunidad → service type from cotizacion
+  // Update costos_referencia (feedback loop §5.6) — only for client projects
   const { data: proyecto } = await supabase
     .from('proyectos')
-    .select('oportunidad_id')
+    .select('oportunidad_id, tipo')
     .eq('id', id)
     .single()
 
-  if (proyecto?.oportunidad_id) {
+  if (proyecto?.tipo !== 'interno' && proyecto?.oportunidad_id) {
     const { data: opp } = await supabase
       .from('oportunidades')
       .select('descripcion')
@@ -416,14 +464,17 @@ export async function addFactura(proyectoId: string, input: {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Validate estado — factura NOT allowed on cerrado
+  // Validate estado + tipo — factura NOT allowed on cerrado or interno
   const { data: proyecto } = await supabase
     .from('proyectos')
-    .select('estado')
+    .select('estado, tipo')
     .eq('id', proyectoId)
     .single()
 
   if (!proyecto) return { success: false, error: 'Proyecto no encontrado' }
+  if (proyecto.tipo === 'interno') {
+    return { success: false, error: 'Los proyectos internos no admiten facturación' }
+  }
   if (proyecto.estado === 'cerrado') {
     return { success: false, error: 'No se pueden crear facturas en proyectos cerrados' }
   }
@@ -456,7 +507,7 @@ export async function addCobro(facturaId: string, input: {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Get factura to find proyecto_id (no state restriction for cobros)
+  // Get factura to find proyecto_id (no state restriction for cobros on client projects)
   const { data: factura } = await supabase
     .from('facturas')
     .select('id, proyecto_id, monto')
@@ -464,6 +515,18 @@ export async function addCobro(facturaId: string, input: {
     .single()
 
   if (!factura) return { success: false, error: 'Factura no encontrada' }
+
+  // Validate tipo — cobro NOT allowed on interno
+  if (factura.proyecto_id) {
+    const { data: proyecto } = await supabase
+      .from('proyectos')
+      .select('tipo')
+      .eq('id', factura.proyecto_id)
+      .single()
+    if (proyecto?.tipo === 'interno') {
+      return { success: false, error: 'Los proyectos internos no admiten cobros' }
+    }
+  }
 
   // Check saldo pendiente via view
   const { data: estadoFactura } = await supabase

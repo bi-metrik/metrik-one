@@ -21,18 +21,25 @@ interface Financiero {
 interface Props {
   proyectoId: string
   financiero: Financiero
+  isInterno?: boolean
   onClose: () => void
 }
 
-export default function CierreDialog({ proyectoId, financiero: f, onClose }: Props) {
+export default function CierreDialog({ proyectoId, financiero: f, isInterno = false, onClose }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [lecciones, setLecciones] = useState('')
+  const [roiDescripcion, setRoiDescripcion] = useState('')
+  const [roiRetorno, setRoiRetorno] = useState('')
 
   const handleConfirm = () => {
     startTransition(async () => {
-      const res = await cambiarEstadoProyecto(proyectoId, 'cerrado', lecciones.trim() || undefined)
+      const roi = isInterno ? {
+        descripcion: roiDescripcion.trim() || undefined,
+        retornoEstimado: roiRetorno ? parseFloat(roiRetorno) : undefined,
+      } : undefined
+      const res = await cambiarEstadoProyecto(proyectoId, 'cerrado', lecciones.trim() || undefined, roi)
       if (res.success) {
         toast.success('Proyecto cerrado exitosamente')
         onClose()
@@ -63,10 +70,11 @@ export default function CierreDialog({ proyectoId, financiero: f, onClose }: Pro
           <>
             <h3 className="text-sm font-bold">Cerrar proyecto</h3>
             <p className="text-xs text-muted-foreground">
-              Al cerrar el proyecto se genera un snapshot financiero comparativo.
-              No podras registrar mas horas, gastos ni facturas. Los cobros pendientes aun se podran registrar.
+              {isInterno
+                ? 'Al cerrar el proyecto se genera un resumen de inversión. No podrás registrar más horas ni gastos.'
+                : 'Al cerrar el proyecto se genera un snapshot financiero comparativo. No podras registrar mas horas, gastos ni facturas. Los cobros pendientes aun se podran registrar.'}
             </p>
-            {(f.cartera ?? 0) > 0 && (
+            {!isInterno && (f.cartera ?? 0) > 0 && (
               <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-700 dark:border-yellow-900 dark:bg-yellow-950/20">
                 Tienes {formatCOP(f.cartera ?? 0)} en cartera pendiente. Aun podras registrar cobros despues del cierre.
               </div>
@@ -85,20 +93,57 @@ export default function CierreDialog({ proyectoId, financiero: f, onClose }: Pro
           </>
         )}
 
-        {/* Step 2: Lecciones aprendidas */}
+        {/* Step 2: Lecciones aprendidas + ROI (internos) */}
         {step === 2 && (
           <>
-            <h3 className="text-sm font-bold">Que aprendiste?</h3>
+            <h3 className="text-sm font-bold">{isInterno ? 'Resultado de la inversión' : 'Que aprendiste?'}</h3>
             <p className="text-xs text-muted-foreground">
-              Opcional pero util. Estas notas te ayudaran en futuros proyectos similares.
+              {isInterno
+                ? 'Describe el resultado de esta inversión y, si es posible, estima un retorno.'
+                : 'Opcional pero util. Estas notas te ayudaran en futuros proyectos similares.'}
             </p>
+
+            {isInterno && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1">Resultado de la inversión</label>
+                  <textarea
+                    value={roiDescripcion}
+                    onChange={e => setRoiDescripcion(e.target.value)}
+                    placeholder="Ej: Se lanzó el nuevo sitio web, generando 30% más leads..."
+                    rows={3}
+                    className="w-full rounded-md border px-3 py-2 text-sm resize-none"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Retorno estimado (COP)</label>
+                  <input
+                    type="number"
+                    value={roiRetorno}
+                    onChange={e => setRoiRetorno(e.target.value)}
+                    placeholder="Opcional"
+                    className="w-full rounded-md border px-3 py-2 text-sm"
+                  />
+                </div>
+                {roiRetorno && (f.costo_acumulado ?? 0) > 0 && (
+                  <div className="rounded-md bg-muted p-2 text-xs">
+                    <span className="text-muted-foreground">ROI estimado: </span>
+                    <span className={`font-semibold ${((parseFloat(roiRetorno) - (f.costo_acumulado ?? 0)) / (f.costo_acumulado ?? 1)) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(((parseFloat(roiRetorno) - (f.costo_acumulado ?? 0)) / (f.costo_acumulado ?? 1)) * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <textarea
               value={lecciones}
               onChange={e => setLecciones(e.target.value)}
               placeholder="Que salio bien? Que harias diferente? Algo que quieras recordar..."
-              rows={4}
+              rows={isInterno ? 2 : 4}
               className="w-full rounded-md border px-3 py-2 text-sm resize-none"
-              autoFocus
+              autoFocus={!isInterno}
             />
             <div className="flex gap-2 pt-1">
               <button onClick={() => setStep(1)} className="flex-1 rounded-lg border py-2 text-sm font-medium hover:bg-accent">
@@ -119,21 +164,34 @@ export default function CierreDialog({ proyectoId, financiero: f, onClose }: Pro
           <>
             <h3 className="text-sm font-bold">Resumen final del proyecto</h3>
             <div className="space-y-1.5">
-              <CompareRow label="Presupuesto" value={formatCOP(f.presupuesto_total ?? 0)} />
+              {(f.presupuesto_total ?? 0) > 0 && (
+                <CompareRow label="Presupuesto" value={formatCOP(f.presupuesto_total ?? 0)} />
+              )}
               <CompareRow label="Costo acumulado" value={formatCOP(f.costo_acumulado ?? 0)} />
               <CompareRow
                 label="Horas"
                 value={`${f.horas_reales ?? 0}h${f.horas_estimadas ? ` / ${f.horas_estimadas}h est.` : ''}`}
               />
-              <CompareRow label="Facturado" value={formatCOP(f.facturado ?? 0)} />
-              <CompareRow label="Cobrado" value={formatCOP(f.cobrado ?? 0)} />
-              <CompareRow label="Cartera pendiente" value={formatCOP(f.cartera ?? 0)} />
+              {!isInterno && (
+                <>
+                  <CompareRow label="Facturado" value={formatCOP(f.facturado ?? 0)} />
+                  <CompareRow label="Cobrado" value={formatCOP(f.cobrado ?? 0)} />
+                  <CompareRow label="Cartera pendiente" value={formatCOP(f.cartera ?? 0)} />
+                </>
+              )}
               <div className="border-t pt-1.5 mt-1.5">
-                <CompareRow
-                  label="Ganancia real"
-                  value={`${(f.ganancia_real ?? 0) >= 0 ? '+' : ''}${formatCOP(f.ganancia_real ?? 0)}`}
-                  highlight={f.ganancia_real ?? 0}
-                />
+                {isInterno ? (
+                  <CompareRow
+                    label="Inversión total"
+                    value={formatCOP(f.costo_acumulado ?? 0)}
+                  />
+                ) : (
+                  <CompareRow
+                    label="Ganancia real"
+                    value={`${(f.ganancia_real ?? 0) >= 0 ? '+' : ''}${formatCOP(f.ganancia_real ?? 0)}`}
+                    highlight={f.ganancia_real ?? 0}
+                  />
+                )}
               </div>
             </div>
             <div className="flex gap-2 pt-1">

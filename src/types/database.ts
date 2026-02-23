@@ -2173,6 +2173,9 @@ export type Database = {
           oportunidad_id: string | null
           presupuesto_total: number | null
           retenciones_estimadas: number | null
+          roi_descripcion: string | null
+          roi_retorno_estimado: number | null
+          tipo: string
           updated_at: string | null
           workspace_id: string
         }
@@ -2198,6 +2201,9 @@ export type Database = {
           oportunidad_id?: string | null
           presupuesto_total?: number | null
           retenciones_estimadas?: number | null
+          roi_descripcion?: string | null
+          roi_retorno_estimado?: number | null
+          tipo?: string
           updated_at?: string | null
           workspace_id: string
         }
@@ -2223,6 +2229,9 @@ export type Database = {
           oportunidad_id?: string | null
           presupuesto_total?: number | null
           retenciones_estimadas?: number | null
+          roi_descripcion?: string | null
+          roi_retorno_estimado?: number | null
+          tipo?: string
           updated_at?: string | null
           workspace_id?: string
         }
@@ -3165,6 +3174,7 @@ export type Database = {
           presupuesto_total: number | null
           proyecto_id: string | null
           retenciones_estimadas: number | null
+          tipo: string | null
           updated_at: string | null
           workspace_id: string | null
         }

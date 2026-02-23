@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { FolderOpen, Play, Square } from 'lucide-react'
+import { FolderOpen, Play, Square, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import { startTimer, stopTimer, type ActiveTimer } from '../timer-actions'
 import { cambiarEstadoProyecto } from './actions-v2'
+import NuevoInternoDialog from './nuevo-interno-dialog'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -16,10 +17,12 @@ interface ProyectoFinanciero {
   proyecto_id: string | null
   nombre: string | null
   estado: string | null
+  tipo: string | null
   presupuesto_total: number | null
   avance_porcentaje: number | null
   presupuesto_consumido_pct: number | null
   ganancia_real: number | null
+  costo_acumulado: number | null
   empresa_nombre: string | null
   cobrado: number | null
   facturado: number | null
@@ -50,17 +53,23 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 // ── Component ─────────────────────────────────────────
 
 export default function ProyectosList({ proyectos, activeTimer: serverTimer }: Props) {
+  const [tipoTab, setTipoTab] = useState<'cliente' | 'interno'>('cliente')
   const [activeFilter, setActiveFilter] = useState<FilterTab>('activos')
   const [timer, setTimer] = useState<ActiveTimer | null>(serverTimer)
+  const [showNuevoInterno, setShowNuevoInterno] = useState(false)
 
   // Sync with server when prop changes (revalidation)
   useEffect(() => { setTimer(serverTimer) }, [serverTimer])
 
+  const porTipo = proyectos.filter(p => (p.tipo ?? 'cliente') === tipoTab)
+  const clienteCount = proyectos.filter(p => (p.tipo ?? 'cliente') === 'cliente').length
+  const internoCount = proyectos.filter(p => (p.tipo ?? 'cliente') === 'interno').length
+
   const filtered = activeFilter === 'todos'
-    ? proyectos
+    ? porTipo
     : activeFilter === 'activos'
-      ? proyectos.filter(p => ESTADOS_ACTIVOS.includes(p.estado ?? ''))
-      : proyectos.filter(p => p.estado === activeFilter)
+      ? porTipo.filter(p => ESTADOS_ACTIVOS.includes(p.estado ?? ''))
+      : porTipo.filter(p => p.estado === activeFilter)
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -70,40 +79,72 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
         <span className="text-sm text-muted-foreground">{filtered.length} proyecto{filtered.length !== 1 ? 's' : ''}</span>
       </div>
 
+      {/* Tipo tabs: De clientes / Internos */}
+      <div className="flex gap-1 rounded-lg bg-muted p-1">
+        <button
+          onClick={() => { setTipoTab('cliente'); setActiveFilter('activos') }}
+          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            tipoTab === 'cliente' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          De clientes ({clienteCount})
+        </button>
+        <button
+          onClick={() => { setTipoTab('interno'); setActiveFilter('activos') }}
+          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            tipoTab === 'interno' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Internos ({internoCount})
+        </button>
+      </div>
+
       {/* Filter chips */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {FILTER_TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveFilter(tab.key)}
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-              activeFilter === tab.key
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-accent'
-            }`}
-          >
-            {tab.label}
-            {tab.key === 'activos' ? (
-              <span className="ml-1 opacity-70">
-                ({proyectos.filter(p => ESTADOS_ACTIVOS.includes(p.estado ?? '')).length})
-              </span>
-            ) : tab.key !== 'todos' ? (
-              <span className="ml-1 opacity-70">
-                ({proyectos.filter(p => p.estado === tab.key).length})
-              </span>
-            ) : null}
-          </button>
-        ))}
+        {FILTER_TABS.map(tab => {
+          const count = tab.key === 'activos'
+            ? porTipo.filter(p => ESTADOS_ACTIVOS.includes(p.estado ?? '')).length
+            : tab.key === 'todos'
+              ? porTipo.length
+              : porTipo.filter(p => p.estado === tab.key).length
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveFilter(tab.key)}
+              className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                activeFilter === tab.key
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              {tab.label}
+              <span className="ml-1 opacity-70">({count})</span>
+            </button>
+          )
+        })}
       </div>
+
+      {/* Nuevo proyecto interno button */}
+      {tipoTab === 'interno' && (
+        <button
+          onClick={() => setShowNuevoInterno(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/25 py-3 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+        >
+          <Plus className="h-4 w-4" />
+          Nuevo proyecto interno
+        </button>
+      )}
 
       {/* Project cards */}
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-center">
           <FolderOpen className="h-12 w-12 text-muted-foreground/40" />
           <p className="mt-3 text-sm text-muted-foreground">
-            {activeFilter === 'todos'
-              ? 'No hay proyectos aun. Gana una oportunidad para crear tu primer proyecto.'
-              : 'No hay proyectos en este estado.'}
+            {tipoTab === 'interno'
+              ? 'No hay proyectos internos. Crea uno para registrar inversiones operativas.'
+              : activeFilter === 'activos'
+                ? 'No hay proyectos activos. Gana una oportunidad para crear tu primer proyecto.'
+                : 'No hay proyectos en este estado.'}
           </p>
         </div>
       ) : (
@@ -112,11 +153,17 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
             <ProyectoCard
               key={p.proyecto_id}
               proyecto={p}
+              isInterno={tipoTab === 'interno'}
               activeTimer={timer}
               onTimerChange={setTimer}
             />
           ))}
         </div>
+      )}
+
+      {/* Nuevo proyecto interno dialog */}
+      {showNuevoInterno && (
+        <NuevoInternoDialog onClose={() => setShowNuevoInterno(false)} />
       )}
     </div>
   )
@@ -126,10 +173,12 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
 
 function ProyectoCard({
   proyecto: p,
+  isInterno,
   activeTimer,
   onTimerChange,
 }: {
   proyecto: ProyectoFinanciero
+  isInterno: boolean
   activeTimer: ActiveTimer | null
   onTimerChange: (t: ActiveTimer | null) => void
 }) {
@@ -262,9 +311,11 @@ function ProyectoCard({
               </button>
             ) : null}
           </div>
-          {p.empresa_nombre && (
+          {isInterno ? (
+            <span className="mt-0.5 inline-block rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">Interno</span>
+          ) : p.empresa_nombre ? (
             <p className="mt-0.5 truncate text-xs text-muted-foreground">{p.empresa_nombre}</p>
-          )}
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {p.presupuesto_total ? (
@@ -315,12 +366,21 @@ function ProyectoCard({
         </div>
       </div>
 
-      {/* Row 3: Ganancia real */}
+      {/* Row 3: Ganancia (client) or Inversión (interno) */}
       <div className="mt-2 flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">Ganancia actual</span>
-        <span className={`text-xs font-semibold ${ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-          {ganancia >= 0 ? '+' : ''}{formatCOP(ganancia)}
-        </span>
+        {isInterno ? (
+          <>
+            <span className="text-[10px] text-muted-foreground">Inversión acumulada</span>
+            <span className="text-xs font-semibold text-orange-600">{formatCOP(p.costo_acumulado ?? 0)}</span>
+          </>
+        ) : (
+          <>
+            <span className="text-[10px] text-muted-foreground">Ganancia actual</span>
+            <span className={`text-xs font-semibold ${ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {ganancia >= 0 ? '+' : ''}{formatCOP(ganancia)}
+            </span>
+          </>
+        )}
       </div>
     </div>
   )
