@@ -121,9 +121,13 @@ async function handleOppPerdida(ctx: HandlerContext): Promise<void> {
 async function handleAyuda(ctx: HandlerContext): Promise<void> {
   const msg = `👋 ¡Hola! Soy tu asistente MéTRIK ONE. Puedo ayudarte con:
 
+⏱️ *Timer de horas:*
+• "Iniciar en [proyecto]"
+• "Parar"
+• "¿Cuánto llevo?"
+
 💰 *Registrar:*
 • "Gasté [monto] en [concepto] para [proyecto]"
-• "Trabajé [X] horas en [proyecto]"
 • "Me pagaron [monto] de [proyecto]"
 • "Mi saldo es [monto]"
 

@@ -112,8 +112,14 @@ async function processMessage(message: IncomingMessage): Promise<void> {
 
   // 7. Check collaborator permissions (D99)
   if (user.role === 'collaborator' && !COLLABORATOR_ALLOWED_INTENTS.includes(parsed.intent)) {
-    await sendTextMessage(message.phone,
-      '❌ No tienes permiso para esta acción. Solo puedes registrar gastos, horas y notas de tus proyectos.');
+    // Special message for collaborators trying manual HORAS
+    if (parsed.intent === 'HORAS') {
+      await sendTextMessage(message.phone,
+        '⏱️ Las horas se registran con el timer.\n\nEscribe *iniciar en [proyecto]* para empezar y *parar* cuando termines.');
+    } else {
+      await sendTextMessage(message.phone,
+        '❌ No tienes permiso para esta acción. Solo puedes registrar gastos, iniciar timer y notas de tus proyectos.');
+    }
     return;
   }
 
@@ -148,6 +154,9 @@ async function routeToHandler(ctx: HandlerContext): Promise<void> {
     case 'GASTO_DIRECTO':
     case 'GASTO_OPERATIVO':
     case 'HORAS':
+    case 'TIMER_INICIAR':
+    case 'TIMER_PARAR':
+    case 'TIMER_ESTADO':
     case 'COBRO':
     case 'CONTACTO_NUEVO':
     case 'SALDO_BANCARIO':
@@ -209,7 +218,7 @@ async function handleSessionResponse(
   const pendingAction = (session as any).context?.pending_action;
 
   // Route to the appropriate handler based on pending action
-  if (['W01', 'W02', 'W03', 'W04', 'W06', 'W32'].includes(pendingAction)) {
+  if (['W01', 'W02', 'W03', 'W03T', 'W04', 'W06', 'W32'].includes(pendingAction)) {
     await handleRegistro(ctx);
   } else if (['W22', 'W23', 'W24'].includes(pendingAction)) {
     await handleAccion(ctx);

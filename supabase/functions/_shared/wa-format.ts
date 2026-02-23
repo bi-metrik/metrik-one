@@ -87,3 +87,15 @@ export function formatAgo(days: number): string {
   if (days === 1) return 'ayer';
   return `hace ${days} días`;
 }
+
+/** Format elapsed time from ISO timestamp to "Xh Xmin" */
+export function formatElapsed(inicio: string | Date): { label: string; hours: number } {
+  const start = typeof inicio === 'string' ? new Date(inicio) : inicio;
+  const ms = Date.now() - start.getTime();
+  const totalMinutes = Math.max(0, Math.floor(ms / 60_000));
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  const decimalHours = Math.round((totalMinutes / 60) * 100) / 100; // 2 decimals
+  const label = h > 0 ? `${h}h ${m}min` : `${m}min`;
+  return { label, hours: decimalHours };
+}

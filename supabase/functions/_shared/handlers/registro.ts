@@ -4,7 +4,7 @@
 
 import type { HandlerContext } from '../types.ts';
 import { AMBIGUOUS_CATEGORIES, CATEGORIA_LABELS, STREAK_MILESTONES } from '../types.ts';
-import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince } from '../wa-format.ts';
+import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, formatElapsed } from '../wa-format.ts';
 import { findProjects, findActiveProjects, findContacts, matchCategory, findMatchingBorrador } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
 
@@ -21,6 +21,9 @@ export async function handleRegistro(ctx: HandlerContext): Promise<void> {
     case 'GASTO_DIRECTO': await handleGastoDirecto(ctx); break;
     case 'GASTO_OPERATIVO': await handleGastoOperativo(ctx); break;
     case 'HORAS': await handleHoras(ctx); break;
+    case 'TIMER_INICIAR': await handleTimerIniciar(ctx); break;
+    case 'TIMER_PARAR': await handleTimerParar(ctx); break;
+    case 'TIMER_ESTADO': await handleTimerEstado(ctx); break;
     case 'COBRO': await handleCobro(ctx); break;
     case 'CONTACTO_NUEVO': await handleContactoNuevo(ctx); break;
     case 'SALDO_BANCARIO': await handleSaldoBancario(ctx); break;
@@ -411,6 +414,246 @@ async function showHorasConfirmation(ctx: HandlerContext, project: any, hours: n
 }
 
 // ============================================================
+// W03T — Timer: Iniciar / Parar / Estado
+// ============================================================
+
+async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
+  const { user, supabase, parsed } = ctx;
+  const { entity_hint } = parsed.fields;
+
+  // Check if there's already an active timer
+  const { data: existing } = await supabase
+    .from('timer_activo')
+    .select('id, proyecto_id, inicio, descripcion')
+    .eq('workspace_id', user.workspace_id)
+    .single();
+
+  if (existing) {
+    // Fetch project name for active timer
+    const { data: proj } = await supabase
+      .from('proyectos')
+      .select('nombre')
+      .eq('id', existing.proyecto_id)
+      .single();
+
+    const elapsed = formatElapsed(existing.inicio);
+
+    // If entity_hint differs from current project, offer to switch
+    if (entity_hint) {
+      const newProjects = await findProjects(supabase, user.workspace_id, entity_hint);
+      if (newProjects.length > 0 && newProjects[0].id !== existing.proyecto_id) {
+        const newProj = newProjects[0];
+        await ctx.sendOptions(
+          `⏱️ Ya tienes timer en ${bold(proj?.nombre || '?')} (${elapsed.label}).`,
+          [
+            `Parar ${proj?.nombre} e iniciar ${newProj.nombre}`,
+            `Seguir con ${proj?.nombre}`,
+          ],
+        );
+        await ctx.updateSession('awaiting_selection', {
+          intent: 'TIMER_INICIAR', pending_action: 'W03T',
+          proyecto_id: newProj.id, proyecto_nombre: newProj.nombre,
+          parsed_fields: { entity_hint },
+          options: [
+            { id: 'switch', label: `Parar e iniciar ${newProj.nombre}` },
+            { id: 'keep', label: `Seguir con ${proj?.nombre}` },
+          ],
+        });
+        return;
+      }
+    }
+
+    // Same project or no entity_hint — just inform
+    await ctx.sendMessage(`⏱️ Ya tienes timer activo en ${bold(proj?.nombre || '?')} (${elapsed.label}).\n\nEscribe *parar* cuando termines.`);
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  // No active timer — find project
+  if (!entity_hint) {
+    const projects = await findActiveProjects(supabase, user.workspace_id);
+    if (projects.length === 0) {
+      await ctx.sendMessage('❌ No tienes proyectos activos para iniciar timer.');
+      await completeSession(supabase, ctx.session.id);
+      return;
+    }
+
+    if (projects.length === 1) {
+      // Auto-assign only project
+      await startTimer(ctx, projects[0].proyecto_id, projects[0].nombre);
+      return;
+    }
+
+    const options = projects.slice(0, 5).map((p: any) => ({
+      id: p.proyecto_id,
+      label: `${p.nombre}`,
+    }));
+    await ctx.sendOptions('⏱️ ¿En cuál proyecto?', options.map((o) => o.label));
+    await ctx.updateSession('awaiting_selection', {
+      intent: 'TIMER_INICIAR', pending_action: 'W03T',
+      options,
+    });
+    return;
+  }
+
+  // Find project by entity_hint
+  const projects = await findProjects(supabase, user.workspace_id, entity_hint);
+
+  if (projects.length === 0) {
+    const allActive = await findActiveProjects(supabase, user.workspace_id);
+    if (allActive.length === 0) {
+      await ctx.sendMessage(`❌ No encontré proyecto con "${entity_hint}" y no tienes proyectos activos.`);
+      await completeSession(supabase, ctx.session.id);
+      return;
+    }
+    const options = allActive.slice(0, 5).map((p: any) => ({
+      id: p.proyecto_id,
+      label: p.nombre,
+    }));
+    await ctx.sendOptions(
+      `❌ No encontré proyecto con "${entity_hint}". Tus proyectos activos:`,
+      options.map((o) => o.label),
+    );
+    await ctx.updateSession('awaiting_selection', {
+      intent: 'TIMER_INICIAR', pending_action: 'W03T',
+      options,
+    });
+    return;
+  }
+
+  if (projects.length === 1) {
+    await startTimer(ctx, projects[0].id, projects[0].nombre);
+    return;
+  }
+
+  // Multiple matches
+  const options = projects.slice(0, 5).map((p: any) => ({
+    id: p.id,
+    label: p.nombre,
+  }));
+  await ctx.sendOptions('⏱️ ¿En cuál proyecto?', options.map((o) => o.label));
+  await ctx.updateSession('awaiting_selection', {
+    intent: 'TIMER_INICIAR', pending_action: 'W03T',
+    options,
+  });
+}
+
+async function startTimer(ctx: HandlerContext, proyectoId: string, proyectoNombre: string): Promise<void> {
+  const { supabase, user } = ctx;
+
+  const { error } = await supabase.from('timer_activo').insert({
+    workspace_id: user.workspace_id,
+    proyecto_id: proyectoId,
+    inicio: new Date().toISOString(),
+  });
+
+  if (error) {
+    console.error('[timer] Start error:', error);
+    await ctx.sendMessage('❌ Error al iniciar timer. Intenta de nuevo.');
+  } else {
+    await ctx.sendMessage(`⏱️ Timer iniciado en ${bold(proyectoNombre)}.\n\nCuando termines escribe *parar*.`);
+  }
+
+  await completeSession(supabase, ctx.session.id);
+}
+
+async function handleTimerParar(ctx: HandlerContext): Promise<void> {
+  const { user, supabase } = ctx;
+
+  // Find active timer
+  const { data: timer } = await supabase
+    .from('timer_activo')
+    .select('id, proyecto_id, inicio')
+    .eq('workspace_id', user.workspace_id)
+    .single();
+
+  if (!timer) {
+    await ctx.sendMessage("⏱️ No tienes timer activo.\n\nEscribe *iniciar en [proyecto]* para empezar.");
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  // Calculate elapsed
+  const elapsed = formatElapsed(timer.inicio);
+
+  if (elapsed.hours < 0.02) { // Less than ~1 min
+    // Delete timer without saving — too short
+    await supabase.from('timer_activo').delete().eq('id', timer.id);
+    await ctx.sendMessage('⏱️ Timer cancelado (menos de 1 minuto).');
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  // Insert into horas
+  const now = new Date();
+  const { error } = await supabase.from('horas').insert({
+    workspace_id: user.workspace_id,
+    proyecto_id: timer.proyecto_id,
+    fecha: now.toISOString().slice(0, 10),
+    horas: elapsed.hours,
+    inicio: timer.inicio,
+    fin: now.toISOString(),
+    timer_activo: true,
+    canal_registro: 'whatsapp',
+  });
+
+  if (error) {
+    console.error('[timer] Save horas error:', error);
+    await ctx.sendMessage('❌ Error al guardar horas. El timer sigue activo.');
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  // Delete timer
+  await supabase.from('timer_activo').delete().eq('id', timer.id);
+
+  // Fetch updated project metrics
+  const { data: project } = await supabase
+    .from('v_proyecto_financiero')
+    .select('*')
+    .eq('proyecto_id', timer.proyecto_id)
+    .single();
+
+  if (project) {
+    const horasPct = Number(project.horas_estimadas) > 0
+      ? (Number(project.horas_reales) / Number(project.horas_estimadas)) * 100
+      : 0;
+    const msg = `✅ ${elapsed.label} registradas en ${bold(project.nombre)}.\n\n📂 ${bold(project.nombre)}\n├ Horas: ${Number(project.horas_reales)} / ${Number(project.horas_estimadas)}h (${formatPct(horasPct)})\n├ Presupuesto usado: ${formatPct(Number(project.presupuesto_consumido_pct))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
+    await ctx.sendMessage(msg);
+  } else {
+    await ctx.sendMessage(`✅ ${elapsed.label} registradas.`);
+  }
+
+  await completeSession(supabase, ctx.session.id);
+}
+
+async function handleTimerEstado(ctx: HandlerContext): Promise<void> {
+  const { user, supabase } = ctx;
+
+  const { data: timer } = await supabase
+    .from('timer_activo')
+    .select('id, proyecto_id, inicio')
+    .eq('workspace_id', user.workspace_id)
+    .single();
+
+  if (!timer) {
+    await ctx.sendMessage("⏱️ No tienes timer activo.\n\nEscribe *iniciar en [proyecto]* para empezar.");
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  const { data: proj } = await supabase
+    .from('proyectos')
+    .select('nombre')
+    .eq('id', timer.proyecto_id)
+    .single();
+
+  const elapsed = formatElapsed(timer.inicio);
+  await ctx.sendMessage(`⏱️ Llevas ${bold(elapsed.label)} en ${bold(proj?.nombre || '?')}.\n\nEscribe *parar* para registrar.`);
+  await completeSession(supabase, ctx.session.id);
+}
+
+// ============================================================
 // W04 — Cobro (§7)
 // ============================================================
 
@@ -705,6 +948,7 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
       case 'W01': await handleW01Selection(ctx, selected); break;
       case 'W02': await handleW02Selection(ctx, selected); break;
       case 'W03': await handleW03Selection(ctx, selected); break;
+      case 'W03T': await handleW03TSelection(ctx, selected); break;
       case 'W04': await handleW04Selection(ctx, selected); break;
       case 'W06': await handleW06Selection(ctx, selected); break;
       case 'W32': await handleW32Selection(ctx, selected); break;
@@ -832,6 +1076,59 @@ async function handleW03Selection(ctx: HandlerContext, selected: { id: string; l
     await ctx.sendMessage('❌ No encontré ese proyecto. Intenta de nuevo.');
     await completeSession(supabase, session.id);
   }
+}
+
+async function handleW03TSelection(ctx: HandlerContext, selected: { id: string; label: string }): Promise<void> {
+  const { session, supabase, user } = ctx;
+  const context = session.context;
+
+  if (selected.id === 'keep') {
+    await ctx.sendMessage('👍 Seguimos con el timer actual.');
+    await completeSession(supabase, session.id);
+    return;
+  }
+
+  if (selected.id === 'switch') {
+    // Stop current timer + save hours, then start new one
+    const { data: timer } = await supabase
+      .from('timer_activo')
+      .select('id, proyecto_id, inicio')
+      .eq('workspace_id', user.workspace_id)
+      .single();
+
+    if (timer) {
+      const elapsed = formatElapsed(timer.inicio);
+      if (elapsed.hours >= 0.02) {
+        // Save hours from old timer
+        const { data: oldProj } = await supabase
+          .from('proyectos').select('nombre').eq('id', timer.proyecto_id).single();
+        const now = new Date();
+        await supabase.from('horas').insert({
+          workspace_id: user.workspace_id,
+          proyecto_id: timer.proyecto_id,
+          fecha: now.toISOString().slice(0, 10),
+          horas: elapsed.hours,
+          inicio: timer.inicio,
+          fin: now.toISOString(),
+          timer_activo: true,
+          canal_registro: 'whatsapp',
+        });
+        await supabase.from('timer_activo').delete().eq('id', timer.id);
+        await ctx.sendMessage(`✅ ${elapsed.label} registradas en ${bold(oldProj?.nombre || '?')}.`);
+      } else {
+        await supabase.from('timer_activo').delete().eq('id', timer.id);
+      }
+    }
+
+    // Start new timer
+    await completeSession(supabase, session.id);
+    await startTimer(ctx, context.proyecto_id!, context.proyecto_nombre!);
+    return;
+  }
+
+  // Selected a project from list → start timer
+  await completeSession(supabase, session.id);
+  await startTimer(ctx, selected.id, selected.label.replace(/\*/g, ''));
 }
 
 async function handleW04Selection(ctx: HandlerContext, selected: { id: string; label: string }): Promise<void> {

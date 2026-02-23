@@ -27,7 +27,10 @@ INTENCIONES MVP:
 REGISTRO:
 - GASTO_DIRECTO: Gasto asociable a proyecto ("Gasté X en Y para Z")
 - GASTO_OPERATIVO: Gasto general/fijo ("Pagué el arriendo", "Compré internet")
-- HORAS: Registro de tiempo ("Trabajé X horas en Y")
+- HORAS: Registro manual de tiempo ("Trabajé X horas en Y") — SOLO para owners
+- TIMER_INICIAR: Iniciar cronómetro ("Iniciar en X", "Empezar X", "Arrancar en X", "Dale a X")
+- TIMER_PARAR: Detener cronómetro ("Parar", "Terminé", "Listo", "Ya acabé")
+- TIMER_ESTADO: Consultar tiempo transcurrido ("¿Cuánto llevo?", "¿Cuánto tiempo?")
 - COBRO: Pago recibido ("Me pagaron X de Y")
 - CONTACTO_NUEVO: Crear contacto ("Nuevo contacto: nombre, teléfono")
 - SALDO_BANCARIO: El usuario reporta cuánto tiene en el banco ("Mi saldo es X", "Tengo X en el banco")
@@ -98,6 +101,11 @@ const FEW_SHOT_EXAMPLES = [
   { input: '¿Cómo estoy este mes?', output: '{"intent":"MIS_NUMEROS","confidence":0.90,"fields":{}}' },
   { input: '¿Quién me debe?', output: '{"intent":"CARTERA","confidence":0.92,"fields":{}}' },
   { input: 'Hola', output: '{"intent":"AYUDA","confidence":0.90,"fields":{}}' },
+  { input: 'Iniciar en lo de Pérez', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"entity_hint":"Pérez"}}' },
+  { input: 'Dale al proyecto Test', output: '{"intent":"TIMER_INICIAR","confidence":0.90,"fields":{"entity_hint":"Test"}}' },
+  { input: 'Parar', output: '{"intent":"TIMER_PARAR","confidence":0.95,"fields":{}}' },
+  { input: 'Terminé', output: '{"intent":"TIMER_PARAR","confidence":0.92,"fields":{}}' },
+  { input: '¿Cuánto llevo?', output: '{"intent":"TIMER_ESTADO","confidence":0.93,"fields":{}}' },
 ];
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {
@@ -267,7 +275,23 @@ function regexParse(text: string): ParseResult {
     }
   }
 
-  // HORAS — "trabajé X horas", "le metí X horas"
+  // TIMER_PARAR — "parar", "terminé", "listo", "ya acabé"
+  if (/\b(parar|detener|par[oó]|termin[eé]|listo|acab[eé]|ya\s+acab[eé])\b/i.test(lower) &&
+      !/gast[eé]|pagu[eé]|compr[eé]/i.test(lower)) {
+    return { intent: 'TIMER_PARAR', confidence: 0.92, fields: {} };
+  }
+
+  // TIMER_ESTADO — "cuánto llevo", "cuánto tiempo", "timer", "cronómetro"
+  if (/cu[aá]nto\s+llevo|cu[aá]nto\s+tiempo|timer\b|cron[oó]metro/i.test(lower)) {
+    return { intent: 'TIMER_ESTADO', confidence: 0.90, fields: {} };
+  }
+
+  // TIMER_INICIAR — "iniciar", "empezar", "arrancar", "dale a"
+  if (/\b(iniciar|empezar|arrancar|comenzar)\b|dale\s+a/i.test(lower)) {
+    return { intent: 'TIMER_INICIAR', confidence: 0.90, fields: { entity_hint: extractEntityHint(text) } };
+  }
+
+  // HORAS — "trabajé X horas", "le metí X horas" (manual — solo owners)
   if (/(?:trabaj[eé]|le\s+met[ií]|dediqu[eé])\s+(\d+(?:[.,]\d+)?)\s*horas?/i.test(lower)) {
     const hoursMatch = lower.match(/(\d+(?:[.,]\d+)?)\s*horas?/i);
     const hours = hoursMatch ? parseFloat(hoursMatch[1].replace(',', '.')) : undefined;

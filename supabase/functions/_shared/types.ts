@@ -8,6 +8,9 @@ export type Intent =
   | 'GASTO_DIRECTO'
   | 'GASTO_OPERATIVO'
   | 'HORAS'
+  | 'TIMER_INICIAR'
+  | 'TIMER_PARAR'
+  | 'TIMER_ESTADO'
   | 'COBRO'
   | 'CONTACTO_NUEVO'
   | 'SALDO_BANCARIO'
@@ -167,7 +170,9 @@ export const AMBIGUOUS_CATEGORIES = [
 
 export const COLLABORATOR_ALLOWED_INTENTS: Intent[] = [
   'GASTO_DIRECTO',
-  'HORAS',
+  'TIMER_INICIAR',
+  'TIMER_PARAR',
+  'TIMER_ESTADO',
   'NOTA_PROYECTO',
   'ESTADO_PROYECTO',
   'AYUDA',
