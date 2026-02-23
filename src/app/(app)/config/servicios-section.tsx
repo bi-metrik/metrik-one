@@ -73,11 +73,11 @@ export default function ServiciosSection({ initialData }: Props) {
 
   const handleCreate = () => {
     if (!nombre.trim()) { toast.error('Nombre requerido'); return }
-    const precioVal = rubros.length > 0 ? calcPrecioFromRubros() : Number(precio)
+    const precioVal = Number(precio)
     if (precioVal <= 0) { toast.error('Precio debe ser mayor a 0'); return }
 
     startTransition(async () => {
-      const costoVal = Number(costoEstimado) || 0
+      const costoVal = rubros.length > 0 ? calcPrecioFromRubros() : (Number(costoEstimado) || 0)
       const res = await createServicio({
         nombre: nombre.trim(),
         precio_estandar: precioVal,
@@ -96,11 +96,11 @@ export default function ServiciosSection({ initialData }: Props) {
 
   const handleUpdate = (id: string) => {
     if (!nombre.trim()) { toast.error('Nombre requerido'); return }
-    const precioVal = rubros.length > 0 ? calcPrecioFromRubros() : Number(precio)
+    const precioVal = Number(precio)
     if (precioVal <= 0) { toast.error('Precio debe ser mayor a 0'); return }
 
     startTransition(async () => {
-      const costoVal = Number(costoEstimado) || 0
+      const costoVal = rubros.length > 0 ? calcPrecioFromRubros() : (Number(costoEstimado) || 0)
       const res = await updateServicio(id, {
         nombre: nombre.trim(),
         precio_estandar: precioVal,
@@ -189,52 +189,60 @@ export default function ServiciosSection({ initialData }: Props) {
                 autoFocus
               />
             </div>
-            {rubros.length === 0 && (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">Precio estandar *</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                  <input
-                    type="number"
-                    value={precio}
-                    onChange={e => setPrecio(e.target.value)}
-                    placeholder="1500000"
-                    min="0"
-                    className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
-                  />
-                </div>
-              </div>
-            )}
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Costo estimado</label>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Precio estandar *</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
                 <input
                   type="number"
-                  value={costoEstimado}
-                  onChange={e => setCostoEstimado(e.target.value)}
-                  placeholder="500000"
+                  value={precio}
+                  onChange={e => setPrecio(e.target.value)}
+                  placeholder="1500000"
                   min="0"
                   className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
                 />
               </div>
-              {Number(costoEstimado) > 0 && (Number(precio) > 0 || calcPrecioFromRubros() > 0) && (
-                <p className="mt-1 text-xs text-green-600">
-                  Margen: {(((rubros.length > 0 ? calcPrecioFromRubros() : Number(precio)) - Number(costoEstimado)) / (rubros.length > 0 ? calcPrecioFromRubros() : Number(precio)) * 100).toFixed(1)}%
-                </p>
-              )}
             </div>
+            {rubros.length === 0 ? (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Costo estimado</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                  <input
+                    type="number"
+                    value={costoEstimado}
+                    onChange={e => setCostoEstimado(e.target.value)}
+                    placeholder="500000"
+                    min="0"
+                    className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
+                  />
+                </div>
+                {Number(costoEstimado) > 0 && Number(precio) > 0 && (
+                  <p className="mt-1 text-xs text-green-600">
+                    Margen: {(((Number(precio)) - Number(costoEstimado)) / Number(precio) * 100).toFixed(1)}%
+                  </p>
+                )}
+              </div>
+            ) : (
+              Number(precio) > 0 && calcPrecioFromRubros() > 0 && (
+                <div className="flex items-end">
+                  <p className="text-xs text-green-600">
+                    Margen: {((Number(precio) - calcPrecioFromRubros()) / Number(precio) * 100).toFixed(1)}%
+                  </p>
+                </div>
+              )
+            )}
           </div>
 
           {/* Rubros template */}
           <div>
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-muted-foreground">
-                Rubros plantilla {rubros.length > 0 && `(${rubros.length})`}
+                Rubros de costo {rubros.length > 0 && `(${rubros.length})`}
               </label>
               {rubros.length > 0 && (
-                <span className="text-xs font-medium text-green-600">
-                  Total: {formatCOP(calcPrecioFromRubros())}
+                <span className="text-xs font-medium text-muted-foreground">
+                  Costo: {formatCOP(calcPrecioFromRubros())}
                 </span>
               )}
             </div>
@@ -321,7 +329,7 @@ export default function ServiciosSection({ initialData }: Props) {
                 className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <Plus className="h-3 w-3" />
-                {rubros.length === 0 ? 'Agregar rubros plantilla (opcional)' : 'Agregar otro rubro'}
+                {rubros.length === 0 ? 'Agregar rubros de costo (opcional)' : 'Agregar otro rubro'}
               </button>
             )}
           </div>
