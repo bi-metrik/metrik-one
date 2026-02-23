@@ -91,7 +91,7 @@ export default function AppShell({
   const METRIK_ISOTIPO = 'https://hcxyowictswpibzqxwyj.supabase.co/storage/v1/object/public/metrik-landing/Isotipo_Mk.png'
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background" style={brandingStyle}>
+    <div className="flex h-dvh overflow-hidden bg-background" style={brandingStyle}>
       {/* ── Desktop Sidebar ── */}
       <aside
         className={`hidden md:flex flex-col shrink-0 transition-all duration-200 ease-in-out ${
