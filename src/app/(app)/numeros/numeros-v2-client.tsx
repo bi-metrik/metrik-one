@@ -276,33 +276,33 @@ export default function NumerosV2Client({ initialData }: Props) {
       )}
 
       {showFab && (
-        <div className="fixed bottom-24 right-6 z-50 flex flex-col-reverse items-end gap-2">
+        <div className="fixed bottom-24 right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
           <button
             onClick={() => { setShowFab(false); router.push('/nuevo/oportunidad') }}
-            className="flex items-center gap-2 rounded-full bg-orange-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-orange-600"
+            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors border-b"
           >
-            <Target className="h-4 w-4" />
+            <Target className="h-4 w-4 shrink-0 text-muted-foreground" />
             Nueva oportunidad
           </button>
           <button
             onClick={() => { setShowFab(false); router.push('/nuevo/gasto') }}
-            className="flex items-center gap-2 rounded-full bg-red-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-red-600"
+            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors border-b"
           >
-            <Receipt className="h-4 w-4" />
+            <Receipt className="h-4 w-4 shrink-0 text-muted-foreground" />
             Registrar gasto
           </button>
           <button
             onClick={() => { setShowFab(false); router.push('/proyectos') }}
-            className="flex items-center gap-2 rounded-full bg-green-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-green-600"
+            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors border-b"
           >
-            <Banknote className="h-4 w-4" />
+            <Banknote className="h-4 w-4 shrink-0 text-muted-foreground" />
             Registrar cobro
           </button>
           <button
             onClick={() => { setShowFab(false); setShowSaldoDialog(true) }}
-            className="flex items-center gap-2 rounded-full bg-blue-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-blue-600"
+            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors"
           >
-            <Flame className="h-4 w-4" />
+            <Flame className="h-4 w-4 shrink-0 text-muted-foreground" />
             Actualizar saldo
           </button>
         </div>
