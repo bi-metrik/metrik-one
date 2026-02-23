@@ -235,15 +235,9 @@ async function identifyUser(
   // Normalize phone (remove +, spaces, etc.)
   const normalized = phone.replace(/[\s+\-()]/g, '');
 
-  // 1. Check if phone belongs to a workspace owner (via staff.phone_whatsapp)
-  const { data: staffMatch } = await supabase
-    .from('staff')
-    .select('workspace_id, name, phone_whatsapp, es_principal')
-    .or(`phone_whatsapp.eq.${normalized},phone_whatsapp.eq.+${normalized}`)
-    .eq('es_principal', true)
-    .eq('is_active', true)
-    .limit(1)
-    .single();
+  // 1. Check if phone belongs to a workspace owner (via RPC — strips non-digits for matching)
+  const { data: staffRows } = await supabase.rpc('wa_identify_user', { p_phone: normalized });
+  const staffMatch = staffRows?.[0];
 
   if (staffMatch) {
     // Get workspace subscription info
@@ -256,13 +250,13 @@ async function identifyUser(
     return {
       workspace_id: staffMatch.workspace_id,
       phone: normalized,
-      name: staffMatch.name,
-      role: 'owner',
+      name: staffMatch.full_name,
+      role: staffMatch.es_principal ? 'owner' : 'collaborator',
       subscription_status: workspace?.subscription_status || 'trial',
     };
   }
 
-  // 2. Check if phone belongs to a WA collaborator
+  // 2. Check if phone belongs to a WA collaborator (also flexible matching)
   const { data: collabMatch } = await supabase
     .from('wa_collaborators')
     .select('id, workspace_id, name, phone')
