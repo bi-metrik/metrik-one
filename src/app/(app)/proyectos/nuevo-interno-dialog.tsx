@@ -12,7 +12,9 @@ interface RubroLine {
   id: string
   tipo: string
   nombre: string
-  presupuestado: string
+  cantidad: string
+  unidad: string
+  valor_unitario: string
 }
 
 interface Props {
@@ -35,11 +37,14 @@ export default function NuevoInternoDialog({ onClose }: Props) {
 
   const addRubro = () => {
     rubroCounter++
+    const defaultTipo = TIPOS_RUBRO[0]
     setRubros(prev => [...prev, {
       id: `new-${rubroCounter}`,
-      tipo: 'mo_propia',
-      nombre: TIPOS_RUBRO[0].label,
-      presupuestado: '',
+      tipo: defaultTipo.value,
+      nombre: defaultTipo.label,
+      cantidad: '',
+      unidad: defaultTipo.unidadDefault,
+      valor_unitario: '',
     }])
   }
 
@@ -47,8 +52,8 @@ export default function NuevoInternoDialog({ onClose }: Props) {
     setRubros(prev => prev.map(r => {
       if (r.id !== id) return r
       if (field === 'tipo') {
-        const label = TIPOS_RUBRO.find(t => t.value === value)?.label ?? value
-        return { ...r, tipo: value, nombre: label }
+        const t = TIPOS_RUBRO.find(t => t.value === value)
+        return { ...r, tipo: value, nombre: t?.label ?? value, unidad: t?.unidadDefault ?? 'unidades' }
       }
       return { ...r, [field]: value }
     }))
@@ -58,7 +63,8 @@ export default function NuevoInternoDialog({ onClose }: Props) {
     setRubros(prev => prev.filter(r => r.id !== id))
   }
 
-  const totalPresupuesto = rubros.reduce((sum, r) => sum + (parseFloat(r.presupuestado) || 0), 0)
+  const rubroTotal = (r: RubroLine) => (parseFloat(r.cantidad) || 0) * (parseFloat(r.valor_unitario) || 0)
+  const totalPresupuesto = rubros.reduce((sum, r) => sum + rubroTotal(r), 0)
 
   const handleSubmit = () => {
     if (!nombre.trim()) {
@@ -67,11 +73,14 @@ export default function NuevoInternoDialog({ onClose }: Props) {
     }
     startTransition(async () => {
       const rubrosData = rubros
-        .filter(r => parseFloat(r.presupuestado) > 0)
+        .filter(r => rubroTotal(r) > 0)
         .map(r => ({
           nombre: r.nombre,
           tipo: r.tipo,
-          presupuestado: parseFloat(r.presupuestado),
+          cantidad: parseFloat(r.cantidad) || 0,
+          unidad: r.unidad,
+          valor_unitario: parseFloat(r.valor_unitario) || 0,
+          presupuestado: rubroTotal(r),
         }))
 
       const res = await crearProyectoInterno({
@@ -169,33 +178,69 @@ export default function NuevoInternoDialog({ onClose }: Props) {
                 </p>
 
                 {rubros.length > 0 && (
-                  <div className="space-y-2 mb-2">
-                    {rubros.map(r => (
-                      <div key={r.id} className="flex items-center gap-2">
-                        <select
-                          value={r.tipo}
-                          onChange={e => updateRubro(r.id, 'tipo', e.target.value)}
-                          className="flex-1 rounded-lg border bg-background px-2 py-1.5 text-xs outline-none"
-                        >
-                          {TIPOS_RUBRO.map(t => (
-                            <option key={t.value} value={t.value}>{t.label}</option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          value={r.presupuestado}
-                          onChange={e => updateRubro(r.id, 'presupuestado', e.target.value)}
-                          placeholder="$ COP"
-                          className="w-28 rounded-lg border bg-background px-2 py-1.5 text-xs text-right outline-none"
-                        />
-                        <button
-                          onClick={() => removeRubro(r.id)}
-                          className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
+                  <div className="space-y-3 mb-2">
+                    {rubros.map(r => {
+                      const total = rubroTotal(r)
+                      return (
+                        <div key={r.id} className="rounded-lg border bg-muted/30 p-2.5 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={r.tipo}
+                              onChange={e => updateRubro(r.id, 'tipo', e.target.value)}
+                              className="flex-1 rounded-lg border bg-background px-2 py-1.5 text-xs outline-none"
+                            >
+                              {TIPOS_RUBRO.map(t => (
+                                <option key={t.value} value={t.value}>{t.label}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => removeRubro(r.id)}
+                              className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[10px] text-muted-foreground mb-0.5">Cantidad</label>
+                              <input
+                                type="number"
+                                value={r.cantidad}
+                                onChange={e => updateRubro(r.id, 'cantidad', e.target.value)}
+                                placeholder="0"
+                                min="0"
+                                className="w-full rounded-lg border bg-background px-2 py-1.5 text-xs outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-muted-foreground mb-0.5">Unidad</label>
+                              <input
+                                type="text"
+                                value={r.unidad}
+                                onChange={e => updateRubro(r.id, 'unidad', e.target.value)}
+                                className="w-full rounded-lg border bg-background px-2 py-1.5 text-xs outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-muted-foreground mb-0.5">Vr. unitario</label>
+                              <input
+                                type="number"
+                                value={r.valor_unitario}
+                                onChange={e => updateRubro(r.id, 'valor_unitario', e.target.value)}
+                                placeholder="$0"
+                                min="0"
+                                className="w-full rounded-lg border bg-background px-2 py-1.5 text-xs text-right outline-none"
+                              />
+                            </div>
+                          </div>
+                          {total > 0 && (
+                            <div className="text-right text-[10px] text-muted-foreground">
+                              Subtotal: <span className="font-semibold text-foreground">{formatCOP(total)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
 
                     {/* Total */}
                     {totalPresupuesto > 0 && (

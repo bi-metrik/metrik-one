@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.1"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       audit_log: {
@@ -2141,28 +2116,37 @@ export type Database = {
       }
       proyecto_rubros: {
         Row: {
+          cantidad: number | null
           created_at: string | null
           id: string
           nombre: string
           presupuestado: number
           proyecto_id: string
           tipo: string | null
+          unidad: string | null
+          valor_unitario: number | null
         }
         Insert: {
+          cantidad?: number | null
           created_at?: string | null
           id?: string
           nombre: string
           presupuestado: number
           proyecto_id: string
           tipo?: string | null
+          unidad?: string | null
+          valor_unitario?: number | null
         }
         Update: {
+          cantidad?: number | null
           created_at?: string | null
           id?: string
           nombre?: string
           presupuestado?: number
           proyecto_id?: string
           tipo?: string | null
+          unidad?: string | null
+          valor_unitario?: number | null
         }
         Relationships: [
           {
@@ -3235,6 +3219,7 @@ export type Database = {
       }
       v_proyecto_rubros_comparativo: {
         Row: {
+          cantidad: number | null
           consumido_pct: number | null
           diferencia: number | null
           gastado_real: number | null
@@ -3243,6 +3228,8 @@ export type Database = {
           rubro_id: string | null
           rubro_nombre: string | null
           rubro_tipo: string | null
+          unidad: string | null
+          valor_unitario: number | null
         }
         Relationships: [
           {
@@ -3401,9 +3388,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },

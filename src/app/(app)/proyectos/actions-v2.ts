@@ -23,7 +23,7 @@ export async function crearProyectoInterno(input: {
   fecha_inicio?: string
   fecha_fin_estimada?: string
   carpeta_url?: string
-  rubros?: { nombre: string; tipo: string; presupuestado: number }[]
+  rubros?: { nombre: string; tipo: string; cantidad: number; unidad: string; valor_unitario: number; presupuestado: number }[]
 }): Promise<ActionResult & { proyectoId?: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -59,6 +59,9 @@ export async function crearProyectoInterno(input: {
       proyecto_id: data.id,
       nombre: r.nombre,
       tipo: r.tipo,
+      cantidad: r.cantidad,
+      unidad: r.unidad,
+      valor_unitario: r.valor_unitario,
       presupuestado: r.presupuestado,
     }))
     await supabase.from('proyecto_rubros').insert(rubrosToInsert)
