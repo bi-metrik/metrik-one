@@ -4,12 +4,33 @@ import { useMemo } from 'react'
 import { Info, AlertTriangle } from 'lucide-react'
 import {
   calcularFiscal,
-  formatCOP,
-  FISCAL_DISCLAIMER,
-  DEFAULT_USER_PROFILE,
-  DEFAULT_CLIENT_PROFILE,
-  type FiscalBreakdown,
+  formatCOPFiscal as formatCOP,
+  type FiscalProfile,
+  type FiscalResult,
 } from '@/lib/fiscal/calculos'
+
+const FISCAL_DISCLAIMER =
+  'Valores estimados con base en parámetros fiscales 2026. Consulta tu contador para cálculos definitivos.'
+
+const DEFAULT_VENDOR_PROFILE: FiscalProfile = {
+  tipo_persona: 'natural',
+  regimen_tributario: 'responsable',
+  gran_contribuyente: false,
+  agente_retenedor: false,
+  autorretenedor: false,
+  ica_rate: 9.66,
+  ica_city: 'Bogotá',
+}
+
+const DEFAULT_BUYER_PROFILE: FiscalProfile = {
+  tipo_persona: 'juridica',
+  regimen_tributario: 'responsable',
+  gran_contribuyente: false,
+  agente_retenedor: true,
+  autorretenedor: false,
+  ica_rate: null,
+  ica_city: null,
+}
 
 interface CotizacionFlashProps {
   valorBruto: number
@@ -23,9 +44,9 @@ interface CotizacionFlashProps {
  * 3 bloques: Cliente paga → Te retienen → Te consignan
  */
 export default function CotizacionFlash({ valorBruto, hasFiscalProfile = false }: CotizacionFlashProps) {
-  const breakdown: FiscalBreakdown | null = useMemo(() => {
+  const breakdown: FiscalResult | null = useMemo(() => {
     if (!valorBruto || valorBruto <= 0) return null
-    return calcularFiscal(valorBruto, DEFAULT_USER_PROFILE, DEFAULT_CLIENT_PROFILE)
+    return calcularFiscal(valorBruto, DEFAULT_VENDOR_PROFILE, DEFAULT_BUYER_PROFILE)
   }, [valorBruto])
 
   if (!breakdown) return null
@@ -54,36 +75,36 @@ export default function CotizacionFlash({ valorBruto, hasFiscalProfile = false }
       <div className="space-y-1">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Cliente paga</p>
         <div className="space-y-0.5">
-          <Row label="Valor bruto" value={breakdown.valorBruto} />
-          {breakdown.hasIVA && (
-            <Row label={`IVA (${breakdown.ivaRate}%)`} value={breakdown.iva} />
+          <Row label="Valor bruto" value={breakdown.subtotal} />
+          {breakdown.aplica.iva && (
+            <Row label={`IVA (${Math.round(breakdown.ivaRate * 100)}%)`} value={breakdown.iva} />
           )}
-          <Row label="Total paga cliente" value={breakdown.totalClientePaga} bold />
+          <Row label="Total paga cliente" value={breakdown.totalBruto} bold />
         </div>
       </div>
 
       {/* Block 2: Te retienen */}
-      {breakdown.hasRetenciones && (
+      {breakdown.totalRetenciones > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Te retienen</p>
           <div className="space-y-0.5">
             {breakdown.reteFuente > 0 && (
               <Row
-                label={`ReteFuente (${breakdown.reteFuenteRate}%)`}
+                label={`ReteFuente (${Math.round(breakdown.reteFuenteRate * 100)}%)`}
                 value={-breakdown.reteFuente}
                 negative
               />
             )}
             {breakdown.reteICA > 0 && (
               <Row
-                label={`ReteICA (${breakdown.reteICARate}‰)`}
+                label={`ReteICA (${(breakdown.reteICARate * 1000).toFixed(2)}‰)`}
                 value={-breakdown.reteICA}
                 negative
               />
             )}
             {breakdown.reteIVA > 0 && (
               <Row
-                label={`ReteIVA (${breakdown.reteIVARate}% del IVA)`}
+                label={`ReteIVA (${Math.round(breakdown.reteIVARate * 100)}% del IVA)`}
                 value={-breakdown.reteIVA}
                 negative
               />
@@ -98,10 +119,10 @@ export default function CotizacionFlash({ valorBruto, hasFiscalProfile = false }
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">Te consignan</span>
           <span className="text-lg font-bold text-primary">
-            {formatCOP(breakdown.netoRecibido)}
+            {formatCOP(breakdown.teQueda)}
           </span>
         </div>
-        {breakdown.hasRetenciones && (
+        {breakdown.totalRetenciones > 0 && (
           <p className="mt-1 text-xs text-muted-foreground">
             Retenciones se recuperan en declaración de renta
           </p>

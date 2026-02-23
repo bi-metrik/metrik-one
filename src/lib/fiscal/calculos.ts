@@ -1,214 +1,105 @@
 /**
- * Motor de cálculos fiscales colombianos — MéTRIK ONE
- *
- * Parámetros fiscales 2026:
- * - UVT: $49.799 (seeded en fiscal_params)
- * - IVA general: 19%
- * - ReteFuente honorarios: 11% (declarante) / 10% (no declarante)
- * - ReteFuente servicios: 4% (>27 UVT) / 6% (>4 UVT)
- * - ReteICA Bogotá: 9.66‰ (0.966%)
- * - ReteIVA: 15% del IVA
- *
- * D51: Default conservador = PN + cliente jurídico + agente retenedor
- * D93: Disclaimer obligatorio
- * D94: Valores desde tabla fiscal_params (Supabase)
+ * Colombian fiscal calculations for cotizaciones
+ * Based on DIAN 2026 rates
  */
 
-// ── Types ──────────────────────────────────────────────
+// UVT 2026 (approx — adjust to real value)
+export const UVT_2026 = 49799
 
 export interface FiscalProfile {
-  personType: 'natural' | 'juridica'   // Tipo persona del usuario
-  taxRegime: 'ordinario' | 'simple'    // Régimen tributario
-  isDeclarante: boolean                // Declarante de renta
-  ivaResponsible: boolean              // Responsable de IVA
-  selfWithholder: boolean              // Autorretenedor
-  icaRate: number                      // Tarifa ICA (‰)
-  icaCity: string                      // Ciudad ICA
+  tipo_persona: 'natural' | 'juridica'
+  regimen_tributario: 'responsable' | 'no_responsable' | 'simplificado' | 'gran_contribuyente'
+  gran_contribuyente: boolean
+  agente_retenedor: boolean
+  autorretenedor: boolean
+  ica_rate: number | null
+  ica_city: string | null
 }
 
-export interface ClientProfile {
-  personType: 'natural' | 'juridica'
-  agenteRetenedor: boolean
-  granContribuyente: boolean
-  taxRegime: 'ordinario' | 'simple'
-}
-
-export interface FiscalBreakdown {
-  // Block 1: Cliente paga
-  valorBruto: number
+export interface FiscalResult {
+  subtotal: number
   iva: number
-  totalClientePaga: number
-
-  // Block 2: Te retienen
-  reteFuente: number
-  reteICA: number
-  reteIVA: number
-  totalRetenciones: number
-
-  // Block 3: Te consignan
-  netoRecibido: number
-
-  // Meta
-  reteFuenteRate: number
   ivaRate: number
+  reteFuente: number
+  reteFuenteRate: number
+  reteICA: number
   reteICARate: number
+  reteIVA: number
   reteIVARate: number
-  hasIVA: boolean
-  hasRetenciones: boolean
-  isEstimated: boolean       // true if using defaults (no complete fiscal profile)
-}
-
-// ── Default Profiles (D51) ─────────────────────────────
-
-export const DEFAULT_USER_PROFILE: FiscalProfile = {
-  personType: 'natural',
-  taxRegime: 'ordinario',
-  isDeclarante: true,
-  ivaResponsible: true,
-  selfWithholder: false,
-  icaRate: 9.66,            // Bogotá default (‰)
-  icaCity: 'Bogotá',
-}
-
-export const DEFAULT_CLIENT_PROFILE: ClientProfile = {
-  personType: 'juridica',
-  agenteRetenedor: true,
-  granContribuyente: false,
-  taxRegime: 'ordinario',
-}
-
-// ── Fiscal Parameters ──────────────────────────────────
-
-export interface FiscalParams {
-  uvt: number
-  ivaGeneral: number
-  reteFuenteHonorarios11: number
-  reteFuenteHonorarios10: number
-  reteFuenteServicios4: number
-  reteFuenteServicios6: number
-  reteICABogotaDefault: number
-  reteIVAPct: number
-  topeReteFuenteServiciosUVT: number
-  topeReteFuenteHonorariosUVT: number
-}
-
-export const DEFAULT_PARAMS: FiscalParams = {
-  uvt: 49799,
-  ivaGeneral: 19,
-  reteFuenteHonorarios11: 11,
-  reteFuenteHonorarios10: 10,
-  reteFuenteServicios4: 4,
-  reteFuenteServicios6: 6,
-  reteICABogotaDefault: 9.66,
-  reteIVAPct: 15,
-  topeReteFuenteServiciosUVT: 4,
-  topeReteFuenteHonorariosUVT: 27,
-}
-
-// ── Calculator ─────────────────────────────────────────
-
-export function calcularFiscal(
-  valorBruto: number,
-  userProfile: FiscalProfile = DEFAULT_USER_PROFILE,
-  clientProfile: ClientProfile = DEFAULT_CLIENT_PROFILE,
-  params: FiscalParams = DEFAULT_PARAMS,
-): FiscalBreakdown {
-  // ── IVA ──
-  const hasIVA = userProfile.ivaResponsible
-  const ivaRate = hasIVA ? params.ivaGeneral : 0
-  const iva = Math.round(valorBruto * (ivaRate / 100))
-  const totalClientePaga = valorBruto + iva
-
-  // ── Retenciones ──
-  // No retenciones si:
-  // - Cliente NO es agente retenedor
-  // - Usuario en Régimen Simple
-  // - Cliente en Régimen Simple (no retiene)
-  const clientRetiene =
-    clientProfile.agenteRetenedor &&
-    userProfile.taxRegime !== 'simple' &&
-    clientProfile.taxRegime !== 'simple'
-
-  let reteFuente = 0
-  let reteFuenteRate = 0
-  let reteICA = 0
-  let reteICARate = 0
-  let reteIVA = 0
-  let reteIVARate = 0
-
-  if (clientRetiene) {
-    // ── ReteFuente ──
-    if (userProfile.personType === 'natural') {
-      // Persona Natural → Honorarios
-      const tope = params.topeReteFuenteHonorariosUVT * params.uvt
-      if (valorBruto > tope) {
-        reteFuenteRate = userProfile.isDeclarante
-          ? params.reteFuenteHonorarios11
-          : params.reteFuenteHonorarios10
-        reteFuente = Math.round(valorBruto * (reteFuenteRate / 100))
-      }
-    } else {
-      // Persona Jurídica → Servicios
-      const tope = params.topeReteFuenteServiciosUVT * params.uvt
-      if (valorBruto > tope) {
-        reteFuenteRate = params.reteFuenteServicios4
-        reteFuente = Math.round(valorBruto * (reteFuenteRate / 100))
-      }
-    }
-
-    // ── ReteICA ──
-    reteICARate = userProfile.icaRate // en por mil (‰)
-    reteICA = Math.round(valorBruto * (reteICARate / 1000))
-
-    // ── ReteIVA ──
-    if (hasIVA && iva > 0) {
-      reteIVARate = params.reteIVAPct
-      reteIVA = Math.round(iva * (reteIVARate / 100))
-    }
+  totalBruto: number      // subtotal + IVA
+  totalRetenciones: number
+  teQueda: number          // totalBruto - totalRetenciones
+  aplica: {
+    iva: boolean
+    reteFuente: boolean
+    reteICA: boolean
+    reteIVA: boolean
   }
+}
 
+/**
+ * Calculate fiscal deductions for a cotización
+ *
+ * Rules:
+ * - IVA 19%: applies if vendor is "responsable de IVA"
+ * - ReteFuente: if subtotal >= 27 UVT for services, rate 11% (juridica) or 10% (natural)
+ * - ReteICA: if buyer is agente_retenedor AND vendor has ICA rate set
+ * - ReteIVA: 15% of IVA, if buyer is gran_contribuyente or agente_retenedor
+ */
+export function calcularFiscal(
+  subtotal: number,
+  vendedor: FiscalProfile,
+  comprador: FiscalProfile | null,
+): FiscalResult {
+  // IVA: 19% if responsable
+  const aplicaIVA = vendedor.regimen_tributario === 'responsable' || vendedor.regimen_tributario === 'gran_contribuyente'
+  const ivaRate = aplicaIVA ? 0.19 : 0
+  const iva = Math.round(subtotal * ivaRate)
+
+  // ReteFuente: services >= 27 UVT
+  const umbralReteFuente = 27 * UVT_2026
+  const aplicaReteFuente = comprador?.agente_retenedor === true && subtotal >= umbralReteFuente && !vendedor.autorretenedor
+  const reteFuenteRate = aplicaReteFuente
+    ? (vendedor.tipo_persona === 'natural' ? 0.10 : 0.11)
+    : 0
+  const reteFuente = Math.round(subtotal * reteFuenteRate)
+
+  // ReteICA: if comprador es agente retenedor y vendedor tiene tarifa ICA
+  const aplicaReteICA = comprador?.agente_retenedor === true && (vendedor.ica_rate ?? 0) > 0
+  const reteICARate = aplicaReteICA ? (vendedor.ica_rate! / 1000) : 0
+  const reteICA = Math.round(subtotal * reteICARate)
+
+  // ReteIVA: 15% del IVA si comprador es gran contribuyente o agente retenedor
+  const aplicaReteIVA = aplicaIVA && (comprador?.gran_contribuyente === true || comprador?.agente_retenedor === true)
+  const reteIVARate = aplicaReteIVA ? 0.15 : 0
+  const reteIVA = Math.round(iva * reteIVARate)
+
+  const totalBruto = subtotal + iva
   const totalRetenciones = reteFuente + reteICA + reteIVA
-  const netoRecibido = totalClientePaga - totalRetenciones
-  const hasRetenciones = totalRetenciones > 0
+  const teQueda = totalBruto - totalRetenciones
 
   return {
-    valorBruto,
+    subtotal,
     iva,
-    totalClientePaga,
-    reteFuente,
-    reteICA,
-    reteIVA,
-    totalRetenciones,
-    netoRecibido,
-    reteFuenteRate,
     ivaRate,
+    reteFuente,
+    reteFuenteRate,
+    reteICA,
     reteICARate,
+    reteIVA,
     reteIVARate,
-    hasIVA,
-    hasRetenciones,
-    isEstimated: false,
+    totalBruto,
+    totalRetenciones,
+    teQueda,
+    aplica: {
+      iva: aplicaIVA,
+      reteFuente: aplicaReteFuente,
+      reteICA: aplicaReteICA,
+      reteIVA: aplicaReteIVA,
+    },
   }
 }
 
-// ── Formatters ─────────────────────────────────────────
-
-export function formatCOP(value: number): string {
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0,
-  }).format(value)
+export function formatCOPFiscal(v: number): string {
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 }
-
-export function formatPct(value: number): string {
-  return `${value}%`
-}
-
-export function formatPerMil(value: number): string {
-  return `${value}‰`
-}
-
-// ── Disclaimer (D93) ───────────────────────────────────
-
-export const FISCAL_DISCLAIMER =
-  'Valores estimados con base en parámetros fiscales 2026. Consulta tu contador para cálculos definitivos.'
