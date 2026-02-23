@@ -99,7 +99,3 @@ export function calcularFiscal(
     },
   }
 }
-
-export function formatCOPFiscal(v: number): string {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
-}

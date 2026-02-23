@@ -4,10 +4,10 @@ import { useMemo } from 'react'
 import { Info, AlertTriangle } from 'lucide-react'
 import {
   calcularFiscal,
-  formatCOPFiscal as formatCOP,
   type FiscalProfile,
   type FiscalResult,
 } from '@/lib/fiscal/calculos'
+import { formatCOP } from '@/lib/contacts/constants'
 
 const FISCAL_DISCLAIMER =
   'Valores estimados con base en parámetros fiscales 2026. Consulta tu contador para cálculos definitivos.'
