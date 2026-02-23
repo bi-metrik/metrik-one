@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus, Trash2, Check, X, Loader2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Check, X, Loader2, Pencil, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { createFixedExpense, deleteFixedExpense, toggleFixedExpense, updateFixedExpense } from '../gastos/actions'
@@ -15,6 +15,36 @@ interface Props {
   totalFixed: number
 }
 
+// ── D129: Tooltips por estado de deducibilidad ──────────
+const TOOLTIP_DEDUCIBLE = {
+  true: 'Este gasto puede reducir lo que le pagas al Estado. Para que cuente, necesitas la factura o documento de pago a nombre de tu empresa. Guardala.',
+  partial: 'Solo una parte de este gasto aplica para reducir impuestos — por ejemplo, si usas el carro o el internet tambien para cosas personales. Tu contador te dice exactamente cuanto.',
+  false: 'Este gasto no reduce tus impuestos. Si lo registras como gasto empresarial sin que lo sea, la DIAN puede rechazarlo y generar sanciones. Separa siempre lo personal de lo empresarial.',
+}
+
+// ── D129: Resolve deducible state from category is_deductible ──
+type DeducibleState = 'true' | 'partial' | 'false'
+
+function getDeducibleState(deducible: boolean | null, categoryId: string | null, categories: ExpenseCategory[]): DeducibleState {
+  // If user explicitly set it, honor that first
+  if (deducible === true) {
+    // Check if category says partial
+    if (categoryId) {
+      const cat = categories.find(c => c.id === categoryId)
+      if (cat?.is_deductible === 'partial') return 'partial'
+    }
+    return 'true'
+  }
+  if (deducible === false || deducible === null) return 'false'
+  return 'false'
+}
+
+function getCategoryDeducibleDefault(categoryId: string, categories: ExpenseCategory[]): boolean {
+  const cat = categories.find(c => c.id === categoryId)
+  if (!cat) return false
+  return cat.is_deductible === 'true' || cat.is_deductible === 'partial'
+}
+
 const formatCurrency = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
@@ -25,6 +55,53 @@ const formatAmountInput = (raw: string) => {
 }
 
 const parseAmount = (formatted: string) => parseInt(formatted.replace(/[^0-9]/g, ''), 10) || 0
+
+// ── Deducible toggle + tooltip subcomponent ─────────────
+function DeducibleToggle({
+  checked,
+  onChange,
+  categoryId,
+  categories,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  categoryId: string
+  categories: ExpenseCategory[]
+}) {
+  const state = getDeducibleState(checked, categoryId, categories)
+  const tooltip = TOOLTIP_DEDUCIBLE[state]
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onChange(!checked)}
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+            checked
+              ? state === 'partial'
+                ? 'border-amber-500 bg-amber-500 text-white'
+                : 'border-primary bg-primary text-primary-foreground'
+              : 'border-input hover:border-primary'
+          }`}
+        >
+          {checked && <Check className="h-3 w-3" />}
+        </button>
+        <label className="text-xs font-medium text-muted-foreground">
+          Puede ayudarte a pagar menos impuestos? {checked ? '💰' : ''}
+        </label>
+      </div>
+      {/* D129: Inline tooltip — always visible when deducible state changes */}
+      <p className={`text-[11px] leading-snug pl-7 ${
+        state === 'true' ? 'text-green-600 dark:text-green-400'
+          : state === 'partial' ? 'text-amber-600 dark:text-amber-400'
+          : 'text-muted-foreground'
+      }`}>
+        {tooltip}
+      </p>
+    </div>
+  )
+}
 
 export default function GastosFijosSection({ fixedExpenses: initialExpenses, categories, totalFixed: initialTotal }: Props) {
   const router = useRouter()
@@ -60,6 +137,22 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
 
   const cancelEdit = () => {
     setEditingId(null)
+  }
+
+  // D129: Auto-set deducible when category changes (add form)
+  const handleNewCatChange = (catId: string) => {
+    setNewCatId(catId)
+    if (catId) {
+      setNewDeducible(getCategoryDeducibleDefault(catId, categories))
+    }
+  }
+
+  // D129: Auto-set deducible when category changes (edit form)
+  const handleEditCatChange = (catId: string) => {
+    setEditCatId(catId)
+    if (catId) {
+      setEditDeducible(getCategoryDeducibleDefault(catId, categories))
+    }
   }
 
   const handleAdd = () => {
@@ -105,7 +198,6 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
 
       if (!result.success) { toast.error(result.error); return }
 
-      // Update local state
       const oldItem = fixedExpenses.find(f => f.id === id)
       setFixedExpenses(prev => prev.map(f =>
         f.id === id ? {
@@ -154,6 +246,14 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
     })
   }
 
+  // D129: Deducible badge for list items
+  const deducibleBadge = (fe: FixedExpenseWithCategory) => {
+    const state = getDeducibleState(fe.deducible, fe.category_id, categories)
+    if (state === 'true') return <span className="text-green-600 dark:text-green-400">💰 Puede ser deducible</span>
+    if (state === 'partial') return <span className="text-amber-600 dark:text-amber-400">💰 Parcialmente deducible</span>
+    return null
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -200,7 +300,7 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
                   </div>
                   <select
                     value={editCatId}
-                    onChange={(e) => setEditCatId(e.target.value)}
+                    onChange={(e) => handleEditCatChange(e.target.value)}
                     className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-muted-foreground"
                   >
                     <option value="">Sin categoria</option>
@@ -222,21 +322,14 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
                       placeholder="1-31"
                     />
                   </div>
-                  <div className="flex items-center gap-2 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setEditDeducible(!editDeducible)}
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
-                        editDeducible
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-input hover:border-primary'
-                      }`}
-                    >
-                      {editDeducible && <Check className="h-3 w-3" />}
-                    </button>
-                    <label className="text-xs font-medium text-muted-foreground">Deducible</label>
-                  </div>
                 </div>
+                {/* D129: Deducible toggle with tooltip */}
+                <DeducibleToggle
+                  checked={editDeducible}
+                  onChange={setEditDeducible}
+                  categoryId={editCatId}
+                  categories={categories}
+                />
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleUpdate(fe.id)}
@@ -279,10 +372,10 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{fe.description}</p>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       {fe.categoryName && <span>{fe.categoryName}</span>}
                       {fe.dia_pago && <span>Dia {fe.dia_pago}</span>}
-                      {fe.deducible && <span className="text-green-600">Deducible</span>}
+                      {deducibleBadge(fe)}
                     </div>
                   </div>
                 </button>
@@ -330,7 +423,7 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
             </div>
             <select
               value={newCatId}
-              onChange={(e) => setNewCatId(e.target.value)}
+              onChange={(e) => handleNewCatChange(e.target.value)}
               className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-muted-foreground"
             >
               <option value="">Categoria (opcional)</option>
@@ -340,35 +433,26 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
             </select>
           </div>
 
-          {/* New fields: dia_pago + deducible */}
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="text-xs font-medium text-muted-foreground">Dia de pago</label>
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={newDiaPago}
-                onChange={e => setNewDiaPago(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-                placeholder="1-31"
-              />
-            </div>
-            <div className="flex items-center gap-2 pt-4">
-              <button
-                type="button"
-                onClick={() => setNewDeducible(!newDeducible)}
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
-                  newDeducible
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-input hover:border-primary'
-                }`}
-              >
-                {newDeducible && <Check className="h-3 w-3" />}
-              </button>
-              <label className="text-xs font-medium text-muted-foreground">Deducible</label>
-            </div>
+          <div className="flex-1">
+            <label className="text-xs font-medium text-muted-foreground">Dia de pago</label>
+            <input
+              type="number"
+              min={1}
+              max={31}
+              value={newDiaPago}
+              onChange={e => setNewDiaPago(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="1-31"
+            />
           </div>
+
+          {/* D129: Deducible toggle with tooltip */}
+          <DeducibleToggle
+            checked={newDeducible}
+            onChange={setNewDeducible}
+            categoryId={newCatId}
+            categories={categories}
+          />
 
           <button
             onClick={handleAdd}
@@ -377,6 +461,16 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
           >
             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Agregar gasto fijo'}
           </button>
+        </div>
+      )}
+
+      {/* D129 CAMBIO 3: Disclaimer pie de sección */}
+      {fixedExpenses.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <p className="text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+            La deducibilidad depende de tu regimen tributario y de tener los soportes al dia. Estos indicadores son orientativos y no constituyen asesoria tributaria — tu contador tiene la palabra final.
+          </p>
         </div>
       )}
     </div>

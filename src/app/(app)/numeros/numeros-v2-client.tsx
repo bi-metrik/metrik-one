@@ -113,6 +113,25 @@ export default function NumerosV2Client({ initialData }: Props) {
       {/* Franja Conciliación */}
       <FranjaConciliacion data={data.conciliacion} />
 
+      {/* D129 – Alerta gastos deducibles sin soporte */}
+      {data.totalDeduciblesMes > 0 && (
+        <a
+          href="/mi-negocio"
+          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
+        >
+          <span className="mt-0.5 text-lg leading-none">💰</span>
+          <div className="flex-1">
+            <p className="text-amber-900 dark:text-amber-200">
+              Tienes <strong>{formatCOP(data.totalDeduciblesMes)}</strong> en gastos deducibles sin soporte este mes.
+              Guarda las facturas antes del cierre.
+            </p>
+            <span className="mt-1 inline-block text-xs font-medium text-amber-700 dark:text-amber-400">
+              Ir a Mis Gastos Fijos →
+            </span>
+          </div>
+        </a>
+      )}
+
       {/* Cards or placeholder */}
       {!showCards ? (
         <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">

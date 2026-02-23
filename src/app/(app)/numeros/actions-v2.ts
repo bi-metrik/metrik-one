@@ -43,6 +43,9 @@ export interface NumerosData {
   // Franja conciliación
   conciliacion: ConciliacionData
 
+  // D129: Deducibles alert
+  totalDeduciblesMes: number     // sum of deducible fixed expenses monthly_amount
+
   // Meta info
   mesRef: string                 // YYYY-MM
   diaActual: number
@@ -201,7 +204,7 @@ export async function getNumeros(mesRef?: string) {
     // Gastos fijos configurados (fixed_expenses = same table Mi Negocio uses)
     supabase
       .from('fixed_expenses')
-      .select('monthly_amount')
+      .select('monthly_amount, deducible')
       .eq('workspace_id', workspaceId)
       .eq('is_active', true),
 
@@ -371,7 +374,13 @@ export async function getNumeros(mesRef?: string) {
   }
 
   // Gastos fijos
-  const costosFijosMes = (gastosFijosRes.data ?? []).reduce((s, g) => s + Number(g.monthly_amount), 0)
+  const gastosFijosData = gastosFijosRes.data ?? []
+  const costosFijosMes = gastosFijosData.reduce((s, g) => s + Number(g.monthly_amount), 0)
+
+  // D129: Total deducibles
+  const totalDeduciblesMes = gastosFijosData
+    .filter(g => g.deducible === true)
+    .reduce((s, g) => s + Number(g.monthly_amount), 0)
 
   // Margen contribución (from closed projects)
   const proyectosCerrados = proyectosCerradosRes.data ?? []
@@ -473,6 +482,7 @@ export async function getNumeros(mesRef?: string) {
     puntoEquilibrio,
     runwayMeses,
     gastoPromedioMensual,
+    totalDeduciblesMes,
     semaforo,
     conciliacion,
     mesRef: mes,
