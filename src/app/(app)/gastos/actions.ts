@@ -310,6 +310,47 @@ export async function toggleFixedExpense(id: string, isActive: boolean) {
   return { success: true }
 }
 
+export async function updateFixedExpense(id: string, input: {
+  description?: string
+  monthlyAmount?: number
+  categoryId?: string | null
+  diaPago?: number | null
+  deducible?: boolean
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'No autenticado' }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('workspace_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile) return { success: false, error: 'Sin perfil' }
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (input.description !== undefined) updates.description = input.description.trim()
+  if (input.monthlyAmount !== undefined) updates.monthly_amount = input.monthlyAmount
+  if (input.categoryId !== undefined) updates.category_id = input.categoryId || null
+  if (input.diaPago !== undefined) updates.dia_pago = input.diaPago
+  if (input.deducible !== undefined) updates.deducible = input.deducible
+
+  const { error } = await supabase
+    .from('fixed_expenses')
+    .update(updates)
+    .eq('id', id)
+    .eq('workspace_id', profile.workspace_id)
+
+  if (error) return { success: false, error: error.message }
+
+  revalidatePath('/config')
+  revalidatePath('/mi-negocio')
+  revalidatePath('/numeros')
+
+  return { success: true }
+}
+
 // ── Workspace config (Mi tarifa) ────────────────────────
 
 export async function getWorkspaceConfig() {
