@@ -23,9 +23,9 @@ export default function NuevoGastoForm({ proyectos }: Props) {
 
   // Form state
   const [monto, setMonto] = useState('')
-  const [proyectoId, setProyectoId] = useState<string>('')  // '' = sin proyecto, 'empresa' = empresa, UUID = proyecto
+  const [proyectoId, setProyectoId] = useState<string>('empresa')  // 'empresa' = empresa (default), UUID = proyecto
   const [rubroId, setRubroId] = useState('')
-  const [categoria, setCategoria] = useState('otros')
+  const [categoria, setCategoria] = useState('arriendo')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [descripcion, setDescripcion] = useState('')
   const [deducible, setDeducible] = useState(false)
@@ -35,7 +35,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
   const [loadingRubros, setLoadingRubros] = useState(false)
 
   const isEmpresa = proyectoId === 'empresa'
-  const isProyecto = proyectoId !== '' && proyectoId !== 'empresa'
+  const isProyecto = proyectoId !== 'empresa'
   const categoriasVisibles = isEmpresa ? CATEGORIAS_EMPRESA : CATEGORIAS_GASTO
 
   // Fetch rubros when project changes
@@ -53,7 +53,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
     }
   }, [proyectoId, isProyecto])
 
-  // Reset categoria when switching to empresa if current isn't valid
+  // Reset categoria when switching to empresa if current isn't in empresa subset
   useEffect(() => {
     if (isEmpresa && !CATEGORIAS_EMPRESA.some(c => c.value === categoria)) {
       setCategoria('arriendo')
@@ -124,7 +124,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
             onChange={e => setProyectoId(e.target.value)}
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
           >
-            <option value="">Sin proyecto (gasto general)</option>
+            <option value="empresa">Gasto de mi empresa</option>
             {proyectos.length > 0 && (
               <optgroup label="Proyectos activos">
                 {proyectos.map(p => (
@@ -134,7 +134,6 @@ export default function NuevoGastoForm({ proyectos }: Props) {
                 ))}
               </optgroup>
             )}
-            <option value="empresa">Gasto de mi empresa</option>
           </select>
         </div>
 
