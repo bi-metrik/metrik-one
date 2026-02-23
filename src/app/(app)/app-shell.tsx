@@ -163,7 +163,7 @@ export default function AppShell({
             </div>
             {sidebarExpanded && (
               <div className="flex-1 overflow-hidden min-w-0">
-                <p className="truncate text-xs font-bold" style={{ color: '#ffffff' }}>{fullName}</p>
+                <p className="truncate text-xs font-bold" style={{ color: 'var(--sidebar-primary-foreground)' }}>{fullName}</p>
                 <p className="text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{ROLE_LABELS[role] || role}</p>
               </div>
             )}
@@ -263,8 +263,8 @@ export default function AppShell({
         </nav>
       </div>
 
-      {/* FAB — hidden on /numeros (has its own FAB) */}
-      {!pathname.startsWith('/numeros') && <FAB role={role} />}
+      {/* FAB */}
+      <FAB role={role} />
     </div>
   )
 }

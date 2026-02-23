@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Flame, Target, Receipt, Banknote, Plus, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Flame } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { formatCOP } from '@/lib/contacts/constants'
 import QuestionCard from './question-card'
@@ -22,7 +22,6 @@ export default function NumerosV2Client({ initialData }: Props) {
   const [data, setData] = useState(initialData)
   const [mesRef, setMesRef] = useState(initialData?.mesRef ?? getCurrentMes())
   const [isPending, startTransition] = useTransition()
-  const [showFab, setShowFab] = useState(false)
   const [showSaldoDialog, setShowSaldoDialog] = useState(false)
   const [activeDrill, setActiveDrill] = useState<1 | 2 | 3 | 4 | 5 | null>(null)
 
@@ -275,58 +274,6 @@ export default function NumerosV2Client({ initialData }: Props) {
           />
         </>
       )}
-
-      {/* ── FAB ──────────────────────────────────────── */}
-      {showFab && (
-        <div
-          className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]"
-          onClick={() => setShowFab(false)}
-        />
-      )}
-
-      {showFab && (
-        <div className="fixed bottom-[9.5rem] right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
-          <button
-            onClick={() => { setShowFab(false); router.push('/nuevo/oportunidad') }}
-            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors border-b"
-          >
-            <Target className="h-4 w-4 shrink-0 text-muted-foreground" />
-            Nueva oportunidad
-          </button>
-          <button
-            onClick={() => { setShowFab(false); router.push('/nuevo/gasto') }}
-            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors border-b"
-          >
-            <Receipt className="h-4 w-4 shrink-0 text-muted-foreground" />
-            Registrar gasto
-          </button>
-          <button
-            onClick={() => { setShowFab(false); router.push('/proyectos') }}
-            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors border-b"
-          >
-            <Banknote className="h-4 w-4 shrink-0 text-muted-foreground" />
-            Registrar cobro
-          </button>
-          <button
-            onClick={() => { setShowFab(false); setShowSaldoDialog(true) }}
-            className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-          >
-            <Flame className="h-4 w-4 shrink-0 text-muted-foreground" />
-            Actualizar saldo
-          </button>
-        </div>
-      )}
-
-      <button
-        onClick={() => setShowFab(!showFab)}
-        className={`fixed bottom-20 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all ${
-          showFab
-            ? 'bg-foreground text-background'
-            : 'bg-primary text-primary-foreground'
-        }`}
-      >
-        {showFab ? <X className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
-      </button>
 
       {/* Saldo Dialog */}
       {showSaldoDialog && (
