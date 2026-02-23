@@ -27,5 +27,9 @@ CREATE TABLE IF NOT EXISTS timer_activo (
 );
 
 ALTER TABLE timer_activo ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "timer_activo_ws" ON timer_activo
-  FOR ALL USING (workspace_id = current_user_workspace_id());
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'timer_activo' AND policyname = 'timer_activo_ws') THEN
+    CREATE POLICY "timer_activo_ws" ON timer_activo
+      FOR ALL USING (workspace_id = current_user_workspace_id());
+  END IF;
+END $$;

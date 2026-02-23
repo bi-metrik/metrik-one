@@ -8,6 +8,7 @@ import QuestionCard from './question-card'
 import Semaforo from './semaforo'
 import FranjaConciliacion from './franja-conciliacion'
 import SaldoDialog from './saldo-dialog'
+import DrillDownSheet from './drill-down-sheet'
 import type { NumerosData } from './actions-v2'
 import { getNumeros } from './actions-v2'
 
@@ -22,6 +23,7 @@ export default function NumerosV2Client({ initialData }: Props) {
   const [isPending, startTransition] = useTransition()
   const [showFab, setShowFab] = useState(false)
   const [showSaldoDialog, setShowSaldoDialog] = useState(false)
+  const [activeDrill, setActiveDrill] = useState<1 | 2 | 3 | 4 | 5 | null>(null)
 
   const navigateMonth = (direction: -1 | 1) => {
     const [y, m] = mesRef.split('-').map(Number)
@@ -46,9 +48,9 @@ export default function NumerosV2Client({ initialData }: Props) {
   const [yyyy, mm] = mesRef.split('-').map(Number)
   const monthName = new Date(yyyy, mm - 1).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
 
-  // Show cards?
-  const showCards = data.semaforo.capa1Estado !== 'red'
-  const hasWarning = data.semaforo.capa1Estado === 'yellow'
+  // Show cards? — both Capa 1 AND Capa 2 must not be red
+  const showCards = data.semaforo.capa1Estado !== 'red' && data.semaforo.capa2Estado !== 'red'
+  const hasWarning = data.semaforo.capa1Estado === 'yellow' || data.semaforo.capa2Estado === 'yellow'
 
   // ── Color calculations (D105) ─────────────────────
   const ritmoRecaudo = data.metaRecaudo
@@ -114,7 +116,9 @@ export default function NumerosV2Client({ initialData }: Props) {
       {/* Cards or placeholder */}
       {!showCards ? (
         <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-          Completa los pendientes de arriba para ver tus 5 numeros
+          {data.semaforo.capa2Estado === 'red'
+            ? 'Atencion: tus indicadores financieros requieren accion urgente. Revisa el semaforo.'
+            : 'Completa los pendientes de arriba para ver tus 5 numeros'}
         </div>
       ) : (
         <>
@@ -138,6 +142,7 @@ export default function NumerosV2Client({ initialData }: Props) {
                   : 'Sin meta',
               }}
               barColor={recaudoColor}
+              onClick={() => setActiveDrill(1)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
               hasWarningBadge={hasWarning}
@@ -156,6 +161,7 @@ export default function NumerosV2Client({ initialData }: Props) {
                 bar1: { value: data.ingresosMes, label: 'Ingresos' },
                 bar2: { value: data.gastosMes, label: 'Gastos' },
               }}
+              onClick={() => setActiveDrill(2)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
               hasWarningBadge={hasWarning}
@@ -188,6 +194,7 @@ export default function NumerosV2Client({ initialData }: Props) {
                     : '#EF4444'
                   : undefined
               }
+              onClick={() => setActiveDrill(3)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
               hasWarningBadge={hasWarning}
@@ -209,6 +216,7 @@ export default function NumerosV2Client({ initialData }: Props) {
                 markerLabel: `PE ${formatCOP(data.puntoEquilibrio)}`,
               }}
               barColor={ventasColor}
+              onClick={() => setActiveDrill(4)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
               hasWarningBadge={hasWarning}
@@ -232,6 +240,7 @@ export default function NumerosV2Client({ initialData }: Props) {
                 { start: 6, end: 12, color: '#10B981' },
               ],
             }}
+            onClick={() => setActiveDrill(5)}
             isEmpty={monthType === 'future'}
             monthType={monthType}
             hasWarningBadge={hasWarning}
@@ -294,6 +303,16 @@ export default function NumerosV2Client({ initialData }: Props) {
       {/* Saldo Dialog */}
       {showSaldoDialog && (
         <SaldoDialog onClose={() => { setShowSaldoDialog(false); router.refresh() }} />
+      )}
+
+      {/* Drill-down sheet */}
+      {activeDrill && (
+        <DrillDownSheet
+          questionNumber={activeDrill}
+          data={data}
+          monthType={monthType}
+          onClose={() => setActiveDrill(null)}
+        />
       )}
     </div>
   )

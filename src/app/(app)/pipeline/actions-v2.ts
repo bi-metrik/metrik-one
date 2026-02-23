@@ -317,25 +317,28 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     return { success: false, error: projError?.message ?? 'Error creando proyecto' }
   }
 
-  // Create proyecto_rubros from cotización items
+  // Create proyecto_rubros from cotización items (with full detail inheritance)
   if (cotizacion) {
     if (cotizacion.modo === 'detallada') {
-      // Get items with their first rubro type
+      // Get items with full rubro details for inheritance
       const { data: items } = await supabase
         .from('items')
-        .select('nombre, subtotal, rubros(tipo)')
+        .select('nombre, subtotal, rubros(tipo, cantidad, unidad, valor_unitario, valor_total)')
         .eq('cotizacion_id', cotizacion.id)
 
       if (items && items.length > 0) {
         const rubrosToInsert = items.map(item => {
-          const firstRubroTipo = Array.isArray(item.rubros) && item.rubros.length > 0
-            ? (item.rubros[0] as { tipo: string }).tipo
+          const firstRubro = Array.isArray(item.rubros) && item.rubros.length > 0
+            ? (item.rubros[0] as { tipo: string; cantidad: number | null; unidad: string | null; valor_unitario: number | null; valor_total: number | null })
             : null
           return {
             proyecto_id: proyecto.id,
             nombre: item.nombre ?? 'Sin nombre',
             presupuestado: item.subtotal ?? 0,
-            tipo: mapTipoRubro(firstRubroTipo),
+            tipo: mapTipoRubro(firstRubro?.tipo ?? null),
+            cantidad: firstRubro?.cantidad ?? null,
+            unidad: firstRubro?.unidad ?? null,
+            valor_unitario: firstRubro?.valor_unitario ?? null,
           }
         })
 
