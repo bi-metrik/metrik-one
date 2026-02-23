@@ -276,7 +276,7 @@ export default function NumerosV2Client({ initialData }: Props) {
       )}
 
       {showFab && (
-        <div className="fixed bottom-24 right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
+        <div className="fixed bottom-[9.5rem] right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
           <button
             onClick={() => { setShowFab(false); router.push('/nuevo/oportunidad') }}
             className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors border-b"
@@ -310,7 +310,7 @@ export default function NumerosV2Client({ initialData }: Props) {
 
       <button
         onClick={() => setShowFab(!showFab)}
-        className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all ${
+        className={`fixed bottom-20 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all ${
           showFab
             ? 'bg-foreground text-background'
             : 'bg-primary text-primary-foreground'
