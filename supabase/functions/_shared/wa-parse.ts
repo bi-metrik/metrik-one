@@ -101,11 +101,22 @@ const FEW_SHOT_EXAMPLES = [
 ];
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {
+  // Try Gemini first, fall back to regex if unavailable
+  const geminiResult = await tryGemini(userMessage);
+  if (geminiResult) return geminiResult;
+
+  // Fallback: regex-based parser for common patterns
+  console.log('[wa-parse] Using regex fallback');
+  return regexParse(userMessage);
+}
+
+// ============================================================
+// Gemini NLP Parser
+// ============================================================
+
+async function tryGemini(userMessage: string): Promise<ParseResult | null> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey) {
-    console.error('[wa-parse] GEMINI_API_KEY not set');
-    return { intent: 'UNCLEAR', confidence: 0, fields: {} };
-  }
+  if (!apiKey) return null;
 
   const fewShotParts = FEW_SHOT_EXAMPLES.flatMap((ex) => [
     { role: 'user', parts: [{ text: ex.input }] },
@@ -134,27 +145,164 @@ export async function parseMessage(userMessage: string): Promise<ParseResult> {
 
     if (!res.ok) {
       const err = await res.text();
-      console.error(`[wa-parse] Gemini error: ${res.status} ${err}`);
-      return { intent: 'UNCLEAR', confidence: 0, fields: {} };
+      console.error(`[wa-parse] Gemini error: ${res.status} — falling back to regex`);
+      return null; // Fall back to regex
     }
 
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      console.error('[wa-parse] Empty Gemini response');
-      return { intent: 'UNCLEAR', confidence: 0, fields: {} };
-    }
+    if (!text) return null;
 
     const parsed: ParseResult = JSON.parse(text);
-
-    // Enforce confidence threshold (D96)
-    if (parsed.confidence < 0.6) {
-      return { ...parsed, intent: 'UNCLEAR' };
-    }
-
+    if (parsed.confidence < 0.6) return { ...parsed, intent: 'UNCLEAR' };
     return parsed;
   } catch (err) {
-    console.error('[wa-parse] Parse error:', err);
-    return { intent: 'UNCLEAR', confidence: 0, fields: {} };
+    console.error('[wa-parse] Gemini exception:', err);
+    return null;
   }
+}
+
+// ============================================================
+// Regex Fallback Parser — handles common Colombian patterns
+// ============================================================
+
+function parseAmount(text: string): number | null {
+  // "2 palos" / "3 barras" → millions
+  let m = text.match(/(\d+(?:[.,]\d+)?)\s*(?:palos?|barras?|millones?)/i);
+  if (m) return parseFloat(m[1].replace(',', '.')) * 1_000_000;
+  // "medio palo"
+  if (/medio\s*palo/i.test(text)) return 500_000;
+  // "500 lucas" / "200 lucas"
+  m = text.match(/(\d+(?:[.,]\d+)?)\s*lucas?/i);
+  if (m) return parseFloat(m[1].replace(',', '.')) * 1_000;
+  // "180 mil" / "180mil"
+  m = text.match(/(\d+(?:[.,]\d+)?)\s*mil\b/i);
+  if (m) return parseFloat(m[1].replace(',', '.')) * 1_000;
+  // "4.800.000" / "4800000"
+  m = text.match(/(\d{1,3}(?:\.\d{3})+)/);
+  if (m) return parseInt(m[1].replace(/\./g, ''));
+  // Plain number "20000" / "180000"
+  m = text.match(/\b(\d{4,})\b/);
+  if (m) return parseInt(m[1]);
+  return null;
+}
+
+function extractEntityHint(text: string): string | null {
+  // "para (lo de|el proyecto) X"
+  let m = text.match(/(?:para\s+(?:lo\s+de|el\s+proyecto\s+)?|de\s+(?:lo\s+de\s+)?)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/);
+  if (m) return m[1];
+  // "lo de X"
+  m = text.match(/lo\s+de\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)/);
+  if (m) return m[1];
+  // "proyecto X"
+  m = text.match(/proyecto\s+(\S+)/i);
+  if (m) return m[1];
+  return null;
+}
+
+function regexParse(text: string): ParseResult {
+  const lower = text.toLowerCase().trim();
+
+  // AYUDA
+  if (/^(hola|hey|help|ayuda|\?|menu|menú|qué puedo|que puedo|buenos?\s*d[ií]as?)$/i.test(lower) ||
+      /^(qué\s+haces|que\s+haces|cómo\s+funciona|como\s+funciona)$/i.test(lower)) {
+    return { intent: 'AYUDA', confidence: 0.95, fields: {} };
+  }
+
+  // MIS_NUMEROS
+  if (/c[oó]mo\s+(estoy|vamos?|voy)|mis\s+n[uú]meros|resumen\s+(del\s+)?mes/i.test(lower)) {
+    return { intent: 'MIS_NUMEROS', confidence: 0.88, fields: {} };
+  }
+
+  // CARTERA
+  if (/qui[eé]n\s+me\s+debe|cartera|cuentas?\s+por\s+cobrar|me\s+deben/i.test(lower)) {
+    return { intent: 'CARTERA', confidence: 0.90, fields: {} };
+  }
+
+  // ESTADO_PIPELINE
+  if (/qu[eé]\s+tengo\s+en\s+el\s+horno|pipeline|oportunidades|prospectos?/i.test(lower)) {
+    return { intent: 'ESTADO_PIPELINE', confidence: 0.85, fields: {} };
+  }
+
+  // SALDO_BANCARIO — "mi saldo es X", "tengo X en el banco"
+  if (/(?:mi\s+saldo|tengo\s+\d.*(?:en\s+el\s+banco|en\s+cuenta))/i.test(lower)) {
+    const amount = parseAmount(lower);
+    if (amount) return { intent: 'SALDO_BANCARIO', confidence: 0.90, fields: { amount } };
+  }
+
+  // COBRO — "me pagaron", "me consignaron", "me giraron"
+  if (/me\s+(pagaron|consignaron|giraron|transfirieron)/i.test(lower)) {
+    const amount = parseAmount(lower);
+    return { intent: 'COBRO', confidence: 0.88, fields: { amount, entity_hint: extractEntityHint(text) } };
+  }
+
+  // GASTO — "gasté", "pagué", "compré" + monto
+  if (/gast[eé]|pagu[eé]|compr[eé]|invert[ií]/i.test(lower)) {
+    const amount = parseAmount(lower);
+    const entity = extractEntityHint(text);
+    // Extract concept (word after amount or after "en")
+    const conceptMatch = lower.match(/(?:en|de)\s+([a-záéíóúñ\s]{2,30})(?:\s+(?:para|con|del?))?/i);
+    const concept = conceptMatch ? conceptMatch[1].trim() : undefined;
+
+    // Determine if it's project-related (GASTO_DIRECTO) or operational (GASTO_OPERATIVO)
+    const isOperativo = /arriendo|internet|celular|luz|agua|gas|oficina|servicios|n[oó]mina/i.test(lower);
+    return {
+      intent: isOperativo ? 'GASTO_OPERATIVO' : 'GASTO_DIRECTO',
+      confidence: 0.85,
+      fields: { amount, concept, entity_hint: entity, category_hint: concept },
+    };
+  }
+
+  // Generic amount-based gasto (e.g., "20000 en tintos para proyecto Test")
+  if (parseAmount(lower) && /\b(en|para)\b/i.test(lower)) {
+    const amount = parseAmount(lower);
+    const entity = extractEntityHint(text);
+    const conceptMatch = lower.match(/(?:en)\s+([a-záéíóúñ\s]{2,30})(?:\s+(?:para|con|del?))?/i);
+    const concept = conceptMatch ? conceptMatch[1].trim() : undefined;
+    if (amount && (concept || entity)) {
+      return { intent: 'GASTO_DIRECTO', confidence: 0.75, fields: { amount, concept, entity_hint: entity } };
+    }
+  }
+
+  // HORAS — "trabajé X horas", "le metí X horas"
+  if (/(?:trabaj[eé]|le\s+met[ií]|dediqu[eé])\s+(\d+(?:[.,]\d+)?)\s*horas?/i.test(lower)) {
+    const hoursMatch = lower.match(/(\d+(?:[.,]\d+)?)\s*horas?/i);
+    const hours = hoursMatch ? parseFloat(hoursMatch[1].replace(',', '.')) : undefined;
+    return { intent: 'HORAS', confidence: 0.88, fields: { hours, entity_hint: extractEntityHint(text) } };
+  }
+
+  // ESTADO_PROYECTO — "cómo va lo de X"
+  if (/c[oó]mo\s+va|estado\s+de|avance\s+de/i.test(lower)) {
+    return { intent: 'ESTADO_PROYECTO', confidence: 0.85, fields: { entity_hint: extractEntityHint(text) } };
+  }
+
+  // OPP_GANADA — "aceptó", "ganamos"
+  if (/acept[oó]|ganamos|cerr[eé]|firm[oó]/i.test(lower)) {
+    return { intent: 'OPP_GANADA', confidence: 0.80, fields: { entity_hint: extractEntityHint(text) } };
+  }
+
+  // OPP_PERDIDA — "se cayó", "no se dio", "perdimos"
+  if (/se\s+cay[oó]|no\s+se\s+dio|perdimos|descart[oó]/i.test(lower)) {
+    return { intent: 'OPP_PERDIDA', confidence: 0.80, fields: { entity_hint: extractEntityHint(text) } };
+  }
+
+  // NOTA_OPORTUNIDAD / NOTA_PROYECTO
+  if (/nota\s+(para|de|sobre)/i.test(lower)) {
+    const entity = extractEntityHint(text);
+    const noteMatch = text.match(/nota\s+(?:para|de|sobre)\s+\S+[:\s]+(.+)/i);
+    return { intent: 'NOTA_PROYECTO', confidence: 0.80, fields: { entity_hint: entity, note: noteMatch?.[1] } };
+  }
+
+  // CONTACTO_NUEVO — "nuevo contacto", "anota"
+  if (/nuevo\s+contacto|anota|anotar|registra\s+contacto/i.test(lower)) {
+    return { intent: 'CONTACTO_NUEVO', confidence: 0.80, fields: {} };
+  }
+
+  // INFO_CONTACTO — "teléfono de", "datos de"
+  if (/tel[eé]fono\s+de|datos?\s+de|info\s+de|contacto\s+de/i.test(lower)) {
+    return { intent: 'INFO_CONTACTO', confidence: 0.85, fields: { entity_hint: extractEntityHint(text) } };
+  }
+
+  // Nothing matched
+  return { intent: 'UNCLEAR', confidence: 0, fields: {} };
 }
