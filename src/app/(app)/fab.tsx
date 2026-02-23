@@ -207,7 +207,7 @@ export default function FAB({ role }: FABProps) {
 
       {/* ── Timer panel (select project + start) ───────── */}
       {timerPanel && !timer.isRunning && (
-        <div className="fixed bottom-[9.5rem] right-4 md:bottom-24 md:right-6 z-50 w-64 rounded-2xl border bg-card p-4 shadow-xl space-y-3">
+        <div className="fixed bottom-24 right-6 z-50 w-64 rounded-2xl border bg-card p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-violet-500" />
@@ -245,7 +245,7 @@ export default function FAB({ role }: FABProps) {
 
       {/* ── Action menu (card style) ───────────────────── */}
       {open && (
-        <div className="fixed bottom-[9.5rem] right-4 md:bottom-24 md:right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
+        <div className="fixed bottom-24 right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
           {/* Active timer row (when running, replaces "Iniciar timer") */}
           {timer.isRunning && timerLoaded && (
             <div className="flex items-center gap-2 border-b px-4 py-3">
@@ -296,7 +296,7 @@ export default function FAB({ role }: FABProps) {
 
       {/* ── Active timer pill (above FAB — hidden when menu open) ── */}
       {timer.isRunning && timerLoaded && !open && (
-        <div className="fixed bottom-[8.5rem] right-4 md:bottom-[5.5rem] md:right-6 z-50 flex items-center gap-2 rounded-full border bg-card pl-3 pr-1.5 py-1.5 shadow-lg">
+        <div className="fixed bottom-[5.5rem] right-6 z-50 flex items-center gap-2 rounded-full border bg-card pl-3 pr-1.5 py-1.5 shadow-lg">
           <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
           <span className="text-xs font-mono font-semibold tabular-nums">{formatTime(elapsed)}</span>
           <span className="max-w-20 truncate text-[10px] text-muted-foreground">{timer.proyectoNombre}</span>
@@ -313,7 +313,7 @@ export default function FAB({ role }: FABProps) {
       {/* ── Main FAB button ────────────────────────────── */}
       <button
         onClick={() => { setOpen(!open); setTimerPanel(false) }}
-        className={`fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all ${
+        className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all ${
           open
             ? 'bg-foreground text-background'
             : timer.isRunning
