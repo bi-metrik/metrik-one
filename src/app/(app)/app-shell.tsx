@@ -203,12 +203,19 @@ export default function AppShell({
           )}
         </header>
 
-        {/* Mobile header — MéTRIK logo + avatar/logout */}
+        {/* Mobile header — MéTRIK isotipo + company logo + avatar/logout */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
-          <Link href="/numeros" className="flex items-center gap-2">
-            <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
-            <span className="text-sm font-semibold">MeTRIK ONE</span>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/numeros" className="flex items-center shrink-0">
+              <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
+            </Link>
+            {hasLogo && (
+              <img src={branding!.logoUrl} alt={workspaceName} className="h-7 max-w-[120px] object-contain" />
+            )}
+            {!hasLogo && (
+              <span className="truncate text-sm font-semibold">{workspaceName}</span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <div
               className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold"
