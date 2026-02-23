@@ -84,11 +84,11 @@ export default function ServiciosSection({ initialData }: Props) {
         costo_estimado: costoVal,
         rubros_template: rubros.length > 0 ? rubros : undefined,
       })
-      if (res.success) {
+      if (res.success && 'servicio' in res && res.servicio) {
+        setServicios(prev => [...prev, res.servicio!])
         toast.success('Servicio creado')
         resetForm()
-        router.refresh()
-      } else {
+      } else if (!res.success) {
         toast.error(res.error)
       }
     })
@@ -107,11 +107,11 @@ export default function ServiciosSection({ initialData }: Props) {
         costo_estimado: costoVal,
         rubros_template: rubros.length > 0 ? rubros : null,
       })
-      if (res.success) {
+      if (res.success && 'servicio' in res && res.servicio) {
+        setServicios(prev => prev.map(s => s.id === id ? res.servicio! : s))
         toast.success('Servicio actualizado')
         resetForm()
-        router.refresh()
-      } else {
+      } else if (!res.success) {
         toast.error(res.error)
       }
     })

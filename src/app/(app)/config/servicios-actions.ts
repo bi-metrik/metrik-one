@@ -62,14 +62,14 @@ export async function createServicio(input: {
       rubros_template: (input.rubros_template ?? null) as unknown as Json,
       activo: true,
     })
-    .select('id')
+    .select('*')
     .single()
 
   if (dbError) return { success: false, error: dbError.message }
 
   revalidatePath('/config')
   revalidatePath('/mi-negocio')
-  return { success: true, id: data.id }
+  return { success: true, id: data.id, servicio: data }
 }
 
 export async function updateServicio(id: string, input: {
@@ -89,16 +89,18 @@ export async function updateServicio(id: string, input: {
   if (input.rubros_template !== undefined) updates.rubros_template = input.rubros_template
   if (input.activo !== undefined) updates.activo = input.activo
 
-  const { error: dbError } = await supabase
+  const { data, error: dbError } = await supabase
     .from('servicios')
     .update(updates)
     .eq('id', id)
+    .select('*')
+    .single()
 
   if (dbError) return { success: false, error: dbError.message }
 
   revalidatePath('/config')
   revalidatePath('/mi-negocio')
-  return { success: true }
+  return { success: true, servicio: data }
 }
 
 export async function deleteServicio(id: string) {
