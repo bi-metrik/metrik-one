@@ -1,5 +1,7 @@
+import { getProyectosParaGasto } from './gasto-action'
 import NuevoGastoForm from './nuevo-gasto-form'
 
-export default function NuevoGastoPage() {
-  return <NuevoGastoForm />
+export default async function NuevoGastoPage() {
+  const proyectos = await getProyectosParaGasto()
+  return <NuevoGastoForm proyectos={proyectos} />
 }

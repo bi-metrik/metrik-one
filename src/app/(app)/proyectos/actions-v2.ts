@@ -458,6 +458,7 @@ export async function addGastoDirecto(proyectoId: string, input: {
       descripcion: input.descripcion?.trim() || null,
       categoria: input.categoria || 'otros',
       fecha: input.fecha || new Date().toISOString().split('T')[0],
+      tipo: 'directo',
     })
 
   if (dbError) return { success: false, error: dbError.message }
