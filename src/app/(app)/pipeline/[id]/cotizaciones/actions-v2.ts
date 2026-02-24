@@ -164,7 +164,7 @@ export async function deleteItem(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
-  // Fetch item details before deleting (to adjust valor_total if from catalog)
+  // Fetch item details before deleting
   const { data: item } = await supabase
     .from('items')
     .select('cotizacion_id, servicio_origen_id, subtotal')
@@ -173,7 +173,9 @@ export async function deleteItem(id: string) {
 
   if (!item) return { success: false, error: 'Item no encontrado' }
 
-  // If the item came from a catalog service, we need to subtract its sale price from valor_total
+  // Determine how much to subtract from valor_total:
+  // 1. If item has servicio_origen_id → use that service's precio_estandar
+  // 2. Fallback → use the item's subtotal (cost-based estimate)
   let precioRestar = 0
   if (item.servicio_origen_id) {
     const { data: servicio } = await supabase
@@ -181,8 +183,11 @@ export async function deleteItem(id: string) {
       .select('precio_estandar')
       .eq('id', item.servicio_origen_id)
       .single()
-
     precioRestar = servicio?.precio_estandar ?? (item.subtotal ?? 0)
+  } else {
+    // For items added from catalog before fix (servicio_origen_id was not set),
+    // or manually created items: subtract item subtotal as best approximation
+    precioRestar = item.subtotal ?? 0
   }
 
   const { error: dbError } = await supabase
@@ -192,7 +197,7 @@ export async function deleteItem(id: string) {
 
   if (dbError) return { success: false, error: dbError.message }
 
-  // Subtract the sale price from valor_total
+  // Always subtract from valor_total when deleting an item
   if (precioRestar > 0) {
     const { data: cot } = await supabase
       .from('cotizaciones')
@@ -244,7 +249,7 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
     ? rubrosTemplate.reduce((sum, r) => sum + (r.cantidad * r.valor_unitario), 0)
     : (servicio.precio_estandar ?? 0)
 
-  // Create item
+  // Create item (store servicio_origen_id so deleteItem can reverse the valor_total change)
   const { data: newItem, error: itemError } = await supabase
     .from('items')
     .insert({
@@ -252,6 +257,7 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
       nombre: servicio.nombre,
       subtotal,
       orden: nextOrden,
+      servicio_origen_id: servicioId,
     })
     .select('id')
     .single()
