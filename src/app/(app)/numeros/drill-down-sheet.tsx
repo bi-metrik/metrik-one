@@ -242,15 +242,16 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
       </div>
 
       <Divider />
-      <SectionTitle>Punto de equilibrio</SectionTitle>
-      <Row label="PE = Gastos fijos / Margen" value={data.puntoEquilibrio} bold />
+      <SectionTitle>Minimo que necesitas vender</SectionTitle>
+      <Row label="Gastos fijos / Margen de contribucion" value={data.puntoEquilibrio} bold />
+      <p className="text-[10px] text-muted-foreground px-1 -mt-1">Es la venta minima mensual para cubrir todos tus costos fijos</p>
 
       <Divider />
       <SectionTitle>Avance de ventas</SectionTitle>
       <Row label="Ventas del mes" value={data.ventasMes} />
       {data.metaVentas && <Row label="Meta de ventas" value={data.metaVentas} />}
       <Row
-        label="vs Punto equilibrio"
+        label="vs Minimo necesario"
         value={data.ventasMes >= data.puntoEquilibrio ? 'Superado ✅' : `Falta ${formatCOP(faltaParaPE)}`}
         color={data.ventasMes >= data.puntoEquilibrio ? 'green' : 'red'}
         bold
@@ -259,7 +260,7 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
       {monthType === 'current' && faltaParaPE > 0 && diasRestantes > 0 && (
         <>
           <Divider />
-          <SectionTitle>Para llegar al PE</SectionTitle>
+          <SectionTitle>Para cubrir tus costos</SectionTitle>
           <Row label="Dias restantes" value={`${diasRestantes} dias`} />
           <Row label="Venta diaria requerida" value={Math.round(ventaDiariaRequerida)} color="yellow" />
         </>

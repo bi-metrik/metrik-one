@@ -564,15 +564,14 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   let totalWeight = 0
   let greenWeight = 0
 
-  // 1. Gastos fijos configurados (Crítico, peso 3)
-  const gfScore = input.gastosFijosCount >= 3 ? 'green' : input.gastosFijosCount >= 1 ? 'yellow' as const : 'red'
+  // 1. Gastos fijos configurados (Crítico, peso 3) — 1+ es suficiente para verde
+  const gfScore = input.gastosFijosCount >= 1 ? 'green' : 'red'
   totalWeight += 3
   if (gfScore === 'green') greenWeight += 3
-  else if (gfScore === 'yellow') greenWeight += 1.5
   pendientes.push({
     label: 'Gastos fijos configurados',
     done: gfScore === 'green',
-    action: gfScore !== 'green' ? '/config' : undefined,
+    action: gfScore !== 'green' ? '/mi-negocio' : undefined,
   })
 
   // 2. Meta ventas definida (Crítico, peso 3)
@@ -582,7 +581,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   pendientes.push({
     label: 'Meta de ventas definida',
     done: metaScore === 'green',
-    action: metaScore !== 'green' ? '/config' : undefined,
+    action: metaScore !== 'green' ? '/mi-negocio' : undefined,
   })
 
   // 3. Datos fiscales clientes activos (Informativo — no bloquea números)
@@ -598,10 +597,10 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     })
   }
 
-  // 4. Saldo bancario actualizado (Alto, peso 2)
+  // 4. Saldo bancario actualizado (Alto, peso 2) — 7d verde, 14d amarillo, 30d+ rojo
   const saldoScore = input.diasDesdeUltimoSaldo === null
     ? 'red'
-    : input.diasDesdeUltimoSaldo < 4 ? 'green' : input.diasDesdeUltimoSaldo <= 7 ? 'yellow' : 'red'
+    : input.diasDesdeUltimoSaldo <= 7 ? 'green' : input.diasDesdeUltimoSaldo <= 14 ? 'yellow' : 'red'
   totalWeight += 2
   if (saldoScore === 'green') greenWeight += 2
   else if (saldoScore === 'yellow') greenWeight += 1
@@ -671,7 +670,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
 
   const capa1Score = Math.round((greenWeight / totalWeight) * 100)
   const capa1Estado: 'red' | 'yellow' | 'green' =
-    capa1Score >= 80 ? 'green' : capa1Score >= 50 ? 'yellow' : 'red'
+    capa1Score >= 50 ? 'green' : capa1Score >= 30 ? 'yellow' : 'red'
 
   // ── Capa 2: Salud financiera (solo si Capa 1 ≥ 80%) ──
   let capa2Estado: 'red' | 'yellow' | 'green' | null = null
@@ -696,12 +695,12 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     if (colors.includes('red')) {
       capa2Estado = 'red'
       if (runwayColor === 'red') capa2Razon = `Runway: ${input.runwayMeses.toFixed(1)} meses — acelera cobros o reduce gastos`
-      else if (factColor === 'red') capa2Razon = `Facturación bajo PE — faltan $${Math.round(input.puntoEquilibrio - input.ventasMes).toLocaleString('es-CO')}`
+      else if (factColor === 'red') capa2Razon = `Ventas por debajo del minimo necesario — faltan $${Math.round(input.puntoEquilibrio - input.ventasMes).toLocaleString('es-CO')}`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else if (colors.includes('yellow')) {
       capa2Estado = 'yellow'
       if (runwayColor === 'yellow') capa2Razon = `Runway: ${input.runwayMeses.toFixed(1)} meses`
-      else if (factColor === 'yellow') capa2Razon = `Facturación entre PE y meta`
+      else if (factColor === 'yellow') capa2Razon = `Ventas entre el minimo y la meta — vas bien, sigue cerrando`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else {
       capa2Estado = 'green'
@@ -717,16 +716,19 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   // Messages
   let mensaje = ''
   if (capa1Estado === 'red') {
-    mensaje = 'Tus números no son confiables aún'
+    const faltantes = pendientes.filter(p => !p.done).map(p => p.label).slice(0, 2)
+    mensaje = `Falta: ${faltantes.join(', ')}`
   } else if (capa1Estado === 'yellow') {
     const pendientesCount = pendientes.filter(p => !p.done).length
-    mensaje = `Casi listo — ${pendientesCount} pendiente${pendientesCount > 1 ? 's' : ''} para lectura completa`
+    mensaje = `${pendientesCount} dato${pendientesCount > 1 ? 's' : ''} por actualizar — tus numeros ya son visibles`
   } else if (capa2Estado === 'green') {
-    mensaje = 'Datos completos. Tu negocio esta sano.'
+    mensaje = 'Todo al dia'
   } else if (capa2Estado === 'yellow') {
-    mensaje = 'Datos completos. Hay temas que atender.'
+    mensaje = capa2Razon ?? 'Hay temas que atender'
   } else if (capa2Estado === 'red') {
-    mensaje = 'Datos completos. Tu negocio necesita accion inmediata.'
+    mensaje = capa2Razon ?? 'Atencion requerida'
+  } else {
+    mensaje = 'Datos completos'
   }
 
   return {

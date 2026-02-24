@@ -56,9 +56,10 @@ export default function NumerosV2Client({ initialData }: Props) {
   const [yyyy, mm] = mesRef.split('-').map(Number)
   const monthName = new Date(yyyy, mm - 1).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
 
-  // Show cards? — both Capa 1 AND Capa 2 must not be red
-  const showCards = data.semaforo.capa1Estado !== 'red' && data.semaforo.capa2Estado !== 'red'
-  const hasWarning = data.semaforo.capa1Estado === 'yellow' || data.semaforo.capa2Estado === 'yellow'
+  // Show cards? — only block if Capa 1 is RED (missing critical data)
+  // Capa 2 (financial health) is INFORMATIVE — never blocks the dashboard
+  const showCards = data.semaforo.capa1Estado !== 'red'
+  const hasWarning = data.semaforo.capa1Estado === 'yellow' || data.semaforo.capa2Estado === 'yellow' || data.semaforo.capa2Estado === 'red'
 
   // ── Color calculations (D105) ─────────────────────
   const ritmoRecaudo = data.metaRecaudo
@@ -142,10 +143,9 @@ export default function NumerosV2Client({ initialData }: Props) {
 
       {/* Cards or placeholder */}
       {!showCards ? (
-        <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {data.semaforo.capa2Estado === 'red'
-            ? 'Atencion: tus indicadores financieros requieren accion urgente. Revisa el semaforo.'
-            : 'Completa los pendientes de arriba para ver tus 5 numeros'}
+        <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground space-y-2">
+          <p className="font-medium">Completa los pendientes para activar tus numeros</p>
+          <p className="text-xs">Necesitas al menos: 1 gasto fijo, meta de ventas del mes y saldo bancario</p>
         </div>
       ) : (
         <>
@@ -240,7 +240,7 @@ export default function NumerosV2Client({ initialData }: Props) {
                 current: data.ventasMes,
                 target: data.metaVentas ?? data.puntoEquilibrio * 1.5,
                 marker: data.puntoEquilibrio,
-                markerLabel: `PE ${formatCOP(data.puntoEquilibrio)}`,
+                markerLabel: `Minimo ${formatCOP(data.puntoEquilibrio)}`,
               }}
               barColor={ventasColor}
               onClick={() => setActiveDrill(4)}
@@ -307,12 +307,12 @@ function EmptyOnboarding() {
         <OnboardingStep
           step={1}
           label="Configura tus gastos fijos mensuales"
-          href="/config"
+          href="/mi-negocio"
         />
         <OnboardingStep
           step={2}
           label="Define tu meta de ventas del mes"
-          href="/config"
+          href="/mi-negocio"
         />
         <OnboardingStep
           step={3}
