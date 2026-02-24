@@ -241,7 +241,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   // Find best cotización: prefer aceptada, fallback to any
   const { data: cotizacion } = await supabase
     .from('cotizaciones')
-    .select('id, modo, valor_total')
+    .select('id, modo, valor_total, descuento_valor')
     .eq('oportunidad_id', id)
     .order('estado', { ascending: true }) // aceptada sorts first alphabetically
     .order('created_at', { ascending: false })
@@ -256,9 +256,8 @@ export async function ganarOportunidad(id: string, fiscalData?: {
 
   if (cotizacion) {
     // D131: Apply discount to get net budget
-    const cotAny = cotizacion as any
     const valorBruto = cotizacion.valor_total ?? presupuestoTotal
-    const descuento = Number(cotAny.descuento_valor ?? 0)
+    const descuento = Number(cotizacion.descuento_valor ?? 0)
     presupuestoTotal = valorBruto - descuento
 
     // Get items + rubros for detailed cotizaciones

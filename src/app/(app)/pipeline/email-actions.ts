@@ -43,11 +43,10 @@ export async function enviarCotizacionEmail(cotizacionId: string, emailTo: strin
   const senderName = ws?.name || 'MéTRIK ONE'
   const fmt = (v: number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-  // Access discount fields (columns may not be in generated types yet)
+  // Access discount fields
   const { data: cotFull } = await supabase.from('cotizaciones').select('*').eq('id', cotizacionId).single()
-  const cotAny = cotFull as any
-  const descPct = cotAny?.descuento_porcentaje ?? 0
-  const descVal = cotAny?.descuento_valor ?? 0
+  const descPct = cotFull?.descuento_porcentaje ?? 0
+  const descVal = cotFull?.descuento_valor ?? 0
   const valorNeto = cot.valor_total - descVal
   const valorFmt = fmt(valorNeto)
   const tieneDescuento = descVal > 0

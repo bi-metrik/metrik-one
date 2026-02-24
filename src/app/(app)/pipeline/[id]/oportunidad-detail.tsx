@@ -367,7 +367,7 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
                           </span>
                         </div>
                         {c.valor_total !== null && (() => {
-                          const descuento = Number((c as any).descuento_valor ?? 0)
+                          const descuento = Number(c.descuento_valor ?? 0)
                           const valorNeto = c.valor_total - descuento
                           return descuento > 0 ? (
                             <p className="text-xs text-muted-foreground mt-0.5">

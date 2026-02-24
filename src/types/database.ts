@@ -340,6 +340,47 @@ export type Database = {
           },
         ]
       }
+      config_financiera: {
+        Row: {
+          created_at: string | null
+          id: string
+          margen_contribucion_calculado: number | null
+          margen_contribucion_estimado: number | null
+          margen_fuente: string | null
+          n_proyectos_margen: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          margen_contribucion_calculado?: number | null
+          margen_contribucion_estimado?: number | null
+          margen_fuente?: string | null
+          n_proyectos_margen?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          margen_contribucion_calculado?: number | null
+          margen_contribucion_estimado?: number | null
+          margen_fuente?: string | null
+          n_proyectos_margen?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "config_financiera_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       config_metas: {
         Row: {
           created_at: string | null
@@ -583,6 +624,8 @@ export type Database = {
           consecutivo: string
           costo_total: number | null
           created_at: string | null
+          descuento_porcentaje: number
+          descuento_valor: number
           descripcion: string | null
           duplicada_de: string | null
           email_enviado_a: string | null
@@ -603,6 +646,8 @@ export type Database = {
           consecutivo: string
           costo_total?: number | null
           created_at?: string | null
+          descuento_porcentaje?: number
+          descuento_valor?: number
           descripcion?: string | null
           duplicada_de?: string | null
           email_enviado_a?: string | null
@@ -623,6 +668,8 @@ export type Database = {
           consecutivo?: string
           costo_total?: number | null
           created_at?: string | null
+          descuento_porcentaje?: number
+          descuento_valor?: number
           descripcion?: string | null
           duplicada_de?: string | null
           email_enviado_a?: string | null

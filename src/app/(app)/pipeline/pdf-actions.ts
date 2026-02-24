@@ -74,8 +74,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     ica_city: null,
   }
 
-  const cotAny = cot as any
-  const valorNeto = cot.valor_total - (cotAny.descuento_valor ?? 0)
+  const valorNeto = cot.valor_total - (cot.descuento_valor ?? 0)
   const fiscal = calcularFiscal(valorNeto, vendorProfile, buyerProfile)
 
   // Render PDF
@@ -89,8 +88,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       fecha_validez: cot.fecha_validez,
       condiciones_pago: cot.condiciones_pago,
       notas: cot.notas,
-      descuento_porcentaje: cotAny.descuento_porcentaje ?? 0,
-      descuento_valor: cotAny.descuento_valor ?? 0,
+      descuento_porcentaje: cot.descuento_porcentaje ?? 0,
+      descuento_valor: cot.descuento_valor ?? 0,
     },
     empresa: {
       nombre: empresa.nombre,

@@ -82,8 +82,7 @@ export default async function MiNegocioPage() {
       .order('nombre'),
 
     // D130: Config financiera (margen)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any)
+    supabase
       .from('config_financiera')
       .select('margen_contribucion_estimado, margen_fuente, n_proyectos_margen')
       .eq('workspace_id', workspaceId)

@@ -9,7 +9,7 @@ export async function getCotizaciones(oportunidadId: string) {
 
   const { data } = await supabase
     .from('cotizaciones')
-    .select('id, consecutivo, modo, estado, valor_total, margen_porcentaje, costo_total, descripcion, created_at')
+    .select('id, consecutivo, modo, estado, valor_total, descuento_porcentaje, descuento_valor, margen_porcentaje, costo_total, descripcion, created_at')
     .eq('oportunidad_id', oportunidadId)
     .order('created_at', { ascending: false })
 

@@ -275,8 +275,7 @@ export async function getNumeros(mesRef?: string) {
       .eq('is_active', true),
 
     // D130: Config financiera (margen de contribución)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any)
+    supabase
       .from('config_financiera')
       .select('margen_contribucion_estimado, margen_contribucion_calculado, margen_fuente, n_proyectos_margen')
       .eq('workspace_id', workspaceId)

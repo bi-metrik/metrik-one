@@ -35,7 +35,7 @@ interface MiNegocioClientProps {
   categories: ExpenseCategory[]
   servicios: Servicio[]
   staffNomina: { nombre: string; salario: number }[]
-  configFinanciera: { margen_contribucion_estimado: number; margen_fuente: string; n_proyectos_margen: number } | null
+  configFinanciera: { margen_contribucion_estimado: number | null; margen_fuente: string | null; n_proyectos_margen: number | null } | null
   progressPct: number
   currentUserRole: string
   sectionScores: {
@@ -305,7 +305,7 @@ function renderSection(
     categories: ExpenseCategory[]
     servicios: Servicio[]
     staffNomina: { nombre: string; salario: number }[]
-    configFinanciera: { margen_contribucion_estimado: number; margen_fuente: string; n_proyectos_margen: number } | null
+    configFinanciera: { margen_contribucion_estimado: number | null; margen_fuente: string | null; n_proyectos_margen: number | null } | null
     totalFixed: number
     currentUserRole: string
     onClose: () => void
@@ -381,7 +381,7 @@ const MARGEN_OPTIONS = [
 ] as const
 
 function MargenContribucionSection({ configFinanciera }: {
-  configFinanciera: { margen_contribucion_estimado: number; margen_fuente: string; n_proyectos_margen: number } | null
+  configFinanciera: { margen_contribucion_estimado: number | null; margen_fuente: string | null; n_proyectos_margen: number | null } | null
 }) {
   const currentMargen = Number(configFinanciera?.margen_contribucion_estimado ?? 0.95)
   const [selected, setSelected] = useState<number>(currentMargen)

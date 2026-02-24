@@ -109,8 +109,7 @@ export async function updateMargenEstimado(margen: number) {
 
   if (margen < 0.01 || margen > 0.99) return { success: false, error: 'Margen fuera de rango' }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: dbError } = await (supabase as any)
+  const { error: dbError } = await supabase
     .from('config_financiera')
     .upsert({
       workspace_id: workspaceId,
