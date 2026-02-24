@@ -271,9 +271,9 @@ export default function ProyectoDetail({
       )}
 
       {/* ─── Presupuesto vs Real por rubro ─── */}
-      {rubros.length >= 1 && (
-        <div className="space-y-2 rounded-lg border p-4">
-          <h2 className="text-sm font-semibold">Presupuesto vs Real por rubro</h2>
+      <div className="space-y-2 rounded-lg border p-4">
+        <h2 className="text-sm font-semibold">Presupuesto por rubro</h2>
+        {rubros.length >= 1 ? (
           <div className="space-y-2">
             {rubros.map(r => {
               const pct = r.consumido_pct ?? 0
@@ -293,8 +293,12 @@ export default function ProyectoDetail({
               )
             })}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Este proyecto no tiene rubros asignados. Los rubros se crean automaticamente desde la cotizacion aprobada.
+          </p>
+        )}
+      </div>
 
       {/* ─── Facturas (only for client projects) ─── */}
       {!isInterno && <div className="space-y-2 rounded-lg border p-4">
