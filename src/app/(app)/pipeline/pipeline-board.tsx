@@ -8,9 +8,7 @@ import {
   ChevronRight,
   DollarSign,
   RotateCcw,
-  MoreVertical,
   X,
-  ArrowRight,
   GripVertical,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -167,7 +165,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
   const [createStage, setCreateStage] = useState<PipelineStage>('lead')
   const [lostModal, setLostModal] = useState<{ id: string; name: string } | null>(null)
   const [selectedReason, setSelectedReason] = useState('')
-  const [menuOpen, setMenuOpen] = useState<string | null>(null)
+  // ganar/perder are inline buttons (no more ⋮ menu)
   const [selectedOpp, setSelectedOpp] = useState<OpportunityWithClient | null>(null)
   const [selectedOppQuotes, setSelectedOppQuotes] = useState<Quote[]>([])
   const [isPending, startTransition] = useTransition()
@@ -255,7 +253,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
           : o
       )
     )
-    setMenuOpen(null)
+
 
     startTransition(async () => {
       const result = await moveOpportunity(oppId, nextStage)
@@ -306,7 +304,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
           : o
       )
     )
-    setMenuOpen(null)
+
 
     startTransition(async () => {
       const result = await reactivateOpportunity(oppId, targetStage)
@@ -422,50 +420,25 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
                                   </button>
                                 )}
 
-                                {/* Won button (from negotiation) */}
-                                {stage === 'negotiation' && (
+                                {/* Won button (always visible except on won/lost) */}
+                                {stage !== 'won' && stage !== 'lost' && (
                                   <button
                                     onClick={() => handleAdvance(opp.id, 'won')}
                                     disabled={isPending}
-                                    className="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-600 transition-colors hover:bg-green-500/20 disabled:opacity-50 dark:text-green-400"
+                                    className="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2 py-1 text-xs font-medium text-green-600 transition-colors hover:bg-green-500/20 disabled:opacity-50 dark:text-green-400"
                                   >
                                     Ganada
                                   </button>
                                 )}
 
-                                {/* More menu */}
-                                <div className="relative ml-auto">
-                                  <button
-                                    onClick={() => setMenuOpen(menuOpen === opp.id ? null : opp.id)}
-                                    className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100"
-                                  >
-                                    <MoreVertical className="h-3.5 w-3.5" />
-                                  </button>
-
-                                  {menuOpen === opp.id && (
-                                    <div className="absolute right-0 top-8 z-20 w-44 rounded-lg border bg-popover p-1 shadow-lg">
-                                      {stage !== 'negotiation' && (
-                                        <button
-                                          onClick={() => handleAdvance(opp.id, 'won')}
-                                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs hover:bg-accent"
-                                        >
-                                          <ArrowRight className="h-3.5 w-3.5 text-green-500" />
-                                          Marcar ganada
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => {
-                                          setMenuOpen(null)
-                                          setLostModal({ id: opp.id, name: opp.name })
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-destructive hover:bg-accent"
-                                      >
-                                        <X className="h-3.5 w-3.5" />
-                                        Marcar perdida
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
+                                {/* Lost button — always visible */}
+                                <button
+                                  onClick={() => setLostModal({ id: opp.id, name: opp.name })}
+                                  disabled={isPending}
+                                  className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
                               </div>
                             </div>
                           </DraggableCard>

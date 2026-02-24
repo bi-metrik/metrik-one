@@ -423,7 +423,6 @@ export async function addHoras(proyectoId: string, input: {
     .insert({
       workspace_id: workspaceId,
       proyecto_id: proyectoId,
-      user_id: userId,
       fecha: input.fecha,
       horas: input.horas,
       descripcion: input.descripcion?.trim() || null,

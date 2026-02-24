@@ -180,6 +180,38 @@ export default function ProyectoDetail({
         )}
       </div>
 
+      {/* ─── Quick register bar (top) ─── */}
+      {!isCerrado && !isPausado && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setDialog('gasto')}
+            disabled={isPending}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-orange-50 border border-orange-200 py-2.5 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 dark:bg-orange-950/30 dark:border-orange-900 dark:text-orange-400 dark:hover:bg-orange-950/50"
+          >
+            <Receipt className="h-4 w-4" />
+            Gasto
+          </button>
+          <button
+            onClick={() => setDialog('horas')}
+            disabled={isPending}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 border border-blue-200 py-2.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-400 dark:hover:bg-blue-950/50"
+          >
+            <Clock className="h-4 w-4" />
+            Horas
+          </button>
+          {!isInterno && (
+            <button
+              onClick={() => setDialog('factura')}
+              disabled={isPending}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 border border-green-200 py-2.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50 dark:bg-green-950/30 dark:border-green-900 dark:text-green-400 dark:hover:bg-green-950/50"
+            >
+              <FileText className="h-4 w-4" />
+              Factura
+            </button>
+          )}
+        </div>
+      )}
+
       {/* D131: Link to approved cotización */}
       {cotizacionId && oportunidadId && (
         <Link
@@ -293,9 +325,31 @@ export default function ProyectoDetail({
               )
             })}
           </div>
+        ) : cotizacionId ? (
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">Los rubros de la cotizacion no se sincronizaron.</p>
+            <button
+              onClick={() => {
+                startTransition(async () => {
+                  const { resyncRubrosProyecto } = await import('@/app/(app)/pipeline/actions-v2')
+                  const res = await resyncRubrosProyecto(proyectoId)
+                  if (res.success) {
+                    toast.success('Rubros sincronizados')
+                    router.refresh()
+                  } else {
+                    toast.error(res.error)
+                  }
+                })
+              }}
+              disabled={isPending}
+              className="shrink-0 rounded-md bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-400"
+            >
+              Sincronizar
+            </button>
+          </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Este proyecto no tiene rubros asignados. Los rubros se crean automaticamente desde la cotizacion aprobada.
+            Este proyecto no tiene rubros. Puedes crearlos desde una cotizacion.
           </p>
         )}
       </div>
@@ -401,82 +455,49 @@ export default function ProyectoDetail({
         )}
       </div>
 
-      {/* ─── Bottom action bar ─── */}
-      <div className="flex items-center gap-2 rounded-lg border p-3">
-        {!isCerrado && !isPausado && (
-          <>
+      {/* ─── State controls (bottom) ─── */}
+      {!isCerrado && (
+        <div className="flex items-center gap-2 rounded-lg border border-dashed p-3">
+          {isPausado ? (
             <button
-              onClick={() => setDialog('gasto')}
+              onClick={() => handleEstado('en_ejecucion')}
               disabled={isPending}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              <Receipt className="h-3.5 w-3.5" />
-              Gasto
+              <Play className="h-3.5 w-3.5" />
+              Reanudar proyecto
             </button>
+          ) : (
             <button
-              onClick={() => setDialog('horas')}
+              onClick={() => handleEstado('pausado')}
               disabled={isPending}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-yellow-200 py-2 text-xs font-medium text-yellow-700 hover:bg-yellow-50 disabled:opacity-50 dark:border-yellow-900 dark:text-yellow-400 dark:hover:bg-yellow-950/30"
             >
-              <Clock className="h-3.5 w-3.5" />
-              Horas
+              <Pause className="h-3.5 w-3.5" />
+              Pausar
             </button>
-          </>
-        )}
-        {!isCerrado && (
-          <>
-            {!isInterno && (
-              <button
-                onClick={() => setDialog('cobro')}
-                disabled={isPending || facturas.length === 0}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
-                title={facturas.length === 0 ? 'Primero crea una factura' : 'Registrar cobro'}
-              >
-                <Banknote className="h-3.5 w-3.5" />
-                Cobro
-              </button>
-            )}
-            {isPausado ? (
-              <button
-                onClick={() => handleEstado('en_ejecucion')}
-                disabled={isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Reanudar
-              </button>
-            ) : (
-              <button
-                onClick={() => handleEstado('pausado')}
-                disabled={isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-yellow-200 px-3 py-2 text-xs font-medium text-yellow-700 hover:bg-yellow-50 disabled:opacity-50"
-              >
-                <Pause className="h-3.5 w-3.5" />
-                Pausar
-              </button>
-            )}
-            <button
-              onClick={() => setDialog('cierre')}
-              disabled={isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-green-200 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
-            >
-              <Lock className="h-3.5 w-3.5" />
-              Cerrar
-            </button>
-          </>
-        )}
-        {/* Cobro allowed on closed client projects */}
-        {!isInterno && isCerrado && facturas.some(f => f.estado_pago !== 'pagada') && (
+          )}
           <button
-            onClick={() => setDialog('cobro')}
+            onClick={() => setDialog('cierre')}
             disabled={isPending}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 py-2 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-green-200 py-2 text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-50 dark:border-green-900 dark:text-green-400 dark:hover:bg-green-950/30"
           >
-            <Banknote className="h-3.5 w-3.5" />
-            Registrar cobro pendiente
+            <Lock className="h-3.5 w-3.5" />
+            Cerrar proyecto
           </button>
-        )}
-      </div>
+        </div>
+      )}
+      {/* Cobro allowed on closed client projects */}
+      {!isInterno && isCerrado && facturas.some(f => f.estado_pago !== 'pagada') && (
+        <button
+          onClick={() => setDialog('cobro')}
+          disabled={isPending}
+          className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 py-2.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+        >
+          <Banknote className="h-3.5 w-3.5" />
+          Registrar cobro pendiente
+        </button>
+      )}
 
       {/* ─── Dialogs ─── */}
       {dialog === 'gasto' && (

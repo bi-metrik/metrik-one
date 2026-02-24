@@ -322,40 +322,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
 
   // Create proyecto_rubros from cotización items (with full detail inheritance)
   if (cotizacion) {
-    if (cotizacion.modo === 'detallada') {
-      // Get items with full rubro details for inheritance
-      const { data: items } = await supabase
-        .from('items')
-        .select('nombre, subtotal, rubros(tipo, cantidad, unidad, valor_unitario, valor_total)')
-        .eq('cotizacion_id', cotizacion.id)
-
-      if (items && items.length > 0) {
-        const rubrosToInsert = items.map(item => {
-          const firstRubro = Array.isArray(item.rubros) && item.rubros.length > 0
-            ? (item.rubros[0] as { tipo: string; cantidad: number | null; unidad: string | null; valor_unitario: number | null; valor_total: number | null })
-            : null
-          return {
-            proyecto_id: proyecto.id,
-            nombre: item.nombre ?? 'Sin nombre',
-            presupuestado: item.subtotal ?? 0,
-            tipo: mapTipoRubro(firstRubro?.tipo ?? null),
-            cantidad: firstRubro?.cantidad ?? null,
-            unidad: firstRubro?.unidad ?? null,
-            valor_unitario: firstRubro?.valor_unitario ?? null,
-          }
-        })
-
-        await supabase.from('proyecto_rubros').insert(rubrosToInsert)
-      }
-    } else {
-      // Flash: single "general" rubro
-      await supabase.from('proyecto_rubros').insert({
-        proyecto_id: proyecto.id,
-        nombre: 'General',
-        presupuestado: presupuestoTotal,
-        tipo: 'general',
-      })
-    }
+    await syncRubrosCotizacion(supabase, proyecto.id, cotizacion.id, cotizacion.modo, presupuestoTotal)
   }
 
   revalidatePath('/pipeline')
@@ -375,6 +342,95 @@ function mapTipoRubro(tipo: string | null): string {
     servicios_prof: 'servicios_profesionales',
   }
   return map[tipo ?? ''] ?? 'general'
+}
+
+// ── Sync rubros from cotización to proyecto ──────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function syncRubrosCotizacion(supabase: any, proyectoId: string, cotizacionId: string, modo: string | null, presupuestoTotal: number) {
+  if (modo === 'detallada') {
+    const { data: items } = await supabase
+      .from('items')
+      .select('nombre, subtotal, rubros(tipo, cantidad, unidad, valor_unitario, valor_total)')
+      .eq('cotizacion_id', cotizacionId)
+
+    if (items && items.length > 0) {
+      // Flatten: each item may have multiple rubros
+      const rubrosToInsert: Record<string, unknown>[] = []
+      for (const item of items) {
+        const rubrosList = Array.isArray(item.rubros) ? item.rubros : []
+        if (rubrosList.length > 0) {
+          for (const r of rubrosList) {
+            rubrosToInsert.push({
+              proyecto_id: proyectoId,
+              nombre: item.nombre ?? 'Sin nombre',
+              presupuestado: r.valor_total ?? item.subtotal ?? 0,
+              tipo: mapTipoRubro(r.tipo ?? null),
+              cantidad: r.cantidad ?? null,
+              unidad: r.unidad ?? null,
+              valor_unitario: r.valor_unitario ?? null,
+            })
+          }
+        } else {
+          // Item without rubros — create generic
+          rubrosToInsert.push({
+            proyecto_id: proyectoId,
+            nombre: item.nombre ?? 'Sin nombre',
+            presupuestado: item.subtotal ?? 0,
+            tipo: 'general',
+          })
+        }
+      }
+
+      if (rubrosToInsert.length > 0) {
+        await supabase.from('proyecto_rubros').insert(rubrosToInsert)
+      }
+    }
+  } else {
+    // Flash: single "general" rubro
+    await supabase.from('proyecto_rubros').insert({
+      proyecto_id: proyectoId,
+      nombre: 'General',
+      presupuestado: presupuestoTotal,
+      tipo: 'general',
+    })
+  }
+}
+
+// ── Re-sync rubros for existing project ──────────────────────
+export async function resyncRubrosProyecto(proyectoId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  // Get project's cotizacion
+  const { data: proyecto } = await supabase
+    .from('proyectos')
+    .select('cotizacion_id, presupuesto_total')
+    .eq('id', proyectoId)
+    .single()
+
+  if (!proyecto?.cotizacion_id) return { success: false, error: 'Sin cotización vinculada' }
+
+  // Check if rubros already exist
+  const { count } = await supabase
+    .from('proyecto_rubros')
+    .select('id', { count: 'exact', head: true })
+    .eq('proyecto_id', proyectoId)
+
+  if ((count ?? 0) > 0) return { success: false, error: 'El proyecto ya tiene rubros' }
+
+  // Get cotización mode
+  const { data: cotizacion } = await supabase
+    .from('cotizaciones')
+    .select('id, modo, valor_total')
+    .eq('id', proyecto.cotizacion_id)
+    .single()
+
+  if (!cotizacion) return { success: false, error: 'Cotización no encontrada' }
+
+  await syncRubrosCotizacion(supabase, proyectoId, cotizacion.id, cotizacion.modo, proyecto.presupuesto_total ?? 0)
+
+  revalidatePath(`/proyectos/${proyectoId}`)
+  return { success: true }
 }
 
 export async function updateOportunidad(id: string, updates: Record<string, unknown>) {
