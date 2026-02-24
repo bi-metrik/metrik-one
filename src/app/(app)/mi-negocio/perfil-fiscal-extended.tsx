@@ -40,7 +40,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
         email_facturacion: emailFacturacion.trim() || undefined,
       })
       if (res.success) {
-        toast.success('Datos de facturacion actualizados')
+        toast.success('Datos de facturación actualizados')
         router.refresh()
       } else {
         toast.error(res.error || 'Error')
@@ -49,7 +49,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
   }
 
   const fiscalSummary = isConfigured ? {
-    personType: fiscalProfile!.person_type === 'juridica' ? 'Persona Juridica' : 'Persona Natural',
+    personType: fiscalProfile!.person_type === 'juridica' ? 'Persona Jurídica' : 'Persona Natural',
     regime: fiscalProfile!.tax_regime === 'simple' ? 'Simple (SIMPLE)' : 'Ordinario',
     iva: fiscalProfile!.iva_responsible ? 'Responsable (19%)' : 'No responsable',
     city: fiscalProfile!.ica_city || 'Bogota',
@@ -109,7 +109,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
 
       {/* Extended: Facturacion fields */}
       <div className="space-y-3 border-t pt-4">
-        <h4 className="text-sm font-medium">Datos de facturacion</h4>
+        <h4 className="text-sm font-medium">Datos de facturación</h4>
         <p className="text-xs text-muted-foreground">
           Estos datos aparecen en tus cotizaciones y facturas.
         </p>
@@ -126,7 +126,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Razon social</label>
+            <label className="text-xs font-medium text-muted-foreground">Razón social</label>
             <input
               type="text"
               value={razonSocial}
@@ -136,17 +136,17 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Direccion fiscal</label>
+            <label className="text-xs font-medium text-muted-foreground">Dirección fiscal</label>
             <input
               type="text"
               value={direccionFiscal}
               onChange={e => setDireccionFiscal(e.target.value)}
               className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="Cra 7 #45-12, Bogota"
+              placeholder="Cra 7 #45-12, Bogotá"
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Email facturacion</label>
+            <label className="text-xs font-medium text-muted-foreground">Email facturación</label>
             <input
               type="email"
               value={emailFacturacion}

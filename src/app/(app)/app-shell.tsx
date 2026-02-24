@@ -45,7 +45,7 @@ function getNavItemsForRole(role: string) {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: 'Dueno',
+  owner: 'Dueño',
   admin: 'Admin',
   operator: 'Operador',
   read_only: 'Lectura',

@@ -605,7 +605,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   totalWeight += 1
   if (input.horasRecientes) greenWeight += 1
   pendientes.push({
-    label: 'Horas de proyectos al dia',
+    label: 'Horas de proyectos al día',
     done: input.horasRecientes,
     action: !input.horasRecientes ? '/proyectos' : undefined,
   })
@@ -620,7 +620,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   if (diffScore === 'green') greenWeight += 1
   else if (diffScore === 'yellow') greenWeight += 0.5
   pendientes.push({
-    label: 'Conciliacion bancaria al dia',
+    label: 'Conciliación bancaria al día',
     done: diffScore === 'green' || saldoScore === 'green',
   })
 
@@ -651,12 +651,12 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     if (colors.includes('red')) {
       capa2Estado = 'red'
       if (runwayColor === 'red') capa2Razon = `Runway: ${input.runwayMeses.toFixed(1)} meses — acelera cobros o reduce gastos`
-      else if (factColor === 'red') capa2Razon = `Facturacion bajo PE — faltan $${Math.round(input.puntoEquilibrio - input.ventasMes).toLocaleString('es-CO')}`
+      else if (factColor === 'red') capa2Razon = `Facturación bajo PE — faltan $${Math.round(input.puntoEquilibrio - input.ventasMes).toLocaleString('es-CO')}`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else if (colors.includes('yellow')) {
       capa2Estado = 'yellow'
       if (runwayColor === 'yellow') capa2Razon = `Runway: ${input.runwayMeses.toFixed(1)} meses`
-      else if (factColor === 'yellow') capa2Razon = `Facturacion entre PE y meta`
+      else if (factColor === 'yellow') capa2Razon = `Facturación entre PE y meta`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else {
       capa2Estado = 'green'
@@ -672,7 +672,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   // Messages
   let mensaje = ''
   if (capa1Estado === 'red') {
-    mensaje = 'Tus numeros no son confiables aun'
+    mensaje = 'Tus números no son confiables aún'
   } else if (capa1Estado === 'yellow') {
     const pendientesCount = pendientes.filter(p => !p.done).length
     mensaje = `Casi listo — ${pendientesCount} pendiente${pendientesCount > 1 ? 's' : ''} para lectura completa`

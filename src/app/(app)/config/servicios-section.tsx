@@ -279,7 +279,7 @@ export default function ServiciosSection({ initialData }: Props) {
                     ))}
                   </select>
                   <input
-                    placeholder="Descripcion (opcional)"
+                    placeholder="Descripción (opcional)"
                     value={newRubro.descripcion}
                     onChange={e => setNewRubro(p => ({ ...p, descripcion: e.target.value }))}
                     className="rounded border bg-background px-2 py-1.5 text-xs"
@@ -451,7 +451,7 @@ export default function ServiciosSection({ initialData }: Props) {
       ) : !showAddForm && (
         <div className="rounded-lg border border-dashed p-6 text-center">
           <p className="text-sm text-muted-foreground">
-            Crea tu catalogo de servicios. Al cotizar, podras agregar servicios del catalogo y los rubros se llenan solos.
+            Crea tu catálogo de servicios. Al cotizar, podrás agregar servicios del catálogo y los rubros se llenan solos.
           </p>
         </div>
       )}

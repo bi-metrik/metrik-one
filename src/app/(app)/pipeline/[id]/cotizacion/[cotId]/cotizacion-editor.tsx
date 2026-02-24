@@ -285,7 +285,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {isFlash && (
         <div className="space-y-3 rounded-lg border p-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Descripcion</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Descripción</label>
             <textarea
               value={flashDesc}
               onChange={e => setFlashDesc(e.target.value)}

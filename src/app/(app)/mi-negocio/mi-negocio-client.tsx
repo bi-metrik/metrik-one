@@ -63,7 +63,7 @@ const CHAPTERS: { title: string; emoji: string; sections: SectionDef[] }[] = [
     ],
   },
   {
-    title: 'Tu Operacion',
+    title: 'Tu Operación',
     emoji: '2',
     sections: [
       { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios' },
@@ -166,14 +166,14 @@ export default function MiNegocioClient({
       <div>
         <h1 className="text-2xl font-bold">Mi Negocio</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Configura tu negocio paso a paso para que tus numeros sean mas precisos.
+          Configura tu negocio paso a paso para que tus números sean más precisos.
         </p>
       </div>
 
       {/* ── Progress Bar (sticky) ── */}
       <div className="sticky top-0 z-10 bg-background pb-2 pt-1">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Progreso de configuracion</span>
+          <span className="text-xs font-medium text-muted-foreground">Progreso de configuración</span>
           <span className="text-xs font-bold text-primary">{progressPct}%</span>
         </div>
         <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
@@ -194,7 +194,7 @@ export default function MiNegocioClient({
                 🎉 ¡Tu negocio esta listo!
               </p>
               <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                Has completado toda la configuracion. Tus numeros ahora son 100% precisos.
+                Has completado toda la configuración. Tus números ahora son 100% precisos.
               </p>
             </div>
           </div>
@@ -208,7 +208,7 @@ export default function MiNegocioClient({
             👋 Bienvenido a <span className="font-bold">Mi Negocio</span>
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Completa cada seccion para que MeTRIK ONE calcule tus numeros con precision.
+            Completa cada sección para que MeTRIK ONE calcule tus números con precisión.
             No necesitas hacerlo todo hoy — puedes avanzar a tu ritmo.
           </p>
         </div>
