@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Flame } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { formatCOP } from '@/lib/contacts/constants'
 import QuestionCard from './question-card'
@@ -56,10 +56,8 @@ export default function NumerosV2Client({ initialData }: Props) {
   const [yyyy, mm] = mesRef.split('-').map(Number)
   const monthName = new Date(yyyy, mm - 1).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
 
-  // Show cards? — only block if Capa 1 is RED (missing critical data)
-  // Capa 2 (financial health) is INFORMATIVE — never blocks the dashboard
-  const showCards = data.semaforo.capa1Estado !== 'red'
-  const hasWarning = data.semaforo.capa1Estado === 'yellow' || data.semaforo.capa2Estado === 'yellow' || data.semaforo.capa2Estado === 'red'
+  // D108-rev: Cards always visible. Capa 1 is informative, not blocking.
+  const showCards = true
 
   // ── Color calculations (D105) ─────────────────────
   const ritmoRecaudo = data.metaRecaudo
@@ -144,16 +142,16 @@ export default function NumerosV2Client({ initialData }: Props) {
               barData={{
                 current: data.recaudoMes,
                 target: data.metaRecaudo ?? 1,
-                label: 'Meta de cobro del mes',
+                label: 'Cobrado este mes',
                 sublabel: data.metaRecaudo
-                  ? `${formatCOP(data.recaudoMes)} / ${formatCOP(data.metaRecaudo)} (${data.metaRecaudo > 0 ? Math.round((data.recaudoMes / data.metaRecaudo) * 100) : 0}%)`
+                  ? `${formatCOP(data.recaudoMes)} de ${formatCOP(data.metaRecaudo)} (${data.metaRecaudo > 0 ? Math.round((data.recaudoMes / data.metaRecaudo) * 100) : 0}%)`
                   : 'Sin meta de cobro',
               }}
               barColor={recaudoColor}
               onClick={() => setActiveDrill(1)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
-              hasWarningBadge={hasWarning}
+
             />
 
             {/* P2: ¿Estoy ganando? */}
@@ -172,7 +170,7 @@ export default function NumerosV2Client({ initialData }: Props) {
               onClick={() => setActiveDrill(2)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
-              hasWarningBadge={hasWarning}
+
             />
           </div>
 
@@ -190,9 +188,9 @@ export default function NumerosV2Client({ initialData }: Props) {
               barData={{
                 current: data.totalCobrado,
                 target: data.totalFacturado || 1,
-                label: 'Facturas cobradas',
+                label: 'Cobrado',
                 sublabel: data.totalFacturado > 0
-                  ? `${formatCOP(data.totalCobrado)} de ${formatCOP(data.totalFacturado)} facturado (${Math.round((data.totalCobrado / data.totalFacturado) * 100)}%)`
+                  ? `${formatCOP(data.totalCobrado)} de ${formatCOP(data.totalFacturado)} (${Math.round((data.totalCobrado / data.totalFacturado) * 100)}%)`
                   : 'Sin facturas emitidas',
               }}
               barColor={
@@ -205,7 +203,7 @@ export default function NumerosV2Client({ initialData }: Props) {
               onClick={() => setActiveDrill(3)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
-              hasWarningBadge={hasWarning}
+
             />
 
             {/* P4: ¿Cuánto necesito vender? */}
@@ -221,13 +219,13 @@ export default function NumerosV2Client({ initialData }: Props) {
                 current: data.ventasMes,
                 target: data.metaVentas ?? data.puntoEquilibrio * 1.5,
                 marker: data.puntoEquilibrio,
-                markerLabel: `Minimo ${formatCOP(data.puntoEquilibrio)}`,
+                markerLabel: `Necesitas ${formatCOP(data.puntoEquilibrio)}`,
               }}
               barColor={ventasColor}
               onClick={() => setActiveDrill(4)}
               isEmpty={monthType === 'future'}
               monthType={monthType}
-              hasWarningBadge={hasWarning}
+
             />
           </div>
 
@@ -251,7 +249,6 @@ export default function NumerosV2Client({ initialData }: Props) {
             onClick={() => setActiveDrill(5)}
             isEmpty={monthType === 'future'}
             monthType={monthType}
-            hasWarningBadge={hasWarning}
           />
         </>
       )}
@@ -285,6 +282,7 @@ export default function NumerosV2Client({ initialData }: Props) {
           data={data}
           monthType={monthType}
           onClose={() => setActiveDrill(null)}
+          onChangeDrill={(q) => setActiveDrill(q)}
         />
       )}
     </div>

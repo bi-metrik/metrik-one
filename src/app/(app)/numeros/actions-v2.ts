@@ -16,7 +16,8 @@ export interface NumerosData {
   // P2: Estoy ganando
   ingresosMes: number            // cobros del mes
   gastosMes: number              // gastos del mes
-  utilidad: number               // ingresos - gastos
+  gastosProyectosMes: number     // COH-5: gastos with proyecto_id (direct project costs)
+  utilidad: number               // ingresos - gastos - costos fijos
   ingresosMesAnterior: number
   gastosMesAnterior: number
 
@@ -25,6 +26,7 @@ export interface NumerosData {
   totalFacturado: number
   totalCobrado: number
   carteraMesAnterior: number
+  carteraDetalle: CarteraItem[]  // COH-3: per-project breakdown
 
   // P4: Cuanto necesito vender
   ventasMes: number              // facturas emitidas del mes
@@ -41,6 +43,7 @@ export interface NumerosData {
   // P5: Cuanto aguanto
   runwayMeses: number
   gastoPromedioMensual: number
+  gastoTotalMensual: number        // gastoPromedioMensual + costosFijosMes
 
   // Semáforo
   semaforo: SemaforoData
@@ -83,6 +86,13 @@ export interface ConciliacionData {
   streakRecord: number
   streakMilestone: string | null  // 🥉🥈🥇🏆
   estado: 1 | 2 | 3 | 4         // 4 visual states from spec
+}
+
+export interface CarteraItem {
+  proyectoNombre: string
+  facturaRef: string
+  saldo: number
+  diasVencimiento: number
 }
 
 // ── getNumeros ────────────────────────────────────────
@@ -158,10 +168,10 @@ export async function getNumeros(mesRef?: string) {
       .gte('fecha', prevStart)
       .lt('fecha', prevEnd),
 
-    // Gastos del mes
+    // Gastos del mes (include proyecto_id for COH-5 categorization)
     supabase
       .from('gastos')
-      .select('monto')
+      .select('monto, proyecto_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', mesStart)
       .lt('fecha', mesEnd),
@@ -190,10 +200,10 @@ export async function getNumeros(mesRef?: string) {
       .gte('fecha_emision', mesStart)
       .lt('fecha_emision', mesEnd),
 
-    // All facturas (for cartera)
+    // All facturas (for cartera) — include project name + numero_factura for COH-3
     supabase
       .from('facturas')
-      .select('id, monto, fecha_emision')
+      .select('id, monto, fecha_emision, numero_factura, proyecto_id, proyectos(nombre)')
       .eq('workspace_id', workspaceId),
 
     // All cobros (for cartera)
@@ -296,7 +306,9 @@ export async function getNumeros(mesRef?: string) {
   const ingresosMesAnterior = recaudoMesAnterior
 
   // Gastos
-  const gastosMes = (gastosRes.data ?? []).reduce((s, g) => s + Number(g.monto), 0)
+  const gastosData = gastosRes.data ?? []
+  const gastosMes = gastosData.reduce((s, g) => s + Number(g.monto), 0)
+  const gastosProyectosMes = gastosData.filter(g => g.proyecto_id).reduce((s, g) => s + Number(g.monto), 0)
   const gastosMesAnterior = (gastosPrevRes.data ?? []).reduce((s, g) => s + Number(g.monto), 0)
 
   // Gastos avg (3 months)
@@ -358,6 +370,22 @@ export async function getNumeros(mesRef?: string) {
   })
 
   const carteraMesAnterior = ingresosMesAnterior > 0 ? carteraPendiente * 0.9 : 0 // approximate
+
+  // COH-3: Cartera detail by project
+  const carteraDetalle: CarteraItem[] = allFacturas
+    .map(f => {
+      const cobrado = cobrosPorFactura.get(f.id) ?? 0
+      const saldo = Number(f.monto) - cobrado
+      const dias = Math.floor((today.getTime() - new Date(f.fecha_emision).getTime()) / 86400000)
+      return {
+        proyectoNombre: (f as unknown as { proyectos: { nombre: string } | null }).proyectos?.nombre ?? 'Sin proyecto',
+        facturaRef: (f as unknown as { numero_factura: string | null }).numero_factura ?? 'Sin numero',
+        saldo,
+        diasVencimiento: dias,
+      }
+    })
+    .filter(item => item.saldo > 0.01)
+    .sort((a, b) => b.diasVencimiento - a.diasVencimiento)
 
   // Ventas (facturas emitidas del mes)
   const ventasMes = (facturasRes.data ?? []).reduce((s, f) => s + Number(f.monto), 0)
@@ -509,13 +537,15 @@ export async function getNumeros(mesRef?: string) {
     recaudoMesAnterior,
     ingresosMes,
     gastosMes,
-    utilidad: ingresosMes - gastosMes,
+    gastosProyectosMes,
+    utilidad: ingresosMes - gastosMes - costosFijosMes,
     ingresosMesAnterior,
     gastosMesAnterior,
     carteraPendiente,
     totalFacturado,
     totalCobrado,
     carteraMesAnterior,
+    carteraDetalle,
     ventasMes,
     metaVentas,
     costosFijosMes,
@@ -528,6 +558,7 @@ export async function getNumeros(mesRef?: string) {
     puntoEquilibrio,
     runwayMeses,
     gastoPromedioMensual,
+    gastoTotalMensual,
     totalDeduciblesMes,
     semaforo,
     conciliacion,
@@ -593,7 +624,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   // No suma al peso — es solo informativo
   if (!fiscalDone && empresasTotal > 0) {
     pendientes.push({
-      label: `Datos fiscales de ${empresasTotal - empresasCompletas} empresa${empresasTotal - empresasCompletas > 1 ? 's' : ''} (opcional)`,
+      label: `Datos fiscales de ${empresasTotal - empresasCompletas} empresa${empresasTotal - empresasCompletas > 1 ? 's' : ''} (recomendado)`,
       done: false,
       action: '/directorio',
     })

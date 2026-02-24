@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, X, Flame, UserPlus, Receipt, Clock, Play, Square, Landmark } from 'lucide-react'
+import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getProyectosActivos,
@@ -25,15 +25,9 @@ interface FABAction {
 
 const FAB_ACTIONS: FABAction[] = [
   {
-    label: 'Nueva oportunidad',
-    icon: Flame,
-    href: '/nuevo/oportunidad',
-    roles: ['owner', 'admin'],
-  },
-  {
-    label: 'Nuevo contacto',
-    icon: UserPlus,
-    href: '/nuevo/contacto',
+    label: 'Registrar cobro',
+    icon: Banknote,
+    href: '/nuevo/cobro',
     roles: ['owner', 'admin'],
   },
   {
@@ -41,6 +35,12 @@ const FAB_ACTIONS: FABAction[] = [
     icon: Receipt,
     href: '/nuevo/gasto',
     roles: ['owner', 'admin', 'operator'],
+  },
+  {
+    label: 'Nueva oportunidad',
+    icon: Flame,
+    href: '/nuevo/oportunidad',
+    roles: ['owner', 'admin'],
   },
   {
     label: 'Actualizar saldo',

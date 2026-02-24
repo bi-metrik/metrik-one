@@ -1,6 +1,7 @@
 'use client'
 
-import { X } from 'lucide-react'
+import { X, ArrowRight } from 'lucide-react'
+import Link from 'next/link'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { NumerosData } from './actions-v2'
 
@@ -9,9 +10,10 @@ interface DrillDownSheetProps {
   data: NumerosData
   monthType: 'current' | 'past' | 'future'
   onClose: () => void
+  onChangeDrill?: (q: 1 | 2 | 3 | 4 | 5) => void
 }
 
-export default function DrillDownSheet({ questionNumber, data, monthType, onClose }: DrillDownSheetProps) {
+export default function DrillDownSheet({ questionNumber, data, monthType, onClose, onChangeDrill }: DrillDownSheetProps) {
   return (
     <>
       {/* Backdrop */}
@@ -34,11 +36,11 @@ export default function DrillDownSheet({ questionNumber, data, monthType, onClos
           </div>
 
           <div className="p-4 space-y-4">
-            {questionNumber === 1 && <DrillP1 data={data} monthType={monthType} />}
+            {questionNumber === 1 && <DrillP1 data={data} monthType={monthType} onChangeDrill={onChangeDrill} />}
             {questionNumber === 2 && <DrillP2 data={data} monthType={monthType} />}
             {questionNumber === 3 && <DrillP3 data={data} monthType={monthType} />}
             {questionNumber === 4 && <DrillP4 data={data} monthType={monthType} />}
-            {questionNumber === 5 && <DrillP5 data={data} monthType={monthType} />}
+            {questionNumber === 5 && <DrillP5 data={data} monthType={monthType} onChangeDrill={onChangeDrill} />}
           </div>
         </div>
       </div>
@@ -80,16 +82,42 @@ function Row({ label, value, bold, color, indent }: {
 }
 
 function SectionTitle({ children }: { children: string }) {
-  return <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground pt-2">{children}</h3>
+  return <h3 className="text-[11px] font-semibold text-muted-foreground pt-2">{children}</h3>
 }
 
 function Divider() {
   return <div className="border-t my-1" />
 }
 
+function DrillDownLinks({ links }: { links: { label: string; href?: string; onClick?: () => void }[] }) {
+  return (
+    <div className="mt-3 pt-3 border-t space-y-1.5">
+      {links.map((link, i) => link.href ? (
+        <Link
+          key={i}
+          href={link.href}
+          className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-medium text-primary hover:bg-accent transition-colors"
+        >
+          {link.label}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      ) : (
+        <button
+          key={i}
+          onClick={link.onClick}
+          className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs font-medium text-primary hover:bg-accent transition-colors"
+        >
+          {link.label}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ── P1: ¿Cuánta plata tengo? ────────────────────────
 
-function DrillP1({ data, monthType }: { data: NumerosData; monthType: string }) {
+function DrillP1({ data, monthType, onChangeDrill }: { data: NumerosData; monthType: string; onChangeDrill?: (q: 1 | 2 | 3 | 4 | 5) => void }) {
   const pctRecaudo = data.metaRecaudo && data.metaRecaudo > 0
     ? Math.round((data.recaudoMes / data.metaRecaudo) * 100)
     : null
@@ -102,7 +130,7 @@ function DrillP1({ data, monthType }: { data: NumerosData; monthType: string }) 
     <div className="space-y-1">
       <SectionTitle>Saldo actual</SectionTitle>
       <Row label="Saldo en caja" value={data.saldoCaja} bold />
-      <Row label="Fuente" value={data.saldoEsReal ? 'Saldo bancario reportado' : 'Calculado (estimado)'} color="muted" />
+      <Row label="Fuente" value={data.saldoEsReal ? 'Ultimo saldo reportado' : 'Calculado (estimado)'} color="muted" />
 
       <Divider />
       <SectionTitle>Recaudo del mes</SectionTitle>
@@ -125,6 +153,11 @@ function DrillP1({ data, monthType }: { data: NumerosData; monthType: string }) 
           )}
         </>
       )}
+
+      <DrillDownLinks links={[
+        ...(onChangeDrill ? [{ label: 'Ver cartera completa', onClick: () => onChangeDrill(3) }] : []),
+        { label: 'Ir a Pipeline', href: '/pipeline' },
+      ]} />
     </div>
   )
 }
@@ -133,14 +166,17 @@ function DrillP1({ data, monthType }: { data: NumerosData; monthType: string }) 
 
 function DrillP2({ data }: { data: NumerosData; monthType: string }) {
   const utilidadAnterior = data.ingresosMesAnterior - data.gastosMesAnterior
-  const otrosGastos = Math.max(0, data.gastosMes - data.componenteNomina - data.componenteOperativo)
   const margenPct = data.ingresosMes > 0
     ? Math.round((data.utilidad / data.ingresosMes) * 100)
     : 0
 
+  // Provisión impuestos estimada (35% régimen ordinario default)
+  const tasaImpuestos = 0.35
+  const provisionImpuestos = data.utilidad > 0 ? Math.round(data.utilidad * tasaImpuestos) : 0
+  const disponibleParaTi = data.utilidad - provisionImpuestos
+
   return (
     <div className="space-y-1">
-      <SectionTitle>Estado de resultados simplificado</SectionTitle>
       <Row label="Ingresos cobrados" value={data.ingresosMes} color="green" />
       {data.componenteNomina > 0 && (
         <Row label="(-) Nomina (Mi Equipo)" value={data.componenteNomina} color="red" indent />
@@ -148,12 +184,25 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       {data.componenteOperativo > 0 && (
         <Row label="(-) Gastos operativos fijos" value={data.componenteOperativo} color="red" indent />
       )}
-      {otrosGastos > 0 && (
-        <Row label="(-) Otros gastos del mes" value={otrosGastos} color="red" indent />
+      {data.gastosProyectosMes > 0 && (
+        <Row label="(-) Gastos de proyectos" value={data.gastosProyectosMes} color="red" indent />
+      )}
+      {(data.gastosMes - data.gastosProyectosMes) > 0 && (
+        <Row label="(-) Otros gastos variables" value={data.gastosMes - data.gastosProyectosMes} color="red" indent />
       )}
       <Divider />
       <Row label="Utilidad" value={data.utilidad} bold color={data.utilidad >= 0 ? 'green' : 'red'} />
       <Row label="Margen" value={`${margenPct}%`} color={margenPct > 20 ? 'green' : margenPct > 0 ? 'yellow' : 'red'} />
+
+      {/* COH-2: Disponible para ti */}
+      {data.utilidad > 0 && (
+        <>
+          <Divider />
+          <Row label={`(-) Provision impuestos (~${Math.round(tasaImpuestos * 100)}%)`} value={provisionImpuestos} color="red" indent />
+          <Row label="Disponible para ti" value={disponibleParaTi} bold color="green" />
+          <p className="text-[10px] text-muted-foreground px-1">Estimado. Consulta a tu contador para el calculo exacto.</p>
+        </>
+      )}
 
       <Divider />
       <SectionTitle>Comparativo mes anterior</SectionTitle>
@@ -167,6 +216,10 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
           color={data.utilidad >= utilidadAnterior ? 'green' : 'red'}
         />
       )}
+
+      <DrillDownLinks links={[
+        { label: 'Ver detalle de gastos', href: '/movimientos' },
+      ]} />
     </div>
   )
 }
@@ -187,6 +240,29 @@ function DrillP3({ data }: { data: NumerosData; monthType: string }) {
       <Row label="Cartera pendiente" value={data.carteraPendiente} bold color={data.carteraPendiente > 0 ? 'red' : 'green'} />
       <Row label="Tasa de cobro" value={`${cobroPct}%`} color={cobroPct >= 80 ? 'green' : cobroPct >= 50 ? 'yellow' : 'red'} />
 
+      {/* COH-3: Cartera detalle por factura */}
+      {data.carteraDetalle && data.carteraDetalle.length > 0 && (
+        <>
+          <Divider />
+          <SectionTitle>Detalle por factura</SectionTitle>
+          <div className="space-y-1.5">
+            {data.carteraDetalle.map((item, i) => (
+              <div key={i} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium truncate">{item.proyectoNombre}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {item.facturaRef}{item.diasVencimiento > 0 ? ` · ${item.diasVencimiento} días` : ' · Hoy'}
+                  </p>
+                </div>
+                <span className="text-xs font-semibold tabular-nums text-red-600 dark:text-red-400 shrink-0 ml-2">
+                  {formatCOP(item.saldo)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <Divider />
       <SectionTitle>Tendencia</SectionTitle>
       <Row label="Cartera mes anterior" value={data.carteraMesAnterior} color="muted" />
@@ -195,6 +271,10 @@ function DrillP3({ data }: { data: NumerosData; monthType: string }) {
         value={data.carteraPendiente <= data.carteraMesAnterior ? 'Bajando ✅' : 'Subiendo ⚠️'}
         color={data.carteraPendiente <= data.carteraMesAnterior ? 'green' : 'red'}
       />
+
+      <DrillDownLinks links={[
+        { label: 'Ver todas las facturas', href: '/proyectos' },
+      ]} />
     </div>
   )
 }
@@ -232,7 +312,7 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
       )}
 
       <Divider />
-      <SectionTitle>Margen de contribucion</SectionTitle>
+      <SectionTitle>Tu margen</SectionTitle>
       <Row label="Margen efectivo" value={`${Math.round(data.margenContribucion * 100)}%`} />
       <div className="flex items-center justify-between py-1">
         <span className="text-[10px] text-muted-foreground">{margenLabel}</span>
@@ -265,35 +345,42 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
           <Row label="Venta diaria requerida" value={Math.round(ventaDiariaRequerida)} color="yellow" />
         </>
       )}
+
+      <DrillDownLinks links={[
+        { label: 'Configurar gastos fijos', href: '/mi-negocio' },
+        ...(data.ventasMes < data.puntoEquilibrio ? [{ label: 'Ir a Pipeline', href: '/pipeline' }] : []),
+      ]} />
     </div>
   )
 }
 
 // ── P5: ¿Cuánto aguanto? ────────────────────────────
 
-function DrillP5({ data }: { data: NumerosData; monthType: string }) {
-  const escenarioOptimista = data.gastoPromedioMensual > 0
-    ? data.saldoCaja / (data.gastoPromedioMensual * 0.8)
+function DrillP5({ data, onChangeDrill }: { data: NumerosData; monthType: string; onChangeDrill?: (q: 1 | 2 | 3 | 4 | 5) => void }) {
+  const gastoTotal = data.gastoTotalMensual
+  const escenarioOptimista = gastoTotal > 0
+    ? data.saldoCaja / (gastoTotal * 0.8)
     : 0
-  const escenarioPesimista = data.gastoPromedioMensual > 0
-    ? data.saldoCaja / (data.gastoPromedioMensual * 1.2)
+  const escenarioPesimista = gastoTotal > 0
+    ? data.saldoCaja / (gastoTotal * 1.2)
     : 0
 
   return (
     <div className="space-y-1">
-      <SectionTitle>Calculo del runway</SectionTitle>
       <Row label="Saldo en caja" value={data.saldoCaja} />
-      <Row label="Gasto promedio mensual" value={data.gastoPromedioMensual} />
+      <Row label="Gasto total mensual" value={gastoTotal} />
+      <Row label="Gastos variables (prom. 3 meses)" value={data.gastoPromedioMensual} color="muted" indent />
+      <Row label="Gastos fijos" value={data.costosFijosMes} color="muted" indent />
       <Divider />
-      <Row label="Runway" value={`${data.runwayMeses.toFixed(1)} meses`} bold
+      <Row label="Te alcanza para" value={`${data.runwayMeses.toFixed(1)} meses`} bold
         color={data.runwayMeses > 6 ? 'green' : data.runwayMeses > 3 ? 'yellow' : 'red'}
       />
 
       <Divider />
       <SectionTitle>Escenarios</SectionTitle>
-      <Row label="Optimista (gastos -20%)" value={`${escenarioOptimista.toFixed(1)} meses`} color="green" />
-      <Row label="Base" value={`${data.runwayMeses.toFixed(1)} meses`} />
-      <Row label="Pesimista (gastos +20%)" value={`${escenarioPesimista.toFixed(1)} meses`} color="red" />
+      <Row label="Si gastas menos (-20%)" value={`${escenarioOptimista.toFixed(1)} meses`} color="green" />
+      <Row label="Si todo sigue igual" value={`${data.runwayMeses.toFixed(1)} meses`} />
+      <Row label="Si gastas mas (+20%)" value={`${escenarioPesimista.toFixed(1)} meses`} color="red" />
 
       <Divider />
       <SectionTitle>Interpretacion</SectionTitle>
@@ -304,6 +391,12 @@ function DrillP5({ data }: { data: NumerosData; monthType: string }) {
             ? 'Reserva moderada. Enfocate en aumentar ingresos o reducir gastos.'
             : 'Atencion: reserva baja. Prioriza cobros pendientes y reduce gastos no esenciales.'}
       </div>
+
+      <DrillDownLinks links={[
+        ...(onChangeDrill ? [{ label: 'Cobrar pendientes', onClick: () => onChangeDrill(3) }] : []),
+        ...(onChangeDrill ? [{ label: 'Revisar gastos', onClick: () => onChangeDrill(4) }] : []),
+        { label: 'Ir a Pipeline', href: '/pipeline' },
+      ]} />
     </div>
   )
 }

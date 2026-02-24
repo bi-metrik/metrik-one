@@ -1,6 +1,6 @@
 'use client'
 
-import { TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { formatCOP } from '@/lib/contacts/constants'
 
 // ── Types ─────────────────────────────────────────────
@@ -44,7 +44,6 @@ interface QuestionCardProps {
   onClick?: () => void
   isEmpty?: boolean
   monthType?: 'current' | 'past' | 'future'
-  hasWarningBadge?: boolean
 }
 
 // ── Component ─────────────────────────────────────────
@@ -61,7 +60,6 @@ export default function QuestionCard({
   onClick,
   isEmpty,
   monthType = 'current',
-  hasWarningBadge,
 }: QuestionCardProps) {
   const formattedValue = valueFormat === 'currency'
     ? formatCOP(value)
@@ -80,20 +78,13 @@ export default function QuestionCard({
   return (
     <button
       onClick={onClick}
-      className={`relative w-full rounded-xl border bg-card p-4 text-left transition-all hover:shadow-md active:scale-[0.98] ${
+      className={`relative w-full rounded-xl border bg-card p-4 text-left transition-all hover:shadow-md active:scale-[0.98] min-h-[140px] ${
         monthType === 'future' ? 'opacity-60 border-dashed' : ''
       }`}
     >
-      {/* Warning badge */}
-      {hasWarningBadge && (
-        <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-400">
-          <span className="text-[10px]" title="Datos parciales"><AlertTriangle className="h-3 w-3 text-yellow-900" /></span>
-        </div>
-      )}
-
       {/* Title + Trend */}
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-xs font-medium text-muted-foreground leading-tight">{title}</h3>
+        <h3 className="text-sm font-semibold text-foreground leading-tight">{title}</h3>
         <div className={`flex items-center gap-0.5 ${trendColor}`}>
           <TrendIcon className="h-3.5 w-3.5" />
         </div>

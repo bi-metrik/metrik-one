@@ -69,11 +69,6 @@ export default function Semaforo({ data }: Props) {
               )}
             </div>
           ))}
-          {data.capa2Razon && (
-            <div className={`mt-2 text-xs font-medium ${textColor} border-t border-current/10 pt-2`}>
-              {data.capa2Razon}
-            </div>
-          )}
         </div>
       )}
     </div>

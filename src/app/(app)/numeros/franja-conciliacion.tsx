@@ -1,6 +1,6 @@
 'use client'
 
-import { Flame, AlertTriangle } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { ConciliacionData } from './actions-v2'
 
@@ -32,7 +32,7 @@ export default function FranjaConciliacion({ data }: Props) {
         </div>
         {streakText && (
           <div className="flex items-center gap-1 text-xs text-orange-600 dark:text-orange-400 shrink-0">
-            <Flame className="h-3.5 w-3.5" />
+            <span>🔥</span>
             <span>{streakText}</span>
           </div>
         )}
@@ -53,7 +53,7 @@ export default function FranjaConciliacion({ data }: Props) {
         </div>
         {streakText && (
           <div className="flex items-center gap-1 text-xs text-orange-600 dark:text-orange-400 shrink-0">
-            <Flame className="h-3.5 w-3.5" />
+            <span>🔥</span>
             <span>{streakText} — no pierdas tu racha!</span>
           </div>
         )}
@@ -78,7 +78,7 @@ export default function FranjaConciliacion({ data }: Props) {
           </span>
           {streakText && (
             <span className="ml-auto flex items-center gap-1 text-orange-600 dark:text-orange-400 shrink-0">
-              <Flame className="h-3.5 w-3.5" />
+              <span>🔥</span>
               {streakText}
             </span>
           )}
