@@ -624,9 +624,9 @@ export type Database = {
           consecutivo: string
           costo_total: number | null
           created_at: string | null
+          descripcion: string | null
           descuento_porcentaje: number
           descuento_valor: number
-          descripcion: string | null
           duplicada_de: string | null
           email_enviado_a: string | null
           estado: string
@@ -646,9 +646,9 @@ export type Database = {
           consecutivo: string
           costo_total?: number | null
           created_at?: string | null
+          descripcion?: string | null
           descuento_porcentaje?: number
           descuento_valor?: number
-          descripcion?: string | null
           duplicada_de?: string | null
           email_enviado_a?: string | null
           estado?: string
@@ -668,9 +668,9 @@ export type Database = {
           consecutivo?: string
           costo_total?: number | null
           created_at?: string | null
+          descripcion?: string | null
           descuento_porcentaje?: number
           descuento_valor?: number
-          descripcion?: string | null
           duplicada_de?: string | null
           email_enviado_a?: string | null
           estado?: string
@@ -1120,6 +1120,7 @@ export type Database = {
           monto: number
           proyecto_id: string | null
           rubro_id: string | null
+          soporte_pendiente: boolean | null
           soporte_url: string | null
           tipo: string | null
           workspace_id: string
@@ -1138,6 +1139,7 @@ export type Database = {
           monto: number
           proyecto_id?: string | null
           rubro_id?: string | null
+          soporte_pendiente?: boolean | null
           soporte_url?: string | null
           tipo?: string | null
           workspace_id: string
@@ -1156,6 +1158,7 @@ export type Database = {
           monto?: number
           proyecto_id?: string | null
           rubro_id?: string | null
+          soporte_pendiente?: boolean | null
           soporte_url?: string | null
           tipo?: string | null
           workspace_id?: string
@@ -1672,6 +1675,48 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      oportunidad_notas: {
+        Row: {
+          canal_registro: string | null
+          contenido: string
+          created_at: string | null
+          id: string
+          oportunidad_id: string
+          workspace_id: string
+        }
+        Insert: {
+          canal_registro?: string | null
+          contenido: string
+          created_at?: string | null
+          id?: string
+          oportunidad_id: string
+          workspace_id: string
+        }
+        Update: {
+          canal_registro?: string | null
+          contenido?: string
+          created_at?: string | null
+          id?: string
+          oportunidad_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oportunidad_notas_oportunidad_id_fkey"
+            columns: ["oportunidad_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "oportunidad_notas_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -3076,6 +3121,44 @@ export type Database = {
           },
         ]
       }
+      wa_message_log: {
+        Row: {
+          created_at: string | null
+          direction: string
+          id: string
+          intent: string | null
+          message_preview: string | null
+          phone: string
+          workspace_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          direction: string
+          id?: string
+          intent?: string | null
+          message_preview?: string | null
+          phone: string
+          workspace_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          direction?: string
+          id?: string
+          intent?: string | null
+          message_preview?: string | null
+          phone?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_message_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           color_primario: string | null
@@ -3316,7 +3399,59 @@ export type Database = {
         Args: { p_workspace_id: string }
         Returns: string
       }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
       unaccent: { Args: { "": string }; Returns: string }
+      wa_find_contacts: {
+        Args: { p_hint: string; p_limit?: number; p_workspace_id: string }
+        Returns: {
+          email: string
+          id: string
+          nombre: string
+          rol: string
+          telefono: string
+        }[]
+      }
+      wa_find_opportunities: {
+        Args: { p_hint: string; p_limit?: number; p_workspace_id: string }
+        Returns: {
+          contacto_nombre: string
+          descripcion: string
+          empresa_nombre: string
+          etapa: string
+          id: string
+          updated_at: string
+          valor_estimado: number
+        }[]
+      }
+      wa_find_projects: {
+        Args: { p_hint: string; p_limit?: number; p_workspace_id: string }
+        Returns: {
+          cartera: number
+          cobrado: number
+          contacto_nombre: string
+          costo_acumulado: number
+          empresa_nombre: string
+          estado: string
+          facturado: number
+          horas_estimadas: number
+          horas_reales: number
+          id: string
+          nombre: string
+          presupuesto_consumido_pct: number
+          presupuesto_total: number
+        }[]
+      }
+      wa_identify_user: {
+        Args: { p_phone: string }
+        Returns: {
+          es_principal: boolean
+          full_name: string
+          phone_whatsapp: string
+          tipo_acceso: string
+          workspace_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
