@@ -8,11 +8,14 @@ import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 
 interface Props {
   proyectoId: string
-  rubrosLista: { id: string; nombre: string; presupuestado: number | null }[]
+  rubrosLista: { id: string; nombre: string; tipo?: string | null; presupuestado: number | null }[]
   onClose: () => void
 }
 
-export default function GastoDialog({ proyectoId, rubrosLista, onClose }: Props) {
+export default function GastoDialog({ proyectoId, rubrosLista: rawRubros, onClose }: Props) {
+  // Filter out labor rubros — mo_propia and mo_terceros are calculated from horas, not gastos
+  const rubrosLista = rawRubros.filter(r => r.tipo !== 'mo_propia' && r.tipo !== 'mo_terceros')
+
   const [isPending, startTransition] = useTransition()
   const [monto, setMonto] = useState('')
   const [rubroId, setRubroId] = useState(rubrosLista.length === 1 ? rubrosLista[0].id : '')

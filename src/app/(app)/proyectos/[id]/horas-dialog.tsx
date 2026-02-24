@@ -4,16 +4,33 @@ import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { addHoras } from '../actions-v2'
 
+interface StaffOption {
+  id: string
+  full_name: string
+  tipo_vinculo: string | null
+  es_principal: boolean | null
+}
+
 interface Props {
   proyectoId: string
+  staffList?: StaffOption[]
   onClose: () => void
 }
 
-export default function HorasDialog({ proyectoId, onClose }: Props) {
+const VINCULO_LABEL: Record<string, string> = {
+  empleado: 'Empleado',
+  contratista: 'Contratista',
+  freelance: 'Freelance',
+}
+
+export default function HorasDialog({ proyectoId, staffList = [], onClose }: Props) {
   const [isPending, startTransition] = useTransition()
   const [horas, setHoras] = useState('1')
   const [descripcion, setDescripcion] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [staffId, setStaffId] = useState(
+    staffList.find(s => s.es_principal)?.id ?? staffList[0]?.id ?? ''
+  )
 
   const handleSubmit = () => {
     const horasNum = parseFloat(horas)
@@ -26,6 +43,7 @@ export default function HorasDialog({ proyectoId, onClose }: Props) {
         fecha,
         horas: horasNum,
         descripcion: descripcion.trim() || undefined,
+        staff_id: staffId || undefined,
       })
       if (res.success) {
         toast.success(`${horasNum}h registradas`)
@@ -40,6 +58,33 @@ export default function HorasDialog({ proyectoId, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-sm rounded-lg bg-background p-5 shadow-xl space-y-4">
         <h3 className="text-sm font-bold">Registrar horas</h3>
+
+        {/* Staff selector */}
+        {staffList.length > 1 && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Persona *</label>
+            <select
+              value={staffId}
+              onChange={e => setStaffId(e.target.value)}
+              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+            >
+              {staffList.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.full_name}
+                  {s.tipo_vinculo ? ` (${VINCULO_LABEL[s.tipo_vinculo] ?? s.tipo_vinculo})` : ''}
+                  {s.es_principal ? ' ★' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Single staff indicator */}
+        {staffList.length === 1 && (
+          <p className="text-xs text-muted-foreground">
+            Persona: <span className="font-medium text-foreground">{staffList[0].full_name}</span>
+          </p>
+        )}
 
         {/* Horas */}
         <div>

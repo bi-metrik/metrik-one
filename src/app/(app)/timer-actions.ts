@@ -94,6 +94,16 @@ export async function stopTimer() {
     return { success: true, horasRegistradas: 0, descartado: true }
   }
 
+  // Get principal staff for cost attribution
+  const { data: principalStaff } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .eq('es_principal', true)
+    .eq('is_active', true)
+    .limit(1)
+    .single()
+
   // Insert horas record
   const { error: horasError } = await supabase
     .from('horas')
@@ -107,6 +117,7 @@ export async function stopTimer() {
       fin: fin.toISOString(),
       timer_activo: true,
       canal_registro: 'app',
+      staff_id: principalStaff?.id ?? null,
     })
 
   if (horasError) return { success: false, error: horasError.message }

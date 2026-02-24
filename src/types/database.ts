@@ -1382,6 +1382,7 @@ export type Database = {
           id: string
           inicio: string | null
           proyecto_id: string
+          staff_id: string | null
           timer_activo: boolean | null
           workspace_id: string
         }
@@ -1395,6 +1396,7 @@ export type Database = {
           id?: string
           inicio?: string | null
           proyecto_id: string
+          staff_id?: string | null
           timer_activo?: boolean | null
           workspace_id: string
         }
@@ -1408,6 +1410,7 @@ export type Database = {
           id?: string
           inicio?: string | null
           proyecto_id?: string
+          staff_id?: string | null
           timer_activo?: boolean | null
           workspace_id?: string
         }
@@ -1425,6 +1428,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_proyecto_financiero"
             referencedColumns: ["proyecto_id"]
+          },
+          {
+            foreignKeyName: "horas_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "horas_workspace_id_fkey"

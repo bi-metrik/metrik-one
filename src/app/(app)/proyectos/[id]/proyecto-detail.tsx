@@ -83,12 +83,20 @@ interface RubroLista {
   presupuestado: number | null
 }
 
+interface StaffOption {
+  id: string
+  full_name: string
+  tipo_vinculo: string | null
+  es_principal: boolean | null
+}
+
 interface Props {
   financiero: Financiero
   rubros: Rubro[]
   facturas: Factura[]
   timeline: TimelineEntry[]
   rubrosLista: RubroLista[]
+  staffList: StaffOption[]
   cotizacionId?: string | null
   oportunidadId?: string | null
 }
@@ -101,6 +109,7 @@ export default function ProyectoDetail({
   facturas,
   timeline,
   rubrosLista,
+  staffList,
   cotizacionId,
   oportunidadId,
 }: Props) {
@@ -531,6 +540,7 @@ export default function ProyectoDetail({
       {dialog === 'horas' && (
         <HorasDialog
           proyectoId={proyectoId}
+          staffList={staffList}
           onClose={() => { setDialog(null); router.refresh() }}
         />
       )}

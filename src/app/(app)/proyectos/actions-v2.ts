@@ -93,7 +93,7 @@ export async function getProyectoDetalle(id: string) {
   if (error || !workspaceId) return null
 
   // Parallel fetches
-  const [financieroRes, rubrosRes, facturasRes, ultimosRes] = await Promise.all([
+  const [financieroRes, rubrosRes, facturasRes, ultimosRes, staffRes] = await Promise.all([
     // Financial summary from view
     supabase
       .from('v_proyecto_financiero')
@@ -121,7 +121,7 @@ export async function getProyectoDetalle(id: string) {
     Promise.all([
       supabase
         .from('horas')
-        .select('id, fecha, horas, descripcion, created_at')
+        .select('id, fecha, horas, descripcion, created_at, staff:staff_id(full_name)')
         .eq('proyecto_id', id)
         .order('fecha', { ascending: false })
         .limit(10),
@@ -138,6 +138,15 @@ export async function getProyectoDetalle(id: string) {
         .order('fecha', { ascending: false })
         .limit(10),
     ]),
+
+    // Active staff list for horas dialog
+    supabase
+      .from('staff')
+      .select('id, full_name, tipo_vinculo, es_principal')
+      .eq('workspace_id', workspaceId)
+      .eq('is_active', true)
+      .order('es_principal', { ascending: false })
+      .order('full_name'),
   ])
 
   if (financieroRes.error || !financieroRes.data) return null
@@ -154,14 +163,18 @@ export async function getProyectoDetalle(id: string) {
   }
 
   const timeline: TimelineEntry[] = [
-    ...(horasRes.data ?? []).map(h => ({
-      id: h.id,
-      tipo: 'horas' as const,
-      fecha: h.fecha ?? '',
-      descripcion: h.descripcion ?? 'Horas registradas',
-      valor: h.horas ?? 0,
-      created_at: h.created_at ?? '',
-    })),
+    ...(horasRes.data ?? []).map(h => {
+      const staffName = (h.staff as unknown as { full_name: string } | null)?.full_name
+      const desc = [h.descripcion ?? 'Horas registradas', staffName ? `(${staffName})` : ''].filter(Boolean).join(' ')
+      return {
+        id: h.id,
+        tipo: 'horas' as const,
+        fecha: h.fecha ?? '',
+        descripcion: desc,
+        valor: h.horas ?? 0,
+        created_at: h.created_at ?? '',
+      }
+    }),
     ...(gastosRes.data ?? []).map(g => ({
       id: g.id,
       tipo: 'gasto' as const,
@@ -202,6 +215,12 @@ export async function getProyectoDetalle(id: string) {
     facturas: facturasRes.data ?? [],
     timeline,
     rubrosLista: rubrosLista ?? [],
+    staffList: (staffRes.data ?? []).map(s => ({
+      id: s.id,
+      full_name: s.full_name ?? 'Sin nombre',
+      tipo_vinculo: s.tipo_vinculo,
+      es_principal: s.es_principal,
+    })),
     cotizacionId: proyectoBase?.cotizacion_id ?? null,
     oportunidadId: proyectoBase?.oportunidad_id ?? null,
   }
@@ -402,6 +421,7 @@ export async function addHoras(proyectoId: string, input: {
   fecha: string
   horas: number
   descripcion?: string
+  staff_id?: string
 }): Promise<ActionResult> {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -418,6 +438,20 @@ export async function addHoras(proyectoId: string, input: {
     return { success: false, error: 'Solo se pueden registrar horas en proyectos en ejecución' }
   }
 
+  // If no staff_id provided, default to principal staff
+  let staffId = input.staff_id
+  if (!staffId) {
+    const { data: principal } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .eq('es_principal', true)
+      .eq('is_active', true)
+      .limit(1)
+      .single()
+    staffId = principal?.id ?? undefined
+  }
+
   const { error: dbError } = await supabase
     .from('horas')
     .insert({
@@ -426,6 +460,7 @@ export async function addHoras(proyectoId: string, input: {
       fecha: input.fecha,
       horas: input.horas,
       descripcion: input.descripcion?.trim() || null,
+      staff_id: staffId || null,
     })
 
   if (dbError) return { success: false, error: dbError.message }
