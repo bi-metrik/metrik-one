@@ -29,6 +29,8 @@ interface CotizacionPDFProps {
     fecha_validez: string | null
     condiciones_pago: string | null
     notas: string | null
+    descuento_porcentaje: number | null
+    descuento_valor: number | null
   }
   empresa: {
     nombre: string
@@ -129,8 +131,20 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
         <Text style={styles.sectionTitle}>Resumen</Text>
         <View style={styles.row}>
           <Text>Subtotal</Text>
-          <Text style={styles.value}>{fmt(fiscal?.subtotal ?? cotizacion.valor_total)}</Text>
+          <Text style={styles.value}>{fmt(cotizacion.valor_total)}</Text>
         </View>
+        {(cotizacion.descuento_valor ?? 0) > 0 && (
+          <>
+            <View style={styles.row}>
+              <Text>Descuento ({cotizacion.descuento_porcentaje ?? 0}%)</Text>
+              <Text style={{ fontSize: 10, color: '#ef4444' }}>-{fmt(cotizacion.descuento_valor ?? 0)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={{ fontWeight: 'bold' }}>Base gravable</Text>
+              <Text style={styles.value}>{fmt(cotizacion.valor_total - (cotizacion.descuento_valor ?? 0))}</Text>
+            </View>
+          </>
+        )}
         {fiscal && fiscal.iva > 0 && (
           <View style={styles.row}>
             <Text>IVA (19%)</Text>

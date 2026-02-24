@@ -41,7 +41,16 @@ export async function enviarCotizacionEmail(cotizacionId: string, emailTo: strin
     .single()
 
   const senderName = ws?.name || 'MéTRIK ONE'
-  const valorFmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(cot.valor_total)
+  const fmt = (v: number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+
+  // Access discount fields (columns may not be in generated types yet)
+  const { data: cotFull } = await supabase.from('cotizaciones').select('*').eq('id', cotizacionId).single()
+  const cotAny = cotFull as any
+  const descPct = cotAny?.descuento_porcentaje ?? 0
+  const descVal = cotAny?.descuento_valor ?? 0
+  const valorNeto = cot.valor_total - descVal
+  const valorFmt = fmt(valorNeto)
+  const tieneDescuento = descVal > 0
 
   try {
     const { error: emailError } = await resend.emails.send({
@@ -52,7 +61,7 @@ export async function enviarCotizacionEmail(cotizacionId: string, emailTo: strin
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #10B981;">Cotización ${cot.consecutivo}</h2>
           <p>Hola,</p>
-          <p>Adjunto encontrarás la cotización <strong>${cot.consecutivo}</strong> por un valor de <strong>${valorFmt}</strong>.</p>
+          <p>Adjunto encontrarás la cotización <strong>${cot.consecutivo}</strong> por un valor de <strong>${valorFmt}</strong>${tieneDescuento ? ` (incluye descuento del ${descPct}%)` : ''}.</p>
           ${cot.descripcion ? `<p style="color: #666;">${cot.descripcion}</p>` : ''}
           <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">

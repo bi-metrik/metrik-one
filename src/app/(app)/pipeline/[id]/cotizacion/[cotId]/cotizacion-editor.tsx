@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, Send, Copy, Save, Plus, Trash2,
+  ArrowLeft, Send, Copy, Save, Plus, Trash2, Percent,
   ChevronDown, ChevronRight, Lock, BookOpen, Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -51,6 +51,8 @@ interface CotizacionData {
   costo_total: number | null
   fecha_envio: string | null
   fecha_validez: string | null
+  descuento_porcentaje?: number | null
+  descuento_valor?: number | null
 }
 
 interface ClientFiscal {
@@ -79,6 +81,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // Flash mode state
   const [flashDesc, setFlashDesc] = useState(cotizacion.descripcion ?? '')
   const [flashValor, setFlashValor] = useState(cotizacion.valor_total?.toString() ?? '')
+
+  // Discount state (shared between flash and detallada)
+  const [discountPct, setDiscountPct] = useState(cotizacion.descuento_porcentaje?.toString() ?? '0')
 
   // Detallada mode state
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(initialItems.map(i => i.id)))
@@ -138,9 +143,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
   const handleSaveFlash = () => {
     startTransition(async () => {
+      const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
+      const val = Math.round(Number(flashValor) * pct / 100)
       const res = await updateCotizacion(cotizacion.id, {
         descripcion: flashDesc.trim(),
         valor_total: Number(flashValor),
+        descuento_porcentaje: pct,
+        descuento_valor: val,
       })
       if (res.success) toast.success('Guardado')
       else toast.error(res.error)
@@ -323,9 +332,46 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           </div>
 
+          {/* Discount */}
+          {editable && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Descuento</label>
+              <div className="flex items-center gap-2">
+                <div className="relative w-24">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={discountPct}
+                    onChange={e => {
+                      const raw = e.target.value.replace(/[^0-9.]/g, '')
+                      setDiscountPct(raw)
+                    }}
+                    className="w-full rounded-md border bg-background py-2 pl-3 pr-7 text-sm"
+                    placeholder="0"
+                  />
+                  <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+                {Number(discountPct) > 0 && Number(flashValor) > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    = -{formatCOP(Math.round(Number(flashValor) * Number(discountPct) / 100))}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+          {!editable && (cotizacion.descuento_porcentaje ?? 0) > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Descuento ({cotizacion.descuento_porcentaje}%)</span>
+              <span className="font-medium text-red-600">-{formatCOP(cotizacion.descuento_valor ?? 0)}</span>
+            </div>
+          )}
+
           {/* Fiscal result preview */}
           {(() => {
-            const valor = Number(flashValor) || 0
+            const valorBruto = Number(flashValor) || 0
+            const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
+            const descVal = Math.round(valorBruto * pct / 100)
+            const valor = valorBruto - descVal
             const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
             if (!hasFiscal || valor === 0) {
               return (
@@ -593,24 +639,44 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           )}
 
           {/* Totals */}
-          <div className="rounded-lg bg-muted/50 p-4 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Costo total</span>
-              <span className="font-medium">{formatCOP(costoTotal)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Valor venta</span>
-              <span className="font-bold">{formatCOP(cotizacion.valor_total ?? 0)}</span>
-            </div>
-            {costoTotal > 0 && (cotizacion.valor_total ?? 0) > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Margen</span>
-                <span className="font-medium text-green-600">
-                  {Math.round(((cotizacion.valor_total ?? 0) - costoTotal) / (cotizacion.valor_total ?? 1) * 100)}%
-                </span>
+          {(() => {
+            const valorVenta = cotizacion.valor_total ?? 0
+            const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
+            const dVal = Math.round(valorVenta * dPct / 100)
+            const valorNeto = valorVenta - dVal
+            return (
+              <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Costo total</span>
+                  <span className="font-medium">{formatCOP(costoTotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Valor venta</span>
+                  <span className="font-bold">{formatCOP(valorVenta)}</span>
+                </div>
+                {dVal > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Descuento ({dPct}%)</span>
+                      <span className="font-medium text-red-600">-{formatCOP(dVal)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm border-t pt-1">
+                      <span className="text-muted-foreground">Subtotal</span>
+                      <span className="font-bold">{formatCOP(valorNeto)}</span>
+                    </div>
+                  </>
+                )}
+                {costoTotal > 0 && valorNeto > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Margen</span>
+                    <span className="font-medium text-green-600">
+                      {Math.round((valorNeto - costoTotal) / valorNeto * 100)}%
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            )
+          })()}
 
           {/* Valor venta editable */}
           {editable && (
@@ -627,7 +693,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     if (val > 0) {
                       e.target.value = val.toLocaleString('es-CO')
                       startTransition(async () => {
-                        await updateCotizacion(cotizacion.id, { valor_total: val })
+                        const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
+                        const dv = Math.round(val * pct / 100)
+                        await updateCotizacion(cotizacion.id, { valor_total: val, descuento_porcentaje: pct, descuento_valor: dv })
                         router.refresh()
                       })
                     }
@@ -638,9 +706,58 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           )}
 
+          {/* Discount */}
+          {editable && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Descuento</label>
+              <div className="flex items-center gap-2">
+                <div className="relative w-24">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={discountPct}
+                    onChange={e => {
+                      const raw = e.target.value.replace(/[^0-9.]/g, '')
+                      setDiscountPct(raw)
+                    }}
+                    onBlur={() => {
+                      const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
+                      const dv = Math.round((cotizacion.valor_total ?? 0) * pct / 100)
+                      startTransition(async () => {
+                        await updateCotizacion(cotizacion.id, { descuento_porcentaje: pct, descuento_valor: dv })
+                        router.refresh()
+                      })
+                    }}
+                    className="w-full rounded-md border bg-background py-2 pl-3 pr-7 text-sm"
+                    placeholder="0"
+                  />
+                  <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+                {(() => {
+                  const pct = Number(discountPct) || 0
+                  const vv = cotizacion.valor_total ?? 0
+                  return pct > 0 && vv > 0 ? (
+                    <span className="text-xs text-muted-foreground">
+                      = -{formatCOP(Math.round(vv * pct / 100))}
+                    </span>
+                  ) : null
+                })()}
+              </div>
+            </div>
+          )}
+          {!editable && (cotizacion.descuento_porcentaje ?? 0) > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Descuento ({cotizacion.descuento_porcentaje}%)</span>
+              <span className="font-medium text-red-600">-{formatCOP(cotizacion.descuento_valor ?? 0)}</span>
+            </div>
+          )}
+
           {/* Fiscal result */}
           {(() => {
-            const valor = cotizacion.valor_total ?? 0
+            const valorBruto = cotizacion.valor_total ?? 0
+            const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
+            const dVal = Math.round(valorBruto * dPct / 100)
+            const valor = valorBruto - dVal
             const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
             if (!hasFiscal || valor === 0) {
               return (

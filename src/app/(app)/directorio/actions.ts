@@ -229,6 +229,20 @@ export async function deleteEmpresa(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
+  // Check for related oportunidades before deleting
+  const { data: oportunidades } = await supabase
+    .from('oportunidades')
+    .select('id')
+    .eq('empresa_id', id)
+    .limit(1)
+
+  if (oportunidades && oportunidades.length > 0) {
+    return {
+      success: false,
+      error: 'No se puede eliminar esta empresa porque tiene oportunidades asociadas en el pipeline. Elimina primero las oportunidades.',
+    }
+  }
+
   const { error: dbError } = await supabase
     .from('empresas')
     .delete()

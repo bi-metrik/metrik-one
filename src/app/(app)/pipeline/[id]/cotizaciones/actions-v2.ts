@@ -164,12 +164,49 @@ export async function deleteItem(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
+  // Fetch item details before deleting (to adjust valor_total if from catalog)
+  const { data: item } = await supabase
+    .from('items')
+    .select('cotizacion_id, servicio_origen_id, subtotal')
+    .eq('id', id)
+    .single()
+
+  if (!item) return { success: false, error: 'Item no encontrado' }
+
+  // If the item came from a catalog service, we need to subtract its sale price from valor_total
+  let precioRestar = 0
+  if (item.servicio_origen_id) {
+    const { data: servicio } = await supabase
+      .from('servicios')
+      .select('precio_estandar')
+      .eq('id', item.servicio_origen_id)
+      .single()
+
+    precioRestar = servicio?.precio_estandar ?? (item.subtotal ?? 0)
+  }
+
   const { error: dbError } = await supabase
     .from('items')
     .delete()
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  // Subtract the sale price from valor_total
+  if (precioRestar > 0) {
+    const { data: cot } = await supabase
+      .from('cotizaciones')
+      .select('valor_total')
+      .eq('id', item.cotizacion_id)
+      .single()
+
+    const newValor = Math.max(0, (cot?.valor_total ?? 0) - precioRestar)
+    await supabase
+      .from('cotizaciones')
+      .update({ valor_total: newValor })
+      .eq('id', item.cotizacion_id)
+  }
+
   return { success: true }
 }
 
@@ -409,6 +446,15 @@ export async function duplicarCotizacion(id: string) {
 
   if (!original) return { success: false, error: 'Cotizacion no encontrada' }
 
+  // Get discount fields separately (columns added via migration, may not be in generated types yet)
+  const { data: discountData } = await supabase
+    .from('cotizaciones')
+    .select('*')
+    .eq('id', id)
+    .single()
+  const descPct = (discountData as any)?.descuento_porcentaje ?? 0
+  const descVal = (discountData as any)?.descuento_valor ?? 0
+
   // Get new consecutivo
   const { data: dupConsRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
@@ -428,6 +474,7 @@ export async function duplicarCotizacion(id: string) {
       costo_total: original.costo_total,
       estado: 'borrador',
       duplicada_de: id,
+      ...({ descuento_porcentaje: descPct, descuento_valor: descVal } as any),
     })
     .select('id')
     .single()
