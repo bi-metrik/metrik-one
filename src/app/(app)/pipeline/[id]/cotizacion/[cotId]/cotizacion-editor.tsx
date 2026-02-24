@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, Send, Copy, Save, Plus, Trash2, Percent,
+  ArrowLeft, Send, Copy, Save, Plus, Trash2, Percent, FileDown,
   ChevronDown, ChevronRight, Lock, BookOpen, Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -15,6 +15,7 @@ import {
   addItemFromServicio,
 } from '../../cotizaciones/actions-v2'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
+import { generateCotizacionPDF } from '@/app/(app)/pipeline/pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
@@ -180,6 +181,30 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  const handleDescargarPDF = () => {
+    startTransition(async () => {
+      const res = await generateCotizacionPDF(cotizacion.id)
+      if (res.success && res.pdf) {
+        // Convert base64 to blob and trigger download
+        const byteChars = atob(res.pdf)
+        const byteArray = new Uint8Array(byteChars.length)
+        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+        const blob = new Blob([byteArray], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = res.filename || `${cotizacion.consecutivo}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        toast.success('PDF descargado')
+      } else {
+        toast.error(res.error || 'Error generando PDF')
+      }
+    })
+  }
+
   const handleAddItem = () => {
     if (!newItemName.trim()) return
     startTransition(async () => {
@@ -283,6 +308,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               Enviar
             </button>
           )}
+          <button
+            onClick={handleDescargarPDF}
+            disabled={isPending}
+            className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+          >
+            <FileDown className="h-3 w-3" />
+            PDF
+          </button>
           <button
             onClick={handleDuplicar}
             disabled={isPending}
