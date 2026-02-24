@@ -53,8 +53,8 @@ export async function getSemaforoData(workspaceId: string): Promise<SemaforoData
     supabase.from('payments').select('*').eq('workspace_id', workspaceId),
     supabase.from('expenses').select('*').eq('workspace_id', workspaceId),
     supabase.from('fixed_expenses').select('*').eq('workspace_id', workspaceId).eq('is_active', true),
-    // D129: Staff salaries for composite gastos fijos
-    supabase.from('staff').select('salary').eq('workspace_id', workspaceId).eq('is_active', true),
+    // D129: Empleados directos (nómina — excluye contratistas/freelance)
+    supabase.from('staff').select('salary').eq('workspace_id', workspaceId).eq('is_active', true).eq('tipo_vinculo', 'empleado'),
   ])
 
   const bankAccounts = bankAccountsRes.data || []

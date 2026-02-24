@@ -143,12 +143,12 @@ export default function ProyectoDetail({
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
       {/* ─── Header ─── */}
       <div className="flex items-center gap-3">
-        <Link
-          href="/proyectos"
+        <button
+          onClick={() => router.back()}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
         <div className="flex-1 min-w-0">
           <h1 className="truncate text-lg font-bold">{f.nombre ?? 'Sin nombre'}</h1>
           <div className="flex items-center gap-2">
@@ -271,7 +271,7 @@ export default function ProyectoDetail({
       )}
 
       {/* ─── Presupuesto vs Real por rubro ─── */}
-      {rubros.length > 1 && (
+      {rubros.length >= 1 && (
         <div className="space-y-2 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Presupuesto vs Real por rubro</h2>
           <div className="space-y-2">

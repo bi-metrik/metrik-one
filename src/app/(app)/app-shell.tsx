@@ -51,6 +51,17 @@ const ROLE_LABELS: Record<string, string> = {
   read_only: 'Lectura',
 }
 
+/** Parse hex color to relative luminance (0=black, 1=white) */
+function hexLuminance(hex: string): number {
+  const h = hex.replace('#', '')
+  if (h.length < 6) return 0
+  const r = parseInt(h.substring(0, 2), 16) / 255
+  const g = parseInt(h.substring(2, 4), 16) / 255
+  const b = parseInt(h.substring(4, 6), 16) / 255
+  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b)
+}
+
 export default function AppShell({
   children,
   fullName,
@@ -81,9 +92,19 @@ export default function AppShell({
   const brandingStyle: Record<string, string> = {}
   if (branding?.colorPrimario) {
     brandingStyle['--sidebar-primary'] = branding.colorPrimario
+    // If primary is light, use dark text for primary-foreground
+    if (hexLuminance(branding.colorPrimario) > 0.4) {
+      brandingStyle['--sidebar-primary-foreground'] = '#1a1a1a'
+    }
   }
   if (branding?.colorSecundario) {
     brandingStyle['--sidebar'] = branding.colorSecundario
+    // If sidebar bg is light, use dark text colors for readability
+    if (hexLuminance(branding.colorSecundario) > 0.4) {
+      brandingStyle['--sidebar-foreground'] = '#1a1a1a'
+      brandingStyle['--sidebar-muted'] = '#555555'
+      brandingStyle['--sidebar-border'] = '#d4d4d4'
+    }
   }
 
   const hasLogo = !!branding?.logoUrl

@@ -158,37 +158,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
           </View>
         )}
 
-        {/* Retenciones (not on client-facing PDF, per spec D58-D59: internal only) */}
-        {fiscal && fiscal.totalRetenciones > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { fontSize: 9, color: '#999' }]}>Retenciones estimadas (informativo)</Text>
-            {fiscal.reteFuente > 0 && (
-              <View style={styles.row}>
-                <Text style={styles.label}>Retencion en la fuente</Text>
-                <Text style={{ fontSize: 9, color: '#ef4444' }}>-{fmt(fiscal.reteFuente)}</Text>
-              </View>
-            )}
-            {fiscal.reteICA > 0 && (
-              <View style={styles.row}>
-                <Text style={styles.label}>ReteICA</Text>
-                <Text style={{ fontSize: 9, color: '#ef4444' }}>-{fmt(fiscal.reteICA)}</Text>
-              </View>
-            )}
-            {fiscal.reteIVA > 0 && (
-              <View style={styles.row}>
-                <Text style={styles.label}>ReteIVA</Text>
-                <Text style={{ fontSize: 9, color: '#ef4444' }}>-{fmt(fiscal.reteIVA)}</Text>
-              </View>
-            )}
-            <View style={styles.rowBold}>
-              <Text style={{ fontWeight: 'bold' }}>TE QUEDA</Text>
-              <Text style={{ fontSize: 12, fontWeight: 'bold', color: primaryColor }}>{fmt(fiscal.teQueda)}</Text>
-            </View>
-            <Text style={{ fontSize: 7, color: '#999', marginTop: 2 }}>
-              * Retenciones estimadas segun perfil fiscal. No constituyen asesoria tributaria.
-            </Text>
-          </>
-        )}
+        {/* Retenciones: NO se muestran en PDF al cliente (info interna) */}
 
         {/* Conditions */}
         {(cotizacion.condiciones_pago || cotizacion.notas) && (

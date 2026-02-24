@@ -115,12 +115,12 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Link
-          href="/pipeline"
+        <button
+          onClick={() => router.back()}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
         <div className="flex-1 min-w-0">
           <h1 className="truncate text-lg font-bold">{oportunidad.descripcion || 'Sin descripcion'}</h1>
           <div className="flex items-center gap-2">

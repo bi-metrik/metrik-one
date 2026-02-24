@@ -99,9 +99,9 @@ export default async function MiNegocioPage() {
   const servicios = serviciosResult.data || []
   const configFinanciera = configFinancieraResult.data
 
-  // D129: Build staffNomina for GastosFijosSection
+  // D129: Nómina = solo empleados directos (no contratistas/freelance)
   const staffNomina = staffMembers
-    .filter(s => (s.salary ?? 0) > 0)
+    .filter(s => s.tipo_vinculo === 'empleado' && (s.salary ?? 0) > 0)
     .map(s => ({ nombre: s.full_name ?? 'Sin nombre', salario: Number(s.salary) }))
 
   // Build category map for fixed expenses

@@ -267,12 +267,13 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .eq('periodo', mesStart),
 
-    // D129: Staff activos con salario (nómina)
+    // D129: Empleados directos con salario (nómina — excluye contratistas/freelance)
     supabase
       .from('staff')
       .select('full_name, salary')
       .eq('workspace_id', workspaceId)
-      .eq('is_active', true),
+      .eq('is_active', true)
+      .eq('tipo_vinculo', 'empleado'),
 
     // D130: Config financiera (margen de contribución)
     supabase
