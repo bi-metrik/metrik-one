@@ -133,6 +133,7 @@ function DrillP1({ data, monthType }: { data: NumerosData; monthType: string }) 
 
 function DrillP2({ data }: { data: NumerosData; monthType: string }) {
   const utilidadAnterior = data.ingresosMesAnterior - data.gastosMesAnterior
+  const otrosGastos = Math.max(0, data.gastosMes - data.componenteNomina - data.componenteOperativo)
   const margenPct = data.ingresosMes > 0
     ? Math.round((data.utilidad / data.ingresosMes) * 100)
     : 0
@@ -140,8 +141,16 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
   return (
     <div className="space-y-1">
       <SectionTitle>Estado de resultados simplificado</SectionTitle>
-      <Row label="Ingresos (cobros)" value={data.ingresosMes} color="green" />
-      <Row label="Gastos totales" value={data.gastosMes} color="red" />
+      <Row label="Ingresos cobrados" value={data.ingresosMes} color="green" />
+      {data.componenteNomina > 0 && (
+        <Row label="(-) Nomina (Mi Equipo)" value={data.componenteNomina} color="red" indent />
+      )}
+      {data.componenteOperativo > 0 && (
+        <Row label="(-) Gastos operativos fijos" value={data.componenteOperativo} color="red" indent />
+      )}
+      {otrosGastos > 0 && (
+        <Row label="(-) Otros gastos del mes" value={otrosGastos} color="red" indent />
+      )}
       <Divider />
       <Row label="Utilidad" value={data.utilidad} bold color={data.utilidad >= 0 ? 'green' : 'red'} />
       <Row label="Margen" value={`${margenPct}%`} color={margenPct > 20 ? 'green' : margenPct > 0 ? 'yellow' : 'red'} />
@@ -197,13 +206,44 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
   const diasRestantes = monthType === 'current' ? data.diasDelMes - data.diaActual : 0
   const ventaDiariaRequerida = diasRestantes > 0 ? faltaParaPE / diasRestantes : 0
 
+  const margenLabel = data.margenFuente === 'calculado'
+    ? `Calculado (${data.nProyectosMargen} proyectos cerrados)`
+    : data.margenFuente === 'mixto'
+      ? `Mixto (${data.nProyectosMargen} proyecto${data.nProyectosMargen !== 1 ? 's' : ''} + estimado)`
+      : 'Estimado por ti'
+
   return (
     <div className="space-y-1">
-      <SectionTitle>Calculo del punto de equilibrio</SectionTitle>
-      <Row label="Costos fijos mensuales" value={data.costosFijosMes} />
-      <Row label="Margen de contribucion promedio" value={`${Math.round(data.margenContribucion * 100)}%`} />
+      <SectionTitle>Gastos fijos mensuales</SectionTitle>
+      {data.staffNomina.length > 0 && (
+        <>
+          <Row label="👥 Nomina (Mi Equipo)" value={data.componenteNomina} bold />
+          {data.staffNomina.map((s, i) => (
+            <Row key={i} label={s.nombre} value={s.salario} indent />
+          ))}
+        </>
+      )}
+      <Row label="🏢 Gastos operativos" value={data.componenteOperativo} bold={data.staffNomina.length > 0} />
+      {data.staffNomina.length > 0 && (
+        <>
+          <Divider />
+          <Row label="Total gastos fijos" value={data.costosFijosMes} bold />
+        </>
+      )}
+
       <Divider />
-      <Row label="Punto de equilibrio" value={data.puntoEquilibrio} bold />
+      <SectionTitle>Margen de contribucion</SectionTitle>
+      <Row label="Margen efectivo" value={`${Math.round(data.margenContribucion * 100)}%`} />
+      <div className="flex items-center justify-between py-1">
+        <span className="text-[10px] text-muted-foreground">{margenLabel}</span>
+        {data.margenFuente === 'estimado' && (
+          <a href="/mi-negocio" className="text-[10px] font-medium text-primary hover:underline">Ajustar →</a>
+        )}
+      </div>
+
+      <Divider />
+      <SectionTitle>Punto de equilibrio</SectionTitle>
+      <Row label="PE = Gastos fijos / Margen" value={data.puntoEquilibrio} bold />
 
       <Divider />
       <SectionTitle>Avance de ventas</SectionTitle>

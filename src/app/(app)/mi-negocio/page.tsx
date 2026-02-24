@@ -28,6 +28,7 @@ export default async function MiNegocioPage() {
     fixedResult,
     categoriesResult,
     serviciosResult,
+    configFinancieraResult,
   ] = await Promise.all([
     supabase
       .from('workspaces')
@@ -79,6 +80,14 @@ export default async function MiNegocioPage() {
       .select('*')
       .eq('workspace_id', workspaceId)
       .order('nombre'),
+
+    // D130: Config financiera (margen)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('config_financiera')
+      .select('margen_contribucion_estimado, margen_fuente, n_proyectos_margen')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle(),
   ])
 
   const workspace = workspaceResult.data
@@ -89,6 +98,12 @@ export default async function MiNegocioPage() {
   const fixedExpenses = fixedResult.data || []
   const categories = categoriesResult.data || []
   const servicios = serviciosResult.data || []
+  const configFinanciera = configFinancieraResult.data
+
+  // D129: Build staffNomina for GastosFijosSection
+  const staffNomina = staffMembers
+    .filter(s => (s.salary ?? 0) > 0)
+    .map(s => ({ nombre: s.full_name ?? 'Sin nombre', salario: Number(s.salary) }))
 
   // Build category map for fixed expenses
   const catMap = new Map(categories.map(c => [c.id, c.name]))
@@ -105,9 +120,10 @@ export default async function MiNegocioPage() {
   // §5 Servicios: 2 pts
   const activeServicios = servicios.filter(s => s.activo !== false)
   const serviciosScore = activeServicios.length >= 1 ? 2 : 0
-  // §6 Gastos fijos: 3 pts
+  // §6 Gastos fijos: 3 pts (nómina + operativos)
   const activeFixed = fixedExpenses.filter(f => f.is_active)
-  const gastosScore = activeFixed.length >= 3 ? 3 : activeFixed.length > 0 ? 1.5 : 0
+  const totalGastosItems = staffNomina.length + activeFixed.length
+  const gastosScore = totalGastosItems >= 3 ? 3 : totalGastosItems > 0 ? 1.5 : 0
   // §7 Cuenta bancaria: 2 pts
   const activeBanks = bankAccounts.filter(a => a.is_active)
   const bancoScore = activeBanks.length >= 1 ? 2 : 0
@@ -130,6 +146,8 @@ export default async function MiNegocioPage() {
       fixedExpenses={fixedWithCat}
       categories={categories}
       servicios={servicios}
+      staffNomina={staffNomina}
+      configFinanciera={configFinanciera}
       progressPct={progressPct}
       currentUserRole={profile.role}
       sectionScores={{

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus, Trash2, Check, X, Loader2, Pencil, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, Check, X, Loader2, Pencil, AlertTriangle, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { createFixedExpense, deleteFixedExpense, toggleFixedExpense, updateFixedExpense } from '../gastos/actions'
@@ -13,6 +13,7 @@ interface Props {
   fixedExpenses: FixedExpenseWithCategory[]
   categories: ExpenseCategory[]
   totalFixed: number
+  staffNomina?: { nombre: string; salario: number }[]
 }
 
 // ── D129: Tooltips por estado de deducibilidad ──────────
@@ -103,7 +104,7 @@ function DeducibleToggle({
   )
 }
 
-export default function GastosFijosSection({ fixedExpenses: initialExpenses, categories, totalFixed: initialTotal }: Props) {
+export default function GastosFijosSection({ fixedExpenses: initialExpenses, categories, totalFixed: initialTotal, staffNomina = [] }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [fixedExpenses, setFixedExpenses] = useState(initialExpenses)
@@ -254,13 +255,16 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
     return null
   }
 
+  const totalNomina = staffNomina.reduce((s, st) => s + st.salario, 0)
+  const totalCompuesto = totalNomina + totalFixed
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Gastos fijos mensuales</h3>
           <p className="text-sm text-muted-foreground">
-            Total: <span className="font-medium text-foreground">{formatCurrency(totalFixed)}</span>/mes
+            Total: <span className="font-medium text-foreground">{formatCurrency(totalCompuesto)}</span>/mes
           </p>
         </div>
         <button
@@ -271,6 +275,40 @@ export default function GastosFijosSection({ fixedExpenses: initialExpenses, cat
           {showAddForm ? 'Cancelar' : 'Agregar'}
         </button>
       </div>
+
+      {/* D129: Nómina block (locked, from Mi Equipo) */}
+      {staffNomina.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">👥</span>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Nomina (desde Mi Equipo)</h4>
+              <Lock className="h-3 w-3 text-muted-foreground" />
+            </div>
+            <span className="text-sm font-semibold">{formatCurrency(totalNomina)}</span>
+          </div>
+          <div className="rounded-lg border border-dashed bg-muted/30 divide-y divide-dashed">
+            {staffNomina.map((s, i) => (
+              <div key={i} className="flex items-center justify-between px-3 py-2">
+                <span className="text-xs text-muted-foreground">{s.nombre}</span>
+                <span className="text-xs font-medium tabular-nums">{formatCurrency(s.salario)}</span>
+              </div>
+            ))}
+          </div>
+          <a href="#mi-equipo" className="text-[10px] font-medium text-primary hover:underline">
+            Editar en Mi Equipo →
+          </a>
+        </div>
+      )}
+
+      {/* Operational expenses header */}
+      {staffNomina.length > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm">🏢</span>
+          <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Gastos operativos</h4>
+          <span className="ml-auto text-sm font-semibold">{formatCurrency(totalFixed)}</span>
+        </div>
+      )}
 
       {/* List */}
       {fixedExpenses.length > 0 ? (

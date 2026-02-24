@@ -45,6 +45,7 @@ export async function getSemaforoData(workspaceId: string): Promise<SemaforoData
   const [
     bankAccountsRes, bankBalancesRes, invoicesRes,
     paymentsRes, expensesRes, fixedExpensesRes,
+    staffSalariesRes,
   ] = await Promise.all([
     supabase.from('bank_accounts').select('id, bank_name, is_primary').eq('workspace_id', workspaceId).eq('is_active', true),
     supabase.from('bank_balances').select('*').eq('workspace_id', workspaceId).order('recorded_at', { ascending: false }),
@@ -52,6 +53,8 @@ export async function getSemaforoData(workspaceId: string): Promise<SemaforoData
     supabase.from('payments').select('*').eq('workspace_id', workspaceId),
     supabase.from('expenses').select('*').eq('workspace_id', workspaceId),
     supabase.from('fixed_expenses').select('*').eq('workspace_id', workspaceId).eq('is_active', true),
+    // D129: Staff salaries for composite gastos fijos
+    supabase.from('staff').select('salary').eq('workspace_id', workspaceId).eq('is_active', true),
   ])
 
   const bankAccounts = bankAccountsRes.data || []
@@ -100,8 +103,10 @@ export async function getSemaforoData(workspaceId: string): Promise<SemaforoData
   }
   clientesRiesgo.sort((a, b) => b.diasVencida - a.diasVencida)
 
-  // P3: CUENTAS POR PAGAR
-  const totalGastosFijos = fixedExpenses.reduce((s, f) => s + f.monthly_amount, 0)
+  // P3: CUENTAS POR PAGAR (D129: nómina + operativos)
+  const staffSalaries = staffSalariesRes.data ?? []
+  const totalNomina = staffSalaries.reduce((s, st) => s + Number(st.salary ?? 0), 0)
+  const totalGastosFijos = fixedExpenses.reduce((s, f) => s + f.monthly_amount, 0) + totalNomina
   const hace90Dias = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
   const gastosUltimos90 = expenses.filter(e => new Date(e.expense_date) >= hace90Dias)
   const gastoMensualPromedio = gastosUltimos90.length > 0

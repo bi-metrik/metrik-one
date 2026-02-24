@@ -88,6 +88,8 @@ interface Props {
   facturas: Factura[]
   timeline: TimelineEntry[]
   rubrosLista: RubroLista[]
+  cotizacionId?: string | null
+  oportunidadId?: string | null
 }
 
 // ── Component ─────────────────────────────────────────
@@ -98,6 +100,8 @@ export default function ProyectoDetail({
   facturas,
   timeline,
   rubrosLista,
+  cotizacionId,
+  oportunidadId,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -175,6 +179,17 @@ export default function ProyectoDetail({
           </a>
         )}
       </div>
+
+      {/* D131: Link to approved cotización */}
+      {cotizacionId && oportunidadId && (
+        <Link
+          href={`/pipeline/${oportunidadId}/cotizacion/${cotizacionId}`}
+          className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm transition-colors hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/30 dark:hover:bg-blue-950/50"
+        >
+          <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+          <span className="text-blue-700 dark:text-blue-300 font-medium">Ver cotizacion aprobada →</span>
+        </Link>
+      )}
 
       {/* ─── Alertas ─── */}
       <ProyectoAlertas financiero={f} facturas={facturas} />

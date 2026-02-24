@@ -30,7 +30,12 @@ export interface NumerosData {
   ventasMes: number              // facturas emitidas del mes
   metaVentas: number | null
   costosFijosMes: number
-  margenContribucion: number     // avg from closed projects
+  componenteNomina: number       // D129: auto from staff salaries
+  componenteOperativo: number    // D129: from fixed_expenses
+  staffNomina: { nombre: string; salario: number }[]  // D129: detail for drill-down
+  margenContribucion: number     // D130: effective margin (3 phases)
+  margenFuente: string           // D130: 'estimado' | 'mixto' | 'calculado'
+  nProyectosMargen: number       // D130: how many projects inform the margin
   puntoEquilibrio: number
 
   // P5: Cuanto aguanto
@@ -124,6 +129,10 @@ export async function getNumeros(mesRef?: string) {
     oportunidadesRes,
     horasRecientesRes,
     gastosFijosBorradoresRes,
+    // D129: Nómina desde staff
+    staffNominaRes,
+    // D130: Config financiera (margen)
+    configFinancieraRes,
   ] = await Promise.all([
     // Latest bank balance
     supabase
@@ -257,6 +266,21 @@ export async function getNumeros(mesRef?: string) {
       .select('id, confirmado')
       .eq('workspace_id', workspaceId)
       .eq('periodo', mesStart),
+
+    // D129: Staff activos con salario (nómina)
+    supabase
+      .from('staff')
+      .select('full_name, salary')
+      .eq('workspace_id', workspaceId)
+      .eq('is_active', true),
+
+    // D130: Config financiera (margen de contribución)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('config_financiera')
+      .select('margen_contribucion_estimado, margen_contribucion_calculado, margen_fuente, n_proyectos_margen')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle(),
   ])
 
   // ── Calculate values ─────────────────────────────
@@ -373,26 +397,41 @@ export async function getNumeros(mesRef?: string) {
     }
   }
 
-  // Gastos fijos
+  // D129: Gastos fijos compuestos (nómina + operativos)
   const gastosFijosData = gastosFijosRes.data ?? []
-  const costosFijosMes = gastosFijosData.reduce((s, g) => s + Number(g.monthly_amount), 0)
+  const staffData = staffNominaRes.data ?? []
+  const componenteNomina = staffData.reduce((s, st) => s + Number(st.salary ?? 0), 0)
+  const componenteOperativo = gastosFijosData.reduce((s, g) => s + Number(g.monthly_amount), 0)
+  const costosFijosMes = componenteNomina + componenteOperativo
+  const staffNomina = staffData
+    .filter(st => Number(st.salary ?? 0) > 0)
+    .map(st => ({ nombre: st.full_name ?? 'Sin nombre', salario: Number(st.salary) }))
 
-  // D129: Total deducibles
+  // D129: Total deducibles (only from operativos — nómina not deducible this way)
   const totalDeduciblesMes = gastosFijosData
     .filter(g => g.deducible === true)
     .reduce((s, g) => s + Number(g.monthly_amount), 0)
 
-  // Margen contribución (from closed projects)
-  const proyectosCerrados = proyectosCerradosRes.data ?? []
-  let margenContribucion = 0.3 // default 30%
-  if (proyectosCerrados.length > 0) {
-    const margenes = proyectosCerrados
-      .filter(p => Number(p.presupuesto_total) > 0)
-      .map(p => 1 - (Number(p.costo_acumulado) / Number(p.presupuesto_total)))
-    if (margenes.length > 0) {
-      margenContribucion = margenes.reduce((s, m) => s + m, 0) / margenes.length
-    }
+  // D130: Margen de contribución progresivo (3 fases)
+  const configFin = configFinancieraRes.data
+  const margenEstimado = Number(configFin?.margen_contribucion_estimado ?? 0.95)
+  const margenCalculado = configFin?.margen_contribucion_calculado ? Number(configFin.margen_contribucion_calculado) : null
+  const margenFuente = configFin?.margen_fuente ?? 'estimado'
+  const nProyectosMargen = configFin?.n_proyectos_margen ?? 0
+
+  let margenContribucion: number
+  if (margenFuente === 'calculado' && margenCalculado !== null) {
+    // Phase 3: 3+ closed projects → 100% calculated
+    margenContribucion = margenCalculado
+  } else if (margenFuente === 'mixto' && margenCalculado !== null) {
+    // Phase 2: 1-2 closed projects → weighted blend
+    margenContribucion = 0.6 * margenEstimado + 0.4 * margenCalculado
+  } else {
+    // Phase 1: no closed projects → use estimated
+    margenContribucion = margenEstimado
   }
+  // Clamp to reasonable range
+  margenContribucion = Math.max(0.05, Math.min(0.99, margenContribucion))
 
   // PE
   const puntoEquilibrio = margenContribucion > 0 ? costosFijosMes / margenContribucion : costosFijosMes
@@ -430,7 +469,7 @@ export async function getNumeros(mesRef?: string) {
 
   // ── Semáforo ─────────────────────────────────────
   const semaforo = calcularSemaforo({
-    gastosFijosCount: gastosFijosRes.data?.length ?? 0,
+    gastosFijosCount: (gastosFijosRes.data?.length ?? 0) + staffNomina.length,
     metaVentas,
     empresas: empresasRes.data ?? [],
     diasDesdeUltimoSaldo: diasDesdeUltimo,
@@ -478,7 +517,12 @@ export async function getNumeros(mesRef?: string) {
     ventasMes,
     metaVentas,
     costosFijosMes,
+    componenteNomina,
+    componenteOperativo,
+    staffNomina,
     margenContribucion,
+    margenFuente,
+    nProyectosMargen,
     puntoEquilibrio,
     runwayMeses,
     gastoPromedioMensual,
@@ -521,9 +565,10 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   let greenWeight = 0
 
   // 1. Gastos fijos configurados (Crítico, peso 3)
-  const gfScore = input.gastosFijosCount >= 1 ? 'green' : 'red'
+  const gfScore = input.gastosFijosCount >= 3 ? 'green' : input.gastosFijosCount >= 1 ? 'yellow' as const : 'red'
   totalWeight += 3
   if (gfScore === 'green') greenWeight += 3
+  else if (gfScore === 'yellow') greenWeight += 1.5
   pendientes.push({
     label: 'Gastos fijos configurados',
     done: gfScore === 'green',

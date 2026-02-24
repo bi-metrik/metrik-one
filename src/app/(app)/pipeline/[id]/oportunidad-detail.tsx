@@ -40,6 +40,8 @@ interface CotizacionRow {
   modo: string | null
   estado: string | null
   valor_total: number | null
+  descuento_porcentaje?: number | null
+  descuento_valor?: number | null
   created_at: string | null
 }
 
@@ -364,9 +366,18 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
                             {c.modo === 'flash' ? 'Flash' : 'Detallada'}
                           </span>
                         </div>
-                        {c.valor_total !== null && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{formatCOP(c.valor_total)}</p>
-                        )}
+                        {c.valor_total !== null && (() => {
+                          const descuento = Number((c as any).descuento_valor ?? 0)
+                          const valorNeto = c.valor_total - descuento
+                          return descuento > 0 ? (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              <span className="line-through opacity-60">{formatCOP(c.valor_total)}</span>{' '}
+                              <span className="font-medium text-foreground">{formatCOP(valorNeto)}</span>
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground mt-0.5">{formatCOP(c.valor_total)}</p>
+                          )
+                        })()}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">

@@ -255,7 +255,11 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   let presupuestoTotal = opp.valor_estimado ?? 0
 
   if (cotizacion) {
-    presupuestoTotal = cotizacion.valor_total ?? presupuestoTotal
+    // D131: Apply discount to get net budget
+    const cotAny = cotizacion as any
+    const valorBruto = cotizacion.valor_total ?? presupuestoTotal
+    const descuento = Number(cotAny.descuento_valor ?? 0)
+    presupuestoTotal = valorBruto - descuento
 
     // Get items + rubros for detailed cotizaciones
     if (cotizacion.modo === 'detallada') {

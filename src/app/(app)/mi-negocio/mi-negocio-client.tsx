@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useTransition } from 'react'
 import { ChevronRight, Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles } from 'lucide-react'
+import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio } from '@/types/database'
 
 // Existing config sections — reused via import
@@ -10,6 +11,9 @@ import StaffSection from '../config/staff-section'
 import BankAccountsSection from '../config/bank-accounts-section'
 import MonthlyTargetsSection from '../config/monthly-targets-section'
 import ServiciosSection from '../config/servicios-section'
+
+// Actions
+import { updateMargenEstimado } from './actions'
 
 // New sections
 import PerfilFiscalExtended from './perfil-fiscal-extended'
@@ -30,6 +34,8 @@ interface MiNegocioClientProps {
   fixedExpenses: FixedExpenseWithCategory[]
   categories: ExpenseCategory[]
   servicios: Servicio[]
+  staffNomina: { nombre: string; salario: number }[]
+  configFinanciera: { margen_contribucion_estimado: number; margen_fuente: string; n_proyectos_margen: number } | null
   progressPct: number
   currentUserRole: string
   sectionScores: {
@@ -98,6 +104,8 @@ export default function MiNegocioClient({
   fixedExpenses,
   categories,
   servicios,
+  staffNomina,
+  configFinanciera,
   progressPct,
   currentUserRole,
   sectionScores,
@@ -266,6 +274,8 @@ export default function MiNegocioClient({
                       fixedExpenses,
                       categories,
                       servicios,
+                      staffNomina,
+                      configFinanciera,
                       totalFixed,
                       currentUserRole,
                       onClose: () => setActiveSection(null),
@@ -294,6 +304,8 @@ function renderSection(
     fixedExpenses: (FixedExpense & { categoryName: string | null })[]
     categories: ExpenseCategory[]
     servicios: Servicio[]
+    staffNomina: { nombre: string; salario: number }[]
+    configFinanciera: { margen_contribucion_estimado: number; margen_fuente: string; n_proyectos_margen: number } | null
     totalFixed: number
     currentUserRole: string
     onClose: () => void
@@ -326,6 +338,7 @@ function renderSection(
           fixedExpenses={props.fixedExpenses}
           categories={props.categories}
           totalFixed={props.totalFixed}
+          staffNomina={props.staffNomina}
         />
       )
 
@@ -344,13 +357,127 @@ function renderSection(
 
     case 'metas-mensuales':
       return (
-        <MonthlyTargetsSection
-          initialData={props.monthlyTargets}
-          initialYear={new Date().getFullYear()}
-        />
+        <div className="space-y-6">
+          <MonthlyTargetsSection
+            initialData={props.monthlyTargets}
+            initialYear={new Date().getFullYear()}
+          />
+          <MargenContribucionSection configFinanciera={props.configFinanciera} />
+        </div>
       )
 
     default:
       return <p className="text-sm text-muted-foreground">Seccion no encontrada</p>
   }
+}
+
+// ── D130: Margen de Contribución Section ──────────────
+
+const MARGEN_OPTIONS = [
+  { label: 'Casi nada — vendo mi tiempo', value: 0.95 },
+  { label: 'Alrededor del 20-30%', value: 0.75 },
+  { label: 'Alrededor del 40-50%', value: 0.55 },
+  { label: 'Mas del 60%', value: 0.35 },
+] as const
+
+function MargenContribucionSection({ configFinanciera }: {
+  configFinanciera: { margen_contribucion_estimado: number; margen_fuente: string; n_proyectos_margen: number } | null
+}) {
+  const currentMargen = Number(configFinanciera?.margen_contribucion_estimado ?? 0.95)
+  const [selected, setSelected] = useState<number>(currentMargen)
+  const [customValue, setCustomValue] = useState('')
+  const [useCustom, setUseCustom] = useState(false)
+  const [isPending, startTransition] = useTransition()
+
+  const handleSave = () => {
+    const margen = useCustom ? (1 - (parseInt(customValue) || 0) / 100) : selected
+    if (margen < 0.01 || margen > 0.99) {
+      toast.error('El margen debe estar entre 1% y 99%')
+      return
+    }
+    startTransition(async () => {
+      const result = await updateMargenEstimado(margen)
+      if (result.success) toast.success('Margen actualizado')
+      else toast.error(result.error ?? 'Error')
+    })
+  }
+
+  const fuente = configFinanciera?.margen_fuente ?? 'estimado'
+  const nProyectos = configFinanciera?.n_proyectos_margen ?? 0
+
+  return (
+    <div className="space-y-3 border-t pt-4">
+      <div>
+        <h4 className="text-sm font-semibold">Margen de contribucion</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          ¿Que porcentaje de lo que vendes se lo llevan los costos directos del proyecto? (materiales, subcontratistas, etc.)
+        </p>
+      </div>
+
+      {fuente === 'calculado' ? (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/20">
+          <p className="text-xs text-green-700 dark:text-green-400">
+            ✅ Tu margen se calcula automaticamente con datos de {nProyectos} proyecto{nProyectos !== 1 ? 's' : ''} cerrado{nProyectos !== 1 ? 's' : ''}: <strong>{Math.round((1 - currentMargen) * 100)}% costo directo</strong> → <strong>{Math.round(currentMargen * 100)}% margen</strong>
+          </p>
+        </div>
+      ) : (
+        <>
+          {fuente === 'mixto' && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/20">
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Tu margen combina tu estimado con {nProyectos} proyecto{nProyectos !== 1 ? 's' : ''} cerrado{nProyectos !== 1 ? 's' : ''}. Con 3+ proyectos sera 100% automatico.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {MARGEN_OPTIONS.map(opt => (
+              <label key={opt.value} className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="margen"
+                  checked={!useCustom && selected === opt.value}
+                  onChange={() => { setSelected(opt.value); setUseCustom(false) }}
+                  className="h-4 w-4 text-primary accent-primary"
+                />
+                <span className="text-sm">{opt.label}</span>
+              </label>
+            ))}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="radio"
+                name="margen"
+                checked={useCustom}
+                onChange={() => setUseCustom(true)}
+                className="h-4 w-4 text-primary accent-primary"
+              />
+              <span className="text-sm">Valor exacto:</span>
+              {useCustom && (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={customValue}
+                    onChange={e => setCustomValue(e.target.value)}
+                    className="w-16 rounded border border-input bg-background px-2 py-1 text-sm"
+                    placeholder="30"
+                  />
+                  <span className="text-sm text-muted-foreground">% costo directo</span>
+                </div>
+              )}
+            </label>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={isPending}
+            className="flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {isPending ? 'Guardando...' : 'Guardar margen'}
+          </button>
+        </>
+      )}
+    </div>
+  )
 }

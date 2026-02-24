@@ -189,12 +189,21 @@ export async function getProyectoDetalle(id: string) {
     .eq('proyecto_id', id)
     .order('nombre')
 
+  // D131: Fetch cotizacion_id for link to approved cotización
+  const { data: proyectoBase } = await supabase
+    .from('proyectos')
+    .select('cotizacion_id, oportunidad_id')
+    .eq('id', id)
+    .single()
+
   return {
     financiero: financieroRes.data,
     rubros: rubrosRes.data ?? [],
     facturas: facturasRes.data ?? [],
     timeline,
     rubrosLista: rubrosLista ?? [],
+    cotizacionId: proyectoBase?.cotizacion_id ?? null,
+    oportunidadId: proyectoBase?.oportunidad_id ?? null,
   }
 }
 
