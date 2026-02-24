@@ -134,12 +134,12 @@ export async function getNumeros(mesRef?: string) {
     // D130: Config financiera (margen)
     configFinancieraRes,
   ] = await Promise.all([
-    // Latest bank balance
+    // Latest bank balance (order by created_at — fecha can be NULL in old records)
     supabase
       .from('saldos_banco')
-      .select('saldo_real, saldo_teorico, diferencia, fecha')
+      .select('saldo_real, saldo_teorico, diferencia, fecha, created_at')
       .eq('workspace_id', workspaceId)
-      .order('fecha', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(1),
 
     // Cobros del mes
@@ -313,7 +313,7 @@ export async function getNumeros(mesRef?: string) {
   let saldoTeorico = recaudoMes - gastosMes // simplified
   if (ultimoSaldo) {
     // Calculate theoretical from last real balance
-    const lastBalanceDate = ultimoSaldo.fecha ?? new Date().toISOString()
+    const lastBalanceDate = ultimoSaldo.fecha ?? ultimoSaldo.created_at ?? new Date().toISOString()
     const lastDateStr = lastBalanceDate.split('T')[0]
     const cobrosDesde = await supabase
       .from('cobros')
@@ -442,8 +442,9 @@ export async function getNumeros(mesRef?: string) {
 
   // ── Conciliación ─────────────────────────────────
   const streakData = streakRes.data
-  const diasDesdeUltimo = ultimoSaldo?.fecha
-    ? Math.floor((today.getTime() - new Date(ultimoSaldo.fecha).getTime()) / 86400000)
+  const saldoFechaRef = ultimoSaldo?.fecha ?? ultimoSaldo?.created_at
+  const diasDesdeUltimo = saldoFechaRef
+    ? Math.floor((today.getTime() - new Date(saldoFechaRef).getTime()) / 86400000)
     : null
 
   const streakSemanas = streakData?.semanas_actuales ?? 0
@@ -460,7 +461,7 @@ export async function getNumeros(mesRef?: string) {
   const tolerancia = Math.max(toleranciaAbs, toleranciaPct)
 
   let conciliacionEstado: 1 | 2 | 3 | 4 = 1
-  if (!diasDesdeUltimo || diasDesdeUltimo > 7) {
+  if (diasDesdeUltimo === null || diasDesdeUltimo > 7) {
     conciliacionEstado = 4
   } else if (Math.abs(diferencia) > tolerancia) {
     conciliacionEstado = 3
@@ -750,18 +751,18 @@ export async function actualizarSaldo(saldoReal: number, nota?: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Calculate theoretical balance
+  // Calculate theoretical balance (order by created_at — fecha can be NULL in old records)
   const { data: ultimoSaldo } = await supabase
     .from('saldos_banco')
-    .select('saldo_real, fecha')
+    .select('saldo_real, fecha, created_at')
     .eq('workspace_id', workspaceId)
-    .order('fecha', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
   let saldoTeorico = 0
   if (ultimoSaldo) {
-    const lastDate = (ultimoSaldo.fecha ?? new Date().toISOString()).split('T')[0]
+    const lastDate = (ultimoSaldo.fecha ?? ultimoSaldo.created_at ?? new Date().toISOString()).split('T')[0]
     const [cobrosDesde, gastosDesde] = await Promise.all([
       supabase.from('cobros').select('monto').eq('workspace_id', workspaceId).gt('fecha', lastDate),
       supabase.from('gastos').select('monto').eq('workspace_id', workspaceId).gt('fecha', lastDate),
