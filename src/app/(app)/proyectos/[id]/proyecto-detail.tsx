@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useTransition, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, FolderOpen, Clock, Receipt, Banknote, Pause, Play,
@@ -104,9 +104,22 @@ export default function ProyectoDetail({
   oportunidadId,
 }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
   const [avance, setAvance] = useState(f.avance_porcentaje ?? 0)
   const [dialog, setDialog] = useState<'gasto' | 'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
+
+  // Auto-open dialog from URL param (e.g. ?action=gasto)
+  useEffect(() => {
+    const action = searchParams.get('action')
+    if (action && ['gasto', 'horas', 'factura', 'cobro', 'cierre'].includes(action)) {
+      setDialog(action as typeof dialog)
+      // Clean up URL param
+      const url = new URL(window.location.href)
+      url.searchParams.delete('action')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [searchParams])
 
   const estado = (f.estado ?? 'en_ejecucion') as EstadoProyecto
   const config = ESTADO_PROYECTO_CONFIG[estado]

@@ -2,12 +2,12 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Flame, Building2, User, Search, Clock } from 'lucide-react'
+import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
-import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS } from '@/lib/pipeline/constants'
+import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS, RAZONES_PERDIDA } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { moveOportunidad } from './actions-v2'
+import { moveOportunidad, ganarOportunidad, perderOportunidad } from './actions-v2'
 import type { EtapaPipeline } from '@/lib/pipeline/constants'
 
 interface OportunidadRow {
@@ -31,6 +31,8 @@ export default function PipelineList({ oportunidades }: Props) {
   const [search, setSearch] = useState('')
   const [etapaFilter, setEtapaFilter] = useState<string | null>('activas')
   const [isPending, startTransition] = useTransition()
+  const [lostModal, setLostModal] = useState<{ id: string; name: string } | null>(null)
+  const [selectedReason, setSelectedReason] = useState('')
   const router = useRouter()
 
   const cycleEtapa = (id: string, currentEtapa: string | null) => {
@@ -50,6 +52,40 @@ export default function PipelineList({ oportunidades }: Props) {
         toast.error(res.error ?? 'Error')
       }
     })
+  }
+
+  const handleGanar = (id: string) => {
+    startTransition(async () => {
+      const res = await ganarOportunidad(id)
+      if (res.success) {
+        toast.success('¡Oportunidad ganada! Proyecto creado.')
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error al marcar como ganada')
+      }
+    })
+  }
+
+  const handlePerder = () => {
+    if (!lostModal || !selectedReason) return
+    const id = lostModal.id
+    setLostModal(null)
+    setSelectedReason('')
+    startTransition(async () => {
+      const res = await perderOportunidad(id, selectedReason)
+      if (res.success) {
+        toast.info('Oportunidad marcada como perdida')
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error')
+      }
+    })
+  }
+
+  const getNextEtapa = (current: string | null): EtapaPipeline | null => {
+    const idx = ETAPAS_ACTIVAS.indexOf((current ?? 'lead_nuevo') as EtapaPipeline)
+    if (idx === -1 || idx >= ETAPAS_ACTIVAS.length - 1) return null
+    return ETAPAS_ACTIVAS[idx + 1]
   }
 
   const filtered = oportunidades.filter(o => {
@@ -179,6 +215,7 @@ export default function PipelineList({ oportunidades }: Props) {
           const stale = dias !== null && dias > 7
 
           const isActive = ETAPAS_ACTIVAS.includes(o.etapa as EtapaPipeline)
+          const nextEtapa = getNextEtapa(o.etapa)
 
           return (
             <EntityCard
@@ -198,6 +235,39 @@ export default function PipelineList({ oportunidades }: Props) {
                 ...(isActive ? { onClick: () => cycleEtapa(o.id, o.etapa) } : {}),
               }] : undefined}
               timeAgo={timeAgo(o.created_at)}
+              footerContent={isActive ? (
+                <div className="flex items-center gap-1.5">
+                  {/* Advance to next stage */}
+                  {nextEtapa && (
+                    <button
+                      onClick={() => cycleEtapa(o.id, o.etapa)}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                    >
+                      {ETAPA_CONFIG[nextEtapa].label}
+                      <ChevronRight className="h-3 w-3" />
+                    </button>
+                  )}
+                  {/* Won */}
+                  <button
+                    onClick={() => handleGanar(o.id)}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2.5 py-1.5 text-xs font-medium text-green-600 transition-colors hover:bg-green-500/20 disabled:opacity-50 dark:text-green-400"
+                  >
+                    <Trophy className="h-3 w-3" />
+                    Ganada
+                  </button>
+                  {/* Lost */}
+                  <button
+                    onClick={() => setLostModal({ id: o.id, name: o.descripcion || 'Sin descripcion' })}
+                    disabled={isPending}
+                    className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                  >
+                    <X className="h-3 w-3" />
+                    Perdida
+                  </button>
+                </div>
+              ) : undefined}
             />
           )
         })}
@@ -207,6 +277,46 @@ export default function PipelineList({ oportunidades }: Props) {
           </p>
         )}
       </div>
+
+      {/* Lost Reason Modal */}
+      {lostModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl border bg-background p-6 shadow-xl">
+            <h3 className="text-lg font-semibold">¿Por qué se perdió?</h3>
+            <p className="mt-1 text-sm text-muted-foreground">{lostModal.name}</p>
+            <div className="mt-4 space-y-2">
+              {RAZONES_PERDIDA.map(r => (
+                <button
+                  key={r.value}
+                  onClick={() => setSelectedReason(r.value)}
+                  className={`flex w-full items-center rounded-lg border px-4 py-3 text-sm transition-colors ${
+                    selectedReason === r.value
+                      ? 'border-destructive bg-destructive/5 font-medium text-destructive'
+                      : 'border-border hover:bg-accent'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={() => { setLostModal(null); setSelectedReason('') }}
+                className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-background text-sm font-medium transition-colors hover:bg-accent"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handlePerder}
+                disabled={!selectedReason || isPending}
+                className="flex h-10 flex-1 items-center justify-center rounded-lg bg-destructive text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-50"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

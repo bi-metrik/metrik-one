@@ -57,6 +57,8 @@ export interface EntityCardProps {
   badges?: { label: string; className?: string; onClick?: () => void }[]
   /** Relative time text (e.g. "hace 3 dias") */
   timeAgo?: string
+  /** Custom footer content rendered after badges */
+  footerContent?: React.ReactNode
   /** Extra className */
   className?: string
 }
@@ -80,6 +82,7 @@ export default function EntityCard({
   href,
   onClick,
   timeAgo,
+  footerContent,
   className = '',
 }: EntityCardProps) {
   const [expandedSections, setExpandedSections] = useState<Set<number>>(
@@ -229,6 +232,13 @@ export default function EntityCard({
       {/* ── Time ago ── */}
       {timeAgo && (
         <p className="mt-1.5 text-[11px] text-muted-foreground">{timeAgo}</p>
+      )}
+
+      {/* ── Footer content ── */}
+      {footerContent && (
+        <div className="mt-2" onClick={(e) => { e.stopPropagation(); e.preventDefault() }}>
+          {footerContent}
+        </div>
       )}
 
       {/* ── Primary action ── */}

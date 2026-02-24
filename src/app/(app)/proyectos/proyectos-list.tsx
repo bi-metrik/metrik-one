@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { FolderOpen, Play, Square, Plus } from 'lucide-react'
+import { FolderOpen, Play, Square, Plus, Receipt, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
@@ -382,6 +382,35 @@ function ProyectoCard({
           </>
         )}
       </div>
+
+      {/* Row 4: Quick register shortcuts (only for active projects) */}
+      {estado === 'en_ejecucion' && (
+        <div className="mt-3 flex items-center gap-1.5 border-t pt-3" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => router.push(`/proyectos/${p.proyecto_id}?action=gasto`)}
+            className="inline-flex items-center gap-1 rounded-md bg-orange-50 border border-orange-200 px-2.5 py-1.5 text-[11px] font-medium text-orange-700 transition-colors hover:bg-orange-100 dark:bg-orange-950/30 dark:border-orange-900 dark:text-orange-400 dark:hover:bg-orange-950/50"
+          >
+            <Receipt className="h-3 w-3" />
+            Gasto
+          </button>
+          <button
+            onClick={() => router.push(`/proyectos/${p.proyecto_id}?action=horas`)}
+            className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200 px-2.5 py-1.5 text-[11px] font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-400 dark:hover:bg-blue-950/50"
+          >
+            <Play className="h-3 w-3" />
+            Horas
+          </button>
+          {!isInterno && (
+            <button
+              onClick={() => router.push(`/proyectos/${p.proyecto_id}?action=factura`)}
+              className="inline-flex items-center gap-1 rounded-md bg-green-50 border border-green-200 px-2.5 py-1.5 text-[11px] font-medium text-green-700 transition-colors hover:bg-green-100 dark:bg-green-950/30 dark:border-green-900 dark:text-green-400 dark:hover:bg-green-950/50"
+            >
+              <FileText className="h-3 w-3" />
+              Factura
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
