@@ -122,25 +122,6 @@ export default function NumerosV2Client({ initialData }: Props) {
       {/* Franja Conciliación */}
       <FranjaConciliacion data={data.conciliacion} />
 
-      {/* Alerta gastos fijos sin factura/soporte */}
-      {data.totalDeduciblesMes > 0 && (
-        <a
-          href="/mi-negocio"
-          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
-        >
-          <span className="mt-0.5 text-lg leading-none">🧾</span>
-          <div className="flex-1">
-            <p className="text-amber-900 dark:text-amber-200">
-              Tienes <strong>{formatCOP(data.totalDeduciblesMes)}</strong> en gastos fijos que puedes deducir de impuestos.
-              Recuerda guardar las facturas de soporte.
-            </p>
-            <span className="mt-1 inline-block text-xs font-medium text-amber-700 dark:text-amber-400">
-              Ver gastos fijos →
-            </span>
-          </div>
-        </a>
-      )}
-
       {/* Cards or placeholder */}
       {!showCards ? (
         <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground space-y-2">
@@ -273,6 +254,20 @@ export default function NumerosV2Client({ initialData }: Props) {
             hasWarningBadge={hasWarning}
           />
         </>
+      )}
+
+      {/* Tip: gastos deducibles (informativo, al final) */}
+      {showCards && data.totalDeduciblesMes > 0 && (
+        <a
+          href="/mi-negocio"
+          className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent"
+        >
+          <span>🧾</span>
+          <span>
+            Tienes <strong className="text-foreground">{formatCOP(data.totalDeduciblesMes)}</strong> en gastos deducibles — recuerda guardar facturas
+          </span>
+          <span className="ml-auto shrink-0 text-[10px] font-medium text-primary">Ver →</span>
+        </a>
       )}
 
       {/* Saldo Dialog */}
