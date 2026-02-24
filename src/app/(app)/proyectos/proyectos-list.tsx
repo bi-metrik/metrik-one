@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { FolderOpen, Play, Square, Plus, Receipt, FileText } from 'lucide-react'
+import { FolderOpen, Play, Square, Plus, Receipt, FileText, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
@@ -10,6 +10,9 @@ import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import { startTimer, stopTimer, type ActiveTimer } from '../timer-actions'
 import { cambiarEstadoProyecto } from './actions-v2'
 import NuevoInternoDialog from './nuevo-interno-dialog'
+import GastoDialog from './[id]/gasto-dialog'
+import HorasDialog from './[id]/horas-dialog'
+import FacturaDialog from './[id]/factura-dialog'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -39,6 +42,7 @@ interface Props {
 // ── Filter chips ──────────────────────────────────────
 
 type FilterTab = 'activos' | 'todos' | 'en_ejecucion' | 'pausado' | 'cerrado'
+type DialogType = 'gasto' | 'horas' | 'factura'
 
 const ESTADOS_ACTIVOS = ['en_ejecucion', 'pausado']
 
@@ -53,10 +57,12 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 // ── Component ─────────────────────────────────────────
 
 export default function ProyectosList({ proyectos, activeTimer: serverTimer }: Props) {
+  const router = useRouter()
   const [tipoTab, setTipoTab] = useState<'cliente' | 'interno'>('cliente')
   const [activeFilter, setActiveFilter] = useState<FilterTab>('activos')
   const [timer, setTimer] = useState<ActiveTimer | null>(serverTimer)
   const [showNuevoInterno, setShowNuevoInterno] = useState(false)
+  const [openDialog, setOpenDialog] = useState<{ type: DialogType; proyecto: ProyectoFinanciero } | null>(null)
 
   // Sync with server when prop changes (revalidation)
   useEffect(() => { setTimer(serverTimer) }, [serverTimer])
@@ -70,6 +76,11 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
     : activeFilter === 'activos'
       ? porTipo.filter(p => ESTADOS_ACTIVOS.includes(p.estado ?? ''))
       : porTipo.filter(p => p.estado === activeFilter)
+
+  const handleCloseDialog = () => {
+    setOpenDialog(null)
+    router.refresh()
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -156,6 +167,7 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
               isInterno={tipoTab === 'interno'}
               activeTimer={timer}
               onTimerChange={setTimer}
+              onOpenDialog={(type) => setOpenDialog({ type, proyecto: p })}
             />
           ))}
         </div>
@@ -164,6 +176,29 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
       {/* Nuevo proyecto interno dialog */}
       {showNuevoInterno && (
         <NuevoInternoDialog onClose={() => setShowNuevoInterno(false)} />
+      )}
+
+      {/* ── Register dialogs (opened from card shortcuts) ── */}
+      {openDialog?.type === 'gasto' && openDialog.proyecto.proyecto_id && (
+        <GastoDialog
+          proyectoId={openDialog.proyecto.proyecto_id}
+          rubrosLista={[]}
+          onClose={handleCloseDialog}
+        />
+      )}
+      {openDialog?.type === 'horas' && openDialog.proyecto.proyecto_id && (
+        <HorasDialog
+          proyectoId={openDialog.proyecto.proyecto_id}
+          onClose={handleCloseDialog}
+        />
+      )}
+      {openDialog?.type === 'factura' && openDialog.proyecto.proyecto_id && (
+        <FacturaDialog
+          proyectoId={openDialog.proyecto.proyecto_id}
+          presupuesto={openDialog.proyecto.presupuesto_total ?? 0}
+          facturado={openDialog.proyecto.facturado ?? 0}
+          onClose={handleCloseDialog}
+        />
       )}
     </div>
   )
@@ -176,11 +211,13 @@ function ProyectoCard({
   isInterno,
   activeTimer,
   onTimerChange,
+  onOpenDialog,
 }: {
   proyecto: ProyectoFinanciero
   isInterno: boolean
   activeTimer: ActiveTimer | null
   onTimerChange: (t: ActiveTimer | null) => void
+  onOpenDialog: (type: DialogType) => void
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -387,22 +424,22 @@ function ProyectoCard({
       {estado === 'en_ejecucion' && (
         <div className="mt-3 flex items-center gap-1.5 border-t pt-3" onClick={e => e.stopPropagation()}>
           <button
-            onClick={() => router.push(`/proyectos/${p.proyecto_id}?action=gasto`)}
+            onClick={() => onOpenDialog('gasto')}
             className="inline-flex items-center gap-1 rounded-md bg-orange-50 border border-orange-200 px-2.5 py-1.5 text-[11px] font-medium text-orange-700 transition-colors hover:bg-orange-100 dark:bg-orange-950/30 dark:border-orange-900 dark:text-orange-400 dark:hover:bg-orange-950/50"
           >
             <Receipt className="h-3 w-3" />
             Gasto
           </button>
           <button
-            onClick={() => router.push(`/proyectos/${p.proyecto_id}?action=horas`)}
+            onClick={() => onOpenDialog('horas')}
             className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200 px-2.5 py-1.5 text-[11px] font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-400 dark:hover:bg-blue-950/50"
           >
-            <Play className="h-3 w-3" />
+            <Clock className="h-3 w-3" />
             Horas
           </button>
           {!isInterno && (
             <button
-              onClick={() => router.push(`/proyectos/${p.proyecto_id}?action=factura`)}
+              onClick={() => onOpenDialog('factura')}
               className="inline-flex items-center gap-1 rounded-md bg-green-50 border border-green-200 px-2.5 py-1.5 text-[11px] font-medium text-green-700 transition-colors hover:bg-green-100 dark:bg-green-950/30 dark:border-green-900 dark:text-green-400 dark:hover:bg-green-950/50"
             >
               <FileText className="h-3 w-3" />
