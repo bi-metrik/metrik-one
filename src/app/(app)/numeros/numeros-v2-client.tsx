@@ -133,7 +133,7 @@ export default function NumerosV2Client({ initialData }: Props) {
             {/* P1: ¿Cuánta plata tengo? — Saldo bancario + meta de cobro del mes */}
             <QuestionCard
               questionNumber={1}
-              title="¿Cuanta plata tengo?"
+              title="¿Cuánta plata tengo?"
               value={data.saldoCaja}
               valueFormat="currency"
               trend={data.recaudoMes > data.recaudoMesAnterior ? 'up' : data.recaudoMes < data.recaudoMesAnterior * 0.95 ? 'down' : 'stable'}
@@ -179,7 +179,7 @@ export default function NumerosV2Client({ initialData }: Props) {
             {/* P3: ¿Cuánto me deben? — Cartera (facturas pendientes de cobro) */}
             <QuestionCard
               questionNumber={3}
-              title="¿Cuanto me deben?"
+              title="¿Cuánto me deben?"
               value={data.carteraPendiente}
               valueFormat="currency"
               trend={carteraTrend}
@@ -209,7 +209,7 @@ export default function NumerosV2Client({ initialData }: Props) {
             {/* P4: ¿Cuánto necesito vender? */}
             <QuestionCard
               questionNumber={4}
-              title="¿Cuanto necesito vender?"
+              title="¿Cuánto necesito vender?"
               value={data.puntoEquilibrio}
               valueFormat="currency"
               trend={data.puntoEquilibrio > data.costosFijosMes ? 'up' : 'stable'}
@@ -232,7 +232,7 @@ export default function NumerosV2Client({ initialData }: Props) {
           {/* P5: ¿Cuánto aguanto? (full width) */}
           <QuestionCard
             questionNumber={5}
-            title="¿Cuanto aguanto?"
+            title="¿Cuánto aguanto?"
             value={data.runwayMeses}
             valueFormat="months"
             trend={data.runwayMeses > 6 ? 'up' : data.runwayMeses < 3 ? 'down' : 'stable'}
@@ -251,23 +251,6 @@ export default function NumerosV2Client({ initialData }: Props) {
             monthType={monthType}
           />
         </>
-      )}
-
-      {/* Quick links: Movimientos */}
-      {showCards && (
-        <a
-          href="/movimientos"
-          className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent"
-        >
-          <span>📒</span>
-          <span>
-            {data.totalDeduciblesMes > 0
-              ? <>Tienes <strong className="text-foreground">{formatCOP(data.totalDeduciblesMes)}</strong> en gastos deducibles — recuerda guardar facturas</>
-              : <>Revisa todos tus ingresos y egresos del mes</>
-            }
-          </span>
-          <span className="ml-auto shrink-0 text-[10px] font-medium text-primary">Ir a Mis Movimientos →</span>
-        </a>
       )}
 
       {/* Saldo Dialog */}

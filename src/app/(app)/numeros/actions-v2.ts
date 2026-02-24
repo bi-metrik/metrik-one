@@ -51,8 +51,11 @@ export interface NumerosData {
   // Franja conciliación
   conciliacion: ConciliacionData
 
-  // D129: Deducibles alert
+  // D129/D141: Deducibles
   totalDeduciblesMes: number     // sum of deducible fixed expenses monthly_amount
+  regimenFiscal: 'ordinario' | 'simple' | null  // D141: workspace tax regime
+  gastosDeduciblesMes: number    // D141: gastos variables with deducible category + soporte
+  gastosSinSoporteMes: number    // D141: gastos variables with deducible category but no soporte
 
   // Meta info
   mesRef: string                 // YYYY-MM
@@ -143,6 +146,8 @@ export async function getNumeros(mesRef?: string) {
     staffNominaRes,
     // D130: Config financiera (margen)
     configFinancieraRes,
+    // D141: Perfil fiscal (régimen)
+    fiscalProfileRes,
   ] = await Promise.all([
     // Latest bank balance (order by created_at — fecha can be NULL in old records)
     supabase
@@ -168,10 +173,10 @@ export async function getNumeros(mesRef?: string) {
       .gte('fecha', prevStart)
       .lt('fecha', prevEnd),
 
-    // Gastos del mes (include proyecto_id for COH-5 categorization)
+    // Gastos del mes (include proyecto_id for COH-5, categoria/soporte for D141/D142)
     supabase
       .from('gastos')
-      .select('monto, proyecto_id')
+      .select('monto, proyecto_id, categoria, soporte_url')
       .eq('workspace_id', workspaceId)
       .gte('fecha', mesStart)
       .lt('fecha', mesEnd),
@@ -291,6 +296,13 @@ export async function getNumeros(mesRef?: string) {
       .select('margen_contribucion_estimado, margen_contribucion_calculado, margen_fuente, n_proyectos_margen')
       .eq('workspace_id', workspaceId)
       .maybeSingle(),
+
+    // D141: Perfil fiscal (régimen tributario del workspace)
+    supabase
+      .from('fiscal_profiles')
+      .select('tax_regime')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle(),
   ])
 
   // ── Calculate values ─────────────────────────────
@@ -310,6 +322,18 @@ export async function getNumeros(mesRef?: string) {
   const gastosMes = gastosData.reduce((s, g) => s + Number(g.monto), 0)
   const gastosProyectosMes = gastosData.filter(g => g.proyecto_id).reduce((s, g) => s + Number(g.monto), 0)
   const gastosMesAnterior = (gastosPrevRes.data ?? []).reduce((s, g) => s + Number(g.monto), 0)
+
+  // D141: Deducibles from variable gastos (categorías deducibles + soporte)
+  const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
+  const gastosDeduciblesMes = gastosData
+    .filter(g => CATEGORIAS_DEDUCIBLES.includes(g.categoria) && g.soporte_url)
+    .reduce((s, g) => s + Number(g.monto), 0)
+  const gastosSinSoporteMes = gastosData
+    .filter(g => CATEGORIAS_DEDUCIBLES.includes(g.categoria) && !g.soporte_url)
+    .reduce((s, g) => s + Number(g.monto), 0)
+
+  // D141: Régimen fiscal
+  const regimenFiscal = (fiscalProfileRes.data?.tax_regime as 'ordinario' | 'simple' | null) ?? null
 
   // Gastos avg (3 months)
   const gastos3m = gastos3mRes.data ?? []
@@ -560,6 +584,9 @@ export async function getNumeros(mesRef?: string) {
     gastoPromedioMensual,
     gastoTotalMensual,
     totalDeduciblesMes,
+    regimenFiscal,
+    gastosDeduciblesMes,
+    gastosSinSoporteMes,
     semaforo,
     conciliacion,
     mesRef: mes,
@@ -728,12 +755,12 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     const colors = [runwayColor, factColor, carteraColor]
     if (colors.includes('red')) {
       capa2Estado = 'red'
-      if (runwayColor === 'red') capa2Razon = `Runway: ${input.runwayMeses.toFixed(1)} meses — acelera cobros o reduce gastos`
+      if (runwayColor === 'red') capa2Razon = `Aguantas ${input.runwayMeses.toFixed(1)} meses — acelera cobros o reduce gastos`
       else if (factColor === 'red') capa2Razon = `Ventas por debajo del minimo necesario — faltan $${Math.round(input.puntoEquilibrio - input.ventasMes).toLocaleString('es-CO')}`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else if (colors.includes('yellow')) {
       capa2Estado = 'yellow'
-      if (runwayColor === 'yellow') capa2Razon = `Runway: ${input.runwayMeses.toFixed(1)} meses`
+      if (runwayColor === 'yellow') capa2Razon = `Aguantas ${input.runwayMeses.toFixed(1)} meses`
       else if (factColor === 'yellow') capa2Razon = `Ventas entre el minimo y la meta — vas bien, sigue cerrando`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else {

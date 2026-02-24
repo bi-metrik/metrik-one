@@ -1,15 +1,25 @@
 'use client'
 
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDownCircle, ArrowUpCircle, FileText, Filter } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X } from 'lucide-react'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Movimiento } from './actions'
 
+// D142: Categorías deducibles para régimen ordinario
+const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
+
+function esCategoriaDeducible(categoria: string | null): boolean {
+  if (!categoria) return false
+  return CATEGORIAS_DEDUCIBLES.includes(categoria)
+}
+
 interface Props {
   movimientos: Movimiento[]
-  totales: { ingresos: number; egresos: number }
+  totales: { ingresos: number; egresos: number; deducible: number }
   filtroTipo: string
   filtroMes: string
+  regimenFiscal: string | null
 }
 
 const MESES = [
@@ -27,10 +37,48 @@ function mesLabel(mes: string) {
   return `${MESES[Number(m) - 1]} ${y}`
 }
 
-export default function MovimientosClient({ movimientos, totales, filtroTipo, filtroMes }: Props) {
+// D142: Determine tag type for a gasto based on category + soporte
+function getDeducibleTag(mov: Movimiento, regimen: string | null): 'deducible' | 'falta_soporte' | null {
+  if (mov.tipo !== 'egreso') return null
+  if (regimen === 'simple') return null
+  if (!esCategoriaDeducible(mov.categoria)) return null
+  return mov.soporte_url ? 'deducible' : 'falta_soporte'
+}
+
+export default function MovimientosClient({ movimientos, totales, filtroTipo, filtroMes, regimenFiscal }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const neto = totales.ingresos - totales.egresos
+
+  // D142: Tooltips first-time state
+  const [tooltipDeducible, setTooltipDeducible] = useState(false)
+  const [tooltipFaltaSoporte, setTooltipFaltaSoporte] = useState(false)
+
+  useEffect(() => {
+    // Check if user has already seen tooltips
+    const seenDeducible = localStorage.getItem('metrik_tooltip_deducible_visto')
+    const seenFaltaSoporte = localStorage.getItem('metrik_tooltip_falta_soporte_visto')
+
+    // Show tooltip on first encounter
+    if (!seenDeducible && regimenFiscal !== 'simple') {
+      const hasDeducible = movimientos.some(m => getDeducibleTag(m, regimenFiscal) === 'deducible')
+      if (hasDeducible) setTooltipDeducible(true)
+    }
+    if (!seenFaltaSoporte && regimenFiscal !== 'simple') {
+      const hasFaltaSoporte = movimientos.some(m => getDeducibleTag(m, regimenFiscal) === 'falta_soporte')
+      if (hasFaltaSoporte) setTooltipFaltaSoporte(true)
+    }
+  }, [movimientos, regimenFiscal])
+
+  const dismissTooltipDeducible = useCallback(() => {
+    setTooltipDeducible(false)
+    localStorage.setItem('metrik_tooltip_deducible_visto', 'true')
+  }, [])
+
+  const dismissTooltipFaltaSoporte = useCallback(() => {
+    setTooltipFaltaSoporte(false)
+    localStorage.setItem('metrik_tooltip_falta_soporte_visto', 'true')
+  }, [])
 
   function navigate(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -54,6 +102,8 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
 
   const fechasOrdenadas = Object.keys(porFecha).sort((a, b) => b.localeCompare(a))
 
+  const showDeducibleCard = regimenFiscal === 'ordinario' && totales.deducible > 0
+
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
       {/* Header */}
@@ -73,7 +123,7 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className={`grid gap-2 ${showDeducibleCard ? 'grid-cols-4' : 'grid-cols-3'}`}>
         <div className="rounded-lg border bg-card p-3 text-center">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Ingresos</p>
           <p className="text-sm font-semibold text-green-600 dark:text-green-400">
@@ -92,6 +142,15 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
             {neto >= 0 ? '+' : ''}{formatCOP(neto)}
           </p>
         </div>
+        {/* D142: Fourth card — Deducible (only régimen ordinario) */}
+        {showDeducibleCard && (
+          <div className="rounded-lg border bg-card p-3 text-center">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Deducible</p>
+            <p className="text-sm font-semibold text-green-600 dark:text-green-400">
+              {formatCOP(totales.deducible)}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Filter tabs */}
@@ -111,6 +170,38 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
         ))}
       </div>
 
+      {/* D142: Tooltip educativo — Deducible (primera vez) */}
+      {tooltipDeducible && (
+        <div className="relative rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950/30">
+          <button onClick={dismissTooltipDeducible} className="absolute top-2 right-2 rounded p-0.5 hover:bg-green-100 dark:hover:bg-green-900/50">
+            <X className="h-3.5 w-3.5 text-green-700 dark:text-green-300" />
+          </button>
+          <p className="text-xs font-semibold text-green-800 dark:text-green-200 mb-1">Que significa &quot;Deducible&quot;?</p>
+          <p className="text-[11px] text-green-700 dark:text-green-300 leading-relaxed">
+            Marcamos como deducible los gastos que tienen soporte fiscal (factura) en categorias que normalmente son deducibles de tu renta. Este es un estimado. Confirma siempre con tu contador antes de declarar.
+          </p>
+          <button onClick={dismissTooltipDeducible} className="mt-2 rounded-md bg-green-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-green-700">
+            Entendido
+          </button>
+        </div>
+      )}
+
+      {/* D142: Tooltip educativo — Falta soporte (primera vez) */}
+      {tooltipFaltaSoporte && !tooltipDeducible && (
+        <div className="relative rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+          <button onClick={dismissTooltipFaltaSoporte} className="absolute top-2 right-2 rounded p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900/50">
+            <X className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" />
+          </button>
+          <p className="text-xs font-semibold text-amber-800 dark:text-amber-200 mb-1">Por que &quot;Falta soporte&quot;?</p>
+          <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+            Este gasto podria ser deducible, pero no tiene factura adjunta. Sin factura electronica, la DIAN no lo acepta como deduccion. Tip: Toma foto del recibo o edita el gasto para agregar soporte.
+          </p>
+          <button onClick={dismissTooltipFaltaSoporte} className="mt-2 rounded-md bg-amber-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-amber-700">
+            Entendido
+          </button>
+        </div>
+      )}
+
       {/* Movimientos list */}
       {movimientos.length === 0 ? (
         <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -126,50 +217,59 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
                 {formatFechaCort(fecha)}
               </p>
               <div className="space-y-1">
-                {porFecha[fecha].map(mov => (
-                  <div
-                    key={mov.id}
-                    className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5"
-                  >
-                    {/* Icon */}
-                    {mov.tipo === 'ingreso' ? (
-                      <ArrowDownCircle className="h-5 w-5 shrink-0 text-green-500" />
-                    ) : (
-                      <ArrowUpCircle className="h-5 w-5 shrink-0 text-red-500" />
-                    )}
+                {porFecha[fecha].map(mov => {
+                  const tag = getDeducibleTag(mov, regimenFiscal)
+                  return (
+                    <div
+                      key={mov.id}
+                      className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5"
+                    >
+                      {/* Icon */}
+                      {mov.tipo === 'ingreso' ? (
+                        <ArrowDownCircle className="h-5 w-5 shrink-0 text-green-500" />
+                      ) : (
+                        <ArrowUpCircle className="h-5 w-5 shrink-0 text-red-500" />
+                      )}
 
-                    {/* Info */}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{mov.descripcion}</p>
-                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                        {mov.proyecto && <span className="truncate">{mov.proyecto}</span>}
-                        {mov.categoria && (
-                          <>
-                            {mov.proyecto && <span>·</span>}
-                            <span className="capitalize">{mov.categoria}</span>
-                          </>
-                        )}
-                        {mov.deducible && (
-                          <span className="rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                            Deducible
-                          </span>
-                        )}
-                        {mov.soporte_url && (
-                          <FileText className="h-3 w-3 text-blue-500" />
-                        )}
+                      {/* Info */}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{mov.descripcion}</p>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                          {mov.proyecto && <span className="truncate">{mov.proyecto}</span>}
+                          {mov.categoria && (
+                            <>
+                              {mov.proyecto && <span>·</span>}
+                              <span className="capitalize">{mov.categoria}</span>
+                            </>
+                          )}
+                          {/* D142: Category-based tags */}
+                          {tag === 'deducible' && (
+                            <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                              Deducible
+                            </span>
+                          )}
+                          {tag === 'falta_soporte' && (
+                            <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                              Falta soporte
+                            </span>
+                          )}
+                          {mov.soporte_url && (
+                            <FileText className="h-3 w-3 text-blue-500" />
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Amount */}
-                    <span className={`shrink-0 text-sm font-semibold tabular-nums ${
-                      mov.tipo === 'ingreso'
-                        ? 'text-green-600 dark:text-green-400'
-                        : 'text-red-600 dark:text-red-400'
-                    }`}>
-                      {mov.tipo === 'ingreso' ? '+' : '-'}{formatCOP(mov.monto)}
-                    </span>
-                  </div>
-                ))}
+                      {/* Amount */}
+                      <span className={`shrink-0 text-sm font-semibold tabular-nums ${
+                        mov.tipo === 'ingreso'
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        {mov.tipo === 'ingreso' ? '+' : '-'}{formatCOP(mov.monto)}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           ))}

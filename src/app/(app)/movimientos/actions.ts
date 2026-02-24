@@ -14,12 +14,20 @@ export type Movimiento = {
   soporte_url: string | null
 }
 
+// D142: Categorías deducibles para régimen ordinario
+const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
+
+function esCategoriaDeducible(categoria: string | null): boolean {
+  if (!categoria) return false
+  return CATEGORIAS_DEDUCIBLES.includes(categoria)
+}
+
 export async function getMovimientos(filters?: {
   tipo?: 'todos' | 'ingresos' | 'egresos'
   mes?: string // YYYY-MM
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
-  if (error || !workspaceId) return { movimientos: [], totales: { ingresos: 0, egresos: 0 } }
+  if (error || !workspaceId) return { movimientos: [], totales: { ingresos: 0, egresos: 0, deducible: 0 }, regimenFiscal: null as string | null }
 
   const tipoFilter = filters?.tipo ?? 'todos'
   const mes = filters?.mes ?? new Date().toISOString().slice(0, 7) // default current month
@@ -89,5 +97,19 @@ export async function getMovimientos(filters?: {
   const ingresos = results.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0)
   const egresos = results.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0)
 
-  return { movimientos: results, totales: { ingresos, egresos } }
+  // D142: Deducible total (category-based + soporte)
+  const deducible = results
+    .filter(m => m.tipo === 'egreso' && esCategoriaDeducible(m.categoria) && m.soporte_url)
+    .reduce((s, m) => s + m.monto, 0)
+
+  // D141: Fiscal regime
+  const { data: fiscalProfile } = await supabase
+    .from('fiscal_profiles')
+    .select('tax_regime')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+
+  const regimenFiscal = (fiscalProfile?.tax_regime as string | null) ?? null
+
+  return { movimientos: results, totales: { ingresos, egresos, deducible }, regimenFiscal }
 }

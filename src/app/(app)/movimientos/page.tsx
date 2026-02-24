@@ -10,7 +10,7 @@ export default async function MovimientosPage({ searchParams }: Props) {
   const tipo = (params.tipo as 'todos' | 'ingresos' | 'egresos') ?? 'todos'
   const mes = params.mes ?? new Date().toISOString().slice(0, 7)
 
-  const { movimientos, totales } = await getMovimientos({ tipo, mes })
+  const { movimientos, totales, regimenFiscal } = await getMovimientos({ tipo, mes })
 
   return (
     <MovimientosClient
@@ -18,6 +18,7 @@ export default async function MovimientosPage({ searchParams }: Props) {
       totales={totales}
       filtroTipo={tipo}
       filtroMes={mes}
+      regimenFiscal={regimenFiscal}
     />
   )
 }

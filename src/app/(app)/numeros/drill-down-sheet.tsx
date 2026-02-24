@@ -49,11 +49,11 @@ export default function DrillDownSheet({ questionNumber, data, monthType, onClos
 }
 
 const TITLES: Record<number, string> = {
-  1: '¿Cuanta plata tengo?',
+  1: '¿Cuánta plata tengo?',
   2: '¿Estoy ganando?',
-  3: '¿Cuanto me deben?',
-  4: '¿Cuanto necesito vender?',
-  5: '¿Cuanto aguanto?',
+  3: '¿Cuánto me deben?',
+  4: '¿Cuánto necesito vender?',
+  5: '¿Cuánto aguanto?',
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -201,6 +201,33 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
           <Row label={`(-) Provision impuestos (~${Math.round(tasaImpuestos * 100)}%)`} value={provisionImpuestos} color="red" indent />
           <Row label="Disponible para ti" value={disponibleParaTi} bold color="green" />
           <p className="text-[10px] text-muted-foreground px-1">Estimado. Consulta a tu contador para el calculo exacto.</p>
+        </>
+      )}
+
+      {/* D141: Ahorro fiscal — conditional by regime */}
+      {data.regimenFiscal === 'ordinario' && (data.gastosDeduciblesMes > 0 || data.gastosSinSoporteMes > 0 || data.totalDeduciblesMes > 0) && (
+        <>
+          <Divider />
+          <SectionTitle>Ahorro fiscal</SectionTitle>
+          <Row label="Gastos deducibles este mes" value={data.gastosDeduciblesMes + data.totalDeduciblesMes} color="green" />
+          {data.gastosSinSoporteMes > 0 && (
+            <Row label="Gastos sin soporte (oportunidad)" value={data.gastosSinSoporteMes} color="yellow" />
+          )}
+        </>
+      )}
+      {data.regimenFiscal === 'simple' && (
+        <>
+          <Divider />
+          <p className="text-[10px] text-muted-foreground px-1 py-1">Tu regimen (SIMPLE) calcula impuestos sobre ingresos brutos. No aplican deducciones por gastos.</p>
+        </>
+      )}
+      {!data.regimenFiscal && (
+        <>
+          <Divider />
+          <div className="flex items-center justify-between py-1">
+            <p className="text-[10px] text-muted-foreground">Configura tu regimen fiscal en Mi Negocio para ver estimaciones tributarias.</p>
+            <Link href="/mi-negocio" className="text-[10px] font-medium text-primary hover:underline shrink-0 ml-2">Configurar →</Link>
+          </div>
         </>
       )}
 
