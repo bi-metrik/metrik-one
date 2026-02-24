@@ -72,11 +72,11 @@ export default function CierreDialog({ proyectoId, financiero: f, isInterno = fa
             <p className="text-xs text-muted-foreground">
               {isInterno
                 ? 'Al cerrar el proyecto se genera un resumen de inversión. No podrás registrar más horas ni gastos.'
-                : 'Al cerrar el proyecto se genera un snapshot financiero comparativo. No podras registrar mas horas, gastos ni facturas. Los cobros pendientes aun se podran registrar.'}
+                : 'Al cerrar el proyecto se genera un snapshot financiero comparativo. No podrás registrar más horas, gastos ni facturas. Los cobros pendientes aún se podrán registrar.'}
             </p>
             {!isInterno && (f.cartera ?? 0) > 0 && (
               <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-700 dark:border-yellow-900 dark:bg-yellow-950/20">
-                Tienes {formatCOP(f.cartera ?? 0)} en cartera pendiente. Aun podras registrar cobros despues del cierre.
+                Tienes {formatCOP(f.cartera ?? 0)} en cartera pendiente. Aún podrás registrar cobros después del cierre.
               </div>
             )}
             <div className="flex gap-2 pt-1">

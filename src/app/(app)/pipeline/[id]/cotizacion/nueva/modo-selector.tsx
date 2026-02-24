@@ -72,7 +72,7 @@ export default function ModoSelector({ oportunidadId }: Props) {
             <div>
               <h3 className="text-sm font-bold">Flash</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Rapida: solo descripcion y valor total
+                Rápida: solo descripción y valor total
               </p>
             </div>
           </button>
@@ -99,7 +99,7 @@ export default function ModoSelector({ oportunidadId }: Props) {
         <div className="space-y-4 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Cotizacion flash</h2>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Descripcion *</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Descripción *</label>
             <textarea
               value={flashDesc}
               onChange={e => setFlashDesc(e.target.value)}

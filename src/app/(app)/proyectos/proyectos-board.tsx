@@ -301,7 +301,7 @@ export default function ProyectosBoard({ initialProjects }: ProyectosBoardProps)
         </div>
         <div className="rounded-xl border border-dashed border-border p-12 text-center">
           <FolderKanban className="mx-auto h-12 w-12 text-muted-foreground/30" />
-          <h3 className="mt-4 text-sm font-medium">Sin proyectos aun</h3>
+          <h3 className="mt-4 text-sm font-medium">Sin proyectos aún</h3>
           <p className="mt-2 text-sm text-muted-foreground">
             Cuando marques una oportunidad como &ldquo;Ganada&rdquo; en el Pipeline, tu proyecto aparecera aqui automaticamente.
           </p>

@@ -75,9 +75,9 @@ export default function PipelineList({ oportunidades }: Props) {
     const days = Math.floor(diff / 86400000)
     if (days === 0) return 'Hoy'
     if (days === 1) return 'Ayer'
-    if (days < 30) return `Hace ${days} dias`
+    if (days < 30) return `Hace ${days} días`
     if (days < 365) return `Hace ${Math.floor(days / 30)} meses`
-    return `Hace ${Math.floor(days / 365)} anos`
+    return `Hace ${Math.floor(days / 365)} años`
   }
 
   // Value pipeline summary
@@ -93,7 +93,7 @@ export default function PipelineList({ oportunidades }: Props) {
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16">
         <Flame className="h-12 w-12 text-muted-foreground/30" />
         <h3 className="mt-4 text-base font-medium">
-          Tu pipeline esta vacio
+          Tu pipeline está vacío
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Crea tu primera oportunidad para empezar a vender
@@ -190,7 +190,7 @@ export default function PipelineList({ oportunidades }: Props) {
               summaryLines={[
                 ...(empresa ? [{ icon: <Building2 className="h-3 w-3" />, text: empresa.nombre }] : []),
                 ...(contacto ? [{ icon: <User className="h-3 w-3" />, text: contacto.nombre }] : []),
-                ...(stale ? [{ icon: <Clock className="h-3 w-3 text-amber-500" />, text: `${dias} dias sin actividad` }] : []),
+                ...(stale ? [{ icon: <Clock className="h-3 w-3 text-amber-500" />, text: `${dias} días sin actividad` }] : []),
               ]}
               badges={etapaConfig ? [{
                 label: etapaConfig.label,

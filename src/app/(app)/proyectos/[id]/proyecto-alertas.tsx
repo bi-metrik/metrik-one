@@ -70,7 +70,7 @@ function calcularAlertas(f: Financiero, facturas: Factura[]): Alerta[] {
       id: 'A03',
       severity: 'red',
       icon: <FileText className="h-3.5 w-3.5" />,
-      message: `${facturasVencidas.length} factura${facturasVencidas.length > 1 ? 's' : ''} con mas de 60 dias sin cobro`,
+      message: `${facturasVencidas.length} factura${facturasVencidas.length > 1 ? 's' : ''} con más de 60 días sin cobro`,
     })
   }
 

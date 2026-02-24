@@ -69,9 +69,9 @@ export default function ContactosList({ contactos }: Props) {
     const days = Math.floor(diff / 86400000)
     if (days === 0) return 'Hoy'
     if (days === 1) return 'Ayer'
-    if (days < 30) return `Hace ${days} dias`
+    if (days < 30) return `Hace ${days} días`
     if (days < 365) return `Hace ${Math.floor(days / 30)} meses`
-    return `Hace ${Math.floor(days / 365)} anos`
+    return `Hace ${Math.floor(days / 365)} años`
   }
 
   const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const

@@ -98,7 +98,7 @@ export default function Contacto360({ contacto, oportunidades, empresaVinculada 
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Telefono</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Teléfono</label>
             <div className="relative">
               <Phone className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -182,7 +182,7 @@ export default function Contacto360({ contacto, oportunidades, empresaVinculada 
         </div>
         {oportunidades.length === 0 ? (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            Este contacto no tiene oportunidades aun
+            Este contacto no tiene oportunidades aún
           </p>
         ) : (
           <div className="space-y-2">

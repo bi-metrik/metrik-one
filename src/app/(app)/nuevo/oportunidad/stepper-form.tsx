@@ -217,7 +217,7 @@ export default function StepperForm() {
       <div className="rounded-lg border p-4">
         {step === 0 && (
           <div className="space-y-3">
-            <h2 className="text-sm font-semibold">Quien es el contacto?</h2>
+            <h2 className="text-sm font-semibold">¿Quién es el contacto?</h2>
 
             {/* Selected contacto chip */}
             {contactoId ? (

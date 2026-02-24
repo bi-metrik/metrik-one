@@ -350,7 +350,7 @@ export default function ProyectoDetail({
 
       {/* ─── Últimos registros (timeline) ─── */}
       <div className="space-y-2 rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Ultimos registros</h2>
+        <h2 className="text-sm font-semibold">Últimos registros</h2>
         {timeline.length === 0 ? (
           <p className="py-3 text-center text-xs text-muted-foreground">Sin registros</p>
         ) : (

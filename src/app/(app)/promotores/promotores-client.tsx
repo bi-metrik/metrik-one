@@ -423,7 +423,7 @@ export default function PromotoresClient({ promoters }: PromotoresClientProps) {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="promoter-phone">Telefono</Label>
+                <Label htmlFor="promoter-phone">Teléfono</Label>
                 <Input
                   id="promoter-phone"
                   placeholder="+57 300 000 0000"

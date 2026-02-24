@@ -79,7 +79,7 @@ export default function FiscalGateForm({ oportunidadId, empresa, onComplete, onC
     <div className="rounded-lg border-2 border-green-200 bg-green-50/30 p-5">
       <div className="flex items-center gap-2">
         <ShieldCheck className="h-5 w-5 text-green-600" />
-        <h3 className="text-sm font-bold text-green-800">Un paso mas para cerrar este negocio</h3>
+        <h3 className="text-sm font-bold text-green-800">Un paso más para cerrar este negocio</h3>
       </div>
       <p className="mt-1 text-xs text-green-700">
         Completa el perfil fiscal de <strong>{empresa.nombre}</strong> para poder cerrar la oportunidad.

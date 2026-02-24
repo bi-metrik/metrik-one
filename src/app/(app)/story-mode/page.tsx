@@ -108,7 +108,7 @@ const SLIDES: StorySlide[] = [
   },
   {
     icon: <Receipt className="h-8 w-8" />,
-    title: 'Facturas y cobras',
+    title: 'Facturas y cobros',
     subtitle: 'Cartera + alertas inteligentes',
     description:
       'Programa tus cobros, registra lo que te pagan y ONE te avisa cuando es hora de cobrar. Tú nunca contactas al cliente — ONE te prepara el mensaje.',
