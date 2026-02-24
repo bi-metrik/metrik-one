@@ -234,6 +234,21 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
     await supabase.from('rubros').insert(rubrosToInsert)
   }
 
+  // Add the service's sale price (precio_estandar) to the cotización valor_total
+  const precioVenta = servicio.precio_estandar ?? subtotal
+  if (precioVenta > 0) {
+    const { data: cot } = await supabase
+      .from('cotizaciones')
+      .select('valor_total')
+      .eq('id', cotizacionId)
+      .single()
+
+    await supabase
+      .from('cotizaciones')
+      .update({ valor_total: (cot?.valor_total ?? 0) + precioVenta })
+      .eq('id', cotizacionId)
+  }
+
   return { success: true, id: newItem?.id }
 }
 
