@@ -1,0 +1,93 @@
+'use server'
+
+import { getWorkspace } from '@/lib/actions/get-workspace'
+
+export type Movimiento = {
+  id: string
+  tipo: 'ingreso' | 'egreso'
+  fecha: string
+  monto: number
+  descripcion: string
+  categoria: string | null
+  proyecto: string | null
+  deducible: boolean
+  soporte_url: string | null
+}
+
+export async function getMovimientos(filters?: {
+  tipo?: 'todos' | 'ingresos' | 'egresos'
+  mes?: string // YYYY-MM
+}) {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { movimientos: [], totales: { ingresos: 0, egresos: 0 } }
+
+  const tipoFilter = filters?.tipo ?? 'todos'
+  const mes = filters?.mes ?? new Date().toISOString().slice(0, 7) // default current month
+
+  const startDate = `${mes}-01`
+  const [y, m] = mes.split('-').map(Number)
+  const endDate = new Date(y, m, 0).toISOString().split('T')[0] // last day of month
+
+  const results: Movimiento[] = []
+
+  // ── Egresos (gastos table) ──────────────────────────
+  if (tipoFilter === 'todos' || tipoFilter === 'egresos') {
+    const { data: gastos } = await supabase
+      .from('gastos')
+      .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, proyecto_id, proyectos(nombre)')
+      .eq('workspace_id', workspaceId)
+      .gte('fecha', startDate)
+      .lte('fecha', endDate)
+      .order('fecha', { ascending: false })
+
+    for (const g of gastos ?? []) {
+      const proy = g.proyectos as { nombre: string } | null
+      results.push({
+        id: g.id,
+        tipo: 'egreso',
+        fecha: g.fecha,
+        monto: Number(g.monto),
+        descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
+        categoria: g.categoria,
+        proyecto: proy?.nombre ?? null,
+        deducible: g.deducible ?? false,
+        soporte_url: g.soporte_url ?? null,
+      })
+    }
+  }
+
+  // ── Ingresos (cobros table) ─────────────────────────
+  if (tipoFilter === 'todos' || tipoFilter === 'ingresos') {
+    const { data: cobros } = await supabase
+      .from('cobros')
+      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre)')
+      .eq('workspace_id', workspaceId)
+      .gte('fecha', startDate)
+      .lte('fecha', endDate)
+      .order('fecha', { ascending: false })
+
+    for (const c of cobros ?? []) {
+      const proy = c.proyectos as { nombre: string } | null
+      results.push({
+        id: c.id,
+        tipo: 'ingreso',
+        fecha: c.fecha,
+        monto: Number(c.monto),
+        descripcion: c.notas ?? 'Cobro',
+        categoria: null,
+        proyecto: proy?.nombre ?? null,
+        deducible: false,
+        soporte_url: null,
+      })
+    }
+  }
+
+  // Sort by date descending
+  results.sort((a, b) => b.fecha.localeCompare(a.fecha))
+
+  // Totals
+  const ingresos = results.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0)
+  const egresos = results.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0)
+
+  return { movimientos: results, totales: { ingresos, egresos } }
+}

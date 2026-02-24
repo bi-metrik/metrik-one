@@ -256,17 +256,20 @@ export default function NumerosV2Client({ initialData }: Props) {
         </>
       )}
 
-      {/* Tip: gastos deducibles (informativo, al final) */}
-      {showCards && data.totalDeduciblesMes > 0 && (
+      {/* Quick links: Movimientos */}
+      {showCards && (
         <a
-          href="/mi-negocio"
+          href="/movimientos"
           className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent"
         >
-          <span>🧾</span>
+          <span>📒</span>
           <span>
-            Tienes <strong className="text-foreground">{formatCOP(data.totalDeduciblesMes)}</strong> en gastos deducibles — recuerda guardar facturas
+            {data.totalDeduciblesMes > 0
+              ? <>Tienes <strong className="text-foreground">{formatCOP(data.totalDeduciblesMes)}</strong> en gastos deducibles — recuerda guardar facturas</>
+              : <>Revisa todos tus ingresos y egresos del mes</>
+            }
           </span>
-          <span className="ml-auto shrink-0 text-[10px] font-medium text-primary">Ver →</span>
+          <span className="ml-auto shrink-0 text-[10px] font-medium text-primary">Ir a Mis Movimientos →</span>
         </a>
       )}
 
