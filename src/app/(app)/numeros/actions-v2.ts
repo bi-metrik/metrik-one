@@ -436,8 +436,9 @@ export async function getNumeros(mesRef?: string) {
   // PE
   const puntoEquilibrio = margenContribucion > 0 ? costosFijosMes / margenContribucion : costosFijosMes
 
-  // Runway
-  const runwayMeses = gastoPromedioMensual > 0 ? saldoCaja / gastoPromedioMensual : 99
+  // Runway = saldo / (gastos variables promedio + gastos fijos mensuales)
+  const gastoTotalMensual = gastoPromedioMensual + costosFijosMes
+  const runwayMeses = gastoTotalMensual > 0 ? saldoCaja / gastoTotalMensual : 99
 
   // ── Conciliación ─────────────────────────────────
   const streakData = streakRes.data
@@ -607,6 +608,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   pendientes.push({
     label: 'Saldo bancario actualizado',
     done: saldoScore === 'green',
+    action: saldoScore !== 'green' ? '/numeros?saldo=1' : undefined,
   })
 
   // 5. Oportunidades actualizadas (Medio, peso 1)
@@ -787,6 +789,7 @@ export async function actualizarSaldo(saldoReal: number, nota?: string) {
       saldo_real: saldoReal,
       saldo_teorico: saldoTeorico,
       diferencia,
+      fecha: new Date().toISOString(),
       registrado_via: 'app',
       nota: nota?.trim() || null,
     })

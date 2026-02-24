@@ -122,20 +122,20 @@ export default function NumerosV2Client({ initialData }: Props) {
       {/* Franja Conciliación */}
       <FranjaConciliacion data={data.conciliacion} />
 
-      {/* D129 – Alerta gastos deducibles sin soporte */}
+      {/* Alerta gastos fijos sin factura/soporte */}
       {data.totalDeduciblesMes > 0 && (
         <a
           href="/mi-negocio"
           className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
         >
-          <span className="mt-0.5 text-lg leading-none">💰</span>
+          <span className="mt-0.5 text-lg leading-none">🧾</span>
           <div className="flex-1">
             <p className="text-amber-900 dark:text-amber-200">
-              Tienes <strong>{formatCOP(data.totalDeduciblesMes)}</strong> en gastos deducibles sin soporte este mes.
-              Guarda las facturas antes del cierre.
+              Tienes <strong>{formatCOP(data.totalDeduciblesMes)}</strong> en gastos fijos que puedes deducir de impuestos.
+              Recuerda guardar las facturas de soporte.
             </p>
             <span className="mt-1 inline-block text-xs font-medium text-amber-700 dark:text-amber-400">
-              Ir a Mis Gastos Fijos →
+              Ver gastos fijos →
             </span>
           </div>
         </a>
@@ -151,7 +151,7 @@ export default function NumerosV2Client({ initialData }: Props) {
         <>
           {/* P1 + P2 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* P1: ¿Cuánta plata tengo? */}
+            {/* P1: ¿Cuánta plata tengo? — Saldo bancario + meta de cobro del mes */}
             <QuestionCard
               questionNumber={1}
               title="¿Cuanta plata tengo?"
@@ -163,10 +163,10 @@ export default function NumerosV2Client({ initialData }: Props) {
               barData={{
                 current: data.recaudoMes,
                 target: data.metaRecaudo ?? 1,
-                label: `Recaudo`,
+                label: 'Meta de cobro del mes',
                 sublabel: data.metaRecaudo
                   ? `${formatCOP(data.recaudoMes)} / ${formatCOP(data.metaRecaudo)} (${data.metaRecaudo > 0 ? Math.round((data.recaudoMes / data.metaRecaudo) * 100) : 0}%)`
-                  : 'Sin meta',
+                  : 'Sin meta de cobro',
               }}
               barColor={recaudoColor}
               onClick={() => setActiveDrill(1)}
@@ -197,7 +197,7 @@ export default function NumerosV2Client({ initialData }: Props) {
 
           {/* P3 + P4 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* P3: ¿Cuánto me deben? */}
+            {/* P3: ¿Cuánto me deben? — Cartera (facturas pendientes de cobro) */}
             <QuestionCard
               questionNumber={3}
               title="¿Cuanto me deben?"
@@ -209,10 +209,10 @@ export default function NumerosV2Client({ initialData }: Props) {
               barData={{
                 current: data.totalCobrado,
                 target: data.totalFacturado || 1,
-                label: 'Cobrado',
+                label: 'Facturas cobradas',
                 sublabel: data.totalFacturado > 0
-                  ? `${formatCOP(data.totalCobrado)} / ${formatCOP(data.totalFacturado)} (${Math.round((data.totalCobrado / data.totalFacturado) * 100)}%)`
-                  : 'Sin facturas',
+                  ? `${formatCOP(data.totalCobrado)} de ${formatCOP(data.totalFacturado)} facturado (${Math.round((data.totalCobrado / data.totalFacturado) * 100)}%)`
+                  : 'Sin facturas emitidas',
               }}
               barColor={
                 data.totalFacturado > 0
