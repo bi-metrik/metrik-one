@@ -6,6 +6,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, FolderOpen, Clock, Receipt, Banknote, Pause, Play,
   Lock, Plus, TrendingUp, TrendingDown, FileText, AlertTriangle,
+  ChevronDown, RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateAvance, cambiarEstadoProyecto } from '../actions-v2'
@@ -108,6 +109,7 @@ export default function ProyectoDetail({
   const [isPending, startTransition] = useTransition()
   const [avance, setAvance] = useState(f.avance_porcentaje ?? 0)
   const [dialog, setDialog] = useState<'gasto' | 'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
+  const [showRubros, setShowRubros] = useState(false)
 
   // Auto-open dialog from URL param (e.g. ?action=gasto)
   useEffect(() => {
@@ -264,16 +266,74 @@ export default function ProyectoDetail({
           )}
         </div>
 
-        {/* Presupuesto consumido (read-only) — only if presupuesto exists */}
+        {/* Presupuesto consumido (clickable to expand rubros) */}
         {(f.presupuesto_total ?? 0) > 0 && (
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-medium">Presupuesto consumido</span>
+            <button
+              onClick={() => setShowRubros(!showRubros)}
+              className="flex w-full items-center justify-between mb-1 group"
+            >
+              <span className="text-xs font-medium flex items-center gap-1">
+                Presupuesto consumido
+                <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${showRubros ? 'rotate-180' : ''}`} />
+              </span>
               <span className="text-xs font-semibold">{consumo}%</span>
-            </div>
+            </button>
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <div className={`h-full rounded-full ${semaforoBar}`} style={{ width: `${Math.min(consumo, 100)}%` }} />
             </div>
+
+            {/* Rubros drill-down */}
+            {showRubros && (
+              <div className="mt-3 space-y-2 border-t pt-3">
+                {rubros.length >= 1 ? (
+                  rubros.map(r => {
+                    const pct = r.consumido_pct ?? 0
+                    const barColor = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-blue-500'
+                    return (
+                      <div key={r.rubro_id}>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="truncate font-medium">{r.rubro_nombre}</span>
+                          <span className="shrink-0 text-muted-foreground">
+                            {formatCOP(r.gastado_real ?? 0)} / {formatCOP(r.presupuestado ?? 0)}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                        </div>
+                      </div>
+                    )
+                  })
+                ) : cotizacionId ? (
+                  <p className="text-xs text-muted-foreground">No hay rubros sincronizados.</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Sin rubros de presupuesto.</p>
+                )}
+
+                {/* Sync button */}
+                {cotizacionId && (
+                  <button
+                    onClick={() => {
+                      startTransition(async () => {
+                        const { resyncRubrosProyecto } = await import('@/app/(app)/pipeline/actions-v2')
+                        const res = await resyncRubrosProyecto(proyectoId)
+                        if (res.success) {
+                          toast.success('Rubros sincronizados desde cotización')
+                          router.refresh()
+                        } else {
+                          toast.error(res.error)
+                        }
+                      })
+                    }}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1 rounded-md bg-muted px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isPending ? 'animate-spin' : ''}`} />
+                    {rubros.length > 0 ? 'Re-sincronizar rubros' : 'Sincronizar desde cotización'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -314,58 +374,6 @@ export default function ProyectoDetail({
           </div>
         </div>
       )}
-
-      {/* ─── Presupuesto vs Real por rubro ─── */}
-      <div className="space-y-2 rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Presupuesto por rubro</h2>
-        {rubros.length >= 1 ? (
-          <div className="space-y-2">
-            {rubros.map(r => {
-              const pct = r.consumido_pct ?? 0
-              const barColor = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-blue-500'
-              return (
-                <div key={r.rubro_id}>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="truncate font-medium">{r.rubro_nombre}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {formatCOP(r.gastado_real ?? 0)} / {formatCOP(r.presupuestado ?? 0)}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        ) : cotizacionId ? (
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">Los rubros de la cotizacion no se sincronizaron.</p>
-            <button
-              onClick={() => {
-                startTransition(async () => {
-                  const { resyncRubrosProyecto } = await import('@/app/(app)/pipeline/actions-v2')
-                  const res = await resyncRubrosProyecto(proyectoId)
-                  if (res.success) {
-                    toast.success('Rubros sincronizados')
-                    router.refresh()
-                  } else {
-                    toast.error(res.error)
-                  }
-                })
-              }}
-              disabled={isPending}
-              className="shrink-0 rounded-md bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-400"
-            >
-              Sincronizar
-            </button>
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Este proyecto no tiene rubros. Puedes crearlos desde una cotizacion.
-          </p>
-        )}
-      </div>
 
       {/* ─── Facturas (only for client projects) ─── */}
       {!isInterno && <div className="space-y-2 rounded-lg border p-4">

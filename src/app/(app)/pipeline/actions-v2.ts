@@ -331,20 +331,19 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   return { success: true, proyectoId: proyecto.id }
 }
 
-// Helper: map cotización tipo_rubro to proyecto_rubros tipo
-function mapTipoRubro(tipo: string | null): string {
-  const map: Record<string, string> = {
-    mo_propia: 'horas',
-    mo_terceros: 'subcontratacion',
-    materiales: 'materiales',
-    viaticos: 'transporte',
-    software: 'servicios_profesionales',
-    servicios_prof: 'servicios_profesionales',
-  }
-  return map[tipo ?? ''] ?? 'general'
+// Label lookup for rubro types
+const TIPO_RUBRO_LABELS: Record<string, string> = {
+  mo_propia: 'Mano de obra propia',
+  mo_terceros: 'Mano de obra terceros',
+  materiales: 'Materiales',
+  viaticos: 'Viáticos',
+  software: 'Software y tecnología',
+  servicios_prof: 'Servicios profesionales',
 }
 
 // ── Sync rubros from cotización to proyecto ──────────────────
+// Aggregates all rubros across all items by tipo, so e.g. "mo_propia"
+// from 5 items gets totalized into one proyecto_rubros row.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function syncRubrosCotizacion(supabase: any, proyectoId: string, cotizacionId: string, modo: string | null, presupuestoTotal: number) {
   if (modo === 'detallada') {
@@ -354,32 +353,63 @@ async function syncRubrosCotizacion(supabase: any, proyectoId: string, cotizacio
       .eq('cotizacion_id', cotizacionId)
 
     if (items && items.length > 0) {
-      // Flatten: each item may have multiple rubros
-      const rubrosToInsert: Record<string, unknown>[] = []
+      // Aggregate rubros by tipo across all items
+      const aggregated: Record<string, {
+        tipo: string
+        nombre: string
+        presupuestado: number
+        cantidad: number
+        unidad: string | null
+      }> = {}
+      let itemsWithoutRubros = 0
+      let itemsWithoutRubrosTotal = 0
+
       for (const item of items) {
         const rubrosList = Array.isArray(item.rubros) ? item.rubros : []
         if (rubrosList.length > 0) {
           for (const r of rubrosList) {
-            rubrosToInsert.push({
-              proyecto_id: proyectoId,
-              nombre: item.nombre ?? 'Sin nombre',
-              presupuestado: r.valor_total ?? item.subtotal ?? 0,
-              tipo: mapTipoRubro(r.tipo ?? null),
-              cantidad: r.cantidad ?? null,
-              unidad: r.unidad ?? null,
-              valor_unitario: r.valor_unitario ?? null,
-            })
+            const tipo = r.tipo ?? 'general'
+            if (!aggregated[tipo]) {
+              aggregated[tipo] = {
+                tipo,
+                nombre: TIPO_RUBRO_LABELS[tipo] ?? tipo,
+                presupuestado: 0,
+                cantidad: 0,
+                unidad: r.unidad ?? null,
+              }
+            }
+            aggregated[tipo].presupuestado += Number(r.valor_total ?? 0)
+            aggregated[tipo].cantidad += Number(r.cantidad ?? 0)
           }
         } else {
-          // Item without rubros — create generic
-          rubrosToInsert.push({
-            proyecto_id: proyectoId,
-            nombre: item.nombre ?? 'Sin nombre',
-            presupuestado: item.subtotal ?? 0,
-            tipo: 'general',
-          })
+          // Item without rubros — accumulate for a generic entry
+          itemsWithoutRubros++
+          itemsWithoutRubrosTotal += Number(item.subtotal ?? 0)
         }
       }
+
+      // Add generic entry for items without rubros
+      if (itemsWithoutRubros > 0) {
+        if (!aggregated['general']) {
+          aggregated['general'] = {
+            tipo: 'general',
+            nombre: 'General',
+            presupuestado: 0,
+            cantidad: 0,
+            unidad: null,
+          }
+        }
+        aggregated['general'].presupuestado += itemsWithoutRubrosTotal
+      }
+
+      const rubrosToInsert = Object.values(aggregated).map(a => ({
+        proyecto_id: proyectoId,
+        nombre: a.nombre,
+        presupuestado: a.presupuestado,
+        tipo: a.tipo,
+        cantidad: a.cantidad > 0 ? a.cantidad : null,
+        unidad: a.unidad,
+      }))
 
       if (rubrosToInsert.length > 0) {
         await supabase.from('proyecto_rubros').insert(rubrosToInsert)
@@ -410,13 +440,11 @@ export async function resyncRubrosProyecto(proyectoId: string) {
 
   if (!proyecto?.cotizacion_id) return { success: false, error: 'Sin cotización vinculada' }
 
-  // Check if rubros already exist
-  const { count } = await supabase
+  // Delete existing rubros (allow re-sync)
+  await supabase
     .from('proyecto_rubros')
-    .select('id', { count: 'exact', head: true })
+    .delete()
     .eq('proyecto_id', proyectoId)
-
-  if ((count ?? 0) > 0) return { success: false, error: 'El proyecto ya tiene rubros' }
 
   // Get cotización mode
   const { data: cotizacion } = await supabase
