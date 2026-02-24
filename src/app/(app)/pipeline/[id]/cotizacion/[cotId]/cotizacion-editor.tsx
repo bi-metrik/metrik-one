@@ -18,7 +18,9 @@ import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
+import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import type { EstadoCotizacion } from '@/lib/pipeline/constants'
+import type { FiscalProfile, Client } from '@/types/database'
 
 interface RubroRow {
   id: string
@@ -51,13 +53,22 @@ interface CotizacionData {
   fecha_validez: string | null
 }
 
+interface ClientFiscal {
+  person_type: string | null
+  tax_regime: string | null
+  gran_contribuyente: boolean
+  agente_retenedor: boolean
+}
+
 interface Props {
   oportunidadId: string
   cotizacion: CotizacionData
   initialItems: ItemRow[]
+  fiscalProfile?: FiscalProfile | null
+  clientFiscal?: ClientFiscal | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -140,7 +151,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     startTransition(async () => {
       const res = await enviarCotizacion(cotizacion.id)
       if (res.success) {
-        toast.success('Cotizacion enviada')
+        toast.success('Cotización enviada')
         router.refresh()
       } else {
         toast.error(res.error)
@@ -152,7 +163,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     startTransition(async () => {
       const res = await duplicarCotizacion(cotizacion.id)
       if (res.success) {
-        toast.success('Cotizacion duplicada')
+        toast.success('Cotización duplicada')
         router.push(`/pipeline/${oportunidadId}/cotizacion/${res.id}`)
       } else {
         toast.error(res.error)
@@ -277,7 +288,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {!editable && (
         <div className="flex items-center gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
           <Lock className="h-4 w-4" />
-          Esta cotizacion esta en estado <strong>{estadoConfig?.label}</strong> y no se puede editar. Puedes duplicarla.
+          Esta cotización está en estado <strong>{estadoConfig?.label}</strong> y no se puede editar. Puedes duplicarla.
         </div>
       )}
 
@@ -299,9 +310,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
               <input
-                type="number"
-                value={flashValor}
-                onChange={e => setFlashValor(e.target.value)}
+                type="text"
+                inputMode="numeric"
+                value={Number(flashValor) ? Number(flashValor).toLocaleString('es-CO') : flashValor}
+                onChange={e => {
+                  const raw = e.target.value.replace(/[^0-9]/g, '')
+                  setFlashValor(raw)
+                }}
                 disabled={!editable}
                 className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm disabled:opacity-60"
               />
@@ -309,13 +324,64 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </div>
 
           {/* Fiscal result preview */}
-          <div className="rounded-lg bg-green-50 p-4 text-center">
-            <p className="text-xs font-medium text-green-700">TU RECIBES</p>
-            <p className="text-2xl font-bold text-green-700">{formatCOP(Number(flashValor) || 0)}</p>
-            <p className="mt-1 text-[10px] text-green-600">
-              Resultado fiscal: se calcula al completar el perfil fiscal de la empresa
-            </p>
-          </div>
+          {(() => {
+            const valor = Number(flashValor) || 0
+            const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
+            if (!hasFiscal || valor === 0) {
+              return (
+                <div className="rounded-lg bg-green-50 p-4 text-center">
+                  <p className="text-xs font-medium text-green-700">TU RECIBES</p>
+                  <p className="text-2xl font-bold text-green-700">{formatCOP(valor)}</p>
+                  <p className="mt-1 text-[10px] text-green-600">
+                    {!fiscalProfile?.is_complete
+                      ? 'Resultado fiscal: se calcula al completar el perfil fiscal de la empresa'
+                      : 'Completa el perfil fiscal del cliente para ver el desglose'}
+                  </p>
+                </div>
+              )
+            }
+            const resumen = generarResumenFiscal(
+              fiscalProfile as FiscalProfile,
+              clientFiscal as unknown as Client,
+              valor,
+              0
+            )
+            return (
+              <div className="space-y-2">
+                {/* Cliente paga */}
+                <div className="rounded-lg bg-blue-50 p-3 text-center">
+                  <p className="text-[10px] font-medium text-blue-600">EL CLIENTE PAGA</p>
+                  <p className="text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
+                  {resumen.iva > 0 && (
+                    <p className="text-[10px] text-blue-500">Base {formatCOP(valor)} + IVA {formatCOP(resumen.iva)}</p>
+                  )}
+                </div>
+                {/* Retenciones */}
+                {(resumen.retefuente_valor > 0 || resumen.reteica_valor > 0 || resumen.reteiva_valor > 0) && (
+                  <div className="rounded-lg bg-amber-50 p-3">
+                    <p className="mb-1 text-center text-[10px] font-medium text-amber-700">RETENCIONES</p>
+                    <div className="space-y-0.5 text-[10px] text-amber-600">
+                      {resumen.retefuente_valor > 0 && (
+                        <div className="flex justify-between"><span>ReteFuente ({resumen.retefuente_pct}%)</span><span>-{formatCOP(resumen.retefuente_valor)}</span></div>
+                      )}
+                      {resumen.reteica_valor > 0 && (
+                        <div className="flex justify-between"><span>ReteICA ({resumen.reteica_pct}‰)</span><span>-{formatCOP(resumen.reteica_valor)}</span></div>
+                      )}
+                      {resumen.reteiva_valor > 0 && (
+                        <div className="flex justify-between"><span>ReteIVA ({resumen.reteiva_pct}%)</span><span>-{formatCOP(resumen.reteiva_valor)}</span></div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {/* Tú recibes */}
+                <div className="rounded-lg bg-green-50 p-3 text-center">
+                  <p className="text-[10px] font-medium text-green-600">TÚ RECIBES</p>
+                  <p className="text-xl font-bold text-green-700">{formatCOP(resumen.neto_recibido)}</p>
+                  <p className="text-[10px] text-green-500">Margen real neto: {resumen.margen_real_neto_pct}%</p>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       )}
 
@@ -463,12 +529,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               {showCatalog ? (
                 <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-3 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-blue-800">Agregar desde catalogo</span>
+                    <span className="text-xs font-medium text-blue-800">Agregar desde catálogo</span>
                     <button onClick={() => setShowCatalog(false)} className="text-xs text-blue-600 hover:underline">Cerrar</button>
                   </div>
                   {catalogItems.length === 0 ? (
                     <p className="py-3 text-center text-xs text-muted-foreground">
-                      No tienes servicios en tu catalogo. Crealos en Config → Mis servicios.
+                      No tienes servicios en tu catálogo. Créalos en Config → Mis servicios.
                     </p>
                   ) : (
                     <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -501,7 +567,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-300 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
                 >
                   {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
-                  Agregar desde catalogo
+                  Agregar desde catálogo
                 </button>
               )}
 
@@ -553,11 +619,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
                 <input
-                  type="number"
-                  defaultValue={cotizacion.valor_total ?? ''}
+                  type="text"
+                  inputMode="numeric"
+                  defaultValue={cotizacion.valor_total ? cotizacion.valor_total.toLocaleString('es-CO') : ''}
                   onBlur={e => {
-                    const val = Number(e.target.value)
+                    const val = Number(e.target.value.replace(/[^0-9]/g, ''))
                     if (val > 0) {
+                      e.target.value = val.toLocaleString('es-CO')
                       startTransition(async () => {
                         await updateCotizacion(cotizacion.id, { valor_total: val })
                         router.refresh()
@@ -571,13 +639,61 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           )}
 
           {/* Fiscal result */}
-          <div className="rounded-lg bg-green-50 p-4 text-center">
-            <p className="text-xs font-medium text-green-700">TU RECIBES</p>
-            <p className="text-2xl font-bold text-green-700">{formatCOP(cotizacion.valor_total ?? 0)}</p>
-            <p className="mt-1 text-[10px] text-green-600">
-              Resultado fiscal detallado se calcula al completar el perfil fiscal de la empresa
-            </p>
-          </div>
+          {(() => {
+            const valor = cotizacion.valor_total ?? 0
+            const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
+            if (!hasFiscal || valor === 0) {
+              return (
+                <div className="rounded-lg bg-green-50 p-4 text-center">
+                  <p className="text-xs font-medium text-green-700">TÚ RECIBES</p>
+                  <p className="text-2xl font-bold text-green-700">{formatCOP(valor)}</p>
+                  <p className="mt-1 text-[10px] text-green-600">
+                    {!fiscalProfile?.is_complete
+                      ? 'Completa tu perfil fiscal en Mi Negocio para ver el desglose'
+                      : 'Completa el perfil fiscal del cliente para ver el desglose'}
+                  </p>
+                </div>
+              )
+            }
+            const resumen = generarResumenFiscal(
+              fiscalProfile as FiscalProfile,
+              clientFiscal as unknown as Client,
+              valor,
+              costoTotal
+            )
+            return (
+              <div className="space-y-2">
+                <div className="rounded-lg bg-blue-50 p-3 text-center">
+                  <p className="text-[10px] font-medium text-blue-600">EL CLIENTE PAGA</p>
+                  <p className="text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
+                  {resumen.iva > 0 && (
+                    <p className="text-[10px] text-blue-500">Base {formatCOP(valor)} + IVA {formatCOP(resumen.iva)}</p>
+                  )}
+                </div>
+                {(resumen.retefuente_valor > 0 || resumen.reteica_valor > 0 || resumen.reteiva_valor > 0) && (
+                  <div className="rounded-lg bg-amber-50 p-3">
+                    <p className="mb-1 text-center text-[10px] font-medium text-amber-700">RETENCIONES</p>
+                    <div className="space-y-0.5 text-[10px] text-amber-600">
+                      {resumen.retefuente_valor > 0 && (
+                        <div className="flex justify-between"><span>ReteFuente ({resumen.retefuente_pct}%)</span><span>-{formatCOP(resumen.retefuente_valor)}</span></div>
+                      )}
+                      {resumen.reteica_valor > 0 && (
+                        <div className="flex justify-between"><span>ReteICA ({resumen.reteica_pct}‰)</span><span>-{formatCOP(resumen.reteica_valor)}</span></div>
+                      )}
+                      {resumen.reteiva_valor > 0 && (
+                        <div className="flex justify-between"><span>ReteIVA ({resumen.reteiva_pct}%)</span><span>-{formatCOP(resumen.reteiva_valor)}</span></div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className="rounded-lg bg-green-50 p-3 text-center">
+                  <p className="text-[10px] font-medium text-green-600">TÚ RECIBES</p>
+                  <p className="text-xl font-bold text-green-700">{formatCOP(resumen.neto_recibido)}</p>
+                  <p className="text-[10px] text-green-500">Margen real neto: {resumen.margen_real_neto_pct}%</p>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       )}
     </div>

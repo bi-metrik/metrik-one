@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
+  const redirectTo = searchParams.get('redirectTo') || searchParams.get('next') || '/dashboard'
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
   const isLocalEnv = process.env.NODE_ENV === 'development'
 
@@ -28,10 +29,12 @@ export async function GET(request: Request) {
           .single()
 
         if (ws?.slug) {
+          // Sanitize redirectTo to prevent open redirect
+          const safePath = redirectTo.startsWith('/') ? redirectTo : '/dashboard'
           if (isLocalEnv) {
-            return NextResponse.redirect(`${origin}/dashboard`)
+            return NextResponse.redirect(`${origin}${safePath}`)
           }
-          return NextResponse.redirect(`https://${ws.slug}.${baseDomain}/dashboard`)
+          return NextResponse.redirect(`https://${ws.slug}.${baseDomain}${safePath}`)
         }
       }
 

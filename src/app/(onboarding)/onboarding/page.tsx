@@ -165,7 +165,7 @@ export default function OnboardingPage() {
               onKeyDown={(e) => e.key === 'Enter' && handleNext()}
             />
             <p className="text-xs text-muted-foreground">
-              Tu URL será: <strong>{businessName.trim() ? businessName.trim().toLowerCase().replace(/[^a-z0-9]+/gi, '-').slice(0, 20) : 'tu-negocio'}.metrikone.co</strong>
+              Tu URL será: <strong>{businessName.trim() ? businessName.trim().toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 48) : 'tu-negocio'}.metrikone.co</strong>
             </p>
           </div>
         </div>

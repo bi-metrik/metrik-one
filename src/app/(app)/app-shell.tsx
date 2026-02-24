@@ -33,7 +33,7 @@ interface AppShellProps {
 
 // Sidebar adaptativo por rol
 const ALL_NAV_ITEMS = [
-  { href: '/numeros', label: 'Numeros', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
   { href: '/pipeline', label: 'Pipeline', icon: Flame, roles: ['owner', 'admin'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin'] },
@@ -172,7 +172,7 @@ export default function AppShell({
                 onClick={handleSignOut}
                 className="rounded-md p-1 transition-colors hover:opacity-80"
                 style={{ color: 'var(--sidebar-muted)' }}
-                title="Cerrar sesion"
+                title="Cerrar sesión"
               >
                 <LogOut className="h-3.5 w-3.5" />
               </button>
@@ -183,7 +183,7 @@ export default function AppShell({
               onClick={handleSignOut}
               className="flex w-full justify-center rounded-md p-1.5 mt-1 transition-colors hover:opacity-80"
               style={{ color: 'var(--sidebar-muted)' }}
-              title="Cerrar sesion"
+              title="Cerrar sesión"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>
@@ -195,8 +195,8 @@ export default function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Desktop header — date left, brand logo right */}
         <header className="hidden md:flex h-12 items-center justify-between border-b border-border bg-background px-6 shrink-0">
-          <p className="text-xs font-medium text-muted-foreground capitalize">
-            {new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          <p className="text-xs font-medium text-muted-foreground">
+            {(() => { const d = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
           </p>
           {hasLogo && (
             <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
@@ -227,7 +227,7 @@ export default function AppShell({
               onClick={handleSignOut}
               className="rounded-md p-1.5 transition-colors hover:opacity-80"
               style={{ color: 'var(--sidebar-muted)' }}
-              title="Cerrar sesion"
+              title="Cerrar sesión"
             >
               <LogOut className="h-4 w-4" />
             </button>

@@ -22,7 +22,7 @@ export const ETAPA_CONFIG: Record<EtapaPipeline, {
   contacto_inicial: { label: 'Contacto inicial', probabilidad: 20,  chipClass: 'bg-blue-100 text-blue-700',    dotClass: 'bg-blue-500',   order: 1 },
   discovery_hecha:  { label: 'Discovery hecha',  probabilidad: 40,  chipClass: 'bg-blue-200 text-blue-800',    dotClass: 'bg-blue-600',   order: 2 },
   propuesta_enviada:{ label: 'Propuesta enviada', probabilidad: 60,  chipClass: 'bg-yellow-100 text-yellow-700',dotClass: 'bg-yellow-500', order: 3 },
-  negociacion:      { label: 'Negociacion',       probabilidad: 80,  chipClass: 'bg-orange-100 text-orange-700',dotClass: 'bg-orange-500', order: 4 },
+  negociacion:      { label: 'Negociación',       probabilidad: 80,  chipClass: 'bg-orange-100 text-orange-700',dotClass: 'bg-orange-500', order: 4 },
   ganada:           { label: 'Ganada',            probabilidad: 100, chipClass: 'bg-green-100 text-green-700',  dotClass: 'bg-green-500',  order: 5 },
   perdida:          { label: 'Perdida',           probabilidad: 0,   chipClass: 'bg-red-100 text-red-700',      dotClass: 'bg-red-500',    order: 6 },
 }
@@ -39,11 +39,11 @@ export const FUENTES_ADQUISICION = [
   { value: 'promotor', label: 'Promotor' },
   { value: 'referido', label: 'Referido' },
   { value: 'alianza', label: 'Alianza / Partner' },
-  { value: 'red_social_organico', label: 'Red social (organico)' },
+  { value: 'red_social_organico', label: 'Red social (orgánico)' },
   { value: 'pauta_digital', label: 'Pauta digital (pagado)' },
   { value: 'contacto_directo', label: 'Contacto directo' },
   { value: 'evento', label: 'Evento / Networking' },
-  { value: 'web_organico', label: 'Web / Organico' },
+  { value: 'web_organico', label: 'Web / Orgánico' },
 ] as const
 
 export type FuenteAdquisicion = typeof FUENTES_ADQUISICION[number]['value']
@@ -76,8 +76,8 @@ export const TIPOS_RUBRO = [
   { value: 'mo_propia', label: 'Mano de obra propia', unidadDefault: 'horas' },
   { value: 'mo_terceros', label: 'Mano de obra terceros', unidadDefault: 'horas' },
   { value: 'materiales', label: 'Materiales', unidadDefault: 'unidades' },
-  { value: 'viaticos', label: 'Viaticos', unidadDefault: 'dias' },
-  { value: 'software', label: 'Software y tecnologia', unidadDefault: 'licencias' },
+  { value: 'viaticos', label: 'Viáticos', unidadDefault: 'dias' },
+  { value: 'software', label: 'Software y tecnología', unidadDefault: 'licencias' },
   { value: 'servicios_prof', label: 'Servicios profesionales', unidadDefault: 'horas' },
 ] as const
 
@@ -88,12 +88,12 @@ export type TipoRubro = typeof TIPOS_RUBRO[number]['value']
 export const CATEGORIAS_GASTO = [
   { value: 'materiales', label: 'Materiales' },
   { value: 'transporte', label: 'Transporte' },
-  { value: 'alimentacion', label: 'Alimentacion' },
+  { value: 'alimentacion', label: 'Alimentación' },
   { value: 'servicios_profesionales', label: 'Servicios profesionales' },
   { value: 'software', label: 'Software' },
   { value: 'arriendo', label: 'Arriendo' },
   { value: 'marketing', label: 'Marketing' },
-  { value: 'capacitacion', label: 'Capacitacion' },
+  { value: 'capacitacion', label: 'Capacitación' },
   { value: 'otros', label: 'Otros' },
 ] as const
 
@@ -113,19 +113,19 @@ export const RAZONES_PERDIDA = [
 // ── Sectores colombianos ────────────────────────────────────
 
 export const SECTORES_EMPRESA = [
-  'Tecnologia',
-  'Consultoria',
-  'Ingenieria',
+  'Tecnología',
+  'Consultoría',
+  'Ingeniería',
   'Arquitectura',
-  'Diseno',
-  'Construccion',
-  'Educacion',
+  'Diseño',
+  'Construcción',
+  'Educación',
   'Salud',
   'Legal',
   'Contabilidad',
   'Marketing',
   'Comunicaciones',
-  'Energia',
+  'Energía',
   'Agroindustria',
   'Manufactura',
   'Transporte',
@@ -162,7 +162,7 @@ export const ESTADO_PROYECTO_CONFIG: Record<EstadoProyecto, {
   label: string
   chipClass: string
 }> = {
-  en_ejecucion: { label: 'En ejecucion', chipClass: 'bg-blue-100 text-blue-700' },
+  en_ejecucion: { label: 'En ejecución', chipClass: 'bg-blue-100 text-blue-700' },
   pausado:      { label: 'Pausado',       chipClass: 'bg-yellow-100 text-yellow-700' },
   cerrado:      { label: 'Cerrado',       chipClass: 'bg-green-100 text-green-700' },
 }
@@ -171,20 +171,20 @@ export const ESTADO_PROYECTO_CONFIG: Record<EstadoProyecto, {
 
 export const TIPOS_PERSONA = [
   { value: 'natural', label: 'Persona Natural' },
-  { value: 'juridica', label: 'Persona Juridica' },
+  { value: 'juridica', label: 'Persona Jurídica' },
 ] as const
 
 export const REGIMENES_TRIBUTARIOS = [
-  { value: 'comun', label: 'Regimen Comun' },
-  { value: 'simple', label: 'Regimen Simple' },
+  { value: 'comun', label: 'Régimen Común' },
+  { value: 'simple', label: 'Régimen Simple' },
   { value: 'no_responsable', label: 'No Responsable de IVA' },
 ] as const
 
 // ── Tipos de documento de identidad ──────────────────────────
 
 export const TIPOS_DOCUMENTO = [
-  { value: 'CC', label: 'Cedula de Ciudadania' },
-  { value: 'CE', label: 'Cedula de Extranjeria' },
+  { value: 'CC', label: 'Cédula de Ciudadanía' },
+  { value: 'CE', label: 'Cédula de Extranjería' },
   { value: 'NIT', label: 'NIT' },
   { value: 'pasaporte', label: 'Pasaporte' },
   { value: 'PEP', label: 'PEP' },

@@ -52,7 +52,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
     personType: fiscalProfile!.person_type === 'juridica' ? 'Persona Jurídica' : 'Persona Natural',
     regime: fiscalProfile!.tax_regime === 'simple' ? 'Simple (SIMPLE)' : 'Ordinario',
     iva: fiscalProfile!.iva_responsible ? 'Responsable (19%)' : 'No responsable',
-    city: fiscalProfile!.ica_city || 'Bogota',
+    city: fiscalProfile!.ica_city || 'Bogotá',
     icaRate: fiscalProfile!.ica_rate || 9.66,
     isEstimated: fiscalProfile!.is_estimated,
   } : null
@@ -102,7 +102,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
 
       <div className="space-y-1.5 rounded-lg border p-3">
         <SummaryRow label="Tipo persona" value={fiscalSummary!.personType} />
-        <SummaryRow label="Regimen" value={fiscalSummary!.regime} />
+        <SummaryRow label="Régimen" value={fiscalSummary!.regime} />
         <SummaryRow label="IVA" value={fiscalSummary!.iva} />
         <SummaryRow label="Ciudad ICA" value={`${fiscalSummary!.city} (${fiscalSummary!.icaRate}‰)`} />
       </div>
@@ -142,7 +142,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
               value={direccionFiscal}
               onChange={e => setDireccionFiscal(e.target.value)}
               className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="Cra 7 #45-12, Bogotá"
+              placeholder="Ej: Cra 7 #45-12, Oficina 301"
             />
           </div>
           <div>
@@ -152,7 +152,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
               value={emailFacturacion}
               onChange={e => setEmailFacturacion(e.target.value)}
               className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="facturacion@miempresa.co"
+              placeholder="Ej: contabilidad@tuempresa.co"
             />
           </div>
         </div>
