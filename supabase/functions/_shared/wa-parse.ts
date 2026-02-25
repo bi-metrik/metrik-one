@@ -19,6 +19,7 @@ REGLAS:
 - Extrae montos en formato numérico (sin puntos de miles, sin "$")
 - Los nombres de personas/empresas van tal cual los escribió el usuario
 - Si el mensaje menciona un proyecto/cliente, extráelo como "entity_hint"
+- Si el mensaje menciona un código de proyecto como "P-12", "#12", "proyecto 12", "el 12", extráelo como "project_code" (solo el número entero). project_code tiene prioridad sobre entity_hint.
 - Fechas: si no se menciona, no incluyas el campo (el sistema usa "hoy")
 - Montos en pesos colombianos por defecto
 
@@ -106,6 +107,10 @@ const FEW_SHOT_EXAMPLES = [
   { input: 'Parar', output: '{"intent":"TIMER_PARAR","confidence":0.95,"fields":{}}' },
   { input: 'Terminé', output: '{"intent":"TIMER_PARAR","confidence":0.92,"fields":{}}' },
   { input: '¿Cuánto llevo?', output: '{"intent":"TIMER_ESTADO","confidence":0.93,"fields":{}}' },
+  // Project code examples
+  { input: 'Carga al P-12 un gasto de 50 mil en materiales', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":12,"category_hint":"materiales"}}' },
+  { input: 'Iniciar timer en el 3', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"project_code":3}}' },
+  { input: 'Me pagaron 2 millones del P-5', output: '{"intent":"COBRO","confidence":0.92,"fields":{"amount":2000000,"project_code":5}}' },
 ];
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {
@@ -195,21 +200,36 @@ function parseAmount(text: string): number | null {
   return null;
 }
 
-function extractEntityHint(text: string): string | null {
+/** Extract project code (P-12, #12) or entity hint from text */
+function extractProjectRef(text: string): { entity_hint?: string; project_code?: number } {
+  // Priority 1: Project code — "P-12", "P12", "#12"
+  let m = text.match(/(?:P-?|#)(\d{1,4})\b/i);
+  if (m) return { project_code: parseInt(m[1]) };
+  // "proyecto 12" / "el proyecto 12" (only if followed by a number)
+  m = text.match(/(?:proyecto|proy)\s+(\d{1,4})\b/i);
+  if (m) return { project_code: parseInt(m[1]) };
+  // "al 12" / "del 12" / "en el 12" (short numeric reference after preposition)
+  m = text.match(/(?:al|del|en\s+el)\s+(\d{1,4})\b/);
+  if (m) return { project_code: parseInt(m[1]) };
+
+  // Priority 2: Entity hint (fuzzy name) — existing logic
   // "para (lo de|el proyecto) X"
-  let m = text.match(/(?:para\s+(?:lo\s+de|el\s+proyecto\s+)?|de\s+(?:lo\s+de\s+)?)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/);
-  if (m) return m[1];
+  m = text.match(/(?:para\s+(?:lo\s+de|el\s+proyecto\s+)?|de\s+(?:lo\s+de\s+)?)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/);
+  if (m) return { entity_hint: m[1] };
   // "lo de X"
   m = text.match(/lo\s+de\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)/);
-  if (m) return m[1];
-  // "proyecto X"
+  if (m) return { entity_hint: m[1] };
+  // "proyecto X" (non-numeric)
   m = text.match(/proyecto\s+(\S+)/i);
-  if (m) return m[1];
-  return null;
+  if (m) return { entity_hint: m[1] };
+  return {};
 }
 
 function regexParse(text: string): ParseResult {
   const lower = text.toLowerCase().trim();
+
+  // Extract project reference once — used across multiple intents
+  const projectRef = extractProjectRef(text);
 
   // AYUDA
   if (/^(hola|hey|help|ayuda|\?|menu|menú|qué puedo|que puedo|buenos?\s*d[ií]as?)$/i.test(lower) ||
@@ -241,13 +261,12 @@ function regexParse(text: string): ParseResult {
   // COBRO — "me pagaron", "me consignaron", "me giraron"
   if (/me\s+(pagaron|consignaron|giraron|transfirieron)/i.test(lower)) {
     const amount = parseAmount(lower);
-    return { intent: 'COBRO', confidence: 0.88, fields: { amount, entity_hint: extractEntityHint(text) } };
+    return { intent: 'COBRO', confidence: 0.88, fields: { amount, ...projectRef } };
   }
 
   // GASTO — "gasté", "pagué", "compré" + monto
   if (/gast[eé]|pagu[eé]|compr[eé]|invert[ií]/i.test(lower)) {
     const amount = parseAmount(lower);
-    const entity = extractEntityHint(text);
     // Extract concept — stop before "con", "para", "del", "de" (prepositions)
     const conceptMatch = lower.match(/(?:en|de)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})(?:\s+(?:para|con|del?|a)\b|$)/i);
     const concept = conceptMatch ? conceptMatch[1].trim() : undefined;
@@ -255,23 +274,24 @@ function regexParse(text: string): ParseResult {
     // Determine if it's project-related (GASTO_DIRECTO) or operational (GASTO_OPERATIVO)
     // IMPORTANT: \b word boundaries prevent "gas" from matching inside "gasté"
     const isOperativo = /\b(arriendo|internet|celular|luz|agua|gas|oficina|servicios|n[oó]mina)\b/i.test(lower);
-    // If there's an entity_hint (project/client), it's always a direct expense
-    const intent = (isOperativo && !entity) ? 'GASTO_OPERATIVO' : 'GASTO_DIRECTO';
+    // If there's a project reference (code or entity_hint), it's always a direct expense
+    const hasProject = projectRef.project_code !== undefined || projectRef.entity_hint !== undefined;
+    const intent = (isOperativo && !hasProject) ? 'GASTO_OPERATIVO' : 'GASTO_DIRECTO';
     return {
       intent,
       confidence: 0.85,
-      fields: { amount, concept, entity_hint: entity, category_hint: concept },
+      fields: { amount, concept, ...projectRef, category_hint: concept },
     };
   }
 
   // Generic amount-based gasto (e.g., "20000 en tintos para proyecto Test")
   if (parseAmount(lower) && /\b(en|para)\b/i.test(lower)) {
     const amount = parseAmount(lower);
-    const entity = extractEntityHint(text);
     const conceptMatch = lower.match(/(?:en)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})(?:\s+(?:para|con|del?|a)\b|$)/i);
     const concept = conceptMatch ? conceptMatch[1].trim() : undefined;
-    if (amount && (concept || entity)) {
-      return { intent: 'GASTO_DIRECTO', confidence: 0.75, fields: { amount, concept, entity_hint: entity } };
+    const hasProject = projectRef.project_code !== undefined || projectRef.entity_hint !== undefined;
+    if (amount && (concept || hasProject)) {
+      return { intent: 'GASTO_DIRECTO', confidence: 0.75, fields: { amount, concept, ...projectRef } };
     }
   }
 
@@ -288,36 +308,35 @@ function regexParse(text: string): ParseResult {
 
   // TIMER_INICIAR — "iniciar", "empezar", "arrancar", "dale a"
   if (/\b(iniciar|empezar|arrancar|comenzar)\b|dale\s+a/i.test(lower)) {
-    return { intent: 'TIMER_INICIAR', confidence: 0.90, fields: { entity_hint: extractEntityHint(text) } };
+    return { intent: 'TIMER_INICIAR', confidence: 0.90, fields: { ...projectRef } };
   }
 
   // HORAS — "trabajé X horas", "le metí X horas" (manual — solo owners)
   if (/(?:trabaj[eé]|le\s+met[ií]|dediqu[eé])\s+(\d+(?:[.,]\d+)?)\s*horas?/i.test(lower)) {
     const hoursMatch = lower.match(/(\d+(?:[.,]\d+)?)\s*horas?/i);
     const hours = hoursMatch ? parseFloat(hoursMatch[1].replace(',', '.')) : undefined;
-    return { intent: 'HORAS', confidence: 0.88, fields: { hours, entity_hint: extractEntityHint(text) } };
+    return { intent: 'HORAS', confidence: 0.88, fields: { hours, ...projectRef } };
   }
 
   // ESTADO_PROYECTO — "cómo va lo de X"
   if (/c[oó]mo\s+va|estado\s+de|avance\s+de/i.test(lower)) {
-    return { intent: 'ESTADO_PROYECTO', confidence: 0.85, fields: { entity_hint: extractEntityHint(text) } };
+    return { intent: 'ESTADO_PROYECTO', confidence: 0.85, fields: { ...projectRef } };
   }
 
   // OPP_GANADA — "aceptó", "ganamos"
   if (/acept[oó]|ganamos|cerr[eé]|firm[oó]/i.test(lower)) {
-    return { intent: 'OPP_GANADA', confidence: 0.80, fields: { entity_hint: extractEntityHint(text) } };
+    return { intent: 'OPP_GANADA', confidence: 0.80, fields: { entity_hint: projectRef.entity_hint } };
   }
 
   // OPP_PERDIDA — "se cayó", "no se dio", "perdimos"
   if (/se\s+cay[oó]|no\s+se\s+dio|perdimos|descart[oó]/i.test(lower)) {
-    return { intent: 'OPP_PERDIDA', confidence: 0.80, fields: { entity_hint: extractEntityHint(text) } };
+    return { intent: 'OPP_PERDIDA', confidence: 0.80, fields: { entity_hint: projectRef.entity_hint } };
   }
 
   // NOTA_OPORTUNIDAD / NOTA_PROYECTO
   if (/nota\s+(para|de|sobre)/i.test(lower)) {
-    const entity = extractEntityHint(text);
     const noteMatch = text.match(/nota\s+(?:para|de|sobre)\s+\S+[:\s]+(.+)/i);
-    return { intent: 'NOTA_PROYECTO', confidence: 0.80, fields: { entity_hint: entity, note: noteMatch?.[1] } };
+    return { intent: 'NOTA_PROYECTO', confidence: 0.80, fields: { ...projectRef, note: noteMatch?.[1] } };
   }
 
   // CONTACTO_NUEVO — "nuevo contacto", "anota"
@@ -327,7 +346,7 @@ function regexParse(text: string): ParseResult {
 
   // INFO_CONTACTO — "teléfono de", "datos de"
   if (/tel[eé]fono\s+de|datos?\s+de|info\s+de|contacto\s+de/i.test(lower)) {
-    return { intent: 'INFO_CONTACTO', confidence: 0.85, fields: { entity_hint: extractEntityHint(text) } };
+    return { intent: 'INFO_CONTACTO', confidence: 0.85, fields: { entity_hint: projectRef.entity_hint } };
   }
 
   // Nothing matched

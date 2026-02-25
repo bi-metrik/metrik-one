@@ -99,9 +99,8 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   if (message.type === 'audio' && message.audio_id) {
     const result = await transcribeAudio(message.audio_id);
     if (!result.text) {
-      // TODO: Remove debug error detail after fixing
-      const debugInfo = result.error ? `\n\n_Debug: ${result.error}_` : '';
-      await sendTextMessage(message.phone, `🎙️ No pude entender el audio. ¿Puedes escribirlo?${debugInfo}`);
+      if (result.error) console.error(`[wa-webhook] Audio transcription failed: ${result.error}`);
+      await sendTextMessage(message.phone, '🎙️ No pude entender el audio. ¿Puedes escribirlo?');
       return;
     }
     message.text = result.text;

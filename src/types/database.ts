@@ -2273,6 +2273,7 @@ export type Database = {
           canal_creacion: string | null
           carpeta_url: string | null
           cierre_snapshot: Json | null
+          codigo: number
           contacto_id: string | null
           cotizacion_id: string | null
           created_at: string | null
@@ -2301,6 +2302,7 @@ export type Database = {
           canal_creacion?: string | null
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
+          codigo?: number
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -2329,6 +2331,7 @@ export type Database = {
           canal_creacion?: string | null
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
+          codigo?: number
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -3305,6 +3308,7 @@ export type Database = {
           carpeta_url: string | null
           cartera: number | null
           cobrado: number | null
+          codigo: number | null
           contacto_nombre: string | null
           costo_acumulado: number | null
           costo_horas: number | null
@@ -3399,6 +3403,10 @@ export type Database = {
         Args: { p_workspace_id: string }
         Returns: string
       }
+      get_next_proyecto_codigo: {
+        Args: { p_workspace_id: string }
+        Returns: number
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       unaccent: { Args: { "": string }; Returns: string }
@@ -3429,6 +3437,7 @@ export type Database = {
         Returns: {
           cartera: number
           cobrado: number
+          codigo: number
           contacto_nombre: string
           costo_acumulado: number
           empresa_nombre: string

@@ -5,7 +5,7 @@
 import type { HandlerContext } from '../types.ts';
 import { AMBIGUOUS_CATEGORIES, CATEGORIA_LABELS, STREAK_MILESTONES } from '../types.ts';
 import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, formatElapsed } from '../wa-format.ts';
-import { findProjects, findActiveProjects, findContacts, matchCategory, findMatchingBorrador } from '../wa-lookup.ts';
+import { findProjects, findProjectByCode, findActiveProjects, findContacts, matchCategory, findMatchingBorrador } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
 
 export async function handleRegistro(ctx: HandlerContext): Promise<void> {
@@ -36,7 +36,7 @@ export async function handleRegistro(ctx: HandlerContext): Promise<void> {
 
 async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { amount, entity_hint, concept, category_hint } = parsed.fields;
+  const { amount, entity_hint, concept, category_hint, project_code } = parsed.fields;
 
   if (!amount || amount <= 0) {
     await ctx.sendMessage('❌ El monto debe ser mayor a $0. ¿Cuánto fue el gasto?');
@@ -45,6 +45,22 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
 
   // Resolve category
   const categoria = matchCategory(category_hint || concept || '') || 'otros';
+
+  // Fast path: project_code → exact match by código
+  if (project_code) {
+    const project = await findProjectByCode(supabase, user.workspace_id, project_code);
+    if (project) {
+      const borrador = await findMatchingBorrador(supabase, user.workspace_id, concept || '', categoria, amount);
+      if (borrador) {
+        await showBorradorMatch(ctx, borrador, project, amount, categoria);
+      } else {
+        await showGastoDirectoConfirmation(ctx, project, amount, categoria, concept);
+      }
+      return;
+    }
+    // Code not found — fall through to entity_hint or show all
+    await ctx.sendMessage(`⚠️ No encontré proyecto activo con código P-${project_code}.`);
+  }
 
   if (!entity_hint) {
     // No project hint — show list of active projects
@@ -311,7 +327,7 @@ async function proceedGastoOperativo(ctx: HandlerContext, amount: number, concep
 
 async function handleHoras(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { hours, entity_hint } = parsed.fields;
+  const { hours, entity_hint, project_code } = parsed.fields;
 
   if (!hours || hours <= 0) {
     await ctx.sendMessage('❌ El registro debe ser mayor a 0 horas.');
@@ -320,6 +336,16 @@ async function handleHoras(ctx: HandlerContext): Promise<void> {
   if (hours > 16) {
     await ctx.sendMessage(`⚠️ ¿Seguro? ${hours} horas es mucho. Confirma el número.`);
     return;
+  }
+
+  // Fast path: project_code → exact match by código
+  if (project_code) {
+    const project = await findProjectByCode(supabase, user.workspace_id, project_code);
+    if (project) {
+      await showHorasConfirmation(ctx, project, hours, false);
+      return;
+    }
+    await ctx.sendMessage(`⚠️ No encontré proyecto activo con código P-${project_code}.`);
   }
 
   const activeProjects = await findActiveProjects(supabase, user.workspace_id);
@@ -445,7 +471,27 @@ async function showHorasConfirmation(ctx: HandlerContext, project: any, hours: n
 
 async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
   const { user, supabase, parsed } = ctx;
-  const { entity_hint } = parsed.fields;
+  const { entity_hint, project_code } = parsed.fields;
+
+  // Fast path: project_code → exact match by código (only when no active timer)
+  if (project_code) {
+    const { data: existingTimer } = await supabase
+      .from('timer_activo')
+      .select('id')
+      .eq('workspace_id', user.workspace_id)
+      .single();
+
+    if (!existingTimer) {
+      const project = await findProjectByCode(supabase, user.workspace_id, project_code);
+      if (project) {
+        await startTimer(ctx, project.proyecto_id, project.nombre);
+        return;
+      }
+      await ctx.sendMessage(`⚠️ No encontré proyecto activo con código P-${project_code}.`);
+      // Fall through to normal flow
+    }
+    // If timer exists, fall through to normal flow which handles the switch logic
+  }
 
   // Check if there's already an active timer
   const { data: existing } = await supabase
@@ -708,11 +754,25 @@ async function handleTimerEstado(ctx: HandlerContext): Promise<void> {
 
 async function handleCobro(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { amount, entity_hint } = parsed.fields;
+  const { amount, entity_hint, project_code } = parsed.fields;
 
   if (!amount || amount <= 0) {
     await ctx.sendMessage('❌ El monto del cobro debe ser mayor a $0.');
     return;
+  }
+
+  // Fast path: project_code → exact match by código
+  if (project_code) {
+    const project = await findProjectByCode(supabase, user.workspace_id, project_code);
+    if (project) {
+      await ctx.updateSession('awaiting_selection', {
+        intent: 'COBRO', pending_action: 'W04',
+        amount, parsed_fields: parsed.fields,
+      });
+      await proceedCobroWithProject(ctx, project.proyecto_id, project.nombre);
+      return;
+    }
+    await ctx.sendMessage(`⚠️ No encontré proyecto activo con código P-${project_code}.`);
   }
 
   if (!entity_hint) {

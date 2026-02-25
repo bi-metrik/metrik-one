@@ -30,6 +30,7 @@ export interface ParsedFields {
   amount?: number;
   concept?: string;
   entity_hint?: string;
+  project_code?: number;  // Short numeric code (e.g. 12 from "P-012")
   category_hint?: string;
   hours?: number;
   date_hint?: string;

@@ -4,6 +4,23 @@
 
 import type { SupabaseClient } from './types.ts';
 
+/** Find a single active project by its short numeric code (P-012) */
+export async function findProjectByCode(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  code: number,
+) {
+  const { data, error } = await supabase
+    .from('v_proyecto_financiero')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('codigo', code)
+    .eq('estado', 'en_ejecucion')
+    .single();
+  if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findProjectByCode error:', error);
+  return data ?? null;
+}
+
 /** Find active projects matching entity_hint by fuzzy name match */
 export async function findProjects(
   supabase: SupabaseClient,
