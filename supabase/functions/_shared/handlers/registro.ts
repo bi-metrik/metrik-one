@@ -177,9 +177,11 @@ async function showGastoDirectoConfirmation(ctx: HandlerContext, project: any, a
   msg += '\n\n¿Confirmo? (Sí/No)';
 
   await ctx.sendMessage(msg);
+  // project.proyecto_id from v_proyecto_financiero, project.id from RPC
+  const proyectoId = project.proyecto_id || project.id;
   await ctx.updateSession('confirming', {
     intent: 'GASTO_DIRECTO', pending_action: 'W01',
-    proyecto_id: project.id, proyecto_nombre: project.nombre,
+    proyecto_id: proyectoId, proyecto_nombre: project.nombre,
     amount, categoria,
     parsed_fields: { ...ctx.parsed.fields, concept },
   });
@@ -198,7 +200,7 @@ async function showBorradorMatch(ctx: HandlerContext, borrador: any, project: an
   await ctx.sendOptions(msg, options);
   await ctx.updateSession('awaiting_selection', {
     intent: 'GASTO_DIRECTO', pending_action: 'W01',
-    proyecto_id: project.id, proyecto_nombre: project.nombre,
+    proyecto_id: project.proyecto_id || project.id, proyecto_nombre: project.nombre,
     amount, categoria, borrador_id: borrador.id,
     options: [
       { id: 'borrador', label: 'Confirmar borrador' },
@@ -431,7 +433,7 @@ async function showHorasConfirmation(ctx: HandlerContext, project: any, hours: n
   await ctx.sendMessage(msg);
   await ctx.updateSession('confirming', {
     intent: 'HORAS', pending_action: 'W03',
-    proyecto_id: project.id || project.proyecto_id,
+    proyecto_id: project.proyecto_id || project.id,
     proyecto_nombre: project.nombre,
     parsed_fields: { ...ctx.parsed.fields, hours },
   });
