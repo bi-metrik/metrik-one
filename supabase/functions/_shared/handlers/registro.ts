@@ -117,15 +117,26 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
   }
 
   if (projects.length === 1) {
-    // Single match — check for borrador match
-    const borrador = await findMatchingBorrador(supabase, user.workspace_id, concept || '', categoria, amount);
-    if (borrador) {
-      await showBorradorMatch(ctx, borrador, projects[0], amount, categoria);
-      return;
+    // Single fuzzy match — always confirm which project (D-DISAMB)
+    const p = projects[0];
+    const allActive = await findActiveProjects(supabase, user.workspace_id);
+    const hasOtherProjects = allActive.length > 1;
+    const disambigOptions: Array<{ id: string; label: string }> = [
+      { id: p.id, label: bold(p.nombre) },
+    ];
+    if (hasOtherProjects) {
+      disambigOptions.push({ id: 'otro_proyecto', label: 'Otro proyecto' });
     }
+    disambigOptions.push({ id: 'operativo', label: 'Gasto operativo (sin proyecto)' });
 
-    // Direct confirmation
-    await showGastoDirectoConfirmation(ctx, projects[0], amount, categoria, concept);
+    await ctx.sendOptions(
+      `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Para ${bold(p.nombre)}?`,
+      disambigOptions.map((o) => o.label),
+    );
+    await ctx.updateSession('awaiting_selection', {
+      intent: 'GASTO_DIRECTO', pending_action: 'W01',
+      amount, categoria, parsed_fields: parsed.fields, options: disambigOptions,
+    });
     return;
   }
 
@@ -345,7 +356,20 @@ async function handleHoras(ctx: HandlerContext): Promise<void> {
   const projects = await findProjects(supabase, user.workspace_id, entity_hint);
 
   if (projects.length === 1) {
-    await showHorasConfirmation(ctx, projects[0], hours, false);
+    // Single fuzzy match — confirm which project (D-DISAMB)
+    const p = projects[0];
+    const disambigOptions: Array<{ id: string; label: string }> = [
+      { id: p.id, label: bold(p.nombre) },
+      { id: 'otro_proyecto', label: 'Otro proyecto' },
+    ];
+    await ctx.sendOptions(
+      `⏱️ ${hours} horas. ¿Para ${bold(p.nombre)}?`,
+      disambigOptions.map((o) => o.label),
+    );
+    await ctx.updateSession('awaiting_selection', {
+      intent: 'HORAS', pending_action: 'W03',
+      parsed_fields: parsed.fields, options: disambigOptions,
+    });
     return;
   }
 
@@ -441,10 +465,12 @@ async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
     // If entity_hint differs from current project, offer to switch
     if (entity_hint) {
       const newProjects = await findProjects(supabase, user.workspace_id, entity_hint);
-      if (newProjects.length > 0 && newProjects[0].id !== existing.proyecto_id) {
-        const newProj = newProjects[0];
+      const filteredProjects = newProjects.filter((p: any) => p.id !== existing.proyecto_id);
+
+      if (filteredProjects.length === 1) {
+        const newProj = filteredProjects[0];
         await ctx.sendOptions(
-          `⏱️ Ya tienes timer en ${bold(proj?.nombre || '?')} (${elapsed.label}).`,
+          `⏱️ Ya tienes timer en ${bold(proj?.nombre || '?')} (${elapsed.label}). ¿Cambiar a ${bold(newProj.nombre)}?`,
           [
             `Parar ${proj?.nombre} e iniciar ${newProj.nombre}`,
             `Seguir con ${proj?.nombre}`,
@@ -458,6 +484,24 @@ async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
             { id: 'switch', label: `Parar e iniciar ${newProj.nombre}` },
             { id: 'keep', label: `Seguir con ${proj?.nombre}` },
           ],
+        });
+        return;
+      }
+
+      if (filteredProjects.length > 1) {
+        // Multiple matches — let user pick (D-DISAMB)
+        const switchOptions = filteredProjects.slice(0, 4).map((p: any) => ({
+          id: p.id, label: p.nombre,
+        }));
+        switchOptions.push({ id: 'keep', label: `Seguir con ${proj?.nombre}` });
+        await ctx.sendOptions(
+          `⏱️ Ya tienes timer en ${bold(proj?.nombre || '?')} (${elapsed.label}). ¿Cambiar a cuál?`,
+          switchOptions.map((o) => o.label),
+        );
+        await ctx.updateSession('awaiting_selection', {
+          intent: 'TIMER_INICIAR', pending_action: 'W03T',
+          parsed_fields: { entity_hint },
+          options: switchOptions,
         });
         return;
       }
@@ -521,20 +565,23 @@ async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  if (projects.length === 1) {
-    await startTimer(ctx, projects[0].id, projects[0].nombre);
-    return;
-  }
-
-  // Multiple matches
-  const options = projects.slice(0, 5).map((p: any) => ({
+  // Single or multiple fuzzy matches — always let user confirm (D-DISAMB)
+  const timerOptions = projects.slice(0, 5).map((p: any) => ({
     id: p.id,
     label: p.nombre,
   }));
-  await ctx.sendOptions('⏱️ ¿En cuál proyecto?', options.map((o) => o.label));
+  if (projects.length === 1) {
+    timerOptions.push({ id: 'otro_proyecto', label: 'Otro proyecto' });
+  }
+  await ctx.sendOptions(
+    projects.length === 1
+      ? `⏱️ ¿Iniciar timer en ${bold(projects[0].nombre)}?`
+      : '⏱️ ¿En cuál proyecto?',
+    timerOptions.map((o) => o.label),
+  );
   await ctx.updateSession('awaiting_selection', {
     intent: 'TIMER_INICIAR', pending_action: 'W03T',
-    options,
+    options: timerOptions,
   });
 }
 
@@ -686,24 +733,43 @@ async function handleCobro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  const project = projects[0];
+  // Always let user confirm which project (D-DISAMB)
+  const cobroOptions = projects.slice(0, 5).map((p: any) => ({
+    id: p.id, label: bold(p.nombre),
+  }));
+  if (projects.length === 1) {
+    cobroOptions.push({ id: 'otro_proyecto', label: 'Otro proyecto' });
+  }
+  await ctx.sendOptions(
+    projects.length === 1
+      ? `💰 Cobro de ${formatCOP(amount)}. ¿De ${bold(projects[0].nombre)}?`
+      : `💰 Cobro de ${formatCOP(amount)}. ¿De cuál proyecto?`,
+    cobroOptions.map((o) => o.label),
+  );
+  await ctx.updateSession('awaiting_selection', {
+    intent: 'COBRO', pending_action: 'W04',
+    amount, parsed_fields: parsed.fields, options: cobroOptions,
+  });
+}
 
-  // Find invoices with pending balance
+/** After project is confirmed for cobro, look up invoices and proceed */
+async function proceedCobroWithProject(ctx: HandlerContext, projectId: string, projectName: string): Promise<void> {
+  const { supabase } = ctx;
+  const context = ctx.session.context;
+  const amount = context.amount!;
+
   const { data: facturas } = await supabase
     .from('v_facturas_estado')
     .select('*')
-    .eq('proyecto_id', project.id)
+    .eq('proyecto_id', projectId)
     .gt('saldo_pendiente', 0)
     .order('fecha_emision', { ascending: true });
 
   if (!facturas || facturas.length === 0) {
-    // No invoices — register as advance
-    const msg = `💰 Cobro de ${formatCOP(amount)} para ${bold(project.nombre)}.\n\n⚠️ No hay facturas emitidas para este proyecto. El cobro se registra como anticipo.\n\n¿Confirmo? (Sí/No)`;
+    const msg = `💰 Cobro de ${formatCOP(amount)} para ${bold(projectName)}.\n\n⚠️ No hay facturas emitidas. Se registra como anticipo.\n\n¿Confirmo? (Sí/No)`;
     await ctx.sendMessage(msg);
     await ctx.updateSession('confirming', {
-      intent: 'COBRO', pending_action: 'W04',
-      proyecto_id: project.id, proyecto_nombre: project.nombre,
-      amount, parsed_fields: parsed.fields,
+      proyecto_id: projectId, proyecto_nombre: projectName,
     });
     return;
   }
@@ -711,34 +777,29 @@ async function handleCobro(ctx: HandlerContext): Promise<void> {
   if (facturas.length === 1) {
     const f = facturas[0];
     const saldo = Number(f.saldo_pendiente);
-    const isFullPayment = Math.abs(saldo - amount) < 100; // tolerance $100
-
-    const msg = `💰 Cobro recibido:\n\n📂 Proyecto: ${bold(project.nombre)}\n📄 Factura: ${f.numero_factura || '#' + f.factura_id.slice(0, 4)} — Saldo: ${formatCOP(saldo)}\n💵 Cobro: ${formatCOP(amount)} ${isFullPayment ? '✅ Pago completo' : ''}\n\n¿Confirmo? (Sí/No)`;
+    const isFullPayment = Math.abs(saldo - amount) < 100;
+    const msg = `💰 Cobro recibido:\n\n📂 Proyecto: ${bold(projectName)}\n📄 Factura: ${f.numero_factura || '#' + f.factura_id.slice(0, 4)} — Saldo: ${formatCOP(saldo)}\n💵 Cobro: ${formatCOP(amount)} ${isFullPayment ? '✅ Pago completo' : ''}\n\n¿Confirmo? (Sí/No)`;
     await ctx.sendMessage(msg);
     await ctx.updateSession('confirming', {
-      intent: 'COBRO', pending_action: 'W04',
-      proyecto_id: project.id, proyecto_nombre: project.nombre,
-      factura_id: f.factura_id, amount,
-      parsed_fields: parsed.fields,
+      proyecto_id: projectId, proyecto_nombre: projectName,
+      factura_id: f.factura_id,
     });
     return;
   }
 
   // Multiple invoices
-  const options = facturas.slice(0, 4).map((f: any) => ({
+  const facturaOptions = facturas.slice(0, 4).map((f: any) => ({
     id: f.factura_id,
     label: `Factura ${f.numero_factura || '#' + f.factura_id.slice(0, 4)} — Saldo: ${formatCOP(Number(f.saldo_pendiente))} (${f.dias_antiguedad} días)`,
   }));
-  options.push({ id: 'general', label: 'Abono general (sin asociar a factura)' });
+  facturaOptions.push({ id: 'general', label: 'Abono general (sin asociar a factura)' });
 
   await ctx.sendOptions(
-    `💰 Cobro de ${formatCOP(amount)} para ${bold(project.nombre)}. ¿A cuál factura?`,
-    options.map((o) => o.label),
+    `💰 Cobro de ${formatCOP(amount)} para ${bold(projectName)}. ¿A cuál factura?`,
+    facturaOptions.map((o) => o.label),
   );
   await ctx.updateSession('awaiting_selection', {
-    intent: 'COBRO', pending_action: 'W04',
-    proyecto_id: project.id, proyecto_nombre: project.nombre,
-    amount, parsed_fields: parsed.fields, options,
+    proyecto_id: projectId, proyecto_nombre: projectName, options: facturaOptions,
   });
 }
 
@@ -970,6 +1031,9 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
           .eq('id', context.gasto_id);
         await ctx.sendMessage('📷 Guardé el soporte fotográfico.');
       }
+    } else if (message.type === 'audio') {
+      await ctx.sendMessage('📷 Necesito una foto del soporte, no un audio. Envía la imagen o escribe *después*.');
+      return; // Stay in awaiting_image
     } else if (['después', 'despues', 'luego'].includes(text)) {
       await ctx.sendMessage('👍 Sin problema. Puedes enviarlo después.');
     } else if (['no', 'sin soporte'].includes(text)) {
@@ -1011,10 +1075,37 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
     return;
   }
 
-  // Selected a project
-  const projects = await findProjects(supabase, user.workspace_id, '');
-  const project = projects.find((p: any) => p.id === selected.id) ||
-    { id: selected.id, nombre: selected.label.replace(/\*|\s—.*/g, ''), presupuesto_total: 0, costo_acumulado: 0, presupuesto_consumido_pct: 0 };
+  if (selected.id === 'otro_proyecto') {
+    // Show all active projects
+    const allActive = await findActiveProjects(supabase, user.workspace_id);
+    const newOptions = allActive.slice(0, 5).map((p: any) => ({
+      id: p.proyecto_id,
+      label: bold(p.nombre),
+    }));
+    newOptions.push({ id: 'operativo', label: 'Gasto operativo (sin proyecto)' });
+    await ctx.sendOptions('Tus proyectos activos:', newOptions.map((o) => o.label));
+    await ctx.updateSession('awaiting_selection', { options: newOptions });
+    return;
+  }
+
+  // Selected a specific project — fetch details + check borrador
+  const { data: project } = await supabase
+    .from('v_proyecto_financiero')
+    .select('*')
+    .eq('proyecto_id', selected.id)
+    .single();
+
+  if (!project) {
+    await ctx.sendMessage('❌ No encontré ese proyecto. Intenta de nuevo.');
+    await completeSession(supabase, session.id);
+    return;
+  }
+
+  const borrador = await findMatchingBorrador(supabase, user.workspace_id, context.parsed_fields?.concept || '', context.categoria || 'otros', context.amount!);
+  if (borrador) {
+    await showBorradorMatch(ctx, borrador, project, context.amount!, context.categoria || 'otros');
+    return;
+  }
 
   await showGastoDirectoConfirmation(ctx, project, context.amount!, context.categoria || 'otros', context.parsed_fields?.concept);
 }
@@ -1062,6 +1153,17 @@ async function handleW03Selection(ctx: HandlerContext, selected: { id: string; l
   const { session, supabase, user } = ctx;
   const context = session.context;
   const hours = context.parsed_fields?.hours || 0;
+
+  if (selected.id === 'otro_proyecto') {
+    const allActive = await findActiveProjects(supabase, user.workspace_id);
+    const newOptions = allActive.slice(0, 5).map((p: any) => ({
+      id: p.proyecto_id,
+      label: bold(p.nombre),
+    }));
+    await ctx.sendOptions('¿Para cuál proyecto?', newOptions.map((o) => o.label));
+    await ctx.updateSession('awaiting_selection', { options: newOptions });
+    return;
+  }
 
   // Fetch project details
   const { data: project } = await supabase
@@ -1126,15 +1228,74 @@ async function handleW03TSelection(ctx: HandlerContext, selected: { id: string; 
     return;
   }
 
-  // Selected a project from list → start timer
+  if (selected.id === 'otro_proyecto') {
+    const allActive = await findActiveProjects(supabase, user.workspace_id);
+    const newOptions = allActive.slice(0, 5).map((p: any) => ({
+      id: p.proyecto_id,
+      label: p.nombre,
+    }));
+    await ctx.sendOptions('⏱️ ¿En cuál proyecto?', newOptions.map((o) => o.label));
+    await ctx.updateSession('awaiting_selection', { options: newOptions });
+    return;
+  }
+
+  // Selected a project from list — check for active timer first
+  const { data: activeTimer } = await supabase
+    .from('timer_activo')
+    .select('id, proyecto_id, inicio')
+    .eq('workspace_id', user.workspace_id)
+    .single();
+
+  if (activeTimer) {
+    // Stop current timer, save hours, then start new
+    const elapsed = formatElapsed(activeTimer.inicio);
+    if (elapsed.hours >= 0.02) {
+      const { data: oldProj } = await supabase
+        .from('proyectos').select('nombre').eq('id', activeTimer.proyecto_id).single();
+      const now = new Date();
+      await supabase.from('horas').insert({
+        workspace_id: user.workspace_id,
+        proyecto_id: activeTimer.proyecto_id,
+        fecha: now.toISOString().slice(0, 10),
+        horas: elapsed.hours,
+        inicio: activeTimer.inicio,
+        fin: now.toISOString(),
+        timer_activo: true,
+        canal_registro: 'whatsapp',
+      });
+      await supabase.from('timer_activo').delete().eq('id', activeTimer.id);
+      await ctx.sendMessage(`✅ ${elapsed.label} registradas en ${bold(oldProj?.nombre || '?')}.`);
+    } else {
+      await supabase.from('timer_activo').delete().eq('id', activeTimer.id);
+    }
+  }
+
   await completeSession(supabase, session.id);
   await startTimer(ctx, selected.id, selected.label.replace(/\*/g, ''));
 }
 
 async function handleW04Selection(ctx: HandlerContext, selected: { id: string; label: string }): Promise<void> {
-  const { session, supabase } = ctx;
+  const { session, supabase, user } = ctx;
   const context = session.context;
 
+  // Phase 1: Project selection (no proyecto_id yet)
+  if (!context.proyecto_id) {
+    if (selected.id === 'otro_proyecto') {
+      const allActive = await findActiveProjects(supabase, user.workspace_id);
+      const newOptions = allActive.slice(0, 5).map((p: any) => ({
+        id: p.proyecto_id,
+        label: bold(p.nombre),
+      }));
+      await ctx.sendOptions('¿De cuál proyecto?', newOptions.map((o) => o.label));
+      await ctx.updateSession('awaiting_selection', { options: newOptions });
+      return;
+    }
+    // User picked a project — proceed to invoice lookup
+    await proceedCobroWithProject(ctx, selected.id, selected.label.replace(/\*/g, ''));
+    return;
+  }
+
+  // Phase 2: Invoice selection (proyecto_id already set)
   if (selected.id === 'general') {
     // Register without specific invoice
     await ctx.updateSession('confirming', { factura_id: undefined });

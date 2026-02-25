@@ -5,6 +5,7 @@
 
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage } from '../_shared/wa-parse.ts';
+import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
@@ -92,6 +93,19 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     await sendTextMessage(message.phone,
       '⚠️ Has enviado muchos mensajes. Espera unos minutos o usa la app.');
     return;
+  }
+
+  // 3.5 Transcribe audio before any processing
+  if (message.type === 'audio' && message.audio_id) {
+    const transcription = await transcribeAudio(message.audio_id);
+    if (!transcription) {
+      await sendTextMessage(message.phone, '🎙️ No pude entender el audio. ¿Puedes escribirlo?');
+      return;
+    }
+    message.text = transcription;
+    // Echo so user can verify what was understood
+    await sendTextMessage(message.phone, `🎙️ _${transcription}_`);
+    console.log(`[wa-webhook] Audio transcribed: "${transcription.slice(0, 100)}"`);
   }
 
   // Log inbound message
@@ -324,6 +338,16 @@ function extractMessage(payload: any): IncomingMessage | null {
         text: msg.image?.caption || '',
         type: 'image',
         image_id: msg.image?.id,
+        timestamp: msg.timestamp,
+      };
+    }
+
+    if (msg.type === 'audio') {
+      return {
+        phone,
+        text: '',
+        type: 'audio',
+        audio_id: msg.audio?.id,
         timestamp: msg.timestamp,
       };
     }

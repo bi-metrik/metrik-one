@@ -108,8 +108,9 @@ export interface WaUser {
 export interface IncomingMessage {
   phone: string;
   text: string;
-  type: 'text' | 'image' | 'interactive' | 'button';
+  type: 'text' | 'image' | 'audio' | 'interactive' | 'button';
   image_id?: string;
+  audio_id?: string;
   interactive_reply?: string; // button/list reply ID
   timestamp: string;
 }
