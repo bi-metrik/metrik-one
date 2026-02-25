@@ -1,11 +1,11 @@
 // ============================================================
-// Gemini 2.0 Flash — NLP Parser (Spec §2, D92)
+// Gemini 2.5 Flash — NLP Parser (Spec §2, D92)
 // Single master prompt for all 16 intents
 // ============================================================
 
 import type { ParseResult } from './types.ts';
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const SYSTEM_PROMPT = `Eres el parser de MéTRIK ONE, un sistema financiero para independientes colombianos.
 

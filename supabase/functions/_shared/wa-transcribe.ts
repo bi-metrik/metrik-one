@@ -3,40 +3,66 @@
 // ============================================================
 
 const META_API_VERSION = 'v21.0';
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
+
+// WhatsApp sends audio/ogg; codecs=opus — normalize to base mime
+function normalizeMimeType(raw: string): string {
+  const base = raw.split(';')[0].trim().toLowerCase();
+  // Map WhatsApp audio types to Gemini-supported types
+  const mimeMap: Record<string, string> = {
+    'audio/ogg': 'audio/ogg',
+    'audio/oga': 'audio/ogg',
+    'audio/opus': 'audio/opus',
+    'audio/mp4': 'audio/mp4',
+    'audio/mpeg': 'audio/mpeg',
+    'audio/mp3': 'audio/mp3',
+    'audio/wav': 'audio/wav',
+    'audio/webm': 'audio/webm',
+    'audio/aac': 'audio/aac',
+    'audio/amr': 'audio/amr',
+  };
+  return mimeMap[base] || 'audio/ogg'; // default for WhatsApp
+}
+
+/** Result of transcription attempt — includes error detail for debugging */
+export interface TranscribeResult {
+  text: string | null;
+  error?: string;
+}
 
 /**
  * Download WhatsApp audio message and transcribe with Gemini.
- * Returns transcribed text or null if transcription fails.
+ * Returns transcribed text or null if transcription fails, with error detail.
  */
-export async function transcribeAudio(audioId: string): Promise<string | null> {
+export async function transcribeAudio(audioId: string): Promise<TranscribeResult> {
   try {
+    console.log(`[wa-transcribe] Starting transcription for audio: ${audioId}`);
+
     // 1. Get download URL from Meta
     const mediaUrl = await getMediaUrl(audioId);
     if (!mediaUrl) {
-      console.error('[wa-transcribe] Failed to get media URL');
-      return null;
+      return { text: null, error: 'META_URL_FAIL: No pude obtener URL del audio de Meta' };
     }
+    console.log(`[wa-transcribe] Got media URL (${mediaUrl.slice(0, 80)}...)`);
 
     // 2. Download audio binary
     const audioData = await downloadMedia(mediaUrl);
     if (!audioData) {
-      console.error('[wa-transcribe] Failed to download media');
-      return null;
+      return { text: null, error: 'META_DOWNLOAD_FAIL: No pude descargar el audio' };
     }
+    console.log(`[wa-transcribe] Downloaded ${audioData.sizeKB}KB, raw mime: "${audioData.rawMimeType}", normalized: "${audioData.mimeType}"`);
 
     // 3. Transcribe with Gemini
-    const text = await geminiTranscribe(audioData.base64, audioData.mimeType);
-    if (!text) {
-      console.error('[wa-transcribe] Gemini transcription failed');
-      return null;
+    const result = await geminiTranscribe(audioData.base64, audioData.mimeType);
+    if (!result.text) {
+      return { text: null, error: result.error || 'GEMINI_EMPTY: Gemini no devolvió texto' };
     }
 
-    console.log(`[wa-transcribe] OK (${audioData.mimeType}): "${text.slice(0, 100)}"`);
-    return text;
+    console.log(`[wa-transcribe] OK: "${result.text.slice(0, 100)}"`);
+    return { text: result.text };
   } catch (err) {
-    console.error('[wa-transcribe] Error:', err);
-    return null;
+    console.error('[wa-transcribe] Unhandled error:', err);
+    return { text: null, error: `EXCEPTION: ${String(err).slice(0, 200)}` };
   }
 }
 
@@ -46,7 +72,10 @@ export async function transcribeAudio(audioId: string): Promise<string | null> {
 
 async function getMediaUrl(mediaId: string): Promise<string | null> {
   const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN');
-  if (!token) return null;
+  if (!token) {
+    console.error('[wa-transcribe] WHATSAPP_ACCESS_TOKEN not set');
+    return null;
+  }
 
   const res = await fetch(
     `https://graph.facebook.com/${META_API_VERSION}/${mediaId}`,
@@ -54,7 +83,8 @@ async function getMediaUrl(mediaId: string): Promise<string | null> {
   );
 
   if (!res.ok) {
-    console.error(`[wa-transcribe] Meta media GET failed: ${res.status}`);
+    const errBody = await res.text();
+    console.error(`[wa-transcribe] Meta media GET failed: ${res.status} — ${errBody.slice(0, 200)}`);
     return null;
   }
 
@@ -64,7 +94,7 @@ async function getMediaUrl(mediaId: string): Promise<string | null> {
 
 async function downloadMedia(
   url: string,
-): Promise<{ base64: string; mimeType: string } | null> {
+): Promise<{ base64: string; mimeType: string; rawMimeType: string; sizeKB: number } | null> {
   const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN');
   if (!token) return null;
 
@@ -73,15 +103,18 @@ async function downloadMedia(
   });
 
   if (!res.ok) {
-    console.error(`[wa-transcribe] Media download failed: ${res.status}`);
+    const errBody = await res.text();
+    console.error(`[wa-transcribe] Media download failed: ${res.status} — ${errBody.slice(0, 200)}`);
     return null;
   }
 
-  const mimeType = res.headers.get('content-type') || 'audio/ogg';
+  const rawMimeType = res.headers.get('content-type') || 'audio/ogg';
+  const mimeType = normalizeMimeType(rawMimeType);
   const buffer = new Uint8Array(await res.arrayBuffer());
+  const sizeKB = Math.round(buffer.length / 1024);
   const base64 = uint8ToBase64(buffer);
 
-  return { base64, mimeType };
+  return { base64, mimeType, rawMimeType, sizeKB };
 }
 
 /** Convert Uint8Array to base64 in chunks to avoid call stack overflow */
@@ -102,11 +135,16 @@ function uint8ToBase64(buffer: Uint8Array): string {
 async function geminiTranscribe(
   base64Audio: string,
   mimeType: string,
-): Promise<string | null> {
+): Promise<TranscribeResult> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.error('[wa-transcribe] GEMINI_API_KEY not set');
+    return { text: null, error: 'GEMINI_NO_KEY: API key no configurada' };
+  }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
+  console.log(`[wa-transcribe] Calling Gemini with mime_type=${mimeType}, base64 length=${base64Audio.length}`);
 
   const res = await fetch(url, {
     method: 'POST',
@@ -132,14 +170,30 @@ async function geminiTranscribe(
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    console.error(`[wa-transcribe] Gemini error: ${res.status} — ${err}`);
-    return null;
+    const errBody = await res.text();
+    console.error(`[wa-transcribe] Gemini HTTP error: ${res.status} — ${errBody.slice(0, 500)}`);
+    return { text: null, error: `GEMINI_HTTP_${res.status}: ${errBody.slice(0, 150)}` };
   }
 
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
-  if (!text || text === 'INAUDIBLE') return null;
-  return text;
+  // Check for blocked content
+  const blockReason = data.promptFeedback?.blockReason;
+  if (blockReason) {
+    console.error(`[wa-transcribe] Gemini blocked: ${blockReason}`);
+    return { text: null, error: `GEMINI_BLOCKED: ${blockReason}` };
+  }
+
+  const finishReason = data.candidates?.[0]?.finishReason;
+  if (finishReason && finishReason !== 'STOP') {
+    console.warn(`[wa-transcribe] Gemini finishReason: ${finishReason}`);
+  }
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  console.log(`[wa-transcribe] Gemini raw response: "${(text || '(empty)').slice(0, 150)}"`);
+
+  if (!text || text === 'INAUDIBLE') {
+    return { text: null, error: `GEMINI_RESULT: ${text || '(empty response)'}` };
+  }
+  return { text };
 }

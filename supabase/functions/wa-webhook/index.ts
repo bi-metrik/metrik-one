@@ -97,15 +97,17 @@ async function processMessage(message: IncomingMessage): Promise<void> {
 
   // 3.5 Transcribe audio before any processing
   if (message.type === 'audio' && message.audio_id) {
-    const transcription = await transcribeAudio(message.audio_id);
-    if (!transcription) {
-      await sendTextMessage(message.phone, '🎙️ No pude entender el audio. ¿Puedes escribirlo?');
+    const result = await transcribeAudio(message.audio_id);
+    if (!result.text) {
+      // TODO: Remove debug error detail after fixing
+      const debugInfo = result.error ? `\n\n_Debug: ${result.error}_` : '';
+      await sendTextMessage(message.phone, `🎙️ No pude entender el audio. ¿Puedes escribirlo?${debugInfo}`);
       return;
     }
-    message.text = transcription;
+    message.text = result.text;
     // Echo so user can verify what was understood
-    await sendTextMessage(message.phone, `🎙️ _${transcription}_`);
-    console.log(`[wa-webhook] Audio transcribed: "${transcription.slice(0, 100)}"`);
+    await sendTextMessage(message.phone, `🎙️ _${result.text}_`);
+    console.log(`[wa-webhook] Audio transcribed: "${result.text.slice(0, 100)}"`);
   }
 
   // Log inbound message
