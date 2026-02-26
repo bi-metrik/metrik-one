@@ -46,49 +46,30 @@ BEGIN
   DELETE FROM streaks WHERE workspace_id = ws_id;
   DELETE FROM costos_referencia WHERE workspace_id = ws_id;
   DELETE FROM config_financiera WHERE workspace_id = ws_id;
-  DELETE FROM bank_balances WHERE workspace_id = ws_id;
-  DELETE FROM bank_accounts WHERE workspace_id = ws_id;
   DELETE FROM saldos_banco WHERE workspace_id = ws_id;
   DELETE FROM config_metas WHERE workspace_id = ws_id;
-  DELETE FROM payments WHERE workspace_id = ws_id;
-  DELETE FROM invoices WHERE workspace_id = ws_id;
   DELETE FROM cobros WHERE workspace_id = ws_id;
   DELETE FROM facturas WHERE workspace_id = ws_id;
-  DELETE FROM expenses WHERE workspace_id = ws_id;
   DELETE FROM gastos WHERE workspace_id = ws_id;
   DELETE FROM gastos_fijos_borradores WHERE workspace_id = ws_id;
   DELETE FROM gastos_fijos_config WHERE workspace_id = ws_id;
-  DELETE FROM fixed_expenses WHERE workspace_id = ws_id;
-  DELETE FROM time_entries WHERE workspace_id = ws_id;
   DELETE FROM horas WHERE workspace_id = ws_id;
-  DELETE FROM timer_activo WHERE workspace_id = ws_id;
   DELETE FROM proyecto_notas WHERE workspace_id = ws_id;
   DELETE FROM proyecto_rubros WHERE proyecto_id IN (SELECT id FROM proyectos WHERE workspace_id = ws_id);
-  DELETE FROM projects WHERE workspace_id = ws_id;
   DELETE FROM proyectos WHERE workspace_id = ws_id;
   DELETE FROM rubros WHERE item_id IN (
     SELECT i.id FROM items i JOIN cotizaciones c ON c.id = i.cotizacion_id WHERE c.workspace_id = ws_id
   );
   DELETE FROM items WHERE cotizacion_id IN (SELECT id FROM cotizaciones WHERE workspace_id = ws_id);
-  DELETE FROM quotes WHERE workspace_id = ws_id;
   DELETE FROM cotizaciones WHERE workspace_id = ws_id;
-  DELETE FROM opportunity_stage_history WHERE workspace_id = ws_id;
-  DELETE FROM opportunities WHERE workspace_id = ws_id;
   DELETE FROM oportunidad_notas WHERE workspace_id = ws_id;
   DELETE FROM oportunidades WHERE workspace_id = ws_id;
-  DELETE FROM promoters WHERE workspace_id = ws_id;
-  DELETE FROM contacts WHERE workspace_id = ws_id;
-  DELETE FROM clients WHERE workspace_id = ws_id;
   DELETE FROM empresas WHERE workspace_id = ws_id;
   DELETE FROM contactos WHERE workspace_id = ws_id;
   DELETE FROM servicios WHERE workspace_id = ws_id;
   DELETE FROM staff WHERE workspace_id = ws_id;
-  DELETE FROM expense_categories WHERE workspace_id = ws_id;
   DELETE FROM fiscal_profiles WHERE workspace_id = ws_id;
   DELETE FROM profiles WHERE workspace_id = ws_id;
-  DELETE FROM health_scores WHERE workspace_id = ws_id;
-  DELETE FROM notifications WHERE workspace_id = ws_id;
-  DELETE FROM audit_log WHERE workspace_id = ws_id;
   DELETE FROM workspaces WHERE id = ws_id;
   DELETE FROM auth.users WHERE id = usr_id;
 END $$;
@@ -160,15 +141,15 @@ INSERT INTO fiscal_profiles (
 -- ════════════════════════════════════════════════════════════
 -- §5. STAFF (3 personas)
 -- ════════════════════════════════════════════════════════════
-INSERT INTO staff (id, workspace_id, nombre, email, telefono, rol, is_active, salary, horas_disponibles_mes, es_principal, tipo_acceso, tipo_vinculo, created_at) VALUES
+INSERT INTO staff (id, workspace_id, full_name, phone_whatsapp, position, is_active, salary, horas_disponibles_mes, es_principal, tipo_acceso, tipo_vinculo, created_at) VALUES
   ('44444444-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001',
-   'Lucía Vargas', 'lucia@lumina.co', '3001234567', 'Directora Creativa',
+   'Lucía Vargas', '3001234567', 'Directora Creativa',
    true, 6000000, 160, true, 'app', 'empleado', '2025-01-01T00:00:00Z'),
   ('44444444-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001',
-   'Tomás Rendón', 'tomas@lumina.co', '3009876543', 'Diseñador Senior',
+   'Tomás Rendón', '3009876543', 'Diseñador Senior',
    true, 4000000, 160, false, 'ambos', 'contratista', '2025-01-15T00:00:00Z'),
   ('44444444-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001',
-   'Isabella Montoya', 'isabella@lumina.co', '3005551234', 'Community Manager',
+   'Isabella Montoya', '3005551234', 'Community Manager',
    true, 2500000, 120, false, 'whatsapp', 'freelance', '2025-03-01T00:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
@@ -233,49 +214,6 @@ INSERT INTO empresas (id, workspace_id, nombre, sector, numero_documento, tipo_d
   ('33333333-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001',
    'Restaurante El Fogón', 'Gastronomía', '1045678901', 'CC', 'natural', 'simple', NULL, NULL,
    '22222222-0000-0000-0000-000000000009', 'Camila Restrepo', 'camila@elfogon.co', '2026-02-10T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §9. CLIENTS (legacy — espejo de empresas)
--- ════════════════════════════════════════════════════════════
-INSERT INTO clients (id, workspace_id, name, nit, person_type, tax_regime, gran_contribuyente, agente_retenedor, sector, contact_name, contact_phone, email, is_active, created_at) VALUES
-  ('33330000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001',
-   'TechNova SAS', '901234567-1', 'juridica', 'comun', false, true, 'Tecnología', 'Carolina Mejía', '3101112233', 'carolina@technova.co', true, '2025-01-05T00:00:00Z'),
-  ('33330000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001',
-   'Café Montañero', '1098765432', 'natural', 'simple', NULL, false, 'Agroindustria', 'Andrés Gutiérrez', '3114445566', 'andres@cafemontanero.com', true, '2025-01-20T00:00:00Z'),
-  ('33330000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001',
-   'Constructora Altiplano SAS', '900876543-2', 'juridica', 'comun', true, true, 'Construcción', 'Felipe Ruiz', '3139990011', 'felipe@altiplano.com.co', true, '2025-03-15T00:00:00Z'),
-  ('33330000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001',
-   'Hotel Boutique Rosario', '901555888-3', 'juridica', 'comun', false, true, 'Hotelería', 'Ricardo Londoño', '3155556677', 'ricardo@hotelrosario.co', true, '2025-05-10T00:00:00Z'),
-  ('33330000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001',
-   'Fundación Raíces', '900111222-4', 'juridica', 'no_responsable', false, false, 'ONGs', 'Mariana Torres', '3142223344', 'mariana@raicesfundacion.org', true, '2025-02-15T00:00:00Z'),
-  ('33330000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001',
-   'Restaurante El Fogón', '1045678901', 'natural', 'simple', NULL, NULL, 'Gastronomía', 'Camila Restrepo', '3183334455', 'camila@elfogon.co', true, '2026-02-10T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §10. CONTACTS (legacy — espejo de contactos)
--- ════════════════════════════════════════════════════════════
-INSERT INTO contacts (id, workspace_id, full_name, phone, email, company, contact_type, client_id, promoter_id, country, created_at) VALUES
-  ('22220000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Carolina Mejía', '3101112233', 'carolina@technova.co', 'TechNova SAS', 'decision_maker', '33330000-0000-0000-0000-000000000001', NULL, 'Colombia', '2025-01-05T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', 'Andrés Gutiérrez', '3114445566', 'andres@cafemontanero.com', 'Café Montañero', 'decision_maker', '33330000-0000-0000-0000-000000000002', NULL, 'Colombia', '2025-01-20T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', 'Valentina Ospina', '3127778899', 'valentina.ospina@gmail.com', NULL, 'promoter', NULL, '22221111-0000-0000-0000-000000000001', 'Colombia', '2025-02-10T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', 'Felipe Ruiz', '3139990011', 'felipe@altiplano.com.co', 'Constructora Altiplano SAS', 'influencer', '33330000-0000-0000-0000-000000000003', NULL, 'Colombia', '2025-03-15T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', 'Mariana Torres', '3142223344', 'mariana@raicesfundacion.org', 'Fundación Raíces', 'decision_maker', '33330000-0000-0000-0000-000000000005', NULL, 'Colombia', '2025-02-15T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', 'Ricardo Londoño', '3155556677', 'ricardo@hotelrosario.co', 'Hotel Boutique Rosario', 'operational', '33330000-0000-0000-0000-000000000004', NULL, 'Colombia', '2025-05-10T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', 'Sofía Hernández', '3168889900', 'sofia@technova.co', 'TechNova SAS', 'decision_maker', '33330000-0000-0000-0000-000000000001', NULL, 'Colombia', '2025-07-20T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', 'Diego Castaño', '3171112244', 'diego.castano@outlook.com', NULL, 'promoter', NULL, NULL, 'Colombia', '2025-01-10T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', 'Camila Restrepo', '3183334455', 'camila@elfogon.co', 'Restaurante El Fogón', 'decision_maker', '33330000-0000-0000-0000-000000000006', NULL, 'Colombia', '2026-02-10T00:00:00Z'),
-  ('22220000-0000-0000-0000-000000000010', '11111111-0000-0000-0000-000000000001', 'Julián Bedoya', '3195556688', 'julian.bedoya@gmail.com', NULL, 'decision_maker', NULL, NULL, 'Colombia', '2026-01-15T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §11. PROMOTERS (legacy — 2 promotores)
--- ════════════════════════════════════════════════════════════
-INSERT INTO promoters (id, workspace_id, name, email, phone, status, commission_pct, referrals_count, won_projects, accumulated_commission, notes, created_at) VALUES
-  ('22221111-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001',
-   'Valentina Ospina', 'valentina.ospina@gmail.com', '3127778899', 'active', 12, 3, 1, 660000,
-   'Promotora activa desde febrero 2025', '2025-02-10T00:00:00Z'),
-  ('22221111-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001',
-   'Diego Castaño', 'diego.castano@outlook.com', '3171112244', 'active', 15, 2, 0, 0,
-   'Promotor aliado desde 2024', '2025-01-10T00:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
 -- §12. OPORTUNIDADES (12 — todas las etapas del pipeline)
@@ -384,38 +322,6 @@ INSERT INTO oportunidad_notas (id, workspace_id, oportunidad_id, contenido, cana
   ('56560000-0000-0000-0000-000000000025', '11111111-0000-0000-0000-000000000001', '55555555-0000-0000-0000-000000000011', 'Camila escribió por WhatsApp preguntando por diseño de marca para su restaurante nuevo.', 'whatsapp', '2026-02-16T08:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
--- §14. OPPORTUNITIES (legacy — espejo de oportunidades)
--- ════════════════════════════════════════════════════════════
-INSERT INTO opportunities (id, workspace_id, client_id, name, description, stage, probability, estimated_value, last_action, last_action_date, estimated_close_date, lost_reason, created_at) VALUES
-  ('55550000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000001', 'Branding corporativo completo', 'Renovación imagen corporativa TechNova', 'won', 100, 8000000, 'Propuesta aceptada', '2025-01-25T00:00:00Z', '2025-02-15', NULL, '2025-01-10T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000002', 'Diseño de empaques línea premium', 'Empaques café especialidad', 'won', 100, 5500000, 'Contrato firmado', '2025-02-20T00:00:00Z', '2025-03-15', NULL, '2025-02-05T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000005', 'Sitio web institucional', 'Web para Fundación Raíces', 'lost', 0, 10000000, 'Decidieron hacer internamente', '2025-03-10T00:00:00Z', '2025-04-01', 'Presupuesto insuficiente', '2025-02-20T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000003', 'Branding + Landing page', 'Proyecto residencial Altiplano', 'won', 100, 18000000, 'Anticipo recibido', '2025-05-10T00:00:00Z', '2025-06-15', NULL, '2025-04-15T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000004', 'Campaña fotográfica temporada', 'Fotos hotel temporada alta', 'won', 100, 5000000, 'Sesión completada', '2025-06-15T00:00:00Z', '2025-07-01', NULL, '2025-05-20T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000001', 'Rediseño app móvil UI/UX', 'App TechNova rediseño', 'won', 100, 15000000, 'Kick-off realizado', '2025-09-05T00:00:00Z', '2025-12-15', NULL, '2025-08-01T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000002', 'Gestión redes sociales 6 meses', 'RRSS Café Montañero', 'won', 100, 21000000, 'Contrato firmado', '2025-11-01T00:00:00Z', '2025-11-15', NULL, '2025-10-10T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000005', 'Video institucional 3min', 'Video Fundación Raíces', 'won', 100, 12000000, 'Brief aprobado', '2025-12-05T00:00:00Z', '2026-02-28', NULL, '2025-11-15T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000003', 'Señalética proyecto residencial', 'Señalética Alturas del Poblado', 'quotation', 60, 7500000, 'Cotización enviada', '2026-01-28T00:00:00Z', '2026-03-01', NULL, '2026-01-20T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000010', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000004', 'Rediseño web + booking', 'Web Hotel Rosario', 'prospect', 40, 14000000, 'Discovery completada', '2026-02-12T00:00:00Z', '2026-04-15', NULL, '2026-02-05T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000011', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000006', 'Identidad visual restaurante', 'Marca El Fogón', 'lead', 20, 8000000, 'Primer contacto', '2026-02-16T00:00:00Z', '2026-04-01', NULL, '2026-02-15T00:00:00Z'),
-  ('55550000-0000-0000-0000-000000000012', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000006', 'Consultoría marca personal', 'Marca personal Julián', 'lead', 10, 4000000, NULL, NULL, '2026-04-01', NULL, '2026-02-20T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §15. OPPORTUNITY STAGE HISTORY (legacy — transiciones clave)
--- ════════════════════════════════════════════════════════════
-INSERT INTO opportunity_stage_history (id, workspace_id, opportunity_id, from_stage, to_stage, changed_by, created_at) VALUES
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000001', 'lead', 'prospect', '00000000-0000-0000-0000-000000000001', '2025-01-12T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000001', 'prospect', 'quotation', '00000000-0000-0000-0000-000000000001', '2025-01-18T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000001', 'quotation', 'negotiation', '00000000-0000-0000-0000-000000000001', '2025-01-22T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000001', 'negotiation', 'won', '00000000-0000-0000-0000-000000000001', '2025-01-25T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000003', 'lead', 'prospect', '00000000-0000-0000-0000-000000000001', '2025-02-25T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000003', 'prospect', 'quotation', '00000000-0000-0000-0000-000000000001', '2025-03-01T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000003', 'quotation', 'lost', '00000000-0000-0000-0000-000000000001', '2025-03-10T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000004', 'lead', 'won', '00000000-0000-0000-0000-000000000001', '2025-05-10T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000006', 'lead', 'won', '00000000-0000-0000-0000-000000000001', '2025-09-05T00:00:00Z'),
-  (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000009', 'lead', 'quotation', '00000000-0000-0000-0000-000000000001', '2026-01-28T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
 -- §16. COTIZACIONES (9 cotizaciones)
 -- ════════════════════════════════════════════════════════════
 INSERT INTO cotizaciones (id, workspace_id, oportunidad_id, consecutivo, modo, descripcion, valor_total, margen_porcentaje, costo_total, descuento_porcentaje, descuento_valor, estado, fecha_envio, fecha_validez, notas, condiciones_pago, created_at) VALUES
@@ -512,20 +418,6 @@ INSERT INTO rubros (id, item_id, tipo, descripcion, cantidad, unidad, valor_unit
   ('68686868-0000-0000-0000-000000000016', '67676767-0000-0000-0000-000000000014', 'viaticos', 'Transporte y alimentación rodaje', 2, 'día', 250000, 3);
 
 -- ════════════════════════════════════════════════════════════
--- §19. QUOTES (legacy — espejo de cotizaciones)
--- ════════════════════════════════════════════════════════════
-INSERT INTO quotes (id, workspace_id, opportunity_id, name, client_id, number, total_amount, margin_pct, status, sent_at, valid_until, notes, created_at) VALUES
-  ('66660000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000001', 'Branding TechNova', '33330000-0000-0000-0000-000000000001', 'COT-2025-0001', 8000000, 60, 'accepted', '2025-01-18T14:00:00Z', '2025-02-18', NULL, '2025-01-18T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000002', 'Empaques Montañero', '33330000-0000-0000-0000-000000000002', 'COT-2025-0002', 5500000, 56, 'accepted', '2025-02-12T16:00:00Z', '2025-03-12', NULL, '2025-02-12T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000003', 'Web Fundación', '33330000-0000-0000-0000-000000000005', 'COT-2025-0003', 10000000, 50, 'rejected', '2025-03-01T15:00:00Z', '2025-04-01', NULL, '2025-03-01T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000004', 'Branding+Web Altiplano', '33330000-0000-0000-0000-000000000003', 'COT-2025-0004', 18000000, 58, 'accepted', '2025-04-28T14:00:00Z', '2025-05-28', NULL, '2025-04-28T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000005', 'Fotos Hotel Rosario', '33330000-0000-0000-0000-000000000004', 'COT-2025-0005', 5000000, 60, 'accepted', '2025-06-01T09:00:00Z', '2025-07-01', NULL, '2025-06-01T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000006', 'App TechNova', '33330000-0000-0000-0000-000000000001', 'COT-2025-0006', 15000000, 55, 'accepted', '2025-08-20T11:00:00Z', '2025-09-20', NULL, '2025-08-20T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000007', 'RRSS Montañero', '33330000-0000-0000-0000-000000000002', 'COT-2025-0007', 21000000, 49, 'accepted', '2025-10-20T10:00:00Z', '2025-11-20', NULL, '2025-10-20T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000008', 'Video Fundación', '33330000-0000-0000-0000-000000000005', 'COT-2025-0008', 12000000, 38, 'accepted', '2025-11-28T14:00:00Z', '2025-12-28', NULL, '2025-11-28T00:00:00Z'),
-  ('66660000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000009', 'Señalética Altiplano', '33330000-0000-0000-0000-000000000003', 'COT-2026-0001', 7500000, 53, 'sent', '2026-01-28T15:00:00Z', '2026-02-28', NULL, '2026-01-28T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
 -- §20. PROYECTOS (8 — 4 cerrados, 2 en ejecución, 1 pausado, 1 interno)
 -- ════════════════════════════════════════════════════════════
 INSERT INTO proyectos (id, workspace_id, oportunidad_id, cotizacion_id, empresa_id, contacto_id, nombre, tipo, estado, presupuesto_total, horas_estimadas, avance_porcentaje, ganancia_estimada, retenciones_estimadas, fecha_inicio, fecha_fin_estimada, fecha_cierre, notas_cierre, lecciones_aprendidas, cierre_snapshot, created_at) VALUES
@@ -611,12 +503,12 @@ INSERT INTO proyecto_rubros (id, proyecto_id, nombre, presupuestado, tipo, canti
   -- P3: Altiplano Branding+Web
   ('78787878-0000-0000-0000-000000000007', '77777777-0000-0000-0000-000000000003', 'Dirección creativa', 4500000, 'mo_propia', 120, 'hora', 37500, '2025-05-12T00:00:00Z'),
   ('78787878-0000-0000-0000-000000000008', '77777777-0000-0000-0000-000000000003', 'Diseño y desarrollo', 3750000, 'mo_terceros', 150, 'hora', 25000, '2025-05-12T00:00:00Z'),
-  ('78787878-0000-0000-0000-000000000009', '77777777-0000-0000-0000-000000000003', 'Render 3D', 1500000, 'servicios_profesionales', 1, 'und', 1500000, '2025-05-12T00:00:00Z'),
+  ('78787878-0000-0000-0000-000000000009', '77777777-0000-0000-0000-000000000003', 'Render 3D', 1500000, 'servicios_prof', 1, 'und', 1500000, '2025-05-12T00:00:00Z'),
   ('78787878-0000-0000-0000-000000000010', '77777777-0000-0000-0000-000000000003', 'Software y hosting', 750000, 'software', 1, 'global', 750000, '2025-05-12T00:00:00Z'),
   -- P4: Fotos Hotel Rosario
   ('78787878-0000-0000-0000-000000000011', '77777777-0000-0000-0000-000000000004', 'Dirección y edición', 1500000, 'mo_propia', 40, 'hora', 37500, '2025-06-05T00:00:00Z'),
   ('78787878-0000-0000-0000-000000000012', '77777777-0000-0000-0000-000000000004', 'Alquiler equipo fotográfico', 800000, 'materiales', 2, 'día', 400000, '2025-06-05T00:00:00Z'),
-  ('78787878-0000-0000-0000-000000000013', '77777777-0000-0000-0000-000000000004', 'Transporte', 350000, 'transporte', 1, 'global', 350000, '2025-06-05T00:00:00Z'),
+  ('78787878-0000-0000-0000-000000000013', '77777777-0000-0000-0000-000000000004', 'Transporte', 350000, 'viaticos', 1, 'global', 350000, '2025-06-05T00:00:00Z'),
   -- P5: TechNova App
   ('78787878-0000-0000-0000-000000000014', '77777777-0000-0000-0000-000000000005', 'UX Research + Diseño', 6750000, 'mo_propia', 180, 'hora', 37500, '2025-09-08T00:00:00Z'),
   ('78787878-0000-0000-0000-000000000015', '77777777-0000-0000-0000-000000000005', 'Prototipado', 2500000, 'mo_terceros', 100, 'hora', 25000, '2025-09-08T00:00:00Z'),
@@ -624,7 +516,7 @@ INSERT INTO proyecto_rubros (id, proyecto_id, nombre, presupuestado, tipo, canti
   -- P6: Redes Café Montañero
   ('78787878-0000-0000-0000-000000000017', '77777777-0000-0000-0000-000000000006', 'Gestión redes Isabella', 7500000, 'mo_propia', 120, 'hora', 20833, '2025-11-01T00:00:00Z'),
   ('78787878-0000-0000-0000-000000000018', '77777777-0000-0000-0000-000000000006', 'Diseño posts Tomás', 3750000, 'mo_terceros', 150, 'hora', 25000, '2025-11-01T00:00:00Z'),
-  ('78787878-0000-0000-0000-000000000019', '77777777-0000-0000-0000-000000000006', 'Pauta publicitaria', 3000000, 'marketing', 6, 'mes', 500000, '2025-11-01T00:00:00Z'),
+  ('78787878-0000-0000-0000-000000000019', '77777777-0000-0000-0000-000000000006', 'Pauta publicitaria', 3000000, 'general', 6, 'mes', 500000, '2025-11-01T00:00:00Z'),
   -- P7: Video Fundación
   ('78787878-0000-0000-0000-000000000020', '77777777-0000-0000-0000-000000000007', 'Dirección de arte', 1875000, 'mo_propia', 50, 'hora', 37500, '2025-12-10T00:00:00Z'),
   ('78787878-0000-0000-0000-000000000021', '77777777-0000-0000-0000-000000000007', 'Producción audiovisual', 4500000, 'mo_terceros', 3, 'día', 1500000, '2025-12-10T00:00:00Z'),
@@ -644,19 +536,6 @@ INSERT INTO proyecto_notas (id, workspace_id, proyecto_id, contenido, canal_regi
   (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '77777777-0000-0000-0000-000000000006', 'Primer mes de gestión completado. Engagement +35%.', 'whatsapp', '2025-12-02T09:00:00Z'),
   (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '77777777-0000-0000-0000-000000000006', 'Andrés feliz con resultados. Pide más contenido de video.', 'app', '2026-01-15T15:00:00Z'),
   (gen_random_uuid(), '11111111-0000-0000-0000-000000000001', '77777777-0000-0000-0000-000000000007', 'Guión aprobado. Preproducción lista. PAUSADO por disponibilidad de la fundación para rodaje.', 'app', '2026-01-20T10:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §23. PROJECTS (legacy — espejo de proyectos)
--- ════════════════════════════════════════════════════════════
-INSERT INTO projects (id, workspace_id, client_id, opportunity_id, quote_id, name, approved_budget, start_date, estimated_end_date, status, progress_pct, closed_at, actual_cost, actual_margin_pct, lessons_learned, created_at) VALUES
-  ('77770000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000001', '66660000-0000-0000-0000-000000000001', 'TechNova Branding Corporativo', 8000000, '2025-01-27', '2025-03-15', 'closed', 100, '2025-03-10T00:00:00Z', 2950000, 63, 'Mockups ayudan a vender', '2025-01-27T00:00:00Z'),
-  ('77770000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000002', '55550000-0000-0000-0000-000000000002', '66660000-0000-0000-0000-000000000002', 'Empaques Café Montañero', 5500000, '2025-02-22', '2025-04-15', 'closed', 100, '2025-04-10T00:00:00Z', 2200000, 60, 'Pedir muestras físicas', '2025-02-22T00:00:00Z'),
-  ('77770000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000003', '55550000-0000-0000-0000-000000000004', '66660000-0000-0000-0000-000000000004', 'Altiplano Branding + Landing', 18000000, '2025-05-12', '2025-08-30', 'closed', 100, '2025-08-25T00:00:00Z', 7100000, 61, 'Entregas parciales cada 2 sem', '2025-05-12T00:00:00Z'),
-  ('77770000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000004', '55550000-0000-0000-0000-000000000005', '66660000-0000-0000-0000-000000000005', 'Fotografía Hotel Rosario', 5000000, '2025-06-05', '2025-07-15', 'closed', 100, '2025-07-12T00:00:00Z', 1850000, 63, 'Equipo de respaldo en exteriores', '2025-06-05T00:00:00Z'),
-  ('77770000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000001', '55550000-0000-0000-0000-000000000006', '66660000-0000-0000-0000-000000000006', 'TechNova App UI/UX', 15000000, '2025-09-08', '2026-01-30', 'active', 65, NULL, NULL, NULL, NULL, '2025-09-08T00:00:00Z'),
-  ('77770000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000002', '55550000-0000-0000-0000-000000000007', '66660000-0000-0000-0000-000000000007', 'Redes Sociales Café Montañero', 21000000, '2025-11-01', '2026-04-30', 'active', 55, NULL, NULL, NULL, NULL, '2025-11-01T00:00:00Z'),
-  ('77770000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', '33330000-0000-0000-0000-000000000005', '55550000-0000-0000-0000-000000000008', '66660000-0000-0000-0000-000000000008', 'Video Fundación Raíces', 12000000, '2025-12-10', '2026-03-15', 'paused', 30, NULL, NULL, NULL, NULL, '2025-12-10T00:00:00Z'),
-  ('77770000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', NULL, NULL, NULL, 'Portafolio Lúmina 2026', 0, '2026-01-06', '2026-03-01', 'active', 45, NULL, NULL, NULL, NULL, '2026-01-06T00:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
 -- §24. HORAS (time entries — tabla española)
@@ -827,50 +706,6 @@ INSERT INTO horas (id, workspace_id, proyecto_id, staff_id, fecha, horas, descri
   ('eeeeeeee-0000-0000-0000-000000000145', '11111111-0000-0000-0000-000000000001', '77777777-0000-0000-0000-000000000008', '44444444-0000-0000-0000-000000000001', '2026-01-28', 3, 'Selección fotografías para cada caso de estudio', 'app', '2026-01-28T09:00:00Z'),
   ('eeeeeeee-0000-0000-0000-000000000146', '11111111-0000-0000-0000-000000000001', '77777777-0000-0000-0000-000000000008', '44444444-0000-0000-0000-000000000002', '2026-02-04', 2, 'Exportación y optimización imágenes web', 'app', '2026-02-04T10:00:00Z'),
   ('eeeeeeee-0000-0000-0000-000000000147', '11111111-0000-0000-0000-000000000001', '77777777-0000-0000-0000-000000000008', '44444444-0000-0000-0000-000000000001', '2026-02-11', 2, 'Revisión final textos y diseño — ajustes menores', 'app', '2026-02-11T14:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §25. TIME_ENTRIES (legacy — espejo de horas)
--- ════════════════════════════════════════════════════════════
--- ~30 entradas representativas usando project IDs legacy (77770000-...)
-INSERT INTO time_entries (id, workspace_id, project_id, user_id, entry_date, hours, activity, source, created_at) VALUES
-  -- P1: TechNova Branding
-  ('eeee0000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', '2025-01-28', 6, 'Brand research and competitor analysis', 'app', '2025-01-28T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', '2025-02-03', 6, 'Logo iteration and typography selection', 'app', '2025-02-03T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', '2025-02-12', 6, 'Brand manual — foundations section', 'app', '2025-02-12T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', '2025-03-07', 7, 'Final delivery and brand training', 'app', '2025-03-07T09:00:00Z'),
-  -- P2: Empaques Montañero
-  ('eeee0000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', '2025-02-24', 5, 'Packaging briefing and premium coffee research', 'app', '2025-02-24T14:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', '2025-03-10', 4, 'First proposal presentation to client', 'whatsapp', '2025-03-10T10:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', '2025-03-24', 3, 'Print proof supervision — color adjustments', 'app', '2025-03-24T11:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', '2025-04-07', 4, 'Final delivery and client approval', 'app', '2025-04-07T14:00:00Z'),
-  -- P3: Altiplano Branding+Web
-  ('eeee0000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '2025-05-13', 6, 'Kickoff — construction company brand research', 'app', '2025-05-13T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000010', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '2025-06-02', 8, 'Landing wireframes and user flow', 'app', '2025-06-02T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000011', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '2025-07-01', 8, '3D render integration — residential facade', 'app', '2025-07-01T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000012', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '2025-07-14', 8, 'Production deploy and hosting setup', 'app', '2025-07-14T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000013', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '2025-08-18', 6, 'Final presentation and team training', 'app', '2025-08-18T14:00:00Z'),
-  -- P4: Hotel Rosario Photos
-  ('eeee0000-0000-0000-0000-000000000014', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', '2025-06-12', 8, 'Photo session day 1 — rooms and lobby', 'app', '2025-06-12T07:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000015', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', '2025-06-13', 8, 'Photo session day 2 — restaurant and exteriors', 'app', '2025-06-13T07:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000016', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', '2025-06-19', 4, 'Photo retouching batch 1 — rooms', 'app', '2025-06-19T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000017', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', '2025-07-01', 3, 'Gallery delivery — web formats', 'app', '2025-07-01T14:00:00Z'),
-  -- P5: TechNova App
-  ('eeee0000-0000-0000-0000-000000000018', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', '2025-09-09', 6, 'App redesign kickoff workshop', 'app', '2025-09-09T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000019', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', '2025-10-06', 5, 'Low-fi wireframes — reports module', 'app', '2025-10-06T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000020', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', '2025-11-10', 5, 'Hi-fi UI — reports screens', 'app', '2025-11-10T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000021', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', '2025-12-08', 5, 'Design system documentation', 'app', '2025-12-08T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000022', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', '2026-01-12', 6, 'Visual QA — module 1 implementation review', 'app', '2026-01-12T09:00:00Z'),
-  -- P6: Redes Montañero
-  ('eeee0000-0000-0000-0000-000000000023', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001', '2025-11-03', 5, 'Social media strategy — November content plan', 'app', '2025-11-03T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000024', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001', '2025-12-01', 6, 'Christmas content creation — coffee and holidays', 'app', '2025-12-01T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000025', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001', '2026-01-13', 5, 'Q4 metrics review — quarterly report for client', 'app', '2026-01-13T14:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000026', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001', '2026-02-05', 3, 'January metrics review — strategy adjustment', 'whatsapp', '2026-02-05T15:00:00Z'),
-  -- P7: Video Fundación
-  ('eeee0000-0000-0000-0000-000000000027', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000007', '00000000-0000-0000-0000-000000000001', '2025-12-11', 5, 'Foundation briefing — institutional video goals', 'app', '2025-12-11T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000028', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000007', '00000000-0000-0000-0000-000000000001', '2025-12-18', 5, 'Script writing — narrative structure', 'app', '2025-12-18T09:00:00Z'),
-  ('eeee0000-0000-0000-0000-000000000029', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000007', '00000000-0000-0000-0000-000000000001', '2026-01-15', 3, 'Script and storyboard presentation to foundation', 'whatsapp', '2026-01-15T11:00:00Z'),
-  -- P8: Portafolio Lúmina
-  ('eeee0000-0000-0000-0000-000000000030', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000001', '2026-01-07', 4, 'Portfolio structure definition — sections and cases', 'app', '2026-01-07T09:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
 -- §26. GASTOS_FIJOS_CONFIG — 6 gastos fijos recurrentes
@@ -1153,66 +988,6 @@ WHERE b.gasto_id = g.id
   AND g.tipo = 'fijo';
 
 -- ════════════════════════════════════════════════════════════
--- §30a. EXPENSE_CATEGORIES — Seed manual (trigger disabled en replica)
--- ════════════════════════════════════════════════════════════
-INSERT INTO expense_categories (id, workspace_id, name, is_deductible, deduction_pct, sort_order) VALUES
-  ('ecececec-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Materiales e insumos', 'yes', 100, 1),
-  ('ecececec-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', 'Transporte y movilidad', 'yes', 100, 2),
-  ('ecececec-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', 'Alimentación trabajo', 'partial', 50, 3),
-  ('ecececec-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', 'Servicios profesionales', 'yes', 100, 4),
-  ('ecececec-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', 'Software y tecnología', 'yes', 100, 5),
-  ('ecececec-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', 'Arriendo y servicios', 'yes', 100, 6),
-  ('ecececec-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', 'Marketing y publicidad', 'yes', 100, 7),
-  ('ecececec-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', 'Capacitación', 'yes', 100, 8),
-  ('ecececec-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', 'Otros gastos operativos', 'partial', 50, 9);
-
--- ════════════════════════════════════════════════════════════
--- §30b. FIXED_EXPENSES (legacy — espejo de gastos_fijos_config)
--- ════════════════════════════════════════════════════════════
-INSERT INTO fixed_expenses (id, workspace_id, category_id, description, monthly_amount, is_active, created_at) VALUES
-  ('fe000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000006', 'Arriendo oficina cowork', 2800000, true, '2025-01-01T00:00:00Z'),
-  ('fe000000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000005', 'Internet fibra óptica', 180000, true, '2025-01-01T00:00:00Z'),
-  ('fe000000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000005', 'Adobe Creative Cloud', 350000, true, '2025-01-01T00:00:00Z'),
-  ('fe000000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000002', 'Transporte mensual', 400000, true, '2025-01-01T00:00:00Z'),
-  ('fe000000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000004', 'Contador honorarios', 800000, true, '2025-01-01T00:00:00Z'),
-  ('fe000000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000007', 'Pauta redes propias', 500000, true, '2025-01-01T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §30. EXPENSES (legacy) — 30 entradas representativas
--- ════════════════════════════════════════════════════════════
-INSERT INTO expenses (id, workspace_id, project_id, category_id, expense_date, amount, description, support_url, is_rework, source, created_at) VALUES
-  ('aaaa0000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000005', '2025-02-03', 450000, 'Typography license — Satoshi family', NULL, false, 'app', '2025-02-03T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000001', '2025-02-15', 120000, 'Brand manual printing — first draft', NULL, false, 'app', '2025-02-15T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000001', '2025-03-10', 250000, 'Final brand manual — premium printing', NULL, false, 'app', '2025-03-10T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', 'ecececec-0000-0000-0000-000000000001', '2025-03-05', 80000, 'Mockup revision printing', NULL, true, 'app', '2025-03-05T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', 'ecececec-0000-0000-0000-000000000001', '2025-03-01', 350000, 'Package print proofs — round 1', NULL, false, 'app', '2025-03-01T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', 'ecececec-0000-0000-0000-000000000001', '2025-03-15', 80000, 'Coffee samples for photo reference', NULL, false, 'app', '2025-03-15T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', 'ecececec-0000-0000-0000-000000000001', '2025-04-01', 180000, 'Package print proofs — round 2 corrections', NULL, true, 'app', '2025-04-01T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', 'ecececec-0000-0000-0000-000000000005', '2025-05-25', 150000, 'Domain altiplano.co registration', NULL, false, 'app', '2025-05-25T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', 'ecececec-0000-0000-0000-000000000004', '2025-06-20', 1500000, '3D render — external vendor', NULL, false, 'app', '2025-06-20T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000010', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', 'ecececec-0000-0000-0000-000000000005', '2025-07-05', 250000, 'Web hosting annual plan', NULL, false, 'app', '2025-07-05T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000011', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', 'ecececec-0000-0000-0000-000000000001', '2025-08-10', 300000, 'Corporate brochure printing 500 units', NULL, false, 'app', '2025-08-10T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000012', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', 'ecececec-0000-0000-0000-000000000001', '2025-06-11', 800000, 'Camera equipment rental — Canon R5', NULL, false, 'app', '2025-06-11T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000013', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', 'ecececec-0000-0000-0000-000000000002', '2025-06-12', 200000, 'Transport to hotel — crew + equipment', NULL, false, 'app', '2025-06-12T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000014', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', 'ecececec-0000-0000-0000-000000000003', '2025-06-13', 150000, 'Crew meals during photo shoot', NULL, false, 'app', '2025-06-13T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000015', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', 'ecececec-0000-0000-0000-000000000005', '2025-09-15', 350000, 'Figma team license — professional', NULL, false, 'app', '2025-09-15T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000016', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', 'ecececec-0000-0000-0000-000000000005', '2025-10-20', 180000, 'Testing tools — Maze + Hotjar', NULL, false, 'app', '2025-10-20T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000017', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', 'ecececec-0000-0000-0000-000000000002', '2025-11-05', 120000, 'Travel to TechNova dev team meeting', NULL, false, 'whatsapp', '2025-11-05T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000018', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', 'ecececec-0000-0000-0000-000000000005', '2025-12-01', 95000, 'Icon library premium subscription', NULL, false, 'app', '2025-12-01T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000019', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'ecececec-0000-0000-0000-000000000007', '2025-11-15', 500000, 'Instagram ads — November campaign', NULL, false, 'app', '2025-11-15T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000020', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'ecececec-0000-0000-0000-000000000007', '2025-12-15', 500000, 'Instagram ads — December campaign', NULL, false, 'app', '2025-12-15T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000021', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'ecececec-0000-0000-0000-000000000005', '2025-11-20', 120000, 'Stock photos pack — Shutterstock', NULL, false, 'app', '2025-11-20T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000022', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'ecececec-0000-0000-0000-000000000001', '2025-12-03', 80000, 'Christmas photo session props', NULL, false, 'app', '2025-12-03T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000023', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'ecececec-0000-0000-0000-000000000007', '2026-01-15', 500000, 'Instagram ads — January campaign', NULL, false, 'app', '2026-01-15T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000024', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000007', 'ecececec-0000-0000-0000-000000000001', '2026-01-22', 1000000, 'Video equipment rental — camera, lights, audio', NULL, false, 'app', '2026-01-22T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000025', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000007', 'ecececec-0000-0000-0000-000000000003', '2026-01-23', 150000, 'Catering for shoot day', NULL, false, 'app', '2026-01-23T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000026', '11111111-0000-0000-0000-000000000001', NULL, 'ecececec-0000-0000-0000-000000000009', '2025-01-15', 85000, 'Office supplies — paper, post-its', NULL, false, 'app', '2025-01-15T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000027', '11111111-0000-0000-0000-000000000001', NULL, 'ecececec-0000-0000-0000-000000000002', '2025-04-18', 65000, 'Taxi to various client meetings', NULL, false, 'whatsapp', '2025-04-18T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000028', '11111111-0000-0000-0000-000000000001', NULL, 'ecececec-0000-0000-0000-000000000008', '2025-06-10', 180000, 'Typography workshop registration', NULL, false, 'app', '2025-06-10T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000029', '11111111-0000-0000-0000-000000000001', NULL, 'ecececec-0000-0000-0000-000000000008', '2025-10-12', 250000, 'Framer advanced course — design team', NULL, false, 'app', '2025-10-12T10:00:00Z'),
-  ('aaaa0000-0000-0000-0000-000000000030', '11111111-0000-0000-0000-000000000001', NULL, 'ecececec-0000-0000-0000-000000000009', '2025-12-15', 320000, 'Christmas gifts for clients', NULL, false, 'app', '2025-12-15T10:00:00Z');
-
--- ════════════════════════════════════════════════════════════
 -- §31. FACTURAS (16 facturas across projects)
 -- ════════════════════════════════════════════════════════════
 INSERT INTO facturas (id, workspace_id, proyecto_id, numero_factura, monto, fecha_emision, notas, canal_registro, created_at) VALUES
@@ -1269,64 +1044,6 @@ INSERT INTO cobros (id, workspace_id, factura_id, proyecto_id, monto, fecha, not
   ('99999999-0000-0000-0000-000000000016', '11111111-0000-0000-0000-000000000001', '88888888-0000-0000-0000-000000000016', '77777777-0000-0000-0000-000000000007', 4800000, '2025-12-20', 'Pago anticipo video institucional', 'app', '2025-12-20T10:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
--- §33. INVOICES (legacy — espejo de facturas)
--- ════════════════════════════════════════════════════════════
-INSERT INTO invoices (id, workspace_id, project_id, concept, gross_amount, due_date, status, notes, created_at) VALUES
-  -- P1: TechNova Branding — collected
-  ('88880000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', 'Anticipo branding corporativo 50%', 4000000, '2025-02-10', 'collected', 'FE-001', '2025-01-27T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000001', 'Saldo final branding corporativo', 4000000, '2025-03-25', 'collected', 'FE-002', '2025-03-10T10:00:00Z'),
-  -- P2: Empaques — collected
-  ('88880000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', 'Anticipo diseño empaques 40%', 2200000, '2025-03-08', 'collected', 'FE-003', '2025-02-22T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000002', 'Saldo final empaques premium', 3300000, '2025-04-25', 'collected', 'FE-004', '2025-04-10T10:00:00Z'),
-  -- P3: Altiplano — collected
-  ('88880000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', 'Anticipo branding + landing 40%', 7200000, '2025-05-26', 'collected', 'FE-005', '2025-05-12T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', 'Avance 70% — entrega branding', 5400000, '2025-07-15', 'collected', 'FE-006', '2025-07-01T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000003', 'Saldo final — entrega landing', 5400000, '2025-09-08', 'collected', 'FE-007', '2025-08-25T10:00:00Z'),
-  -- P4: Hotel Rosario — collected
-  ('88880000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', 'Anticipo sesión fotográfica 50%', 2500000, '2025-06-19', 'collected', 'FE-008', '2025-06-05T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000004', 'Saldo final fotografía hotel', 2500000, '2025-07-26', 'collected', 'FE-009', '2025-07-12T10:00:00Z'),
-  -- P5: TechNova App — collected (both invoiced amounts paid)
-  ('88880000-0000-0000-0000-000000000010', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', 'Anticipo rediseño UI/UX fase 1', 4500000, '2025-09-22', 'collected', 'FE-010', '2025-09-08T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000011', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', 'Avance fase 2 — wireframes', 4500000, '2025-11-29', 'collected', 'FE-011', '2025-11-15T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000012', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000005', 'Milestone fase 3 — prototipos', 6000000, '2026-03-15', 'scheduled', 'Próximo hito por facturar', '2026-02-20T10:00:00Z'),
-  -- P6: Redes Café Montañero — mixed statuses
-  ('88880000-0000-0000-0000-000000000013', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'Mes 1 — gestión redes noviembre', 3500000, '2025-11-15', 'collected', 'FE-012', '2025-11-01T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000014', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'Mes 2 — gestión redes diciembre', 3500000, '2025-12-15', 'collected', 'FE-013', '2025-12-01T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000015', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'Mes 3 — gestión redes enero', 3500000, '2026-01-15', 'collected', 'FE-014', '2026-01-01T10:00:00Z'),
-  ('88880000-0000-0000-0000-000000000016', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000006', 'Mes 4 — gestión redes febrero', 3500000, '2026-02-15', 'partial', 'FE-015 — $2M de $3.5M cobrado', '2026-02-01T10:00:00Z'),
-  -- P7: Video Fundación Raíces — collected (anticipo)
-  ('88880000-0000-0000-0000-000000000017', '11111111-0000-0000-0000-000000000001', '77770000-0000-0000-0000-000000000007', 'Anticipo video institucional 40%', 4800000, '2025-12-24', 'collected', 'FE-016', '2025-12-10T10:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §34. PAYMENTS (legacy — espejo de cobros)
--- Retención ~4% para agentes retenedores (TechNova, Altiplano, Hotel Rosario)
--- ════════════════════════════════════════════════════════════
-INSERT INTO payments (id, workspace_id, invoice_id, net_received, payment_date, payment_method, retention_applied, source, reference, created_at) VALUES
-  -- P1: TechNova Branding (agente_retenedor=true, ~4% retention)
-  ('99990000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000001', 3840000, '2025-02-05', 'transfer', 160000, 'app', 'TRF-20250205-001', '2025-02-05T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000002', 3840000, '2025-03-15', 'transfer', 160000, 'app', 'TRF-20250315-001', '2025-03-15T10:00:00Z'),
-  -- P2: Empaques Café Montañero (agente_retenedor=false, no retention)
-  ('99990000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000003', 2200000, '2025-03-01', 'transfer', 0, 'app', 'TRF-20250301-001', '2025-03-01T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000004', 3300000, '2025-04-15', 'transfer', 0, 'app', 'TRF-20250415-001', '2025-04-15T10:00:00Z'),
-  -- P3: Altiplano (agente_retenedor=true, ~4% retention)
-  ('99990000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000005', 6912000, '2025-05-20', 'transfer', 288000, 'app', 'TRF-20250520-001', '2025-05-20T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000006', 5184000, '2025-07-10', 'transfer', 216000, 'app', 'TRF-20250710-001', '2025-07-10T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000007', 5184000, '2025-09-01', 'check', 216000, 'app', 'CHQ-20250901-001', '2025-09-01T10:00:00Z'),
-  -- P4: Hotel Rosario (agente_retenedor=true, ~4% retention)
-  ('99990000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000008', 2400000, '2025-06-10', 'transfer', 100000, 'app', 'TRF-20250610-001', '2025-06-10T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000009', 2400000, '2025-07-18', 'transfer', 100000, 'app', 'TRF-20250718-001', '2025-07-18T10:00:00Z'),
-  -- P5: TechNova App (agente_retenedor=true, ~4% retention)
-  ('99990000-0000-0000-0000-000000000010', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000010', 4320000, '2025-09-20', 'transfer', 180000, 'app', 'TRF-20250920-001', '2025-09-20T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000011', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000011', 4320000, '2025-12-01', 'transfer', 180000, 'app', 'TRF-20251201-001', '2025-12-01T10:00:00Z'),
-  -- P6: Redes Café Montañero (agente_retenedor=false, no retention)
-  ('99990000-0000-0000-0000-000000000012', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000013', 3500000, '2025-11-10', 'transfer', 0, 'app', 'TRF-20251110-001', '2025-11-10T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000013', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000014', 3500000, '2025-12-10', 'transfer', 0, 'app', 'TRF-20251210-001', '2025-12-10T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000014', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000015', 3500000, '2026-01-10', 'transfer', 0, 'app', 'TRF-20260110-001', '2026-01-10T10:00:00Z'),
-  ('99990000-0000-0000-0000-000000000015', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000016', 2000000, '2026-02-15', 'transfer', 0, 'app', 'TRF-20260215-001', '2026-02-15T10:00:00Z'),
-  -- P7: Video Fundación Raíces (agente_retenedor=false, no retention)
-  ('99990000-0000-0000-0000-000000000016', '11111111-0000-0000-0000-000000000001', '88880000-0000-0000-0000-000000000017', 4800000, '2025-12-20', 'check', 0, 'app', 'CHQ-20251220-001', '2025-12-20T10:00:00Z');
-
--- ════════════════════════════════════════════════════════════
 -- §35. CONFIG_METAS (14 months of sales/collection targets)
 -- ════════════════════════════════════════════════════════════
 INSERT INTO config_metas (id, workspace_id, mes, meta_ventas_mensual, meta_recaudo_mensual, created_at) VALUES
@@ -1365,31 +1082,6 @@ INSERT INTO saldos_banco (id, workspace_id, saldo_real, saldo_teorico, diferenci
   ('dddddddd-0000-0000-0000-000000000014', '11111111-0000-0000-0000-000000000001', 43800000, 44100000, -300000, '2026-02-25T18:00:00Z', 'app', 'Parcial feb', '2026-02-25T18:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
--- §37. BANK_ACCOUNTS (legacy — 1 account)
--- ════════════════════════════════════════════════════════════
-INSERT INTO bank_accounts (id, workspace_id, bank_name, account_name, account_type, is_primary, is_active, created_at) VALUES
-  ('ba000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Bancolombia', 'Cuenta Ahorros Lúmina', 'savings', true, true, '2025-01-01T00:00:00Z');
-
--- ════════════════════════════════════════════════════════════
--- §38. BANK_BALANCES (legacy — 14 entries)
--- ════════════════════════════════════════════════════════════
-INSERT INTO bank_balances (id, workspace_id, account_id, balance, notes, recorded_at) VALUES
-  ('bb000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 5200000, 'Conciliación ene', '2025-01-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 7800000, 'Conciliación feb', '2025-02-28T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 11500000, 'Conciliación mar', '2025-03-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 14200000, 'Conciliación abr', '2025-04-30T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000005', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 20100000, 'Conciliación may', '2025-05-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000006', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 22500000, 'Conciliación jun', '2025-06-30T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000007', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 27300000, 'Conciliación jul', '2025-07-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000008', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 26800000, 'Conciliación ago', '2025-08-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000009', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 30500000, 'Conciliación sep', '2025-09-30T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000010', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 29800000, 'Conciliación oct', '2025-10-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000011', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 35200000, 'Conciliación nov', '2025-11-30T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000012', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 42100000, 'Conciliación dic', '2025-12-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000013', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 44500000, 'Conciliación ene', '2026-01-31T18:00:00Z'),
-  ('bb000000-0000-0000-0000-000000000014', '11111111-0000-0000-0000-000000000001', 'ba000000-0000-0000-0000-000000000001', 43800000, 'Parcial feb', '2026-02-25T18:00:00Z');
-
--- ════════════════════════════════════════════════════════════
 -- §39. CONFIG_FINANCIERA
 -- ════════════════════════════════════════════════════════════
 INSERT INTO config_financiera (id, workspace_id, margen_contribucion_estimado, margen_contribucion_calculado, margen_fuente, n_proyectos_margen, created_at) VALUES
@@ -1399,15 +1091,15 @@ INSERT INTO config_financiera (id, workspace_id, margen_contribucion_estimado, m
 -- §40. COSTOS_REFERENCIA (3 service type averages)
 -- ════════════════════════════════════════════════════════════
 INSERT INTO costos_referencia (id, workspace_id, tipo_servicio, horas_promedio, costo_promedio, margen_promedio, proyectos_base, updated_at) VALUES
-  ('cr000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Branding', 85.00, 3200000, 60.00, 2, '2026-02-25T00:00:00Z'),
-  ('cr000000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', 'Diseño Web', 195.00, 7100000, 61.00, 1, '2026-02-25T00:00:00Z'),
-  ('cr000000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', 'Fotografía', 38.00, 1850000, 63.00, 1, '2026-02-25T00:00:00Z');
+  ('c0000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Branding', 85.00, 3200000, 60.00, 2, '2026-02-25T00:00:00Z'),
+  ('c0000000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', 'Diseño Web', 195.00, 7100000, 61.00, 1, '2026-02-25T00:00:00Z'),
+  ('c0000000-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', 'Fotografía', 38.00, 1850000, 63.00, 1, '2026-02-25T00:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
 -- §41. STREAKS
 -- ════════════════════════════════════════════════════════════
 INSERT INTO streaks (id, workspace_id, tipo, semanas_actuales, semanas_record, ultima_actualizacion, streak_inicio, created_at) VALUES
-  ('st000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'conciliacion', 8, 12, '2026-02-23T18:00:00Z', '2025-12-29', '2025-12-29T00:00:00Z');
+  ('50000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'conciliacion', 8, 12, '2026-02-23T18:00:00Z', '2025-12-29', '2025-12-29T00:00:00Z');
 
 -- ════════════════════════════════════════════════════════════
 -- §FINAL. Re-enable triggers and RLS
