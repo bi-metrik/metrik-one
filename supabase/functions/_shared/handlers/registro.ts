@@ -66,14 +66,14 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     // No project hint — show list of active projects
     const projects = await findActiveProjects(supabase, user.workspace_id);
     if (projects.length === 0) {
-      await ctx.sendMessage('No tienes proyectos activos. ¿Quieres registrarlo como gasto operativo?');
+      await ctx.sendMessage('No tienes proyectos activos. ¿Lo registro como gasto de empresa?');
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_DIRECTO',
         pending_action: 'W01',
         amount,
         categoria,
         parsed_fields: parsed.fields,
-        options: [{ id: 'operativo', label: 'Registrar como gasto operativo' }],
+        options: [{ id: 'operativo', label: '🏢 Sí, gasto de empresa' }, { id: 'cancelar', label: 'Cancelar' }],
       });
       return;
     }
@@ -82,7 +82,7 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
       id: p.proyecto_id,
       label: `${p.nombre} — ${formatPct(Number(p.presupuesto_consumido_pct))} presupuesto usado`,
     }));
-    options.push({ id: 'operativo', label: 'Registrar como gasto operativo (sin proyecto)' });
+    options.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
 
     await ctx.sendOptions(
       `💰 Gasto de ${formatCOP(amount)} en ${concept || categoria}. ¿Para cuál proyecto?`,
@@ -106,11 +106,11 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     // No match — show active projects
     const allActive = await findActiveProjects(supabase, user.workspace_id);
     if (allActive.length === 0) {
-      await ctx.sendMessage(`❌ No encontré proyecto activo con "${entity_hint}" y no tienes otros proyectos. ¿Registrar como gasto operativo?`);
+      await ctx.sendMessage(`❌ No encontré proyecto activo con "${entity_hint}" y no tienes otros proyectos. ¿Lo registro como gasto de empresa?`);
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_DIRECTO', pending_action: 'W01',
         amount, categoria, parsed_fields: parsed.fields,
-        options: [{ id: 'operativo', label: 'Sí, registrar como gasto operativo' }, { id: 'cancelar', label: 'Cancelar' }],
+        options: [{ id: 'operativo', label: '🏢 Sí, gasto de empresa' }, { id: 'cancelar', label: 'Cancelar' }],
       });
       return;
     }
@@ -119,7 +119,7 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
       id: p.proyecto_id,
       label: bold(p.nombre),
     }));
-    options.push({ id: 'operativo', label: 'Registrar como gasto operativo (sin proyecto)' });
+    options.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
 
     await ctx.sendOptions(
       `❌ No encontré proyecto activo con "${entity_hint}".\n\nTus proyectos activos son:`,
@@ -143,7 +143,7 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     if (hasOtherProjects) {
       disambigOptions.push({ id: 'otro_proyecto', label: 'Otro proyecto' });
     }
-    disambigOptions.push({ id: 'operativo', label: 'Gasto operativo (sin proyecto)' });
+    disambigOptions.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
 
     await ctx.sendOptions(
       `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Para ${bold(p.nombre)}?`,
@@ -250,7 +250,7 @@ async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
     const activeProjects = await findActiveProjects(supabase, user.workspace_id);
     if (activeProjects.length > 0) {
       await ctx.sendMessage(
-        `💰 ${formatCOP(amount)} en ${concept || 'gasto'}.\n\n¿Este gasto es de...?\n1️⃣ 📂 Un proyecto de trabajo\n2️⃣ 🏢 Mi empresa (gasto operativo)\n\nResponde con el número.`
+        `💰 ${formatCOP(amount)} en ${concept || 'gasto'}.\n\n¿Este gasto es de...?\n1️⃣ 📂 Un proyecto\n2️⃣ 🏢 Mi empresa\n\nResponde con el número.`
       );
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_OPERATIVO', pending_action: 'W02',
@@ -258,8 +258,8 @@ async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
         parsed_fields: parsed.fields,
         disambiguation: undefined,
         options: [
-          { id: 'proyecto', label: 'Un proyecto de trabajo' },
-          { id: 'empresa', label: 'Mi empresa (gasto operativo)' },
+          { id: 'proyecto', label: '📂 Un proyecto' },
+          { id: 'empresa', label: '🏢 Mi empresa' },
         ],
       });
       return;
@@ -1144,7 +1144,7 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
       id: p.proyecto_id,
       label: bold(p.nombre),
     }));
-    newOptions.push({ id: 'operativo', label: 'Gasto operativo (sin proyecto)' });
+    newOptions.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
     await ctx.sendOptions('Tus proyectos activos:', newOptions.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', { options: newOptions });
     return;
