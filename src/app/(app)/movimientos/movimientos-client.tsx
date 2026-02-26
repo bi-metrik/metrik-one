@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen } from 'lucide-react'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Movimiento } from './actions'
 
@@ -49,6 +50,9 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
   const router = useRouter()
   const searchParams = useSearchParams()
   const neto = totales.ingresos - totales.egresos
+
+  // Soporte image lightbox
+  const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
 
   // D142: Tooltips first-time state
   const [tooltipDeducible, setTooltipDeducible] = useState(false)
@@ -219,6 +223,7 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
               <div className="space-y-1">
                 {porFecha[fecha].map(mov => {
                   const tag = getDeducibleTag(mov, regimenFiscal)
+                  const hasSoporteImage = mov.soporte_url && !mov.soporte_url.startsWith('wamid.')
                   return (
                     <div
                       key={mov.id}
@@ -234,15 +239,29 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
                       {/* Info */}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{mov.descripcion}</p>
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                          {mov.proyecto && <span className="truncate">{mov.proyecto}</span>}
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          {mov.proyecto && <span className="truncate max-w-[140px]">{mov.proyecto}</span>}
                           {mov.categoria && (
                             <>
                               {mov.proyecto && <span>·</span>}
-                              <span className="capitalize">{mov.categoria}</span>
+                              <span className="capitalize">{mov.categoria.replace(/_/g, ' ')}</span>
                             </>
                           )}
-                          {/* D142: Category-based tags */}
+                          {/* Tipo gasto badge */}
+                          {mov.tipo === 'egreso' && mov.tipo_gasto && (
+                            <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${
+                              mov.tipo_gasto === 'directo'
+                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+                                : mov.tipo_gasto === 'empresa'
+                                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300'
+                                  : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                            }`}>
+                              {mov.tipo_gasto === 'directo' && <FolderOpen className="h-2.5 w-2.5" />}
+                              {mov.tipo_gasto === 'empresa' && <Building2 className="h-2.5 w-2.5" />}
+                              {mov.tipo_gasto === 'directo' ? 'Proyecto' : mov.tipo_gasto === 'empresa' ? 'Empresa' : 'Fijo'}
+                            </span>
+                          )}
+                          {/* Deducible / Falta soporte tags */}
                           {tag === 'deducible' && (
                             <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
                               Deducible
@@ -253,8 +272,9 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
                               Falta soporte
                             </span>
                           )}
-                          {mov.soporte_url && (
-                            <FileText className="h-3 w-3 text-blue-500" />
+                          {/* Canal WhatsApp indicator */}
+                          {mov.canal_registro === 'whatsapp' && (
+                            <Smartphone className="h-3 w-3 text-green-500" />
                           )}
                         </div>
                       </div>
@@ -267,6 +287,19 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
                       }`}>
                         {mov.tipo === 'ingreso' ? '+' : '-'}{formatCOP(mov.monto)}
                       </span>
+
+                      {/* Soporte thumbnail */}
+                      {hasSoporteImage ? (
+                        <button
+                          onClick={() => setSoporteModal({ url: mov.soporte_url!, descripcion: mov.descripcion })}
+                          className="shrink-0 rounded border border-border overflow-hidden hover:ring-2 hover:ring-primary/50 transition-shadow"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={mov.soporte_url!} alt="Soporte" className="h-8 w-8 object-cover" loading="lazy" />
+                        </button>
+                      ) : mov.soporte_url ? (
+                        <span title="Soporte (foto no disponible)"><FileText className="h-4 w-4 shrink-0 text-amber-500" /></span>
+                      ) : null}
                     </div>
                   )
                 })}
@@ -275,6 +308,24 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
           ))}
         </div>
       )}
+
+      {/* Soporte image lightbox */}
+      <Dialog open={!!soporteModal} onOpenChange={() => setSoporteModal(null)}>
+        <DialogContent className="max-w-md p-2 sm:max-w-lg">
+          <DialogTitle className="sr-only">Soporte</DialogTitle>
+          {soporteModal && (
+            <div className="space-y-2">
+              <p className="truncate px-2 pt-2 text-sm font-medium">{soporteModal.descripcion}</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={soporteModal.url}
+                alt="Soporte fotográfico"
+                className="w-full rounded-lg"
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

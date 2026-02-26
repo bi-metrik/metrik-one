@@ -12,6 +12,8 @@ export type Movimiento = {
   proyecto: string | null
   deducible: boolean
   soporte_url: string | null
+  tipo_gasto: 'directo' | 'empresa' | 'fijo' | null
+  canal_registro: 'app' | 'whatsapp' | null
 }
 
 // D142: Categorías deducibles para régimen ordinario
@@ -42,7 +44,7 @@ export async function getMovimientos(filters?: {
   if (tipoFilter === 'todos' || tipoFilter === 'egresos') {
     const { data: gastos } = await supabase
       .from('gastos')
-      .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, proyecto_id, proyectos(nombre)')
+      .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre)')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
@@ -60,6 +62,8 @@ export async function getMovimientos(filters?: {
         proyecto: proy?.nombre ?? null,
         deducible: g.deducible ?? false,
         soporte_url: g.soporte_url ?? null,
+        tipo_gasto: (g.tipo as Movimiento['tipo_gasto']) ?? null,
+        canal_registro: (g.canal_registro as Movimiento['canal_registro']) ?? null,
       })
     }
   }
@@ -86,6 +90,8 @@ export async function getMovimientos(filters?: {
         proyecto: proy?.nombre ?? null,
         deducible: false,
         soporte_url: null,
+        tipo_gasto: null,
+        canal_registro: null,
       })
     }
   }

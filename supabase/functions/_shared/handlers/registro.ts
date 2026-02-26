@@ -7,6 +7,7 @@ import { AMBIGUOUS_CATEGORIES, CATEGORIA_LABELS, STREAK_MILESTONES } from '../ty
 import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, formatElapsed } from '../wa-format.ts';
 import { findProjects, findProjectByCode, findActiveProjects, findContacts, matchCategory, findMatchingBorrador } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
+import { downloadAndStoreImage } from '../wa-media.ts';
 
 export async function handleRegistro(ctx: HandlerContext): Promise<void> {
   const { parsed, session } = ctx;
@@ -1085,13 +1086,19 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
   // Handle image for soporte (W01/W02 awaiting_image)
   if (session.state === 'awaiting_image') {
     if (message.type === 'image' && message.image_id) {
-      // Store image reference
       if (context.gasto_id) {
-        await supabase
-          .from('gastos')
-          .update({ soporte_url: message.image_id, soporte_pendiente: false })
-          .eq('id', context.gasto_id);
-        await ctx.sendMessage('📷 Guardé el soporte fotográfico.');
+        // Download from WhatsApp → upload to Supabase Storage
+        const publicUrl = await downloadAndStoreImage(
+          supabase, message.image_id, user.workspace_id, context.gasto_id,
+        );
+        if (publicUrl) {
+          await supabase.from('gastos')
+            .update({ soporte_url: publicUrl, soporte_pendiente: false })
+            .eq('id', context.gasto_id);
+          await ctx.sendMessage('📷 Guardé el soporte fotográfico.');
+        } else {
+          await ctx.sendMessage('⚠️ No pude guardar la foto. Puedes subirla después desde la app.');
+        }
       }
     } else if (message.type === 'audio') {
       await ctx.sendMessage('📷 Necesito una foto del soporte, no un audio. Envía la imagen o escribe *después*.');
@@ -1099,7 +1106,7 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     } else if (['después', 'despues', 'luego'].includes(text)) {
       await ctx.sendMessage('👍 Sin problema. Puedes enviarlo después.');
     } else if (['no', 'sin soporte'].includes(text)) {
-      // Do nothing
+      // Do nothing — soporte_pendiente stays true for tracking
     }
     await completeSession(supabase, session.id);
     return;

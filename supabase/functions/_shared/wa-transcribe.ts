@@ -2,11 +2,12 @@
 // Audio Transcription — Download from Meta + Gemini 2.0 Flash
 // ============================================================
 
-const META_API_VERSION = 'v21.0';
+import { getMediaUrl, downloadMediaBinary } from './wa-media.ts';
+
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
 // WhatsApp sends audio/ogg; codecs=opus — normalize to base mime
-function normalizeMimeType(raw: string): string {
+function normalizeAudioMimeType(raw: string): string {
   const base = raw.split(';')[0].trim().toLowerCase();
   // Map WhatsApp audio types to Gemini-supported types
   const mimeMap: Record<string, string> = {
@@ -46,14 +47,16 @@ export async function transcribeAudio(audioId: string): Promise<TranscribeResult
     console.log(`[wa-transcribe] Got media URL (${mediaUrl.slice(0, 80)}...)`);
 
     // 2. Download audio binary
-    const audioData = await downloadMedia(mediaUrl);
+    const audioData = await downloadMediaBinary(mediaUrl);
     if (!audioData) {
       return { text: null, error: 'META_DOWNLOAD_FAIL: No pude descargar el audio' };
     }
-    console.log(`[wa-transcribe] Downloaded ${audioData.sizeKB}KB, raw mime: "${audioData.rawMimeType}", normalized: "${audioData.mimeType}"`);
+    const mimeType = normalizeAudioMimeType(audioData.rawMimeType);
+    const base64 = uint8ToBase64(audioData.buffer);
+    console.log(`[wa-transcribe] Downloaded ${audioData.sizeKB}KB, raw mime: "${audioData.rawMimeType}", normalized: "${mimeType}"`);
 
     // 3. Transcribe with Gemini
-    const result = await geminiTranscribe(audioData.base64, audioData.mimeType);
+    const result = await geminiTranscribe(base64, mimeType);
     if (!result.text) {
       return { text: null, error: result.error || 'GEMINI_EMPTY: Gemini no devolvió texto' };
     }
@@ -64,57 +67,6 @@ export async function transcribeAudio(audioId: string): Promise<TranscribeResult
     console.error('[wa-transcribe] Unhandled error:', err);
     return { text: null, error: `EXCEPTION: ${String(err).slice(0, 200)}` };
   }
-}
-
-// ============================================================
-// Meta Media Download
-// ============================================================
-
-async function getMediaUrl(mediaId: string): Promise<string | null> {
-  const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN');
-  if (!token) {
-    console.error('[wa-transcribe] WHATSAPP_ACCESS_TOKEN not set');
-    return null;
-  }
-
-  const res = await fetch(
-    `https://graph.facebook.com/${META_API_VERSION}/${mediaId}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    console.error(`[wa-transcribe] Meta media GET failed: ${res.status} — ${errBody.slice(0, 200)}`);
-    return null;
-  }
-
-  const data = await res.json();
-  return data.url || null;
-}
-
-async function downloadMedia(
-  url: string,
-): Promise<{ base64: string; mimeType: string; rawMimeType: string; sizeKB: number } | null> {
-  const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN');
-  if (!token) return null;
-
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    console.error(`[wa-transcribe] Media download failed: ${res.status} — ${errBody.slice(0, 200)}`);
-    return null;
-  }
-
-  const rawMimeType = res.headers.get('content-type') || 'audio/ogg';
-  const mimeType = normalizeMimeType(rawMimeType);
-  const buffer = new Uint8Array(await res.arrayBuffer());
-  const sizeKB = Math.round(buffer.length / 1024);
-  const base64 = uint8ToBase64(buffer);
-
-  return { base64, mimeType, rawMimeType, sizeKB };
 }
 
 /** Convert Uint8Array to base64 in chunks to avoid call stack overflow */
