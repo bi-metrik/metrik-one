@@ -77,21 +77,17 @@ END $$;
 -- ════════════════════════════════════════════════════════════
 -- §1. AUTH USER
 -- ════════════════════════════════════════════════════════════
-INSERT INTO auth.users (
-  id, instance_id, aud, role, email, encrypted_password,
-  email_confirmed_at, created_at, updated_at,
-  raw_app_meta_data, raw_user_meta_data, is_super_admin
-) VALUES (
-  '00000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000000',
-  'authenticated', 'authenticated',
-  'demo@metrik.com.co',
-  crypt('demo1234', gen_salt('bf')),
-  now(), '2025-01-01T00:00:00Z', now(),
-  '{"provider":"email","providers":["email"]}',
-  '{"full_name":"Lucía Vargas"}',
-  false
-);
+-- IMPORTANTE: El usuario demo NO se crea via SQL directo.
+-- Insertar manualmente en auth.users no crea el registro en auth.identities,
+-- que Supabase necesita para magic link (OTP) login.
+--
+-- En su lugar, usar la Admin Auth API de Supabase:
+--   curl -X POST "https://yfjqscvvxetobiidnepa.supabase.co/auth/v1/admin/users" \
+--     -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+--     -H "Content-Type: application/json" \
+--     -d '{"id":"00000000-0000-0000-0000-000000000001","email":"bmmorenog@gmail.com","email_confirm":true,"user_metadata":{"full_name":"Lucía Vargas"}}'
+--
+-- Esto crea auth.users + auth.identities correctamente.
 
 -- ════════════════════════════════════════════════════════════
 -- §2. WORKSPACE
