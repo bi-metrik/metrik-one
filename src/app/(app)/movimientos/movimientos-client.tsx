@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2 } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { toast } from 'sonner'
+import { getRolePermissions } from '@/lib/roles'
 import type { Movimiento } from './actions'
-import { marcarComoPagado } from './actions'
+import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento } from './actions'
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -27,8 +28,10 @@ interface Props {
   filtroProy: string
   filtroTipoProy: string
   filtroEstadoPago: string
+  filtroEstadoCausacion: string
   regimenFiscal: string | null
   proyectos: { id: string; nombre: string; tipo: string }[]
+  role: string
 }
 
 const MESES = [
@@ -54,15 +57,25 @@ function getDeducibleTag(mov: Movimiento, regimen: string | null): 'deducible' |
   return mov.soporte_url ? 'deducible' : 'falta_soporte'
 }
 
+// D246: Causación badge config
+const CAUSACION_BADGES: Record<string, { label: string; className: string } | null> = {
+  PENDIENTE: { label: 'Pendiente', className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' },
+  APROBADO: { label: 'Aprobado', className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' },
+  RECHAZADO: { label: 'Rechazado', className: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+  CAUSADO: null, // No badge for CAUSADO (final state)
+}
+
 export default function MovimientosClient({
   movimientos, totales, filtroTipo, filtroMes,
   filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago,
-  regimenFiscal, proyectos,
+  filtroEstadoCausacion, regimenFiscal, proyectos, role,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const neto = totales.ingresos - totales.egresos
   const [isPending, startTransition] = useTransition()
+
+  const perms = getRolePermissions(role)
 
   // Soporte image lightbox
   const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
@@ -71,11 +84,15 @@ export default function MovimientosClient({
   const [pagoModal, setPagoModal] = useState<{ id: string; descripcion: string; monto: number; fecha: string } | null>(null)
   const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
 
+  // D246: Rechazo dialog
+  const [rechazoModal, setRechazoModal] = useState<{ tabla: 'gastos' | 'cobros'; id: string; descripcion: string } | null>(null)
+  const [rechazoMotivo, setRechazoMotivo] = useState('')
+
   // Filters panel
   const [showFilters, setShowFilters] = useState(false)
 
   // Count active filters (excluding 'todos')
-  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago].filter(f => f !== 'todos').length
+  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago, filtroEstadoCausacion].filter(f => f !== 'todos').length
 
   // Auto-open filters if any are active
   useEffect(() => {
@@ -126,6 +143,7 @@ export default function MovimientosClient({
     params.delete('proy')
     params.delete('tipoProy')
     params.delete('estadoPago')
+    params.delete('estadoCausacion')
     router.push(`/movimientos?${params.toString()}`)
   }
 
@@ -144,6 +162,39 @@ export default function MovimientosClient({
       if (res.success) {
         toast.success('Gasto marcado como pagado')
         setPagoModal(null)
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  // D246: Aprobar handler
+  function handleAprobar(tabla: 'gastos' | 'cobros', id: string) {
+    startTransition(async () => {
+      const res = await aprobarMovimiento(tabla, id)
+      if (res.success) {
+        toast.success('Movimiento aprobado')
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  // D246: Rechazar handler
+  function handleRechazar() {
+    if (!rechazoModal) return
+    if (!rechazoMotivo.trim()) {
+      toast.error('El motivo es obligatorio')
+      return
+    }
+    startTransition(async () => {
+      const res = await rechazarMovimiento(rechazoModal.tabla, rechazoModal.id, rechazoMotivo)
+      if (res.success) {
+        toast.success('Movimiento rechazado')
+        setRechazoModal(null)
+        setRechazoMotivo('')
         router.refresh()
       } else {
         toast.error(res.error)
@@ -247,8 +298,8 @@ export default function MovimientosClient({
       {/* Advanced filters panel */}
       {showFilters && (
         <div className="rounded-lg border bg-card p-3 space-y-2">
+          {/* Row 1: Categoría + Proyecto */}
           <div className="grid grid-cols-2 gap-2">
-            {/* Categoría */}
             <select
               value={filtroCat}
               onChange={e => navigate('cat', e.target.value)}
@@ -260,7 +311,6 @@ export default function MovimientosClient({
               ))}
             </select>
 
-            {/* Proyecto */}
             <select
               value={filtroProy}
               onChange={e => navigate('proy', e.target.value)}
@@ -274,8 +324,10 @@ export default function MovimientosClient({
                 </option>
               ))}
             </select>
+          </div>
 
-            {/* Tipo proyecto */}
+          {/* Row 2: Tipo proyecto + Estado pago + Estado contable */}
+          <div className="grid grid-cols-3 gap-2">
             <select
               value={filtroTipoProy}
               onChange={e => navigate('tipoProy', e.target.value)}
@@ -287,15 +339,27 @@ export default function MovimientosClient({
               <option value="empresa">Empresa</option>
             </select>
 
-            {/* Estado pago */}
             <select
               value={filtroEstadoPago}
               onChange={e => navigate('estadoPago', e.target.value)}
               className="rounded-md border bg-background px-2 py-1.5 text-xs"
             >
-              <option value="todos">Todo estado de pago</option>
+              <option value="todos">Todo estado pago</option>
               <option value="pagado">Pagados</option>
               <option value="pendiente">Pendientes</option>
+            </select>
+
+            {/* D246: Estado contable filter */}
+            <select
+              value={filtroEstadoCausacion}
+              onChange={e => navigate('estadoCausacion', e.target.value)}
+              className="rounded-md border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="todos">Estado contable</option>
+              <option value="PENDIENTE">Pendiente</option>
+              <option value="APROBADO">Aprobado</option>
+              <option value="CAUSADO">Causado</option>
+              <option value="RECHAZADO">Rechazado</option>
             </select>
           </div>
 
@@ -365,6 +429,7 @@ export default function MovimientosClient({
                 {porFecha[fecha].map(mov => {
                   const tag = getDeducibleTag(mov, regimenFiscal)
                   const hasSoporteImage = mov.soporte_url && !mov.soporte_url.startsWith('wamid.')
+                  const causacionBadge = CAUSACION_BADGES[mov.estado_causacion]
                   return (
                     <div
                       key={mov.id}
@@ -404,7 +469,24 @@ export default function MovimientosClient({
                           )}
 
                           {/* Line 3: Badges + User initials + Soporte */}
-                          <div className="mt-1.5 flex items-center gap-1.5">
+                          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                            {/* D246: Causación badge */}
+                            {causacionBadge && (
+                              <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${causacionBadge.className}`}>
+                                {mov.estado_causacion === 'PENDIENTE' && <Clock className="h-2.5 w-2.5" />}
+                                {mov.estado_causacion === 'APROBADO' && <ShieldCheck className="h-2.5 w-2.5" />}
+                                {mov.estado_causacion === 'RECHAZADO' && <XCircle className="h-2.5 w-2.5" />}
+                                {causacionBadge.label}
+                              </span>
+                            )}
+
+                            {/* D246: Rechazo motivo tooltip */}
+                            {mov.estado_causacion === 'RECHAZADO' && mov.rechazo_motivo && (
+                              <span className="text-[10px] text-muted-foreground italic truncate max-w-[120px]" title={mov.rechazo_motivo}>
+                                {mov.rechazo_motivo}
+                              </span>
+                            )}
+
                             {/* Tipo gasto badge */}
                             {mov.tipo === 'egreso' && mov.tipo_gasto && (
                               <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${
@@ -420,11 +502,11 @@ export default function MovimientosClient({
                               </span>
                             )}
 
-                            {/* D119: Pendiente badge */}
+                            {/* D119: Pendiente pago badge */}
                             {mov.estado_pago === 'pendiente' && (
                               <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
                                 <Clock className="h-2.5 w-2.5" />
-                                Pendiente
+                                Pend. pago
                               </span>
                             )}
 
@@ -462,6 +544,32 @@ export default function MovimientosClient({
 
                             {/* Spacer */}
                             <div className="flex-1" />
+
+                            {/* D246: Aprobar / Rechazar buttons (owner/admin + PENDIENTE only) */}
+                            {perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE' && (
+                              <>
+                                <button
+                                  onClick={() => handleAprobar(mov.tabla, mov.id)}
+                                  disabled={isPending}
+                                  className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 transition-colors disabled:opacity-50"
+                                  title="Aprobar movimiento"
+                                >
+                                  <ShieldCheck className="h-2.5 w-2.5" />
+                                  Aprobar
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setRechazoModal({ tabla: mov.tabla, id: mov.id, descripcion: mov.descripcion })
+                                    setRechazoMotivo('')
+                                  }}
+                                  disabled={isPending}
+                                  className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-300 dark:hover:bg-red-900/60 transition-colors disabled:opacity-50"
+                                  title="Rechazar movimiento"
+                                >
+                                  <ShieldX className="h-2.5 w-2.5" />
+                                </button>
+                              </>
+                            )}
 
                             {/* User initials */}
                             {mov.created_by_initials && (
@@ -556,6 +664,49 @@ export default function MovimientosClient({
                   className="flex-1 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
                 >
                   {isPending ? 'Guardando...' : 'Confirmar pago'}
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* D246: Rechazo dialog */}
+      <Dialog open={!!rechazoModal} onOpenChange={() => { setRechazoModal(null); setRechazoMotivo('') }}>
+        <DialogContent className="max-w-sm">
+          <DialogTitle className="text-base font-semibold">
+            Rechazar movimiento
+          </DialogTitle>
+          {rechazoModal && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {rechazoModal.descripcion}
+              </p>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Motivo del rechazo *</label>
+                <textarea
+                  value={rechazoMotivo}
+                  onChange={e => setRechazoMotivo(e.target.value)}
+                  placeholder="Explica por qué se rechaza este movimiento..."
+                  rows={3}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setRechazoModal(null); setRechazoMotivo('') }}
+                  className="flex-1 rounded-md border px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleRechazar}
+                  disabled={isPending || !rechazoMotivo.trim()}
+                  className="flex-1 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {isPending ? 'Rechazando...' : 'Rechazar'}
                 </button>
               </div>
             </div>

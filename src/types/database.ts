@@ -185,6 +185,56 @@ export type Database = {
           },
         ]
       }
+      causaciones_log: {
+        Row: {
+          accion: string
+          created_at: string | null
+          datos: Json | null
+          estado_anterior: string
+          estado_nuevo: string
+          id: string
+          motivo: string | null
+          realizado_por: string
+          registro_id: string
+          tabla: string
+          workspace_id: string
+        }
+        Insert: {
+          accion: string
+          created_at?: string | null
+          datos?: Json | null
+          estado_anterior: string
+          estado_nuevo: string
+          id?: string
+          motivo?: string | null
+          realizado_por: string
+          registro_id: string
+          tabla: string
+          workspace_id: string
+        }
+        Update: {
+          accion?: string
+          created_at?: string | null
+          datos?: Json | null
+          estado_anterior?: string
+          estado_nuevo?: string
+          id?: string
+          motivo?: string | null
+          realizado_por?: string
+          registro_id?: string
+          tabla?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "causaciones_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           address: string | null
@@ -267,42 +317,81 @@ export type Database = {
       }
       cobros: {
         Row: {
+          alegra_id: string | null
+          aprobado_por: string | null
           canal_registro: string | null
+          causado_por: string | null
+          centro_costo: string | null
           created_at: string | null
           created_by: string | null
+          cuenta_contable: string | null
+          enviado_alegra: boolean | null
+          estado_causacion: string
           external_ref: string | null
           factura_id: string
           fecha: string
+          fecha_aprobacion: string | null
+          fecha_causacion: string | null
+          fecha_envio_alegra: string | null
           id: string
           monto: number
           notas: string | null
+          notas_causacion: string | null
           proyecto_id: string
+          rechazo_motivo: string | null
+          retencion_aplicada: number | null
           workspace_id: string
         }
         Insert: {
+          alegra_id?: string | null
+          aprobado_por?: string | null
           canal_registro?: string | null
+          causado_por?: string | null
+          centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          cuenta_contable?: string | null
+          enviado_alegra?: boolean | null
+          estado_causacion?: string
           external_ref?: string | null
           factura_id: string
           fecha?: string
+          fecha_aprobacion?: string | null
+          fecha_causacion?: string | null
+          fecha_envio_alegra?: string | null
           id?: string
           monto: number
           notas?: string | null
+          notas_causacion?: string | null
           proyecto_id: string
+          rechazo_motivo?: string | null
+          retencion_aplicada?: number | null
           workspace_id: string
         }
         Update: {
+          alegra_id?: string | null
+          aprobado_por?: string | null
           canal_registro?: string | null
+          causado_por?: string | null
+          centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          cuenta_contable?: string | null
+          enviado_alegra?: boolean | null
+          estado_causacion?: string
           external_ref?: string | null
           factura_id?: string
           fecha?: string
+          fecha_aprobacion?: string | null
+          fecha_causacion?: string | null
+          fecha_envio_alegra?: string | null
           id?: string
           monto?: number
           notas?: string | null
+          notas_causacion?: string | null
           proyecto_id?: string
+          rechazo_motivo?: string | null
+          retencion_aplicada?: number | null
           workspace_id?: string
         }
         Relationships: [
@@ -1117,21 +1206,34 @@ export type Database = {
       }
       gastos: {
         Row: {
+          alegra_id: string | null
+          aprobado_por: string | null
           canal_registro: string | null
           categoria: string
+          causado_por: string | null
+          centro_costo: string | null
           created_at: string | null
           created_by: string | null
+          cuenta_contable: string | null
           deducible: boolean | null
           descripcion: string | null
           empresa_id: string | null
+          enviado_alegra: boolean | null
+          estado_causacion: string
           estado_pago: string | null
           external_ref: string | null
           fecha: string
+          fecha_aprobacion: string | null
+          fecha_causacion: string | null
+          fecha_envio_alegra: string | null
           fecha_pago: string | null
           gasto_fijo_ref_id: string | null
           id: string
           monto: number
+          notas_causacion: string | null
           proyecto_id: string | null
+          rechazo_motivo: string | null
+          retencion_aplicada: number | null
           rubro_id: string | null
           soporte_pendiente: boolean | null
           soporte_url: string | null
@@ -1139,21 +1241,34 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          alegra_id?: string | null
+          aprobado_por?: string | null
           canal_registro?: string | null
           categoria: string
+          causado_por?: string | null
+          centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          cuenta_contable?: string | null
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
+          enviado_alegra?: boolean | null
+          estado_causacion?: string
           estado_pago?: string | null
           external_ref?: string | null
           fecha?: string
+          fecha_aprobacion?: string | null
+          fecha_causacion?: string | null
+          fecha_envio_alegra?: string | null
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
           monto: number
+          notas_causacion?: string | null
           proyecto_id?: string | null
+          rechazo_motivo?: string | null
+          retencion_aplicada?: number | null
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
@@ -1161,21 +1276,34 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          alegra_id?: string | null
+          aprobado_por?: string | null
           canal_registro?: string | null
           categoria?: string
+          causado_por?: string | null
+          centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          cuenta_contable?: string | null
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
+          enviado_alegra?: boolean | null
+          estado_causacion?: string
           estado_pago?: string | null
           external_ref?: string | null
           fecha?: string
+          fecha_aprobacion?: string | null
+          fecha_causacion?: string | null
+          fecha_envio_alegra?: string | null
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
           monto?: number
+          notas_causacion?: string | null
           proyecto_id?: string | null
+          rechazo_motivo?: string | null
+          retencion_aplicada?: number | null
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
@@ -3620,24 +3748,38 @@ export const Constants = {
   },
 } as const
 
-// ── Custom type aliases ──────────────────────────────────────
+// ── Custom type aliases ──────────────────────────────────
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
-export type ExpenseCategory = Database['public']['Tables']['expense_categories']['Row']
-export type FixedExpense = Database['public']['Tables']['fixed_expenses']['Row']
-export type FiscalProfile = Database['public']['Tables']['fiscal_profiles']['Row']
-export type Staff = Database['public']['Tables']['staff']['Row']
-export type MonthlyTarget = Database['public']['Tables']['monthly_targets']['Row']
-export type Servicio = Database['public']['Tables']['servicios']['Row']
-export type Note = Database['public']['Tables']['notes']['Row']
+export type BankBalance = Database['public']['Tables']['bank_balances']['Row']
+export type CausacionLog = Database['public']['Tables']['causaciones_log']['Row']
 export type Client = Database['public']['Tables']['clients']['Row']
-export type Empresa = Database['public']['Tables']['empresas']['Row']
+export type Cobro = Database['public']['Tables']['cobros']['Row']
+export type Contact = Database['public']['Tables']['contacts']['Row']
 export type Contacto = Database['public']['Tables']['contactos']['Row']
-export type Invoice = Database['public']['Tables']['invoices']['Row']
-export type Payment = Database['public']['Tables']['payments']['Row']
-export type Opportunity = Database['public']['Tables']['oportunidades']['Row']
-export type OpportunityLegacy = Database['public']['Tables']['opportunities']['Row']
-export type Quote = Database['public']['Tables']['quotes']['Row']
-export type Project = Database['public']['Tables']['proyectos']['Row']
-export type ProjectLegacy = Database['public']['Tables']['projects']['Row']
+export type Cotizacion = Database['public']['Tables']['cotizaciones']['Row']
+export type Empresa = Database['public']['Tables']['empresas']['Row']
 export type Expense = Database['public']['Tables']['expenses']['Row']
+export type ExpenseCategory = Database['public']['Tables']['expense_categories']['Row']
+export type Factura = Database['public']['Tables']['facturas']['Row']
+export type FiscalProfile = Database['public']['Tables']['fiscal_profiles']['Row']
+export type FixedExpense = Database['public']['Tables']['fixed_expenses']['Row']
+export type Gasto = Database['public']['Tables']['gastos']['Row']
+export type Hora = Database['public']['Tables']['horas']['Row']
+export type Invoice = Database['public']['Tables']['invoices']['Row']
+export type MonthlyTarget = Database['public']['Tables']['monthly_targets']['Row']
+export type Note = Database['public']['Tables']['notes']['Row']
+export type Oportunidad = Database['public']['Tables']['oportunidades']['Row']
+export type OpportunityLegacy = Database['public']['Tables']['opportunities']['Row']
+export type Payment = Database['public']['Tables']['payments']['Row']
+export type Profile = Database['public']['Tables']['profiles']['Row']
+export type ProjectLegacy = Database['public']['Tables']['projects']['Row']
+export type Proyecto = Database['public']['Tables']['proyectos']['Row']
+export type ProyectoRubro = Database['public']['Tables']['proyecto_rubros']['Row']
+export type Quote = Database['public']['Tables']['quotes']['Row']
+export type Rubro = Database['public']['Tables']['rubros']['Row']
+export type SaldoBanco = Database['public']['Tables']['saldos_banco']['Row']
+export type Servicio = Database['public']['Tables']['servicios']['Row']
+export type Staff = Database['public']['Tables']['staff']['Row']
+export type TeamInvitation = Database['public']['Tables']['team_invitations']['Row']
 export type TimeEntry = Database['public']['Tables']['time_entries']['Row']
+export type Workspace = Database['public']['Tables']['workspaces']['Row']

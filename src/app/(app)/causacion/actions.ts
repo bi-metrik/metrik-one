@@ -1,0 +1,265 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
+
+// ── Types ────────────────────────────────────────────────
+
+export type ItemCausacion = {
+  id: string
+  tipo: 'ingreso' | 'egreso'
+  tabla: 'gastos' | 'cobros'
+  fecha: string
+  monto: number
+  descripcion: string
+  categoria: string | null
+  proyecto: string | null
+  created_by_name: string | null
+  fecha_aprobacion: string | null
+  // Campos contables (filled by contador at causación)
+  cuenta_contable: string | null
+  centro_costo: string | null
+  notas_causacion: string | null
+  retencion_aplicada: number | null
+  fecha_causacion: string | null
+}
+
+function getInitials(name: string | null): string | null {
+  if (!name) return null
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return parts[0].substring(0, 2).toUpperCase()
+}
+
+// ── getCausacionData ─────────────────────────────────────
+
+export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: string) {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { items: [], counts: { aprobados: 0, causados: 0 } }
+
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canViewCausacion) return { items: [], counts: { aprobados: 0, causados: 0 } }
+
+  const currentMes = mes ?? new Date().toISOString().slice(0, 7)
+  const [y, m] = currentMes.split('-').map(Number)
+  const startDate = `${currentMes}-01`
+  const endDate = new Date(y, m, 0).toISOString().split('T')[0]
+
+  const items: ItemCausacion[] = []
+
+  // ── Gastos ──────────────────────────────────────────
+  {
+    let query = supabase
+      .from('gastos')
+      .select('id, fecha, monto, descripcion, categoria, proyecto_id, proyectos(nombre), created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion')
+      .eq('workspace_id', workspaceId)
+
+    if (tab === 'aprobados') {
+      query = query.eq('estado_causacion', 'APROBADO')
+    } else {
+      // Causados this month (by fecha_causacion)
+      query = query
+        .eq('estado_causacion', 'CAUSADO')
+        .gte('fecha_causacion', `${startDate}T00:00:00`)
+        .lte('fecha_causacion', `${endDate}T23:59:59`)
+    }
+
+    query = query.order('fecha', { ascending: false })
+
+    const { data: gastos } = await query
+
+    for (const g of gastos ?? []) {
+      const proy = g.proyectos as { nombre: string } | null
+      const profile = g.created_by_profile as { full_name: string } | null
+      items.push({
+        id: g.id,
+        tipo: 'egreso',
+        tabla: 'gastos',
+        fecha: g.fecha,
+        monto: Number(g.monto),
+        descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
+        categoria: g.categoria,
+        proyecto: proy?.nombre ?? null,
+        created_by_name: profile?.full_name ?? null,
+        fecha_aprobacion: g.fecha_aprobacion ?? null,
+        cuenta_contable: g.cuenta_contable ?? null,
+        centro_costo: g.centro_costo ?? null,
+        notas_causacion: g.notas_causacion ?? null,
+        retencion_aplicada: g.retencion_aplicada ? Number(g.retencion_aplicada) : null,
+        fecha_causacion: g.fecha_causacion ?? null,
+      })
+    }
+  }
+
+  // ── Cobros ──────────────────────────────────────────
+  {
+    let query = supabase
+      .from('cobros')
+      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion')
+      .eq('workspace_id', workspaceId)
+
+    if (tab === 'aprobados') {
+      query = query.eq('estado_causacion', 'APROBADO')
+    } else {
+      query = query
+        .eq('estado_causacion', 'CAUSADO')
+        .gte('fecha_causacion', `${startDate}T00:00:00`)
+        .lte('fecha_causacion', `${endDate}T23:59:59`)
+    }
+
+    query = query.order('fecha', { ascending: false })
+
+    const { data: cobros } = await query
+
+    for (const c of cobros ?? []) {
+      const proy = c.proyectos as { nombre: string } | null
+      const profile = c.created_by_profile as { full_name: string } | null
+      items.push({
+        id: c.id,
+        tipo: 'ingreso',
+        tabla: 'cobros',
+        fecha: c.fecha,
+        monto: Number(c.monto),
+        descripcion: c.notas ?? 'Cobro',
+        categoria: null,
+        proyecto: proy?.nombre ?? null,
+        created_by_name: profile?.full_name ?? null,
+        fecha_aprobacion: c.fecha_aprobacion ?? null,
+        cuenta_contable: c.cuenta_contable ?? null,
+        centro_costo: c.centro_costo ?? null,
+        notas_causacion: c.notas_causacion ?? null,
+        retencion_aplicada: c.retencion_aplicada ? Number(c.retencion_aplicada) : null,
+        fecha_causacion: c.fecha_causacion ?? null,
+      })
+    }
+  }
+
+  // Sort by fecha desc
+  items.sort((a, b) => b.fecha.localeCompare(a.fecha))
+
+  // Counts for tab badges
+  const { count: aprobadosGastos } = await supabase
+    .from('gastos')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+    .eq('estado_causacion', 'APROBADO')
+
+  const { count: aprobadosCobros } = await supabase
+    .from('cobros')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+    .eq('estado_causacion', 'APROBADO')
+
+  // Causados this month
+  const { count: causadosGastos } = await supabase
+    .from('gastos')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+    .eq('estado_causacion', 'CAUSADO')
+    .gte('fecha_causacion', `${startDate}T00:00:00`)
+    .lte('fecha_causacion', `${endDate}T23:59:59`)
+
+  const { count: causadosCobros } = await supabase
+    .from('cobros')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+    .eq('estado_causacion', 'CAUSADO')
+    .gte('fecha_causacion', `${startDate}T00:00:00`)
+    .lte('fecha_causacion', `${endDate}T23:59:59`)
+
+  return {
+    items,
+    counts: {
+      aprobados: (aprobadosGastos ?? 0) + (aprobadosCobros ?? 0),
+      causados: (causadosGastos ?? 0) + (causadosCobros ?? 0),
+    },
+  }
+}
+
+// ── causarMovimiento ─────────────────────────────────────
+
+export async function causarMovimiento(input: {
+  tabla: 'gastos' | 'cobros'
+  registroId: string
+  cuenta_contable: string
+  centro_costo: string
+  notas_causacion?: string
+  retencion_aplicada?: number
+}) {
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
+
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canCausar) return { success: false, error: 'Sin permisos para causar' }
+
+  if (!input.cuenta_contable.trim()) return { success: false, error: 'Cuenta contable es obligatoria' }
+  if (!input.centro_costo.trim()) return { success: false, error: 'Centro de costo es obligatorio' }
+
+  // Validate record belongs to workspace and is APROBADO
+  // Use separate queries per table to keep TypeScript happy with Supabase types
+  let estadoCausacion: string | null = null
+  let registroMonto: number | null = null
+
+  if (input.tabla === 'gastos') {
+    const { data } = await supabase
+      .from('gastos')
+      .select('id, estado_causacion, monto')
+      .eq('id', input.registroId)
+      .eq('workspace_id', workspaceId)
+      .single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+    registroMonto = Number(data.monto)
+  } else {
+    const { data } = await supabase
+      .from('cobros')
+      .select('id, estado_causacion, monto')
+      .eq('id', input.registroId)
+      .eq('workspace_id', workspaceId)
+      .single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+    registroMonto = Number(data.monto)
+  }
+
+  if (estadoCausacion !== 'APROBADO') return { success: false, error: 'Solo se pueden causar movimientos APROBADOS' }
+
+  const updatePayload = {
+    estado_causacion: 'CAUSADO' as const,
+    causado_por: userId,
+    fecha_causacion: new Date().toISOString(),
+    cuenta_contable: input.cuenta_contable.trim(),
+    centro_costo: input.centro_costo.trim(),
+    notas_causacion: input.notas_causacion?.trim() || null,
+    retencion_aplicada: input.retencion_aplicada ?? null,
+  }
+
+  const { error: updateError } = input.tabla === 'gastos'
+    ? await supabase.from('gastos').update(updatePayload).eq('id', input.registroId)
+    : await supabase.from('cobros').update(updatePayload).eq('id', input.registroId)
+
+  if (updateError) return { success: false, error: updateError.message }
+
+  // Log to causaciones_log with snapshot
+  await supabase.from('causaciones_log').insert({
+    workspace_id: workspaceId,
+    tabla: input.tabla,
+    registro_id: input.registroId,
+    accion: 'CAUSAR',
+    estado_anterior: 'APROBADO',
+    estado_nuevo: 'CAUSADO',
+    datos: {
+      cuenta_contable: input.cuenta_contable.trim(),
+      centro_costo: input.centro_costo.trim(),
+      notas_causacion: input.notas_causacion?.trim() || null,
+      retencion_aplicada: input.retencion_aplicada ?? null,
+      monto: registroMonto,
+    },
+    realizado_por: userId,
+  })
+
+  revalidatePath('/causacion')
+  revalidatePath('/movimientos')
+  return { success: true }
+}

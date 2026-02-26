@@ -19,6 +19,9 @@ export const ROLE_PERMISSIONS = {
     canRegisterCobro: true,
     canExportCSV: true,
     canManageTeam: true,
+    canApproveCausacion: true,   // D246: aprobar PENDIENTE → APROBADO
+    canCausar: true,             // D246: causar APROBADO → CAUSADO
+    canViewCausacion: true,      // D246: ver /causacion
   },
   admin: {
     label: 'Admin',
@@ -35,6 +38,9 @@ export const ROLE_PERMISSIONS = {
     canRegisterCobro: true,
     canExportCSV: true,
     canManageTeam: false,
+    canApproveCausacion: true,
+    canCausar: true,
+    canViewCausacion: true,
   },
   operator: {
     label: 'Operador',
@@ -51,6 +57,9 @@ export const ROLE_PERMISSIONS = {
     canRegisterCobro: false,
     canExportCSV: false,
     canManageTeam: false,
+    canApproveCausacion: false,
+    canCausar: false,
+    canViewCausacion: false,
   },
   read_only: {
     label: 'Lectura',
@@ -67,6 +76,9 @@ export const ROLE_PERMISSIONS = {
     canRegisterCobro: false,
     canExportCSV: true,
     canManageTeam: false,
+    canApproveCausacion: false,
+    canCausar: false,
+    canViewCausacion: false,
   },
 } as const
 

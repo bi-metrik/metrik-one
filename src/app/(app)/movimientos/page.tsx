@@ -1,8 +1,9 @@
 import { getMovimientos, getFilterOptions } from './actions'
+import { getWorkspace } from '@/lib/actions/get-workspace'
 import MovimientosClient from './movimientos-client'
 
 interface Props {
-  searchParams: Promise<{ tipo?: string; mes?: string; cat?: string; proy?: string; tipoProy?: string; estadoPago?: string }>
+  searchParams: Promise<{ tipo?: string; mes?: string; cat?: string; proy?: string; tipoProy?: string; estadoPago?: string; estadoCausacion?: string }>
 }
 
 export default async function MovimientosPage({ searchParams }: Props) {
@@ -13,10 +14,12 @@ export default async function MovimientosPage({ searchParams }: Props) {
   const proy = params.proy ?? 'todos'
   const tipoProy = params.tipoProy ?? 'todos'
   const estadoPago = params.estadoPago ?? 'todos'
+  const estadoCausacion = params.estadoCausacion ?? 'todos'
 
-  const [{ movimientos, totales, regimenFiscal }, { proyectos }] = await Promise.all([
-    getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago }),
+  const [{ movimientos, totales, regimenFiscal }, { proyectos }, { role }] = await Promise.all([
+    getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago, estadoCausacion }),
     getFilterOptions(),
+    getWorkspace(),
   ])
 
   return (
@@ -29,8 +32,10 @@ export default async function MovimientosPage({ searchParams }: Props) {
       filtroProy={proy}
       filtroTipoProy={tipoProy}
       filtroEstadoPago={estadoPago}
+      filtroEstadoCausacion={estadoCausacion}
       regimenFiscal={regimenFiscal}
       proyectos={proyectos}
+      role={role ?? 'read_only'}
     />
   )
 }

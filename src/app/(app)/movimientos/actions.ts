@@ -2,10 +2,12 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 
 export type Movimiento = {
   id: string
   tipo: 'ingreso' | 'egreso'
+  tabla: 'gastos' | 'cobros'
   fecha: string
   monto: number
   descripcion: string
@@ -19,6 +21,9 @@ export type Movimiento = {
   created_by_initials: string | null
   estado_pago: 'pagado' | 'pendiente' | null  // null for ingresos
   fecha_pago: string | null
+  // D246: Causación contable
+  estado_causacion: 'PENDIENTE' | 'APROBADO' | 'CAUSADO' | 'RECHAZADO'
+  rechazo_motivo: string | null
 }
 
 // D142: Categorías deducibles para régimen ordinario
@@ -43,6 +48,7 @@ export async function getMovimientos(filters?: {
   proy?: string         // proyecto_id filter
   tipoProy?: string     // 'interno' | 'cliente' | 'empresa' | 'todos'
   estadoPago?: string   // 'todos' | 'pagado' | 'pendiente'
+  estadoCausacion?: string // D246: 'todos' | 'PENDIENTE' | 'APROBADO' | 'CAUSADO' | 'RECHAZADO'
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { movimientos: [], totales: { ingresos: 0, egresos: 0, deducible: 0 }, regimenFiscal: null as string | null }
@@ -53,6 +59,7 @@ export async function getMovimientos(filters?: {
   const proyFilter = filters?.proy && filters.proy !== 'todos' ? filters.proy : null
   const tipoProyFilter = filters?.tipoProy && filters.tipoProy !== 'todos' ? filters.tipoProy : null
   const estadoPagoFilter = filters?.estadoPago && filters.estadoPago !== 'todos' ? filters.estadoPago : null
+  const estadoCausacionFilter = filters?.estadoCausacion && filters.estadoCausacion !== 'todos' ? filters.estadoCausacion : null
 
   const startDate = `${mes}-01`
   const [y, m] = mes.split('-').map(Number)
@@ -79,7 +86,7 @@ export async function getMovimientos(filters?: {
     if (!skipGastos) {
       let query = supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago')
+        .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
         .eq('workspace_id', workspaceId)
         .gte('fecha', startDate)
         .lte('fecha', endDate)
@@ -100,6 +107,7 @@ export async function getMovimientos(filters?: {
         query = query.eq('id', '00000000-0000-0000-0000-000000000000') // impossible match
       }
       if (estadoPagoFilter) query = query.eq('estado_pago', estadoPagoFilter)
+      if (estadoCausacionFilter) query = query.eq('estado_causacion', estadoCausacionFilter)
 
       query = query.order('fecha', { ascending: false })
 
@@ -111,6 +119,7 @@ export async function getMovimientos(filters?: {
         results.push({
           id: g.id,
           tipo: 'egreso',
+          tabla: 'gastos',
           fecha: g.fecha,
           monto: Number(g.monto),
           descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
@@ -124,6 +133,8 @@ export async function getMovimientos(filters?: {
           created_by_initials: getInitials(profile?.full_name ?? null),
           estado_pago: (g.estado_pago as 'pagado' | 'pendiente') ?? 'pagado',
           fecha_pago: g.fecha_pago ?? null,
+          estado_causacion: (g.estado_causacion as Movimiento['estado_causacion']) ?? 'PENDIENTE',
+          rechazo_motivo: g.rechazo_motivo ?? null,
         })
       }
     }
@@ -135,7 +146,7 @@ export async function getMovimientos(filters?: {
   if ((tipoFilter === 'todos' || tipoFilter === 'ingresos') && !skipIngresos) {
     let query = supabase
       .from('cobros')
-      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name)')
+      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
@@ -149,6 +160,7 @@ export async function getMovimientos(filters?: {
     } else if (proyectoIdsByTipo && proyectoIdsByTipo.length === 0) {
       query = query.eq('id', '00000000-0000-0000-0000-000000000000')
     }
+    if (estadoCausacionFilter) query = query.eq('estado_causacion', estadoCausacionFilter)
 
     query = query.order('fecha', { ascending: false })
 
@@ -160,6 +172,7 @@ export async function getMovimientos(filters?: {
       results.push({
         id: c.id,
         tipo: 'ingreso',
+        tabla: 'cobros',
         fecha: c.fecha,
         monto: Number(c.monto),
         descripcion: c.notas ?? 'Cobro',
@@ -173,6 +186,8 @@ export async function getMovimientos(filters?: {
         created_by_initials: getInitials(profile?.full_name ?? null),
         estado_pago: null,
         fecha_pago: null,
+        estado_causacion: (c.estado_causacion as Movimiento['estado_causacion']) ?? 'PENDIENTE',
+        rechazo_motivo: c.rechazo_motivo ?? null,
       })
     }
   }
@@ -252,5 +267,109 @@ export async function marcarComoPagado(gastoId: string, fechaPago?: string) {
 
   revalidatePath('/movimientos')
   revalidatePath('/numeros')
+  return { success: true }
+}
+
+// ── D246: Aprobar movimiento (PENDIENTE → APROBADO) ────
+
+export async function aprobarMovimiento(tabla: 'gastos' | 'cobros', registroId: string) {
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
+
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para aprobar' }
+
+  // Validate record belongs to workspace and is PENDIENTE
+  let estadoCausacion: string | null = null
+  if (tabla === 'gastos') {
+    const { data } = await supabase.from('gastos').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+  } else {
+    const { data } = await supabase.from('cobros').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+  }
+
+  if (estadoCausacion !== 'PENDIENTE') return { success: false, error: 'Solo se pueden aprobar movimientos PENDIENTES' }
+
+  const updatePayload = {
+    estado_causacion: 'APROBADO' as const,
+    aprobado_por: userId,
+    fecha_aprobacion: new Date().toISOString(),
+  }
+
+  const { error: updateError } = tabla === 'gastos'
+    ? await supabase.from('gastos').update(updatePayload).eq('id', registroId)
+    : await supabase.from('cobros').update(updatePayload).eq('id', registroId)
+
+  if (updateError) return { success: false, error: updateError.message }
+
+  // Log to causaciones_log
+  await supabase.from('causaciones_log').insert({
+    workspace_id: workspaceId,
+    tabla,
+    registro_id: registroId,
+    accion: 'APROBAR',
+    estado_anterior: 'PENDIENTE',
+    estado_nuevo: 'APROBADO',
+    realizado_por: userId,
+  })
+
+  revalidatePath('/movimientos')
+  revalidatePath('/causacion')
+  return { success: true }
+}
+
+// ── D246: Rechazar movimiento (PENDIENTE → RECHAZADO) ──
+
+export async function rechazarMovimiento(tabla: 'gastos' | 'cobros', registroId: string, motivo: string) {
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
+
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para rechazar' }
+
+  if (!motivo || motivo.trim().length === 0) return { success: false, error: 'El motivo es obligatorio' }
+
+  // Validate record belongs to workspace and is PENDIENTE
+  let estadoCausacion: string | null = null
+  if (tabla === 'gastos') {
+    const { data } = await supabase.from('gastos').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+  } else {
+    const { data } = await supabase.from('cobros').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+  }
+
+  if (estadoCausacion !== 'PENDIENTE') return { success: false, error: 'Solo se pueden rechazar movimientos PENDIENTES' }
+
+  const updatePayload = {
+    estado_causacion: 'RECHAZADO' as const,
+    rechazo_motivo: motivo.trim(),
+  }
+
+  const { error: updateError } = tabla === 'gastos'
+    ? await supabase.from('gastos').update(updatePayload).eq('id', registroId)
+    : await supabase.from('cobros').update(updatePayload).eq('id', registroId)
+
+  if (updateError) return { success: false, error: updateError.message }
+
+  // Log to causaciones_log
+  await supabase.from('causaciones_log').insert({
+    workspace_id: workspaceId,
+    tabla,
+    registro_id: registroId,
+    accion: 'RECHAZAR',
+    estado_anterior: 'PENDIENTE',
+    estado_nuevo: 'RECHAZADO',
+    motivo: motivo.trim(),
+    realizado_por: userId,
+  })
+
+  revalidatePath('/movimientos')
+  revalidatePath('/causacion')
   return { success: true }
 }
