@@ -1083,6 +1083,24 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
+  // D119: Handle payment status (W01/W02 awaiting_payment_status)
+  if (session.state === 'awaiting_payment_status') {
+    const text = message.text?.toLowerCase().trim() || '';
+    const isPendiente = text === '2' || text.includes('pendiente') || text.includes('crédito') || text.includes('credito');
+
+    if (isPendiente && context.gasto_id) {
+      await supabase.from('gastos')
+        .update({ estado_pago: 'pendiente' })
+        .eq('id', context.gasto_id);
+    }
+    // Default: 'pagado' (already set on insert)
+
+    // Advance to soporte prompt
+    await ctx.sendMessage('📎 ¿Tienes soporte? 📷 Ahora / ⏰ Después / ❌ No');
+    await ctx.updateSession('awaiting_image', {});
+    return;
+  }
+
   // Handle image for soporte (W01/W02 awaiting_image)
   if (session.state === 'awaiting_image') {
     if (message.type === 'image' && message.image_id) {
@@ -1473,10 +1491,10 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     msg = `✅ Gasto de ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
   }
 
-  msg += '\n\n📎 ¿Tienes soporte? 📷 Ahora / ⏰ Después / ❌ No';
+  msg += '\n\n💳 ¿Ya lo pagaste?\n1️⃣ Sí, ya pagado\n2️⃣ Pendiente (a crédito)';
   await ctx.sendMessage(msg);
-  await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
-  return true; // Skip completeSession — awaiting soporte image
+  await ctx.updateSession('awaiting_payment_status', { gasto_id: gasto?.id });
+  return true; // Skip completeSession — awaiting payment status
 }
 
 async function executeW02(ctx: HandlerContext): Promise<boolean> {
@@ -1519,11 +1537,11 @@ async function executeW02(ctx: HandlerContext): Promise<boolean> {
 
   let msg = `✅ Gasto de empresa registrado:\n💰 ${formatCOP(c.amount!)} — ${CATEGORIA_LABELS[c.categoria || 'otros'] || c.categoria}\n📊 Gastos empresa este mes: ${formatCOP(totalMes)}`;
   if (detalle) msg += `\n   (${detalle})`;
-  msg += '\n\n📎 ¿Tienes soporte? 📷 Ahora / ⏰ Después / ❌ No';
+  msg += '\n\n💳 ¿Ya lo pagaste?\n1️⃣ Sí, ya pagado\n2️⃣ Pendiente (a crédito)';
 
   await ctx.sendMessage(msg);
-  await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
-  return true; // Skip completeSession — awaiting soporte image
+  await ctx.updateSession('awaiting_payment_status', { gasto_id: gasto?.id });
+  return true; // Skip completeSession — awaiting payment status
 }
 
 async function executeBorradorConfirmation(ctx: HandlerContext): Promise<void> {

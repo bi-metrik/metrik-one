@@ -45,6 +45,10 @@ export interface NumerosData {
   gastoPromedioMensual: number
   gastoTotalMensual: number        // gastoPromedioMensual + costosFijosMes
 
+  // D119: Cuentas por pagar
+  cxpTotal: number
+  cxpCount: number
+
   // Semáforo
   semaforo: SemaforoData
 
@@ -148,6 +152,8 @@ export async function getNumeros(mesRef?: string) {
     configFinancieraRes,
     // D141: Perfil fiscal (régimen)
     fiscalProfileRes,
+    // D119: Cuentas por pagar
+    cxpRes,
   ] = await Promise.all([
     // Latest bank balance (order by created_at — fecha can be NULL in old records)
     supabase
@@ -303,6 +309,13 @@ export async function getNumeros(mesRef?: string) {
       .select('tax_regime')
       .eq('workspace_id', workspaceId)
       .maybeSingle(),
+
+    // D119: Cuentas por pagar (all pending gastos, not month-scoped)
+    supabase
+      .from('gastos')
+      .select('monto')
+      .eq('workspace_id', workspaceId)
+      .eq('estado_pago', 'pendiente'),
   ])
 
   // ── Calculate values ─────────────────────────────
@@ -335,6 +348,11 @@ export async function getNumeros(mesRef?: string) {
   // D141: Régimen fiscal
   const regimenFiscal = (fiscalProfileRes.data?.tax_regime as 'ordinario' | 'simple' | null) ?? null
 
+  // D119: Cuentas por pagar
+  const cxpData = cxpRes.data ?? []
+  const cxpTotal = cxpData.reduce((s, g) => s + Number(g.monto), 0)
+  const cxpCount = cxpData.length
+
   // Gastos avg (3 months)
   const gastos3m = gastos3mRes.data ?? []
   const monthsMap = new Map<string, number>()
@@ -360,6 +378,7 @@ export async function getNumeros(mesRef?: string) {
       .from('gastos')
       .select('monto')
       .eq('workspace_id', workspaceId)
+      .eq('estado_pago', 'pagado')  // D119: only paid gastos affect cash
       .gt('fecha', lastDateStr)
 
     const cobrosPostSaldo = (cobrosDesde.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
@@ -587,6 +606,8 @@ export async function getNumeros(mesRef?: string) {
     regimenFiscal,
     gastosDeduciblesMes,
     gastosSinSoporteMes,
+    cxpTotal,
+    cxpCount,
     semaforo,
     conciliacion,
     mesRef: mes,
@@ -823,7 +844,7 @@ export async function actualizarSaldo(saldoReal: number, nota?: string) {
     const lastDate = (ultimoSaldo.fecha ?? ultimoSaldo.created_at ?? new Date().toISOString()).split('T')[0]
     const [cobrosDesde, gastosDesde] = await Promise.all([
       supabase.from('cobros').select('monto').eq('workspace_id', workspaceId).gt('fecha', lastDate),
-      supabase.from('gastos').select('monto').eq('workspace_id', workspaceId).gt('fecha', lastDate),
+      supabase.from('gastos').select('monto').eq('workspace_id', workspaceId).eq('estado_pago', 'pagado').gt('fecha', lastDate),
     ])
     const cobrosPost = (cobrosDesde.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
     const gastosPost = (gastosDesde.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
@@ -832,7 +853,7 @@ export async function actualizarSaldo(saldoReal: number, nota?: string) {
     // First time: theoretical = all cobros - all gastos
     const [cobrosAll, gastosAll] = await Promise.all([
       supabase.from('cobros').select('monto').eq('workspace_id', workspaceId),
-      supabase.from('gastos').select('monto').eq('workspace_id', workspaceId),
+      supabase.from('gastos').select('monto').eq('workspace_id', workspaceId).eq('estado_pago', 'pagado'),
     ])
     const totalCobros = (cobrosAll.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
     const totalGastos = (gastosAll.data ?? []).reduce((s, c) => s + Number(c.monto), 0)

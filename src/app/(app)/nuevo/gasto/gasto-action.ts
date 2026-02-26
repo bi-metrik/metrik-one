@@ -13,6 +13,7 @@ export async function createGasto(input: {
   deducible?: boolean
   proyecto_id?: string | null  // UUID, 'empresa', or null
   rubro_id?: string | null
+  estado_pago?: 'pagado' | 'pendiente'
 }) {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -55,6 +56,7 @@ export async function createGasto(input: {
       proyecto_id: proyectoId,
       rubro_id: (proyectoId && input.rubro_id) ? input.rubro_id : null,
       tipo,
+      estado_pago: input.estado_pago ?? 'pagado',
       canal_registro: 'app',
       created_by: userId,
     })

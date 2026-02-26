@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { formatCOP } from '@/lib/contacts/constants'
 import QuestionCard from './question-card'
@@ -173,6 +173,23 @@ export default function NumerosV2Client({ initialData }: Props) {
 
             />
           </div>
+
+          {/* D119: CxP banner */}
+          {data.cxpTotal > 0 && (
+            <a
+              href="/movimientos?tipo=egresos&estadoPago=pendiente"
+              className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm transition-colors hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/40 dark:hover:bg-orange-950/60"
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0 text-orange-600 dark:text-orange-400" />
+              <span className="text-orange-800 dark:text-orange-300">
+                <span className="font-semibold">Cuentas por pagar:</span>{' '}
+                {formatCOP(data.cxpTotal)}{' '}
+                <span className="text-orange-600 dark:text-orange-400">
+                  ({data.cxpCount} pendiente{data.cxpCount !== 1 ? 's' : ''})
+                </span>
+              </span>
+            </a>
+          )}
 
           {/* P3 + P4 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

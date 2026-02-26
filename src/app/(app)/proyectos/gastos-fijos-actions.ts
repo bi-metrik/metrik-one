@@ -82,6 +82,7 @@ export async function confirmarBorradorGastoFijo(borradorId: string, montoAjusta
       descripcion: borrador.nombre,
       fecha: new Date().toISOString().split('T')[0],
       tipo: 'fijo',
+      estado_pago: 'pagado',
       gasto_fijo_ref_id: borrador.gasto_fijo_config_id,
       created_by: userId,
     })

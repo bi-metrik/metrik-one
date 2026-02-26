@@ -1124,8 +1124,10 @@ export type Database = {
           deducible: boolean | null
           descripcion: string | null
           empresa_id: string | null
+          estado_pago: string | null
           external_ref: string | null
           fecha: string
+          fecha_pago: string | null
           gasto_fijo_ref_id: string | null
           id: string
           monto: number
@@ -1144,8 +1146,10 @@ export type Database = {
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
+          estado_pago?: string | null
           external_ref?: string | null
           fecha?: string
+          fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
           monto: number
@@ -1164,8 +1168,10 @@ export type Database = {
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
+          estado_pago?: string | null
           external_ref?: string | null
           fecha?: string
+          fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
           monto?: number

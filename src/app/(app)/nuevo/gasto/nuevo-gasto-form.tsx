@@ -29,6 +29,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [descripcion, setDescripcion] = useState('')
   const [deducible, setDeducible] = useState(false)
+  const [yaPagado, setYaPagado] = useState(true)
 
   // Rubros for selected project
   const [rubros, setRubros] = useState<{ id: string; nombre: string }[]>([])
@@ -75,6 +76,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
         deducible,
         proyecto_id: proyectoId || null,
         rubro_id: rubroId || null,
+        estado_pago: yaPagado ? 'pagado' : 'pendiente',
       })
       if (res.success) {
         toast.success('Gasto registrado')
@@ -185,6 +187,24 @@ export default function NuevoGastoForm({ proyectos }: Props) {
             onChange={e => setFecha(e.target.value)}
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
           />
+        </div>
+
+        {/* Ya pagado */}
+        <div>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={yaPagado}
+              onChange={e => setYaPagado(e.target.checked)}
+              className="rounded border"
+            />
+            <span className="text-sm">Ya pagado</span>
+          </label>
+          {!yaPagado && (
+            <p className="mt-1 ml-6 text-[11px] text-orange-600 dark:text-orange-400">
+              Se registra como cuenta por pagar. Podrás marcarlo como pagado después.
+            </p>
+          )}
         </div>
 
         {/* Descripcion */}

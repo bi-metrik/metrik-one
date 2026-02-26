@@ -54,6 +54,7 @@ export type SessionState =
   | 'confirming'
   | 'awaiting_selection'
   | 'awaiting_reason'
+  | 'awaiting_payment_status'
   | 'awaiting_image'
   | 'completed'
   | 'expired';

@@ -478,6 +478,7 @@ export async function addGastoDirecto(proyectoId: string, input: {
   descripcion?: string
   categoria?: string
   fecha?: string
+  estado_pago?: 'pagado' | 'pendiente'
 }): Promise<ActionResult> {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -505,6 +506,7 @@ export async function addGastoDirecto(proyectoId: string, input: {
       categoria: input.categoria || 'otros',
       fecha: input.fecha || new Date().toISOString().split('T')[0],
       tipo: 'directo',
+      estado_pago: input.estado_pago ?? 'pagado',
       created_by: userId,
     })
 

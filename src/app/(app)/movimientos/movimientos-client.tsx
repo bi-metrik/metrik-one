@@ -1,11 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
+import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
+import { toast } from 'sonner'
 import type { Movimiento } from './actions'
+import { marcarComoPagado } from './actions'
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -20,7 +23,12 @@ interface Props {
   totales: { ingresos: number; egresos: number; deducible: number }
   filtroTipo: string
   filtroMes: string
+  filtroCat: string
+  filtroProy: string
+  filtroTipoProy: string
+  filtroEstadoPago: string
   regimenFiscal: string | null
+  proyectos: { id: string; nombre: string; tipo: string }[]
 }
 
 const MESES = [
@@ -46,24 +54,42 @@ function getDeducibleTag(mov: Movimiento, regimen: string | null): 'deducible' |
   return mov.soporte_url ? 'deducible' : 'falta_soporte'
 }
 
-export default function MovimientosClient({ movimientos, totales, filtroTipo, filtroMes, regimenFiscal }: Props) {
+export default function MovimientosClient({
+  movimientos, totales, filtroTipo, filtroMes,
+  filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago,
+  regimenFiscal, proyectos,
+}: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const neto = totales.ingresos - totales.egresos
+  const [isPending, startTransition] = useTransition()
 
   // Soporte image lightbox
   const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
+
+  // Marcar como pagado dialog
+  const [pagoModal, setPagoModal] = useState<{ id: string; descripcion: string; monto: number; fecha: string } | null>(null)
+  const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
+
+  // Filters panel
+  const [showFilters, setShowFilters] = useState(false)
+
+  // Count active filters (excluding 'todos')
+  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago].filter(f => f !== 'todos').length
+
+  // Auto-open filters if any are active
+  useEffect(() => {
+    if (activeFilterCount > 0) setShowFilters(true)
+  }, [activeFilterCount])
 
   // D142: Tooltips first-time state
   const [tooltipDeducible, setTooltipDeducible] = useState(false)
   const [tooltipFaltaSoporte, setTooltipFaltaSoporte] = useState(false)
 
   useEffect(() => {
-    // Check if user has already seen tooltips
     const seenDeducible = localStorage.getItem('metrik_tooltip_deducible_visto')
     const seenFaltaSoporte = localStorage.getItem('metrik_tooltip_falta_soporte_visto')
 
-    // Show tooltip on first encounter
     if (!seenDeducible && regimenFiscal !== 'simple') {
       const hasDeducible = movimientos.some(m => getDeducibleTag(m, regimenFiscal) === 'deducible')
       if (hasDeducible) setTooltipDeducible(true)
@@ -86,7 +112,20 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
 
   function navigate(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString())
-    params.set(key, value)
+    if (value === 'todos') {
+      params.delete(key)
+    } else {
+      params.set(key, value)
+    }
+    router.push(`/movimientos?${params.toString()}`)
+  }
+
+  function clearFilters() {
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('cat')
+    params.delete('proy')
+    params.delete('tipoProy')
+    params.delete('estadoPago')
     router.push(`/movimientos?${params.toString()}`)
   }
 
@@ -95,6 +134,21 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
     const [y, m] = filtroMes.split('-').map(Number)
     const d = new Date(y, m - 1 + delta, 1)
     navigate('mes', d.toISOString().slice(0, 7))
+  }
+
+  // Marcar como pagado handler
+  function handleMarcarPagado() {
+    if (!pagoModal) return
+    startTransition(async () => {
+      const res = await marcarComoPagado(pagoModal.id, fechaPago)
+      if (res.success) {
+        toast.success('Gasto marcado como pagado')
+        setPagoModal(null)
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
   }
 
   // Group movimientos by date
@@ -146,7 +200,6 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
             {neto >= 0 ? '+' : ''}{formatCOP(neto)}
           </p>
         </div>
-        {/* D142: Fourth card — Deducible (only régimen ordinario) */}
         {showDeducibleCard && (
           <div className="rounded-lg border bg-card p-3 text-center">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Deducible</p>
@@ -157,22 +210,105 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
         )}
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 rounded-lg border bg-card p-1">
-        {(['todos', 'ingresos', 'egresos'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => navigate('tipo', t)}
-            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              filtroTipo === t
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {t === 'todos' ? 'Todos' : t === 'ingresos' ? 'Ingresos' : 'Egresos'}
-          </button>
-        ))}
+      {/* Filter tabs + Filtros button */}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 gap-1 rounded-lg border bg-card p-1">
+          {(['todos', 'ingresos', 'egresos'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => navigate('tipo', t)}
+              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                filtroTipo === t
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t === 'todos' ? 'Todos' : t === 'ingresos' ? 'Ingresos' : 'Egresos'}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`relative flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+            activeFilterCount > 0
+              ? 'border-primary bg-primary/5 text-primary'
+              : 'bg-card text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          {activeFilterCount > 0 && (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
       </div>
+
+      {/* Advanced filters panel */}
+      {showFilters && (
+        <div className="rounded-lg border bg-card p-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            {/* Categoría */}
+            <select
+              value={filtroCat}
+              onChange={e => navigate('cat', e.target.value)}
+              className="rounded-md border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="todos">Todas las categorias</option>
+              {CATEGORIAS_GASTO.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+
+            {/* Proyecto */}
+            <select
+              value={filtroProy}
+              onChange={e => navigate('proy', e.target.value)}
+              className="rounded-md border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="todos">Todos los proyectos</option>
+              <option value="empresa">Empresa (sin proyecto)</option>
+              {proyectos.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.nombre}{p.tipo === 'interno' ? ' · Int' : ''}
+                </option>
+              ))}
+            </select>
+
+            {/* Tipo proyecto */}
+            <select
+              value={filtroTipoProy}
+              onChange={e => navigate('tipoProy', e.target.value)}
+              className="rounded-md border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="todos">Todos los tipos</option>
+              <option value="cliente">Externo (cliente)</option>
+              <option value="interno">Interno</option>
+              <option value="empresa">Empresa</option>
+            </select>
+
+            {/* Estado pago */}
+            <select
+              value={filtroEstadoPago}
+              onChange={e => navigate('estadoPago', e.target.value)}
+              className="rounded-md border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="todos">Todo estado de pago</option>
+              <option value="pagado">Pagados</option>
+              <option value="pendiente">Pendientes</option>
+            </select>
+          </div>
+
+          {activeFilterCount > 0 && (
+            <button
+              onClick={clearFilters}
+              className="text-[11px] text-muted-foreground hover:text-foreground underline"
+            >
+              Limpiar filtros
+            </button>
+          )}
+        </div>
+      )}
 
       {/* D142: Tooltip educativo — Deducible (primera vez) */}
       {tooltipDeducible && (
@@ -211,6 +347,11 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
         <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
           <Filter className="mx-auto mb-2 h-8 w-8 opacity-40" />
           <p>No hay movimientos en {mesLabel(filtroMes)}</p>
+          {activeFilterCount > 0 && (
+            <button onClick={clearFilters} className="mt-2 text-xs text-primary underline">
+              Limpiar filtros
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -277,6 +418,29 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
                                 {mov.tipo_gasto === 'empresa' && <Building2 className="h-2.5 w-2.5" />}
                                 {mov.tipo_gasto === 'directo' ? 'Proyecto' : mov.tipo_gasto === 'empresa' ? 'Empresa' : 'Fijo'}
                               </span>
+                            )}
+
+                            {/* D119: Pendiente badge */}
+                            {mov.estado_pago === 'pendiente' && (
+                              <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
+                                <Clock className="h-2.5 w-2.5" />
+                                Pendiente
+                              </span>
+                            )}
+
+                            {/* D119: Marcar como pagado button */}
+                            {mov.estado_pago === 'pendiente' && (
+                              <button
+                                onClick={() => {
+                                  setPagoModal({ id: mov.id, descripcion: mov.descripcion, monto: mov.monto, fecha: mov.fecha })
+                                  setFechaPago(new Date().toISOString().split('T')[0])
+                                }}
+                                className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60 transition-colors"
+                                title="Marcar como pagado"
+                              >
+                                <CheckCircle2 className="h-2.5 w-2.5" />
+                                Pagado
+                              </button>
                             )}
 
                             {/* Deducible / Falta soporte tags */}
@@ -351,6 +515,49 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
                 alt="Soporte fotográfico"
                 className="w-full rounded-lg"
               />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* D119: Marcar como pagado dialog */}
+      <Dialog open={!!pagoModal} onOpenChange={() => setPagoModal(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogTitle className="text-base font-semibold">
+            Marcar gasto como pagado
+          </DialogTitle>
+          {pagoModal && (
+            <div className="space-y-4">
+              <div className="space-y-1 text-sm">
+                <p><span className="text-muted-foreground">Gasto:</span> {pagoModal.descripcion} — {formatCOP(pagoModal.monto)}</p>
+                <p><span className="text-muted-foreground">Causado:</span> {pagoModal.fecha}</p>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Fecha de pago</label>
+                <input
+                  type="date"
+                  value={fechaPago}
+                  onChange={e => setFechaPago(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPagoModal(null)}
+                  className="flex-1 rounded-md border px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleMarcarPagado}
+                  disabled={isPending}
+                  className="flex-1 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                >
+                  {isPending ? 'Guardando...' : 'Confirmar pago'}
+                </button>
+              </div>
             </div>
           )}
         </DialogContent>
