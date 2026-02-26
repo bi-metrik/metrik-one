@@ -1082,7 +1082,7 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Handle image for soporte (W02 awaiting_image)
+  // Handle image for soporte (W01/W02 awaiting_image)
   if (session.state === 'awaiting_image') {
     if (message.type === 'image' && message.image_id) {
       // Store image reference
@@ -1412,11 +1412,12 @@ async function executeRegistro(ctx: HandlerContext): Promise<void> {
   const { session, supabase, user } = ctx;
   const context = session.context;
   const action = context.pending_action;
+  let awaitingImage = false;
 
   try {
     switch (action) {
-      case 'W01': await executeW01(ctx); break;
-      case 'W02': await executeW02(ctx); break;
+      case 'W01': awaitingImage = await executeW01(ctx); break;
+      case 'W02': awaitingImage = await executeW02(ctx); break;
       case 'W03': await executeW03(ctx); break;
       case 'W04': await executeW04(ctx); break;
       case 'W06': await executeW06(ctx); break;
@@ -1427,14 +1428,17 @@ async function executeRegistro(ctx: HandlerContext): Promise<void> {
     await ctx.sendMessage('❌ Ocurrió un error al registrar. Intenta de nuevo.');
   }
 
-  await completeSession(supabase, session.id);
+  // Don't complete if handler is awaiting soporte image
+  if (!awaitingImage) {
+    await completeSession(supabase, session.id);
+  }
 }
 
-async function executeW01(ctx: HandlerContext): Promise<void> {
+async function executeW01(ctx: HandlerContext): Promise<boolean> {
   const { supabase, user, session } = ctx;
   const c = session.context;
 
-  const { error } = await supabase.from('gastos').insert({
+  const { data: gasto, error } = await supabase.from('gastos').insert({
     workspace_id: user.workspace_id,
     proyecto_id: c.proyecto_id,
     monto: c.amount,
@@ -1442,7 +1446,8 @@ async function executeW01(ctx: HandlerContext): Promise<void> {
     descripcion: c.parsed_fields?.concept || '',
     tipo: 'directo',
     canal_registro: 'whatsapp',
-  });
+    soporte_pendiente: true,
+  }).select().single();
 
   if (error) throw error;
 
@@ -1453,22 +1458,27 @@ async function executeW01(ctx: HandlerContext): Promise<void> {
     .eq('proyecto_id', c.proyecto_id)
     .single();
 
+  let msg: string;
   if (project) {
-    const msg = `✅ Gasto registrado.\n\n📂 ${bold(project.nombre)}\n├ Presupuesto usado: ${formatCOP(Number(project.costo_acumulado))} / ${formatCOP(Number(project.presupuesto_total))} (${formatPct(Number(project.presupuesto_consumido_pct))})\n├ Horas: ${Number(project.horas_reales) || 0} / ${Number(project.horas_estimadas) || 0}h\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
-    await ctx.sendMessage(msg);
+    msg = `✅ Gasto registrado.\n\n📂 ${bold(project.nombre)}\n├ Presupuesto usado: ${formatCOP(Number(project.costo_acumulado))} / ${formatCOP(Number(project.presupuesto_total))} (${formatPct(Number(project.presupuesto_consumido_pct))})\n├ Horas: ${Number(project.horas_reales) || 0} / ${Number(project.horas_estimadas) || 0}h\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
   } else {
-    await ctx.sendMessage(`✅ Gasto de ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`);
+    msg = `✅ Gasto de ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
   }
+
+  msg += '\n\n📎 ¿Tienes soporte? 📷 Ahora / ⏰ Después / ❌ No';
+  await ctx.sendMessage(msg);
+  await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
+  return true; // Skip completeSession — awaiting soporte image
 }
 
-async function executeW02(ctx: HandlerContext): Promise<void> {
+async function executeW02(ctx: HandlerContext): Promise<boolean> {
   const { supabase, user, session } = ctx;
   const c = session.context;
 
   if (c.borrador_id) {
-    // Confirm borrador
+    // Confirm borrador — no soporte needed for fixed expenses
     await executeBorradorConfirmation(ctx);
-    return;
+    return false;
   }
 
   const { data: gasto, error } = await supabase.from('gastos').insert({
@@ -1504,6 +1514,7 @@ async function executeW02(ctx: HandlerContext): Promise<void> {
 
   await ctx.sendMessage(msg);
   await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
+  return true; // Skip completeSession — awaiting soporte image
 }
 
 async function executeBorradorConfirmation(ctx: HandlerContext): Promise<void> {
