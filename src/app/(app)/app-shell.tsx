@@ -39,13 +39,21 @@ const ALL_NAV_ITEMS = [
   { href: '/pipeline', label: 'Pipeline', icon: Flame, roles: ['owner', 'admin'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'read_only'] },
-  { href: '/causacion', label: 'Causacion', icon: BookOpen, roles: ['owner', 'admin'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin'] },
   { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'operator'] },
 ]
 
+// D246: Sección contable separada (futuro: visible para rol contador)
+const CONTABILIDAD_NAV_ITEMS = [
+  { href: '/causacion', label: 'Causacion', icon: BookOpen, roles: ['owner', 'admin'] },
+]
+
 function getNavItemsForRole(role: string) {
   return ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
+}
+
+function getContabilidadItemsForRole(role: string) {
+  return CONTABILIDAD_NAV_ITEMS.filter(item => item.roles.includes(role))
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -91,6 +99,7 @@ export default function AppShell({
     .toUpperCase()
 
   const navItems = getNavItemsForRole(role)
+  const contabilidadItems = getContabilidadItemsForRole(role)
 
   // Dynamic branding: override CSS custom properties when workspace has custom colors
   const brandingStyle: Record<string, string> = {}
@@ -176,6 +185,42 @@ export default function AppShell({
             )
           })}
         </nav>
+
+        {/* D246: Contabilidad section — separated from main nav */}
+        {contabilidadItems.length > 0 && (
+          <div className="px-2 pb-1 pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
+            {sidebarExpanded && (
+              <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
+                Contabilidad
+              </p>
+            )}
+            {contabilidadItems.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+              const Icon = item.icon
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  title={!sidebarExpanded ? item.label : undefined}
+                  className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                    sidebarExpanded ? '' : 'justify-center'
+                  } ${
+                    isActive
+                      ? 'shadow-sm'
+                      : 'hover:opacity-90'
+                  }`}
+                  style={{
+                    backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                    color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                  }}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {sidebarExpanded && <span>{item.label}</span>}
+                </Link>
+              )
+            })}
+          </div>
+        )}
 
         {/* User section */}
         <div className="px-2 pb-3 pt-2" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
