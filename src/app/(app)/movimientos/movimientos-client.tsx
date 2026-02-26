@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle, User } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
@@ -457,18 +457,22 @@ export default function MovimientosClient({
                             </span>
                           </div>
 
-                          {/* Line 2: Registrado por + Proyecto + Categoria */}
-                          {(mov.created_by_name || mov.proyecto || mov.categoria) && (
+                          {/* Line 2: Proyecto + Categoria */}
+                          {(mov.proyecto || mov.categoria) && (
                             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                              {mov.created_by_name && (
-                                <span className="font-medium text-foreground/70">{mov.created_by_name}</span>
-                              )}
-                              {mov.created_by_name && (mov.proyecto || mov.categoria) && ' · '}
                               {mov.proyecto}
                               {mov.proyecto && mov.categoria && ' · '}
                               {mov.categoria && (
                                 <span className="capitalize">{mov.categoria.replace(/_/g, ' ')}</span>
                               )}
+                            </p>
+                          )}
+
+                          {/* Line 3: Registrado por — separate line for traceability */}
+                          {mov.created_by_name && (
+                            <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <User className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{mov.created_by_name}</span>
                             </p>
                           )}
 
