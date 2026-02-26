@@ -227,79 +227,108 @@ export default function MovimientosClient({ movimientos, totales, filtroTipo, fi
                   return (
                     <div
                       key={mov.id}
-                      className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5"
+                      className="rounded-lg border bg-card px-3 py-2.5"
                     >
-                      {/* Icon */}
-                      {mov.tipo === 'ingreso' ? (
-                        <ArrowDownCircle className="h-5 w-5 shrink-0 text-green-500" />
-                      ) : (
-                        <ArrowUpCircle className="h-5 w-5 shrink-0 text-red-500" />
-                      )}
+                      <div className="flex items-start gap-3">
+                        {/* Icon */}
+                        {mov.tipo === 'ingreso' ? (
+                          <ArrowDownCircle className="mt-0.5 h-5 w-5 shrink-0 text-green-500" />
+                        ) : (
+                          <ArrowUpCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+                        )}
 
-                      {/* Info */}
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{mov.descripcion}</p>
-                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                          {mov.proyecto && <span className="truncate max-w-[140px]">{mov.proyecto}</span>}
-                          {mov.categoria && (
-                            <>
-                              {mov.proyecto && <span>·</span>}
-                              <span className="capitalize">{mov.categoria.replace(/_/g, ' ')}</span>
-                            </>
-                          )}
-                          {/* Tipo gasto badge */}
-                          {mov.tipo === 'egreso' && mov.tipo_gasto && (
-                            <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${
-                              mov.tipo_gasto === 'directo'
-                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-                                : mov.tipo_gasto === 'empresa'
-                                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300'
-                                  : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                        {/* Content column */}
+                        <div className="min-w-0 flex-1">
+                          {/* Line 1: Description + Amount */}
+                          <div className="flex items-baseline justify-between gap-2">
+                            <p className="truncate text-sm font-medium">{mov.descripcion}</p>
+                            <span className={`shrink-0 text-sm font-semibold tabular-nums ${
+                              mov.tipo === 'ingreso'
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-red-600 dark:text-red-400'
                             }`}>
-                              {mov.tipo_gasto === 'directo' && <FolderOpen className="h-2.5 w-2.5" />}
-                              {mov.tipo_gasto === 'empresa' && <Building2 className="h-2.5 w-2.5" />}
-                              {mov.tipo_gasto === 'directo' ? 'Proyecto' : mov.tipo_gasto === 'empresa' ? 'Empresa' : 'Fijo'}
+                              {mov.tipo === 'ingreso' ? '+' : '-'}{formatCOP(mov.monto)}
                             </span>
+                          </div>
+
+                          {/* Line 2: Proyecto + Categoria */}
+                          {(mov.proyecto || mov.categoria) && (
+                            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                              {mov.proyecto}
+                              {mov.proyecto && mov.categoria && ' · '}
+                              {mov.categoria && (
+                                <span className="capitalize">{mov.categoria.replace(/_/g, ' ')}</span>
+                              )}
+                            </p>
                           )}
-                          {/* Deducible / Falta soporte tags */}
-                          {tag === 'deducible' && (
-                            <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
-                              Deducible
-                            </span>
-                          )}
-                          {tag === 'falta_soporte' && (
-                            <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                              Falta soporte
-                            </span>
-                          )}
-                          {/* Canal WhatsApp indicator */}
-                          {mov.canal_registro === 'whatsapp' && (
-                            <Smartphone className="h-3 w-3 text-green-500" />
-                          )}
+
+                          {/* Line 3: Badges + User initials + Soporte */}
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            {/* Tipo gasto badge */}
+                            {mov.tipo === 'egreso' && mov.tipo_gasto && (
+                              <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${
+                                mov.tipo_gasto === 'directo'
+                                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+                                  : mov.tipo_gasto === 'empresa'
+                                    ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300'
+                                    : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                              }`}>
+                                {mov.tipo_gasto === 'directo' && <FolderOpen className="h-2.5 w-2.5" />}
+                                {mov.tipo_gasto === 'empresa' && <Building2 className="h-2.5 w-2.5" />}
+                                {mov.tipo_gasto === 'directo' ? 'Proyecto' : mov.tipo_gasto === 'empresa' ? 'Empresa' : 'Fijo'}
+                              </span>
+                            )}
+
+                            {/* Deducible / Falta soporte tags */}
+                            {tag === 'deducible' && (
+                              <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                Deducible
+                              </span>
+                            )}
+                            {tag === 'falta_soporte' && (
+                              <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                Falta soporte
+                              </span>
+                            )}
+
+                            {/* Canal WhatsApp indicator */}
+                            {mov.canal_registro === 'whatsapp' && (
+                              <Smartphone className="h-3 w-3 text-green-500" />
+                            )}
+
+                            {/* Spacer */}
+                            <div className="flex-1" />
+
+                            {/* User initials */}
+                            {mov.created_by_initials && (
+                              <span
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground"
+                                title={mov.created_by_name ?? undefined}
+                              >
+                                {mov.created_by_initials}
+                              </span>
+                            )}
+
+                            {/* Soporte indicator */}
+                            {hasSoporteImage ? (
+                              <button
+                                onClick={() => setSoporteModal({ url: mov.soporte_url!, descripcion: mov.descripcion })}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 transition-colors"
+                                title="Ver soporte"
+                              >
+                                <FileText className="h-3 w-3" />
+                              </button>
+                            ) : mov.soporte_url ? (
+                              <span
+                                className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-50 text-amber-500 dark:bg-amber-900/30 dark:text-amber-400"
+                                title="Soporte (foto no disponible)"
+                              >
+                                <FileText className="h-3 w-3" />
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
-
-                      {/* Amount */}
-                      <span className={`shrink-0 text-sm font-semibold tabular-nums ${
-                        mov.tipo === 'ingreso'
-                          ? 'text-green-600 dark:text-green-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        {mov.tipo === 'ingreso' ? '+' : '-'}{formatCOP(mov.monto)}
-                      </span>
-
-                      {/* Soporte thumbnail */}
-                      {hasSoporteImage ? (
-                        <button
-                          onClick={() => setSoporteModal({ url: mov.soporte_url!, descripcion: mov.descripcion })}
-                          className="shrink-0 rounded border border-border overflow-hidden hover:ring-2 hover:ring-primary/50 transition-shadow"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={mov.soporte_url!} alt="Soporte" className="h-8 w-8 object-cover" loading="lazy" />
-                        </button>
-                      ) : mov.soporte_url ? (
-                        <span title="Soporte (foto no disponible)"><FileText className="h-4 w-4 shrink-0 text-amber-500" /></span>
-                      ) : null}
                     </div>
                   )
                 })}

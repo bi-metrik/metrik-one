@@ -14,6 +14,8 @@ export type Movimiento = {
   soporte_url: string | null
   tipo_gasto: 'directo' | 'empresa' | 'fijo' | null
   canal_registro: 'app' | 'whatsapp' | null
+  created_by_name: string | null
+  created_by_initials: string | null
 }
 
 // D142: Categorías deducibles para régimen ordinario
@@ -22,6 +24,13 @@ const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesiona
 function esCategoriaDeducible(categoria: string | null): boolean {
   if (!categoria) return false
   return CATEGORIAS_DEDUCIBLES.includes(categoria)
+}
+
+function getInitials(name: string | null): string | null {
+  if (!name) return null
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return parts[0].substring(0, 2).toUpperCase()
 }
 
 export async function getMovimientos(filters?: {
@@ -44,7 +53,7 @@ export async function getMovimientos(filters?: {
   if (tipoFilter === 'todos' || tipoFilter === 'egresos') {
     const { data: gastos } = await supabase
       .from('gastos')
-      .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre)')
+      .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
@@ -52,6 +61,7 @@ export async function getMovimientos(filters?: {
 
     for (const g of gastos ?? []) {
       const proy = g.proyectos as { nombre: string } | null
+      const profile = g.created_by_profile as { full_name: string } | null
       results.push({
         id: g.id,
         tipo: 'egreso',
@@ -64,6 +74,8 @@ export async function getMovimientos(filters?: {
         soporte_url: g.soporte_url ?? null,
         tipo_gasto: (g.tipo as Movimiento['tipo_gasto']) ?? null,
         canal_registro: (g.canal_registro as Movimiento['canal_registro']) ?? null,
+        created_by_name: profile?.full_name ?? null,
+        created_by_initials: getInitials(profile?.full_name ?? null),
       })
     }
   }
@@ -72,7 +84,7 @@ export async function getMovimientos(filters?: {
   if (tipoFilter === 'todos' || tipoFilter === 'ingresos') {
     const { data: cobros } = await supabase
       .from('cobros')
-      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre)')
+      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name)')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
@@ -80,6 +92,7 @@ export async function getMovimientos(filters?: {
 
     for (const c of cobros ?? []) {
       const proy = c.proyectos as { nombre: string } | null
+      const profile = c.created_by_profile as { full_name: string } | null
       results.push({
         id: c.id,
         tipo: 'ingreso',
@@ -92,6 +105,8 @@ export async function getMovimientos(filters?: {
         soporte_url: null,
         tipo_gasto: null,
         canal_registro: null,
+        created_by_name: profile?.full_name ?? null,
+        created_by_initials: getInitials(profile?.full_name ?? null),
       })
     }
   }

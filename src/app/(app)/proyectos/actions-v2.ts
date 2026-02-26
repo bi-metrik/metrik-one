@@ -479,7 +479,7 @@ export async function addGastoDirecto(proyectoId: string, input: {
   categoria?: string
   fecha?: string
 }): Promise<ActionResult> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Validate estado
@@ -505,6 +505,7 @@ export async function addGastoDirecto(proyectoId: string, input: {
       categoria: input.categoria || 'otros',
       fecha: input.fecha || new Date().toISOString().split('T')[0],
       tipo: 'directo',
+      created_by: userId,
     })
 
   if (dbError) return { success: false, error: dbError.message }
@@ -565,7 +566,7 @@ export async function addCobro(facturaId: string, input: {
   fecha?: string
   notas?: string
 }): Promise<ActionResult> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Get factura to find proyecto_id (no state restriction for cobros on client projects)
@@ -610,6 +611,7 @@ export async function addCobro(facturaId: string, input: {
       monto: input.monto,
       fecha: input.fecha || new Date().toISOString().split('T')[0],
       notas: input.notas?.trim() || null,
+      created_by: userId,
     })
 
   if (dbError) return { success: false, error: dbError.message }

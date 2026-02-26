@@ -269,6 +269,7 @@ export type Database = {
         Row: {
           canal_registro: string | null
           created_at: string | null
+          created_by: string | null
           external_ref: string | null
           factura_id: string
           fecha: string
@@ -281,6 +282,7 @@ export type Database = {
         Insert: {
           canal_registro?: string | null
           created_at?: string | null
+          created_by?: string | null
           external_ref?: string | null
           factura_id: string
           fecha?: string
@@ -293,6 +295,7 @@ export type Database = {
         Update: {
           canal_registro?: string | null
           created_at?: string | null
+          created_by?: string | null
           external_ref?: string | null
           factura_id?: string
           fecha?: string
@@ -303,6 +306,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "cobros_created_by_profiles_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "cobros_factura_id_fkey"
             columns: ["factura_id"]
@@ -1110,6 +1120,7 @@ export type Database = {
           canal_registro: string | null
           categoria: string
           created_at: string | null
+          created_by: string | null
           deducible: boolean | null
           descripcion: string | null
           empresa_id: string | null
@@ -1129,6 +1140,7 @@ export type Database = {
           canal_registro?: string | null
           categoria: string
           created_at?: string | null
+          created_by?: string | null
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
@@ -1148,6 +1160,7 @@ export type Database = {
           canal_registro?: string | null
           categoria?: string
           created_at?: string | null
+          created_by?: string | null
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
@@ -1191,6 +1204,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_proyecto_rubros_comparativo"
             referencedColumns: ["rubro_id"]
+          },
+          {
+            foreignKeyName: "gastos_created_by_profiles_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "gastos_empresa_id_fkey"

@@ -58,7 +58,7 @@ export async function generarBorradoresGastosFijos() {
 // ── D84: Confirm a draft fixed expense ─────────────────────
 
 export async function confirmarBorradorGastoFijo(borradorId: string, montoAjustado?: number) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Get the borrador
@@ -83,6 +83,7 @@ export async function confirmarBorradorGastoFijo(borradorId: string, montoAjusta
       fecha: new Date().toISOString().split('T')[0],
       tipo: 'fijo',
       gasto_fijo_ref_id: borrador.gasto_fijo_config_id,
+      created_by: userId,
     })
     .select('id')
     .single()

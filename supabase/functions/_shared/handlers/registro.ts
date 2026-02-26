@@ -1454,6 +1454,7 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     tipo: 'directo',
     canal_registro: 'whatsapp',
     soporte_pendiente: true,
+    created_by: user.user_id ?? null,
   }).select().single();
 
   if (error) throw error;
@@ -1496,6 +1497,7 @@ async function executeW02(ctx: HandlerContext): Promise<boolean> {
     tipo: 'empresa',
     canal_registro: 'whatsapp',
     soporte_pendiente: true,
+    created_by: user.user_id ?? null,
   }).select().single();
 
   if (error) throw error;
@@ -1537,6 +1539,7 @@ async function executeBorradorConfirmation(ctx: HandlerContext): Promise<void> {
     tipo: 'fijo',
     canal_registro: 'whatsapp',
     gasto_fijo_ref_id: c.borrador_id,
+    created_by: user.user_id ?? null,
   }).select().single();
 
   if (error) throw error;
@@ -1594,6 +1597,7 @@ async function executeW04(ctx: HandlerContext): Promise<void> {
     monto: c.amount,
     fecha: new Date().toISOString().slice(0, 10),
     canal_registro: 'whatsapp',
+    created_by: user.user_id ?? null,
   };
   if (c.factura_id) insertData.factura_id = c.factura_id;
 

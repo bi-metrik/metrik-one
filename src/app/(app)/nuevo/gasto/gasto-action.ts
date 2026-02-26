@@ -14,7 +14,7 @@ export async function createGasto(input: {
   proyecto_id?: string | null  // UUID, 'empresa', or null
   rubro_id?: string | null
 }) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   if (!input.monto || input.monto <= 0) return { success: false, error: 'Monto invalido' }
@@ -55,7 +55,8 @@ export async function createGasto(input: {
       proyecto_id: proyectoId,
       rubro_id: (proyectoId && input.rubro_id) ? input.rubro_id : null,
       tipo,
-      canal_registro: 'web',
+      canal_registro: 'app',
+      created_by: userId,
     })
 
   if (dbError) return { success: false, error: dbError.message }
