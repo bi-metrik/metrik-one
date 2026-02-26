@@ -457,9 +457,13 @@ export default function MovimientosClient({
                             </span>
                           </div>
 
-                          {/* Line 2: Proyecto + Categoria */}
-                          {(mov.proyecto || mov.categoria) && (
+                          {/* Line 2: Registrado por + Proyecto + Categoria */}
+                          {(mov.created_by_name || mov.proyecto || mov.categoria) && (
                             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                              {mov.created_by_name && (
+                                <span className="font-medium text-foreground/70">{mov.created_by_name}</span>
+                              )}
+                              {mov.created_by_name && (mov.proyecto || mov.categoria) && ' · '}
                               {mov.proyecto}
                               {mov.proyecto && mov.categoria && ' · '}
                               {mov.categoria && (
@@ -571,10 +575,10 @@ export default function MovimientosClient({
                               </>
                             )}
 
-                            {/* User initials */}
+                            {/* User initials avatar */}
                             {mov.created_by_initials && (
                               <span
-                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground"
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[9px] font-bold text-primary ring-1 ring-primary/20"
                                 title={mov.created_by_name ?? undefined}
                               >
                                 {mov.created_by_initials}
