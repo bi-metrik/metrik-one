@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
-  const redirectTo = searchParams.get('redirectTo') || searchParams.get('next') || '/dashboard'
+  const redirectTo = searchParams.get('redirectTo') || searchParams.get('next') || '/numeros'
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
   const isLocalEnv = process.env.NODE_ENV === 'development'
 
