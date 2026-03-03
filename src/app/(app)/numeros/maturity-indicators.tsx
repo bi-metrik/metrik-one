@@ -77,7 +77,7 @@ const INDICATORS = [
   },
   {
     key: 'conversion',
-    label: 'Tasa de conversión pipeline',
+    label: 'Tasa de conversión oportunidades',
     description: 'Cuántas oportunidades se convierten en proyectos',
     icon: Receipt,
     test: (d: MaturityData) => d.invoicesRegistered >= 3,

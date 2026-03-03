@@ -930,7 +930,7 @@ export default function ProjectDetailClient({
                   </div>
                 </div>
                 <p className="mt-2 text-[10px] text-muted-foreground">
-                  * Estimación conservadora. Consulta configuración fiscal para tu caso.
+                  * Estimación conservadora. Consulta ajustes fiscales para tu caso.
                 </p>
               </div>
             )}

@@ -265,7 +265,7 @@ export default function OpportunityDetail({
   const handleCreateQuote = () => {
     if (quoteMode === 'detailed') {
       const validItems = lineItems.filter(li => li.description.trim() && li.unit_price > 0)
-      if (validItems.length === 0) { toast.error('Agrega al menos un ítem con descripción y precio'); return }
+      if (validItems.length === 0) { toast.error('Agrega al menos un entregable con descripción y precio'); return }
       const descLines = validItems.map(li =>
         `${li.description} (${li.quantity} × ${formatCurrency(li.unit_price)})`
       ).join('\n')
@@ -538,7 +538,7 @@ export default function OpportunityDetail({
                         </div>
                         {lineItems.map(li => (
                           <div key={li.id} className="grid grid-cols-[1fr_60px_90px_24px] gap-1.5">
-                            <input type="text" value={li.description} onChange={e => setLineItems(prev => prev.map(l => l.id === li.id ? { ...l, description: e.target.value } : l))} className="rounded-md border bg-background px-2 py-1 text-xs" placeholder="Ítem..." />
+                            <input type="text" value={li.description} onChange={e => setLineItems(prev => prev.map(l => l.id === li.id ? { ...l, description: e.target.value } : l))} className="rounded-md border bg-background px-2 py-1 text-xs" placeholder="Entregable..." />
                             <input type="number" min="1" value={li.quantity || ''} onChange={e => setLineItems(prev => prev.map(l => l.id === li.id ? { ...l, quantity: Number(e.target.value) || 1 } : l))} className="rounded-md border bg-background px-1 py-1 text-center text-xs" />
                             <input type="number" value={li.unit_price || ''} onChange={e => setLineItems(prev => prev.map(l => l.id === li.id ? { ...l, unit_price: Number(e.target.value) || 0 } : l))} className="rounded-md border bg-background px-1 py-1 text-right text-xs" placeholder="0" />
                             <button onClick={() => { if (lineItems.length > 1) setLineItems(prev => prev.filter(l => l.id !== li.id)) }} disabled={lineItems.length <= 1} className="flex items-center justify-center rounded-md hover:bg-accent disabled:opacity-30">
@@ -547,7 +547,7 @@ export default function OpportunityDetail({
                           </div>
                         ))}
                         <button onClick={() => setLineItems(prev => [...prev, newLineItem()])} className="flex items-center gap-1 text-[10px] text-primary hover:underline">
-                          <Plus className="h-2.5 w-2.5" /> Agregar ítem
+                          <Plus className="h-2.5 w-2.5" /> Agregar entregable
                         </button>
                       </div>
                       <div className="flex items-center justify-between rounded-md bg-primary/5 px-2 py-1.5">

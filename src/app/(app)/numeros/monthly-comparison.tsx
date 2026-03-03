@@ -60,7 +60,7 @@ function generateInsight(months: MonthlyData[]): string | null {
     return `Tus ingresos crecieron más del 20% en ${latest.monthLabel}. ¡Gran mes!`
   }
   if (latest.ingresos < prev.ingresos * 0.8) {
-    return `Tus ingresos bajaron más del 20% en ${latest.monthLabel}. Revisa tu pipeline.`
+    return `Tus ingresos bajaron más del 20% en ${latest.monthLabel}. Revisa tus oportunidades.`
   }
 
   // Margin trend

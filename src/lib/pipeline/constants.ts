@@ -18,10 +18,10 @@ export const ETAPA_CONFIG: Record<EtapaPipeline, {
   dotClass: string
   order: number
 }> = {
-  lead_nuevo:       { label: 'Lead nuevo',       probabilidad: 10,  chipClass: 'bg-gray-100 text-gray-600',    dotClass: 'bg-gray-400',   order: 0 },
-  contacto_inicial: { label: 'Contacto inicial', probabilidad: 20,  chipClass: 'bg-blue-100 text-blue-700',    dotClass: 'bg-blue-500',   order: 1 },
-  discovery_hecha:  { label: 'Discovery hecha',  probabilidad: 40,  chipClass: 'bg-blue-200 text-blue-800',    dotClass: 'bg-blue-600',   order: 2 },
-  propuesta_enviada:{ label: 'Propuesta enviada', probabilidad: 60,  chipClass: 'bg-yellow-100 text-yellow-700',dotClass: 'bg-yellow-500', order: 3 },
+  lead_nuevo:       { label: 'Por contactar',       probabilidad: 10,  chipClass: 'bg-gray-100 text-gray-600',    dotClass: 'bg-gray-400',   order: 0 },
+  contacto_inicial: { label: 'Primer contacto', probabilidad: 20,  chipClass: 'bg-blue-100 text-blue-700',    dotClass: 'bg-blue-500',   order: 1 },
+  discovery_hecha:  { label: 'Necesidad clara',  probabilidad: 40,  chipClass: 'bg-blue-200 text-blue-800',    dotClass: 'bg-blue-600',   order: 2 },
+  propuesta_enviada:{ label: 'Propuesta presentada', probabilidad: 60,  chipClass: 'bg-yellow-100 text-yellow-700',dotClass: 'bg-yellow-500', order: 3 },
   negociacion:      { label: 'Negociación',       probabilidad: 80,  chipClass: 'bg-orange-100 text-orange-700',dotClass: 'bg-orange-500', order: 4 },
   ganada:           { label: 'Ganada',            probabilidad: 100, chipClass: 'bg-green-100 text-green-700',  dotClass: 'bg-green-500',  order: 5 },
   perdida:          { label: 'Perdida',           probabilidad: 0,   chipClass: 'bg-red-100 text-red-700',      dotClass: 'bg-red-500',    order: 6 },

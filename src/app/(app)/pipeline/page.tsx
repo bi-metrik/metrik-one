@@ -11,7 +11,7 @@ export default async function PipelinePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold">Pipeline</h1>
+          <h1 className="text-lg font-bold">Oportunidades</h1>
           <p className="text-xs text-muted-foreground">
             {oportunidades.length} oportunidad{oportunidades.length !== 1 ? 'es' : ''}
           </p>

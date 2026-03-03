@@ -181,7 +181,7 @@ export default function MiNegocioClient({
       {/* ── Progress Bar (sticky) ── */}
       <div className="sticky top-0 z-10 bg-background pb-2 pt-1">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Progreso de configuración</span>
+          <span className="text-xs font-medium text-muted-foreground">Progreso de ajustes</span>
           <span className="text-xs font-bold text-primary">{progressPct}%</span>
         </div>
         <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
@@ -202,7 +202,7 @@ export default function MiNegocioClient({
                 🎉 ¡Tu negocio esta listo!
               </p>
               <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                Has completado toda la configuración. Tus números ahora son 100% precisos.
+                Has completado todos los ajustes. Tus números ahora son 100% precisos.
               </p>
             </div>
           </div>

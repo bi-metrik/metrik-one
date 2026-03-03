@@ -43,12 +43,12 @@ const SLIDES: StorySlide[] = [
   {
     icon: <Users className="h-8 w-8" />,
     title: 'Tus clientes, organizados',
-    subtitle: 'Pipeline visual',
+    subtitle: 'Tus oportunidades',
     description:
       'Desde que alguien te busca hasta que cierras el negocio. 6 etapas claras para que nunca se te escape una oportunidad.',
     visual: (
       <div className="flex gap-2">
-        {['Lead', 'Prospecto', 'Cotización', 'Negociación', 'Ganada'].map((stage, i) => (
+        {['Por contactar', 'Primer contacto', 'Propuesta', 'Negociación', 'Ganada'].map((stage, i) => (
           <div
             key={stage}
             className="flex h-16 flex-1 items-center justify-center rounded-lg border border-border text-xs font-medium"

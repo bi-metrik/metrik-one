@@ -296,20 +296,20 @@ export default function ProyectosBoard({ initialProjects }: ProyectosBoardProps)
         <div>
           <h1 className="text-2xl font-bold">Proyectos</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Todos tus proyectos nacen del Pipeline.
+            Todos tus proyectos nacen de Oportunidades.
           </p>
         </div>
         <div className="rounded-xl border border-dashed border-border p-12 text-center">
           <FolderKanban className="mx-auto h-12 w-12 text-muted-foreground/30" />
           <h3 className="mt-4 text-sm font-medium">Sin proyectos aún</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Cuando marques una oportunidad como &ldquo;Ganada&rdquo; en el Pipeline, tu proyecto aparecera aqui automaticamente.
+            Cuando marques una oportunidad como &ldquo;Ganada&rdquo; en Oportunidades, tu proyecto aparecera aqui automaticamente.
           </p>
           <Link
             href="/pipeline"
             className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
           >
-            Ir al Pipeline
+            Ir a Oportunidades
             <ArrowRight className="h-4 w-4" />
           </Link>
         </div>

@@ -437,7 +437,7 @@ export default function WizardFelipe({ onComplete, onSkip, initialData }: Wizard
                   </p>
                   <p className="text-xs text-amber-600 dark:text-amber-500">
                     Algunos valores usan defaults conservadores porque seleccionaste &quot;No sé&quot;.
-                    Puedes editarlos después en Configuración.
+                    Puedes editarlos después en Ajustes.
                   </p>
                 </div>
               </div>

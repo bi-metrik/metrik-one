@@ -39,7 +39,7 @@ interface CotizacionFlashProps {
 }
 
 /**
- * Cotización Flash — D32, D50, D86
+ * Cotización Rápida — D32, D50, D86
  * Widget que muestra en real-time los cálculos fiscales de una oportunidad.
  * 3 bloques: Cliente paga → Te retienen → Te consignan
  */
@@ -55,7 +55,7 @@ export default function CotizacionFlash({ valorBruto, hasFiscalProfile = false }
     <div className="mt-3 space-y-3 rounded-lg border bg-card p-4">
       {/* Title */}
       <div className="flex items-center gap-2">
-        <h4 className="text-sm font-semibold">Cotización Flash</h4>
+        <h4 className="text-sm font-semibold">Cotización Rápida</h4>
         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
           En vivo
         </span>
@@ -66,7 +66,7 @@ export default function CotizacionFlash({ valorBruto, hasFiscalProfile = false }
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900 dark:bg-amber-950/30">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
           <p className="text-xs text-amber-700 dark:text-amber-400">
-            Cálculo estimado con perfil conservador. Completa tu perfil fiscal en Configuración para ver números exactos.
+            Cálculo estimado con perfil conservador. Completa tu perfil fiscal en Ajustes para ver números exactos.
           </p>
         </div>
       )}

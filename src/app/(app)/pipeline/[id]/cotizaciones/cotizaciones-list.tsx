@@ -79,7 +79,7 @@ export default function CotizacionesList({
     if (formMode === 'detailed') {
       // Validate line items
       const validItems = lineItems.filter(li => li.description.trim() && li.unit_price > 0)
-      if (validItems.length === 0) { toast.error('Agrega al menos un ítem con descripción y precio'); return }
+      if (validItems.length === 0) { toast.error('Agrega al menos un entregable con descripción y precio'); return }
 
       // Build description from line items and use total
       const descLines = validItems.map(li =>
@@ -305,7 +305,7 @@ export default function CotizacionesList({
                       value={li.description}
                       onChange={e => updateLineItem(li.id, 'description', e.target.value)}
                       className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                      placeholder="Ítem..."
+                      placeholder="Entregable..."
                     />
                     <input
                       type="number"
@@ -334,7 +334,7 @@ export default function CotizacionesList({
                   onClick={addLineItem}
                   className="flex items-center gap-1 text-xs text-primary hover:underline"
                 >
-                  <Plus className="h-3 w-3" /> Agregar ítem
+                  <Plus className="h-3 w-3" /> Agregar entregable
                 </button>
               </div>
               {/* Total + cost */}

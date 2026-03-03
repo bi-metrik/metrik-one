@@ -69,20 +69,20 @@ export default function GastoDialog({ proyectoId, rubrosLista: rawRubros, onClos
         {/* Rubro (hidden if only 1) */}
         {rubrosLista.length > 1 && (
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Rubro</label>
+            <label className="text-xs font-medium text-muted-foreground">Costo</label>
             <select
               value={rubroId}
               onChange={e => setRubroId(e.target.value)}
               className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
             >
-              <option value="">Sin rubro</option>
+              <option value="">Sin costo</option>
               {rubrosLista.map(r => (
                 <option key={r.id} value={r.id}>{r.nombre}</option>
               ))}
             </select>
             {selectedRubro && selectedRubro.presupuestado && (
               <p className="mt-1 text-[10px] text-muted-foreground">
-                Presupuesto del rubro: {formatCOP(selectedRubro.presupuestado)}
+                Presupuesto del costo: {formatCOP(selectedRubro.presupuestado)}
               </p>
             )}
           </div>

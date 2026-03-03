@@ -23,7 +23,7 @@ export default function ModoSelector({ oportunidadId }: Props) {
     startTransition(async () => {
       const res = await createCotizacionFlash(oportunidadId, flashDesc, Number(flashValor))
       if (res.success) {
-        toast.success('Cotizacion flash creada')
+        toast.success('Cotización rápida creada')
         router.push(`/pipeline/${oportunidadId}/cotizacion/${res.id}`)
       } else {
         toast.error(res.error)
@@ -70,9 +70,9 @@ export default function ModoSelector({ oportunidadId }: Props) {
               <Zap className="h-6 w-6 text-amber-600" />
             </div>
             <div>
-              <h3 className="text-sm font-bold">Flash</h3>
+              <h3 className="text-sm font-bold">Rápida</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Rápida: solo descripción y valor total
+                Solo descripción y valor total
               </p>
             </div>
           </button>
@@ -89,7 +89,7 @@ export default function ModoSelector({ oportunidadId }: Props) {
             <div>
               <h3 className="text-sm font-bold">Detallada</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Items, rubros, costos y margen
+                Entregables, costos y margen
               </p>
             </div>
           </button>
@@ -97,7 +97,7 @@ export default function ModoSelector({ oportunidadId }: Props) {
       ) : (
         /* Flash inline form */
         <div className="space-y-4 rounded-lg border p-4">
-          <h2 className="text-sm font-semibold">Cotizacion flash</h2>
+          <h2 className="text-sm font-semibold">Cotización rápida</h2>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Descripción *</label>
             <textarea
@@ -135,7 +135,7 @@ export default function ModoSelector({ oportunidadId }: Props) {
               disabled={isPending || !flashDesc.trim() || Number(flashValor) <= 0}
               className="flex-1 rounded-lg bg-primary py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {isPending ? 'Creando...' : 'Crear cotizacion flash'}
+              {isPending ? 'Creando...' : 'Crear cotización rápida'}
             </button>
           </div>
         </div>

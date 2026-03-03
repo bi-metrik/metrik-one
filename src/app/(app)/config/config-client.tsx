@@ -202,7 +202,7 @@ export default function ConfigClient({
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <div>
-        <h1 className="text-2xl font-bold">Configuración</h1>
+        <h1 className="text-2xl font-bold">Ajustes</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Configura tu workspace para que tus Números sean más precisos.
         </p>

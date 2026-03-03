@@ -156,7 +156,7 @@ function DrillP1({ data, monthType, onChangeDrill }: { data: NumerosData; monthT
 
       <DrillDownLinks links={[
         ...(onChangeDrill ? [{ label: 'Ver cartera completa', onClick: () => onChangeDrill(3) }] : []),
-        { label: 'Ir a Pipeline', href: '/pipeline' },
+        { label: 'Ir a Oportunidades', href: '/pipeline' },
       ]} />
     </div>
   )
@@ -375,7 +375,7 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
 
       <DrillDownLinks links={[
         { label: 'Configurar gastos fijos', href: '/mi-negocio' },
-        ...(data.ventasMes < data.puntoEquilibrio ? [{ label: 'Ir a Pipeline', href: '/pipeline' }] : []),
+        ...(data.ventasMes < data.puntoEquilibrio ? [{ label: 'Ir a Oportunidades', href: '/pipeline' }] : []),
       ]} />
     </div>
   )
@@ -422,7 +422,7 @@ function DrillP5({ data, onChangeDrill }: { data: NumerosData; monthType: string
       <DrillDownLinks links={[
         ...(onChangeDrill ? [{ label: 'Cobrar pendientes', onClick: () => onChangeDrill(3) }] : []),
         ...(onChangeDrill ? [{ label: 'Revisar gastos', onClick: () => onChangeDrill(4) }] : []),
-        { label: 'Ir a Pipeline', href: '/pipeline' },
+        { label: 'Ir a Oportunidades', href: '/pipeline' },
       ]} />
     </div>
   )

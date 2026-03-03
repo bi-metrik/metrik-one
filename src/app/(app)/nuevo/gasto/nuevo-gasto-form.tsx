@@ -150,13 +150,13 @@ export default function NuevoGastoForm({ proyectos }: Props) {
         {/* Rubro (only when project selected and has >1 rubro) */}
         {isProyecto && !loadingRubros && rubros.length > 1 && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Rubro</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Costo</label>
             <select
               value={rubroId}
               onChange={e => setRubroId(e.target.value)}
               className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
             >
-              <option value="">Sin rubro</option>
+              <option value="">Sin costo</option>
               {rubros.map(r => (
                 <option key={r.id} value={r.id}>{r.nombre}</option>
               ))}

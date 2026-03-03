@@ -129,7 +129,7 @@ export default function PipelineList({ oportunidades }: Props) {
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16">
         <Flame className="h-12 w-12 text-muted-foreground/30" />
         <h3 className="mt-4 text-base font-medium">
-          Tu pipeline está vacío
+          Aún no tienes oportunidades
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Crea tu primera oportunidad para empezar a vender
@@ -143,7 +143,7 @@ export default function PipelineList({ oportunidades }: Props) {
       {/* Pipeline summary */}
       <div className="flex gap-3 rounded-lg bg-muted/50 p-3">
         <div className="flex-1">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Pipeline total</p>
+          <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Total oportunidades</p>
           <p className="text-sm font-bold">{formatCOP(totalPipeline)}</p>
         </div>
         <div className="flex-1">

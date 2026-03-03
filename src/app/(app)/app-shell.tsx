@@ -36,7 +36,7 @@ interface AppShellProps {
 // Sidebar adaptativo por rol
 const ALL_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
-  { href: '/pipeline', label: 'Pipeline', icon: Flame, roles: ['owner', 'admin'] },
+  { href: '/pipeline', label: 'Oportunidades', icon: Flame, roles: ['owner', 'admin'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'read_only'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin'] },

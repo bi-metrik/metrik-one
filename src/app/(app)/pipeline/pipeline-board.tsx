@@ -334,7 +334,7 @@ export default function PipelineBoard({ initialOpportunities }: PipelineBoardPro
       <div className="space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-2xl font-bold">Pipeline</h1>
+          <h1 className="text-2xl font-bold">Oportunidades</h1>
           <div className="mt-1 flex items-center gap-4 text-sm text-muted-foreground">
             <span>Total: <strong className="text-foreground">{formatCurrency(pipelineTotal)}</strong></span>
             <span>Ponderado: <strong className="text-foreground">{formatCurrency(pipelineWeighted)}</strong></span>

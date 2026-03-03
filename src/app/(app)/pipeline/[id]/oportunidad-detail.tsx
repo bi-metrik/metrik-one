@@ -363,7 +363,7 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium truncate">{c.consecutivo || 'Sin consecutivo'}</span>
                           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
-                            {c.modo === 'flash' ? 'Flash' : 'Detallada'}
+                            {c.modo === 'flash' ? 'Rápida' : 'Detallada'}
                           </span>
                         </div>
                         {c.valor_total !== null && (() => {

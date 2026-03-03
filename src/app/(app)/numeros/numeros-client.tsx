@@ -363,7 +363,7 @@ export default function NumerosClient({ data, isFirstVisit, monthlyData, maturit
       : p3State === 'partial'
       ? data.hasFiscalEstimated
         ? 'Usando valores fiscales estimados. Completa tu perfil fiscal para datos exactos.'
-        : 'Parcial — completa tu perfil fiscal en Configuración.'
+        : 'Parcial — completa tu perfil fiscal en Ajustes.'
       : `Ganancia después de provisión fiscal. Completa para precisar.`,
     ctaLabel: p3State === 'empty' ? 'Configurar perfil fiscal' : undefined,
     ctaHref: p3State === 'empty' ? '/config' : undefined,
@@ -460,7 +460,7 @@ export default function NumerosClient({ data, isFirstVisit, monthlyData, maturit
       {data.hasOpportunities && (
         <div className="flex gap-3">
           <div className="flex-1 rounded-lg border bg-card p-4">
-            <p className="text-xs text-muted-foreground">Pipeline activo</p>
+            <p className="text-xs text-muted-foreground">Oportunidades activas</p>
             <p className="mt-1 text-lg font-bold">{fmt(data.pipelineValue)}</p>
             <p className="text-xs text-muted-foreground">{data.totalOpportunities - data.wonCount} oportunidades</p>
           </div>
@@ -514,7 +514,7 @@ export default function NumerosClient({ data, isFirstVisit, monthlyData, maturit
                 estado: data.hasFixedExpenses ? 'Configurado' : 'Sin configurar',
               },
               {
-                indicador: 'Pipeline activo',
+                indicador: 'Oportunidades activas',
                 valor: data.pipelineValue,
                 estado: data.hasOpportunities ? 'Activo' : 'Vacío',
               },

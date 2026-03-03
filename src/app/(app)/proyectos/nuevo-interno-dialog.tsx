@@ -131,7 +131,7 @@ export default function NuevoInternoDialog({ onClose }: Props) {
                 Los costos se registrarán como inversión operativa.
               </p>
               <p>
-                Si este trabajo es para un cliente, créalo desde Pipeline para poder cotizar, facturar y cobrar.
+                Si este trabajo es para un cliente, créalo desde Oportunidades para poder cotizar, facturar y cobrar.
               </p>
             </div>
 
@@ -141,7 +141,7 @@ export default function NuevoInternoDialog({ onClose }: Props) {
                 className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border py-2.5 text-xs font-medium hover:bg-accent transition-colors"
               >
                 <Flame className="h-3.5 w-3.5" />
-                Ir a Pipeline
+                Ir a Oportunidades
               </button>
               <button
                 onClick={() => setStep(2)}
@@ -174,7 +174,7 @@ export default function NuevoInternoDialog({ onClose }: Props) {
               <div>
                 <label className="block text-xs font-medium mb-1">Presupuesto estimado</label>
                 <p className="text-[10px] text-muted-foreground mb-2">
-                  Clasifica el presupuesto por rubro para hacer seguimiento detallado.
+                  Clasifica el presupuesto por costo para hacer seguimiento detallado.
                 </p>
 
                 {rubros.length > 0 && (
@@ -257,7 +257,7 @@ export default function NuevoInternoDialog({ onClose }: Props) {
                   className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
                 >
                   <Plus className="h-3 w-3" />
-                  Agregar rubro
+                  Agregar costo
                 </button>
               </div>
 

@@ -238,7 +238,7 @@ export default function ServiciosSection({ initialData }: Props) {
           <div>
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-muted-foreground">
-                Rubros de costo {rubros.length > 0 && `(${rubros.length})`}
+                Costos {rubros.length > 0 && `(${rubros.length})`}
               </label>
               {rubros.length > 0 && (
                 <span className="text-xs font-medium text-muted-foreground">
@@ -319,7 +319,7 @@ export default function ServiciosSection({ initialData }: Props) {
                     onClick={addRubroToList}
                     className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground"
                   >
-                    Agregar rubro
+                    Agregar costo
                   </button>
                 </div>
               </div>
@@ -329,7 +329,7 @@ export default function ServiciosSection({ initialData }: Props) {
                 className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <Plus className="h-3 w-3" />
-                {rubros.length === 0 ? 'Agregar rubros de costo (opcional)' : 'Agregar otro rubro'}
+                {rubros.length === 0 ? 'Agregar costos (opcional)' : 'Agregar otro costo'}
               </button>
             )}
           </div>

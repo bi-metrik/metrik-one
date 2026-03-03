@@ -115,7 +115,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       if (res.success) {
         await recalcularTotales(cotizacion.id)
         setShowCatalog(false)
-        toast.success('Servicio agregado con rubros')
+        toast.success('Servicio agregado con costos')
         router.refresh()
       } else {
         toast.error(res.error)
@@ -283,7 +283,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               {estadoConfig?.label}
             </span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium">
-              {isFlash ? 'Flash' : 'Detallada'}
+              {isFlash ? 'Rápida' : 'Detallada'}
             </span>
           </div>
         </div>

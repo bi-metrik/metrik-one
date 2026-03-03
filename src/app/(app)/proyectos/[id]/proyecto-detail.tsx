@@ -314,9 +314,9 @@ export default function ProyectoDetail({
                     )
                   })
                 ) : cotizacionId ? (
-                  <p className="text-xs text-muted-foreground">No hay rubros sincronizados.</p>
+                  <p className="text-xs text-muted-foreground">No hay costos sincronizados.</p>
                 ) : (
-                  <p className="text-xs text-muted-foreground">Sin rubros de presupuesto.</p>
+                  <p className="text-xs text-muted-foreground">Sin costos de presupuesto.</p>
                 )}
 
                 {/* Sync button */}
@@ -327,7 +327,7 @@ export default function ProyectoDetail({
                         const { resyncRubrosProyecto } = await import('@/app/(app)/pipeline/actions-v2')
                         const res = await resyncRubrosProyecto(proyectoId)
                         if (res.success) {
-                          toast.success('Rubros sincronizados desde cotización')
+                          toast.success('Costos sincronizados desde cotización')
                           router.refresh()
                         } else {
                           toast.error(res.error)
@@ -338,7 +338,7 @@ export default function ProyectoDetail({
                     className="inline-flex items-center gap-1 rounded-md bg-muted px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                   >
                     <RefreshCw className={`h-3 w-3 ${isPending ? 'animate-spin' : ''}`} />
-                    {rubros.length > 0 ? 'Re-sincronizar rubros' : 'Sincronizar desde cotización'}
+                    {rubros.length > 0 ? 'Re-sincronizar costos' : 'Sincronizar desde cotización'}
                   </button>
                 )}
               </div>
