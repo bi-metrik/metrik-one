@@ -3,6 +3,9 @@
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import Link from 'next/link'
+import MetrikLockup from '@/components/metrik-lockup'
+
+const FONT = 'var(--font-montserrat), Montserrat, sans-serif'
 
 export default function RegistroPage() {
   const [email, setEmail] = useState('')
@@ -14,7 +17,7 @@ export default function RegistroPage() {
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!acceptedTerms) {
-      setError('Debes aceptar los términos y condiciones')
+      setError('Debes aceptar los terminos y condiciones')
       return
     }
 
@@ -41,7 +44,7 @@ export default function RegistroPage() {
   const googleEnabled = false
   const handleGoogleSignUp = async () => {
     if (!acceptedTerms) {
-      setError('Debes aceptar los términos y condiciones')
+      setError('Debes aceptar los terminos y condiciones')
       return
     }
 
@@ -56,31 +59,41 @@ export default function RegistroPage() {
 
   if (sent) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
-        <div className="w-full max-w-sm space-y-6 text-center">
-          <h1 className="text-2xl font-bold">¡Casi listo!</h1>
-          <p className="text-muted-foreground">
-            Enviamos un link a <strong>{email}</strong>. Haz clic para crear tu cuenta.
-          </p>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4">
+        <div className="w-full max-w-sm space-y-8 text-center">
+          <MetrikLockup size="md" linkTo="/" />
+          <div className="space-y-3">
+            <h1 className="text-xl font-bold" style={{ fontFamily: FONT, color: '#1A1A1A' }}>
+              ¡Casi listo!
+            </h1>
+            <p className="text-sm" style={{ color: '#6B7280' }}>
+              Enviamos un link a <strong style={{ color: '#1A1A1A' }}>{email}</strong>. Haz clic para crear tu cuenta.
+            </p>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">Crea tu cuenta</h1>
-          <p className="text-sm text-muted-foreground">
-            Comienza gratis por 14 días. Sin tarjeta de crédito.
-          </p>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4">
+      <div className="w-full max-w-sm space-y-8">
+        <div className="flex flex-col items-center space-y-6">
+          <MetrikLockup size="md" linkTo="/" />
+          <div className="space-y-1 text-center">
+            <h1 className="text-xl font-bold" style={{ fontFamily: FONT, color: '#1A1A1A' }}>
+              Crea tu cuenta
+            </h1>
+            <p className="text-sm" style={{ color: '#6B7280' }}>
+              Comienza gratis por 14 dias. Sin tarjeta de credito.
+            </p>
+          </div>
         </div>
 
         <form onSubmit={handleSignUp} className="space-y-4">
           <div className="space-y-2">
-            <label htmlFor="email" className="text-sm font-medium">
-              Correo electrónico
+            <label htmlFor="email" className="text-sm font-medium" style={{ color: '#1A1A1A' }}>
+              Correo electronico
             </label>
             <input
               id="email"
@@ -89,38 +102,50 @@ export default function RegistroPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-11 w-full rounded-lg border bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2"
+              style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = '#10B981'
+                e.currentTarget.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.15)'
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = '#E5E7EB'
+                e.currentTarget.style.boxShadow = 'none'
+              }}
             />
           </div>
 
-          <div className="flex items-start space-x-2">
+          <div className="flex items-start space-x-2.5">
             <input
               id="terms"
               type="checkbox"
               checked={acceptedTerms}
               onChange={(e) => setAcceptedTerms(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-input"
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-emerald-500"
             />
-            <label htmlFor="terms" className="text-sm text-muted-foreground">
+            <label htmlFor="terms" className="text-sm" style={{ color: '#6B7280' }}>
               Acepto los{' '}
-              <a href="#" className="font-medium text-primary hover:underline">
-                términos y condiciones
+              <a href="#" className="font-medium hover:underline" style={{ color: '#10B981' }}>
+                terminos y condiciones
               </a>{' '}
               y la{' '}
-              <a href="#" className="font-medium text-primary hover:underline">
-                política de privacidad
+              <a href="#" className="font-medium hover:underline" style={{ color: '#10B981' }}>
+                politica de privacidad
               </a>
             </label>
           </div>
 
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-sm text-red-500">{error}</p>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50"
+            style={{ backgroundColor: '#10B981' }}
+            onMouseEnter={(e) => { if (!loading) e.currentTarget.style.backgroundColor = '#059669' }}
+            onMouseLeave={(e) => { if (!loading) e.currentTarget.style.backgroundColor = '#10B981' }}
           >
             {loading ? 'Enviando...' : 'Crear cuenta'}
           </button>
@@ -130,16 +155,17 @@ export default function RegistroPage() {
           <>
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
+                <span className="w-full" style={{ borderTop: '1px solid #E5E7EB' }} />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">O regístrate con</span>
+                <span className="bg-white px-2" style={{ color: '#6B7280' }}>O registrate con</span>
               </div>
             </div>
 
             <button
               onClick={handleGoogleSignUp}
-              className="inline-flex h-10 w-full items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent"
+              className="inline-flex h-11 w-full items-center justify-center rounded-lg border text-sm font-medium transition-colors hover:bg-gray-50"
+              style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
             >
               <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -152,10 +178,10 @@ export default function RegistroPage() {
           </>
         )}
 
-        <p className="text-center text-sm text-muted-foreground">
+        <p className="text-center text-sm" style={{ color: '#6B7280' }}>
           ¿Ya tienes cuenta?{' '}
-          <Link href="/login" className="font-medium text-primary hover:underline">
-            Inicia sesión
+          <Link href="/login" className="font-medium hover:underline" style={{ color: '#10B981' }}>
+            Inicia sesion
           </Link>
         </p>
       </div>
