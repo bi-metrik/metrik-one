@@ -122,7 +122,8 @@ export default function AppShell({
 
   const hasLogo = !!branding?.logoUrl
 
-  const METRIK_ISOTIPO = 'https://hcxyowictswpibzqxwyj.supabase.co/storage/v1/object/public/metrik-landing/Isotipo_Mk.png'
+  // Brand lockup: MéTRIK (Bold 700) + one (Light 300) + green line
+  const logoFont = 'var(--font-montserrat), Montserrat, sans-serif'
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background" style={brandingStyle}>
@@ -139,13 +140,21 @@ export default function AppShell({
         {/* Sidebar header: MéTRIK branding + collapse */}
         <div className="flex h-14 items-center justify-between px-3">
           {sidebarExpanded ? (
-            <Link href="/numeros" className="flex items-center gap-2 flex-1 overflow-hidden">
-              <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 shrink-0 object-contain" />
-              <span className="truncate text-sm font-semibold" style={{ color: 'var(--sidebar-foreground)' }}>MeTRIK ONE</span>
+            <Link href="/numeros" className="flex-1 overflow-hidden">
+              <div className="inline-flex flex-col">
+                <div className="flex items-baseline" style={{ fontFamily: logoFont }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em', color: 'var(--sidebar-foreground)' }}>MéTRIK</span>
+                  <span style={{ fontWeight: 300, fontSize: '0.9375rem', letterSpacing: '-0.005em', color: 'var(--sidebar-foreground)', marginLeft: '0.25rem' }}>one</span>
+                </div>
+                <div style={{ height: '2px', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '3px' }} />
+              </div>
             </Link>
           ) : (
-            <Link href="/numeros" className="flex h-8 w-8 shrink-0 items-center justify-center">
-              <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
+            <Link href="/numeros" className="flex h-8 w-10 shrink-0 items-center justify-center">
+              <div className="inline-flex flex-col items-center">
+                <span style={{ fontFamily: logoFont, fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em', color: 'var(--sidebar-foreground)' }}>M</span>
+                <div style={{ height: '1.5px', width: '100%', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '1px' }} />
+              </div>
             </Link>
           )}
           <button
@@ -277,7 +286,10 @@ export default function AppShell({
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
           <div className="flex items-center gap-3">
             <Link href="/numeros" className="flex items-center shrink-0">
-              <img src={METRIK_ISOTIPO} alt="MeTRIK" className="h-7 w-7 object-contain" />
+              <div className="inline-flex flex-col items-center">
+                <span style={{ fontFamily: logoFont, fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em', color: 'var(--sidebar-foreground)' }}>M</span>
+                <div style={{ height: '1.5px', width: '100%', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '1px' }} />
+              </div>
             </Link>
             {hasLogo && (
               <img src={branding!.logoUrl} alt={workspaceName} className="h-7 max-w-[120px] object-contain" />
