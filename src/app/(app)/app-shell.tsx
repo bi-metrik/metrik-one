@@ -152,7 +152,10 @@ export default function AppShell({
           ) : (
             <Link href="/numeros" className="flex h-8 w-10 shrink-0 items-center justify-center">
               <div className="inline-flex flex-col items-center">
-                <span style={{ fontFamily: logoFont, fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em', color: 'var(--sidebar-foreground)' }}>M</span>
+                <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
+                  <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
+                  <span style={{ fontWeight: 400, fontSize: '0.5625rem' }}>1</span>
+                </div>
                 <div style={{ height: '1.5px', width: '100%', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '1px' }} />
               </div>
             </Link>
@@ -287,7 +290,10 @@ export default function AppShell({
           <div className="flex items-center gap-3">
             <Link href="/numeros" className="flex items-center shrink-0">
               <div className="inline-flex flex-col items-center">
-                <span style={{ fontFamily: logoFont, fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em', color: 'var(--sidebar-foreground)' }}>M</span>
+                <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
+                  <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
+                  <span style={{ fontWeight: 400, fontSize: '0.5625rem' }}>1</span>
+                </div>
                 <div style={{ height: '1.5px', width: '100%', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '1px' }} />
               </div>
             </Link>
