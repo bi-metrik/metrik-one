@@ -7,7 +7,6 @@ const K_REVEALED = 0.60
 export default function Splash() {
   const [visible, setVisible] = useState(true)
   const [fadeOut, setFadeOut] = useState(false)
-  const [breathe, setBreathe] = useState(false)
 
   const [beamProgress, setBeamProgress] = useState(0)
   const [beamStarted, setBeamStarted] = useState(false)
@@ -26,7 +25,7 @@ export default function Splash() {
   const runBeam = useCallback(() => {
     setBeamStarted(true)
     startTimeRef.current = performance.now()
-    const duration = 2200
+    const duration = 1400
 
     const tick = (now: number) => {
       const elapsed = now - startTimeRef.current!
@@ -55,12 +54,11 @@ export default function Splash() {
 
   useEffect(() => {
     const t = [
-      setTimeout(() => runBeam(), 500),
-      setTimeout(() => setOneCooling(true), 2200),
-      setTimeout(() => setLineGlow(true), 2800),
-      setTimeout(() => setBreathe(true), 3400),
-      setTimeout(() => { setBreathe(false); setFadeOut(true) }, 4500),
-      setTimeout(() => setVisible(false), 5300),
+      setTimeout(() => runBeam(), 300),
+      setTimeout(() => setOneCooling(true), 1600),
+      setTimeout(() => setLineGlow(true), 2000),
+      setTimeout(() => setFadeOut(true), 2200),
+      setTimeout(() => setVisible(false), 2800),
     ]
     return () => t.forEach(clearTimeout)
   }, [runBeam])
@@ -95,7 +93,7 @@ export default function Splash() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;800&display=swap');
 
         .sp {
           position: fixed;
@@ -107,20 +105,14 @@ export default function Splash() {
           justify-content: center;
           overflow: hidden;
           opacity: ${fadeOut ? 0 : 1};
-          transition: opacity 0.8s cubic-bezier(0.4,0,0.2,1);
+          transition: opacity 0.6s cubic-bezier(0.4,0,0.2,1);
         }
 
-        .lk {
+        .sp-lk {
           position: relative;
           display: flex;
           flex-direction: column;
           align-items: flex-start;
-        }
-
-        .lk-br { animation: br 2.2s ease-in-out infinite; }
-        @keyframes br {
-          0%,100% { transform: scale(1); }
-          50%     { transform: scale(1.01); }
         }
 
         .sp-row {
@@ -132,34 +124,31 @@ export default function Splash() {
 
         .sp-ch {
           font-family: 'Montserrat', sans-serif;
+          font-weight: 800;
+          font-size: clamp(2.2rem, 5vw, 3.2rem);
           line-height: 1;
-          display: inline-block;
-          will-change: opacity, text-shadow;
-        }
-
-        .sp-ch-b {
-          font-weight: 900;
-          font-size: clamp(4rem, 11vw, 8.5rem);
           color: #1A1A1A;
           letter-spacing: -0.02em;
-          transition: text-shadow 0.2s ease;
+          display: inline-block;
+          will-change: opacity, text-shadow;
+          transition: text-shadow 0.15s ease;
         }
 
         .sp-lit {
-          text-shadow: 0 4px 18px rgba(16,185,129,0.3), 0 2px 35px rgba(16,185,129,0.1);
+          text-shadow: 0 2px 12px rgba(16,185,129,0.25), 0 1px 24px rgba(16,185,129,0.08);
         }
 
-        .one-wrap {
+        .sp-one-wrap {
           position: relative;
           display: inline-flex;
           align-items: baseline;
-          margin-left: clamp(10px, 2vw, 22px);
+          margin-left: clamp(6px, 1.2vw, 14px);
         }
 
         .sp-one {
           font-family: 'Montserrat', sans-serif;
-          font-weight: 400;
-          font-size: clamp(4rem, 11vw, 8.5rem);
+          font-weight: 300;
+          font-size: clamp(2.2rem, 5vw, 3.2rem);
           line-height: 1;
           letter-spacing: -0.01em;
           display: inline-block;
@@ -168,7 +157,7 @@ export default function Splash() {
           z-index: 2;
         }
 
-        .destello-wrap {
+        .sp-destello-wrap {
           position: absolute;
           inset: 0;
           display: flex;
@@ -179,53 +168,36 @@ export default function Splash() {
           overflow: visible;
         }
 
-        .destello {
+        .sp-destello {
           width: 0;
           height: 0;
           border-radius: 50%;
           background: radial-gradient(circle,
             rgba(255,255,255,1) 0%,
-            rgba(16,185,129,0.3) 30%,
-            rgba(16,185,129,0.08) 50%,
+            rgba(16,185,129,0.25) 35%,
+            rgba(16,185,129,0.06) 55%,
             transparent 70%
           );
           opacity: 0;
         }
 
-        .destello.fire {
-          animation: db 0.7s cubic-bezier(0.16,1,0.3,1) forwards;
+        .sp-destello.fire {
+          animation: sp-db 0.5s cubic-bezier(0.16,1,0.3,1) forwards;
         }
 
-        @keyframes db {
+        @keyframes sp-db {
           0%   { width: 0; height: 0; opacity: 0; }
-          8%   { width: 60px; height: 60px; opacity: 1; }
-          22%  { width: 280px; height: 280px; opacity: 0.85; }
-          45%  { width: 340px; height: 340px; opacity: 0.35; }
-          100% { width: 380px; height: 380px; opacity: 0; }
-        }
-
-        .destello-ring {
-          position: absolute;
-          border-radius: 50%;
-          border: 1.5px solid rgba(16,185,129,0.2);
-          width: 0; height: 0;
-          opacity: 0;
-        }
-
-        .destello-ring.fire {
-          animation: dr 0.85s cubic-bezier(0.16,1,0.3,1) 0.04s forwards;
-        }
-
-        @keyframes dr {
-          0%   { width: 20px; height: 20px; opacity: 0.5; }
-          100% { width: 250px; height: 250px; opacity: 0; }
+          10%  { width: 30px; height: 30px; opacity: 1; }
+          30%  { width: 100px; height: 100px; opacity: 0.7; }
+          60%  { width: 130px; height: 130px; opacity: 0.25; }
+          100% { width: 140px; height: 140px; opacity: 0; }
         }
 
         .sp-track {
           width: 100%;
-          height: 4px;
+          height: 2px;
           position: relative;
-          margin-top: clamp(8px, 1.2vw, 14px);
+          margin-top: clamp(6px, 1vw, 10px);
           overflow: visible;
         }
 
@@ -234,7 +206,7 @@ export default function Splash() {
           left: 0; top: 0;
           height: 100%;
           background: #10B981;
-          border-radius: 2px;
+          border-radius: 1px;
           will-change: width;
         }
 
@@ -242,103 +214,66 @@ export default function Splash() {
           position: absolute;
           top: 50%;
           transform: translate(-50%, -50%);
-          width: 10px;
-          height: 10px;
+          width: 6px;
+          height: 6px;
           border-radius: 50%;
           background: #FFFFFF;
           box-shadow:
-            0 0 6px 3px rgba(16,185,129,0.8),
-            0 0 18px 8px rgba(16,185,129,0.45),
-            0 0 50px 16px rgba(16,185,129,0.18),
-            0 0 90px 30px rgba(16,185,129,0.06);
+            0 0 4px 2px rgba(16,185,129,0.7),
+            0 0 12px 5px rgba(16,185,129,0.35),
+            0 0 30px 10px rgba(16,185,129,0.12);
           z-index: 10;
           pointer-events: none;
           opacity: ${beamFinished ? 0 : 1};
-          transition: opacity 0.6s ease;
+          transition: opacity 0.4s ease;
         }
 
         .sp-tail {
           position: absolute;
           top: 50%;
           transform: translateY(-50%);
-          height: 14px;
-          background: linear-gradient(90deg, transparent 0%, rgba(16,185,129,0.06) 40%, rgba(16,185,129,0.25) 100%);
-          border-radius: 8px;
+          height: 8px;
+          background: linear-gradient(90deg, transparent 0%, rgba(16,185,129,0.04) 40%, rgba(16,185,129,0.18) 100%);
+          border-radius: 4px;
           pointer-events: none;
           z-index: 9;
           opacity: ${beamFinished ? 0 : 1};
-          transition: opacity 0.5s ease;
-        }
-
-        .sp-cone {
-          position: absolute;
-          bottom: 100%;
-          transform: translateX(-50%);
-          width: 80px;
-          height: 60px;
-          background: linear-gradient(0deg, rgba(16,185,129,0.09) 0%, rgba(16,185,129,0.015) 50%, transparent 100%);
-          clip-path: polygon(35% 100%, 65% 100%, 85% 0%, 15% 0%);
-          pointer-events: none;
-          z-index: 8;
-          opacity: ${beamFinished ? 0 : 1};
-          transition: opacity 0.5s ease;
+          transition: opacity 0.4s ease;
         }
 
         .sp-ln-glow {
           position: absolute;
-          inset: -5px 0;
+          inset: -3px 0;
           background: #10B981;
-          border-radius: 6px;
-          filter: blur(10px);
+          border-radius: 4px;
+          filter: blur(6px);
           opacity: 0;
           pointer-events: none;
         }
-        .sp-ln-glow.on { animation: lnp 1.2s cubic-bezier(0.16,1,0.3,1) forwards; }
-        @keyframes lnp {
-          0%   { opacity: 0.3; }
-          30%  { opacity: 0.12; }
+        .sp-ln-glow.on { animation: sp-lnp 0.8s cubic-bezier(0.16,1,0.3,1) forwards; }
+        @keyframes sp-lnp {
+          0%   { opacity: 0.2; }
+          30%  { opacity: 0.08; }
           100% { opacity: 0; }
         }
-
-        .sp-cn {
-          position: absolute;
-          width: 14px; height: 14px;
-          opacity: ${lineGlow ? 0.08 : 0};
-          transition: opacity 0.6s ease;
-        }
-        .sp-cn::before, .sp-cn::after { content:''; position:absolute; background:#1A1A1A; }
-        .sp-cn.tl::before { top:0; left:0; width:10px; height:1px; }
-        .sp-cn.tl::after  { top:0; left:0; width:1px; height:10px; }
-        .sp-cn.tr::before { top:0; right:0; width:10px; height:1px; }
-        .sp-cn.tr::after  { top:0; right:0; width:1px; height:10px; }
-        .sp-cn.bl::before { bottom:0; left:0; width:10px; height:1px; }
-        .sp-cn.bl::after  { bottom:0; left:0; width:1px; height:10px; }
-        .sp-cn.br::before { bottom:0; right:0; width:10px; height:1px; }
-        .sp-cn.br::after  { bottom:0; right:0; width:1px; height:10px; }
       `}</style>
 
       <div className="sp">
-        <div className="sp-cn tl" style={{ top: '15%', left: '8%' }} />
-        <div className="sp-cn tr" style={{ top: '15%', right: '8%' }} />
-        <div className="sp-cn bl" style={{ bottom: '15%', left: '8%' }} />
-        <div className="sp-cn br" style={{ bottom: '15%', right: '8%' }} />
-
-        <div className={`lk ${breathe ? 'lk-br' : ''}`}>
+        <div className="sp-lk">
           <div className="sp-row">
             {metrikChars.map((c, i) => (
               <span
                 key={i}
-                className={`sp-ch sp-ch-b ${isMetrikLit(c.at) ? 'sp-lit' : ''}`}
+                className={`sp-ch ${isMetrikLit(c.at) ? 'sp-lit' : ''}`}
                 style={{ opacity: getMetrikOpacity(c.at) }}
               >
                 {c.ch}
               </span>
             ))}
 
-            <div className="one-wrap">
-              <div className="destello-wrap">
-                <div className={`destello ${oneFlash ? 'fire' : ''}`} />
-                <div className={`destello-ring ${oneFlash ? 'fire' : ''}`} />
+            <div className="sp-one-wrap">
+              <div className="sp-destello-wrap">
+                <div className={`sp-destello ${oneFlash ? 'fire' : ''}`} />
               </div>
 
               <span
@@ -347,12 +282,12 @@ export default function Splash() {
                   opacity: oneGreen ? 1 : 0.04,
                   color: oneCooling ? '#1A1A1A' : (oneGreen ? '#10B981' : '#1A1A1A'),
                   textShadow: oneGreen && !oneCooling
-                    ? '0 0 25px rgba(16,185,129,0.5), 0 0 50px rgba(16,185,129,0.2)'
+                    ? '0 0 16px rgba(16,185,129,0.4), 0 0 32px rgba(16,185,129,0.15)'
                     : '0 0 0 transparent',
                   transition: oneCooling
-                    ? 'color 1s cubic-bezier(0.4,0,0.2,1), text-shadow 1s cubic-bezier(0.4,0,0.2,1)'
+                    ? 'color 0.8s cubic-bezier(0.4,0,0.2,1), text-shadow 0.8s cubic-bezier(0.4,0,0.2,1)'
                     : (oneGreen
-                      ? 'opacity 0.1s ease, color 0.1s ease, text-shadow 0.3s ease'
+                      ? 'opacity 0.08s ease, color 0.08s ease, text-shadow 0.2s ease'
                       : 'none'),
                 }}
               >
@@ -370,11 +305,10 @@ export default function Splash() {
                 <div
                   className="sp-tail"
                   style={{
-                    left: `${Math.max(0, beamPct - 14)}%`,
-                    width: `${Math.min(beamPct, 14)}%`,
+                    left: `${Math.max(0, beamPct - 12)}%`,
+                    width: `${Math.min(beamPct, 12)}%`,
                   }}
                 />
-                <div className="sp-cone" style={{ left: `${beamPct}%` }} />
               </>
             )}
 
