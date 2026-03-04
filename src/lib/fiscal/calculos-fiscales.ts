@@ -17,7 +17,7 @@
  * 8. Neto
  */
 
-import type { FiscalProfile, Client } from '@/types/database'
+import type { FiscalProfile, Client, Empresa } from '@/types/database'
 import {
   UVT_2026,
   TOPE_NO_RESPONSABLE_IVA_COP,
@@ -60,6 +60,43 @@ export function clasificarPerfilFiscal(perfil: FiscalProfile): PerfilFiscalLetra
 
   // B: PN responsable de IVA (ordinario)
   return 'B'
+}
+
+// =============================================
+// ESTADO FISCAL EMPRESA — §2.2, §6, D89
+// =============================================
+
+export type EstadoFiscal = 'pendiente' | 'parcial' | 'verificado'
+
+/** Los 6 campos del hard gate fiscal (D75, §6) */
+const HARD_GATE_FIELDS = [
+  'numero_documento',
+  'tipo_persona',
+  'regimen_tributario',
+  'gran_contribuyente',
+  'agente_retenedor',
+  'autorretenedor',
+] as const
+
+type HardGateField = typeof HARD_GATE_FIELDS[number]
+
+/**
+ * Calcula el estado fiscal de una empresa-cliente (D89).
+ * pendiente = 0 campos, parcial = 1-5, verificado = 6/6.
+ */
+export function calcularEstadoFiscal(empresa: Pick<Empresa, HardGateField>): EstadoFiscal {
+  const filled = HARD_GATE_FIELDS.filter(f => empresa[f] != null).length
+  if (filled === 0) return 'pendiente'
+  if (filled === 6) return 'verificado'
+  return 'parcial'
+}
+
+/**
+ * Retorna los campos faltantes del hard gate fiscal.
+ * Si retorna array vacío, el perfil está completo.
+ */
+export function getHardGateFiscalMissing(empresa: Pick<Empresa, HardGateField>): HardGateField[] {
+  return HARD_GATE_FIELDS.filter(f => empresa[f] == null) as unknown as HardGateField[]
 }
 
 // =============================================

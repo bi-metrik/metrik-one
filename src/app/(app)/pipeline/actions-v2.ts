@@ -24,7 +24,7 @@ export async function getOportunidad(id: string) {
 
   const { data } = await supabase
     .from('oportunidades')
-    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, sector, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
+    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, sector, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor)')
     .eq('id', id)
     .single()
 
@@ -189,6 +189,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   regimen_tributario?: string
   gran_contribuyente?: boolean
   agente_retenedor?: boolean
+  autorretenedor?: boolean
 }) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
@@ -214,8 +215,22 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     if (fiscalData.regimen_tributario) updates.regimen_tributario = fiscalData.regimen_tributario
     if (fiscalData.gran_contribuyente !== undefined) updates.gran_contribuyente = fiscalData.gran_contribuyente
     if (fiscalData.agente_retenedor !== undefined) updates.agente_retenedor = fiscalData.agente_retenedor
+    if (fiscalData.autorretenedor !== undefined) updates.autorretenedor = fiscalData.autorretenedor
 
     if (Object.keys(updates).length > 0) {
+      // Update empresa fields + recalculate estado_fiscal (D89)
+      const { data: currentEmpresa } = await supabase
+        .from('empresas')
+        .select('numero_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor')
+        .eq('id', empresaId)
+        .single()
+
+      // Merge current + new to compute estado_fiscal
+      const merged = { ...currentEmpresa, ...updates }
+      const fields = ['numero_documento', 'tipo_persona', 'regimen_tributario', 'gran_contribuyente', 'agente_retenedor', 'autorretenedor'] as const
+      const filled = fields.filter(f => merged[f] != null).length
+      updates.estado_fiscal = filled === 0 ? 'pendiente' : filled === 6 ? 'verificado' : 'parcial'
+
       const { error: updateError } = await supabase
         .from('empresas')
         .update(updates)

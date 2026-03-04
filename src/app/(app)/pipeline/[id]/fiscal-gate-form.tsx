@@ -15,6 +15,7 @@ interface EmpresaData {
   regimen_tributario: string | null
   gran_contribuyente: boolean | null
   agente_retenedor: boolean | null
+  autorretenedor: boolean | null
 }
 
 interface Props {
@@ -33,6 +34,7 @@ export default function FiscalGateForm({ oportunidadId, empresa, onComplete, onC
     regimen_tributario: empresa.regimen_tributario ?? '',
     gran_contribuyente: empresa.gran_contribuyente?.toString() ?? '',
     agente_retenedor: empresa.agente_retenedor?.toString() ?? '',
+    autorretenedor: empresa.autorretenedor?.toString() ?? '',
   })
 
   // Show only the missing fields
@@ -43,6 +45,7 @@ export default function FiscalGateForm({ oportunidadId, empresa, onComplete, onC
     regimen_tributario: !empresa.regimen_tributario,
     gran_contribuyente: empresa.gran_contribuyente === null,
     agente_retenedor: empresa.agente_retenedor === null,
+    autorretenedor: empresa.autorretenedor === null,
   }
 
   // Auto-suggest tipo_documento when tipo_persona changes
@@ -65,6 +68,7 @@ export default function FiscalGateForm({ oportunidadId, empresa, onComplete, onC
         regimen_tributario: form.regimen_tributario || undefined,
         gran_contribuyente: form.gran_contribuyente ? form.gran_contribuyente === 'true' : undefined,
         agente_retenedor: form.agente_retenedor ? form.agente_retenedor === 'true' : undefined,
+        autorretenedor: form.autorretenedor ? form.autorretenedor === 'true' : undefined,
       })
       if (res.success) {
         toast.success('Oportunidad ganada! Proyecto creado.')
@@ -164,6 +168,20 @@ export default function FiscalGateForm({ oportunidadId, empresa, onComplete, onC
             <select
               value={form.agente_retenedor}
               onChange={e => setForm(p => ({ ...p, agente_retenedor: e.target.value }))}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Seleccionar</option>
+              <option value="true">Si</option>
+              <option value="false">No</option>
+            </select>
+          </div>
+        )}
+        {missing.autorretenedor && (
+          <div>
+            <label className="mb-1 block text-xs font-medium">Autorretenedor</label>
+            <select
+              value={form.autorretenedor}
+              onChange={e => setForm(p => ({ ...p, autorretenedor: e.target.value }))}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
               <option value="">Seleccionar</option>

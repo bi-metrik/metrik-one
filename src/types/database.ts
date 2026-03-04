@@ -811,10 +811,12 @@ export type Database = {
       empresas: {
         Row: {
           agente_retenedor: boolean | null
+          autorretenedor: boolean | null
           contacto_email: string | null
           contacto_id: string | null
           contacto_nombre: string | null
           created_at: string | null
+          estado_fiscal: string
           gran_contribuyente: boolean | null
           id: string
           nombre: string
@@ -828,10 +830,12 @@ export type Database = {
         }
         Insert: {
           agente_retenedor?: boolean | null
+          autorretenedor?: boolean | null
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
+          estado_fiscal?: string
           gran_contribuyente?: boolean | null
           id?: string
           nombre: string
@@ -845,10 +849,12 @@ export type Database = {
         }
         Update: {
           agente_retenedor?: boolean | null
+          autorretenedor?: boolean | null
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
+          estado_fiscal?: string
           gran_contribuyente?: boolean | null
           id?: string
           nombre?: string
