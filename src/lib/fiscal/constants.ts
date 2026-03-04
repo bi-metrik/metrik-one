@@ -24,12 +24,25 @@ export const TOPE_RST_COP = TOPE_RST_UVT * UVT_2026
 // TARIFAS DE RETENCIÓN
 // =============================================
 
-/** Retefuente por honorarios — Persona Natural declarante o no */
-export const RETEFUENTE_HONORARIOS_PCT = 11
+/** Retefuente por honorarios — Persona Natural declarante */
+export const RETEFUENTE_HONORARIOS_DECLARANTE_PCT = 11
 
-/** Retefuente por servicios — PJ o PN declarante, desde 2 UVT */
+/** Retefuente por honorarios — Persona Natural NO declarante */
+export const RETEFUENTE_HONORARIOS_NO_DECLARANTE_PCT = 10
+
+/** Retefuente por servicios generales — PJ, desde 4 UVT */
 export const RETEFUENTE_SERVICIOS_PJ_PCT = 4
-export const RETEFUENTE_SERVICIOS_BASE_UVT = 2
+
+/** Base mínima retefuente servicios/honorarios: 4 UVT */
+export const RETEFUENTE_SERVICIOS_BASE_UVT = 4
+export const RETEFUENTE_SERVICIOS_BASE_COP = RETEFUENTE_SERVICIOS_BASE_UVT * UVT_2026
+
+/** Base mínima retefuente compras: 27 UVT */
+export const RETEFUENTE_COMPRAS_BASE_UVT = 27
+export const RETEFUENTE_COMPRAS_BASE_COP = RETEFUENTE_COMPRAS_BASE_UVT * UVT_2026
+
+/** Retefuente compras: 2.5% */
+export const RETEFUENTE_COMPRAS_PCT = 2.5
 
 /** ReteIVA — 15% del IVA facturado (aplica cuando usuario es responsable de IVA) */
 export const RETEIVA_SOBRE_IVA_PCT = 15

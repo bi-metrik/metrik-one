@@ -1,14 +1,29 @@
 /**
- * Motor de cálculos fiscales para cotizaciones MéTRIK ONE
+ * Motor fiscal centralizado MéTRIK ONE — v2
  *
- * Calcula retenciones, seguridad social y ganancia real
- * basándose en el perfil fiscal del usuario x perfil fiscal del cliente.
+ * Fuente de verdad para todos los cálculos fiscales colombianos.
+ * Spec: [98B] §7. Validación: Felipe [55A], Hana [53C], Emilio [56].
+ *
+ * Consumidores: Cotización Flash, Editor de cotización, PDF, (futuro) Edge Function.
+ *
+ * Cadena de cortocircuitos §7.2:
+ * 1. ¿estado_fiscal tenant = pendiente? → STOP
+ * 2. ¿Perfil A (no responsable IVA)? → IVA = $0, solo retenciones + alerta tope
+ * 3. ¿Servicio excluido/exento? → IVA = $0 para ese ítem
+ * 4. IVA = precio × tarifa_iva del servicio
+ * 5. ¿Tenant es autorretenedor? → cliente NO retiene (D92)
+ * 6. ¿Cliente retiene IVA? → ReteIVA
+ * 7. ReteICA
+ * 8. Neto
  */
 
 import type { FiscalProfile, Client } from '@/types/database'
 import {
-  RETEFUENTE_HONORARIOS_PCT,
+  UVT_2026,
+  RETEFUENTE_HONORARIOS_DECLARANTE_PCT,
+  RETEFUENTE_HONORARIOS_NO_DECLARANTE_PCT,
   RETEFUENTE_SERVICIOS_PJ_PCT,
+  RETEFUENTE_SERVICIOS_BASE_COP,
   IVA_PCT,
   RETEIVA_SOBRE_IVA_PCT,
   SEGURIDAD_SOCIAL_EFECTIVO_PCT,
@@ -61,29 +76,23 @@ export interface AlertaFiscal {
 // Adapters: ONE types → fiscal logic
 // =============================================
 
-/**
- * Adapta FiscalProfile de ONE al formato que necesita el motor fiscal.
- * ONE usa: person_type, tax_regime, iva_responsible, ica_city
- */
 function adaptPerfilUsuario(fp: FiscalProfile) {
   return {
     tipo_contribuyente: fp.person_type || 'persona_natural',
     regimen_tributario: fp.tax_regime || 'ordinario',
-    responsable_iva: fp.iva_responsible,
+    responsable_iva: fp.iva_responsible ?? false,
+    es_declarante: fp.is_declarante ?? true, // conservador: asumir declarante
+    autorretenedor: fp.self_withholder ?? false,
     ciudad: fp.ica_city || '',
   }
 }
 
-/**
- * Adapta Client de ONE al formato fiscal del cliente.
- * ONE usa: person_type, tax_regime, gran_contribuyente, agente_retenedor
- */
 function adaptFiscalCliente(client: Client) {
   return {
     tipo_cliente: client.person_type || 'persona_natural',
     regimen_simple: client.tax_regime === 'simple',
-    agente_retenedor: client.agente_retenedor,
-    gran_contribuyente: client.gran_contribuyente,
+    agente_retenedor: client.agente_retenedor ?? false,
+    gran_contribuyente: client.gran_contribuyente ?? false,
   }
 }
 
@@ -92,7 +101,8 @@ function adaptFiscalCliente(client: Client) {
 // =============================================
 
 /**
- * Determina si se debe cobrar IVA y calcula el valor
+ * Determina si se debe cobrar IVA y calcula el valor.
+ * Cortocircuito §7.2 paso 2: Perfil A → IVA = $0
  */
 export function calcularIVA(
   perfil: FiscalProfile,
@@ -100,6 +110,7 @@ export function calcularIVA(
 ): CalculoIVA {
   const u = adaptPerfilUsuario(perfil)
 
+  // Perfil A / no responsable IVA → cortocircuito
   if (!u.responsable_iva) {
     return {
       aplica_iva: false,
@@ -123,14 +134,18 @@ export function calcularIVA(
 // =============================================
 
 /**
- * Calcula las retenciones que aplica el cliente al pagar.
+ * Calcula retenciones que aplica el cliente al pagar.
+ * Implementa cortocircuitos §7.2 pasos 5-7.
  *
- * Matriz: perfil usuario x perfil cliente
- * - Si usuario = Régimen Simple → NO le retienen
- * - Si cliente = PN (no retiene) → NO retiene
- * - Si cliente = PJ + Régimen Simple → NO retiene retefuente/ICA
- * - Si cliente = PJ + Agente Retenedor → retiene retefuente + ICA
- * - Si cliente = Gran Contribuyente → retiene retefuente + ICA + posible reteIVA
+ * Orden de evaluación (D92):
+ * 1. Si tenant en Régimen Simple → NO retienen
+ * 2. Si tenant es autorretenedor → cliente NO retiene en la fuente
+ * 3. Si cliente es PN sin ser agente retenedor → NO retiene
+ * 4. Si cliente en Régimen Simple → NO retiene
+ * 5. Base mínima UVT: servicios/honorarios >= 4 UVT ($209,496)
+ * 6. Tarifa según tipo_contribuyente + declarante
+ * 7. ReteICA si cliente es agente retenedor
+ * 8. ReteIVA si aplica
  */
 export function calcularRetenciones(
   perfil: FiscalProfile,
@@ -151,32 +166,43 @@ export function calcularRetenciones(
     total_retenciones: 0,
   }
 
-  // REGLA 1: Si usuario está en Régimen Simple → NO le retienen
+  // CORTOCIRCUITO 1: Tenant en Régimen Simple → NO le retienen
   if (u.regimen_tributario === 'simple') {
     return resultado
   }
 
-  // REGLA 2: Si el cliente es Persona Natural (no retiene) → NO retiene
+  // CORTOCIRCUITO 2 (D92): Tenant es autorretenedor → cliente NO retiene en la fuente
+  // ReteICA y ReteIVA pueden seguir aplicando
+  const tenantAutorretenedor = u.autorretenedor
+
+  // CORTOCIRCUITO 3: Cliente es PN sin ser agente retenedor → NO retiene
   if (c.tipo_cliente === 'persona_natural' && !c.agente_retenedor) {
     return resultado
   }
 
-  // REGLA 3: Si el cliente está en Régimen Simple → NO retiene retefuente/ICA
+  // CORTOCIRCUITO 4: Cliente en Régimen Simple → NO retiene
   if (c.regimen_simple) {
     return resultado
   }
 
-  // RETEFUENTE
-  if (c.agente_retenedor) {
-    if (u.tipo_contribuyente === 'persona_natural') {
-      resultado.retefuente_pct = RETEFUENTE_HONORARIOS_PCT
-    } else {
-      resultado.retefuente_pct = RETEFUENTE_SERVICIOS_PJ_PCT
+  // RETEFUENTE — solo si tenant NO es autorretenedor (D92)
+  if (c.agente_retenedor && !tenantAutorretenedor) {
+    // Base mínima: servicios/honorarios >= 4 UVT
+    if (precioBase >= RETEFUENTE_SERVICIOS_BASE_COP) {
+      if (u.tipo_contribuyente === 'persona_natural') {
+        // PN declarante: 11%, PN no declarante: 10%
+        resultado.retefuente_pct = u.es_declarante
+          ? RETEFUENTE_HONORARIOS_DECLARANTE_PCT
+          : RETEFUENTE_HONORARIOS_NO_DECLARANTE_PCT
+      } else {
+        // PJ: 4% servicios generales
+        resultado.retefuente_pct = RETEFUENTE_SERVICIOS_PJ_PCT
+      }
+      resultado.retefuente_valor = Math.round(precioBase * (resultado.retefuente_pct / 100))
     }
-    resultado.retefuente_valor = Math.round(precioBase * (resultado.retefuente_pct / 100))
   }
 
-  // RETEICA
+  // RETEICA — aplica independiente del autorretenedor
   if (c.agente_retenedor) {
     const tarifaICA = getTarifaICA(u.ciudad)
     if (tarifaICA > 0) {
@@ -185,7 +211,7 @@ export function calcularRetenciones(
     }
   }
 
-  // RETEIVA
+  // RETEIVA — 15% del IVA si aplica
   if (u.responsable_iva && ivaValor > 0) {
     if (c.agente_retenedor || c.gran_contribuyente) {
       resultado.reteiva_pct = RETEIVA_SOBRE_IVA_PCT
@@ -204,7 +230,7 @@ export function calcularRetenciones(
 // =============================================
 
 /**
- * Calcula la provisión de seguridad social para independientes
+ * Provisión seguridad social independientes.
  * Base: 40% de ingresos brutos, Tarifa: 28.5% → Efectivo: 11.4%
  */
 export function calcularSeguridadSocial(precioBase: number): number {
@@ -217,7 +243,7 @@ export function calcularSeguridadSocial(precioBase: number): number {
 
 /**
  * Genera el resumen fiscal completo de una cotización.
- * Esta es la función principal que consolida todos los cálculos.
+ * Función principal que consolida todos los cálculos.
  */
 export function generarResumenFiscal(
   perfil: FiscalProfile,
@@ -225,25 +251,12 @@ export function generarResumenFiscal(
   precioFinal: number,
   costoTotal: number = 0
 ): ResumenFiscal {
-  // 1. IVA
   const iva = calcularIVA(perfil, precioFinal)
-
-  // 2. Total que paga el cliente
   const totalPagaCliente = iva.total_con_iva
-
-  // 3. Retenciones
   const retenciones = calcularRetenciones(perfil, client, precioFinal, iva.iva_valor)
-
-  // 4. Neto recibido = total_paga_cliente - retenciones
   const netoRecibido = totalPagaCliente - retenciones.total_retenciones
-
-  // 5. Seguridad social (sobre precio base, no sobre total con IVA)
   const seguridadSocial = calcularSeguridadSocial(precioFinal)
-
-  // 6. Ganancia real = neto_recibido - costos - seguridad_social
   const gananciaReal = netoRecibido - costoTotal - seguridadSocial
-
-  // 7. Margen real neto (sobre precio final)
   const margenRealNeto = precioFinal > 0
     ? (gananciaReal / precioFinal) * 100
     : 0
@@ -265,12 +278,12 @@ export function generarResumenFiscal(
 }
 
 // =============================================
-// ALERTAS FISCALES
+// ALERTAS FISCALES — §7.8 D93 compliant
 // =============================================
 
 /**
- * Genera alertas condicionales basadas en el resumen fiscal
- * ("Alertas de Felipe")
+ * Genera alertas condicionales basadas en el resumen fiscal.
+ * D93: Sin verbos imperativos — informar, no instruir.
  */
 export function generarAlertasFiscales(
   perfil: FiscalProfile,
@@ -287,8 +300,8 @@ export function generarAlertasFiscales(
   if (resumen.ganancia_real < 0) {
     alertas.push({
       tipo: 'danger',
-      mensaje: 'Estás perdiendo plata en este proyecto.',
-      detalle: 'Revisa tus costos o sube el precio.',
+      mensaje: 'Ganancia real negativa en este proyecto.',
+      detalle: 'Los costos + impuestos superan el precio de venta.',
     })
   }
   // Margen real bajo
@@ -298,11 +311,11 @@ export function generarAlertasFiscales(
       : 0
     alertas.push({
       tipo: 'warning',
-      mensaje: `Con margen del ${Math.round(margenBruto)}%, el margen REAL después de impuestos baja a ${resumen.margen_real_neto_pct}%.`,
+      mensaje: `Margen bruto del ${Math.round(margenBruto)}% baja a ${resumen.margen_real_neto_pct}% después de impuestos.`,
     })
   }
 
-  // Cliente no retiene (PN) — la plata no es toda tuya
+  // Cliente PN no retiene — provisionar para declaración
   if (
     c.tipo_cliente === 'persona_natural' &&
     !c.agente_retenedor &&
@@ -314,13 +327,13 @@ export function generarAlertasFiscales(
     if (provisionEstimada > 0) {
       alertas.push({
         tipo: 'warning',
-        mensaje: 'Te llega más plata pero NO es toda tuya.',
-        detalle: `Provisiona ~$${provisionEstimada.toLocaleString('es-CO')} para impuestos.`,
+        mensaje: 'Sin retenciones en este pago.',
+        detalle: `Provisión sugerida para declaración de renta: ~$${provisionEstimada.toLocaleString('es-CO')}.`,
       })
     }
   }
 
-  // Podría beneficiarse de Régimen Simple
+  // Información sobre Régimen Simple
   if (
     u.regimen_tributario === 'ordinario' &&
     u.tipo_contribuyente === 'persona_natural' &&
@@ -328,8 +341,7 @@ export function generarAlertasFiscales(
   ) {
     alertas.push({
       tipo: 'info',
-      mensaje: 'Si estuvieras en Régimen Simple: no te retienen retefuente.',
-      detalle: `Eso significaría +$${resumen.retefuente_valor.toLocaleString('es-CO')} de flujo por este proyecto.`,
+      mensaje: `En Régimen Simple no aplica retención en la fuente: +$${resumen.retefuente_valor.toLocaleString('es-CO')} de flujo en este proyecto.`,
     })
   }
 
@@ -341,7 +353,7 @@ export function generarAlertasFiscales(
 // =============================================
 
 /**
- * Calcula precio sugerido desde costo total y margen esperado
+ * Calcula precio sugerido desde costo total y margen esperado.
  * Fórmula: precio = costo / (1 - margen)
  */
 export function calcularPrecioSugerido(costoTotal: number, margenPct: number): number {
@@ -351,8 +363,8 @@ export function calcularPrecioSugerido(costoTotal: number, margenPct: number): n
 }
 
 /**
- * Calcula margen real desde precio y costo
- * Fórmula: margen = (precio - costo) / precio x 100
+ * Calcula margen real desde precio y costo.
+ * Fórmula: margen = (precio - costo) / precio × 100
  */
 export function calcularMargenReal(precioFinal: number, costoTotal: number): number {
   if (precioFinal <= 0) return 0
