@@ -74,7 +74,7 @@ export default function LoginPage() {
               Iniciar sesion
             </h1>
             <p className="text-sm" style={{ color: '#6B7280' }}>
-              Ingresa a tu cuenta de MéTRIK ONE
+              Ingresa a tu cuenta de MéTRIK one
             </p>
           </div>
         </div>

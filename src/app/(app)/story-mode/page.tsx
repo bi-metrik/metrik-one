@@ -28,7 +28,7 @@ const SLIDES: StorySlide[] = [
     title: 'Todo empieza con un registro',
     subtitle: 'El botón + es tu mejor amigo',
     description:
-      'Un gasto, una hora de trabajo, un cobro. Con un toque desde cualquier pantalla, ONE lo captura todo.',
+      'Un gasto, una hora de trabajo, un cobro. Con un toque desde cualquier pantalla, one lo captura todo.',
     visual: (
       <div className="relative flex items-center justify-center">
         <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary shadow-lg">
@@ -111,7 +111,7 @@ const SLIDES: StorySlide[] = [
     title: 'Facturas y cobros',
     subtitle: 'Cartera + alertas inteligentes',
     description:
-      'Programa tus cobros, registra lo que te pagan y ONE te avisa cuando es hora de cobrar. Tú nunca contactas al cliente — ONE te prepara el mensaje.',
+      'Programa tus cobros, registra lo que te pagan y one te avisa cuando es hora de cobrar. Tú nunca contactas al cliente — one te prepara el mensaje.',
     visual: (
       <div className="space-y-2">
         {[

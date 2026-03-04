@@ -356,7 +356,7 @@ export default function ConfigClient({
           ) : !showAddForm && (
             <div className="rounded-lg border border-dashed p-6 text-center">
               <p className="text-sm text-muted-foreground">
-                Agrega tus gastos fijos para que ONE calcule tu punto de equilibrio.
+                Agrega tus gastos fijos para que one calcule tu punto de equilibrio.
               </p>
             </div>
           )}

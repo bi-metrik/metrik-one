@@ -216,7 +216,7 @@ export default function MiNegocioClient({
             👋 Bienvenido a <span className="font-bold">Mi Negocio</span>
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Completa cada sección para que MeTRIK ONE calcule tus números con precisión.
+            Completa cada sección para que MéTRIK one calcule tus números con precisión.
             No necesitas hacerlo todo hoy — puedes avanzar a tu ritmo.
           </p>
         </div>

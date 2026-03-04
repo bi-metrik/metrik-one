@@ -22,7 +22,7 @@ const montserrat = Montserrat({
 })
 
 export const metadata: Metadata = {
-  title: 'MéTRIK ONE',
+  title: 'MéTRIK one',
   description: 'Tus números claros para tomar mejores decisiones',
 }
 

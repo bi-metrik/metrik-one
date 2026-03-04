@@ -180,7 +180,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
 
         {/* Footer */}
         <Text style={styles.footer}>
-          Generado por MeTRIK ONE · {cotizacion.consecutivo} · {new Date().toLocaleDateString('es-CO')}
+          Generado por MéTRIK one · {cotizacion.consecutivo} · {new Date().toLocaleDateString('es-CO')}
         </Text>
       </Page>
     </Document>

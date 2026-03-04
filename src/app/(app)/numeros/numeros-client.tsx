@@ -359,7 +359,7 @@ export default function NumerosClient({ data, isFirstVisit, monthlyData, maturit
       ? fmt(flujoNeto) // Simplified — full fiscal in Sprint 6
       : undefined,
     detail: p3State === 'empty'
-      ? 'Completa tu perfil fiscal para que ONE calcule cuánto es realmente tuyo después de impuestos.'
+      ? 'Completa tu perfil fiscal para que one calcule cuánto es realmente tuyo después de impuestos.'
       : p3State === 'partial'
       ? data.hasFiscalEstimated
         ? 'Usando valores fiscales estimados. Completa tu perfil fiscal para datos exactos.'

@@ -120,7 +120,7 @@ export default function OnboardingPage() {
           <div className="space-y-2">
             <h1 className="text-2xl font-bold">¿Cómo te llamas?</h1>
             <p className="text-muted-foreground">
-              Así te identificaremos dentro de MéTRIK ONE.
+              Así te identificaremos dentro de MéTRIK one.
             </p>
           </div>
           <div className="space-y-2">

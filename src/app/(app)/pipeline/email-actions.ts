@@ -40,7 +40,7 @@ export async function enviarCotizacionEmail(cotizacionId: string, emailTo: strin
     .limit(1)
     .single()
 
-  const senderName = ws?.name || 'MéTRIK ONE'
+  const senderName = ws?.name || 'MéTRIK one'
   const fmt = (v: number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
   // Access discount fields
@@ -65,7 +65,7 @@ export async function enviarCotizacionEmail(cotizacionId: string, emailTo: strin
           <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
           <p style="font-size: 12px; color: #999;">
-            Enviado desde ${senderName} vía MéTRIK ONE
+            Enviado desde ${senderName} vía MéTRIK one
           </p>
         </div>
       `,
