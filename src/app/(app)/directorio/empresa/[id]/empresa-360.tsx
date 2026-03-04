@@ -11,6 +11,7 @@ import { formatNit, formatCOP } from '@/lib/contacts/constants'
 import type { Empresa } from '@/types/database'
 import type { EtapaPipeline, EstadoProyecto } from '@/lib/pipeline/constants'
 import NotesSection from '@/components/notes-section'
+import RutUploadCard from '@/components/rut-upload-card'
 
 interface OportunidadRow {
   id: string
@@ -142,6 +143,20 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
             </select>
           </div>
         </div>
+      </div>
+
+      {/* Documento RUT */}
+      <div className="space-y-3 rounded-lg border p-4">
+        <h2 className="text-sm font-semibold">Documento RUT</h2>
+        <p className="text-[10px] text-muted-foreground">
+          Sube el RUT y llenamos el perfil fiscal automaticamente con IA
+        </p>
+        <RutUploadCard
+          empresaId={empresa.id}
+          currentRutUrl={empresa.rut_documento_url}
+          currentRutVerificado={empresa.rut_verificado}
+          currentRutFecha={empresa.rut_fecha_carga}
+        />
       </div>
 
       {/* Perfil fiscal */}

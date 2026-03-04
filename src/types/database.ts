@@ -810,57 +810,99 @@ export type Database = {
       }
       empresas: {
         Row: {
+          actividad_ciiu: string | null
+          actividad_secundaria: string | null
           agente_retenedor: boolean | null
           autorretenedor: boolean | null
           contacto_email: string | null
           contacto_id: string | null
           contacto_nombre: string | null
           created_at: string | null
+          departamento: string | null
+          direccion_fiscal: string | null
+          email_fiscal: string | null
           estado_fiscal: string
+          fecha_inicio_actividades: string | null
           gran_contribuyente: boolean | null
           id: string
+          municipio: string | null
           nombre: string
           numero_documento: string | null
+          razon_social: string | null
           regimen_tributario: string | null
+          responsable_iva: boolean | null
+          rut_confianza_ocr: number | null
+          rut_documento_url: string | null
+          rut_fecha_carga: string | null
+          rut_verificado: boolean | null
           sector: string | null
+          telefono: string | null
           tipo_documento: string | null
           tipo_persona: string | null
           updated_at: string | null
           workspace_id: string
         }
         Insert: {
+          actividad_ciiu?: string | null
+          actividad_secundaria?: string | null
           agente_retenedor?: boolean | null
           autorretenedor?: boolean | null
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
+          departamento?: string | null
+          direccion_fiscal?: string | null
+          email_fiscal?: string | null
           estado_fiscal?: string
+          fecha_inicio_actividades?: string | null
           gran_contribuyente?: boolean | null
           id?: string
+          municipio?: string | null
           nombre: string
           numero_documento?: string | null
+          razon_social?: string | null
           regimen_tributario?: string | null
+          responsable_iva?: boolean | null
+          rut_confianza_ocr?: number | null
+          rut_documento_url?: string | null
+          rut_fecha_carga?: string | null
+          rut_verificado?: boolean | null
           sector?: string | null
+          telefono?: string | null
           tipo_documento?: string | null
           tipo_persona?: string | null
           updated_at?: string | null
           workspace_id: string
         }
         Update: {
+          actividad_ciiu?: string | null
+          actividad_secundaria?: string | null
           agente_retenedor?: boolean | null
           autorretenedor?: boolean | null
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
+          departamento?: string | null
+          direccion_fiscal?: string | null
+          email_fiscal?: string | null
           estado_fiscal?: string
+          fecha_inicio_actividades?: string | null
           gran_contribuyente?: boolean | null
           id?: string
+          municipio?: string | null
           nombre?: string
           numero_documento?: string | null
+          razon_social?: string | null
           regimen_tributario?: string | null
+          responsable_iva?: boolean | null
+          rut_confianza_ocr?: number | null
+          rut_documento_url?: string | null
+          rut_fecha_carga?: string | null
+          rut_verificado?: boolean | null
           sector?: string | null
+          telefono?: string | null
           tipo_documento?: string | null
           tipo_persona?: string | null
           updated_at?: string | null

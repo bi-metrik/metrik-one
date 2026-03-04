@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { ShieldCheck } from 'lucide-react'
+import { ShieldCheck, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { ganarOportunidad } from '../actions-v2'
 import { TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO } from '@/lib/pipeline/constants'
+import RutUploadCard from '@/components/rut-upload-card'
 
 interface EmpresaData {
   id: string
@@ -88,6 +89,15 @@ export default function FiscalGateForm({ oportunidadId, empresa, onComplete, onC
       <p className="mt-1 text-xs text-green-700">
         Completa el perfil fiscal de <strong>{empresa.nombre}</strong> para poder cerrar la oportunidad.
       </p>
+
+      {/* RUT shortcut — auto-fill via OCR */}
+      <div className="mt-3">
+        <RutUploadCard
+          empresaId={empresa.id}
+          onComplete={onComplete}
+        />
+        <p className="mt-2 text-center text-[10px] text-muted-foreground">O completa manualmente:</p>
+      </div>
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {missing.tipo_persona && (
