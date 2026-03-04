@@ -80,11 +80,9 @@ export async function parseRut(
   fileBuffer: ArrayBuffer,
   mimeType: string,
 ): Promise<{ data: RutParseResult | null; error?: string }> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env['GEMINI_API_KEY']
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim()
   if (!apiKey) {
-    const allKeys = Object.keys(process.env).filter(k => /gemini|google|api.key/i.test(k))
-    console.error('[parse-rut] GEMINI_API_KEY missing. Related env keys found:', allKeys.length ? allKeys : 'NONE')
-    return { data: null, error: `GEMINI_API_KEY no configurada en el servidor (env keys: ${allKeys.join(', ') || 'ninguna'})` }
+    return { data: null, error: 'GEMINI_API_KEY no configurada en el servidor' }
   }
 
   const normalizedMime = SUPPORTED_MIMES[mimeType.toLowerCase()]
