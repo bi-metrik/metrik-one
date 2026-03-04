@@ -20,6 +20,7 @@
 import type { FiscalProfile, Client } from '@/types/database'
 import {
   UVT_2026,
+  TOPE_NO_RESPONSABLE_IVA_COP,
   RETEFUENTE_HONORARIOS_DECLARANTE_PCT,
   RETEFUENTE_HONORARIOS_NO_DECLARANTE_PCT,
   RETEFUENTE_SERVICIOS_PJ_PCT,
@@ -29,6 +30,54 @@ import {
   SEGURIDAD_SOCIAL_EFECTIVO_PCT,
   getTarifaICA,
 } from './constants'
+
+// =============================================
+// PERFILES FISCALES — §2.10, D88
+// =============================================
+
+export type PerfilFiscalLetra = 'A' | 'B' | 'C' | 'D'
+
+/**
+ * Clasifica al tenant en uno de los 4 perfiles fiscales adaptativos.
+ * Fuente: casilla 53 RUT + tipo persona + régimen (D88).
+ *
+ * A: Independiente no responsable IVA (~45% ICP)
+ * B: PN responsable IVA, régimen ordinario (~25%)
+ * C: PJ responsable IVA (~20%)
+ * D: Régimen Simple (~10%)
+ */
+export function clasificarPerfilFiscal(perfil: FiscalProfile): PerfilFiscalLetra {
+  const u = adaptPerfilUsuario(perfil)
+
+  // D: Régimen Simple (cualquier tipo persona)
+  if (u.regimen_tributario === 'simple') return 'D'
+
+  // A: No responsable de IVA
+  if (!u.responsable_iva) return 'A'
+
+  // C: PJ responsable de IVA
+  if (u.tipo_contribuyente === 'persona_juridica') return 'C'
+
+  // B: PN responsable de IVA (ordinario)
+  return 'B'
+}
+
+// =============================================
+// TIPOS IVA POR SERVICIO — §2.8, D78, D80
+// =============================================
+
+export type TipoIVA = 'gravado_19' | 'gravado_5' | 'exento' | 'excluido'
+
+const TARIFA_IVA_MAP: Record<TipoIVA, number> = {
+  gravado_19: 19,
+  gravado_5: 5,
+  exento: 0,
+  excluido: 0,
+}
+
+export function getTarifaIVAPorTipo(tipoIva: TipoIVA): number {
+  return TARIFA_IVA_MAP[tipoIva] ?? IVA_PCT
+}
 
 // =============================================
 // INTERFACES
@@ -102,15 +151,21 @@ function adaptFiscalCliente(client: Client) {
 
 /**
  * Determina si se debe cobrar IVA y calcula el valor.
- * Cortocircuito §7.2 paso 2: Perfil A → IVA = $0
+ * Cortocircuitos §7.2:
+ *   paso 2: Perfil A (no responsable IVA) → IVA = $0
+ *   paso 3: Servicio exento/excluido → IVA = $0
+ *   paso 4: IVA = precio × tarifa_iva del servicio
+ *
+ * @param tipoIva — tipo IVA del servicio (D78, D80). Default: gravado_19.
  */
 export function calcularIVA(
   perfil: FiscalProfile,
-  precioBase: number
+  precioBase: number,
+  tipoIva: TipoIVA = 'gravado_19'
 ): CalculoIVA {
   const u = adaptPerfilUsuario(perfil)
 
-  // Perfil A / no responsable IVA → cortocircuito
+  // Cortocircuito §7.2.2: Perfil A / no responsable IVA → IVA = $0
   if (!u.responsable_iva) {
     return {
       aplica_iva: false,
@@ -120,10 +175,22 @@ export function calcularIVA(
     }
   }
 
-  const ivaValor = Math.round(precioBase * (IVA_PCT / 100))
+  // Cortocircuito §7.2.3: Servicio exento o excluido → IVA = $0
+  const tarifaIva = getTarifaIVAPorTipo(tipoIva)
+  if (tarifaIva === 0) {
+    return {
+      aplica_iva: false,
+      iva_pct: 0,
+      iva_valor: 0,
+      total_con_iva: precioBase,
+    }
+  }
+
+  // §7.2.4: IVA = precio × tarifa_iva del servicio
+  const ivaValor = Math.round(precioBase * (tarifaIva / 100))
   return {
     aplica_iva: true,
-    iva_pct: IVA_PCT,
+    iva_pct: tarifaIva,
     iva_valor: ivaValor,
     total_con_iva: precioBase + ivaValor,
   }
@@ -290,11 +357,31 @@ export function generarAlertasFiscales(
   client: Client,
   resumen: ResumenFiscal,
   precioFinal: number,
-  costoTotal: number
+  costoTotal: number,
+  facturacionAcumulada: number = 0
 ): AlertaFiscal[] {
   const u = adaptPerfilUsuario(perfil)
   const c = adaptFiscalCliente(client)
+  const perfilLetra = clasificarPerfilFiscal(perfil)
   const alertas: AlertaFiscal[] = []
+
+  // Perfil A: Alerta tope 3.500 UVT (D86)
+  if (perfilLetra === 'A' && facturacionAcumulada > 0) {
+    const pctTope = (facturacionAcumulada / TOPE_NO_RESPONSABLE_IVA_COP) * 100
+    if (pctTope >= 100) {
+      alertas.push({
+        tipo: 'danger',
+        mensaje: `Facturación acumulada supera el tope de no responsable de IVA.`,
+        detalle: `Al superar 3.500 UVT ($${TOPE_NO_RESPONSABLE_IVA_COP.toLocaleString('es-CO')}), la ley requiere inscripción como responsable (Art. 506 ET).`,
+      })
+    } else if (pctTope >= 80) {
+      alertas.push({
+        tipo: 'warning',
+        mensaje: `Facturación acumulada: ${Math.round(pctTope)}% del tope de no responsable de IVA.`,
+        detalle: `Tope anual: $${TOPE_NO_RESPONSABLE_IVA_COP.toLocaleString('es-CO')} (3.500 UVT).`,
+      })
+    }
+  }
 
   // Ganancia negativa
   if (resumen.ganancia_real < 0) {

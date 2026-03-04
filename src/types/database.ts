@@ -2740,6 +2740,42 @@ export type Database = {
           },
         ]
       }
+      ref_tarifas_ica: {
+        Row: {
+          id: string
+          municipio: string
+          ciiu_desde: string
+          ciiu_hasta: string
+          tarifa_por_mil: number
+          vigencia_desde: string
+          vigencia_hasta: string | null
+          fuente: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          municipio: string
+          ciiu_desde?: string
+          ciiu_hasta?: string
+          tarifa_por_mil: number
+          vigencia_desde?: string
+          vigencia_hasta?: string | null
+          fuente: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          municipio?: string
+          ciiu_desde?: string
+          ciiu_hasta?: string
+          tarifa_por_mil?: number
+          vigencia_desde?: string
+          vigencia_hasta?: string | null
+          fuente?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
       rubros: {
         Row: {
           cantidad: number
@@ -2837,6 +2873,8 @@ export type Database = {
           nombre: string
           precio_estandar: number | null
           rubros_template: Json | null
+          tarifa_iva: number
+          tipo_iva: string
           updated_at: string | null
           workspace_id: string
         }
@@ -2848,6 +2886,8 @@ export type Database = {
           nombre: string
           precio_estandar?: number | null
           rubros_template?: Json | null
+          tarifa_iva?: number
+          tipo_iva?: string
           updated_at?: string | null
           workspace_id: string
         }
@@ -2859,6 +2899,8 @@ export type Database = {
           nombre?: string
           precio_estandar?: number | null
           rubros_template?: Json | null
+          tarifa_iva?: number
+          tipo_iva?: string
           updated_at?: string | null
           workspace_id?: string
         }
@@ -3776,6 +3818,7 @@ export type ProjectLegacy = Database['public']['Tables']['projects']['Row']
 export type Proyecto = Database['public']['Tables']['proyectos']['Row']
 export type ProyectoRubro = Database['public']['Tables']['proyecto_rubros']['Row']
 export type Quote = Database['public']['Tables']['quotes']['Row']
+export type RefTarifaIca = Database['public']['Tables']['ref_tarifas_ica']['Row']
 export type Rubro = Database['public']['Tables']['rubros']['Row']
 export type SaldoBanco = Database['public']['Tables']['saldos_banco']['Row']
 export type Servicio = Database['public']['Tables']['servicios']['Row']
