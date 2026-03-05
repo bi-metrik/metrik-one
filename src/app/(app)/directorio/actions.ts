@@ -402,12 +402,13 @@ export async function uploadAndParseRUT(
 
   const rutUrl = signedUrl?.signedUrl || filePath
 
-  // Parse with Gemini OCR — read env at runtime inside server action
-  const rawKey = process.env.GEMINI_API_KEY
-  const geminiKey = (rawKey || '').trim()
-  console.log('[RUT-DEBUG] GEMINI_API_KEY type:', typeof rawKey, '| length:', rawKey?.length ?? 'undefined', '| first5:', rawKey?.slice(0, 5) ?? 'N/A')
+  // Parse with Gemini OCR
+  // IMPORTANT: dynamic key access prevents Next.js/webpack from replacing
+  // process.env.GEMINI_API_KEY with an empty string at build-time.
+  const _envKey = 'GEMINI_API_KEY'
+  const geminiKey = (process.env[_envKey] || '').trim()
   if (!geminiKey) {
-    return { success: false, error: `GEMINI_API_KEY no configurada en el servidor (type=${typeof rawKey}, len=${rawKey?.length ?? 'undef'})` }
+    return { success: false, error: 'GEMINI_API_KEY no configurada en el servidor' }
   }
 
   const buffer = await file.arrayBuffer()
