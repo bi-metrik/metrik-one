@@ -75,12 +75,15 @@ const SUPPORTED_MIMES: Record<string, string> = {
 /**
  * Parse a RUT document (image or PDF) using Gemini 2.5 Flash OCR.
  * Returns structured data with per-field confidence scores.
+ *
+ * IMPORTANT: apiKey must be passed from the server action caller
+ * (process.env is not reliably available in library files on Vercel).
  */
 export async function parseRut(
   fileBuffer: ArrayBuffer,
   mimeType: string,
+  apiKey: string,
 ): Promise<{ data: RutParseResult | null; error?: string }> {
-  const apiKey = (process.env.GEMINI_API_KEY || '').trim()
   if (!apiKey) {
     return { data: null, error: 'GEMINI_API_KEY no configurada en el servidor' }
   }

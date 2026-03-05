@@ -402,9 +402,14 @@ export async function uploadAndParseRUT(
 
   const rutUrl = signedUrl?.signedUrl || filePath
 
-  // Parse with Gemini OCR
+  // Parse with Gemini OCR — read env at runtime inside server action
+  const geminiKey = (process.env.GEMINI_API_KEY || '').trim()
+  if (!geminiKey) {
+    return { success: false, error: 'GEMINI_API_KEY no configurada en el servidor' }
+  }
+
   const buffer = await file.arrayBuffer()
-  const { data: parsed, error: parseError } = await parseRut(buffer, file.type)
+  const { data: parsed, error: parseError } = await parseRut(buffer, file.type, geminiKey)
 
   if (parseError || !parsed) {
     return { success: false, error: parseError || 'Error procesando el RUT' }
