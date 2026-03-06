@@ -151,7 +151,7 @@ export async function parseRut(
     }
 
     // Clean response: strip markdown fences, BOM, trailing commas, comments
-    const text = debugRaw
+    const cleaned = debugRaw
       .replace(/^\uFEFF/, '')                    // BOM
       .replace(/^```(?:json)?\s*/i, '')          // opening fence
       .replace(/\s*```\s*$/, '')                 // closing fence
@@ -159,6 +159,10 @@ export async function parseRut(
       .replace(/\/\*[\s\S]*?\*\//g, '')          // block comments
       .replace(/,\s*([}\]])/g, '$1')             // trailing commas
       .trim()
+
+    // Fix literal newlines inside JSON string values (Gemini sometimes
+    // puts line breaks in addresses, names, etc. without escaping them)
+    const text = fixJsonNewlines(cleaned)
 
     // Parse the JSON response
     const raw = JSON.parse(text) as Record<string, RutField<unknown>>
@@ -255,4 +259,46 @@ function buildResult(raw: Record<string, RutField<unknown>>): RutParseResult {
     overall_confidence,
     nit_valid,
   }
+}
+
+/**
+ * Fix literal newlines inside JSON string values.
+ * Gemini sometimes puts unescaped line breaks in addresses, names, etc.
+ * Uses a simple state machine to only replace \n inside quoted strings.
+ */
+function fixJsonNewlines(json: string): string {
+  let result = ''
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i]
+
+    if (escaped) {
+      result += ch
+      escaped = false
+      continue
+    }
+
+    if (ch === '\\' && inString) {
+      result += ch
+      escaped = true
+      continue
+    }
+
+    if (ch === '"') {
+      inString = !inString
+      result += ch
+      continue
+    }
+
+    if (inString && (ch === '\n' || ch === '\r')) {
+      result += ' ' // Replace literal newline with space
+      continue
+    }
+
+    result += ch
+  }
+
+  return result
 }
