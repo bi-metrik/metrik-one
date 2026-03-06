@@ -5,6 +5,11 @@ import { revalidatePath } from 'next/cache'
 import { parseRut } from '@/lib/rut/parse-rut'
 import type { RutParseResult, RutEmpresaUpdate } from '@/lib/rut/types'
 import { getServerKey } from '@/lib/server-keys'
+import {
+  normalizePersonTypeFiscalProfile,
+  normalizeTaxRegimeFiscalProfile,
+  deriveIvaResponsible,
+} from '@/lib/rut/normalize-rut-fiscal'
 
 // ── Update Extended Fiscal Fields ────────────────────────
 
@@ -212,13 +217,22 @@ export async function confirmRutDataMiNegocio(
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Map RUT field names → fiscal_profiles column names
+  // Normalization: Felipe [55A] validated 2026-03-06
   const updates: Record<string, unknown> = {}
 
-  // Fields that need name mapping
+  // Fields with name mapping + value normalization
   if (confirmedFields.numero_documento !== undefined) updates.nit = confirmedFields.numero_documento
-  if (confirmedFields.tipo_persona !== undefined) updates.person_type = confirmedFields.tipo_persona
-  if (confirmedFields.regimen_tributario !== undefined) updates.tax_regime = confirmedFields.regimen_tributario
-  if (confirmedFields.responsable_iva !== undefined) updates.iva_responsible = confirmedFields.responsable_iva
+  if (confirmedFields.tipo_persona !== undefined) {
+    updates.person_type = normalizePersonTypeFiscalProfile(confirmedFields.tipo_persona)
+  }
+  if (confirmedFields.regimen_tributario !== undefined) {
+    updates.tax_regime = normalizeTaxRegimeFiscalProfile(confirmedFields.regimen_tributario)
+  }
+  // iva_responsible: derive from regimen (regimen manda sobre OCR directo)
+  updates.iva_responsible = deriveIvaResponsible(
+    confirmedFields.regimen_tributario,
+    confirmedFields.responsable_iva,
+  )
   if (confirmedFields.autorretenedor !== undefined) updates.self_withholder = confirmedFields.autorretenedor
   if (confirmedFields.actividad_ciiu !== undefined) updates.ciiu = confirmedFields.actividad_ciiu
 

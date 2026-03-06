@@ -352,6 +352,11 @@ export async function getEmpresaByContacto(contactoId: string) {
 import { parseRut } from '@/lib/rut/parse-rut'
 import type { RutParseResult, RutEmpresaUpdate } from '@/lib/rut/types'
 import { getServerKey } from '@/lib/server-keys'
+import {
+  normalizePersonTypeEmpresa,
+  normalizeTaxRegimeEmpresa,
+  deriveIvaResponsible,
+} from '@/lib/rut/normalize-rut-fiscal'
 
 const RUT_MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const RUT_ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
@@ -431,16 +436,25 @@ export async function confirmRutData(
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Build update object — only include non-undefined fields
+  // Normalization: Felipe [55A] validated 2026-03-06
   const updates: Record<string, unknown> = {}
 
   if (confirmedFields.numero_documento !== undefined) updates.numero_documento = confirmedFields.numero_documento
   if (confirmedFields.tipo_documento !== undefined) updates.tipo_documento = confirmedFields.tipo_documento
-  if (confirmedFields.tipo_persona !== undefined) updates.tipo_persona = confirmedFields.tipo_persona
-  if (confirmedFields.regimen_tributario !== undefined) updates.regimen_tributario = confirmedFields.regimen_tributario
+  if (confirmedFields.tipo_persona !== undefined) {
+    updates.tipo_persona = normalizePersonTypeEmpresa(confirmedFields.tipo_persona)
+  }
+  if (confirmedFields.regimen_tributario !== undefined) {
+    updates.regimen_tributario = normalizeTaxRegimeEmpresa(confirmedFields.regimen_tributario)
+  }
   if (confirmedFields.gran_contribuyente !== undefined) updates.gran_contribuyente = confirmedFields.gran_contribuyente
   if (confirmedFields.agente_retenedor !== undefined) updates.agente_retenedor = confirmedFields.agente_retenedor
   if (confirmedFields.autorretenedor !== undefined) updates.autorretenedor = confirmedFields.autorretenedor
-  if (confirmedFields.responsable_iva !== undefined) updates.responsable_iva = confirmedFields.responsable_iva
+  // responsable_iva: derive from regimen (regimen manda sobre OCR directo)
+  updates.responsable_iva = deriveIvaResponsible(
+    confirmedFields.regimen_tributario,
+    confirmedFields.responsable_iva,
+  )
   if (confirmedFields.razon_social !== undefined) updates.razon_social = confirmedFields.razon_social
   if (confirmedFields.direccion_fiscal !== undefined) updates.direccion_fiscal = confirmedFields.direccion_fiscal
   if (confirmedFields.municipio !== undefined) updates.municipio = confirmedFields.municipio
