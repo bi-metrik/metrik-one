@@ -280,7 +280,7 @@ export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cot
         <div className="flex-1 min-w-0">
           {oportunidadCodigo && (
             <span className="shrink-0 rounded bg-muted px-2 py-0.5 text-xs font-mono font-bold text-muted-foreground">
-              O {oportunidadCodigo}
+              C {oportunidadCodigo}
             </span>
           )}
           <div className="flex items-center gap-2">

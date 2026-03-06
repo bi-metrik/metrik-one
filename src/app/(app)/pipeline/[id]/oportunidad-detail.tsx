@@ -369,6 +369,11 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
                       <FileText className="h-4 w-4 text-blue-500 shrink-0" />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
+                          {oportunidad.codigo && (
+                            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono font-bold text-muted-foreground">
+                              C {oportunidad.codigo}
+                            </span>
+                          )}
                           <span className="text-sm font-medium truncate">{c.consecutivo || 'Sin consecutivo'}</span>
                           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
                             {c.modo === 'flash' ? 'Rápida' : 'Detallada'}
