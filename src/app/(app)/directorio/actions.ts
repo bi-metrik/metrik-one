@@ -351,6 +351,7 @@ export async function getEmpresaByContacto(contactoId: string) {
 
 import { parseRut } from '@/lib/rut/parse-rut'
 import type { RutParseResult, RutEmpresaUpdate } from '@/lib/rut/types'
+import { getServerKey } from '@/lib/server-keys'
 
 const RUT_MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const RUT_ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
@@ -403,10 +404,7 @@ export async function uploadAndParseRUT(
   const rutUrl = signedUrl?.signedUrl || filePath
 
   // Parse with Gemini OCR
-  // IMPORTANT: dynamic key access prevents Next.js/webpack from replacing
-  // process.env.GEMINI_API_KEY with an empty string at build-time.
-  const _envKey = 'GEMINI_API_KEY'
-  const geminiKey = (process.env[_envKey] || '').trim()
+  const geminiKey = getServerKey('gemini')
   if (!geminiKey) {
     return { success: false, error: 'GEMINI_API_KEY no configurada en el servidor' }
   }
