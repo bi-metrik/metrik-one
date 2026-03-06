@@ -150,13 +150,13 @@ export async function parseRut(
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
 
-    // Clean response: strip markdown fences, BOM, trailing commas, comments
+    // Clean response: strip markdown fences, BOM, trailing commas
+    // NOTE: Do NOT strip // or /* comments — those regexes match inside
+    // JSON string values (e.g. URLs, addresses) and destroy the JSON.
     const cleaned = debugRaw
       .replace(/^\uFEFF/, '')                    // BOM
       .replace(/^```(?:json)?\s*/i, '')          // opening fence
       .replace(/\s*```\s*$/, '')                 // closing fence
-      .replace(/\/\/[^\n]*/g, '')                // line comments
-      .replace(/\/\*[\s\S]*?\*\//g, '')          // block comments
       .replace(/,\s*([}\]])/g, '$1')             // trailing commas
       .trim()
 
