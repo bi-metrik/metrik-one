@@ -134,10 +134,17 @@ export async function parseRut(
       return { data: null, error: `Contenido bloqueado por Gemini: ${blockReason}` }
     }
 
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!text) {
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!rawText) {
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
+
+    // Clean response: strip markdown fences, BOM, trailing commas
+    const text = rawText
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/, '')
+      .replace(/,\s*([}\]])/g, '$1')
+      .trim()
 
     // Parse the JSON response
     const raw = JSON.parse(text) as Record<string, RutField<unknown>>
