@@ -21,6 +21,7 @@ import FiscalGateForm from './fiscal-gate-form'
 
 interface OportunidadRow {
   id: string
+  codigo: string | null
   descripcion: string | null
   etapa: string | null
   probabilidad: number | null
@@ -122,7 +123,14 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="truncate text-lg font-bold">{oportunidad.descripcion || 'Sin descripcion'}</h1>
+          <div className="flex items-center gap-2">
+            {oportunidad.codigo && (
+              <span className="shrink-0 rounded bg-muted px-2 py-0.5 text-xs font-mono font-bold text-muted-foreground">
+                O {oportunidad.codigo}
+              </span>
+            )}
+            <h1 className="truncate text-lg font-bold">{oportunidad.descripcion || 'Sin descripcion'}</h1>
+          </div>
           <div className="flex items-center gap-2">
             {etapaConfig && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${etapaConfig.chipClass}`}>

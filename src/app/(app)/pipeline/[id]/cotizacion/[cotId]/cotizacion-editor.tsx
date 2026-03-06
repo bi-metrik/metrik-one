@@ -65,13 +65,14 @@ interface ClientFiscal {
 
 interface Props {
   oportunidadId: string
+  oportunidadCodigo?: string | null
   cotizacion: CotizacionData
   initialItems: ItemRow[]
   fiscalProfile?: FiscalProfile | null
   clientFiscal?: ClientFiscal | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal }: Props) {
+export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cotizacion, initialItems, fiscalProfile, clientFiscal }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -277,6 +278,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="flex-1 min-w-0">
+          {oportunidadCodigo && (
+            <span className="shrink-0 rounded bg-muted px-2 py-0.5 text-xs font-mono font-bold text-muted-foreground">
+              O {oportunidadCodigo}
+            </span>
+          )}
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold">{cotizacion.consecutivo || 'Sin consecutivo'}</h1>
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig?.chipClass}`}>

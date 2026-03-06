@@ -24,6 +24,7 @@ import CierreDialog from './cierre-dialog'
 
 interface Financiero {
   proyecto_id: string | null
+  codigo: string | null
   nombre: string | null
   estado: string | null
   tipo: string | null
@@ -174,7 +175,14 @@ export default function ProyectoDetail({
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="truncate text-lg font-bold">{f.nombre ?? 'Sin nombre'}</h1>
+          <div className="flex items-center gap-2">
+            {f.codigo && (
+              <span className="shrink-0 rounded bg-muted px-2 py-0.5 text-xs font-mono font-bold text-muted-foreground">
+                P {f.codigo}
+              </span>
+            )}
+            <h1 className="truncate text-lg font-bold">{f.nombre ?? 'Sin nombre'}</h1>
+          </div>
           <div className="flex items-center gap-2">
             {config && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${config.chipClass}`}>
