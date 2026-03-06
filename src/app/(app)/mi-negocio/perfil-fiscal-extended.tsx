@@ -5,8 +5,10 @@ import { Shield, Check, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import WizardFelipe from '../config/wizard-felipe'
-import { updateFiscalExtended } from './actions'
+import { updateFiscalExtended, uploadAndParseRutMiNegocio, confirmRutDataMiNegocio } from './actions'
 import type { FiscalProfile } from '@/types/database'
+import RutUploadCard from '@/components/rut-upload-card'
+import RutDataDisplay from '@/components/rut-data-display'
 
 interface Props {
   fiscalProfile: FiscalProfile | null
@@ -18,15 +20,16 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
   const [isPending, startTransition] = useTransition()
   const [showWizard, setShowWizard] = useState(false)
 
-  // Extended fields form
+  // Extended fields form (facturacion — editable)
   const [nit, setNit] = useState(fiscalProfile?.nit || '')
   const [razonSocial, setRazonSocial] = useState(fiscalProfile?.razon_social || '')
   const [direccionFiscal, setDireccionFiscal] = useState(fiscalProfile?.direccion_fiscal || '')
   const [emailFacturacion, setEmailFacturacion] = useState(fiscalProfile?.email_facturacion || '')
 
   const isConfigured = fiscalProfile?.is_complete || fiscalProfile?.is_estimated
+  const rutVerificado = fiscalProfile?.rut_verificado === true
 
-  const handleWizardComplete = (result: { isComplete: boolean; isEstimated: boolean }) => {
+  const handleWizardComplete = () => {
     setShowWizard(false)
     router.refresh()
   }
@@ -40,7 +43,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
         email_facturacion: emailFacturacion.trim() || undefined,
       })
       if (res.success) {
-        toast.success('Datos de facturación actualizados')
+        toast.success('Datos de facturacion actualizados')
         router.refresh()
       } else {
         toast.error(res.error || 'Error')
@@ -48,17 +51,12 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
     })
   }
 
-  const fiscalSummary = isConfigured ? {
-    personType: fiscalProfile!.person_type === 'juridica' ? 'Persona Jurídica' : 'Persona Natural',
-    regime: fiscalProfile!.tax_regime === 'simple' ? 'Simple (SIMPLE)' : 'Ordinario',
-    iva: fiscalProfile!.iva_responsible ? 'Responsable (19%)' : 'No responsable',
-    city: fiscalProfile!.ica_city || 'Bogotá',
-    icaRate: fiscalProfile!.ica_rate || 9.66,
-    isEstimated: fiscalProfile!.is_estimated,
-  } : null
+  const handleRutComplete = () => {
+    router.refresh()
+  }
 
-  // Show wizard if not configured or user clicked edit
-  if (!isConfigured || showWizard) {
+  // Show wizard if not configured AND no RUT, or user explicitly clicked edit
+  if ((!isConfigured && !rutVerificado) || showWizard) {
     return (
       <WizardFelipe
         onComplete={handleWizardComplete}
@@ -76,40 +74,85 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
     )
   }
 
-  // Configured — show summary + extended fields
+  const fiscalSummary = isConfigured ? {
+    city: fiscalProfile!.ica_city || 'Bogota',
+    icaRate: fiscalProfile!.ica_rate || 9.66,
+    isEstimated: fiscalProfile!.is_estimated,
+    isDeclarante: fiscalProfile!.is_declarante,
+  } : null
+
   return (
     <div className="space-y-5">
-      {/* Summary */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold">Perfil fiscal</h3>
-          {fiscalSummary?.isEstimated && (
+      {/* RUT Upload */}
+      <div>
+        <h3 className="font-semibold mb-2">Documento RUT</h3>
+        <p className="text-[10px] text-muted-foreground mb-3">
+          Sube el RUT y llenamos el perfil fiscal automaticamente con IA
+        </p>
+        <RutUploadCard
+          onUploadAndParse={uploadAndParseRutMiNegocio}
+          onConfirm={confirmRutDataMiNegocio}
+          currentRutUrl={fiscalProfile?.rut_documento_url}
+          currentRutVerificado={fiscalProfile?.rut_verificado}
+          currentRutFecha={fiscalProfile?.rut_fecha_carga}
+          onComplete={handleRutComplete}
+        />
+      </div>
+
+      {/* RUT extracted data (read-only) */}
+      <RutDataDisplay
+        nit={fiscalProfile?.nit}
+        tipo_documento={fiscalProfile?.tipo_documento}
+        tipo_persona={fiscalProfile?.person_type}
+        razon_social={fiscalProfile?.razon_social}
+        regimen_tributario={fiscalProfile?.tax_regime}
+        gran_contribuyente={fiscalProfile?.gran_contribuyente}
+        agente_retenedor={fiscalProfile?.agente_retenedor}
+        autorretenedor={fiscalProfile?.self_withholder}
+        responsable_iva={fiscalProfile?.iva_responsible}
+        direccion_fiscal={fiscalProfile?.direccion_fiscal}
+        municipio={fiscalProfile?.municipio}
+        departamento={fiscalProfile?.departamento}
+        telefono={fiscalProfile?.telefono}
+        email_fiscal={fiscalProfile?.email_fiscal}
+        actividad_ciiu={fiscalProfile?.ciiu}
+        actividad_secundaria={fiscalProfile?.actividad_secundaria}
+        fecha_inicio_actividades={fiscalProfile?.fecha_inicio_actividades}
+        onEdit={() => setShowWizard(true)}
+      />
+
+      {/* ICA / Declarante — not from RUT, stays editable */}
+      {fiscalSummary && (
+        <div className="space-y-1.5 rounded-lg border p-3">
+          <p className="text-[10px] font-medium text-muted-foreground mb-1">Datos ICA</p>
+          <div className="flex items-center justify-between py-0.5">
+            <span className="text-xs text-muted-foreground">Ciudad ICA</span>
+            <span className="text-xs font-medium">{fiscalSummary.city} ({fiscalSummary.icaRate}‰)</span>
+          </div>
+          <div className="flex items-center justify-between py-0.5">
+            <span className="text-xs text-muted-foreground">Declarante</span>
+            <span className="text-xs font-medium">{fiscalSummary.isDeclarante ? 'Si' : 'No'}</span>
+          </div>
+          {fiscalSummary.isEstimated && (
             <div className="flex items-center gap-1 mt-1">
               <Shield className="h-3 w-3 text-amber-500" />
-              <span className="text-xs text-amber-600 dark:text-amber-400">
+              <span className="text-[10px] text-amber-600 dark:text-amber-400">
                 Algunos valores son estimados
               </span>
             </div>
           )}
+          <button
+            onClick={() => setShowWizard(true)}
+            className="mt-1 text-[10px] text-primary hover:underline"
+          >
+            Editar perfil completo
+          </button>
         </div>
-        <button
-          onClick={() => setShowWizard(true)}
-          className="text-xs text-primary hover:underline"
-        >
-          Editar perfil
-        </button>
-      </div>
-
-      <div className="space-y-1.5 rounded-lg border p-3">
-        <SummaryRow label="Tipo persona" value={fiscalSummary!.personType} />
-        <SummaryRow label="Régimen" value={fiscalSummary!.regime} />
-        <SummaryRow label="IVA" value={fiscalSummary!.iva} />
-        <SummaryRow label="Ciudad ICA" value={`${fiscalSummary!.city} (${fiscalSummary!.icaRate}‰)`} />
-      </div>
+      )}
 
       {/* Extended: Facturacion fields */}
       <div className="space-y-3 border-t pt-4">
-        <h4 className="text-sm font-medium">Datos de facturación</h4>
+        <h4 className="text-sm font-medium">Datos de facturacion</h4>
         <p className="text-xs text-muted-foreground">
           Estos datos aparecen en tus cotizaciones y facturas.
         </p>
@@ -126,7 +169,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Razón social</label>
+            <label className="text-xs font-medium text-muted-foreground">Razon social</label>
             <input
               type="text"
               value={razonSocial}
@@ -136,7 +179,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Dirección fiscal</label>
+            <label className="text-xs font-medium text-muted-foreground">Direccion fiscal</label>
             <input
               type="text"
               value={direccionFiscal}
@@ -146,7 +189,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Email facturación</label>
+            <label className="text-xs font-medium text-muted-foreground">Email facturacion</label>
             <input
               type="email"
               value={emailFacturacion}
@@ -166,15 +209,6 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
           Guardar
         </button>
       </div>
-    </div>
-  )
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xs font-medium">{value}</span>
     </div>
   )
 }
