@@ -43,6 +43,7 @@ interface ItemRow {
 
 interface CotizacionData {
   id: string
+  codigo: string | null
   consecutivo: string | null
   modo: string | null
   estado: string | null
@@ -194,7 +195,7 @@ export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cot
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = res.filename || `${cotizacion.consecutivo}.pdf`
+        a.download = res.filename || `${cotizacion.codigo || cotizacion.consecutivo}.pdf`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -278,13 +279,11 @@ export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cot
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="flex-1 min-w-0">
-          {oportunidadCodigo && (
-            <span className="shrink-0 rounded bg-muted px-2 py-0.5 text-xs font-mono font-bold text-muted-foreground">
-              C {oportunidadCodigo}
-            </span>
-          )}
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold">{cotizacion.consecutivo || 'Sin consecutivo'}</h1>
+            <h1 className="text-lg font-bold font-mono">{cotizacion.codigo || cotizacion.consecutivo || 'Sin código'}</h1>
+            {cotizacion.codigo && cotizacion.consecutivo && (
+              <span className="text-xs text-muted-foreground">{cotizacion.consecutivo}</span>
+            )}
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig?.chipClass}`}>
               {estadoConfig?.label}
             </span>
