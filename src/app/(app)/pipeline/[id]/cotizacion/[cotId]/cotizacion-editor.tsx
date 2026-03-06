@@ -195,7 +195,7 @@ export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cot
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = res.filename || `${cotizacion.codigo || cotizacion.consecutivo}.pdf`
+        a.download = res.filename || `${cotizacion.codigo || 'cotizacion'}.pdf`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -280,10 +280,7 @@ export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cot
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold font-mono">{cotizacion.codigo || cotizacion.consecutivo || 'Sin código'}</h1>
-            {cotizacion.codigo && cotizacion.consecutivo && (
-              <span className="text-xs text-muted-foreground">{cotizacion.consecutivo}</span>
-            )}
+            <h1 className="text-lg font-bold font-mono">{cotizacion.codigo || 'Sin código'}</h1>
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig?.chipClass}`}>
               {estadoConfig?.label}
             </span>
