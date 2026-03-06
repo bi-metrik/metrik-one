@@ -3,7 +3,7 @@
 // NEVER import this file from client components.
 
 const KEYS = {
-  gemini: 'QUl6YVN5Qlp5SmYwMFFVVEFQWUdqVVgxWjVGR09NZVZNOXFCZWtn',
+  gemini: 'QUl6YVN5QWsyVXJqQTE3RjgyM3JDcU9lZmFLazRXR0s4ODZkZXk0',
 } as const
 
 /** Resolve an API key: tries process.env first, falls back to encoded constant. */
