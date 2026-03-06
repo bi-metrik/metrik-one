@@ -135,16 +135,29 @@ export async function parseRut(
       return { data: null, error: `Contenido bloqueado por Gemini: ${blockReason}` }
     }
 
-    debugRaw = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    // Gemini 2.5 Flash has built-in thinking — response may have multiple parts:
+    // parts[0] = { thought: true, text: "reasoning..." }
+    // parts[1] = { text: '{"nit": ...}' }  <-- the actual JSON
+    const parts = data.candidates?.[0]?.content?.parts || []
+
+    // Find the non-thought part (the actual JSON response)
+    const jsonPart = parts.find(
+      (p: { thought?: boolean; text?: string }) => !p.thought && p.text
+    ) || parts[parts.length - 1]
+
+    debugRaw = jsonPart?.text || ''
     if (!debugRaw) {
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
 
-    // Clean response: strip markdown fences, BOM, trailing commas
+    // Clean response: strip markdown fences, BOM, trailing commas, comments
     const text = debugRaw
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/, '')
-      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/^\uFEFF/, '')                    // BOM
+      .replace(/^```(?:json)?\s*/i, '')          // opening fence
+      .replace(/\s*```\s*$/, '')                 // closing fence
+      .replace(/\/\/[^\n]*/g, '')                // line comments
+      .replace(/\/\*[\s\S]*?\*\//g, '')          // block comments
+      .replace(/,\s*([}\]])/g, '$1')             // trailing commas
       .trim()
 
     // Parse the JSON response
@@ -155,8 +168,8 @@ export async function parseRut(
 
     return { data: result }
   } catch (err) {
-    console.error('[parse-rut] Exception:', err, '\n[parse-rut] Raw:', debugRaw.slice(0, 500))
-    return { data: null, error: `Error procesando RUT: ${String(err).slice(0, 120)} — raw: ${debugRaw.slice(0, 120)}` }
+    console.error('[parse-rut] Exception:', err, '\n[parse-rut] Raw:', debugRaw.slice(0, 800))
+    return { data: null, error: `Error procesando RUT: ${String(err).slice(0, 120)}` }
   }
 }
 
