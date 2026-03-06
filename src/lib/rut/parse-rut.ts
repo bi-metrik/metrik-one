@@ -150,14 +150,13 @@ export async function parseRut(
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
 
-    // Clean response: strip markdown fences, BOM, trailing commas
-    // NOTE: Do NOT strip // or /* comments — those regexes match inside
-    // JSON string values (e.g. URLs, addresses) and destroy the JSON.
+    // Minimal cleanup: only strip BOM + markdown fences.
+    // Gemini with responseMimeType:'application/json' returns valid JSON,
+    // so we avoid regex transforms that can corrupt values inside strings.
     const cleaned = debugRaw
       .replace(/^\uFEFF/, '')                    // BOM
       .replace(/^```(?:json)?\s*/i, '')          // opening fence
       .replace(/\s*```\s*$/, '')                 // closing fence
-      .replace(/,\s*([}\]])/g, '$1')             // trailing commas
       .trim()
 
     // Fix literal newlines inside JSON string values (Gemini sometimes
