@@ -814,6 +814,7 @@ export type Database = {
           actividad_secundaria: string | null
           agente_retenedor: boolean | null
           autorretenedor: boolean | null
+          codigo: string
           contacto_email: string | null
           contacto_id: string | null
           contacto_nombre: string | null
@@ -847,6 +848,7 @@ export type Database = {
           actividad_secundaria?: string | null
           agente_retenedor?: boolean | null
           autorretenedor?: boolean | null
+          codigo: string
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
@@ -880,6 +882,7 @@ export type Database = {
           actividad_secundaria?: string | null
           agente_retenedor?: boolean | null
           autorretenedor?: boolean | null
+          codigo?: string
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
@@ -1968,6 +1971,7 @@ export type Database = {
       oportunidades: {
         Row: {
           carpeta_url: string | null
+          codigo: string
           contacto_id: string
           created_at: string | null
           descripcion: string
@@ -1985,6 +1989,7 @@ export type Database = {
         }
         Insert: {
           carpeta_url?: string | null
+          codigo: string
           contacto_id: string
           created_at?: string | null
           descripcion: string
@@ -2002,6 +2007,7 @@ export type Database = {
         }
         Update: {
           carpeta_url?: string | null
+          codigo?: string
           contacto_id?: string
           created_at?: string | null
           descripcion?: string
@@ -2514,7 +2520,7 @@ export type Database = {
           canal_creacion: string | null
           carpeta_url: string | null
           cierre_snapshot: Json | null
-          codigo: number
+          codigo: string
           contacto_id: string | null
           cotizacion_id: string | null
           created_at: string | null
@@ -2543,7 +2549,7 @@ export type Database = {
           canal_creacion?: string | null
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
-          codigo?: number
+          codigo: string
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -2572,7 +2578,7 @@ export type Database = {
           canal_creacion?: string | null
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
-          codigo?: number
+          codigo?: string
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -3591,12 +3597,13 @@ export type Database = {
           carpeta_url: string | null
           cartera: number | null
           cobrado: number | null
-          codigo: number | null
+          codigo: string | null
           contacto_nombre: string | null
           costo_acumulado: number | null
           costo_horas: number | null
           cotizacion_id: string | null
           created_at: string | null
+          empresa_codigo: string | null
           empresa_nombre: string | null
           estado: string | null
           facturado: number | null
@@ -3682,13 +3689,17 @@ export type Database = {
         Returns: boolean
       }
       current_user_workspace_id: { Args: never; Returns: string }
+      generate_empresa_codigo: {
+        Args: { p_nombre: string; p_workspace_id: string }
+        Returns: string
+      }
+      generate_oportunidad_codigo: {
+        Args: { p_empresa_id: string; p_workspace_id: string }
+        Returns: string
+      }
       get_next_cotizacion_consecutivo: {
         Args: { p_workspace_id: string }
         Returns: string
-      }
-      get_next_proyecto_codigo: {
-        Args: { p_workspace_id: string }
-        Returns: number
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
@@ -3720,7 +3731,7 @@ export type Database = {
         Returns: {
           cartera: number
           cobrado: number
-          codigo: number
+          codigo: string
           contacto_nombre: string
           costo_acumulado: number
           empresa_nombre: string

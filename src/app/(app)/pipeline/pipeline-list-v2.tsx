@@ -12,6 +12,7 @@ import type { EtapaPipeline } from '@/lib/pipeline/constants'
 
 interface OportunidadRow {
   id: string
+  codigo: string | null
   descripcion: string | null
   etapa: string | null
   probabilidad: number | null
@@ -20,7 +21,7 @@ interface OportunidadRow {
   ultima_accion: string | null
   ultima_accion_fecha: string | null
   contactos: { nombre: string } | null
-  empresas: { nombre: string; numero_documento: string | null; tipo_documento: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
+  empresas: { nombre: string; codigo: string | null; numero_documento: string | null; tipo_documento: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
 }
 
 interface Props {
@@ -221,7 +222,7 @@ export default function PipelineList({ oportunidades }: Props) {
             <EntityCard
               key={o.id}
               href={`/pipeline/${o.id}`}
-              title={o.descripcion || 'Sin descripcion'}
+              title={o.codigo ? `O ${o.codigo} · ${o.descripcion || 'Sin descripcion'}` : (o.descripcion || 'Sin descripcion')}
               subtitle={[empresa?.nombre, contacto?.nombre].filter(Boolean).join(' · ')}
               value={o.valor_estimado ? formatCOP(o.valor_estimado) : undefined}
               summaryLines={[

@@ -109,7 +109,7 @@ export default function EmpresasList({ empresas }: Props) {
             <EntityCard
               key={e.id}
               href={`/directorio/empresa/${e.id}`}
-              title={e.nombre}
+              title={e.codigo ? `${e.codigo} · ${e.nombre}` : e.nombre}
               subtitle={e.sector ?? undefined}
               statusLabel={badge?.label}
               statusColor={badge?.color}
