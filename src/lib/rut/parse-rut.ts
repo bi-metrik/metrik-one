@@ -98,6 +98,7 @@ export async function parseRut(
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
+  let debugRaw = ''
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -114,7 +115,7 @@ export async function parseRut(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
           responseMimeType: 'application/json',
         },
       }),
@@ -134,13 +135,13 @@ export async function parseRut(
       return { data: null, error: `Contenido bloqueado por Gemini: ${blockReason}` }
     }
 
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!rawText) {
+    debugRaw = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    if (!debugRaw) {
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
 
     // Clean response: strip markdown fences, BOM, trailing commas
-    const text = rawText
+    const text = debugRaw
       .replace(/^```(?:json)?\s*/i, '')
       .replace(/\s*```\s*$/, '')
       .replace(/,\s*([}\]])/g, '$1')
@@ -154,8 +155,8 @@ export async function parseRut(
 
     return { data: result }
   } catch (err) {
-    console.error('[parse-rut] Exception:', err)
-    return { data: null, error: `Error procesando RUT: ${String(err).slice(0, 200)}` }
+    console.error('[parse-rut] Exception:', err, '\n[parse-rut] Raw:', debugRaw.slice(0, 500))
+    return { data: null, error: `Error procesando RUT: ${String(err).slice(0, 120)} — raw: ${debugRaw.slice(0, 120)}` }
   }
 }
 
