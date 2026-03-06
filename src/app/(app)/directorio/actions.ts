@@ -272,9 +272,10 @@ export async function checkPerfilFiscal(empresaId: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { complete: false, missing: ['Error de autenticacion'] }
 
+  // Aligned with HARD_GATE_FIELDS in calculos-fiscales.ts
   const { data } = await supabase
     .from('empresas')
-    .select('numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
+    .select('numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor')
     .eq('id', empresaId)
     .single()
 
@@ -287,6 +288,7 @@ export async function checkPerfilFiscal(empresaId: string) {
   if (!data.regimen_tributario) missing.push('Regimen tributario')
   if (data.gran_contribuyente === null) missing.push('Gran contribuyente')
   if (data.agente_retenedor === null) missing.push('Agente retenedor')
+  if (data.autorretenedor === null) missing.push('Autorretenedor')
 
   return { complete: missing.length === 0, missing }
 }

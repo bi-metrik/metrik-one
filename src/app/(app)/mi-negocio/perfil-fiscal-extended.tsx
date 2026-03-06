@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { Shield, Check, Loader2 } from 'lucide-react'
-import { toast } from 'sonner'
+import { useState } from 'react'
+import { Shield } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import WizardFelipe from '../config/wizard-felipe'
-import { updateFiscalExtended, uploadAndParseRutMiNegocio, confirmRutDataMiNegocio } from './actions'
+import { uploadAndParseRutMiNegocio, confirmRutDataMiNegocio } from './actions'
 import type { FiscalProfile } from '@/types/database'
 import RutUploadCard from '@/components/rut-upload-card'
 import RutDataDisplay from '@/components/rut-data-display'
@@ -17,14 +16,7 @@ interface Props {
 
 export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
   const [showWizard, setShowWizard] = useState(false)
-
-  // Extended fields form (facturacion — editable)
-  const [nit, setNit] = useState(fiscalProfile?.nit || '')
-  const [razonSocial, setRazonSocial] = useState(fiscalProfile?.razon_social || '')
-  const [direccionFiscal, setDireccionFiscal] = useState(fiscalProfile?.direccion_fiscal || '')
-  const [emailFacturacion, setEmailFacturacion] = useState(fiscalProfile?.email_facturacion || '')
 
   const isConfigured = fiscalProfile?.is_complete || fiscalProfile?.is_estimated
   const rutVerificado = fiscalProfile?.rut_verificado === true
@@ -32,23 +24,6 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
   const handleWizardComplete = () => {
     setShowWizard(false)
     router.refresh()
-  }
-
-  const handleSaveExtended = () => {
-    startTransition(async () => {
-      const res = await updateFiscalExtended({
-        nit: nit.trim() || undefined,
-        razon_social: razonSocial.trim() || undefined,
-        direccion_fiscal: direccionFiscal.trim() || undefined,
-        email_facturacion: emailFacturacion.trim() || undefined,
-      })
-      if (res.success) {
-        toast.success('Datos de facturacion actualizados')
-        router.refresh()
-      } else {
-        toast.error(res.error || 'Error')
-      }
-    })
   }
 
   const handleRutComplete = () => {
@@ -150,65 +125,6 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
         </div>
       )}
 
-      {/* Extended: Facturacion fields */}
-      <div className="space-y-3 border-t pt-4">
-        <h4 className="text-sm font-medium">Datos de facturacion</h4>
-        <p className="text-xs text-muted-foreground">
-          Estos datos aparecen en tus cotizaciones y facturas.
-        </p>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">NIT / CC</label>
-            <input
-              type="text"
-              value={nit}
-              onChange={e => setNit(e.target.value)}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="900.123.456-7"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Razon social</label>
-            <input
-              type="text"
-              value={razonSocial}
-              onChange={e => setRazonSocial(e.target.value)}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="Mi Empresa SAS"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Direccion fiscal</label>
-            <input
-              type="text"
-              value={direccionFiscal}
-              onChange={e => setDireccionFiscal(e.target.value)}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="Ej: Cra 7 #45-12, Oficina 301"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Email facturacion</label>
-            <input
-              type="email"
-              value={emailFacturacion}
-              onChange={e => setEmailFacturacion(e.target.value)}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="Ej: contabilidad@tuempresa.co"
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={handleSaveExtended}
-          disabled={isPending}
-          className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-          Guardar
-        </button>
-      </div>
     </div>
   )
 }
