@@ -10,21 +10,15 @@ import { getConfidenceTier } from '@/lib/rut/types'
 
 type CardState = 'idle' | 'processing' | 'review' | 'done'
 
-type UploadResult = { success: boolean; data?: RutParseResult; rutUrl?: string; error?: string }
-type ConfirmResult = { success: boolean; error?: string }
-
 interface Props {
-  empresaId?: string
-  // Alternative flow via callbacks (for mi-negocio / fiscal_profiles)
-  onUploadAndParse?: (fd: FormData) => Promise<UploadResult>
-  onConfirm?: (fields: RutEmpresaUpdate) => Promise<ConfirmResult>
+  empresaId: string
   currentRutUrl?: string | null
   currentRutVerificado?: boolean | null
   currentRutFecha?: string | null
   onComplete?: () => void
 }
 
-export default function RutUploadCard({ empresaId, onUploadAndParse, onConfirm: onConfirmProp, currentRutUrl, currentRutVerificado, currentRutFecha, onComplete }: Props) {
+export default function RutUploadCard({ empresaId, currentRutUrl, currentRutVerificado, currentRutFecha, onComplete }: Props) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [state, setState] = useState<CardState>(currentRutVerificado ? 'done' : 'idle')
@@ -42,9 +36,7 @@ export default function RutUploadCard({ empresaId, onUploadAndParse, onConfirm: 
     fd.append('rut', file)
 
     startTransition(async () => {
-      const res = onUploadAndParse
-        ? await onUploadAndParse(fd)
-        : await uploadAndParseRUT(empresaId!, fd)
+      const res = await uploadAndParseRUT(empresaId, fd)
       if (res.success && res.data) {
         setParsed(res.data)
         setRutUrl(res.rutUrl || null)
@@ -101,9 +93,7 @@ export default function RutUploadCard({ empresaId, onUploadAndParse, onConfirm: 
         rut_confianza_ocr: parsed?.overall_confidence,
       }
 
-      const res = onConfirmProp
-        ? await onConfirmProp(fields)
-        : await confirmRutData(empresaId!, fields)
+      const res = await confirmRutData(empresaId, fields)
       if (res.success) {
         toast.success('Datos del RUT confirmados')
         setState('done')

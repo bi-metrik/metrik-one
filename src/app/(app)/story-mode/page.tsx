@@ -185,7 +185,7 @@ export default function StoryModePage() {
 
   const handleNext = () => {
     if (isLast) {
-      router.push('/dashboard')
+      router.push('/numeros')
     } else {
       setCurrent(current + 1)
     }
@@ -198,7 +198,7 @@ export default function StoryModePage() {
   }
 
   const handleSkip = () => {
-    router.push('/dashboard')
+    router.push('/numeros')
   }
 
   return (

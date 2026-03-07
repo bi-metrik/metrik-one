@@ -23,14 +23,13 @@ const STEPS: Step[] = ['person', 'regime', 'iva', 'retefuente', 'ica', 'review']
 
 // ── ICA Cities (main cities) ────────────────────────────
 
-// Tarifas ICA consultoría — alineadas con TARIFAS_ICA en fiscal/constants.ts
 const ICA_CITIES: { city: string; rate: number }[] = [
   { city: 'Bogotá', rate: 9.66 },
-  { city: 'Medellín', rate: 9.66 },
+  { city: 'Medellín', rate: 10.0 },
   { city: 'Cali', rate: 10.0 },
   { city: 'Barranquilla', rate: 7.0 },
   { city: 'Cartagena', rate: 7.0 },
-  { city: 'Bucaramanga', rate: 7.0 },
+  { city: 'Bucaramanga', rate: 10.0 },
   { city: 'Pereira', rate: 7.0 },
   { city: 'Manizales', rate: 7.0 },
   { city: 'Santa Marta', rate: 7.0 },

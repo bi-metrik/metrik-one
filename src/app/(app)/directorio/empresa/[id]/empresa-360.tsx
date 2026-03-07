@@ -6,13 +6,12 @@ import Link from 'next/link'
 import { ArrowLeft, Save, Flame, FolderKanban, ShieldCheck, ShieldAlert, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateEmpresa } from '../../actions'
-import { SECTORES_EMPRESA, ETAPA_CONFIG, ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
-import { formatCOP } from '@/lib/contacts/constants'
+import { SECTORES_EMPRESA, TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO, ETAPA_CONFIG, ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
+import { formatNit, formatCOP } from '@/lib/contacts/constants'
 import type { Empresa } from '@/types/database'
 import type { EtapaPipeline, EstadoProyecto } from '@/lib/pipeline/constants'
 import NotesSection from '@/components/notes-section'
 import RutUploadCard from '@/components/rut-upload-card'
-import RutDataDisplay from '@/components/rut-data-display'
 
 interface OportunidadRow {
   id: string
@@ -44,14 +43,34 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
   const [form, setForm] = useState({
     nombre: empresa.nombre,
     sector: empresa.sector ?? '',
+    numero_documento: empresa.numero_documento ?? '',
+    tipo_documento: empresa.tipo_documento ?? '',
+    tipo_persona: empresa.tipo_persona ?? '',
+    regimen_tributario: empresa.regimen_tributario ?? '',
+    gran_contribuyente: empresa.gran_contribuyente ?? false,
+    agente_retenedor: empresa.agente_retenedor ?? false,
   })
 
-  const fiscalVerificado = empresa.rut_verificado === true
+  // Track if the boolean fields have been explicitly set (not null in DB)
+  const granContribuyenteSet = empresa.gran_contribuyente !== null
+  const agenteRetenedorSet = empresa.agente_retenedor !== null
+
+  const [granTouched, setGranTouched] = useState(granContribuyenteSet)
+  const [agenteTouched, setAgenteTouched] = useState(agenteRetenedorSet)
+
+  const perfilCompleto = !!(form.numero_documento && form.tipo_documento && form.tipo_persona && form.regimen_tributario &&
+    granTouched && agenteTouched)
 
   const handleSave = () => {
     const fd = new FormData()
     fd.set('nombre', form.nombre)
     fd.set('sector', form.sector)
+    fd.set('numero_documento', form.numero_documento)
+    fd.set('tipo_documento', form.tipo_documento)
+    fd.set('tipo_persona', form.tipo_persona)
+    fd.set('regimen_tributario', form.regimen_tributario)
+    if (granTouched) fd.set('gran_contribuyente', form.gran_contribuyente.toString())
+    if (agenteTouched) fd.set('agente_retenedor', form.agente_retenedor.toString())
     startTransition(async () => {
       const res = await updateEmpresa(empresa.id, fd)
       if (res.success) {
@@ -77,9 +96,9 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
           <h1 className="text-lg font-bold">{empresa.nombre}</h1>
           <div className="flex items-center gap-2">
             <p className="text-xs text-muted-foreground">Vista 360 de la empresa</p>
-            {fiscalVerificado ? (
+            {perfilCompleto ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
-                <ShieldCheck className="h-3 w-3" /> RUT verificado
+                <ShieldCheck className="h-3 w-3" /> Fiscal completo
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">
@@ -126,16 +145,9 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
         </div>
       </div>
 
-      {/* Perfil fiscal: RUT upload + datos extraidos */}
+      {/* Documento RUT */}
       <div className="space-y-3 rounded-lg border p-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="text-sm font-semibold">Perfil fiscal</h2>
-          {empresa.contacto_id && (
-            <Link href={`/directorio/contacto/${empresa.contacto_id}`} className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 hover:bg-purple-200">
-              <User className="h-3 w-3" /> Persona natural vinculada
-            </Link>
-          )}
-        </div>
+        <h2 className="text-sm font-semibold">Documento RUT</h2>
         <p className="text-[10px] text-muted-foreground">
           Sube el RUT y llenamos el perfil fiscal automaticamente con IA
         </p>
@@ -145,25 +157,97 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
           currentRutVerificado={empresa.rut_verificado}
           currentRutFecha={empresa.rut_fecha_carga}
         />
-        <RutDataDisplay
-          nit={empresa.numero_documento}
-          tipo_documento={empresa.tipo_documento}
-          tipo_persona={empresa.tipo_persona}
-          razon_social={empresa.razon_social}
-          regimen_tributario={empresa.regimen_tributario}
-          gran_contribuyente={empresa.gran_contribuyente}
-          agente_retenedor={empresa.agente_retenedor}
-          autorretenedor={empresa.autorretenedor}
-          responsable_iva={empresa.responsable_iva}
-          direccion_fiscal={empresa.direccion_fiscal}
-          municipio={empresa.municipio}
-          departamento={empresa.departamento}
-          telefono={empresa.telefono}
-          email_fiscal={empresa.email_fiscal}
-          actividad_ciiu={empresa.actividad_ciiu}
-          actividad_secundaria={empresa.actividad_secundaria}
-          fecha_inicio_actividades={empresa.fecha_inicio_actividades}
-        />
+      </div>
+
+      {/* Perfil fiscal */}
+      <div className={`space-y-3 rounded-lg border p-4 ${!perfilCompleto ? 'border-red-200 bg-red-50/30' : ''}`}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h2 className="text-sm font-semibold">Perfil fiscal</h2>
+          {!perfilCompleto && (
+            <span className="text-[10px] text-red-600">Completa este perfil para poder cerrar negocios</span>
+          )}
+          {empresa.contacto_id && (
+            <Link href={`/directorio/contacto/${empresa.contacto_id}`} className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 hover:bg-purple-200">
+              <User className="h-3 w-3" /> Persona natural vinculada
+            </Link>
+          )}
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Tipo documento</label>
+            <select
+              value={form.tipo_documento}
+              onChange={e => setForm(p => ({ ...p, tipo_documento: e.target.value }))}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Seleccionar</option>
+              {TIPOS_DOCUMENTO.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              {form.tipo_documento === 'NIT' ? 'NIT' : form.tipo_documento || 'Numero documento'}
+            </label>
+            <input
+              value={form.numero_documento}
+              onChange={e => setForm(p => ({ ...p, numero_documento: e.target.value }))}
+              placeholder={form.tipo_documento === 'NIT' ? '900.123.456' : '1.020.456.789'}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Tipo persona</label>
+            <select
+              value={form.tipo_persona}
+              onChange={e => setForm(p => ({ ...p, tipo_persona: e.target.value }))}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Seleccionar</option>
+              {TIPOS_PERSONA.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Regimen tributario</label>
+            <select
+              value={form.regimen_tributario}
+              onChange={e => setForm(p => ({ ...p, regimen_tributario: e.target.value }))}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Seleccionar</option>
+              {REGIMENES_TRIBUTARIOS.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+          <label className="flex items-center gap-3 rounded-md border bg-background px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors">
+            <input
+              type="checkbox"
+              checked={form.gran_contribuyente}
+              onChange={e => { setForm(p => ({ ...p, gran_contribuyente: e.target.checked })); setGranTouched(true) }}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            <div>
+              <span className="text-sm font-medium">Gran contribuyente</span>
+              {!granTouched && <span className="ml-2 text-[10px] text-amber-600">Sin definir</span>}
+            </div>
+          </label>
+          <label className="flex items-center gap-3 rounded-md border bg-background px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors">
+            <input
+              type="checkbox"
+              checked={form.agente_retenedor}
+              onChange={e => { setForm(p => ({ ...p, agente_retenedor: e.target.checked })); setAgenteTouched(true) }}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            <div>
+              <span className="text-sm font-medium">Agente retenedor</span>
+              {!agenteTouched && <span className="ml-2 text-[10px] text-amber-600">Sin definir</span>}
+            </div>
+          </label>
+        </div>
       </div>
 
       {/* Oportunidades */}

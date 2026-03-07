@@ -21,7 +21,6 @@ import FiscalGateForm from './fiscal-gate-form'
 
 interface OportunidadRow {
   id: string
-  codigo: string | null
   descripcion: string | null
   etapa: string | null
   probabilidad: number | null
@@ -37,7 +36,6 @@ interface OportunidadRow {
 
 interface CotizacionRow {
   id: string
-  codigo: string | null
   consecutivo: string | null
   modo: string | null
   estado: string | null
@@ -124,14 +122,7 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            {oportunidad.codigo && (
-              <span className="shrink-0 rounded bg-muted px-2 py-0.5 text-xs font-mono font-bold text-muted-foreground">
-                O {oportunidad.codigo}
-              </span>
-            )}
-            <h1 className="truncate text-lg font-bold">{oportunidad.descripcion || 'Sin descripcion'}</h1>
-          </div>
+          <h1 className="truncate text-lg font-bold">{oportunidad.descripcion || 'Sin descripcion'}</h1>
           <div className="flex items-center gap-2">
             {etapaConfig && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${etapaConfig.chipClass}`}>
@@ -370,7 +361,7 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
                       <FileText className="h-4 w-4 text-blue-500 shrink-0" />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-mono font-bold truncate">{c.codigo || c.consecutivo || 'Sin código'}</span>
+                          <span className="text-sm font-medium truncate">{c.consecutivo || 'Sin consecutivo'}</span>
                           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
                             {c.modo === 'flash' ? 'Rápida' : 'Detallada'}
                           </span>

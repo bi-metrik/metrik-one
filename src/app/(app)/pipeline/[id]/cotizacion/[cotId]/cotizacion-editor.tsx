@@ -43,7 +43,6 @@ interface ItemRow {
 
 interface CotizacionData {
   id: string
-  codigo: string | null
   consecutivo: string | null
   modo: string | null
   estado: string | null
@@ -66,14 +65,13 @@ interface ClientFiscal {
 
 interface Props {
   oportunidadId: string
-  oportunidadCodigo?: string | null
   cotizacion: CotizacionData
   initialItems: ItemRow[]
   fiscalProfile?: FiscalProfile | null
   clientFiscal?: ClientFiscal | null
 }
 
-export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cotizacion, initialItems, fiscalProfile, clientFiscal }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -195,7 +193,7 @@ export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cot
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = res.filename || `${cotizacion.codigo || 'cotizacion'}.pdf`
+        a.download = res.filename || `${cotizacion.consecutivo}.pdf`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -280,7 +278,7 @@ export default function CotizacionEditor({ oportunidadId, oportunidadCodigo, cot
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold font-mono">{cotizacion.codigo || 'Sin código'}</h1>
+            <h1 className="text-lg font-bold">{cotizacion.consecutivo || 'Sin consecutivo'}</h1>
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig?.chipClass}`}>
               {estadoConfig?.label}
             </span>

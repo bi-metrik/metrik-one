@@ -25,9 +25,6 @@ export interface FiscalProfile {
   autorretenedor: boolean
   ica_rate: number | null
   ica_city: string | null
-  /** Direct IVA override — when present, takes precedence over regimen inference.
-   *  Required because DB stores "ordinario"/"comun" which don't encode IVA status. */
-  iva_responsible?: boolean
 }
 
 export interface FiscalResult {
@@ -64,18 +61,14 @@ function isSimple(regimen: string): boolean {
 }
 
 function isResponsableIVA(regimen: string): boolean {
-  // Legacy values: "responsable", "gran_contribuyente"
-  // DB values that also imply IVA: "ordinario" (fiscal_profiles), "comun" (empresas)
   return regimen === 'responsable' || regimen === 'gran_contribuyente'
-    || regimen === 'ordinario' || regimen === 'comun'
 }
 
 function toDBPerfil(fp: FiscalProfile) {
   return {
     person_type: isPN(fp.tipo_persona) ? 'persona_natural' : 'persona_juridica',
     tax_regime: isSimple(fp.regimen_tributario) ? 'simple' : 'ordinario',
-    // Use direct iva_responsible when available (from DB), fallback to regimen inference
-    iva_responsible: fp.iva_responsible ?? isResponsableIVA(fp.regimen_tributario),
+    iva_responsible: isResponsableIVA(fp.regimen_tributario),
     is_declarante: true, // conservador: asumir declarante
     self_withholder: fp.autorretenedor,
     ica_city: fp.ica_city,

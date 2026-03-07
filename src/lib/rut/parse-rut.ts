@@ -98,24 +98,6 @@ export async function parseRut(
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
-  // Retry up to 2 attempts
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const result = await callGeminiAndParse(url, base64, normalizedMime, attempt)
-    if (result.data || attempt === 2) return result
-    // First attempt failed with parse error — retry
-    console.warn(`[parse-rut] Attempt ${attempt} failed, retrying...`)
-  }
-
-  return { data: null, error: 'Error inesperado' }
-}
-
-/** Single Gemini API call + JSON parse attempt */
-async function callGeminiAndParse(
-  url: string,
-  base64: string,
-  mimeType: string,
-  attempt: number,
-): Promise<{ data: RutParseResult | null; error?: string }> {
   let debugRaw = ''
   try {
     const res = await fetch(url, {
@@ -127,13 +109,13 @@ async function callGeminiAndParse(
           {
             parts: [
               { text: 'Extrae todos los campos de este documento RUT colombiano.' },
-              { inline_data: { mime_type: mimeType, data: base64 } },
+              { inline_data: { mime_type: normalizedMime, data: base64 } },
             ],
           },
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 4096,
+          maxOutputTokens: 2048,
           responseMimeType: 'application/json',
         },
       }),
@@ -153,12 +135,6 @@ async function callGeminiAndParse(
       return { data: null, error: `Contenido bloqueado por Gemini: ${blockReason}` }
     }
 
-    // Check finish reason — STOP is normal, MAX_TOKENS means truncated
-    const finishReason = data.candidates?.[0]?.finishReason
-    if (finishReason === 'MAX_TOKENS') {
-      console.warn('[parse-rut] Response truncated (MAX_TOKENS)')
-    }
-
     // Gemini 2.5 Flash has built-in thinking — response may have multiple parts:
     // parts[0] = { thought: true, text: "reasoning..." }
     // parts[1] = { text: '{"nit": ...}' }  <-- the actual JSON
@@ -174,8 +150,15 @@ async function callGeminiAndParse(
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
 
-    // Robust JSON extraction and parsing
-    const text = extractAndCleanJson(debugRaw)
+    // Clean response: strip markdown fences, BOM, trailing commas, comments
+    const text = debugRaw
+      .replace(/^\uFEFF/, '')                    // BOM
+      .replace(/^```(?:json)?\s*/i, '')          // opening fence
+      .replace(/\s*```\s*$/, '')                 // closing fence
+      .replace(/\/\/[^\n]*/g, '')                // line comments
+      .replace(/\/\*[\s\S]*?\*\//g, '')          // block comments
+      .replace(/,\s*([}\]])/g, '$1')             // trailing commas
+      .trim()
 
     // Parse the JSON response
     const raw = JSON.parse(text) as Record<string, RutField<unknown>>
@@ -185,23 +168,8 @@ async function callGeminiAndParse(
 
     return { data: result }
   } catch (err) {
-    // Log detailed context around the error position for debugging
-    const errStr = String(err)
-    const posMatch = errStr.match(/position (\d+)/)
-    if (posMatch && debugRaw) {
-      const pos = parseInt(posMatch[1], 10)
-      const start = Math.max(0, pos - 60)
-      const end = Math.min(debugRaw.length, pos + 60)
-      const charCode = pos < debugRaw.length ? debugRaw.charCodeAt(pos) : -1
-      console.error(
-        `[parse-rut] Attempt ${attempt} JSON error at pos ${pos} (char code ${charCode}):\n` +
-        `  CONTEXT: ...${debugRaw.slice(start, pos)}<<<HERE>>>${debugRaw.slice(pos, end)}...\n` +
-        `  TOTAL LENGTH: ${debugRaw.length}`
-      )
-    } else {
-      console.error(`[parse-rut] Attempt ${attempt} Exception:`, err, '\n[parse-rut] Raw:', debugRaw.slice(0, 800))
-    }
-    return { data: null, error: `Error procesando RUT: ${errStr.slice(0, 120)}` }
+    console.error('[parse-rut] Exception:', err, '\n[parse-rut] Raw:', debugRaw.slice(0, 800))
+    return { data: null, error: `Error procesando RUT: ${String(err).slice(0, 120)}` }
   }
 }
 
@@ -287,107 +255,4 @@ function buildResult(raw: Record<string, RutField<unknown>>): RutParseResult {
     overall_confidence,
     nit_valid,
   }
-}
-
-/**
- * Extract valid JSON from Gemini response and clean problematic characters.
- *
- * Strategy:
- * 1. Strip BOM + markdown fences
- * 2. Extract JSON object by finding matching { ... } boundaries
- * 3. Use state machine to fix literal control characters inside strings
- *    (newlines, tabs, and other chars < 0x20 that JSON doesn't allow unescaped)
- */
-function extractAndCleanJson(raw: string): string {
-  // Step 1: Strip BOM + markdown fences
-  let text = raw
-    .replace(/^\uFEFF/, '')
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/, '')
-    .trim()
-
-  // Step 2: Extract JSON object by matching braces
-  // This handles any preamble text or trailing garbage
-  const firstBrace = text.indexOf('{')
-  if (firstBrace === -1) {
-    throw new Error('No JSON object found in response')
-  }
-  const lastBrace = text.lastIndexOf('}')
-  if (lastBrace === -1 || lastBrace <= firstBrace) {
-    throw new Error('Incomplete JSON object in response')
-  }
-  text = text.slice(firstBrace, lastBrace + 1)
-
-  // Step 3: State machine to fix control characters inside JSON strings
-  // Handles: literal newlines, carriage returns, tabs, and other control chars
-  // Also handles edge case: backslash followed by literal newline
-  let result = ''
-  let inString = false
-  let i = 0
-
-  while (i < text.length) {
-    const ch = text[i]
-    const code = text.charCodeAt(i)
-
-    if (inString) {
-      if (ch === '\\') {
-        // Check what follows the backslash
-        if (i + 1 < text.length) {
-          const next = text[i + 1]
-          const nextCode = text.charCodeAt(i + 1)
-          // Valid JSON escape sequences: " \ / b f n r t u
-          if ('"\\bfnrtu/'.includes(next)) {
-            result += ch + next
-            i += 2
-            continue
-          }
-          // Backslash followed by literal newline/CR — skip both, insert space
-          if (next === '\n' || next === '\r') {
-            result += ' '
-            i += 2
-            // Skip \r\n pair
-            if (next === '\r' && i < text.length && text[i] === '\n') i++
-            continue
-          }
-          // Invalid escape (e.g., \N, \C) — drop the backslash, keep the char
-          // This prevents JSON.parse from failing on invalid escapes
-          result += next
-          i += 2
-          continue
-        }
-        // Trailing backslash at end — drop it
-        i++
-        continue
-      }
-      if (ch === '"') {
-        // End of string
-        inString = false
-        result += ch
-        i++
-        continue
-      }
-      // Control characters inside strings (< 0x20) — replace with space
-      if (code < 0x20) {
-        result += ' '
-        i++
-        continue
-      }
-      result += ch
-      i++
-      continue
-    }
-
-    // Outside string
-    if (ch === '"') {
-      inString = true
-      result += ch
-      i++
-      continue
-    }
-
-    result += ch
-    i++
-  }
-
-  return result
 }

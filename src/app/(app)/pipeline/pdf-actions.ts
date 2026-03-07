@@ -22,7 +22,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // Get empresa
   const { data: empresa } = await supabase
     .from('empresas')
-    .select('nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, responsable_iva, autorretenedor')
+    .select('nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
     .eq('id', cot.oportunidades.empresa_id)
     .single()
 
@@ -38,7 +38,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // Get vendor fiscal profile
   const { data: vendorFiscal } = await supabase
     .from('fiscal_profiles')
-    .select('person_type, tax_regime, self_withholder, ica_rate, ica_city, nit, iva_responsible')
+    .select('person_type, tax_regime, self_withholder, ica_rate, ica_city, nit')
     .eq('workspace_id', workspaceId)
     .single()
 
@@ -62,8 +62,6 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     autorretenedor: vendorFiscal?.self_withholder ?? false,
     ica_rate: vendorFiscal?.ica_rate ?? null,
     ica_city: vendorFiscal?.ica_city ?? null,
-    // Direct IVA from DB — bypasses regimen inference in legacy wrapper
-    iva_responsible: vendorFiscal?.iva_responsible ?? undefined,
   }
 
   const buyerProfile: FiscalProfile = {
@@ -71,11 +69,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     regimen_tributario: (empresa.regimen_tributario as any) || 'responsable',
     gran_contribuyente: empresa.gran_contribuyente ?? false,
     agente_retenedor: empresa.agente_retenedor ?? false,
-    autorretenedor: empresa.autorretenedor ?? false,
+    autorretenedor: false,
     ica_rate: null,
     ica_city: null,
-    // Direct IVA from DB — bypasses regimen inference in legacy wrapper
-    iva_responsible: empresa.responsable_iva ?? undefined,
   }
 
   const valorNeto = cot.valor_total - (cot.descuento_valor ?? 0)

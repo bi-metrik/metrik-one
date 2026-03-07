@@ -73,7 +73,6 @@ export async function createExpense(input: CreateExpenseInput) {
 
     revalidatePath('/numeros')
     revalidatePath('/gastos')
-    revalidatePath('/dashboard')
     revalidatePath('/proyectos')
 
     return { success: true, expenseId: expense!.id }
@@ -164,7 +163,6 @@ export async function deleteExpense(expenseId: string) {
 
   revalidatePath('/numeros')
   revalidatePath('/gastos')
-  revalidatePath('/dashboard')
 
   return { success: true }
 }

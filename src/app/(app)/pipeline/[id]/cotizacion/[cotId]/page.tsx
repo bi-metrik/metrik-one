@@ -13,9 +13,6 @@ export default async function CotizacionDetailPage({ params }: { params: Promise
 
   if (!cotizacion) notFound()
 
-  // Extract oportunidad codigo
-  const oportunidadCodigo = (cotizacion as any)?.oportunidades?.codigo ?? null
-
   // Extract client fiscal data from the oportunidad → empresa join
   const empresa = (cotizacion as any)?.oportunidades?.empresas ?? null
   const clientFiscal = empresa ? {
@@ -30,7 +27,6 @@ export default async function CotizacionDetailPage({ params }: { params: Promise
   return (
     <CotizacionEditor
       oportunidadId={id}
-      oportunidadCodigo={oportunidadCodigo}
       cotizacion={cotizacion}
       initialItems={items}
       fiscalProfile={fiscalProfile}
