@@ -185,7 +185,7 @@ export default function StoryModePage() {
 
   const handleNext = () => {
     if (isLast) {
-      router.push('/numeros')
+      router.push('/mi-negocio')
     } else {
       setCurrent(current + 1)
     }
@@ -198,7 +198,7 @@ export default function StoryModePage() {
   }
 
   const handleSkip = () => {
-    router.push('/numeros')
+    router.push('/mi-negocio')
   }
 
   return (
@@ -268,7 +268,7 @@ export default function StoryModePage() {
               className="flex h-12 flex-1 items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
               {isLast ? (
-                'Ir a mi Dashboard'
+                'Configurar mi negocio'
               ) : (
                 <>
                   Siguiente

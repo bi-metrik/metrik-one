@@ -32,6 +32,14 @@ function extractSlug(hostname: string): string | null {
   return null
 }
 
+/** Check if workspace has config_metas → /numeros, otherwise /mi-negocio */
+async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase']): Promise<string> {
+  const { count } = await supabase
+    .from('config_metas')
+    .select('*', { count: 'exact', head: true })
+  return (count && count > 0) ? '/numeros' : '/mi-negocio'
+}
+
 export async function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') || ''
   const slug = extractSlug(hostname)
@@ -56,16 +64,10 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl)
     }
 
-    // Root → dashboard (if configured) or mi-negocio (if new)
+    // Root → /numeros (if configured) or /mi-negocio (if new)
     if (pathname === '/') {
-      const { count } = await supabase
-        .from('config_metas')
-        .select('*', { count: 'exact', head: true })
-
-      if (count && count > 0) {
-        return NextResponse.redirect(new URL('/numeros', request.url))
-      }
-      return NextResponse.redirect(new URL('/mi-negocio', request.url))
+      const landing = await getLanding(supabase)
+      return NextResponse.redirect(new URL(landing, request.url))
     }
 
     return supabaseResponse
@@ -101,10 +103,12 @@ export async function middleware(request: NextRequest) {
           .single()
 
         if (ws?.slug) {
+          // Decide landing: /numeros if configured, /mi-negocio if new
+          const landing = await getLanding(supabase)
           if (IS_DEV) {
-            return NextResponse.redirect(new URL('/numeros', request.url))
+            return NextResponse.redirect(new URL(landing, request.url))
           }
-          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/numeros`)
+          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`)
         }
       }
 
@@ -131,10 +135,11 @@ export async function middleware(request: NextRequest) {
           .single()
 
         if (ws?.slug) {
+          const landing = await getLanding(supabase)
           if (IS_DEV) {
-            return NextResponse.redirect(new URL('/numeros', request.url))
+            return NextResponse.redirect(new URL(landing, request.url))
           }
-          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}/numeros`)
+          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`)
         }
       }
 
