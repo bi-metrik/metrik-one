@@ -807,7 +807,7 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
 }) {
   const [valorVenta, setValorVenta] = useState(valorVentaInicial)
   const [margenInput, setMargenInput] = useState('')
-  const [ventaInput, setVentaInput] = useState(valorVentaInicial ? valorVentaInicial.toLocaleString('es-CO') : '')
+  const [ventaInput, setVentaInput] = useState(valorVentaInicial ? valorVentaInicial.toString() : '')
 
   const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
   const dVal = Math.round(valorVenta * dPct / 100)
@@ -816,24 +816,17 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
     ? Math.round((valorNeto - costoTotal) / valorNeto * 100)
     : 0
 
-  const handleVentaBlur = () => {
-    const val = Number(ventaInput.replace(/[^0-9]/g, ''))
-    if (val > 0) {
-      setValorVenta(val)
-      setVentaInput(val.toLocaleString('es-CO'))
-      setMargenInput('')
-      onSave(val, discountPct)
-    }
+  const applyVenta = (val: number) => {
+    setValorVenta(val)
+    setVentaInput(val.toString())
+    setMargenInput('')
+    onSave(val, discountPct)
   }
 
   const handleMargenBlur = () => {
     const m = Number(margenInput)
     if (m > 0 && m < 100 && costoTotal > 0) {
-      const newVenta = Math.round(costoTotal / (1 - m / 100))
-      setValorVenta(newVenta)
-      setVentaInput(newVenta.toLocaleString('es-CO'))
-      setMargenInput('')
-      onSave(newVenta, discountPct)
+      applyVenta(Math.round(costoTotal / (1 - m / 100)))
     }
   }
 
@@ -878,12 +871,10 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
               onChange={v => {
                 const raw = v.replace(/[^0-9]/g, '')
                 setVentaInput(raw)
-                const val = Number(raw)
-                if (val > 0) {
-                  setValorVenta(val)
-                  setMargenInput('')
-                  onSave(val, discountPct)
-                }
+              }}
+              onApply={v => {
+                const val = Number(v)
+                if (val > 0) applyVenta(val)
               }}
               prefix="$"
               formatted
@@ -920,10 +911,11 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
 
 // ── Mini calculadora inline ────────────────────────────────────
 
-function CalcInput({ placeholder, value, onChange, prefix, formatted }: {
+function CalcInput({ placeholder, value, onChange, onApply, prefix, formatted }: {
   placeholder: string
   value: string
   onChange: (v: string) => void
+  onApply?: (v: string) => void
   prefix?: string
   formatted?: boolean
 }) {
@@ -945,14 +937,21 @@ function CalcInput({ placeholder, value, onChange, prefix, formatted }: {
   const handleApply = () => {
     const result = evalExpr(expr)
     if (result !== null && result > 0) {
-      onChange(result.toString())
+      const str = result.toString()
+      onChange(str)
+      if (onApply) onApply(str)
       setShowCalc(false)
       setExpr('')
     }
   }
 
+  const handleCommit = () => {
+    if (onApply && value) onApply(value)
+  }
+
   const preview = evalExpr(expr)
-  const displayValue = formatted && value ? Number(value).toLocaleString('es-CO') : value
+  const numVal = Number(value)
+  const displayValue = formatted && value && !isNaN(numVal) ? numVal.toLocaleString('es-CO') : value
 
   return (
     <div className="relative">
@@ -968,6 +967,8 @@ function CalcInput({ placeholder, value, onChange, prefix, formatted }: {
               const raw = formatted ? e.target.value.replace(/[^0-9]/g, '') : e.target.value
               onChange(raw)
             }}
+            onBlur={handleCommit}
+            onKeyDown={e => e.key === 'Enter' && handleCommit()}
             className={`w-full rounded border bg-background py-1.5 pr-2 text-${formatted ? 'sm' : 'xs'} min-w-0 ${prefix ? 'pl-7' : 'px-2'}`}
           />
         </div>
