@@ -872,18 +872,22 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Valor de venta</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={ventaInput}
-                onChange={e => setVentaInput(e.target.value.replace(/[^0-9]/g, ''))}
-                onBlur={handleVentaBlur}
-                onKeyDown={e => e.key === 'Enter' && handleVentaBlur()}
-                className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
-              />
-            </div>
+            <CalcInput
+              placeholder="Valor de venta"
+              value={ventaInput}
+              onChange={v => {
+                const raw = v.replace(/[^0-9]/g, '')
+                setVentaInput(raw)
+                const val = Number(raw)
+                if (val > 0) {
+                  setValorVenta(val)
+                  setMargenInput('')
+                  onSave(val, discountPct)
+                }
+              }}
+              prefix="$"
+              formatted
+            />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -916,20 +920,20 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
 
 // ── Mini calculadora inline ────────────────────────────────────
 
-function CalcInput({ placeholder, value, onChange }: {
+function CalcInput({ placeholder, value, onChange, prefix, formatted }: {
   placeholder: string
   value: string
   onChange: (v: string) => void
+  prefix?: string
+  formatted?: boolean
 }) {
   const [showCalc, setShowCalc] = useState(false)
   const [expr, setExpr] = useState('')
 
   const evalExpr = (input: string): number | null => {
     try {
-      // Only allow numbers, operators, parentheses, decimals, spaces
       const sanitized = input.replace(/[^0-9+\-*/.() ]/g, '')
       if (!sanitized.trim()) return null
-      // eslint-disable-next-line no-eval
       const result = Function(`"use strict"; return (${sanitized})`)()
       if (typeof result === 'number' && isFinite(result)) return Math.round(result)
       return null
@@ -948,17 +952,25 @@ function CalcInput({ placeholder, value, onChange }: {
   }
 
   const preview = evalExpr(expr)
+  const displayValue = formatted && value ? Number(value).toLocaleString('es-CO') : value
 
   return (
     <div className="relative">
       <div className="flex gap-1">
-        <input
-          type="number"
-          placeholder={placeholder}
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          className="flex-1 rounded border bg-background px-2 py-1.5 text-xs min-w-0"
-        />
+        <div className="relative flex-1 min-w-0">
+          {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{prefix}</span>}
+          <input
+            type={formatted ? 'text' : 'number'}
+            inputMode="numeric"
+            placeholder={placeholder}
+            value={displayValue}
+            onChange={e => {
+              const raw = formatted ? e.target.value.replace(/[^0-9]/g, '') : e.target.value
+              onChange(raw)
+            }}
+            className={`w-full rounded border bg-background py-1.5 pr-2 text-${formatted ? 'sm' : 'xs'} min-w-0 ${prefix ? 'pl-7' : 'px-2'}`}
+          />
+        </div>
         <button
           type="button"
           onClick={() => setShowCalc(!showCalc)}
