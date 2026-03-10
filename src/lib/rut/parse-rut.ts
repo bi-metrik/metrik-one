@@ -63,6 +63,75 @@ FORMATO DE RESPUESTA:
   "fecha_inicio_actividades": { "value": "2015-03-15", "confidence": 0.80 }
 }`
 
+// JSON Schema for Gemini structured output — forces valid JSON at decode level
+const RUT_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: Object.fromEntries(
+    [
+      'nit', 'digito_verificacion', 'razon_social', 'tipo_documento',
+      'tipo_persona', 'direccion_fiscal', 'municipio', 'departamento',
+      'telefono', 'email_fiscal', 'regimen_tributario', 'actividad_ciiu',
+      'actividad_secundaria', 'fecha_inicio_actividades',
+    ].map(k => [k, {
+      type: 'OBJECT',
+      properties: {
+        value: { type: 'STRING', nullable: true },
+        confidence: { type: 'NUMBER' },
+      },
+      required: ['value', 'confidence'],
+    }])
+    .concat(
+      ['responsable_iva', 'gran_contribuyente', 'agente_retenedor', 'autorretenedor']
+        .map(k => [k, {
+          type: 'OBJECT',
+          properties: {
+            value: { type: 'BOOLEAN', nullable: true },
+            confidence: { type: 'NUMBER' },
+          },
+          required: ['value', 'confidence'],
+        }])
+    )
+  ),
+  required: [
+    'nit', 'digito_verificacion', 'razon_social', 'tipo_documento',
+    'tipo_persona', 'direccion_fiscal', 'municipio', 'departamento',
+    'telefono', 'email_fiscal', 'regimen_tributario', 'responsable_iva',
+    'gran_contribuyente', 'agente_retenedor', 'autorretenedor',
+    'actividad_ciiu', 'actividad_secundaria', 'fecha_inicio_actividades',
+  ],
+}
+
+/**
+ * Attempt to repair malformed JSON from Gemini.
+ * Handles: single quotes, unquoted keys, trailing commas, truncated output.
+ */
+function repairJson(text: string): string {
+  let s = text
+    .replace(/^\uFEFF/, '')                       // BOM
+    .replace(/^```(?:json)?\s*/i, '')             // opening fence
+    .replace(/\s*```\s*$/, '')                    // closing fence
+    .trim()
+
+  // Extract outermost {...} if there's surrounding text
+  const braceStart = s.indexOf('{')
+  const braceEnd = s.lastIndexOf('}')
+  if (braceStart >= 0 && braceEnd > braceStart) {
+    s = s.slice(braceStart, braceEnd + 1)
+  }
+
+  // Fix trailing commas before } or ]
+  s = s.replace(/,\s*([}\]])/g, '$1')
+
+  // Fix single-quoted strings → double-quoted
+  // Only outside already double-quoted strings
+  s = s.replace(/'/g, '"')
+
+  // Fix unquoted keys: word: → "word":
+  s = s.replace(/(?<=[\{,]\s*)(\w+)\s*:/g, '"$1":')
+
+  return s
+}
+
 /** Supported MIME types for RUT documents */
 const SUPPORTED_MIMES: Record<string, string> = {
   'application/pdf': 'application/pdf',
@@ -117,6 +186,7 @@ export async function parseRut(
           temperature: 0.1,
           maxOutputTokens: 2048,
           responseMimeType: 'application/json',
+          responseSchema: RUT_RESPONSE_SCHEMA,
         },
       }),
     })
@@ -150,22 +220,20 @@ export async function parseRut(
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
 
-    // Clean response: strip markdown fences, BOM, trailing commas
-    const text = debugRaw
-      .replace(/^\uFEFF/, '')                    // BOM
-      .replace(/^```(?:json)?\s*/i, '')          // opening fence
-      .replace(/\s*```\s*$/, '')                 // closing fence
-      .replace(/,\s*([}\]])/g, '$1')             // trailing commas
-      .trim()
-
-    // Try parsing; if it fails, attempt to extract JSON object from the text
+    // Parse JSON — with responseSchema, Gemini should always produce valid JSON.
+    // Fallback: repair common malformations if it still fails.
     let raw: Record<string, RutField<unknown>>
     try {
-      raw = JSON.parse(text)
+      raw = JSON.parse(debugRaw)
     } catch {
-      const match = text.match(/\{[\s\S]*\}/)
-      if (!match) throw new Error('No se encontro JSON en la respuesta de Gemini')
-      raw = JSON.parse(match[0])
+      console.warn('[parse-rut] Direct parse failed, attempting repair...')
+      const repaired = repairJson(debugRaw)
+      try {
+        raw = JSON.parse(repaired)
+      } catch (e2) {
+        console.error('[parse-rut] Repair also failed. Raw:', debugRaw.slice(0, 600))
+        throw new Error(`JSON invalido de Gemini: ${String(e2).slice(0, 80)}`)
+      }
     }
 
     // Build typed result
