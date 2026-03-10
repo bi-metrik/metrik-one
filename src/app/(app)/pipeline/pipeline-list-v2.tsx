@@ -12,6 +12,7 @@ import type { EtapaPipeline } from '@/lib/pipeline/constants'
 
 interface OportunidadRow {
   id: string
+  codigo: string
   descripcion: string | null
   etapa: string | null
   probabilidad: number | null
@@ -222,7 +223,7 @@ export default function PipelineList({ oportunidades }: Props) {
               key={o.id}
               href={`/pipeline/${o.id}`}
               title={o.descripcion || 'Sin descripcion'}
-              subtitle={[empresa?.nombre, contacto?.nombre].filter(Boolean).join(' · ')}
+              subtitle={[`O ${o.codigo}`, empresa?.nombre, contacto?.nombre].filter(Boolean).join(' · ')}
               value={o.valor_estimado ? formatCOP(o.valor_estimado) : undefined}
               summaryLines={[
                 ...(empresa ? [{ icon: <Building2 className="h-3 w-3" />, text: empresa.nombre }] : []),

@@ -43,6 +43,7 @@ interface ItemRow {
 
 interface CotizacionData {
   id: string
+  codigo: string | null
   consecutivo: string | null
   modo: string | null
   estado: string | null
@@ -278,7 +279,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold">{cotizacion.consecutivo || 'Sin consecutivo'}</h1>
+            <h1 className="text-lg font-bold">{cotizacion.codigo || cotizacion.consecutivo || 'Sin codigo'}</h1>
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig?.chipClass}`}>
               {estadoConfig?.label}
             </span>

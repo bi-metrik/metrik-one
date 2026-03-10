@@ -11,7 +11,7 @@ export async function getOportunidades() {
 
   const { data } = await supabase
     .from('oportunidades')
-    .select('*, contactos(nombre), empresas(nombre, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
+    .select('*, contactos(nombre), empresas(nombre, codigo, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
 
@@ -24,7 +24,7 @@ export async function getOportunidad(id: string) {
 
   const { data } = await supabase
     .from('oportunidades')
-    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, sector, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor)')
+    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, codigo, sector, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor)')
     .eq('id', id)
     .single()
 
@@ -90,6 +90,7 @@ export async function createOportunidad(input: {
           tipo_persona: 'natural',
           contacto_id: contactoId,
           tipo_documento: 'CC',
+          codigo: '',
         })
         .select('id')
         .single()
@@ -105,6 +106,7 @@ export async function createOportunidad(input: {
         workspace_id: workspaceId,
         nombre: input.empresa_nombre.trim(),
         sector: input.empresa_sector || null,
+        codigo: '',
       })
       .select('id')
       .single()
@@ -124,6 +126,7 @@ export async function createOportunidad(input: {
       descripcion: input.descripcion.trim(),
       valor_estimado: input.valor_estimado,
       etapa: 'lead_nuevo',
+      codigo: '',
     })
     .select('id')
     .single()
@@ -320,6 +323,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
       empresa_id: empresaId,
       contacto_id: opp.contacto_id,
       nombre: opp.descripcion ?? 'Proyecto sin nombre',
+      codigo: '',
       estado: 'en_ejecucion',
       presupuesto_total: presupuestoTotal,
       ganancia_estimada: gananciaEstimada,

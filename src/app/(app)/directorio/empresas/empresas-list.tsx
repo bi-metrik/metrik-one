@@ -110,7 +110,7 @@ export default function EmpresasList({ empresas }: Props) {
               key={e.id}
               href={`/directorio/empresa/${e.id}`}
               title={e.nombre}
-              subtitle={e.sector ?? undefined}
+              subtitle={[e.codigo, e.sector].filter(Boolean).join(' · ') || undefined}
               statusLabel={badge?.label}
               statusColor={badge?.color}
               isComplete={completo}

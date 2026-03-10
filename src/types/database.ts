@@ -719,6 +719,7 @@ export type Database = {
       }
       cotizaciones: {
         Row: {
+          codigo: string
           condiciones_pago: string | null
           consecutivo: string
           costo_total: number | null
@@ -741,6 +742,7 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          codigo: string
           condiciones_pago?: string | null
           consecutivo: string
           costo_total?: number | null
@@ -763,6 +765,7 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          codigo?: string
           condiciones_pago?: string | null
           consecutivo?: string
           costo_total?: number | null
@@ -814,6 +817,7 @@ export type Database = {
           actividad_secundaria: string | null
           agente_retenedor: boolean | null
           autorretenedor: boolean | null
+          codigo: string
           contacto_email: string | null
           contacto_id: string | null
           contacto_nombre: string | null
@@ -847,6 +851,7 @@ export type Database = {
           actividad_secundaria?: string | null
           agente_retenedor?: boolean | null
           autorretenedor?: boolean | null
+          codigo: string
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
@@ -880,6 +885,7 @@ export type Database = {
           actividad_secundaria?: string | null
           agente_retenedor?: boolean | null
           autorretenedor?: boolean | null
+          codigo?: string
           contacto_email?: string | null
           contacto_id?: string | null
           contacto_nombre?: string | null
@@ -1126,10 +1132,16 @@ export type Database = {
       }
       fiscal_profiles: {
         Row: {
+          actividad_secundaria: string | null
+          agente_retenedor: boolean | null
           ciiu: string | null
           created_at: string | null
+          departamento: string | null
           direccion_fiscal: string | null
           email_facturacion: string | null
+          email_fiscal: string | null
+          fecha_inicio_actividades: string | null
+          gran_contribuyente: boolean | null
           ica_city: string | null
           ica_rate: number | null
           id: string
@@ -1137,20 +1149,33 @@ export type Database = {
           is_declarante: boolean | null
           is_estimated: boolean | null
           iva_responsible: boolean | null
+          municipio: string | null
           nit: string | null
           nudge_count: number | null
           person_type: string | null
           razon_social: string | null
+          rut_confianza_ocr: number | null
+          rut_documento_url: string | null
+          rut_fecha_carga: string | null
+          rut_verificado: boolean | null
           self_withholder: boolean | null
           tax_regime: string | null
+          telefono: string | null
+          tipo_documento: string | null
           updated_at: string | null
           workspace_id: string
         }
         Insert: {
+          actividad_secundaria?: string | null
+          agente_retenedor?: boolean | null
           ciiu?: string | null
           created_at?: string | null
+          departamento?: string | null
           direccion_fiscal?: string | null
           email_facturacion?: string | null
+          email_fiscal?: string | null
+          fecha_inicio_actividades?: string | null
+          gran_contribuyente?: boolean | null
           ica_city?: string | null
           ica_rate?: number | null
           id?: string
@@ -1158,20 +1183,33 @@ export type Database = {
           is_declarante?: boolean | null
           is_estimated?: boolean | null
           iva_responsible?: boolean | null
+          municipio?: string | null
           nit?: string | null
           nudge_count?: number | null
           person_type?: string | null
           razon_social?: string | null
+          rut_confianza_ocr?: number | null
+          rut_documento_url?: string | null
+          rut_fecha_carga?: string | null
+          rut_verificado?: boolean | null
           self_withholder?: boolean | null
           tax_regime?: string | null
+          telefono?: string | null
+          tipo_documento?: string | null
           updated_at?: string | null
           workspace_id: string
         }
         Update: {
+          actividad_secundaria?: string | null
+          agente_retenedor?: boolean | null
           ciiu?: string | null
           created_at?: string | null
+          departamento?: string | null
           direccion_fiscal?: string | null
           email_facturacion?: string | null
+          email_fiscal?: string | null
+          fecha_inicio_actividades?: string | null
+          gran_contribuyente?: boolean | null
           ica_city?: string | null
           ica_rate?: number | null
           id?: string
@@ -1179,12 +1217,19 @@ export type Database = {
           is_declarante?: boolean | null
           is_estimated?: boolean | null
           iva_responsible?: boolean | null
+          municipio?: string | null
           nit?: string | null
           nudge_count?: number | null
           person_type?: string | null
           razon_social?: string | null
+          rut_confianza_ocr?: number | null
+          rut_documento_url?: string | null
+          rut_fecha_carga?: string | null
+          rut_verificado?: boolean | null
           self_withholder?: boolean | null
           tax_regime?: string | null
+          telefono?: string | null
+          tipo_documento?: string | null
           updated_at?: string | null
           workspace_id?: string
         }
@@ -1929,6 +1974,7 @@ export type Database = {
       oportunidades: {
         Row: {
           carpeta_url: string | null
+          codigo: string
           contacto_id: string
           created_at: string | null
           descripcion: string
@@ -1946,6 +1992,7 @@ export type Database = {
         }
         Insert: {
           carpeta_url?: string | null
+          codigo: string
           contacto_id: string
           created_at?: string | null
           descripcion: string
@@ -1963,6 +2010,7 @@ export type Database = {
         }
         Update: {
           carpeta_url?: string | null
+          codigo?: string
           contacto_id?: string
           created_at?: string | null
           descripcion?: string
@@ -2475,7 +2523,7 @@ export type Database = {
           canal_creacion: string | null
           carpeta_url: string | null
           cierre_snapshot: Json | null
-          codigo: number
+          codigo: string
           contacto_id: string | null
           cotizacion_id: string | null
           created_at: string | null
@@ -2504,7 +2552,7 @@ export type Database = {
           canal_creacion?: string | null
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
-          codigo?: number
+          codigo: string
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -2533,7 +2581,7 @@ export type Database = {
           canal_creacion?: string | null
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
-          codigo?: number
+          codigo?: string
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -2743,6 +2791,42 @@ export type Database = {
           },
         ]
       }
+      ref_tarifas_ica: {
+        Row: {
+          ciiu_desde: string
+          ciiu_hasta: string
+          created_at: string | null
+          fuente: string
+          id: string
+          municipio: string
+          tarifa_por_mil: number
+          vigencia_desde: string
+          vigencia_hasta: string | null
+        }
+        Insert: {
+          ciiu_desde?: string
+          ciiu_hasta?: string
+          created_at?: string | null
+          fuente: string
+          id?: string
+          municipio: string
+          tarifa_por_mil: number
+          vigencia_desde?: string
+          vigencia_hasta?: string | null
+        }
+        Update: {
+          ciiu_desde?: string
+          ciiu_hasta?: string
+          created_at?: string | null
+          fuente?: string
+          id?: string
+          municipio?: string
+          tarifa_por_mil?: number
+          vigencia_desde?: string
+          vigencia_hasta?: string | null
+        }
+        Relationships: []
+      }
       referrals: {
         Row: {
           created_at: string | null
@@ -2787,42 +2871,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      ref_tarifas_ica: {
-        Row: {
-          id: string
-          municipio: string
-          ciiu_desde: string
-          ciiu_hasta: string
-          tarifa_por_mil: number
-          vigencia_desde: string
-          vigencia_hasta: string | null
-          fuente: string
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          municipio: string
-          ciiu_desde?: string
-          ciiu_hasta?: string
-          tarifa_por_mil: number
-          vigencia_desde?: string
-          vigencia_hasta?: string | null
-          fuente: string
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          municipio?: string
-          ciiu_desde?: string
-          ciiu_hasta?: string
-          tarifa_por_mil?: number
-          vigencia_desde?: string
-          vigencia_hasta?: string | null
-          fuente?: string
-          created_at?: string | null
-        }
-        Relationships: []
       }
       rubros: {
         Row: {
@@ -3552,12 +3600,13 @@ export type Database = {
           carpeta_url: string | null
           cartera: number | null
           cobrado: number | null
-          codigo: number | null
+          codigo: string | null
           contacto_nombre: string | null
           costo_acumulado: number | null
           costo_horas: number | null
           cotizacion_id: string | null
           created_at: string | null
+          empresa_codigo: string | null
           empresa_nombre: string | null
           estado: string | null
           facturado: number | null
@@ -3643,13 +3692,17 @@ export type Database = {
         Returns: boolean
       }
       current_user_workspace_id: { Args: never; Returns: string }
+      generate_empresa_codigo: {
+        Args: { p_nombre: string; p_workspace_id: string }
+        Returns: string
+      }
+      generate_oportunidad_codigo: {
+        Args: { p_empresa_id: string; p_workspace_id: string }
+        Returns: string
+      }
       get_next_cotizacion_consecutivo: {
         Args: { p_workspace_id: string }
         Returns: string
-      }
-      get_next_proyecto_codigo: {
-        Args: { p_workspace_id: string }
-        Returns: number
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
@@ -3681,7 +3734,7 @@ export type Database = {
         Returns: {
           cartera: number
           cobrado: number
-          codigo: number
+          codigo: string
           contacto_nombre: string
           costo_acumulado: number
           empresa_nombre: string

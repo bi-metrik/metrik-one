@@ -9,7 +9,7 @@ export async function getCotizaciones(oportunidadId: string) {
 
   const { data } = await supabase
     .from('cotizaciones')
-    .select('id, consecutivo, modo, estado, valor_total, descuento_porcentaje, descuento_valor, margen_porcentaje, costo_total, descripcion, created_at')
+    .select('id, codigo, consecutivo, modo, estado, valor_total, descuento_porcentaje, descuento_valor, margen_porcentaje, costo_total, descripcion, created_at')
     .eq('oportunidad_id', oportunidadId)
     .order('created_at', { ascending: false })
 
@@ -58,6 +58,7 @@ export async function createCotizacionFlash(oportunidadId: string, descripcion: 
       workspace_id: workspaceId,
       oportunidad_id: oportunidadId,
       consecutivo,
+      codigo: '',
       modo: 'flash',
       descripcion: descripcion.trim(),
       valor_total: valorTotal,
@@ -87,6 +88,7 @@ export async function createCotizacionDetallada(oportunidadId: string) {
       workspace_id: workspaceId,
       oportunidad_id: oportunidadId,
       consecutivo,
+      codigo: '',
       modo: 'detallada',
       valor_total: 0,
       estado: 'borrador',
@@ -473,6 +475,7 @@ export async function duplicarCotizacion(id: string) {
       workspace_id: workspaceId,
       oportunidad_id: original.oportunidad_id,
       consecutivo: dupCons,
+      codigo: '',
       modo: original.modo,
       descripcion: original.descripcion,
       valor_total: original.valor_total,

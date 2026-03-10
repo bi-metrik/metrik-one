@@ -18,6 +18,7 @@ import FacturaDialog from './[id]/factura-dialog'
 
 interface ProyectoFinanciero {
   proyecto_id: string | null
+  codigo: string | null
   nombre: string | null
   estado: string | null
   tipo: string | null
@@ -327,7 +328,10 @@ function ProyectoCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="truncate text-sm font-semibold">{p.nombre ?? 'Sin nombre'}</h3>
+            <h3 className="truncate text-sm font-semibold">
+              {p.codigo && <span className="text-muted-foreground font-medium">P {p.codigo} </span>}
+              {p.nombre ?? 'Sin nombre'}
+            </h3>
             {/* Timer button */}
             {isThisProjectTimer ? (
               <button

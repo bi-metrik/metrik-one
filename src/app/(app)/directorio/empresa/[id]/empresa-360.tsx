@@ -12,6 +12,7 @@ import type { Empresa } from '@/types/database'
 import type { EtapaPipeline, EstadoProyecto } from '@/lib/pipeline/constants'
 import NotesSection from '@/components/notes-section'
 import RutUploadCard from '@/components/rut-upload-card'
+import RutDataDisplay from '@/components/rut-data-display'
 
 interface OportunidadRow {
   id: string
@@ -93,7 +94,10 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <div className="flex-1">
-          <h1 className="text-lg font-bold">{empresa.nombre}</h1>
+          <h1 className="text-lg font-bold">
+            <span className="text-muted-foreground font-medium">{empresa.codigo}</span>{' '}
+            {empresa.nombre}
+          </h1>
           <div className="flex items-center gap-2">
             <p className="text-xs text-muted-foreground">Vista 360 de la empresa</p>
             {perfilCompleto ? (
@@ -157,6 +161,27 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
           currentRutVerificado={empresa.rut_verificado}
           currentRutFecha={empresa.rut_fecha_carga}
         />
+        {empresa.rut_verificado && (
+          <RutDataDisplay
+            nit={empresa.numero_documento}
+            tipo_documento={empresa.tipo_documento}
+            tipo_persona={empresa.tipo_persona}
+            razon_social={empresa.razon_social}
+            regimen_tributario={empresa.regimen_tributario}
+            gran_contribuyente={empresa.gran_contribuyente}
+            agente_retenedor={empresa.agente_retenedor}
+            autorretenedor={empresa.autorretenedor}
+            responsable_iva={empresa.responsable_iva}
+            direccion_fiscal={empresa.direccion_fiscal}
+            municipio={empresa.municipio}
+            departamento={empresa.departamento}
+            telefono={empresa.telefono}
+            email_fiscal={empresa.email_fiscal}
+            actividad_ciiu={empresa.actividad_ciiu}
+            actividad_secundaria={empresa.actividad_secundaria}
+            fecha_inicio_actividades={empresa.fecha_inicio_actividades}
+          />
+        )}
       </div>
 
       {/* Perfil fiscal */}

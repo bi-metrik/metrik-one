@@ -40,6 +40,7 @@ export async function crearProyectoInterno(input: {
     .insert({
       workspace_id: workspaceId,
       nombre: input.nombre.trim(),
+      codigo: '',
       tipo: 'interno',
       estado: 'en_ejecucion',
       presupuesto_total: presupuestoTotal,

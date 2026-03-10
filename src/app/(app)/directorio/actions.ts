@@ -177,6 +177,7 @@ export async function createEmpresa(formData: FormData) {
     .insert({
       workspace_id: workspaceId,
       nombre: nombre.trim(),
+      codigo: '',
       sector: (formData.get('sector') as string) || null,
       numero_documento: (formData.get('numero_documento') as string)?.trim() || null,
       tipo_documento: (formData.get('tipo_documento') as string) || null,
