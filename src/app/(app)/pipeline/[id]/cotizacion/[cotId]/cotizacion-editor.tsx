@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, Send, Copy, Save, Plus, Trash2, Percent, FileDown,
-  ChevronDown, ChevronRight, Lock, BookOpen, Loader2,
+  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -564,12 +564,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           onChange={e => setNewRubro(p => ({ ...p, unidad: e.target.value }))}
                           className="rounded border bg-background px-2 py-1.5 text-xs"
                         />
-                        <input
-                          type="number"
+                        <CalcInput
                           placeholder="Valor unitario"
                           value={newRubro.valor_unitario}
-                          onChange={e => setNewRubro(p => ({ ...p, valor_unitario: e.target.value }))}
-                          className="rounded border bg-background px-2 py-1.5 text-xs"
+                          onChange={v => setNewRubro(p => ({ ...p, valor_unitario: v }))}
                         />
                       </div>
                       <div className="flex gap-2">
@@ -672,73 +670,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           )}
 
-          {/* Totals */}
-          {(() => {
-            const valorVenta = cotizacion.valor_total ?? 0
-            const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
-            const dVal = Math.round(valorVenta * dPct / 100)
-            const valorNeto = valorVenta - dVal
-            return (
-              <div className="rounded-lg bg-muted/50 p-4 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Costo total</span>
-                  <span className="font-medium">{formatCOP(costoTotal)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Valor venta</span>
-                  <span className="font-bold">{formatCOP(valorVenta)}</span>
-                </div>
-                {dVal > 0 && (
-                  <>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Descuento ({dPct}%)</span>
-                      <span className="font-medium text-red-600">-{formatCOP(dVal)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm border-t pt-1">
-                      <span className="text-muted-foreground">Subtotal</span>
-                      <span className="font-bold">{formatCOP(valorNeto)}</span>
-                    </div>
-                  </>
-                )}
-                {costoTotal > 0 && valorNeto > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Margen</span>
-                    <span className="font-medium text-green-600">
-                      {Math.round((valorNeto - costoTotal) / valorNeto * 100)}%
-                    </span>
-                  </div>
-                )}
-              </div>
-            )
-          })()}
-
-          {/* Valor venta editable */}
-          {editable && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Valor de venta</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  defaultValue={cotizacion.valor_total ? cotizacion.valor_total.toLocaleString('es-CO') : ''}
-                  onBlur={e => {
-                    const val = Number(e.target.value.replace(/[^0-9]/g, ''))
-                    if (val > 0) {
-                      e.target.value = val.toLocaleString('es-CO')
-                      startTransition(async () => {
-                        const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
-                        const dv = Math.round(val * pct / 100)
-                        await updateCotizacion(cotizacion.id, { valor_total: val, descuento_porcentaje: pct, descuento_valor: dv })
-                        router.refresh()
-                      })
-                    }
-                  }}
-                  className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
-                />
-              </div>
-            </div>
-          )}
+          {/* Totals + editable margin */}
+          <TotalesMargen
+            costoTotal={costoTotal}
+            valorVentaInicial={cotizacion.valor_total ?? 0}
+            discountPct={discountPct}
+            editable={editable}
+            onSave={(val, pct) => {
+              startTransition(async () => {
+                const dv = Math.round(val * (Math.min(100, Math.max(0, Number(pct) || 0))) / 100)
+                await updateCotizacion(cotizacion.id, { valor_total: val, descuento_porcentaje: Number(pct) || 0, descuento_valor: dv })
+                router.refresh()
+              })
+            }}
+          />
 
           {/* Discount */}
           {editable && (
@@ -845,6 +790,216 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               </div>
             )
           })()}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Totales + Margen bidireccional ─────────────────────────────
+
+function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, onSave }: {
+  costoTotal: number
+  valorVentaInicial: number
+  discountPct: string
+  editable: boolean
+  onSave: (val: number, pct: string) => void
+}) {
+  const [valorVenta, setValorVenta] = useState(valorVentaInicial)
+  const [margenInput, setMargenInput] = useState('')
+  const [ventaInput, setVentaInput] = useState(valorVentaInicial ? valorVentaInicial.toLocaleString('es-CO') : '')
+
+  const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
+  const dVal = Math.round(valorVenta * dPct / 100)
+  const valorNeto = valorVenta - dVal
+  const margen = costoTotal > 0 && valorNeto > 0
+    ? Math.round((valorNeto - costoTotal) / valorNeto * 100)
+    : 0
+
+  const handleVentaBlur = () => {
+    const val = Number(ventaInput.replace(/[^0-9]/g, ''))
+    if (val > 0) {
+      setValorVenta(val)
+      setVentaInput(val.toLocaleString('es-CO'))
+      setMargenInput('')
+      onSave(val, discountPct)
+    }
+  }
+
+  const handleMargenBlur = () => {
+    const m = Number(margenInput)
+    if (m > 0 && m < 100 && costoTotal > 0) {
+      const newVenta = Math.round(costoTotal / (1 - m / 100))
+      setValorVenta(newVenta)
+      setVentaInput(newVenta.toLocaleString('es-CO'))
+      setMargenInput('')
+      onSave(newVenta, discountPct)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Costo total</span>
+          <span className="font-medium">{formatCOP(costoTotal)}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Valor venta</span>
+          <span className="font-bold">{formatCOP(valorVenta)}</span>
+        </div>
+        {dVal > 0 && (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Descuento ({dPct}%)</span>
+              <span className="font-medium text-red-600">-{formatCOP(dVal)}</span>
+            </div>
+            <div className="flex justify-between text-sm border-t pt-1">
+              <span className="text-muted-foreground">Subtotal</span>
+              <span className="font-bold">{formatCOP(valorNeto)}</span>
+            </div>
+          </>
+        )}
+        {costoTotal > 0 && valorNeto > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Margen</span>
+            <span className="font-medium text-green-600">{margen}%</span>
+          </div>
+        )}
+      </div>
+
+      {editable && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Valor de venta</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={ventaInput}
+                onChange={e => setVentaInput(e.target.value.replace(/[^0-9]/g, ''))}
+                onBlur={handleVentaBlur}
+                onKeyDown={e => e.key === 'Enter' && handleVentaBlur()}
+                className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Margen deseado
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={margenInput}
+                onChange={e => setMargenInput(e.target.value.replace(/[^0-9]/g, ''))}
+                onBlur={handleMargenBlur}
+                onKeyDown={e => e.key === 'Enter' && handleMargenBlur()}
+                placeholder={costoTotal > 0 ? `${margen}` : '—'}
+                className="w-full rounded-md border bg-background py-2 pl-3 pr-7 text-sm"
+              />
+              <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+            {costoTotal > 0 && (
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Escribe un % y se calcula la venta
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Mini calculadora inline ────────────────────────────────────
+
+function CalcInput({ placeholder, value, onChange }: {
+  placeholder: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [showCalc, setShowCalc] = useState(false)
+  const [expr, setExpr] = useState('')
+
+  const evalExpr = (input: string): number | null => {
+    try {
+      // Only allow numbers, operators, parentheses, decimals, spaces
+      const sanitized = input.replace(/[^0-9+\-*/.() ]/g, '')
+      if (!sanitized.trim()) return null
+      // eslint-disable-next-line no-eval
+      const result = Function(`"use strict"; return (${sanitized})`)()
+      if (typeof result === 'number' && isFinite(result)) return Math.round(result)
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  const handleApply = () => {
+    const result = evalExpr(expr)
+    if (result !== null && result > 0) {
+      onChange(result.toString())
+      setShowCalc(false)
+      setExpr('')
+    }
+  }
+
+  const preview = evalExpr(expr)
+
+  return (
+    <div className="relative">
+      <div className="flex gap-1">
+        <input
+          type="number"
+          placeholder={placeholder}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="flex-1 rounded border bg-background px-2 py-1.5 text-xs min-w-0"
+        />
+        <button
+          type="button"
+          onClick={() => setShowCalc(!showCalc)}
+          className={`shrink-0 rounded border px-1.5 py-1.5 transition-colors ${showCalc ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}
+        >
+          <Calculator className="h-3 w-3" />
+        </button>
+      </div>
+      {showCalc && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border bg-popover p-2 shadow-lg">
+          <input
+            type="text"
+            value={expr}
+            onChange={e => setExpr(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleApply()}
+            placeholder="ej: 150000 * 3"
+            autoFocus
+            className="w-full rounded border bg-background px-2 py-1.5 text-xs font-mono"
+          />
+          {preview !== null && (
+            <p className="mt-1 text-right text-xs font-mono text-green-600">
+              = {preview.toLocaleString('es-CO')}
+            </p>
+          )}
+          <div className="mt-1.5 flex justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => { setShowCalc(false); setExpr('') }}
+              className="rounded px-2 py-1 text-[10px] hover:bg-accent"
+            >
+              Cerrar
+            </button>
+            <button
+              type="button"
+              onClick={handleApply}
+              disabled={preview === null || preview <= 0}
+              className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50"
+            >
+              Usar
+            </button>
+          </div>
         </div>
       )}
     </div>
