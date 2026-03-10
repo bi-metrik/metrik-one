@@ -812,7 +812,13 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
   const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
   const dVal = Math.round(valorVenta * dPct / 100)
   const valorNeto = valorVenta - dVal
-  const margen = costoTotal > 0 && valorNeto > 0
+
+  // Margen deseado: sobre valor bruto (antes de descuento)
+  const margenBruto = costoTotal > 0 && valorVenta > 0
+    ? Math.round((valorVenta - costoTotal) / valorVenta * 100)
+    : 0
+  // Margen real: sobre valor neto (despues de descuento)
+  const margenReal = costoTotal > 0 && valorNeto > 0
     ? Math.round((valorNeto - costoTotal) / valorNeto * 100)
     : 0
 
@@ -826,6 +832,7 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
   const handleMargenBlur = () => {
     const m = Number(margenInput)
     if (m > 0 && m < 100 && costoTotal > 0) {
+      // Margen deseado calcula sobre venta bruta (antes de descuento)
       applyVenta(Math.round(costoTotal / (1 - m / 100)))
     }
   }
@@ -841,23 +848,34 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
           <span className="text-muted-foreground">Valor venta</span>
           <span className="font-bold">{formatCOP(valorVenta)}</span>
         </div>
+        {costoTotal > 0 && valorVenta > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Margen</span>
+            <span className="font-medium text-green-600">{margenBruto}%</span>
+          </div>
+        )}
         {dVal > 0 && (
           <>
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-sm border-t pt-1">
               <span className="text-muted-foreground">Descuento ({dPct}%)</span>
               <span className="font-medium text-red-600">-{formatCOP(dVal)}</span>
             </div>
-            <div className="flex justify-between text-sm border-t pt-1">
+            <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Subtotal</span>
               <span className="font-bold">{formatCOP(valorNeto)}</span>
             </div>
+            {costoTotal > 0 && valorNeto > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Margen real</span>
+                <span className={`font-medium ${margenReal < margenBruto ? 'text-amber-600' : 'text-green-600'}`}>
+                  {margenReal}%
+                  {margenReal < margenBruto && (
+                    <span className="ml-1 text-[10px]">(-{margenBruto - margenReal}pp)</span>
+                  )}
+                </span>
+              </div>
+            )}
           </>
-        )}
-        {costoTotal > 0 && valorNeto > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Margen</span>
-            <span className="font-medium text-green-600">{margen}%</span>
-          </div>
         )}
       </div>
 
@@ -892,14 +910,14 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
                 onChange={e => setMargenInput(e.target.value.replace(/[^0-9]/g, ''))}
                 onBlur={handleMargenBlur}
                 onKeyDown={e => e.key === 'Enter' && handleMargenBlur()}
-                placeholder={costoTotal > 0 ? `${margen}` : '—'}
+                placeholder={costoTotal > 0 ? `${margenBruto}` : '—'}
                 className="w-full rounded-md border bg-background py-2 pl-3 pr-7 text-sm"
               />
               <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
             {costoTotal > 0 && (
               <p className="mt-0.5 text-[10px] text-muted-foreground">
-                Escribe un % y se calcula la venta
+                Calcula sobre venta antes de descuento
               </p>
             )}
           </div>
