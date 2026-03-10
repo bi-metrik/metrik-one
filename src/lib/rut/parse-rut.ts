@@ -150,18 +150,23 @@ export async function parseRut(
       return { data: null, error: 'Gemini no devolvio respuesta' }
     }
 
-    // Clean response: strip markdown fences, BOM, trailing commas, comments
+    // Clean response: strip markdown fences, BOM, trailing commas
     const text = debugRaw
       .replace(/^\uFEFF/, '')                    // BOM
       .replace(/^```(?:json)?\s*/i, '')          // opening fence
       .replace(/\s*```\s*$/, '')                 // closing fence
-      .replace(/\/\/[^\n]*/g, '')                // line comments
-      .replace(/\/\*[\s\S]*?\*\//g, '')          // block comments
       .replace(/,\s*([}\]])/g, '$1')             // trailing commas
       .trim()
 
-    // Parse the JSON response
-    const raw = JSON.parse(text) as Record<string, RutField<unknown>>
+    // Try parsing; if it fails, attempt to extract JSON object from the text
+    let raw: Record<string, RutField<unknown>>
+    try {
+      raw = JSON.parse(text)
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/)
+      if (!match) throw new Error('No se encontro JSON en la respuesta de Gemini')
+      raw = JSON.parse(match[0])
+    }
 
     // Build typed result
     const result = buildResult(raw)
