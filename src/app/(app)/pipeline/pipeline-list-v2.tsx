@@ -223,7 +223,8 @@ export default function PipelineList({ oportunidades }: Props) {
               key={o.id}
               href={`/pipeline/${o.id}`}
               title={o.descripcion || 'Sin descripcion'}
-              subtitle={[`O ${o.codigo}`, empresa?.nombre, contacto?.nombre].filter(Boolean).join(' · ')}
+              titlePrefix={o.codigo ? `O ${o.codigo}` : undefined}
+              subtitle={[empresa?.nombre, contacto?.nombre].filter(Boolean).join(' · ')}
               value={o.valor_estimado ? formatCOP(o.valor_estimado) : undefined}
               summaryLines={[
                 ...(empresa ? [{ icon: <Building2 className="h-3 w-3" />, text: empresa.nombre }] : []),

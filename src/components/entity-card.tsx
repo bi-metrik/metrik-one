@@ -28,6 +28,8 @@ export interface CardAction {
 export interface EntityCardProps {
   /** Card title (main text) */
   title: string
+  /** Muted prefix before title (e.g. "O 001") */
+  titlePrefix?: string
   /** Subtitle below title */
   subtitle?: string
   /** Status chip label + Tailwind classes */
@@ -67,6 +69,7 @@ export interface EntityCardProps {
 
 export default function EntityCard({
   title,
+  titlePrefix,
   subtitle,
   statusLabel,
   statusColor = 'bg-gray-100 text-gray-600',
@@ -125,7 +128,10 @@ export default function EntityCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           {/* Title + subtitle */}
-          <h3 className="truncate text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {titlePrefix && <span className="text-muted-foreground font-medium">{titlePrefix} </span>}
+            {title}
+          </h3>
           {subtitle && (
             <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
           )}
