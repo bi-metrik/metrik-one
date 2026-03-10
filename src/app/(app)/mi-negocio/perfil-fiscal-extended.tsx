@@ -52,7 +52,8 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
         if (res.data.nit.value) initial.nit = res.data.nit.value
         if (res.data.tipo_documento.value) initial.tipo_documento = res.data.tipo_documento.value
         if (res.data.tipo_persona.value) initial.tipo_persona = res.data.tipo_persona.value
-        if (res.data.regimen_tributario.value) initial.regimen_tributario = res.data.regimen_tributario.value
+        // Regimen: si OCR lo detecto, usar ese valor; si no, asumir no_responsable
+        initial.regimen_tributario = res.data.regimen_tributario.value || 'no_responsable'
         if (res.data.gran_contribuyente.value !== null) initial.gran_contribuyente = res.data.gran_contribuyente.value
         if (res.data.agente_retenedor.value !== null) initial.agente_retenedor = res.data.agente_retenedor.value
         if (res.data.autorretenedor.value !== null) initial.autorretenedor = res.data.autorretenedor.value
@@ -213,7 +214,7 @@ export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) 
             <FieldRow label="NIT" field={parsed.nit} value={editedFields.nit as string} onChange={v => setField('nit', v)} />
             <FieldRow label="Tipo documento" field={parsed.tipo_documento} value={editedFields.tipo_documento as string} onChange={v => setField('tipo_documento', v)} />
             <FieldRow label="Tipo persona" field={parsed.tipo_persona} value={editedFields.tipo_persona as string} onChange={v => setField('tipo_persona', v)} />
-            <FieldRow label="Regimen tributario" field={parsed.regimen_tributario} value={editedFields.regimen_tributario as string} onChange={v => setField('regimen_tributario', v)} />
+            <RegimenField field={parsed.regimen_tributario} value={editedFields.regimen_tributario as string} onChange={v => setField('regimen_tributario', v)} />
             <BoolFieldRow label="Gran contribuyente" field={parsed.gran_contribuyente} value={editedFields.gran_contribuyente as boolean} onChange={v => setField('gran_contribuyente', v)} />
             <BoolFieldRow label="Agente retenedor" field={parsed.agente_retenedor} value={editedFields.agente_retenedor as boolean} onChange={v => setField('agente_retenedor', v)} />
             <BoolFieldRow label="Autorretenedor" field={parsed.autorretenedor} value={editedFields.autorretenedor as boolean} onChange={v => setField('autorretenedor', v)} />
@@ -376,6 +377,60 @@ function FieldRow({ label, field, value, onChange }: {
           field.confidence < 0.7 && field.value !== null ? 'border-amber-300' : ''
         }`}
       />
+    </div>
+  )
+}
+
+const KNOWN_REGIMENES: Record<string, string> = {
+  'responsable': 'Responsable de IVA (Ordinario)',
+  'no_responsable': 'No responsable de IVA',
+  'simple': 'Regimen Simple (RST)',
+  'comun': 'Responsable de IVA (Ordinario)',
+  'ordinario': 'Responsable de IVA (Ordinario)',
+}
+
+function normalizeRegimenKey(raw: string): string | null {
+  const lower = raw.toLowerCase().trim()
+  if (lower.includes('simple')) return 'simple'
+  if (lower.includes('no responsable') || lower.includes('no_responsable') || lower === 'no_responsable') return 'no_responsable'
+  if (lower.includes('responsable') || lower.includes('comun') || lower.includes('común') || lower.includes('ordinario')) return 'responsable'
+  return null
+}
+
+function RegimenField({ field, value, onChange }: {
+  field: { value: string | null; confidence: number }
+  value: string
+  onChange: (v: string) => void
+}) {
+  const normalizedKey = normalizeRegimenKey(value || '')
+  const isUnknown = value && !normalizedKey
+
+  return (
+    <div>
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <label className="text-[10px] font-medium text-muted-foreground">Regimen tributario</label>
+        {field.value !== null && <ConfidenceBadge confidence={field.confidence} />}
+        {!field.value && <span className="text-[9px] text-muted-foreground">(asumido)</span>}
+      </div>
+      {isUnknown ? (
+        <>
+          <p className="mb-1 text-[10px] text-amber-600">No entendimos &quot;{value}&quot; — selecciona:</p>
+          <select
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            className="w-full rounded-md border border-amber-300 bg-background px-2.5 py-1.5 text-sm"
+          >
+            <option value={value}>{value} (original)</option>
+            <option value="no_responsable">No responsable de IVA</option>
+            <option value="responsable">Responsable de IVA (Ordinario)</option>
+            <option value="simple">Regimen Simple (RST)</option>
+          </select>
+        </>
+      ) : (
+        <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-sm">
+          <span>{KNOWN_REGIMENES[normalizedKey || 'no_responsable']}</span>
+        </div>
+      )}
     </div>
   )
 }
