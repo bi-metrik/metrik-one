@@ -6,7 +6,6 @@ import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio } from '@/types/database'
 
 // Existing config sections — reused via import
-import WizardFelipe from '../config/wizard-felipe'
 import StaffSection from '../config/staff-section'
 import BankAccountsSection from '../config/bank-accounts-section'
 import MonthlyTargetsSection from '../config/monthly-targets-section'
