@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { parseRut } from '@/lib/rut/parse-rut'
 import { normalizeTipoPersonaFiscal, normalizeRegimenFiscal } from '@/lib/rut/normalize-rut-fiscal'
@@ -43,7 +44,7 @@ const RUT_ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/
 export async function uploadAndParseRUTFiscal(
   formData: FormData,
 ): Promise<{ success: boolean; data?: RutParseResult; rutUrl?: string; error?: string }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const file = formData.get('rut') as File
@@ -57,13 +58,16 @@ export async function uploadAndParseRUTFiscal(
   const ts = Date.now()
   const filePath = `${workspaceId}/fiscal/rut_${ts}.${ext}`
 
-  const { error: uploadError } = await supabase.storage
+  // Use service client for storage (bypasses RLS)
+  const admin = await createServiceClient()
+
+  const { error: uploadError } = await admin.storage
     .from('rut-documents')
     .upload(filePath, file, { upsert: true })
 
   if (uploadError) return { success: false, error: `Error subiendo archivo: ${uploadError.message}` }
 
-  const { data: signedUrl } = await supabase.storage
+  const { data: signedUrl } = await admin.storage
     .from('rut-documents')
     .createSignedUrl(filePath, 60 * 60 * 24 * 365)
 
@@ -167,7 +171,7 @@ export async function updateBranding(data: {
 // ── Upload Logo File ────────────────────────────────────
 
 export async function uploadLogo(formData: FormData) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const file = formData.get('logo') as File
@@ -183,20 +187,22 @@ export async function uploadLogo(formData: FormData) {
   const ext = file.name.split('.').pop() || 'png'
   const filePath = `${workspaceId}/logo.${ext}`
 
-  // Upload (upsert — replaces if exists)
-  const { error: uploadError } = await supabase.storage
+  // Use service client for storage (bypasses RLS — bucket policies not needed)
+  const admin = await createServiceClient()
+
+  const { error: uploadError } = await admin.storage
     .from('workspace-logos')
     .upload(filePath, file, { upsert: true })
 
   if (uploadError) return { success: false, error: uploadError.message }
 
   // Get public URL
-  const { data: { publicUrl } } = supabase.storage
+  const { data: { publicUrl } } = admin.storage
     .from('workspace-logos')
     .getPublicUrl(filePath)
 
   // Update workspace logo_url
-  const { error: updateError } = await supabase
+  const { error: updateError } = await admin
     .from('workspaces')
     .update({ logo_url: publicUrl })
     .eq('id', workspaceId)
