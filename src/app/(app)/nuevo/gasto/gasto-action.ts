@@ -1,7 +1,41 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+
+// ── Upload soporte to Storage ────────────────────────────────
+
+export async function uploadSoporteGasto(formData: FormData) {
+  const { workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado', url: null }
+
+  const file = formData.get('file') as File | null
+  if (!file || file.size === 0) return { success: false, error: 'Sin archivo', url: null }
+
+  const MAX_SIZE = 5 * 1024 * 1024 // 5MB
+  if (file.size > MAX_SIZE) return { success: false, error: 'El archivo supera 5MB', url: null }
+
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+  if (!allowed.includes(file.type)) return { success: false, error: 'Solo JPEG, PNG, WebP o PDF', url: null }
+
+  const ext = file.name.split('.').pop() || 'jpg'
+  const fileId = crypto.randomUUID()
+  const filePath = `${workspaceId}/${fileId}.${ext}`
+
+  const admin = createServiceClient()
+  const { error: uploadError } = await admin.storage
+    .from('gastos-soportes')
+    .upload(filePath, file, { contentType: file.type, upsert: true })
+
+  if (uploadError) return { success: false, error: uploadError.message, url: null }
+
+  const { data: { publicUrl } } = admin.storage
+    .from('gastos-soportes')
+    .getPublicUrl(filePath)
+
+  return { success: true, error: null, url: publicUrl }
+}
 
 // ── Create gasto (FAB) ──────────────────────────────────────
 
@@ -14,6 +48,7 @@ export async function createGasto(input: {
   proyecto_id?: string | null  // UUID, 'empresa', or null
   rubro_id?: string | null
   estado_pago?: 'pagado' | 'pendiente'
+  soporte_url?: string | null
 }) {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -57,6 +92,7 @@ export async function createGasto(input: {
       rubro_id: (proyectoId && input.rubro_id) ? input.rubro_id : null,
       tipo,
       estado_pago: input.estado_pago ?? 'pagado',
+      soporte_url: input.soporte_url ?? null,
       canal_registro: 'app',
       created_by: userId,
     })

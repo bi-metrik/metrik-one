@@ -3,7 +3,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import MovimientosClient from './movimientos-client'
 
 interface Props {
-  searchParams: Promise<{ tipo?: string; mes?: string; cat?: string; proy?: string; tipoProy?: string; estadoPago?: string; estadoCausacion?: string }>
+  searchParams: Promise<{ tipo?: string; mes?: string; cat?: string; proy?: string; tipoProy?: string; estadoPago?: string; estadoCausacion?: string; createdBy?: string }>
 }
 
 export default async function MovimientosPage({ searchParams }: Props) {
@@ -15,9 +15,10 @@ export default async function MovimientosPage({ searchParams }: Props) {
   const tipoProy = params.tipoProy ?? 'todos'
   const estadoPago = params.estadoPago ?? 'todos'
   const estadoCausacion = params.estadoCausacion ?? 'todos'
+  const createdBy = params.createdBy ?? 'todos'
 
-  const [{ movimientos, totales, regimenFiscal }, { proyectos }, { role }] = await Promise.all([
-    getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago, estadoCausacion }),
+  const [{ movimientos, totales, regimenFiscal }, { proyectos, miembros }, { role }] = await Promise.all([
+    getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago, estadoCausacion, createdBy }),
     getFilterOptions(),
     getWorkspace(),
   ])
@@ -33,8 +34,10 @@ export default async function MovimientosPage({ searchParams }: Props) {
       filtroTipoProy={tipoProy}
       filtroEstadoPago={estadoPago}
       filtroEstadoCausacion={estadoCausacion}
+      filtroCreatedBy={createdBy}
       regimenFiscal={regimenFiscal}
       proyectos={proyectos}
+      miembros={miembros}
       role={role ?? 'read_only'}
     />
   )

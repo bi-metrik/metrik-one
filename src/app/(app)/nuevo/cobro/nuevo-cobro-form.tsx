@@ -56,7 +56,7 @@ export default function NuevoCobroForm({ facturas }: Props) {
       })
       if (res.success) {
         toast.success('Cobro registrado')
-        router.push('/numeros')
+        router.back()
       } else {
         toast.error(res.error)
       }

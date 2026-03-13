@@ -117,27 +117,23 @@ export async function getProyectoDetalle(id: string) {
       .eq('workspace_id', workspaceId)
       .order('fecha_emision', { ascending: false }),
 
-    // Last 10 activity entries (horas + gastos + cobros combined via UNION-like query)
-    // We fetch each separately and merge client-side for simplicity
+    // All activity entries (horas + gastos + cobros) — no limit
     Promise.all([
       supabase
         .from('horas')
         .select('id, fecha, horas, descripcion, created_at, staff:staff_id(full_name)')
         .eq('proyecto_id', id)
-        .order('fecha', { ascending: false })
-        .limit(10),
+        .order('fecha', { ascending: false }),
       supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, categoria, created_at')
+        .select('id, fecha, monto, descripcion, categoria, created_at, tipo, estado_pago, estado_causacion, soporte_url, deducible, created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
         .eq('proyecto_id', id)
-        .order('fecha', { ascending: false })
-        .limit(10),
+        .order('fecha', { ascending: false }),
       supabase
         .from('cobros')
         .select('id, fecha, monto, notas, created_at')
         .eq('proyecto_id', id)
-        .order('fecha', { ascending: false })
-        .limit(10),
+        .order('fecha', { ascending: false }),
     ]),
 
     // Active staff list for horas dialog
@@ -210,11 +206,42 @@ export async function getProyectoDetalle(id: string) {
     .eq('id', id)
     .single()
 
+  // Separate lists for tabs
+  const gastosAll = (gastosRes.data ?? []).map(g => {
+    const profile = g.created_by_profile as { full_name: string } | null
+    return {
+      id: g.id,
+      fecha: g.fecha ?? '',
+      monto: g.monto ?? 0,
+      descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
+      categoria: g.categoria,
+      tipo: g.tipo,
+      estado_pago: g.estado_pago,
+      estado_causacion: g.estado_causacion ?? 'PENDIENTE',
+      soporte_url: g.soporte_url,
+      deducible: g.deducible ?? false,
+      created_by_name: profile?.full_name ?? null,
+    }
+  })
+
+  const horasAll = (horasRes.data ?? []).map(h => {
+    const staffName = (h.staff as unknown as { full_name: string } | null)?.full_name
+    return {
+      id: h.id,
+      fecha: h.fecha ?? '',
+      horas: h.horas ?? 0,
+      descripcion: h.descripcion ?? 'Horas registradas',
+      staff_name: staffName ?? null,
+    }
+  })
+
   return {
     financiero: financieroRes.data,
     rubros: rubrosRes.data ?? [],
     facturas: facturasRes.data ?? [],
     timeline,
+    gastosAll,
+    horasAll,
     rubrosLista: rubrosLista ?? [],
     staffList: (staffRes.data ?? []).map(s => ({
       id: s.id,

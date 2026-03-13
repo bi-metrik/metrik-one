@@ -18,6 +18,8 @@ export default async function ProyectoDetailPage({ params }: Props) {
       rubros={data.rubros}
       facturas={data.facturas}
       timeline={data.timeline}
+      gastosAll={data.gastosAll}
+      horasAll={data.horasAll}
       rubrosLista={data.rubrosLista}
       staffList={data.staffList}
       cotizacionId={data.cotizacionId}

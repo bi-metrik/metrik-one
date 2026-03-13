@@ -9,7 +9,7 @@ import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { toast } from 'sonner'
 import { getRolePermissions } from '@/lib/roles'
 import type { Movimiento } from './actions'
-import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento } from './actions'
+import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento, aprobarTodos } from './actions'
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -29,8 +29,10 @@ interface Props {
   filtroTipoProy: string
   filtroEstadoPago: string
   filtroEstadoCausacion: string
+  filtroCreatedBy: string
   regimenFiscal: string | null
   proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
+  miembros: { id: string; nombre: string }[]
   role: string
 }
 
@@ -68,7 +70,7 @@ const CAUSACION_BADGES: Record<string, { label: string; className: string } | nu
 export default function MovimientosClient({
   movimientos, totales, filtroTipo, filtroMes,
   filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago,
-  filtroEstadoCausacion, regimenFiscal, proyectos, role,
+  filtroEstadoCausacion, filtroCreatedBy, regimenFiscal, proyectos, miembros, role,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -92,7 +94,7 @@ export default function MovimientosClient({
   const [showFilters, setShowFilters] = useState(false)
 
   // Count active filters (excluding 'todos')
-  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago, filtroEstadoCausacion].filter(f => f !== 'todos').length
+  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago, filtroEstadoCausacion, filtroCreatedBy].filter(f => f !== 'todos').length
 
   // Auto-open filters if any are active
   useEffect(() => {
@@ -144,6 +146,7 @@ export default function MovimientosClient({
     params.delete('tipoProy')
     params.delete('estadoPago')
     params.delete('estadoCausacion')
+    params.delete('createdBy')
     router.push(`/movimientos?${params.toString()}`)
   }
 
@@ -195,6 +198,23 @@ export default function MovimientosClient({
         toast.success('Movimiento rechazado')
         setRechazoModal(null)
         setRechazoMotivo('')
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  // Pendientes visibles (for bulk approve)
+  const pendientesVisibles = movimientos.filter(m => m.estado_causacion === 'PENDIENTE')
+
+  function handleAprobarTodos() {
+    if (pendientesVisibles.length === 0) return
+    startTransition(async () => {
+      const items = pendientesVisibles.map(m => ({ tabla: m.tabla, id: m.id }))
+      const res = await aprobarTodos(items)
+      if (res.success) {
+        toast.success(`${res.count} movimientos aprobados`)
         router.refresh()
       } else {
         toast.error(res.error)
@@ -363,6 +383,22 @@ export default function MovimientosClient({
             </select>
           </div>
 
+          {/* Row 3: Registrado por */}
+          {miembros.length > 1 && (
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={filtroCreatedBy}
+                onChange={e => navigate('createdBy', e.target.value)}
+                className="rounded-md border bg-background px-2 py-1.5 text-xs"
+              >
+                <option value="todos">Todos los usuarios</option>
+                {miembros.map(m => (
+                  <option key={m.id} value={m.id}>{m.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {activeFilterCount > 0 && (
             <button
               onClick={clearFilters}
@@ -372,6 +408,18 @@ export default function MovimientosClient({
             </button>
           )}
         </div>
+      )}
+
+      {/* Aprobar todo button */}
+      {perms.canApproveCausacion && pendientesVisibles.length > 0 && (
+        <button
+          onClick={handleAprobarTodos}
+          disabled={isPending}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50"
+        >
+          <ShieldCheck className="h-4 w-4" />
+          {isPending ? 'Aprobando...' : `Aprobar todo (${pendientesVisibles.length})`}
+        </button>
       )}
 
       {/* D142: Tooltip educativo — Deducible (primera vez) */}

@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
+import { useState, useEffect, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Building2, Lightbulb } from 'lucide-react'
+import { ArrowLeft, Building2, Lightbulb, Paperclip, X, FileText, Image } from 'lucide-react'
 import { toast } from 'sonner'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
-import { createGasto, getRubrosProyecto } from './gasto-action'
+import { createGasto, getRubrosProyecto, uploadSoporteGasto } from './gasto-action'
 
 // Categorías empresa: solo las últimas 4 (arriendo, marketing, capacitación, otros)
 const CATEGORIAS_EMPRESA = CATEGORIAS_GASTO.filter(c =>
@@ -40,6 +40,10 @@ export default function NuevoGastoForm({ proyectos }: Props) {
   const [descripcion, setDescripcion] = useState('')
   const [deducible, setDeducible] = useState(false)
   const [yaPagado, setYaPagado] = useState(true)
+  const [soporteFile, setSoporteFile] = useState<File | null>(null)
+  const [soportePreview, setSoportePreview] = useState<string | null>(null)
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Rubros for selected project
   const [rubros, setRubros] = useState<{ id: string; nombre: string; tipo: string | null }[]>([])
@@ -89,6 +93,28 @@ export default function NuevoGastoForm({ proyectos }: Props) {
     }
   }, [categoriasVisibles, categoria])
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('El archivo supera 5MB')
+      return
+    }
+    setSoporteFile(file)
+    if (file.type.startsWith('image/')) {
+      setSoportePreview(URL.createObjectURL(file))
+    } else {
+      setSoportePreview(null)
+    }
+  }
+
+  const clearSoporte = () => {
+    setSoporteFile(null)
+    if (soportePreview) URL.revokeObjectURL(soportePreview)
+    setSoportePreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
   const handleSubmit = () => {
     const montoNum = parseFloat(monto)
     if (!montoNum || montoNum <= 0) {
@@ -96,6 +122,22 @@ export default function NuevoGastoForm({ proyectos }: Props) {
       return
     }
     startTransition(async () => {
+      let soporteUrl: string | null = null
+
+      // Upload soporte if provided
+      if (soporteFile) {
+        setUploadingFile(true)
+        const fd = new FormData()
+        fd.append('file', soporteFile)
+        const uploadRes = await uploadSoporteGasto(fd)
+        setUploadingFile(false)
+        if (!uploadRes.success) {
+          toast.error(uploadRes.error)
+          return
+        }
+        soporteUrl = uploadRes.url
+      }
+
       const res = await createGasto({
         monto: montoNum,
         categoria,
@@ -105,10 +147,11 @@ export default function NuevoGastoForm({ proyectos }: Props) {
         proyecto_id: proyectoId || null,
         rubro_id: rubroId || null,
         estado_pago: yaPagado ? 'pagado' : 'pendiente',
+        soporte_url: soporteUrl,
       })
       if (res.success) {
         toast.success('Gasto registrado')
-        router.push('/numeros')
+        router.back()
       } else {
         toast.error(res.error)
       }
@@ -247,6 +290,47 @@ export default function NuevoGastoForm({ proyectos }: Props) {
           />
         </div>
 
+        {/* Soporte */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Soporte (factura/recibo)</label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          {soporteFile ? (
+            <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
+              {soportePreview ? (
+                <Image className="h-4 w-4 text-blue-500 shrink-0" />
+              ) : (
+                <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+              )}
+              <span className="flex-1 truncate text-sm">{soporteFile.name}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {(soporteFile.size / 1024).toFixed(0)} KB
+              </span>
+              <button
+                type="button"
+                onClick={clearSoporte}
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full items-center gap-2 rounded-md border border-dashed bg-background px-3 py-2.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground transition-colors"
+            >
+              <Paperclip className="h-4 w-4" />
+              Adjuntar foto o PDF
+            </button>
+          )}
+        </div>
+
         {/* Deducible */}
         <div className="flex items-center justify-between">
           <label className="flex items-center gap-2">
@@ -271,7 +355,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
           disabled={isPending || !monto}
           className="w-full rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          {isPending ? 'Registrando...' : 'Registrar gasto'}
+          {isPending ? (uploadingFile ? 'Subiendo soporte...' : 'Registrando...') : 'Registrar gasto'}
         </button>
       </div>
     </div>

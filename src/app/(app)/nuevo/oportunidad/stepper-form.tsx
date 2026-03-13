@@ -172,7 +172,7 @@ export default function StepperForm() {
       })
       if (res.success) {
         toast.success('Oportunidad creada')
-        router.push('/pipeline')
+        router.back()
       } else {
         toast.error(res.error)
       }

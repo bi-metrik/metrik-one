@@ -19,7 +19,7 @@ export default function NuevoContactoForm() {
       const res = await createContacto(fd)
       if (res.success) {
         toast.success('Contacto creado')
-        router.push('/directorio/contactos')
+        router.back()
       } else {
         toast.error(res.error)
       }

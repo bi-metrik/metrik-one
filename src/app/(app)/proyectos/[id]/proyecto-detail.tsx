@@ -91,11 +91,35 @@ interface StaffOption {
   es_principal: boolean | null
 }
 
+interface GastoEntry {
+  id: string
+  fecha: string
+  monto: number
+  descripcion: string
+  categoria: string | null
+  tipo: string | null
+  estado_pago: string | null
+  estado_causacion: string
+  soporte_url: string | null
+  deducible: boolean
+  created_by_name: string | null
+}
+
+interface HoraEntry {
+  id: string
+  fecha: string
+  horas: number
+  descripcion: string
+  staff_name: string | null
+}
+
 interface Props {
   financiero: Financiero
   rubros: Rubro[]
   facturas: Factura[]
   timeline: TimelineEntry[]
+  gastosAll: GastoEntry[]
+  horasAll: HoraEntry[]
   rubrosLista: RubroLista[]
   staffList: StaffOption[]
   cotizacionId?: string | null
@@ -109,6 +133,8 @@ export default function ProyectoDetail({
   rubros,
   facturas,
   timeline,
+  gastosAll,
+  horasAll,
   rubrosLista,
   staffList,
   cotizacionId,
@@ -120,6 +146,7 @@ export default function ProyectoDetail({
   const [avance, setAvance] = useState(f.avance_porcentaje ?? 0)
   const [dialog, setDialog] = useState<'gasto' | 'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
   const [showRubros, setShowRubros] = useState(false)
+  const [registrosTab, setRegistrosTab] = useState<'gastos' | 'horas' | 'facturas'>('gastos')
 
   // Auto-open dialog from URL param (e.g. ?action=gasto)
   useEffect(() => {
@@ -388,104 +415,170 @@ export default function ProyectoDetail({
         </div>
       )}
 
-      {/* ─── Facturas (only for client projects) ─── */}
-      {!isInterno && <div className="space-y-2 rounded-lg border p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Facturas ({facturas.length})</h2>
-          {!isCerrado && (
-            <button
-              onClick={() => setDialog('factura')}
-              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              <Plus className="h-3 w-3" />
-              Factura
-            </button>
-          )}
-        </div>
-        {facturas.length === 0 ? (
-          <p className="py-3 text-center text-xs text-muted-foreground">Sin facturas</p>
-        ) : (
-          <div className="space-y-1.5">
-            {facturas.map(fac => {
-              const estadoPago = fac.estado_pago ?? 'pendiente'
-              const estadoColor = estadoPago === 'pagada'
-                ? 'bg-green-100 text-green-700'
-                : estadoPago === 'parcial'
-                  ? 'bg-yellow-100 text-yellow-700'
-                  : 'bg-gray-100 text-gray-600'
-              const dias = fac.dias_antiguedad ?? 0
-
-              return (
-                <div
-                  key={fac.factura_id}
-                  className="flex items-center justify-between rounded-md border p-2.5"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <FileText className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                      <span className="text-xs font-medium truncate">
-                        {fac.numero_factura || 'Sin numero'}
-                      </span>
-                      <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${estadoColor}`}>
-                        {estadoPago === 'pagada' ? 'Pagada' : estadoPago === 'parcial' ? 'Parcial' : 'Pendiente'}
-                      </span>
-                      {dias > 60 && estadoPago !== 'pagada' && (
-                        <span title={`${dias} dias`}>
-                          <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {formatCOP(fac.cobrado ?? 0)} cobrado de {formatCOP(fac.monto ?? 0)}
-                    </p>
-                  </div>
-                  {estadoPago !== 'pagada' && (
-                    <button
-                      onClick={() => setDialog('cobro')}
-                      className="shrink-0 rounded-md p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/30"
-                      title="Registrar cobro"
-                    >
-                      <Banknote className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>}
-
-      {/* ─── Últimos registros (timeline) ─── */}
+      {/* ─── Registros (tabs: Gastos, Horas, Facturas) ─── */}
       <div className="space-y-2 rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Últimos registros</h2>
-        {timeline.length === 0 ? (
-          <p className="py-3 text-center text-xs text-muted-foreground">Sin registros</p>
-        ) : (
-          <div className="space-y-1.5">
-            {timeline.map(t => {
-              const icon = t.tipo === 'horas'
-                ? <Clock className="h-3.5 w-3.5 text-blue-500" />
-                : t.tipo === 'gasto'
-                  ? <Receipt className="h-3.5 w-3.5 text-orange-500" />
-                  : <Banknote className="h-3.5 w-3.5 text-green-500" />
-              const valueText = t.tipo === 'horas'
-                ? `${t.valor}h`
-                : formatCOP(t.valor)
+        {/* Tab bar */}
+        <div className="flex gap-1 rounded-lg bg-muted p-1">
+          {([
+            { key: 'gastos' as const, label: 'Gastos', count: gastosAll.length },
+            { key: 'horas' as const, label: 'Horas', count: horasAll.length },
+            ...(!isInterno ? [{ key: 'facturas' as const, label: 'Facturas', count: facturas.length }] : []),
+          ]).map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setRegistrosTab(tab.key)}
+              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                registrosTab === tab.key
+                  ? 'bg-background shadow-sm text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab.label} ({tab.count})
+            </button>
+          ))}
+        </div>
 
-              return (
-                <div key={t.id} className="flex items-center justify-between rounded-md p-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {icon}
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium truncate">{t.descripcion}</p>
-                      <p className="text-[10px] text-muted-foreground">{t.fecha}</p>
+        {/* Tab: Gastos */}
+        {registrosTab === 'gastos' && (
+          gastosAll.length === 0 ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">Sin gastos registrados</p>
+          ) : (
+            <div className="space-y-1">
+              {gastosAll.map(g => {
+                const causacionClass =
+                  g.estado_causacion === 'PENDIENTE' ? 'bg-red-100 text-red-800' :
+                  g.estado_causacion === 'APROBADO' ? 'bg-yellow-100 text-yellow-800' :
+                  g.estado_causacion === 'RECHAZADO' ? 'bg-gray-100 text-gray-600' : ''
+                const causacionLabel =
+                  g.estado_causacion === 'PENDIENTE' ? 'Pendiente' :
+                  g.estado_causacion === 'APROBADO' ? 'Aprobado' :
+                  g.estado_causacion === 'RECHAZADO' ? 'Rechazado' : null
+                return (
+                  <div key={g.id} className="rounded-lg border bg-card px-3 py-2.5">
+                    <div className="flex items-start gap-3">
+                      <Receipt className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="truncate text-sm font-medium">{g.descripcion}</p>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums text-red-600 dark:text-red-400">
+                            -{formatCOP(g.monto)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {g.fecha}
+                          {g.categoria && <> · <span className="capitalize">{g.categoria.replace(/_/g, ' ')}</span></>}
+                          {g.created_by_name && <> · {g.created_by_name}</>}
+                        </p>
+                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                          {causacionLabel && (
+                            <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${causacionClass}`}>
+                              {causacionLabel}
+                            </span>
+                          )}
+                          {g.estado_pago === 'pendiente' && (
+                            <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-800">
+                              <Clock className="h-2.5 w-2.5" />
+                              Pend. pago
+                            </span>
+                          )}
+                          {g.deducible && (
+                            <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800">
+                              Deducible
+                            </span>
+                          )}
+                          {g.soporte_url && !g.soporte_url.startsWith('wamid.') && (
+                            <span className="inline-flex h-4 w-4 items-center justify-center rounded bg-blue-50 text-blue-600">
+                              <FileText className="h-2.5 w-2.5" />
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <span className="shrink-0 text-xs font-medium">{valueText}</span>
+                )
+              })}
+            </div>
+          )
+        )}
+
+        {/* Tab: Horas */}
+        {registrosTab === 'horas' && (
+          horasAll.length === 0 ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">Sin horas registradas</p>
+          ) : (
+            <div className="space-y-1">
+              {horasAll.map(h => (
+                <div key={h.id} className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Clock className="h-4 w-4 text-blue-500 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{h.descripcion}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {h.fecha}
+                        {h.staff_name && <> · {h.staff_name}</>}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-blue-600">{h.horas}h</span>
                 </div>
-              )
-            })}
-          </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {/* Tab: Facturas */}
+        {registrosTab === 'facturas' && !isInterno && (
+          facturas.length === 0 ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">Sin facturas</p>
+          ) : (
+            <div className="space-y-1.5">
+              {facturas.map(fac => {
+                const estadoPago = fac.estado_pago ?? 'pendiente'
+                const estadoColor = estadoPago === 'pagada'
+                  ? 'bg-green-100 text-green-700'
+                  : estadoPago === 'parcial'
+                    ? 'bg-yellow-100 text-yellow-700'
+                    : 'bg-gray-100 text-gray-600'
+                const dias = fac.dias_antiguedad ?? 0
+
+                return (
+                  <div
+                    key={fac.factura_id}
+                    className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <FileText className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                        <span className="text-xs font-medium truncate">
+                          {fac.numero_factura || 'Sin numero'}
+                        </span>
+                        <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${estadoColor}`}>
+                          {estadoPago === 'pagada' ? 'Pagada' : estadoPago === 'parcial' ? 'Parcial' : 'Pendiente'}
+                        </span>
+                        {dias > 60 && estadoPago !== 'pagada' && (
+                          <span title={`${dias} dias`}>
+                            <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {formatCOP(fac.cobrado ?? 0)} cobrado de {formatCOP(fac.monto ?? 0)}
+                      </p>
+                    </div>
+                    {estadoPago !== 'pagada' && (
+                      <button
+                        onClick={() => setDialog('cobro')}
+                        className="shrink-0 rounded-md p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/30"
+                        title="Registrar cobro"
+                      >
+                        <Banknote className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
         )}
       </div>
 
