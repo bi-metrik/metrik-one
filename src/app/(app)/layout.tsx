@@ -53,6 +53,7 @@ export default async function AppLayout({
       workspaceName={workspace.name}
       workspaceSlug={workspace.slug}
       role={profile.role}
+      isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}
       branding={{
         colorPrimario: workspace.color_primario ?? undefined,
         colorSecundario: workspace.color_secundario ?? undefined,
