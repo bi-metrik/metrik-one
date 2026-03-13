@@ -13,6 +13,7 @@ export type Movimiento = {
   descripcion: string
   categoria: string | null
   proyecto: string | null
+  proyecto_codigo: string | null
   deducible: boolean
   soporte_url: string | null
   tipo_gasto: 'directo' | 'empresa' | 'fijo' | null
@@ -86,7 +87,7 @@ export async function getMovimientos(filters?: {
     if (!skipGastos) {
       let query = supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
+        .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
         .eq('workspace_id', workspaceId)
         .gte('fecha', startDate)
         .lte('fecha', endDate)
@@ -107,14 +108,19 @@ export async function getMovimientos(filters?: {
         query = query.eq('id', '00000000-0000-0000-0000-000000000000') // impossible match
       }
       if (estadoPagoFilter) query = query.eq('estado_pago', estadoPagoFilter)
-      if (estadoCausacionFilter) query = query.eq('estado_causacion', estadoCausacionFilter)
+      if (estadoCausacionFilter) {
+        query = query.eq('estado_causacion', estadoCausacionFilter)
+      } else {
+        // Hide rejected by default
+        query = query.neq('estado_causacion', 'RECHAZADO')
+      }
 
       query = query.order('fecha', { ascending: false })
 
       const { data: gastos } = await query
 
       for (const g of gastos ?? []) {
-        const proy = g.proyectos as { nombre: string } | null
+        const proy = g.proyectos as { nombre: string; codigo: string } | null
         const profile = g.created_by_profile as { full_name: string } | null
         results.push({
           id: g.id,
@@ -125,6 +131,7 @@ export async function getMovimientos(filters?: {
           descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
           categoria: g.categoria,
           proyecto: proy?.nombre ?? null,
+          proyecto_codigo: proy?.codigo ?? null,
           deducible: g.deducible ?? false,
           soporte_url: g.soporte_url ?? null,
           tipo_gasto: (g.tipo as Movimiento['tipo_gasto']) ?? null,
@@ -146,7 +153,7 @@ export async function getMovimientos(filters?: {
   if ((tipoFilter === 'todos' || tipoFilter === 'ingresos') && !skipIngresos) {
     let query = supabase
       .from('cobros')
-      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
+      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
@@ -160,14 +167,19 @@ export async function getMovimientos(filters?: {
     } else if (proyectoIdsByTipo && proyectoIdsByTipo.length === 0) {
       query = query.eq('id', '00000000-0000-0000-0000-000000000000')
     }
-    if (estadoCausacionFilter) query = query.eq('estado_causacion', estadoCausacionFilter)
+    if (estadoCausacionFilter) {
+      query = query.eq('estado_causacion', estadoCausacionFilter)
+    } else {
+      // Hide rejected by default
+      query = query.neq('estado_causacion', 'RECHAZADO')
+    }
 
     query = query.order('fecha', { ascending: false })
 
     const { data: cobros } = await query
 
     for (const c of cobros ?? []) {
-      const proy = c.proyectos as { nombre: string } | null
+      const proy = c.proyectos as { nombre: string; codigo: string } | null
       const profile = c.created_by_profile as { full_name: string } | null
       results.push({
         id: c.id,
@@ -178,6 +190,7 @@ export async function getMovimientos(filters?: {
         descripcion: c.notas ?? 'Cobro',
         categoria: null,
         proyecto: proy?.nombre ?? null,
+        proyecto_codigo: proy?.codigo ?? null,
         deducible: false,
         soporte_url: null,
         tipo_gasto: null,
@@ -224,7 +237,7 @@ export async function getFilterOptions() {
 
   const { data } = await supabase
     .from('proyectos')
-    .select('id, nombre, tipo')
+    .select('id, nombre, tipo, codigo')
     .eq('workspace_id', workspaceId)
     .in('estado', ['en_ejecucion', 'cerrado'])
     .order('nombre')
@@ -234,6 +247,7 @@ export async function getFilterOptions() {
       id: p.id,
       nombre: p.nombre ?? 'Sin nombre',
       tipo: p.tipo ?? 'cliente',
+      codigo: p.codigo ?? '',
     })),
   }
 }

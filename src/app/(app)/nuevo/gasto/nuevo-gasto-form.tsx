@@ -13,8 +13,18 @@ const CATEGORIAS_EMPRESA = CATEGORIAS_GASTO.filter(c =>
   ['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
 )
 
+// Mapping from rubro tipo (cotización) to allowed expense categories
+const RUBRO_TO_CATEGORIAS: Record<string, string[]> = {
+  mo_propia: ['servicios_profesionales'],
+  mo_terceros: ['servicios_profesionales'],
+  materiales: ['materiales'],
+  viaticos: ['transporte', 'alimentacion'],
+  software: ['software'],
+  servicios_prof: ['servicios_profesionales'],
+}
+
 interface Props {
-  proyectos: { id: string; nombre: string; tipo: string }[]
+  proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
 }
 
 export default function NuevoGastoForm({ proyectos }: Props) {
@@ -32,12 +42,30 @@ export default function NuevoGastoForm({ proyectos }: Props) {
   const [yaPagado, setYaPagado] = useState(true)
 
   // Rubros for selected project
-  const [rubros, setRubros] = useState<{ id: string; nombre: string }[]>([])
+  const [rubros, setRubros] = useState<{ id: string; nombre: string; tipo: string | null }[]>([])
   const [loadingRubros, setLoadingRubros] = useState(false)
 
   const isEmpresa = proyectoId === 'empresa'
   const isProyecto = proyectoId !== 'empresa'
-  const categoriasVisibles = isEmpresa ? CATEGORIAS_EMPRESA : CATEGORIAS_GASTO
+
+  // When project is selected, filter categories to only those matching the project's rubro types
+  const categoriasVisibles = (() => {
+    if (isEmpresa) return CATEGORIAS_EMPRESA
+    if (rubros.length === 0) return CATEGORIAS_GASTO
+    // Collect all allowed categories from the project's rubros
+    const allowedCats = new Set<string>()
+    for (const rubro of rubros) {
+      const cats = rubro.tipo ? RUBRO_TO_CATEGORIAS[rubro.tipo] : null
+      if (cats) {
+        cats.forEach(c => allowedCats.add(c))
+      }
+    }
+    // If no rubros have tipo mapping, show all categories
+    if (allowedCats.size === 0) return CATEGORIAS_GASTO
+    // Always include 'otros' as fallback
+    allowedCats.add('otros')
+    return CATEGORIAS_GASTO.filter(c => allowedCats.has(c.value))
+  })()
 
   // Fetch rubros when project changes
   useEffect(() => {
@@ -54,12 +82,12 @@ export default function NuevoGastoForm({ proyectos }: Props) {
     }
   }, [proyectoId, isProyecto])
 
-  // Reset categoria when switching to empresa if current isn't in empresa subset
+  // Reset categoria when available categories change and current isn't in the list
   useEffect(() => {
-    if (isEmpresa && !CATEGORIAS_EMPRESA.some(c => c.value === categoria)) {
-      setCategoria('arriendo')
+    if (!categoriasVisibles.some(c => c.value === categoria)) {
+      setCategoria(categoriasVisibles[0]?.value ?? 'otros')
     }
-  }, [isEmpresa, categoria])
+  }, [categoriasVisibles, categoria])
 
   const handleSubmit = () => {
     const montoNum = parseFloat(monto)
@@ -131,7 +159,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
               <optgroup label="Proyectos activos">
                 {proyectos.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.nombre}{p.tipo === 'interno' ? ' · Interno' : ''}
+                    {p.codigo} — {p.nombre}{p.tipo === 'interno' ? ' · Interno' : ''}
                   </option>
                 ))}
               </optgroup>

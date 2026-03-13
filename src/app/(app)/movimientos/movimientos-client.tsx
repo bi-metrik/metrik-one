@@ -30,7 +30,7 @@ interface Props {
   filtroEstadoPago: string
   filtroEstadoCausacion: string
   regimenFiscal: string | null
-  proyectos: { id: string; nombre: string; tipo: string }[]
+  proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
   role: string
 }
 
@@ -320,7 +320,7 @@ export default function MovimientosClient({
               <option value="empresa">Empresa (sin proyecto)</option>
               {proyectos.map(p => (
                 <option key={p.id} value={p.id}>
-                  {p.nombre}{p.tipo === 'interno' ? ' · Int' : ''}
+                  {p.codigo} {p.nombre}{p.tipo === 'interno' ? ' · Int' : ''}
                 </option>
               ))}
             </select>
@@ -457,9 +457,13 @@ export default function MovimientosClient({
                             </span>
                           </div>
 
-                          {/* Line 2: Proyecto + Categoria */}
+                          {/* Line 2: Proyecto (con codigo) + Categoria */}
                           {(mov.proyecto || mov.categoria) && (
                             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                              {mov.proyecto_codigo && (
+                                <span className="font-medium text-foreground/70">{mov.proyecto_codigo}</span>
+                              )}
+                              {mov.proyecto_codigo && mov.proyecto && ' '}
                               {mov.proyecto}
                               {mov.proyecto && mov.categoria && ' · '}
                               {mov.categoria && (
@@ -476,7 +480,7 @@ export default function MovimientosClient({
                             </p>
                           )}
 
-                          {/* Line 3: Badges + User initials + Soporte */}
+                          {/* Line 3: Status badges */}
                           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                             {/* D246: Causación badge */}
                             {causacionBadge && (
@@ -518,21 +522,6 @@ export default function MovimientosClient({
                               </span>
                             )}
 
-                            {/* D119: Marcar como pagado button */}
-                            {mov.estado_pago === 'pendiente' && (
-                              <button
-                                onClick={() => {
-                                  setPagoModal({ id: mov.id, descripcion: mov.descripcion, monto: mov.monto, fecha: mov.fecha })
-                                  setFechaPago(new Date().toISOString().split('T')[0])
-                                }}
-                                className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60 transition-colors"
-                                title="Marcar como pagado"
-                              >
-                                <CheckCircle2 className="h-2.5 w-2.5" />
-                                Pagado
-                              </button>
-                            )}
-
                             {/* Deducible / Falta soporte tags */}
                             {tag === 'deducible' && (
                               <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
@@ -552,32 +541,6 @@ export default function MovimientosClient({
 
                             {/* Spacer */}
                             <div className="flex-1" />
-
-                            {/* D246: Aprobar / Rechazar buttons (owner/admin + PENDIENTE only) */}
-                            {perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE' && (
-                              <>
-                                <button
-                                  onClick={() => handleAprobar(mov.tabla, mov.id)}
-                                  disabled={isPending}
-                                  className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 transition-colors disabled:opacity-50"
-                                  title="Aprobar movimiento"
-                                >
-                                  <ShieldCheck className="h-2.5 w-2.5" />
-                                  Aprobar
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setRechazoModal({ tabla: mov.tabla, id: mov.id, descripcion: mov.descripcion })
-                                    setRechazoMotivo('')
-                                  }}
-                                  disabled={isPending}
-                                  className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-300 dark:hover:bg-red-900/60 transition-colors disabled:opacity-50"
-                                  title="Rechazar movimiento"
-                                >
-                                  <ShieldX className="h-2.5 w-2.5" />
-                                </button>
-                              </>
-                            )}
 
                             {/* User initials avatar */}
                             {mov.created_by_initials && (
@@ -607,6 +570,55 @@ export default function MovimientosClient({
                               </span>
                             ) : null}
                           </div>
+
+                          {/* Line 4: Action buttons — visually separated */}
+                          {((perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE') || mov.estado_pago === 'pendiente') && (
+                            <div className="mt-2 flex items-center gap-2 border-t pt-2">
+                              {/* D246: Aprobar */}
+                              {perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE' && (
+                                <button
+                                  onClick={() => handleAprobar(mov.tabla, mov.id)}
+                                  disabled={isPending}
+                                  className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50"
+                                  title="Aprobar movimiento"
+                                >
+                                  <ShieldCheck className="h-3 w-3" />
+                                  Aprobar
+                                </button>
+                              )}
+
+                              {/* D246: Rechazar */}
+                              {perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE' && (
+                                <button
+                                  onClick={() => {
+                                    setRechazoModal({ tabla: mov.tabla, id: mov.id, descripcion: mov.descripcion })
+                                    setRechazoMotivo('')
+                                  }}
+                                  disabled={isPending}
+                                  className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-red-50 px-2.5 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                                  title="Rechazar movimiento"
+                                >
+                                  <ShieldX className="h-3 w-3" />
+                                  Rechazar
+                                </button>
+                              )}
+
+                              {/* D119: Marcar como pagado */}
+                              {mov.estado_pago === 'pendiente' && (
+                                <button
+                                  onClick={() => {
+                                    setPagoModal({ id: mov.id, descripcion: mov.descripcion, monto: mov.monto, fecha: mov.fecha })
+                                    setFechaPago(new Date().toISOString().split('T')[0])
+                                  }}
+                                  className="inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-2.5 py-1 text-[11px] font-medium text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50 transition-colors"
+                                  title="Marcar como pagado"
+                                >
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Pagado
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

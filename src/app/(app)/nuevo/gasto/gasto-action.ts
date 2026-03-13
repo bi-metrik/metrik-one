@@ -76,7 +76,7 @@ export async function getProyectosParaGasto() {
 
   const { data } = await supabase
     .from('proyectos')
-    .select('id, nombre, tipo')
+    .select('id, nombre, tipo, codigo')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'en_ejecucion')
     .order('nombre')
@@ -85,6 +85,7 @@ export async function getProyectosParaGasto() {
     id: p.id,
     nombre: p.nombre ?? 'Sin nombre',
     tipo: p.tipo ?? 'cliente',
+    codigo: p.codigo ?? '',
   }))
 }
 
@@ -96,7 +97,7 @@ export async function getRubrosProyecto(proyectoId: string) {
 
   const { data } = await supabase
     .from('proyecto_rubros')
-    .select('id, nombre')
+    .select('id, nombre, tipo')
     .eq('proyecto_id', proyectoId)
     .order('created_at')
 
