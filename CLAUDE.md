@@ -283,11 +283,25 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-02-26 | Causacion contable (D246), docs MVP v1.0 |
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
-## Estado actual (2026-03-04)
+## Ultimo avance
+**Sesion:** 2026-03-13
+**Branch:** main
+
+Que se hizo:
+- Dashboard admin Mi Bolsillo completo en `/admin/mibolsillo`
+- Cliente Supabase cross-project (`src/lib/supabase/mibolsillo.ts`) conectando a mibolsillo-prod con service role
+- 5 secciones de metricas: Usuarios, Revenue, Engagement, Retencion, Funnel
+- Charts con Recharts (trends 14d, funnel horizontal, top features)
+- Proteccion 3 capas: sidebar (prop `isAdminWorkspace`), page redirect, action guard via `ADMIN_WORKSPACE_ID`
+- Seccion "Admin" en sidebar solo visible para owner del workspace MéTRIK
+- Env vars configuradas en Vercel (MIBOLSILLO_SUPABASE_URL, MIBOLSILLO_SERVICE_ROLE_KEY, ADMIN_WORKSPACE_ID)
+- Deploy exitoso en produccion
+
+**Ultimo commit:** `d139864 feat: dashboard admin Mi Bolsillo — metricas SaaS en /admin/mibolsillo`
+
+## Estado actual (2026-03-13)
 
 - **Branch:** main (up to date con remote)
-- **Ultimo commit:** `f0112ac fix: normalizar ONE → one`
-- **Untracked:** `.claude/`, `README.md`, `docs/Specs/`, `src/app/(app)/dashboard/`
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
 
@@ -318,6 +332,14 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 - **Server actions:** Archivos en `src/lib/actions/` o colocados junto a la pagina que los usa.
 - **Idioma UI:** Espanol (Colombia). Textos hardcodeados, sin i18n.
 - **Nomenclatura:** "MéTRIK one" (one en minuscula) en toda la app. Isotipo: M₁.
+- **Modulos por empresa:** Cuando se necesite un modulo visible solo para un workspace especifico (ej: dashboard de otro producto, panel de control interno), seguir este patron:
+  1. Env var `ADMIN_WORKSPACE_ID` (o equivalente) con el UUID del workspace autorizado
+  2. Server layout pasa prop `isAdminWorkspace` comparando `profile.workspace_id === process.env.ADMIN_WORKSPACE_ID`
+  3. Sidebar condiciona la seccion con ese prop (client component no lee env vars)
+  4. Page server component valida `workspaceId` y redirect si no coincide
+  5. Server actions validan `workspaceId` como ultima barrera
+  6. Ruta bajo `/admin/[modulo]` — seccion "Admin" en sidebar
+  7. Env vars en Vercel con `printf` (no `echo`) para evitar trailing `\n`
 
 ## Documentacion existente
 
@@ -326,3 +348,16 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | `docs/FEATURES.md` | Todos los features por modulo con estado (implementado/schema listo/planeado) |
 | `docs/CHANGELOG.md` | Cambios por sprint con detalle de migraciones y features |
 | `docs/ARCHITECTURE.md` | Arquitectura tecnica completa: stack, infra, multi-tenancy, 48 tablas, roles, fiscal, navegacion |
+
+## Pendientes
+
+- [x] Dashboard Admin Mi Bolsillo (`/admin/mibolsillo`) — completado 2026-03-13
+
+## Decisiones clave
+
+| Fecha | Decision | Contexto |
+|-------|----------|----------|
+| 2026-03-12 | Dashboard Mi Bolsillo dentro de ONE, no standalone | Reunion directiva unanime. Mejor integrado al ecosistema ONE |
+| 2026-03-13 | Acceso a modulos por empresa via ADMIN_WORKSPACE_ID | Solo rol owner no basta — otros workspaces tambien tienen owners. Se necesita filtro por workspace UUID |
+| 2026-03-13 | Cross-project Supabase con service role key server-only | Patron para conectar a otros proyectos Supabase desde ONE. Nunca exponer key al client |
+| 2026-03-13 | Patron de modulos empresa-especificos estandarizado | Env var + 3 capas (sidebar prop, page redirect, action guard). Reusar para cualquier modulo futuro por workspace |
