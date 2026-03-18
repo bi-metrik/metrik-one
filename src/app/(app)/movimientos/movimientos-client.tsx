@@ -822,16 +822,16 @@ export default function MovimientosClient({
 
       {/* Soporte image lightbox */}
       <Dialog open={!!soporteModal} onOpenChange={() => setSoporteModal(null)}>
-        <DialogContent className="max-w-md p-2 sm:max-w-lg">
+        <DialogContent className="max-h-[90vh] max-w-md overflow-hidden p-2 sm:max-w-lg">
           <DialogTitle className="sr-only">Soporte</DialogTitle>
           {soporteModal && (
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               <p className="truncate px-2 pt-2 text-sm font-medium">{soporteModal.descripcion}</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={soporteModal.url}
                 alt="Soporte fotográfico"
-                className="w-full rounded-lg"
+                className="max-h-[75vh] w-full rounded-lg object-contain"
               />
             </div>
           )}
