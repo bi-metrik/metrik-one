@@ -44,8 +44,8 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Resolve category
-  const categoria = matchCategory(category_hint || concept || '') || 'otros';
+  // Resolve category — trust Gemini's category_hint first, matchCategory() as fallback
+  const categoria = category_hint || matchCategory(concept || '') || 'otros';
 
   // Fast path: project_code → exact match by código
   if (project_code) {
@@ -103,7 +103,10 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     // No match — show active projects
     const allActive = await findActiveProjects(supabase, user.workspace_id);
     if (allActive.length === 0) {
-      await ctx.sendMessage(`❌ No encontré "${entity_hint}". ¿Registro como gasto de empresa? (Sí/No)`);
+      await ctx.sendButtons(`❌ No encontré "${entity_hint}". ¿Registro como gasto de empresa?`, [
+        { id: 'operativo', title: '✅ Sí, empresa' },
+        { id: 'cancelar', title: '❌ Cancelar' },
+      ]);
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_DIRECTO', pending_action: 'W01',
         amount, categoria, parsed_fields: parsed.fields,
@@ -173,9 +176,10 @@ async function showGastoDirectoConfirmation(ctx: HandlerContext, project: any, a
     msg += `\n⚠️ Supera presupuesto restante.`;
   }
 
-  msg += '\n\n¿Confirmo? (Sí/No)';
-
-  await ctx.sendMessage(msg);
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
   // project.proyecto_id from v_proyecto_financiero, project.id from RPC
   const proyectoId = project.proyecto_id || project.id;
   await ctx.updateSession('confirming', {
@@ -222,7 +226,7 @@ async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  const categoria = matchCategory(category_hint || concept || '');
+  const categoria = category_hint || matchCategory(concept || '') || null;
 
   // D104: Disambiguation — if category is ambiguous (1-5) or low confidence
   if (
@@ -267,12 +271,14 @@ async function proceedGastoOperativo(ctx: HandlerContext, amount: number, concep
     let msg = `🔄 Confirmo gasto fijo del mes:\n\n📋 ${bold(borrador.nombre)} — Esperado: ${formatCOP(Number(borrador.monto_esperado))}\n💰 Tu pago: ${formatCOP(amount)} ${matchLabel}`;
 
     if (diff === 0 || Math.abs(diff) / Number(borrador.monto_esperado) < 0.2) {
-      msg += '\n\n¿Confirmo? (Sí/No)';
-      await ctx.sendMessage(msg);
+      await ctx.sendButtons(msg, [
+        { id: 'btn_confirm', title: '✅ Confirmar' },
+        { id: 'btn_cancel', title: '❌ Cancelar' },
+      ]);
       await ctx.updateSession('confirming', {
         intent: 'GASTO_OPERATIVO', pending_action: 'W02',
         amount, categoria, borrador_id: borrador.id,
-        parsed_fields: { concept },
+        parsed_fields: { concept, mensaje_original: ctx.parsed.fields.mensaje_original },
       });
     } else {
       await ctx.sendOptions(msg, [
@@ -283,7 +289,7 @@ async function proceedGastoOperativo(ctx: HandlerContext, amount: number, concep
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_OPERATIVO', pending_action: 'W02',
         amount, categoria, borrador_id: borrador.id,
-        parsed_fields: { concept },
+        parsed_fields: { concept, mensaje_original: ctx.parsed.fields.mensaje_original },
         options: [
           { id: 'confirmar_borrador', label: 'Confirmar borrador' },
           { id: 'nuevo', label: 'Gasto diferente' },
@@ -295,12 +301,15 @@ async function proceedGastoOperativo(ctx: HandlerContext, amount: number, concep
   }
 
   // No borrador match — direct confirmation
-  const msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}\n📅 Hoy\n\n¿Confirmo? (Sí/No)`;
-  await ctx.sendMessage(msg);
+  const msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}\n📅 Hoy`;
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
   await ctx.updateSession('confirming', {
     intent: 'GASTO_OPERATIVO', pending_action: 'W02',
     amount, categoria,
-    parsed_fields: { concept },
+    parsed_fields: { concept, mensaje_original: ctx.parsed.fields.mensaje_original },
   });
 }
 
@@ -423,12 +432,12 @@ async function showHorasConfirmation(ctx: HandlerContext, project: any, hours: n
 
   if (excede) {
     msg += `\n\n⚠️ Superaste el estimado de horas en ${Math.round(horasNuevo - horasEstimadas)}h. Esto reduce tu margen.`;
-    msg += '\n\n¿Confirmo de todas formas? (Sí/No)';
-  } else {
-    msg += '\n\n¿Confirmo? (Sí/No)';
   }
 
-  await ctx.sendMessage(msg);
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
   await ctx.updateSession('confirming', {
     intent: 'HORAS', pending_action: 'W03',
     proyecto_id: project.proyecto_id || project.id,
@@ -805,8 +814,11 @@ async function proceedCobroWithProject(ctx: HandlerContext, projectId: string, p
     .order('fecha_emision', { ascending: true });
 
   if (!facturas || facturas.length === 0) {
-    const msg = `💰 Cobro de ${formatCOP(amount)} para ${bold(projectName)}.\n\n⚠️ No hay facturas emitidas. Se registra como anticipo.\n\n¿Confirmo? (Sí/No)`;
-    await ctx.sendMessage(msg);
+    const msg = `💰 Cobro de ${formatCOP(amount)} para ${bold(projectName)}.\n\n⚠️ No hay facturas emitidas. Se registra como anticipo.`;
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     await ctx.updateSession('confirming', {
       proyecto_id: projectId, proyecto_nombre: projectName,
     });
@@ -817,8 +829,11 @@ async function proceedCobroWithProject(ctx: HandlerContext, projectId: string, p
     const f = facturas[0];
     const saldo = Number(f.saldo_pendiente);
     const isFullPayment = Math.abs(saldo - amount) < 100;
-    const msg = `💰 Cobro recibido:\n\n📂 Proyecto: ${bold(projectName)}\n📄 Factura: ${f.numero_factura || '#' + f.factura_id.slice(0, 4)} — Saldo: ${formatCOP(saldo)}\n💵 Cobro: ${formatCOP(amount)} ${isFullPayment ? '✅ Pago completo' : ''}\n\n¿Confirmo? (Sí/No)`;
-    await ctx.sendMessage(msg);
+    const msg = `💰 Cobro recibido:\n\n📂 Proyecto: ${bold(projectName)}\n📄 Factura: ${f.numero_factura || '#' + f.factura_id.slice(0, 4)} — Saldo: ${formatCOP(saldo)}\n💵 Cobro: ${formatCOP(amount)} ${isFullPayment ? '✅ Pago completo' : ''}`;
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     await ctx.updateSession('confirming', {
       proyecto_id: projectId, proyecto_nombre: projectName,
       factura_id: f.factura_id,
@@ -901,9 +916,11 @@ async function handleContactoNuevo(ctx: HandlerContext): Promise<void> {
   if (phone) msg += `\n📱 Teléfono: ${phone}`;
   if (role) msg += `\n💼 Rol: ${role}`;
   if (!phone && !role) msg += '\n\nNo tengo teléfono ni email.';
-  msg += '\n\n¿Confirmo? (Sí/No)';
 
-  await ctx.sendMessage(msg);
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
   await ctx.updateSession('confirming', {
     intent: 'CONTACTO_NUEVO', pending_action: 'W06',
     parsed_fields: parsed.fields,
@@ -939,8 +956,11 @@ async function handleSaldoBancario(ctx: HandlerContext): Promise<void> {
 
   if (!lastSaldo) {
     // First balance ever
-    const msg = `🏦 ¿Registro tu saldo inicial del banco en ${formatCOP(amount)}?\n\nEs tu primer registro de saldo. A partir de ahora, el sistema calculará la diferencia entre lo que registras y lo que debería haber según tus cobros y gastos.\n\n¿Confirmo? (Sí/No)`;
-    await ctx.sendMessage(msg);
+    const msg = `🏦 ¿Registro tu saldo inicial del banco en ${formatCOP(amount)}?\n\nEs tu primer registro de saldo. A partir de ahora, el sistema calculará la diferencia entre lo que registras y lo que debería haber según tus cobros y gastos.`;
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     await ctx.updateSession('confirming', {
       intent: 'SALDO_BANCARIO', pending_action: 'W32',
       amount, parsed_fields: parsed.fields,
@@ -1000,8 +1020,10 @@ async function handleSaldoBancario(ctx: HandlerContext): Promise<void> {
       ],
     });
   } else {
-    msg += '\n\n¿Confirmo? (Sí/No)';
-    await ctx.sendMessage(msg);
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     await ctx.updateSession('confirming', {
       intent: 'SALDO_BANCARIO', pending_action: 'W32',
       amount, parsed_fields: { ...parsed.fields, saldo_teorico: saldoTeorico, diferencia },
@@ -1018,30 +1040,38 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
   const context = session.context;
   const text = message.text.trim().toLowerCase();
 
-  // Handle confirmation (Sí/No)
+  // Handle confirmation (buttons or text)
   if (session.state === 'confirming') {
-    if (['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
+    const btnId = message.interactive_reply;
+    if (btnId === 'btn_confirm' || ['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
       await executeRegistro(ctx);
-    } else if (['no', 'cancelar', 'cancel', '❌', 'nel'].includes(text)) {
+    } else if (btnId === 'btn_cancel' || ['no', 'cancelar', 'cancel', '❌', 'nel'].includes(text)) {
       await ctx.sendMessage('❌ Cancelado.');
       await completeSession(supabase, session.id);
     } else {
-      await ctx.sendMessage('Responde *Sí* para confirmar o *No* para cancelar.');
+      await ctx.sendButtons('Presiona un botón para confirmar o cancelar.', [
+        { id: 'btn_confirm', title: '✅ Confirmar' },
+        { id: 'btn_cancel', title: '❌ Cancelar' },
+      ]);
     }
     return;
   }
 
-  // Handle selection (numbered options)
+  // Handle selection (numbered options or button reply)
   if (session.state === 'awaiting_selection') {
     const options = context.options || [];
-    const selection = parseInt(text);
 
-    if (isNaN(selection) || selection < 1 || selection > options.length) {
+    // Check if response came from an interactive button matching an option ID
+    const btnId = message.interactive_reply;
+    const btnMatch = btnId ? options.find((o: any) => o.id === btnId) : null;
+
+    const selection = parseInt(text);
+    if (!btnMatch && (isNaN(selection) || selection < 1 || selection > options.length)) {
       await ctx.sendMessage(`Responde con un número del 1 al ${options.length}.`);
       return;
     }
 
-    const selected = options[selection - 1];
+    const selected = btnMatch || options[selection - 1];
 
     // Route based on pending action
     switch (context.pending_action) {
@@ -1072,7 +1102,9 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     // Default: 'pagado' (already set on insert)
 
     // Advance to soporte prompt
-    await ctx.sendMessage('📎 ¿Tienes soporte? 📷 Ahora / ⏰ Después / ❌ No');
+    await ctx.sendButtons('📷 ¿Tienes soporte fotográfico?', [
+      { id: 'btn_despues', title: '⏰ Después' },
+    ]);
     await ctx.updateSession('awaiting_image', {});
     return;
   }
@@ -1095,9 +1127,12 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
         }
       }
     } else if (message.type === 'audio') {
-      await ctx.sendMessage('📷 Necesito una foto del soporte, no un audio. Envía la imagen o escribe *después*.');
+      await ctx.sendMessage('📷 Necesito una foto del soporte, no un audio.');
+      await ctx.sendButtons('Envía la imagen o presiona Después.', [
+        { id: 'btn_despues', title: '⏰ Después' },
+      ]);
       return; // Stay in awaiting_image
-    } else if (['después', 'despues', 'luego'].includes(text)) {
+    } else if (message.interactive_reply === 'btn_despues' || ['después', 'despues', 'luego'].includes(text)) {
       await ctx.sendMessage('👍 Sin problema. Puedes enviarlo después.');
     } else if (['no', 'sin soporte'].includes(text)) {
       // Do nothing — soporte_pendiente stays true for tracking
@@ -1206,8 +1241,11 @@ async function handleW02Selection(ctx: HandlerContext, selected: { id: string; l
   if (selected.id === 'nuevo') {
     // Not the borrador — create as new empresa expense
     await ctx.updateSession('confirming', { borrador_id: undefined });
-    const msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(context.amount!)} — ${CATEGORIA_LABELS[context.categoria || 'otros'] || context.categoria}\n📅 Hoy\n\n¿Confirmo? (Sí/No)`;
-    await ctx.sendMessage(msg);
+    const msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(context.amount!)} — ${CATEGORIA_LABELS[context.categoria || 'otros'] || context.categoria}\n📅 Hoy`;
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     return;
   }
 }
@@ -1364,15 +1402,21 @@ async function handleW04Selection(ctx: HandlerContext, selected: { id: string; l
   if (selected.id === 'general') {
     // Register without specific invoice
     await ctx.updateSession('confirming', { factura_id: undefined });
-    const msg = `💰 Cobro de ${formatCOP(context.amount!)} para ${bold(context.proyecto_nombre!)}.\n\nSe registra como abono general.\n\n¿Confirmo? (Sí/No)`;
-    await ctx.sendMessage(msg);
+    const msg = `💰 Cobro de ${formatCOP(context.amount!)} para ${bold(context.proyecto_nombre!)}.\n\nSe registra como abono general.`;
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     return;
   }
 
   // Selected a specific invoice
   await ctx.updateSession('confirming', { factura_id: selected.id });
-  const msg = `💰 Cobro de ${formatCOP(context.amount!)} para ${bold(context.proyecto_nombre!)}.\n📄 Factura: ${selected.label.split(' — ')[0]}\n\n¿Confirmo? (Sí/No)`;
-  await ctx.sendMessage(msg);
+  const msg = `💰 Cobro de ${formatCOP(context.amount!)} para ${bold(context.proyecto_nombre!)}.\n📄 Factura: ${selected.label.split(' — ')[0]}`;
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
 }
 
 async function handleW06Selection(ctx: HandlerContext, selected: { id: string; label: string }): Promise<void> {
@@ -1388,8 +1432,10 @@ async function handleW06Selection(ctx: HandlerContext, selected: { id: string; l
   const fields = session.context.parsed_fields || {};
   let msg = `👤 Crear contacto: ${bold(fields.name || 'Sin nombre')}`;
   if (fields.phone) msg += ` — ${fields.phone}`;
-  msg += '\n\n¿Confirmo? (Sí/No)';
-  await ctx.sendMessage(msg);
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
   await ctx.updateSession('confirming', {});
 }
 
@@ -1471,8 +1517,10 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
   }
 
-  msg += '\n\n📷 Envía foto del soporte o escribe *después*.';
   await ctx.sendMessage(msg);
+  await ctx.sendButtons('📷 ¿Tienes soporte fotográfico?', [
+    { id: 'btn_despues', title: '⏰ Después' },
+  ]);
   await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
   return true;
 }
@@ -1512,9 +1560,11 @@ async function executeW02(ctx: HandlerContext): Promise<boolean> {
 
   const totalMes = (acumulado || []).reduce((sum: number, g: any) => sum + Number(g.monto), 0);
 
-  let msg = `✅ Gasto empresa: ${formatCOP(c.amount!)} — ${CATEGORIA_LABELS[c.categoria || 'otros'] || c.categoria}\n📊 Total empresa este mes: ${formatCOP(totalMes)}`;
-  msg += '\n\n📷 Envía foto del soporte o escribe *después*.';
+  const msg = `✅ Gasto empresa: ${formatCOP(c.amount!)} — ${CATEGORIA_LABELS[c.categoria || 'otros'] || c.categoria}\n📊 Total empresa este mes: ${formatCOP(totalMes)}`;
   await ctx.sendMessage(msg);
+  await ctx.sendButtons('📷 ¿Tienes soporte fotográfico?', [
+    { id: 'btn_despues', title: '⏰ Después' },
+  ]);
   await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
   return true;
 }

@@ -17,12 +17,29 @@ REGLAS:
 - Responde SOLO con JSON válido, sin texto adicional
 - Si no puedes determinar la intención con confianza >70%, usa "UNCLEAR"
 - Extrae montos en formato numérico (sin puntos de miles, sin "$")
-- "concept" debe ser un título corto (2-5 palabras) del gasto, sin montos, sin verbos, sin nombres de personas. Ej: "insumos eléctricos", "taxi reunión", "almuerzo equipo"
+- "concept" es OBLIGATORIO para gastos. Es el título corto (2-5 palabras) que describe el gasto. Sin montos, sin verbos ("gasté/pagué/compré"), sin nombres de personas. Ej: "insumos eléctricos", "taxi a reunión", "almuerzo equipo", "alquiler montacarga"
 - Los nombres de personas/empresas van tal cual los escribió el usuario
 - Si el mensaje menciona un proyecto/cliente, extráelo como "entity_hint"
 - Si el mensaje menciona un código de proyecto como "KAE-2", "FAB-1", "P-12", "#12", extráelo como "project_code" (string tal cual: "KAE-2", "P-12", etc.). Códigos alfanuméricos tipo "XXX-N" tienen prioridad máxima. project_code tiene prioridad sobre entity_hint.
 - Fechas: si no se menciona, no incluyas el campo (el sistema usa "hoy")
 - Montos en pesos colombianos por defecto
+
+CATEGORÍAS DE GASTO (category_hint) — IMPORTANTE:
+"category_hint" es obligatorio para gastos. Clasifica semánticamente así:
+- "materiales": Compras físicas para un proyecto — insumos, herramientas, ferretería, cables, tornillos, láminas, pintura, cemento, madera, repuestos
+- "transporte": Movilidad — taxi, uber, gasolina, peaje, parqueadero, bus, vuelos, alquiler de vehículo, montacarga, grúa, flete, envío
+- "alimentacion": Comida en contexto laboral — almuerzo, tinto, restaurante, onces, desayuno
+- "servicios_profesionales": Pagos a personas por su trabajo — contador, abogado, asesor, consultor, diseñador, programador, freelancer, honorarios, subcontrato
+- "software": Herramientas digitales — licencias, suscripciones, hosting, dominio, apps, cloud, SaaS
+- "arriendo": Gastos fijos de local/oficina — arriendo, alquiler de espacio, servicios públicos (luz, agua, gas, internet). Casi siempre gasto de EMPRESA, no de proyecto.
+- "marketing": Promoción — pauta digital, publicidad, Google Ads, redes sociales, tarjetas de presentación. Casi siempre gasto de EMPRESA.
+- "capacitacion": Formación — cursos, diplomados, libros, talleres. Casi siempre gasto de EMPRESA.
+- "otros": Solo si ninguna categoría aplica
+
+GASTO_DIRECTO vs GASTO_OPERATIVO:
+- Si menciona proyecto, código de proyecto o cliente → GASTO_DIRECTO
+- Si es arriendo, marketing, capacitacion, servicios públicos, o gasto recurrente sin proyecto → GASTO_OPERATIVO
+- Si es ambiguo (materiales, transporte, alimentacion, software, servicios_profesionales) y NO menciona proyecto → GASTO_OPERATIVO
 
 INTENCIONES MVP:
 
@@ -90,10 +107,26 @@ FORMATO DE RESPUESTA:
 }`;
 
 const FEW_SHOT_EXAMPLES = [
-  { input: 'Gasté 180 mil en transporte para lo de Pérez', output: '{"intent":"GASTO_DIRECTO","confidence":0.91,"fields":{"amount":180000,"concept":"transporte","entity_hint":"Pérez","category_hint":"transporte"}}' },
-  { input: 'Pagué el arriendo, 2 palos', output: '{"intent":"GASTO_OPERATIVO","confidence":0.94,"fields":{"amount":2000000,"concept":"arriendo","category_hint":"arriendo"}}' },
+  // Gastos directos (con proyecto)
+  { input: 'Gasté 180 mil en transporte para lo de Pérez', output: '{"intent":"GASTO_DIRECTO","confidence":0.91,"fields":{"amount":180000,"concept":"transporte a obra","entity_hint":"Pérez","category_hint":"transporte"}}' },
+  { input: 'Gasté 50 mil en materiales al KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"KAE-2","category_hint":"materiales"}}' },
+  { input: 'Gaste 182300 insumos eléctricos al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
+  { input: 'Gaste 182300 para compra de insumos eléctricos. Presta Mauricio Moreno. Al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
+  { input: 'Pagué 350 mil de montacarga para el KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.93,"fields":{"amount":350000,"concept":"alquiler montacarga","project_code":"KAE-2","category_hint":"transporte"}}' },
+  { input: 'Pagué 80 mil de taxi para ir a reunión con cliente Pérez', output: '{"intent":"GASTO_DIRECTO","confidence":0.88,"fields":{"amount":80000,"concept":"taxi reunión cliente","entity_hint":"Pérez","category_hint":"transporte"}}' },
+  { input: 'Carga al P-12 un gasto de 50 mil en materiales', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"P-012","category_hint":"materiales"}}' },
+  { input: 'Le pagué al soldador 800 mil por el trabajo en KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.92,"fields":{"amount":800000,"concept":"soldador","project_code":"KAE-2","category_hint":"servicios_profesionales"}}' },
+  { input: 'Almuerzo con el equipo del proyecto FAB-1, 120 mil', output: '{"intent":"GASTO_DIRECTO","confidence":0.90,"fields":{"amount":120000,"concept":"almuerzo equipo","project_code":"FAB-1","category_hint":"alimentacion"}}' },
+  // Gastos operativos (empresa, sin proyecto)
+  { input: 'Pagué el arriendo, 2 palos', output: '{"intent":"GASTO_OPERATIVO","confidence":0.94,"fields":{"amount":2000000,"concept":"arriendo oficina","category_hint":"arriendo"}}' },
+  { input: 'Pagué la pauta de Instagram, 500 lucas', output: '{"intent":"GASTO_OPERATIVO","confidence":0.92,"fields":{"amount":500000,"concept":"pauta Instagram","category_hint":"marketing"}}' },
+  { input: 'Compré un curso de Excel, 180 mil', output: '{"intent":"GASTO_OPERATIVO","confidence":0.90,"fields":{"amount":180000,"concept":"curso Excel","category_hint":"capacitacion"}}' },
+  { input: 'Pagué internet y luz, 280 mil', output: '{"intent":"GASTO_OPERATIVO","confidence":0.91,"fields":{"amount":280000,"concept":"internet y luz","category_hint":"arriendo"}}' },
+  { input: 'Renovación de licencia AutoCAD 1.2 palos', output: '{"intent":"GASTO_OPERATIVO","confidence":0.90,"fields":{"amount":1200000,"concept":"licencia AutoCAD","category_hint":"software"}}' },
+  // Otros intents
   { input: 'Hoy le metí 4 horas a lo de María', output: '{"intent":"HORAS","confidence":0.93,"fields":{"hours":4,"entity_hint":"María","date_hint":"hoy"}}' },
   { input: 'Me consignaron 3 millones del edificio', output: '{"intent":"COBRO","confidence":0.90,"fields":{"amount":3000000,"entity_hint":"edificio"}}' },
+  { input: 'Me pagaron 2 millones del P-5', output: '{"intent":"COBRO","confidence":0.92,"fields":{"amount":2000000,"project_code":"P-005"}}' },
   { input: 'Anota: Ana Gómez, 315 555 1234, arquitecta', output: '{"intent":"CONTACTO_NUEVO","confidence":0.95,"fields":{"name":"Ana Gómez","phone":"3155551234","role":"arquitecta"}}' },
   { input: 'Lo de Torres se puso difícil, el gerente viajó', output: '{"intent":"NOTA_OPORTUNIDAD","confidence":0.85,"fields":{"entity_hint":"Torres","note":"se puso difícil, el gerente viajó"}}' },
   { input: '¿Cómo vamos con Pérez?', output: '{"intent":"ESTADO_PROYECTO","confidence":0.88,"fields":{"entity_hint":"Pérez"}}' },
@@ -108,14 +141,7 @@ const FEW_SHOT_EXAMPLES = [
   { input: 'Parar', output: '{"intent":"TIMER_PARAR","confidence":0.95,"fields":{}}' },
   { input: 'Terminé', output: '{"intent":"TIMER_PARAR","confidence":0.92,"fields":{}}' },
   { input: '¿Cuánto llevo?', output: '{"intent":"TIMER_ESTADO","confidence":0.93,"fields":{}}' },
-  // Project code examples (alphanumeric and numeric)
-  { input: 'Gasté 50 mil en materiales al KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"KAE-2","category_hint":"materiales"}}' },
-  { input: 'Carga al P-12 un gasto de 50 mil en materiales', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"P-012","category_hint":"materiales"}}' },
   { input: 'Iniciar timer en FAB-1', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"project_code":"FAB-1"}}' },
-  { input: 'Me pagaron 2 millones del P-5', output: '{"intent":"COBRO","confidence":0.92,"fields":{"amount":2000000,"project_code":"P-005"}}' },
-  { input: 'Gaste 182300 insumos eléctricos al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
-  { input: 'Gaste 182300 para compra de insumos eléctricos. Presta Mauricio Moreno. Al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
-  { input: 'Pagué 50 mil de taxi para ir a reunión con cliente', output: '{"intent":"GASTO_DIRECTO","confidence":0.88,"fields":{"amount":50000,"concept":"taxi reunión cliente","category_hint":"transporte"}}' },
 ];
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {
