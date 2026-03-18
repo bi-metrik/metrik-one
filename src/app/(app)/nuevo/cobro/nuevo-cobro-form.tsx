@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { addCobro } from '../../proyectos/actions-v2'
@@ -74,9 +73,9 @@ export default function NuevoCobroForm({ facturas }: Props) {
   return (
     <div className="mx-auto max-w-lg space-y-6 px-4 py-6">
       <div className="flex items-center gap-3">
-        <Link href="/numeros" className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+        <button onClick={() => router.back()} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
         <div>
           <h1 className="text-lg font-bold">Registrar cobro</h1>
           <p className="text-xs text-muted-foreground">Registro rapido de cobro a factura</p>

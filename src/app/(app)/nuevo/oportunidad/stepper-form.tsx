@@ -2,7 +2,6 @@
 
 import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
 import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createOportunidad } from '@/app/(app)/pipeline/actions-v2'
@@ -185,9 +184,9 @@ export default function StepperForm() {
   return (
     <div className="mx-auto max-w-lg space-y-6 px-4 py-6">
       <div className="flex items-center gap-3">
-        <Link href="/pipeline" className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+        <button onClick={() => router.back()} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
         <div>
           <h1 className="text-lg font-bold">Nueva oportunidad</h1>
           <p className="text-xs text-muted-foreground">Paso {step + 1} de {totalSteps}</p>
