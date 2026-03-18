@@ -1,15 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback, useTransition } from 'react'
+import { useState, useEffect, useCallback, useTransition, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle, User } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle, User, Upload, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { toast } from 'sonner'
 import { getRolePermissions } from '@/lib/roles'
 import type { Movimiento } from './actions'
-import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento, aprobarTodos } from './actions'
+import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento, aprobarTodos, attachSoporte } from './actions'
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -89,6 +89,29 @@ export default function MovimientosClient({
   // D246: Rechazo dialog
   const [rechazoModal, setRechazoModal] = useState<{ tabla: 'gastos' | 'cobros'; id: string; descripcion: string } | null>(null)
   const [rechazoMotivo, setRechazoMotivo] = useState('')
+
+  // Soporte upload
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingId, setUploadingId] = useState<string | null>(null)
+
+  const handleSoporteUpload = useCallback(async (gastoId: string, file: File) => {
+    setUploadingId(gastoId)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const result = await attachSoporte(gastoId, fd)
+      if (result.success) {
+        toast.success('Soporte agregado')
+        router.refresh()
+      } else {
+        toast.error(result.error || 'Error al subir soporte')
+      }
+    } catch {
+      toast.error('Error al subir soporte')
+    } finally {
+      setUploadingId(null)
+    }
+  }, [router])
 
   // Filters panel
   const [showFilters, setShowFilters] = useState(false)
@@ -600,7 +623,7 @@ export default function MovimientosClient({
                               </span>
                             )}
 
-                            {/* Soporte indicator */}
+                            {/* Soporte indicator / upload */}
                             {hasSoporteImage ? (
                               <button
                                 onClick={() => setSoporteModal({ url: mov.soporte_url!, descripcion: mov.descripcion })}
@@ -616,6 +639,27 @@ export default function MovimientosClient({
                               >
                                 <FileText className="h-3 w-3" />
                               </span>
+                            ) : mov.tipo === 'egreso' ? (
+                              <label
+                                className={`inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded bg-gray-100 text-gray-400 hover:bg-primary/10 hover:text-primary dark:bg-gray-800 dark:text-gray-500 dark:hover:bg-primary/20 dark:hover:text-primary transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}
+                                title="Agregar soporte"
+                              >
+                                {uploadingId === mov.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Upload className="h-3 w-3" />
+                                )}
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0]
+                                    if (file) handleSoporteUpload(mov.id, file)
+                                    e.target.value = ''
+                                  }}
+                                />
+                              </label>
                             ) : null}
                           </div>
 

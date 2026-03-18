@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { createServiceClient } from '@/lib/supabase/server'
 import { getRolePermissions } from '@/lib/roles'
 
 export type Movimiento = {
@@ -442,4 +443,47 @@ export async function aprobarTodos(items: { tabla: 'gastos' | 'cobros'; id: stri
   revalidatePath('/movimientos')
   revalidatePath('/causacion')
   return { success: true, error: null, count: approved }
+}
+
+// ── Attach soporte to existing gasto ────────────────────────
+
+export async function attachSoporte(gastoId: string, formData: FormData) {
+  const { workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const file = formData.get('file') as File | null
+  if (!file || file.size === 0) return { success: false, error: 'Sin archivo' }
+
+  const MAX_SIZE = 5 * 1024 * 1024
+  if (file.size > MAX_SIZE) return { success: false, error: 'El archivo supera 5MB' }
+
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+  if (!allowed.includes(file.type)) return { success: false, error: 'Solo JPEG, PNG, WebP o PDF' }
+
+  const ext = file.name.split('.').pop() || 'jpg'
+  const filePath = `${workspaceId}/${crypto.randomUUID()}.${ext}`
+
+  const admin = createServiceClient()
+
+  const { error: uploadError } = await admin.storage
+    .from('gastos-soportes')
+    .upload(filePath, file, { contentType: file.type, upsert: true })
+
+  if (uploadError) return { success: false, error: uploadError.message }
+
+  const { data: { publicUrl } } = admin.storage
+    .from('gastos-soportes')
+    .getPublicUrl(filePath)
+
+  const { error: updateError } = await admin
+    .from('gastos')
+    .update({ soporte_url: publicUrl, soporte_pendiente: false })
+    .eq('id', gastoId)
+    .eq('workspace_id', workspaceId)
+
+  if (updateError) return { success: false, error: updateError.message }
+
+  revalidatePath('/movimientos')
+  revalidatePath('/causacion')
+  return { success: true, error: null }
 }
