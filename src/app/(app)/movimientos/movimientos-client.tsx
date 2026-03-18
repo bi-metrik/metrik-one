@@ -655,9 +655,30 @@ export default function MovimientosClient({
                               </span>
                             )}
                             {tag === 'falta_soporte' && (
-                              <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                                Falta soporte
-                              </span>
+                              <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
+                                {uploadingId === mov.id ? (
+                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                ) : (
+                                  <Upload className="h-2.5 w-2.5" />
+                                )}
+                                {uploadingId === mov.id ? 'Subiendo...' : 'Agregar soporte'}
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0]
+                                    if (file) {
+                                      if (file.size > 20 * 1024 * 1024) {
+                                        toast.error('El archivo supera 20MB')
+                                      } else {
+                                        handleSoporteUpload(mov.id, file)
+                                      }
+                                    }
+                                    e.target.value = ''
+                                  }}
+                                />
+                              </label>
                             )}
 
                             {/* Canal WhatsApp indicator */}
@@ -684,7 +705,7 @@ export default function MovimientosClient({
                               >
                                 <FileText className="h-3 w-3" />
                               </span>
-                            ) : mov.tipo === 'egreso' ? (
+                            ) : mov.tipo === 'egreso' && tag !== 'falta_soporte' ? (
                               <label
                                 className={`inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded bg-gray-100 text-gray-400 hover:bg-primary/10 hover:text-primary dark:bg-gray-800 dark:text-gray-500 dark:hover:bg-primary/20 dark:hover:text-primary transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}
                                 title="Agregar soporte"
