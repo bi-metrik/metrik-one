@@ -78,7 +78,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         tabla: 'gastos',
         fecha: g.fecha,
         monto: Number(g.monto),
-        descripcion: g.descripcion || g.mensaje_original || g.categoria || 'Gasto',
+        descripcion: g.descripcion || g.categoria || 'Gasto',
         categoria: g.categoria,
         proyecto: proy?.nombre ?? null,
         created_by_name: profile?.full_name ?? null,

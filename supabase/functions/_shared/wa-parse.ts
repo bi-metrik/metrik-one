@@ -17,6 +17,7 @@ REGLAS:
 - Responde SOLO con JSON válido, sin texto adicional
 - Si no puedes determinar la intención con confianza >70%, usa "UNCLEAR"
 - Extrae montos en formato numérico (sin puntos de miles, sin "$")
+- "concept" debe ser un título corto (2-5 palabras) del gasto, sin montos, sin verbos, sin nombres de personas. Ej: "insumos eléctricos", "taxi reunión", "almuerzo equipo"
 - Los nombres de personas/empresas van tal cual los escribió el usuario
 - Si el mensaje menciona un proyecto/cliente, extráelo como "entity_hint"
 - Si el mensaje menciona un código de proyecto como "KAE-2", "FAB-1", "P-12", "#12", extráelo como "project_code" (string tal cual: "KAE-2", "P-12", etc.). Códigos alfanuméricos tipo "XXX-N" tienen prioridad máxima. project_code tiene prioridad sobre entity_hint.
@@ -113,6 +114,8 @@ const FEW_SHOT_EXAMPLES = [
   { input: 'Iniciar timer en FAB-1', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"project_code":"FAB-1"}}' },
   { input: 'Me pagaron 2 millones del P-5', output: '{"intent":"COBRO","confidence":0.92,"fields":{"amount":2000000,"project_code":"P-005"}}' },
   { input: 'Gaste 182300 insumos eléctricos al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
+  { input: 'Gaste 182300 para compra de insumos eléctricos. Presta Mauricio Moreno. Al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
+  { input: 'Pagué 50 mil de taxi para ir a reunión con cliente', output: '{"intent":"GASTO_DIRECTO","confidence":0.88,"fields":{"amount":50000,"concept":"taxi reunión cliente","category_hint":"transporte"}}' },
 ];
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {

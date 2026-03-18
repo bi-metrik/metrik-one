@@ -131,7 +131,7 @@ export async function getMovimientos(filters?: {
           tabla: 'gastos',
           fecha: g.fecha,
           monto: Number(g.monto),
-          descripcion: g.descripcion || g.mensaje_original || g.categoria || 'Gasto',
+          descripcion: g.descripcion || g.categoria || 'Gasto',
           categoria: g.categoria,
           proyecto: proy?.nombre ?? null,
           proyecto_codigo: proy?.codigo ?? null,
