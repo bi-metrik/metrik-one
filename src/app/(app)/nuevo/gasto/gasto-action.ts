@@ -44,7 +44,6 @@ export async function createGasto(input: {
   categoria: string
   fecha: string
   descripcion?: string
-  deducible?: boolean
   proyecto_id?: string | null  // UUID, 'empresa', or null
   rubro_id?: string | null
   estado_pago?: 'pagado' | 'pendiente'
@@ -87,7 +86,7 @@ export async function createGasto(input: {
       monto: input.monto,
       categoria: input.categoria || 'otros',
       descripcion: input.descripcion?.trim() || null,
-      deducible: input.deducible ?? false,
+      deducible: false,
       proyecto_id: proyectoId,
       rubro_id: (proyectoId && input.rubro_id) ? input.rubro_id : null,
       tipo,

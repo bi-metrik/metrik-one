@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Building2, Lightbulb, Paperclip, X, FileText, Image } from 'lucide-react'
+import { ArrowLeft, Building2, Paperclip, X, FileText, Image } from 'lucide-react'
 import { toast } from 'sonner'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { createGasto, getRubrosProyecto, uploadSoporteGasto } from './gasto-action'
@@ -38,7 +38,6 @@ export default function NuevoGastoForm({ proyectos }: Props) {
   const [categoria, setCategoria] = useState('arriendo')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [descripcion, setDescripcion] = useState('')
-  const [deducible, setDeducible] = useState(false)
   const [yaPagado, setYaPagado] = useState(true)
   const [soporteFile, setSoporteFile] = useState<File | null>(null)
   const [soportePreview, setSoportePreview] = useState<string | null>(null)
@@ -175,7 +174,6 @@ export default function NuevoGastoForm({ proyectos }: Props) {
         categoria,
         fecha,
         descripcion: descripcion.trim() || undefined,
-        deducible,
         proyecto_id: proyectoId || null,
         rubro_id: rubroId || null,
         estado_pago: yaPagado ? 'pagado' : 'pendiente',
@@ -360,25 +358,6 @@ export default function NuevoGastoForm({ proyectos }: Props) {
               <Paperclip className="h-4 w-4" />
               Adjuntar foto o PDF
             </button>
-          )}
-        </div>
-
-        {/* Deducible */}
-        <div className="flex items-center justify-between">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={deducible}
-              onChange={e => setDeducible(e.target.checked)}
-              className="rounded border"
-            />
-            <span className="text-sm">Deducible de impuestos</span>
-          </label>
-          {isEmpresa && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">
-              <Lightbulb className="h-3 w-3" />
-              Guárdalo — es deducible
-            </span>
           )}
         </div>
 
