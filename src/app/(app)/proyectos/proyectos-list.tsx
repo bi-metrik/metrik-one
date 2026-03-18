@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { FolderOpen, Play, Square, Plus, Receipt, FileText, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
@@ -10,7 +11,6 @@ import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import { startTimer, stopTimer, type ActiveTimer } from '../timer-actions'
 import { cambiarEstadoProyecto } from './actions-v2'
 import NuevoInternoDialog from './nuevo-interno-dialog'
-import GastoDialog from './[id]/gasto-dialog'
 import HorasDialog from './[id]/horas-dialog'
 import FacturaDialog from './[id]/factura-dialog'
 
@@ -180,13 +180,6 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
       )}
 
       {/* ── Register dialogs (opened from card shortcuts) ── */}
-      {openDialog?.type === 'gasto' && openDialog.proyecto.proyecto_id && (
-        <GastoDialog
-          proyectoId={openDialog.proyecto.proyecto_id}
-          rubrosLista={[]}
-          onClose={handleCloseDialog}
-        />
-      )}
       {openDialog?.type === 'horas' && openDialog.proyecto.proyecto_id && (
         <HorasDialog
           proyectoId={openDialog.proyecto.proyecto_id}
@@ -427,13 +420,13 @@ function ProyectoCard({
       {/* Row 4: Quick register shortcuts (only for active projects) */}
       {estado === 'en_ejecucion' && (
         <div className="mt-3 flex items-center gap-1.5 border-t pt-3" onClick={e => e.stopPropagation()}>
-          <button
-            onClick={() => onOpenDialog('gasto')}
+          <Link
+            href={`/nuevo/gasto?proyecto=${p.proyecto_id}`}
             className="inline-flex items-center gap-1 rounded-md bg-orange-50 border border-orange-200 px-2.5 py-1.5 text-[11px] font-medium text-orange-700 transition-colors hover:bg-orange-100 dark:bg-orange-950/30 dark:border-orange-900 dark:text-orange-400 dark:hover:bg-orange-950/50"
           >
             <Receipt className="h-3 w-3" />
             Gasto
-          </button>
+          </Link>
           <button
             onClick={() => onOpenDialog('horas')}
             className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200 px-2.5 py-1.5 text-[11px] font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-400 dark:hover:bg-blue-950/50"

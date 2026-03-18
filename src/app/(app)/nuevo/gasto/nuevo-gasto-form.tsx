@@ -26,15 +26,18 @@ const RUBRO_TO_CATEGORIAS: Record<string, string[]> = {
 
 interface Props {
   proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
+  defaultProyectoId?: string
 }
 
-export default function NuevoGastoForm({ proyectos }: Props) {
+export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
   // Form state
   const [monto, setMonto] = useState('')
-  const [proyectoId, setProyectoId] = useState<string>('empresa')  // 'empresa' = empresa (default), UUID = proyecto
+  // Si viene proyecto por query param y existe en la lista, pre-seleccionarlo
+  const validDefault = defaultProyectoId && proyectos.some(p => p.id === defaultProyectoId) ? defaultProyectoId : 'empresa'
+  const [proyectoId, setProyectoId] = useState<string>(validDefault)
   const [rubroId, setRubroId] = useState('')
   const [categoria, setCategoria] = useState('arriendo')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])

@@ -14,7 +14,6 @@ import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import ProyectoAlertas from './proyecto-alertas'
-import GastoDialog from './gasto-dialog'
 import HorasDialog from './horas-dialog'
 import FacturaDialog from './factura-dialog'
 import CobroDialog from './cobro-dialog'
@@ -238,14 +237,13 @@ export default function ProyectoDetail({
       {/* ─── Quick register bar (top) ─── */}
       {!isCerrado && !isPausado && (
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setDialog('gasto')}
-            disabled={isPending}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-orange-50 border border-orange-200 py-2.5 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 dark:bg-orange-950/30 dark:border-orange-900 dark:text-orange-400 dark:hover:bg-orange-950/50"
+          <Link
+            href={`/nuevo/gasto?proyecto=${proyectoId}`}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-orange-50 border border-orange-200 py-2.5 text-xs font-medium text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:border-orange-900 dark:text-orange-400 dark:hover:bg-orange-950/50"
           >
             <Receipt className="h-4 w-4" />
             Gasto
-          </button>
+          </Link>
           <button
             onClick={() => setDialog('horas')}
             disabled={isPending}
@@ -627,13 +625,6 @@ export default function ProyectoDetail({
       )}
 
       {/* ─── Dialogs ─── */}
-      {dialog === 'gasto' && (
-        <GastoDialog
-          proyectoId={proyectoId}
-          rubrosLista={rubrosLista}
-          onClose={() => { setDialog(null); router.refresh() }}
-        />
-      )}
       {dialog === 'horas' && (
         <HorasDialog
           proyectoId={proyectoId}
