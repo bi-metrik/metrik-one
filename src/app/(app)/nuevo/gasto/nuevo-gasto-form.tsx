@@ -55,7 +55,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
   const categoriasVisibles = (() => {
     if (isEmpresa) return CATEGORIAS_EMPRESA
     if (rubros.length === 0) return CATEGORIAS_GASTO
-    // Collect all allowed categories from the project's rubros
+    // Collect only categories that map from the project's rubros
     const allowedCats = new Set<string>()
     for (const rubro of rubros) {
       const cats = rubro.tipo ? RUBRO_TO_CATEGORIAS[rubro.tipo] : null
@@ -63,10 +63,7 @@ export default function NuevoGastoForm({ proyectos }: Props) {
         cats.forEach(c => allowedCats.add(c))
       }
     }
-    // If no rubros have tipo mapping, show all categories
     if (allowedCats.size === 0) return CATEGORIAS_GASTO
-    // Always include 'otros' as fallback
-    allowedCats.add('otros')
     return CATEGORIAS_GASTO.filter(c => allowedCats.has(c.value))
   })()
 
