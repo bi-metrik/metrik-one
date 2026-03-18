@@ -284,22 +284,26 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-03-13
+**Sesion:** 2026-03-18
 **Branch:** main
 
 Que se hizo:
-- Dashboard admin Mi Bolsillo completo en `/admin/mibolsillo`
-- Cliente Supabase cross-project (`src/lib/supabase/mibolsillo.ts`) conectando a mibolsillo-prod con service role
-- 5 secciones de metricas: Usuarios, Revenue, Engagement, Retencion, Funnel
-- Charts con Recharts (trends 14d, funnel horizontal, top features)
-- Proteccion 3 capas: sidebar (prop `isAdminWorkspace`), page redirect, action guard via `ADMIN_WORKSPACE_ID`
-- Seccion "Admin" en sidebar solo visible para owner del workspace MéTRIK
-- Env vars configuradas en Vercel (MIBOLSILLO_SUPABASE_URL, MIBOLSILLO_SERVICE_ROLE_KEY, ADMIN_WORKSPACE_ID)
-- Deploy exitoso en produccion
+- Fix costo_horas = 0: migracion para calcular tarifa por staff individual (salary/horas_disponibles_mes) en vez de depender de un staff principal
+- Rediseno "Costos ejecutados" en proyecto: barras por categoria ordenadas por monto, con/sin presupuesto, mano de obra con horas como dato secundario, umbrales de color, totales y saldo
+- Consulta con Vera, Kenji, Kaori, Hana para definir estructura visual de control de costos
+- Nuevo modulo `/equipo`: bandeja de horas con flujo de aprobacion (PENDIENTE->APROBADO/RECHAZADO), filtros por mes/staff/proyecto/estado, perfil de staff con metricas mensuales, auto-aprobacion owner/admin
+- Migracion horas_aprobacion: estado_aprobacion, aprobado_por, fecha_aprobacion, rechazo_motivo, created_by en tabla horas. Vistas SQL filtran solo horas APROBADAS
+- Fix interfaces Financiero: alineadas con vista SQL (ganancia_actual en vez de ganancia_real, cartera calculada client-side)
+- Regeneracion database.ts con nuevas columnas
+- Solo gastos APROBADO cuentan en proyecto (no CAUSADO — es contable, no operativo)
+- Soporte lightbox overflow fix, deducible default false, PDF MIME type fix
+- Unificacion formulario de gasto (un solo form desde FAB, proyecto, etc.)
+- Back button usa router.back() en todos los formularios
+- Tarjetas de gasto en proyecto con diseno de movimientos
 
-**Ultimo commit:** `d139864 feat: dashboard admin Mi Bolsillo — metricas SaaS en /admin/mibolsillo`
+**Ultimo commit:** `7f4c510 feat: modulo /equipo — gestion y aprobacion de horas del equipo`
 
-## Estado actual (2026-03-13)
+## Estado actual (2026-03-18)
 
 - **Branch:** main (up to date con remote)
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
@@ -352,6 +356,13 @@ Que se hizo:
 ## Pendientes
 
 - [x] Dashboard Admin Mi Bolsillo (`/admin/mibolsillo`) — completado 2026-03-13
+- [x] Modulo /equipo con gestion de horas — completado 2026-03-18
+- [x] Costos ejecutados por categoria en proyecto — completado 2026-03-18
+- [x] Costo horas por tarifa individual de staff — completado 2026-03-18
+- [ ] Deducible toggle en modulo causacion (contador activa/desactiva)
+- [ ] AI-suggested deducibility para gastos
+- [ ] WhatsApp bot: titulo limpio de gastos (no usar mensaje_original como titulo)
+- [ ] Verificar que registro de horas desde proyecto pasa created_by correctamente
 
 ## Decisiones clave
 
@@ -361,3 +372,9 @@ Que se hizo:
 | 2026-03-13 | Acceso a modulos por empresa via ADMIN_WORKSPACE_ID | Solo rol owner no basta — otros workspaces tambien tienen owners. Se necesita filtro por workspace UUID |
 | 2026-03-13 | Cross-project Supabase con service role key server-only | Patron para conectar a otros proyectos Supabase desde ONE. Nunca exponer key al client |
 | 2026-03-13 | Patron de modulos empresa-especificos estandarizado | Env var + 3 capas (sidebar prop, page redirect, action guard). Reusar para cualquier modulo futuro por workspace |
+| 2026-03-18 | Costo horas por tarifa individual de cada staff | La vista SQL anterior usaba un solo staff principal. Si nadie tenia es_principal=true, costo_horas=0. Ahora cada registro de hora usa la tarifa del staff que la registro |
+| 2026-03-18 | Ruta /equipo (no /horas) para hub de gestion de equipo | Mas amplio que solo horas, alinea con perfil de staff y metricas del equipo |
+| 2026-03-18 | Sin causaciones_log para horas por ahora | Flujo de aprobacion directo sin tabla de auditoria. Se puede agregar despues si se necesita |
+| 2026-03-18 | Auto-aprobacion de horas para owner/admin | Reduce friccion. Solo operadores necesitan aprobacion explicita |
+| 2026-03-18 | Solo APROBADO cuenta en proyecto (no CAUSADO) | CAUSADO es contable, no operativo. El PM solo ve gastos aprobados |
+| 2026-03-18 | Barras de costos: umbrales 70/90/100, slate sin presupuesto | Consenso Vera+Kenji+Kaori+Hana. Estandar EVM simplificado |
