@@ -26,6 +26,7 @@ const CATEGORIA_CONFIG: Record<string, { label: string; color: string }> = {
   arriendo: { label: 'Arriendo', color: 'bg-stone-100 text-stone-700 dark:bg-stone-800/50 dark:text-stone-400' },
   marketing: { label: 'Marketing', color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
   capacitacion: { label: 'Capacitación', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+  mano_de_obra: { label: 'Mano de obra', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
   otros: { label: 'Otros', color: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
 }
 import HorasDialog from './horas-dialog'
@@ -348,14 +349,20 @@ export default function ProyectoDetail({
                   catTotals.set(cat, (catTotals.get(cat) ?? 0) + g.monto)
                 }
 
+                // Inyectar costo de horas como mano_de_obra
+                const costoHoras = f.costo_horas ?? 0
+                if (costoHoras > 0) {
+                  catTotals.set('mano_de_obra', (catTotals.get('mano_de_obra') ?? 0) + costoHoras)
+                }
+
                 // Mapear rubros a categorias para presupuesto
                 const RUBRO_TIPO_TO_CAT: Record<string, string> = {
                   materiales: 'materiales',
                   viaticos: 'transporte',
                   software: 'software',
                   servicios_prof: 'servicios_profesionales',
-                  mo_propia: 'servicios_profesionales',
-                  mo_terceros: 'servicios_profesionales',
+                  mo_propia: 'mano_de_obra',
+                  mo_terceros: 'mano_de_obra',
                 }
                 const catPresupuesto = new Map<string, number>()
                 for (const r of rubros) {
