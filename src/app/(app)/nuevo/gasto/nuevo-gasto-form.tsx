@@ -21,6 +21,7 @@ const RUBRO_TO_CATEGORIAS: Record<string, string[]> = {
   viaticos: ['transporte', 'alimentacion'],
   software: ['software'],
   servicios_prof: ['servicios_profesionales'],
+  general: ['materiales', 'transporte', 'alimentacion', 'servicios_profesionales', 'software'],
 }
 
 interface Props {
@@ -63,7 +64,10 @@ export default function NuevoGastoForm({ proyectos }: Props) {
         cats.forEach(c => allowedCats.add(c))
       }
     }
-    if (allowedCats.size === 0) return CATEGORIAS_GASTO
+    // Si ningun rubro mapea, mostrar categorias de proyecto (no empresa)
+    if (allowedCats.size === 0) return CATEGORIAS_GASTO.filter(c =>
+      !['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
+    )
     return CATEGORIAS_GASTO.filter(c => allowedCats.has(c.value))
   })()
 
