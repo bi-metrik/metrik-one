@@ -644,37 +644,73 @@ export default function MovimientosClient({
                               </span>
                             )}
 
-                            {/* Deducible / Falta soporte tags */}
+                            {/* Deducible / Soporte tags */}
                             {tag === 'deducible' && (
                               <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
                                 Deducible
                               </span>
                             )}
-                            {tag === 'falta_soporte' && (
-                              <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
-                                {uploadingId === mov.id ? (
-                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                                ) : (
-                                  <Upload className="h-2.5 w-2.5" />
-                                )}
-                                {uploadingId === mov.id ? 'Subiendo...' : 'Agregar soporte'}
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/png,image/webp,application/pdf"
-                                  className="hidden"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0]
-                                    if (file) {
-                                      if (file.size > 20 * 1024 * 1024) {
-                                        toast.error('El archivo supera 20MB')
-                                      } else {
-                                        handleSoporteUpload(mov.id, file)
+                            {/* Soporte: ver / agregar — same position as pill */}
+                            {mov.tipo === 'egreso' && (
+                              hasSoporteImage ? (
+                                <button
+                                  onClick={() => setSoporteModal({ url: mov.soporte_url!, descripcion: mov.descripcion })}
+                                  className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60 transition-colors"
+                                >
+                                  <FileText className="h-2.5 w-2.5" />
+                                  Ver soporte
+                                </button>
+                              ) : tag === 'falta_soporte' ? (
+                                <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
+                                  {uploadingId === mov.id ? (
+                                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                  ) : (
+                                    <Upload className="h-2.5 w-2.5" />
+                                  )}
+                                  {uploadingId === mov.id ? 'Subiendo...' : 'Agregar soporte'}
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0]
+                                      if (file) {
+                                        if (file.size > 20 * 1024 * 1024) {
+                                          toast.error('El archivo supera 20MB')
+                                        } else {
+                                          handleSoporteUpload(mov.id, file)
+                                        }
                                       }
-                                    }
-                                    e.target.value = ''
-                                  }}
-                                />
-                              </label>
+                                      e.target.value = ''
+                                    }}
+                                  />
+                                </label>
+                              ) : !mov.soporte_url ? (
+                                <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
+                                  {uploadingId === mov.id ? (
+                                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                  ) : (
+                                    <Upload className="h-2.5 w-2.5" />
+                                  )}
+                                  {uploadingId === mov.id ? 'Subiendo...' : 'Soporte'}
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0]
+                                      if (file) {
+                                        if (file.size > 20 * 1024 * 1024) {
+                                          toast.error('El archivo supera 20MB')
+                                        } else {
+                                          handleSoporteUpload(mov.id, file)
+                                        }
+                                      }
+                                      e.target.value = ''
+                                    }}
+                                  />
+                                </label>
+                              ) : null
                             )}
 
                             {/* Canal WhatsApp indicator */}
@@ -682,53 +718,6 @@ export default function MovimientosClient({
                               <Smartphone className="h-3 w-3 text-green-500" />
                             )}
 
-                            {/* Spacer */}
-                            <div className="flex-1" />
-
-                            {/* Soporte indicator / upload */}
-                            {hasSoporteImage ? (
-                              <button
-                                onClick={() => setSoporteModal({ url: mov.soporte_url!, descripcion: mov.descripcion })}
-                                className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 transition-colors"
-                                title="Ver soporte"
-                              >
-                                <FileText className="h-3 w-3" />
-                              </button>
-                            ) : mov.soporte_url ? (
-                              <span
-                                className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-50 text-amber-500 dark:bg-amber-900/30 dark:text-amber-400"
-                                title="Soporte (foto no disponible)"
-                              >
-                                <FileText className="h-3 w-3" />
-                              </span>
-                            ) : mov.tipo === 'egreso' && tag !== 'falta_soporte' ? (
-                              <label
-                                className={`inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded bg-gray-100 text-gray-400 hover:bg-primary/10 hover:text-primary dark:bg-gray-800 dark:text-gray-500 dark:hover:bg-primary/20 dark:hover:text-primary transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}
-                                title="Agregar soporte"
-                              >
-                                {uploadingId === mov.id ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Upload className="h-3 w-3" />
-                                )}
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/png,image/webp,application/pdf"
-                                  className="hidden"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0]
-                                    if (file) {
-                                      if (file.size > 20 * 1024 * 1024) {
-                                        toast.error('El archivo supera 20MB')
-                                      } else {
-                                        handleSoporteUpload(mov.id, file)
-                                      }
-                                    }
-                                    e.target.value = ''
-                                  }}
-                                />
-                              </label>
-                            ) : null}
                           </div>
 
                           {/* Line 4: Action buttons — visually separated */}
