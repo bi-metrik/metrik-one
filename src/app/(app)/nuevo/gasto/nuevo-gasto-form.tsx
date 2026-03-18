@@ -55,7 +55,11 @@ export default function NuevoGastoForm({ proyectos }: Props) {
   // When project is selected, filter categories to only those matching the project's rubro types
   const categoriasVisibles = (() => {
     if (isEmpresa) return CATEGORIAS_EMPRESA
-    if (rubros.length === 0) return CATEGORIAS_GASTO
+    // Categorías de proyecto (excluye las exclusivas de empresa)
+    const CATEGORIAS_PROYECTO = CATEGORIAS_GASTO.filter(c =>
+      !['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
+    )
+    if (rubros.length === 0) return CATEGORIAS_PROYECTO
     // Collect only categories that map from the project's rubros
     const allowedCats = new Set<string>()
     for (const rubro of rubros) {
