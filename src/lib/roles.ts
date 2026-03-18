@@ -22,6 +22,7 @@ export const ROLE_PERMISSIONS = {
     canApproveCausacion: true,   // D246: aprobar PENDIENTE → APROBADO
     canCausar: true,             // D246: causar APROBADO → CAUSADO
     canViewCausacion: true,      // D246: ver /causacion
+    canRevertApproval: true,     // Revertir APROBADO → RECHAZADO (solo owner)
   },
   admin: {
     label: 'Admin',
@@ -41,6 +42,7 @@ export const ROLE_PERMISSIONS = {
     canApproveCausacion: true,
     canCausar: true,
     canViewCausacion: true,
+    canRevertApproval: false,
   },
   operator: {
     label: 'Operador',
@@ -60,6 +62,7 @@ export const ROLE_PERMISSIONS = {
     canApproveCausacion: false,
     canCausar: false,
     canViewCausacion: false,
+    canRevertApproval: false,
   },
   read_only: {
     label: 'Lectura',
@@ -79,6 +82,7 @@ export const ROLE_PERMISSIONS = {
     canApproveCausacion: false,
     canCausar: false,
     canViewCausacion: false,
+    canRevertApproval: false,
   },
 } as const
 

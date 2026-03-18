@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useCallback, useTransition, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle, User, Upload, Loader2 } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle, User, Upload, Loader2, RotateCcw, AlertTriangle } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { toast } from 'sonner'
 import { getRolePermissions } from '@/lib/roles'
 import type { Movimiento } from './actions'
-import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento, aprobarTodos, attachSoporte } from './actions'
+import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento, revertirAprobacion, aprobarTodos, attachSoporte } from './actions'
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -64,12 +64,12 @@ function mesLabel(mes: string) {
   return `${MESES[Number(m) - 1]} ${y}`
 }
 
-// D142: Determine tag type for a gasto based on category + soporte
-function getDeducibleTag(mov: Movimiento, regimen: string | null): 'deducible' | 'falta_soporte' | null {
-  if (mov.tipo !== 'egreso') return null
-  if (regimen === 'simple') return null
-  if (!esCategoriaDeducible(mov.categoria)) return null
-  return mov.soporte_url ? 'deducible' : 'falta_soporte'
+// D142: Soporte needed check — deducible category without soporte
+function needsSoporte(mov: Movimiento, regimen: string | null): boolean {
+  if (mov.tipo !== 'egreso') return false
+  if (regimen === 'simple') return false
+  if (mov.soporte_url) return false
+  return esCategoriaDeducible(mov.categoria)
 }
 
 // D246: Causación badge config
@@ -102,6 +102,10 @@ export default function MovimientosClient({
   // D246: Rechazo dialog
   const [rechazoModal, setRechazoModal] = useState<{ tabla: 'gastos' | 'cobros'; id: string; descripcion: string } | null>(null)
   const [rechazoMotivo, setRechazoMotivo] = useState('')
+
+  // Revertir aprobación dialog (owner only)
+  const [revertModal, setRevertModal] = useState<{ tabla: 'gastos' | 'cobros'; id: string; descripcion: string; monto: number } | null>(null)
+  const [revertMotivo, setRevertMotivo] = useState('')
 
   // Soporte upload with image compression
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -179,11 +183,11 @@ export default function MovimientosClient({
     const seenFaltaSoporte = localStorage.getItem('metrik_tooltip_falta_soporte_visto')
 
     if (!seenDeducible && regimenFiscal !== 'simple') {
-      const hasDeducible = movimientos.some(m => getDeducibleTag(m, regimenFiscal) === 'deducible')
+      const hasDeducible = movimientos.some(m => m.tipo === 'egreso' && m.deducible)
       if (hasDeducible) setTooltipDeducible(true)
     }
     if (!seenFaltaSoporte && regimenFiscal !== 'simple') {
-      const hasFaltaSoporte = movimientos.some(m => getDeducibleTag(m, regimenFiscal) === 'falta_soporte')
+      const hasFaltaSoporte = movimientos.some(m => needsSoporte(m, regimenFiscal))
       if (hasFaltaSoporte) setTooltipFaltaSoporte(true)
     }
   }, [movimientos, regimenFiscal])
@@ -267,6 +271,26 @@ export default function MovimientosClient({
         toast.success('Movimiento rechazado')
         setRechazoModal(null)
         setRechazoMotivo('')
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  // Revertir aprobación handler (owner only)
+  function handleRevertir() {
+    if (!revertModal) return
+    if (!revertMotivo.trim()) {
+      toast.error('El motivo es obligatorio')
+      return
+    }
+    startTransition(async () => {
+      const res = await revertirAprobacion(revertModal.tabla, revertModal.id, revertMotivo)
+      if (res.success) {
+        toast.success('Aprobacion revertida')
+        setRevertModal(null)
+        setRevertMotivo('')
         router.refresh()
       } else {
         toast.error(res.error)
@@ -544,7 +568,7 @@ export default function MovimientosClient({
               </p>
               <div className="space-y-1">
                 {porFecha[fecha].map(mov => {
-                  const tag = getDeducibleTag(mov, regimenFiscal)
+                  const faltaSoporte = needsSoporte(mov, regimenFiscal)
                   const hasSoporteImage = mov.soporte_url && !mov.soporte_url.startsWith('wamid.')
                   const causacionBadge = CAUSACION_BADGES[mov.estado_causacion]
                   return (
@@ -644,13 +668,7 @@ export default function MovimientosClient({
                               </span>
                             )}
 
-                            {/* Deducible / Soporte tags */}
-                            {tag === 'deducible' && (
-                              <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
-                                Deducible
-                              </span>
-                            )}
-                            {/* Soporte: ver / agregar — same position as pill */}
+                            {/* Soporte: ver / agregar */}
                             {mov.tipo === 'egreso' && (
                               hasSoporteImage ? (
                                 <button
@@ -660,7 +678,7 @@ export default function MovimientosClient({
                                   <FileText className="h-2.5 w-2.5" />
                                   Ver soporte
                                 </button>
-                              ) : tag === 'falta_soporte' ? (
+                              ) : faltaSoporte ? (
                                 <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
                                   {uploadingId === mov.id ? (
                                     <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -713,6 +731,13 @@ export default function MovimientosClient({
                               ) : null
                             )}
 
+                            {/* Deducible badge — from DB, set by contador */}
+                            {mov.tipo === 'egreso' && mov.deducible && regimenFiscal !== 'simple' && (
+                              <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                Deducible
+                              </span>
+                            )}
+
                             {/* Canal WhatsApp indicator */}
                             {mov.canal_registro === 'whatsapp' && (
                               <Smartphone className="h-3 w-3 text-green-500" />
@@ -721,7 +746,7 @@ export default function MovimientosClient({
                           </div>
 
                           {/* Line 4: Action buttons — visually separated */}
-                          {((perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE') || mov.estado_pago === 'pendiente') && (
+                          {((perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE') || mov.estado_pago === 'pendiente' || (perms.canRevertApproval && mov.estado_causacion === 'APROBADO')) && (
                             <div className="mt-2 flex items-center gap-2 border-t pt-2">
                               {/* D246: Aprobar */}
                               {perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE' && (
@@ -764,6 +789,22 @@ export default function MovimientosClient({
                                 >
                                   <CheckCircle2 className="h-3 w-3" />
                                   Pagado
+                                </button>
+                              )}
+
+                              {/* Revertir aprobación — solo owner */}
+                              {perms.canRevertApproval && mov.estado_causacion === 'APROBADO' && (
+                                <button
+                                  onClick={() => {
+                                    setRevertModal({ tabla: mov.tabla, id: mov.id, descripcion: mov.descripcion, monto: mov.monto })
+                                    setRevertMotivo('')
+                                  }}
+                                  disabled={isPending}
+                                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-red-600 hover:border-red-300 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:bg-red-900/30 dark:hover:text-red-300 dark:hover:border-red-700 transition-all disabled:opacity-50"
+                                  title="Revertir aprobacion"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  Revertir
                                 </button>
                               )}
                             </div>
@@ -876,6 +917,59 @@ export default function MovimientosClient({
                   className="flex-1 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
                 >
                   {isPending ? 'Rechazando...' : 'Rechazar'}
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Revertir aprobación dialog — elegant, owner only */}
+      <Dialog open={!!revertModal} onOpenChange={() => { setRevertModal(null); setRevertMotivo('') }}>
+        <DialogContent className="max-w-sm">
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            </div>
+            Revertir aprobacion
+          </DialogTitle>
+          {revertModal && (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/40 px-3 py-2.5">
+                <p className="text-sm font-medium">{revertModal.descripcion}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Monto: {formatCOP(revertModal.monto)}
+                </p>
+              </div>
+
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                Esta accion revierte la aprobacion y marca el movimiento como rechazado. El movimiento dejara de aparecer en la bandeja de causacion.
+              </p>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Motivo de la reversion *</label>
+                <textarea
+                  value={revertMotivo}
+                  onChange={e => setRevertMotivo(e.target.value)}
+                  placeholder="Ej: Aprobado por error, monto incorrecto..."
+                  rows={2}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setRevertModal(null); setRevertMotivo('') }}
+                  className="flex-1 rounded-md border px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleRevertir}
+                  disabled={isPending || !revertMotivo.trim()}
+                  className="flex-1 rounded-md bg-gradient-to-r from-amber-500 to-amber-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 transition-all"
+                >
+                  {isPending ? 'Revirtiendo...' : 'Confirmar reversion'}
                 </button>
               </div>
             </div>

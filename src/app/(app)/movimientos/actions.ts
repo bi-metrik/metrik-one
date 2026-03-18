@@ -217,9 +217,9 @@ export async function getMovimientos(filters?: {
   const ingresos = results.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0)
   const egresos = results.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0)
 
-  // D142: Deducible total (category-based + soporte)
+  // D142: Deducible total — uses DB field (set by contador in causación)
   const deducible = results
-    .filter(m => m.tipo === 'egreso' && esCategoriaDeducible(m.categoria) && m.soporte_url)
+    .filter(m => m.tipo === 'egreso' && m.deducible)
     .reduce((s, m) => s + m.monto, 0)
 
   // D141: Fiscal regime
@@ -394,6 +394,61 @@ export async function rechazarMovimiento(tabla: 'gastos' | 'cobros', registroId:
     registro_id: registroId,
     accion: 'RECHAZAR',
     estado_anterior: 'PENDIENTE',
+    estado_nuevo: 'RECHAZADO',
+    motivo: motivo.trim(),
+    realizado_por: userId,
+  })
+
+  revalidatePath('/movimientos')
+  revalidatePath('/causacion')
+  return { success: true }
+}
+
+// ── Revertir aprobación (APROBADO → RECHAZADO) — solo owner ──
+
+export async function revertirAprobacion(tabla: 'gastos' | 'cobros', registroId: string, motivo: string) {
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
+
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canRevertApproval) return { success: false, error: 'Solo el dueño puede revertir aprobaciones' }
+
+  if (!motivo || motivo.trim().length === 0) return { success: false, error: 'El motivo es obligatorio' }
+
+  // Validate record belongs to workspace and is APROBADO
+  let estadoCausacion: string | null = null
+  if (tabla === 'gastos') {
+    const { data } = await supabase.from('gastos').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+  } else {
+    const { data } = await supabase.from('cobros').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
+    if (!data) return { success: false, error: 'Registro no encontrado' }
+    estadoCausacion = data.estado_causacion
+  }
+
+  if (estadoCausacion !== 'APROBADO') return { success: false, error: 'Solo se pueden revertir movimientos APROBADOS' }
+
+  const updatePayload = {
+    estado_causacion: 'RECHAZADO' as const,
+    rechazo_motivo: motivo.trim(),
+    aprobado_por: null,
+    fecha_aprobacion: null,
+  }
+
+  const { error: updateError } = tabla === 'gastos'
+    ? await supabase.from('gastos').update(updatePayload).eq('id', registroId)
+    : await supabase.from('cobros').update(updatePayload).eq('id', registroId)
+
+  if (updateError) return { success: false, error: updateError.message }
+
+  // Log to causaciones_log
+  await supabase.from('causaciones_log').insert({
+    workspace_id: workspaceId,
+    tabla,
+    registro_id: registroId,
+    accion: 'REVERTIR_APROBACION',
+    estado_anterior: 'APROBADO',
     estado_nuevo: 'RECHAZADO',
     motivo: motivo.trim(),
     realizado_por: userId,
