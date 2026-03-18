@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 
 // ── Types ───────────────────────────────────────────────
@@ -360,9 +361,9 @@ async function cerrarProyecto(
     costo_horas: fin.costo_horas,
     facturado: fin.facturado,
     cobrado: fin.cobrado,
-    cartera: fin.cartera,
+    cartera: (fin.facturado ?? 0) - (fin.cobrado ?? 0),
     ganancia_estimada: fin.ganancia_estimada,
-    ganancia_real: fin.ganancia_real,
+    ganancia_actual: fin.ganancia_actual,
     avance_porcentaje: fin.avance_porcentaje,
     presupuesto_consumido_pct: fin.presupuesto_consumido_pct,
   }
@@ -455,7 +456,7 @@ export async function addHoras(proyectoId: string, input: {
   descripcion?: string
   staff_id?: string
 }): Promise<ActionResult> {
-  const { supabase, workspaceId, userId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Validate estado
@@ -484,6 +485,10 @@ export async function addHoras(proyectoId: string, input: {
     staffId = principal?.id ?? undefined
   }
 
+  // Auto-approve for owner/admin
+  const perms = getRolePermissions(role ?? 'read_only')
+  const autoApprove = perms.canApproveCausacion
+
   const { error: dbError } = await supabase
     .from('horas')
     .insert({
@@ -493,12 +498,17 @@ export async function addHoras(proyectoId: string, input: {
       horas: input.horas,
       descripcion: input.descripcion?.trim() || null,
       staff_id: staffId || null,
+      created_by: userId,
+      estado_aprobacion: autoApprove ? 'APROBADO' : 'PENDIENTE',
+      aprobado_por: autoApprove ? userId : null,
+      fecha_aprobacion: autoApprove ? new Date().toISOString() : null,
     })
 
   if (dbError) return { success: false, error: dbError.message }
 
   revalidatePath(`/proyectos/${proyectoId}`)
   revalidatePath('/proyectos')
+  revalidatePath('/equipo')
   return { success: true }
 }
 

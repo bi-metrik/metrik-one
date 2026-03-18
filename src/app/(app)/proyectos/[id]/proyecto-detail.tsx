@@ -50,9 +50,7 @@ interface Financiero {
   gastos_directos: number | null
   facturado: number | null
   cobrado: number | null
-  cartera: number | null
-  por_facturar: number | null
-  ganancia_real: number | null
+  ganancia_actual: number | null
   ganancia_estimada: number | null
   horas_estimadas: number | null
   horas_reales: number | null
@@ -186,7 +184,7 @@ export default function ProyectoDetail({
 
   const consumo = Math.min(f.presupuesto_consumido_pct ?? 0, 150)
   const semaforoBar = consumo > 90 ? 'bg-red-500' : consumo > 70 ? 'bg-yellow-500' : 'bg-green-500'
-  const ganancia = f.ganancia_real ?? 0
+  const ganancia = f.ganancia_actual ?? 0
 
   const handleAvanceChange = (newVal: number) => {
     setAvance(newVal)
@@ -481,8 +479,8 @@ export default function ProyectoDetail({
           <FinCard label="Costo acumulado" value={f.costo_acumulado} warning={consumo > 90} />
           <FinCard label="Facturado" value={f.facturado} />
           <FinCard label="Cobrado" value={f.cobrado} />
-          <FinCard label="Cartera" value={f.cartera} />
-          <FinCard label="Por facturar" value={f.por_facturar} />
+          <FinCard label="Cartera" value={(f.facturado ?? 0) - (f.cobrado ?? 0)} />
+          <FinCard label="Por facturar" value={(f.presupuesto_total ?? 0) - (f.facturado ?? 0)} />
           <div className="col-span-2 rounded-lg border p-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               {ganancia >= 0

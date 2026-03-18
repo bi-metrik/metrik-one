@@ -1635,49 +1635,64 @@ export type Database = {
       }
       horas: {
         Row: {
+          aprobado_por: string | null
           canal_registro: string | null
           created_at: string | null
+          created_by: string | null
           created_by_wa_name: string | null
           descripcion: string | null
+          estado_aprobacion: string | null
           fecha: string
+          fecha_aprobacion: string | null
           fin: string | null
           horas: number
           id: string
           inicio: string | null
           mensaje_original: string | null
           proyecto_id: string
+          rechazo_motivo: string | null
           staff_id: string | null
           timer_activo: boolean | null
           workspace_id: string
         }
         Insert: {
+          aprobado_por?: string | null
           canal_registro?: string | null
           created_at?: string | null
+          created_by?: string | null
           created_by_wa_name?: string | null
           descripcion?: string | null
+          estado_aprobacion?: string | null
           fecha?: string
+          fecha_aprobacion?: string | null
           fin?: string | null
           horas: number
           id?: string
           inicio?: string | null
           mensaje_original?: string | null
           proyecto_id: string
+          rechazo_motivo?: string | null
           staff_id?: string | null
           timer_activo?: boolean | null
           workspace_id: string
         }
         Update: {
+          aprobado_por?: string | null
           canal_registro?: string | null
           created_at?: string | null
+          created_by?: string | null
           created_by_wa_name?: string | null
           descripcion?: string | null
+          estado_aprobacion?: string | null
           fecha?: string
+          fecha_aprobacion?: string | null
           fin?: string | null
           horas?: number
           id?: string
           inicio?: string | null
           mensaje_original?: string | null
           proyecto_id?: string
+          rechazo_motivo?: string | null
           staff_id?: string | null
           timer_activo?: boolean | null
           workspace_id?: string
@@ -3616,7 +3631,6 @@ export type Database = {
           avance_porcentaje: number | null
           canal_creacion: string | null
           carpeta_url: string | null
-          cartera: number | null
           cobrado: number | null
           codigo: string | null
           contacto_nombre: string | null
@@ -3624,22 +3638,21 @@ export type Database = {
           costo_horas: number | null
           cotizacion_id: string | null
           created_at: string | null
-          empresa_codigo: string | null
           empresa_nombre: string | null
           estado: string | null
           facturado: number | null
           fecha_cierre: string | null
           fecha_fin_estimada: string | null
           fecha_inicio: string | null
+          ganancia_actual: number | null
           ganancia_estimada: number | null
-          ganancia_real: number | null
           gastos_directos: number | null
           horas_estimadas: number | null
           horas_reales: number | null
           nombre: string | null
+          num_cobros: number | null
           num_facturas: number | null
           oportunidad_id: string | null
-          por_facturar: number | null
           presupuesto_consumido_pct: number | null
           presupuesto_total: number | null
           proyecto_id: string | null

@@ -25,12 +25,11 @@ interface ProyectoFinanciero {
   presupuesto_total: number | null
   avance_porcentaje: number | null
   presupuesto_consumido_pct: number | null
-  ganancia_real: number | null
+  ganancia_actual: number | null
   costo_acumulado: number | null
   empresa_nombre: string | null
   cobrado: number | null
   facturado: number | null
-  cartera: number | null
   horas_reales: number | null
   created_at: string | null
 }
@@ -219,7 +218,7 @@ function ProyectoCard({
   const config = ESTADO_PROYECTO_CONFIG[estado]
   const avance = Math.min(p.avance_porcentaje ?? 0, 100)
   const consumo = Math.min(p.presupuesto_consumido_pct ?? 0, 150)
-  const ganancia = p.ganancia_real ?? 0
+  const ganancia = p.ganancia_actual ?? 0
 
   const isThisProjectTimer = activeTimer?.proyecto_id === p.proyecto_id
   const canTimer = estado === 'en_ejecucion'

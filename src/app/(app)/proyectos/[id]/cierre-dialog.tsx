@@ -13,9 +13,8 @@ interface Financiero {
   horas_reales: number | null
   facturado: number | null
   cobrado: number | null
-  cartera: number | null
   ganancia_estimada: number | null
-  ganancia_real: number | null
+  ganancia_actual: number | null
 }
 
 interface Props {
@@ -74,9 +73,9 @@ export default function CierreDialog({ proyectoId, financiero: f, isInterno = fa
                 ? 'Al cerrar el proyecto se genera un resumen de inversión. No podrás registrar más horas ni gastos.'
                 : 'Al cerrar el proyecto se genera un snapshot financiero comparativo. No podrás registrar más horas, gastos ni facturas. Los cobros pendientes aún se podrán registrar.'}
             </p>
-            {!isInterno && (f.cartera ?? 0) > 0 && (
+            {!isInterno && ((f.facturado ?? 0) - (f.cobrado ?? 0)) > 0 && (
               <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-700 dark:border-yellow-900 dark:bg-yellow-950/20">
-                Tienes {formatCOP(f.cartera ?? 0)} en cartera pendiente. Aún podrás registrar cobros después del cierre.
+                Tienes {formatCOP((f.facturado ?? 0) - (f.cobrado ?? 0))} en cartera pendiente. Aún podrás registrar cobros después del cierre.
               </div>
             )}
             <div className="flex gap-2 pt-1">
@@ -176,7 +175,7 @@ export default function CierreDialog({ proyectoId, financiero: f, isInterno = fa
                 <>
                   <CompareRow label="Facturado" value={formatCOP(f.facturado ?? 0)} />
                   <CompareRow label="Cobrado" value={formatCOP(f.cobrado ?? 0)} />
-                  <CompareRow label="Cartera pendiente" value={formatCOP(f.cartera ?? 0)} />
+                  <CompareRow label="Cartera pendiente" value={formatCOP((f.facturado ?? 0) - (f.cobrado ?? 0))} />
                 </>
               )}
               <div className="border-t pt-1.5 mt-1.5">
@@ -188,8 +187,8 @@ export default function CierreDialog({ proyectoId, financiero: f, isInterno = fa
                 ) : (
                   <CompareRow
                     label="Ganancia real"
-                    value={`${(f.ganancia_real ?? 0) >= 0 ? '+' : ''}${formatCOP(f.ganancia_real ?? 0)}`}
-                    highlight={f.ganancia_real ?? 0}
+                    value={`${(f.ganancia_actual ?? 0) >= 0 ? '+' : ''}${formatCOP(f.ganancia_actual ?? 0)}`}
+                    highlight={f.ganancia_actual ?? 0}
                   />
                 )}
               </div>
