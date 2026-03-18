@@ -324,6 +324,7 @@ export type Database = {
           centro_costo: string | null
           created_at: string | null
           created_by: string | null
+          created_by_wa_name: string | null
           cuenta_contable: string | null
           enviado_alegra: boolean | null
           estado_causacion: string
@@ -351,6 +352,7 @@ export type Database = {
           centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          created_by_wa_name?: string | null
           cuenta_contable?: string | null
           enviado_alegra?: boolean | null
           estado_causacion?: string
@@ -378,6 +380,7 @@ export type Database = {
           centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          created_by_wa_name?: string | null
           cuenta_contable?: string | null
           enviado_alegra?: boolean | null
           estado_causacion?: string
@@ -1310,6 +1313,7 @@ export type Database = {
           centro_costo: string | null
           created_at: string | null
           created_by: string | null
+          created_by_wa_name: string | null
           cuenta_contable: string | null
           deducible: boolean | null
           descripcion: string | null
@@ -1346,6 +1350,7 @@ export type Database = {
           centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          created_by_wa_name?: string | null
           cuenta_contable?: string | null
           deducible?: boolean | null
           descripcion?: string | null
@@ -1382,6 +1387,7 @@ export type Database = {
           centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
+          created_by_wa_name?: string | null
           cuenta_contable?: string | null
           deducible?: boolean | null
           descripcion?: string | null
@@ -1631,6 +1637,7 @@ export type Database = {
         Row: {
           canal_registro: string | null
           created_at: string | null
+          created_by_wa_name: string | null
           descripcion: string | null
           fecha: string
           fin: string | null
@@ -1646,6 +1653,7 @@ export type Database = {
         Insert: {
           canal_registro?: string | null
           created_at?: string | null
+          created_by_wa_name?: string | null
           descripcion?: string | null
           fecha?: string
           fin?: string | null
@@ -1661,6 +1669,7 @@ export type Database = {
         Update: {
           canal_registro?: string | null
           created_at?: string | null
+          created_by_wa_name?: string | null
           descripcion?: string | null
           fecha?: string
           fin?: string | null

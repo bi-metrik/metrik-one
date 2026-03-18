@@ -89,7 +89,7 @@ export async function getMovimientos(filters?: {
     if (!skipGastos) {
       let query = supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, mensaje_original, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
+        .select('id, fecha, monto, descripcion, mensaje_original, categoria, deducible, soporte_url, tipo, canal_registro, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
         .eq('workspace_id', workspaceId)
         .gte('fecha', startDate)
         .lte('fecha', endDate)
@@ -139,8 +139,8 @@ export async function getMovimientos(filters?: {
           soporte_url: g.soporte_url ?? null,
           tipo_gasto: (g.tipo as Movimiento['tipo_gasto']) ?? null,
           canal_registro: (g.canal_registro as Movimiento['canal_registro']) ?? null,
-          created_by_name: profile?.full_name ?? null,
-          created_by_initials: getInitials(profile?.full_name ?? null),
+          created_by_name: profile?.full_name ?? g.created_by_wa_name ?? null,
+          created_by_initials: getInitials(profile?.full_name ?? g.created_by_wa_name ?? null),
           estado_pago: (g.estado_pago as 'pagado' | 'pendiente') ?? 'pagado',
           fecha_pago: g.fecha_pago ?? null,
           estado_causacion: (g.estado_causacion as Movimiento['estado_causacion']) ?? 'PENDIENTE',
@@ -156,7 +156,7 @@ export async function getMovimientos(filters?: {
   if ((tipoFilter === 'todos' || tipoFilter === 'ingresos') && !skipIngresos) {
     let query = supabase
       .from('cobros')
-      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
+      .select('id, fecha, monto, notas, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
@@ -199,8 +199,8 @@ export async function getMovimientos(filters?: {
         soporte_url: null,
         tipo_gasto: null,
         canal_registro: null,
-        created_by_name: profile?.full_name ?? null,
-        created_by_initials: getInitials(profile?.full_name ?? null),
+        created_by_name: profile?.full_name ?? c.created_by_wa_name ?? null,
+        created_by_initials: getInitials(profile?.full_name ?? c.created_by_wa_name ?? null),
         estado_pago: null,
         fecha_pago: null,
         estado_causacion: (c.estado_causacion as Movimiento['estado_causacion']) ?? 'PENDIENTE',

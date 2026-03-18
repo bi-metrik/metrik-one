@@ -126,7 +126,7 @@ export async function getProyectoDetalle(id: string) {
         .order('fecha', { ascending: false }),
       supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, mensaje_original, categoria, created_at, tipo, estado_pago, estado_causacion, soporte_url, deducible, created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
+        .select('id, fecha, monto, descripcion, mensaje_original, categoria, created_at, tipo, estado_pago, estado_causacion, soporte_url, deducible, created_by, created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
         .eq('proyecto_id', id)
         .order('fecha', { ascending: false }),
       supabase
@@ -220,7 +220,7 @@ export async function getProyectoDetalle(id: string) {
       estado_causacion: g.estado_causacion ?? 'PENDIENTE',
       soporte_url: g.soporte_url,
       deducible: g.deducible ?? false,
-      created_by_name: profile?.full_name ?? null,
+      created_by_name: profile?.full_name ?? g.created_by_wa_name ?? null,
     }
   })
 

@@ -660,6 +660,7 @@ async function handleTimerParar(ctx: HandlerContext): Promise<void> {
     fin: now.toISOString(),
     timer_activo: true,
     canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
   });
 
   if (error) {
@@ -1276,6 +1277,7 @@ async function handleW03TSelection(ctx: HandlerContext, selected: { id: string; 
           fin: now.toISOString(),
           timer_activo: true,
           canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
         });
         await supabase.from('timer_activo').delete().eq('id', timer.id);
         await ctx.sendMessage(`✅ ${elapsed.label} registradas en ${bold(oldProj?.nombre || '?')}.`);
@@ -1324,6 +1326,7 @@ async function handleW03TSelection(ctx: HandlerContext, selected: { id: string; 
         fin: now.toISOString(),
         timer_activo: true,
         canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
       });
       await supabase.from('timer_activo').delete().eq('id', activeTimer.id);
       await ctx.sendMessage(`✅ ${elapsed.label} registradas en ${bold(oldProj?.nombre || '?')}.`);
@@ -1447,6 +1450,7 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     mensaje_original: c.parsed_fields?.mensaje_original || null,
     tipo: 'directo',
     canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
     soporte_pendiente: true,
     created_by: user.user_id ?? null,
   }).select().single();
@@ -1491,6 +1495,7 @@ async function executeW02(ctx: HandlerContext): Promise<boolean> {
     mensaje_original: c.parsed_fields?.mensaje_original || null,
     tipo: 'empresa',
     canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
     soporte_pendiente: true,
     created_by: user.user_id ?? null,
   }).select().single();
@@ -1527,6 +1532,7 @@ async function executeBorradorConfirmation(ctx: HandlerContext): Promise<void> {
     mensaje_original: c.parsed_fields?.mensaje_original || null,
     tipo: 'fijo',
     canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
     gasto_fijo_ref_id: c.borrador_id,
     created_by: user.user_id ?? null,
   }).select().single();
@@ -1555,6 +1561,7 @@ async function executeW03(ctx: HandlerContext): Promise<void> {
     descripcion: c.parsed_fields?.concept || CATEGORIA_LABELS[c.categoria || ''] || c.categoria || '',
     mensaje_original: c.parsed_fields?.mensaje_original || null,
     canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
   });
 
   if (error) throw error;
@@ -1587,6 +1594,7 @@ async function executeW04(ctx: HandlerContext): Promise<void> {
     monto: c.amount,
     fecha: new Date().toISOString().slice(0, 10),
     canal_registro: 'whatsapp',
+    created_by_wa_name: user.name,
     mensaje_original: c.parsed_fields?.mensaje_original || null,
     created_by: user.user_id ?? null,
   };
