@@ -126,6 +126,7 @@ interface HoraEntry {
   horas: number
   descripcion: string
   staff_name: string | null
+  costo: number
 }
 
 interface Props {
@@ -321,17 +322,17 @@ export default function ProyectoDetail({
           )}
         </div>
 
-        {/* Costo por categoría (expandible) */}
+        {/* Costos ejecutados (expandible) */}
         <div>
           <button
             onClick={() => setShowRubros(!showRubros)}
             className="flex w-full items-center justify-between mb-1 group"
           >
             <span className="text-xs font-medium flex items-center gap-1">
-              Costo por categoria
+              Costos ejecutados
               <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${showRubros ? 'rotate-180' : ''}`} />
             </span>
-            <span className="text-xs font-semibold">{consumo > 0 ? `${consumo}%` : formatCOP(f.gastos_directos ?? 0)}</span>
+            <span className="text-xs font-semibold tabular-nums">{formatCOP(f.costo_acumulado ?? 0)}</span>
           </button>
           {(f.presupuesto_total ?? 0) > 0 && (
             <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -340,7 +341,7 @@ export default function ProyectoDetail({
           )}
 
           {showRubros && (
-            <div className="mt-3 space-y-2 border-t pt-3">
+            <div className="mt-3 space-y-3 border-t pt-3">
               {(() => {
                 // Agrupar gastos por categoria
                 const catTotals = new Map<string, number>()
@@ -349,9 +350,10 @@ export default function ProyectoDetail({
                   catTotals.set(cat, (catTotals.get(cat) ?? 0) + g.monto)
                 }
 
-                // Inyectar costo de horas como mano_de_obra
-                const costoHoras = f.costo_horas ?? 0
-                if (costoHoras > 0) {
+                // Inyectar costo de horas como mano_de_obra (calculado por staff)
+                const totalHoras = horasAll.reduce((s, h) => s + h.horas, 0)
+                const costoHoras = horasAll.reduce((s, h) => s + h.costo, 0)
+                if (costoHoras > 0 || totalHoras > 0) {
                   catTotals.set('mano_de_obra', (catTotals.get('mano_de_obra') ?? 0) + costoHoras)
                 }
 
@@ -380,45 +382,75 @@ export default function ProyectoDetail({
                   presupuesto: catPresupuesto.get(cat) ?? 0,
                 })).sort((a, b) => b.gastado - a.gastado)
 
-                const totalGastado = rows.reduce((s, r) => s + r.gastado, 0)
+                const totalEjecutado = rows.reduce((s, r) => s + r.gastado, 0)
+                const totalPresupuesto = catPresupuesto.size > 0
+                  ? rows.reduce((s, r) => s + r.presupuesto, 0)
+                  : 0
 
                 if (rows.length === 0) {
-                  return <p className="text-xs text-muted-foreground">Sin gastos aprobados</p>
+                  return <p className="text-xs text-muted-foreground">Sin costos registrados</p>
                 }
 
                 return (
                   <>
+                    {/* Resumen ejecutivo */}
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground pb-1">
+                      <span>Ejecutado: <span className="font-semibold text-foreground">{formatCOP(totalEjecutado)}</span></span>
+                      {totalPresupuesto > 0 && (
+                        <span>Presupuesto: <span className="font-semibold text-foreground">{formatCOP(totalPresupuesto)}</span></span>
+                      )}
+                    </div>
+
+                    {/* Barras por categoría */}
                     {rows.map(r => {
                       const cfg = CATEGORIA_CONFIG[r.cat]
                       const label = cfg?.label ?? r.cat.replace(/_/g, ' ')
-                      const pct = r.presupuesto > 0 ? Math.round((r.gastado / r.presupuesto) * 100) : (r.gastado > 0 ? 100 : 0)
-                      const barColor = r.presupuesto === 0
-                        ? 'bg-red-400'
-                        : pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-blue-500'
-                      const diff = r.presupuesto - r.gastado
+                      const hasBudget = r.presupuesto > 0
+                      const pct = hasBudget ? Math.round((r.gastado / r.presupuesto) * 100) : 0
+                      const barWidth = hasBudget
+                        ? Math.min(pct, 100)
+                        : (totalEjecutado > 0 ? Math.round((r.gastado / totalEjecutado) * 100) : 0)
+                      const barColor = !hasBudget
+                        ? 'bg-slate-400'
+                        : pct > 100 ? 'bg-red-500' : pct > 90 ? 'bg-red-400' : pct > 70 ? 'bg-yellow-500' : 'bg-blue-500'
+                      const saldo = r.presupuesto - r.gastado
+                      const isLabor = r.cat === 'mano_de_obra'
+
                       return (
                         <div key={r.cat}>
                           <div className="flex items-center justify-between text-xs">
-                            <span className="truncate font-medium capitalize">{label}</span>
+                            <span className="truncate font-medium">{label}{isLabor && totalHoras > 0 && <span className="text-muted-foreground font-normal ml-1">({totalHoras}h)</span>}</span>
                             <span className="shrink-0 tabular-nums text-muted-foreground">
-                              {formatCOP(r.gastado)}{r.presupuesto > 0 && ` / ${formatCOP(r.presupuesto)}`}
+                              {formatCOP(r.gastado)}{hasBudget && <span className="text-[10px]"> / {formatCOP(r.presupuesto)} <span className={pct > 100 ? 'text-red-500 font-semibold' : ''}>{pct}%</span></span>}
                             </span>
                           </div>
-                          <div className="mt-0.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                          <div className="relative mt-0.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.max(barWidth, r.gastado > 0 ? 2 : 0)}%` }} />
                           </div>
-                          {r.presupuesto > 0 && diff < 0 && (
-                            <p className="mt-0.5 text-[10px] text-red-500 font-medium">Excedido {formatCOP(Math.abs(diff))}</p>
+                          {hasBudget && saldo < 0 && (
+                            <p className="mt-0.5 text-[10px] text-red-500 font-medium">Excedido {formatCOP(Math.abs(saldo))}</p>
                           )}
-                          {r.presupuesto === 0 && r.gastado > 0 && (
-                            <p className="mt-0.5 text-[10px] text-muted-foreground">Sin presupuesto asignado</p>
+                          {hasBudget && saldo > 0 && (
+                            <p className="mt-0.5 text-[10px] text-muted-foreground">Disponible {formatCOP(saldo)}</p>
                           )}
                         </div>
                       )
                     })}
-                    <div className="flex items-center justify-between border-t pt-2 text-xs font-semibold">
-                      <span>Total gastado</span>
-                      <span className="text-red-600 dark:text-red-400 tabular-nums">{formatCOP(totalGastado)}</span>
+
+                    {/* Total */}
+                    <div className="border-t pt-2 space-y-1">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span>Total ejecutado</span>
+                        <span className="tabular-nums">{formatCOP(totalEjecutado)}</span>
+                      </div>
+                      {totalPresupuesto > 0 && (
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-muted-foreground">Saldo total</span>
+                          <span className={`tabular-nums font-medium ${totalPresupuesto - totalEjecutado < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                            {formatCOP(totalPresupuesto - totalEjecutado)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </>
                 )

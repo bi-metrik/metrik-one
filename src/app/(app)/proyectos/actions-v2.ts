@@ -121,7 +121,7 @@ export async function getProyectoDetalle(id: string) {
     Promise.all([
       supabase
         .from('horas')
-        .select('id, fecha, horas, descripcion, created_at, staff:staff_id(full_name)')
+        .select('id, fecha, horas, descripcion, created_at, staff:staff_id(full_name, salary, horas_disponibles_mes)')
         .eq('proyecto_id', id)
         .order('fecha', { ascending: false }),
       supabase
@@ -227,13 +227,15 @@ export async function getProyectoDetalle(id: string) {
   })
 
   const horasAll = (horasRes.data ?? []).map(h => {
-    const staffName = (h.staff as unknown as { full_name: string } | null)?.full_name
+    const staff = h.staff as unknown as { full_name: string; salary: number | null; horas_disponibles_mes: number | null } | null
+    const tarifaHora = (staff?.salary && staff?.horas_disponibles_mes) ? staff.salary / staff.horas_disponibles_mes : 0
     return {
       id: h.id,
       fecha: h.fecha ?? '',
       horas: h.horas ?? 0,
       descripcion: h.descripcion ?? 'Horas registradas',
-      staff_name: staffName ?? null,
+      staff_name: staff?.full_name ?? null,
+      costo: (h.horas ?? 0) * tarifaHora,
     }
   })
 
