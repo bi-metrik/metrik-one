@@ -6,14 +6,28 @@ import Link from 'next/link'
 import {
   ArrowLeft, FolderOpen, Clock, Receipt, Banknote, Pause, Play,
   Lock, Plus, TrendingUp, TrendingDown, FileText, AlertTriangle,
-  ChevronDown, RefreshCw,
+  ChevronDown, RefreshCw, ArrowUpCircle, User, Smartphone, Upload, Loader2,
 } from 'lucide-react'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { updateAvance, cambiarEstadoProyecto } from '../actions-v2'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import ProyectoAlertas from './proyecto-alertas'
+
+// Category display config (same as movimientos)
+const CATEGORIA_CONFIG: Record<string, { label: string; color: string }> = {
+  materiales: { label: 'Materiales', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+  transporte: { label: 'Transporte', color: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400' },
+  alimentacion: { label: 'Alimentación', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  servicios_profesionales: { label: 'Servicios prof.', color: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' },
+  software: { label: 'Software', color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+  arriendo: { label: 'Arriendo', color: 'bg-stone-100 text-stone-700 dark:bg-stone-800/50 dark:text-stone-400' },
+  marketing: { label: 'Marketing', color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
+  capacitacion: { label: 'Capacitación', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+  otros: { label: 'Otros', color: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+}
 import HorasDialog from './horas-dialog'
 import FacturaDialog from './factura-dialog'
 import CobroDialog from './cobro-dialog'
@@ -101,6 +115,7 @@ interface GastoEntry {
   estado_causacion: string
   soporte_url: string | null
   deducible: boolean
+  canal_registro: string | null
   created_by_name: string | null
 }
 
@@ -143,9 +158,10 @@ export default function ProyectoDetail({
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
   const [avance, setAvance] = useState(f.avance_porcentaje ?? 0)
-  const [dialog, setDialog] = useState<'gasto' | 'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
+  const [dialog, setDialog] = useState<'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
   const [showRubros, setShowRubros] = useState(false)
   const [registrosTab, setRegistrosTab] = useState<'gastos' | 'horas' | 'facturas'>('gastos')
+  const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
 
   // Auto-open dialog from URL param (e.g. ?action=gasto)
   useEffect(() => {
@@ -436,58 +452,81 @@ export default function ProyectoDetail({
           ))}
         </div>
 
-        {/* Tab: Gastos */}
+        {/* Tab: Gastos — mismo diseño que movimientos */}
         {registrosTab === 'gastos' && (
           gastosAll.length === 0 ? (
-            <p className="py-3 text-center text-xs text-muted-foreground">Sin gastos registrados</p>
+            <p className="py-3 text-center text-xs text-muted-foreground">Sin gastos aprobados</p>
           ) : (
             <div className="space-y-1">
               {gastosAll.map(g => {
-                const causacionClass =
-                  g.estado_causacion === 'PENDIENTE' ? 'bg-red-100 text-red-800' :
-                  g.estado_causacion === 'APROBADO' ? 'bg-yellow-100 text-yellow-800' :
-                  g.estado_causacion === 'RECHAZADO' ? 'bg-gray-100 text-gray-600' : ''
-                const causacionLabel =
-                  g.estado_causacion === 'PENDIENTE' ? 'Pendiente' :
-                  g.estado_causacion === 'APROBADO' ? 'Aprobado' :
-                  g.estado_causacion === 'RECHAZADO' ? 'Rechazado' : null
+                const hasSoporteImage = g.soporte_url && !g.soporte_url.startsWith('wamid.')
                 return (
                   <div key={g.id} className="rounded-lg border bg-card px-3 py-2.5">
                     <div className="flex items-start gap-3">
-                      <Receipt className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+                      <ArrowUpCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
                       <div className="min-w-0 flex-1">
+                        {/* Line 1: Description + Amount */}
                         <div className="flex items-baseline justify-between gap-2">
                           <p className="truncate text-sm font-medium">{g.descripcion}</p>
                           <span className="shrink-0 text-sm font-semibold tabular-nums text-red-600 dark:text-red-400">
                             -{formatCOP(g.monto)}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          {g.fecha}
-                          {g.categoria && <> · <span className="capitalize">{g.categoria.replace(/_/g, ' ')}</span></>}
-                          {g.created_by_name && <> · {g.created_by_name}</>}
-                        </p>
-                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                          {causacionLabel && (
-                            <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${causacionClass}`}>
-                              {causacionLabel}
-                            </span>
-                          )}
+
+                        {/* Line 2: Categoria badge */}
+                        {g.categoria && (
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            {(() => {
+                              const cfg = CATEGORIA_CONFIG[g.categoria]
+                              return cfg ? (
+                                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${cfg.color}`}>
+                                  {cfg.label}
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400 capitalize">
+                                  {g.categoria.replace(/_/g, ' ')}
+                                </span>
+                              )
+                            })()}
+                          </div>
+                        )}
+
+                        {/* Line 3: User */}
+                        {g.created_by_name && (
+                          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <User className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{g.created_by_name}</span>
+                          </p>
+                        )}
+
+                        {/* Line 4: Status badges */}
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                           {g.estado_pago === 'pendiente' && (
-                            <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-800">
+                            <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
                               <Clock className="h-2.5 w-2.5" />
                               Pend. pago
                             </span>
                           )}
+
+                          {/* Soporte: ver */}
+                          {hasSoporteImage && (
+                            <button
+                              onClick={() => setSoporteModal({ url: g.soporte_url!, descripcion: g.descripcion })}
+                              className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60 transition-colors"
+                            >
+                              <FileText className="h-2.5 w-2.5" />
+                              Ver soporte
+                            </button>
+                          )}
+
                           {g.deducible && (
-                            <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800">
+                            <span className="rounded px-1 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
                               Deducible
                             </span>
                           )}
-                          {g.soporte_url && !g.soporte_url.startsWith('wamid.') && (
-                            <span className="inline-flex h-4 w-4 items-center justify-center rounded bg-blue-50 text-blue-600">
-                              <FileText className="h-2.5 w-2.5" />
-                            </span>
+
+                          {g.canal_registro === 'whatsapp' && (
+                            <Smartphone className="h-3 w-3 text-green-500" />
                           )}
                         </div>
                       </div>
@@ -654,6 +693,24 @@ export default function ProyectoDetail({
           onClose={() => { setDialog(null); router.refresh() }}
         />
       )}
+
+      {/* Soporte image lightbox */}
+      <Dialog open={!!soporteModal} onOpenChange={() => setSoporteModal(null)}>
+        <DialogContent className="max-h-[90vh] max-w-md overflow-hidden p-2 sm:max-w-lg">
+          <DialogTitle className="sr-only">Soporte</DialogTitle>
+          {soporteModal && (
+            <div className="flex flex-col gap-2">
+              <p className="truncate px-2 pt-2 text-sm font-medium">{soporteModal.descripcion}</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={soporteModal.url}
+                alt="Soporte fotográfico"
+                className="max-h-[75vh] w-full rounded-lg object-contain"
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
