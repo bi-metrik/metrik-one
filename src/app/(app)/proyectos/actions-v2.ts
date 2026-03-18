@@ -126,7 +126,7 @@ export async function getProyectoDetalle(id: string) {
         .order('fecha', { ascending: false }),
       supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, categoria, created_at, tipo, estado_pago, estado_causacion, soporte_url, deducible, created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
+        .select('id, fecha, monto, descripcion, mensaje_original, categoria, created_at, tipo, estado_pago, estado_causacion, soporte_url, deducible, created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
         .eq('proyecto_id', id)
         .order('fecha', { ascending: false }),
       supabase
@@ -176,7 +176,7 @@ export async function getProyectoDetalle(id: string) {
       id: g.id,
       tipo: 'gasto' as const,
       fecha: g.fecha ?? '',
-      descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
+      descripcion: g.descripcion || g.mensaje_original || g.categoria || 'Gasto',
       valor: g.monto ?? 0,
       created_at: g.created_at ?? '',
     })),
@@ -213,7 +213,7 @@ export async function getProyectoDetalle(id: string) {
       id: g.id,
       fecha: g.fecha ?? '',
       monto: g.monto ?? 0,
-      descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
+      descripcion: g.descripcion || g.mensaje_original || g.categoria || 'Gasto',
       categoria: g.categoria,
       tipo: g.tipo,
       estado_pago: g.estado_pago,

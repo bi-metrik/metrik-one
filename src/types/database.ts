@@ -334,6 +334,7 @@ export type Database = {
           fecha_causacion: string | null
           fecha_envio_alegra: string | null
           id: string
+          mensaje_original: string | null
           monto: number
           notas: string | null
           notas_causacion: string | null
@@ -360,6 +361,7 @@ export type Database = {
           fecha_causacion?: string | null
           fecha_envio_alegra?: string | null
           id?: string
+          mensaje_original?: string | null
           monto: number
           notas?: string | null
           notas_causacion?: string | null
@@ -386,6 +388,7 @@ export type Database = {
           fecha_causacion?: string | null
           fecha_envio_alegra?: string | null
           id?: string
+          mensaje_original?: string | null
           monto?: number
           notas?: string | null
           notas_causacion?: string | null
@@ -1322,6 +1325,7 @@ export type Database = {
           fecha_pago: string | null
           gasto_fijo_ref_id: string | null
           id: string
+          mensaje_original: string | null
           monto: number
           notas_causacion: string | null
           proyecto_id: string | null
@@ -1357,6 +1361,7 @@ export type Database = {
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
+          mensaje_original?: string | null
           monto: number
           notas_causacion?: string | null
           proyecto_id?: string | null
@@ -1392,6 +1397,7 @@ export type Database = {
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
+          mensaje_original?: string | null
           monto?: number
           notas_causacion?: string | null
           proyecto_id?: string | null
@@ -1631,6 +1637,7 @@ export type Database = {
           horas: number
           id: string
           inicio: string | null
+          mensaje_original: string | null
           proyecto_id: string
           staff_id: string | null
           timer_activo: boolean | null
@@ -1645,6 +1652,7 @@ export type Database = {
           horas: number
           id?: string
           inicio?: string | null
+          mensaje_original?: string | null
           proyecto_id: string
           staff_id?: string | null
           timer_activo?: boolean | null
@@ -1659,6 +1667,7 @@ export type Database = {
           horas?: number
           id?: string
           inicio?: string | null
+          mensaje_original?: string | null
           proyecto_id?: string
           staff_id?: string | null
           timer_activo?: boolean | null

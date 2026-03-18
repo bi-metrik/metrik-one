@@ -138,7 +138,10 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     return;
   }
 
-  // 8. Build handler context
+  // 8. Inject original message text into parsed fields as metadata
+  parsed.fields.mensaje_original = message.text;
+
+  // 9. Build handler context
   const ctx: HandlerContext = {
     user,
     message,

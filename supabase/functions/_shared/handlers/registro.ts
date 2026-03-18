@@ -4,7 +4,7 @@
 
 import type { HandlerContext } from '../types.ts';
 import { AMBIGUOUS_CATEGORIES, CATEGORIA_LABELS, STREAK_MILESTONES } from '../types.ts';
-import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, formatElapsed } from '../wa-format.ts';
+import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, formatElapsed, formatProject } from '../wa-format.ts';
 import { findProjects, findProjectByCode, findActiveProjects, findContacts, matchCategory, findMatchingBorrador } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
 import { downloadAndStoreImage } from '../wa-media.ts';
@@ -81,21 +81,17 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
 
     const options = projects.slice(0, 5).map((p: any) => ({
       id: p.proyecto_id,
-      label: `${p.nombre} — ${formatPct(Number(p.presupuesto_consumido_pct))} presupuesto usado`,
+      label: formatProject(p),
     }));
     options.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
 
     await ctx.sendOptions(
-      `💰 Gasto de ${formatCOP(amount)} en ${concept || categoria}. ¿Para cuál proyecto?`,
+      `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Para cuál proyecto?`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
-      intent: 'GASTO_DIRECTO',
-      pending_action: 'W01',
-      amount,
-      categoria,
-      parsed_fields: parsed.fields,
-      options,
+      intent: 'GASTO_DIRECTO', pending_action: 'W01',
+      amount, categoria, parsed_fields: parsed.fields, options,
     });
     return;
   }
@@ -107,23 +103,23 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     // No match — show active projects
     const allActive = await findActiveProjects(supabase, user.workspace_id);
     if (allActive.length === 0) {
-      await ctx.sendMessage(`❌ No encontré proyecto activo con "${entity_hint}" y no tienes otros proyectos. ¿Lo registro como gasto de empresa?`);
+      await ctx.sendMessage(`❌ No encontré "${entity_hint}". ¿Registro como gasto de empresa? (Sí/No)`);
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_DIRECTO', pending_action: 'W01',
         amount, categoria, parsed_fields: parsed.fields,
-        options: [{ id: 'operativo', label: '🏢 Sí, gasto de empresa' }, { id: 'cancelar', label: 'Cancelar' }],
+        options: [{ id: 'operativo', label: 'Sí, gasto de empresa' }, { id: 'cancelar', label: 'Cancelar' }],
       });
       return;
     }
 
     const options = allActive.slice(0, 4).map((p: any) => ({
       id: p.proyecto_id,
-      label: bold(p.nombre),
+      label: formatProject(p),
     }));
     options.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
 
     await ctx.sendOptions(
-      `❌ No encontré proyecto activo con "${entity_hint}".\n\nTus proyectos activos son:`,
+      `❌ No encontré "${entity_hint}". Tus proyectos:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -134,37 +130,25 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
   }
 
   if (projects.length === 1) {
-    // Single fuzzy match — always confirm which project (D-DISAMB)
+    // Single fuzzy match — go direct to confirmation (skip disambiguation)
     const p = projects[0];
-    const allActive = await findActiveProjects(supabase, user.workspace_id);
-    const hasOtherProjects = allActive.length > 1;
-    const disambigOptions: Array<{ id: string; label: string }> = [
-      { id: p.id, label: bold(p.nombre) },
-    ];
-    if (hasOtherProjects) {
-      disambigOptions.push({ id: 'otro_proyecto', label: 'Otro proyecto' });
+    const borrador = await findMatchingBorrador(supabase, user.workspace_id, concept || '', categoria, amount);
+    if (borrador) {
+      await showBorradorMatch(ctx, borrador, p, amount, categoria);
+    } else {
+      await showGastoDirectoConfirmation(ctx, p, amount, categoria, concept);
     }
-    disambigOptions.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
-
-    await ctx.sendOptions(
-      `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Para ${bold(p.nombre)}?`,
-      disambigOptions.map((o) => o.label),
-    );
-    await ctx.updateSession('awaiting_selection', {
-      intent: 'GASTO_DIRECTO', pending_action: 'W01',
-      amount, categoria, parsed_fields: parsed.fields, options: disambigOptions,
-    });
     return;
   }
 
   // Multiple matches
   const options = projects.slice(0, 5).map((p: any) => ({
     id: p.id,
-    label: `${bold(p.nombre)} — ${formatPct(Number(p.presupuesto_consumido_pct))} presupuesto usado`,
+    label: formatProject(p),
   }));
 
   await ctx.sendOptions(
-    `💰 Gasto de ${formatCOP(amount)} en ${concept || categoria}. ¿Para cuál proyecto?`,
+    `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Cuál proyecto?`,
     options.map((o) => o.label),
   );
   await ctx.updateSession('awaiting_selection', {
@@ -177,18 +161,16 @@ async function showGastoDirectoConfirmation(ctx: HandlerContext, project: any, a
   const presupuesto = Number(project.presupuesto_total) || 0;
   const costoActual = Number(project.costo_acumulado) || 0;
   const costoNuevo = costoActual + amount;
-  const pctActual = presupuesto > 0 ? (costoActual / presupuesto) * 100 : 0;
   const pctNuevo = presupuesto > 0 ? (costoNuevo / presupuesto) * 100 : 0;
 
-  let msg = `✅ Registro gasto directo:\n\n📂 Proyecto: ${bold(project.nombre)}\n💰 Monto: ${formatCOP(amount)}\n📋 Categoría: ${CATEGORIA_LABELS[categoria] || categoria}\n📅 Fecha: Hoy`;
+  let msg = `📂 ${bold(formatProject(project))}\n💰 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}`;
 
   if (presupuesto > 0) {
-    msg += `\n\nPresupuesto: ${formatCOP(costoActual)} de ${formatCOP(presupuesto)} (${formatPct(pctActual)})`;
-    msg += `\nCon este gasto: ${formatCOP(costoNuevo)} (${formatPct(pctNuevo)})`;
+    msg += `\n📊 Presupuesto: ${formatCOP(costoNuevo)} / ${formatCOP(presupuesto)} (${formatPct(pctNuevo)})`;
   }
 
   if (amount > (presupuesto - costoActual) && presupuesto > 0) {
-    msg += `\n\n⚠️ Este gasto supera el presupuesto restante.`;
+    msg += `\n⚠️ Supera presupuesto restante.`;
   }
 
   msg += '\n\n¿Confirmo? (Sí/No)';
@@ -367,11 +349,11 @@ async function handleHoras(ctx: HandlerContext): Promise<void> {
     // Multiple projects, no hint
     const options = activeProjects.slice(0, 5).map((p: any) => ({
       id: p.proyecto_id,
-      label: `${bold(p.nombre)} — ${formatPct(Number(p.horas_reales || 0) / Number(p.horas_estimadas || 1) * 100)} horas`,
+      label: formatProject(p),
     }));
 
     await ctx.sendOptions(
-      `⏱️ ${hours} horas. ¿Para cuál proyecto?`,
+      `⏱️ ${hours}h. ¿Para cuál proyecto?`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -385,30 +367,19 @@ async function handleHoras(ctx: HandlerContext): Promise<void> {
   const projects = await findProjects(supabase, user.workspace_id, entity_hint);
 
   if (projects.length === 1) {
-    // Single fuzzy match — confirm which project (D-DISAMB)
+    // Single fuzzy match — go direct to confirmation
     const p = projects[0];
-    const disambigOptions: Array<{ id: string; label: string }> = [
-      { id: p.id, label: bold(p.nombre) },
-      { id: 'otro_proyecto', label: 'Otro proyecto' },
-    ];
-    await ctx.sendOptions(
-      `⏱️ ${hours} horas. ¿Para ${bold(p.nombre)}?`,
-      disambigOptions.map((o) => o.label),
-    );
-    await ctx.updateSession('awaiting_selection', {
-      intent: 'HORAS', pending_action: 'W03',
-      parsed_fields: parsed.fields, options: disambigOptions,
-    });
+    await showHorasConfirmation(ctx, p, hours, false);
     return;
   }
 
   if (projects.length === 0) {
     const options = activeProjects.slice(0, 5).map((p: any) => ({
       id: p.proyecto_id || p.id,
-      label: bold(p.nombre),
+      label: formatProject(p),
     }));
     await ctx.sendOptions(
-      `❌ No encontré proyecto con "${entity_hint}". Tus proyectos activos:`,
+      `❌ No encontré "${entity_hint}". Tus proyectos:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -420,10 +391,10 @@ async function handleHoras(ctx: HandlerContext): Promise<void> {
 
   // Multiple matches
   const options = projects.slice(0, 5).map((p: any) => ({
-    id: p.id, label: bold(p.nombre),
+    id: p.id, label: formatProject(p),
   }));
   await ctx.sendOptions(
-    `⏱️ ${hours} horas. ¿Para cuál proyecto?`,
+    `⏱️ ${hours}h. ¿Cuál proyecto?`,
     options.map((o) => o.label),
   );
   await ctx.updateSession('awaiting_selection', {
@@ -441,9 +412,9 @@ async function showHorasConfirmation(ctx: HandlerContext, project: any, hours: n
 
   let msg = '';
   if (isAutoAssign) {
-    msg = `⏱️ ${hours} horas para ${bold(project.nombre)} (tu único proyecto activo).`;
+    msg = `⏱️ ${hours}h para ${bold(formatProject(project))} (tu único proyecto activo).`;
   } else {
-    msg = `⏱️ Registro de horas:\n\n📂 Proyecto: ${bold(project.nombre)}\n🕐 Horas: ${hours}h (hoy)`;
+    msg = `📂 ${bold(formatProject(project))}\n🕐 ${hours}h (hoy)`;
   }
 
   if (horasEstimadas > 0) {
@@ -579,7 +550,7 @@ async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
 
     const options = projects.slice(0, 5).map((p: any) => ({
       id: p.proyecto_id,
-      label: `${p.nombre}`,
+      label: formatProject(p),
     }));
     await ctx.sendOptions('⏱️ ¿En cuál proyecto?', options.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', {
@@ -592,19 +563,25 @@ async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
   // Find project by entity_hint
   const projects = await findProjects(supabase, user.workspace_id, entity_hint);
 
+  if (projects.length === 1) {
+    // Single match — start timer directly
+    await startTimer(ctx, projects[0].id, formatProject(projects[0]));
+    return;
+  }
+
   if (projects.length === 0) {
     const allActive = await findActiveProjects(supabase, user.workspace_id);
     if (allActive.length === 0) {
-      await ctx.sendMessage(`❌ No encontré proyecto con "${entity_hint}" y no tienes proyectos activos.`);
+      await ctx.sendMessage(`❌ No encontré "${entity_hint}" y no tienes proyectos activos.`);
       await completeSession(supabase, ctx.session.id);
       return;
     }
     const options = allActive.slice(0, 5).map((p: any) => ({
       id: p.proyecto_id,
-      label: p.nombre,
+      label: formatProject(p),
     }));
     await ctx.sendOptions(
-      `❌ No encontré proyecto con "${entity_hint}". Tus proyectos activos:`,
+      `❌ No encontré "${entity_hint}". Tus proyectos:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -614,20 +591,12 @@ async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Single or multiple fuzzy matches — always let user confirm (D-DISAMB)
+  // Multiple matches
   const timerOptions = projects.slice(0, 5).map((p: any) => ({
     id: p.id,
-    label: p.nombre,
+    label: formatProject(p),
   }));
-  if (projects.length === 1) {
-    timerOptions.push({ id: 'otro_proyecto', label: 'Otro proyecto' });
-  }
-  await ctx.sendOptions(
-    projects.length === 1
-      ? `⏱️ ¿Iniciar timer en ${bold(projects[0].nombre)}?`
-      : '⏱️ ¿En cuál proyecto?',
-    timerOptions.map((o) => o.label),
-  );
+  await ctx.sendOptions('⏱️ ¿En cuál proyecto?', timerOptions.map((o) => o.label));
   await ctx.updateSession('awaiting_selection', {
     intent: 'TIMER_INICIAR', pending_action: 'W03T',
     options: timerOptions,
@@ -796,17 +765,23 @@ async function handleCobro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Always let user confirm which project (D-DISAMB)
-  const cobroOptions = projects.slice(0, 5).map((p: any) => ({
-    id: p.id, label: bold(p.nombre),
-  }));
   if (projects.length === 1) {
-    cobroOptions.push({ id: 'otro_proyecto', label: 'Otro proyecto' });
+    // Single match — go direct to invoice lookup
+    const p = projects[0];
+    await ctx.updateSession('awaiting_selection', {
+      intent: 'COBRO', pending_action: 'W04',
+      amount, parsed_fields: parsed.fields,
+    });
+    await proceedCobroWithProject(ctx, p.id, formatProject(p));
+    return;
   }
+
+  // Multiple matches
+  const cobroOptions = projects.slice(0, 5).map((p: any) => ({
+    id: p.id, label: formatProject(p),
+  }));
   await ctx.sendOptions(
-    projects.length === 1
-      ? `💰 Cobro de ${formatCOP(amount)}. ¿De ${bold(projects[0].nombre)}?`
-      : `💰 Cobro de ${formatCOP(amount)}. ¿De cuál proyecto?`,
+    `💰 Cobro de ${formatCOP(amount)}. ¿Cuál proyecto?`,
     cobroOptions.map((o) => o.label),
   );
   await ctx.updateSession('awaiting_selection', {
@@ -1167,10 +1142,10 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
     const allActive = await findActiveProjects(supabase, user.workspace_id);
     const newOptions = allActive.slice(0, 5).map((p: any) => ({
       id: p.proyecto_id,
-      label: bold(p.nombre),
+      label: formatProject(p),
     }));
     newOptions.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
-    await ctx.sendOptions('Tus proyectos activos:', newOptions.map((o) => o.label));
+    await ctx.sendOptions('Tus proyectos:', newOptions.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', { options: newOptions });
     return;
   }
@@ -1469,6 +1444,7 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     monto: c.amount,
     categoria: c.categoria || 'otros',
     descripcion: c.parsed_fields?.concept || '',
+    mensaje_original: c.parsed_fields?.mensaje_original || null,
     tipo: 'directo',
     canal_registro: 'whatsapp',
     soporte_pendiente: true,
@@ -1486,15 +1462,15 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
 
   let msg: string;
   if (project) {
-    msg = `✅ Gasto registrado.\n\n📂 ${bold(project.nombre)}\n├ Presupuesto usado: ${formatCOP(Number(project.costo_acumulado))} / ${formatCOP(Number(project.presupuesto_total))} (${formatPct(Number(project.presupuesto_consumido_pct))})\n├ Horas: ${Number(project.horas_reales) || 0} / ${Number(project.horas_estimadas) || 0}h\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
+    msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(formatProject(project))}.\n📊 Presupuesto: ${formatCOP(Number(project.costo_acumulado))} / ${formatCOP(Number(project.presupuesto_total))} (${formatPct(Number(project.presupuesto_consumido_pct))})`;
   } else {
-    msg = `✅ Gasto de ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
+    msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
   }
 
-  msg += '\n\n💳 ¿Ya lo pagaste?\n1️⃣ Sí, ya pagado\n2️⃣ Pendiente (a crédito)';
+  msg += '\n\n📷 Envía foto del soporte o escribe *después*.';
   await ctx.sendMessage(msg);
-  await ctx.updateSession('awaiting_payment_status', { gasto_id: gasto?.id });
-  return true; // Skip completeSession — awaiting payment status
+  await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
+  return true;
 }
 
 async function executeW02(ctx: HandlerContext): Promise<boolean> {
@@ -1512,6 +1488,7 @@ async function executeW02(ctx: HandlerContext): Promise<boolean> {
     monto: c.amount,
     categoria: c.categoria || 'otros',
     descripcion: c.parsed_fields?.concept || '',
+    mensaje_original: c.parsed_fields?.mensaje_original || null,
     tipo: 'empresa',
     canal_registro: 'whatsapp',
     soporte_pendiente: true,
@@ -1523,25 +1500,18 @@ async function executeW02(ctx: HandlerContext): Promise<boolean> {
   // D103: Enriched response with monthly accumulated
   const { data: acumulado } = await supabase
     .from('gastos')
-    .select('monto, descripcion')
+    .select('monto')
     .eq('workspace_id', user.workspace_id)
     .is('proyecto_id', null)
-    .gte('fecha', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
-    .order('created_at', { ascending: false })
-    .limit(4);
+    .gte('fecha', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
 
   const totalMes = (acumulado || []).reduce((sum: number, g: any) => sum + Number(g.monto), 0);
-  const detalle = (acumulado || []).slice(0, 3).map((g: any) =>
-    `${g.descripcion || 'Sin desc.'} ${formatCOPShort(Number(g.monto))}`
-  ).join(' · ');
 
-  let msg = `✅ Gasto de empresa registrado:\n💰 ${formatCOP(c.amount!)} — ${CATEGORIA_LABELS[c.categoria || 'otros'] || c.categoria}\n📊 Gastos empresa este mes: ${formatCOP(totalMes)}`;
-  if (detalle) msg += `\n   (${detalle})`;
-  msg += '\n\n💳 ¿Ya lo pagaste?\n1️⃣ Sí, ya pagado\n2️⃣ Pendiente (a crédito)';
-
+  let msg = `✅ Gasto empresa: ${formatCOP(c.amount!)} — ${CATEGORIA_LABELS[c.categoria || 'otros'] || c.categoria}\n📊 Total empresa este mes: ${formatCOP(totalMes)}`;
+  msg += '\n\n📷 Envía foto del soporte o escribe *después*.';
   await ctx.sendMessage(msg);
-  await ctx.updateSession('awaiting_payment_status', { gasto_id: gasto?.id });
-  return true; // Skip completeSession — awaiting payment status
+  await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
+  return true;
 }
 
 async function executeBorradorConfirmation(ctx: HandlerContext): Promise<void> {
@@ -1554,6 +1524,7 @@ async function executeBorradorConfirmation(ctx: HandlerContext): Promise<void> {
     monto: c.amount,
     categoria: c.categoria || 'otros',
     descripcion: c.parsed_fields?.concept || '',
+    mensaje_original: c.parsed_fields?.mensaje_original || null,
     tipo: 'fijo',
     canal_registro: 'whatsapp',
     gasto_fijo_ref_id: c.borrador_id,
@@ -1582,6 +1553,7 @@ async function executeW03(ctx: HandlerContext): Promise<void> {
     fecha: new Date().toISOString().slice(0, 10),
     horas: c.parsed_fields?.hours || 0,
     descripcion: c.parsed_fields?.concept || '',
+    mensaje_original: c.parsed_fields?.mensaje_original || null,
     canal_registro: 'whatsapp',
   });
 
@@ -1597,7 +1569,7 @@ async function executeW03(ctx: HandlerContext): Promise<void> {
     const horasPct = Number(project.horas_estimadas) > 0
       ? (Number(project.horas_reales) / Number(project.horas_estimadas)) * 100
       : 0;
-    const msg = `✅ ${c.parsed_fields?.hours}h registradas en ${bold(project.nombre)}.\n\n📂 ${bold(project.nombre)}\n├ Horas: ${Number(project.horas_reales)} / ${Number(project.horas_estimadas)}h (${formatPct(horasPct)})\n├ Presupuesto usado: ${formatPct(Number(project.presupuesto_consumido_pct))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
+    const msg = `✅ ${c.parsed_fields?.hours}h en ${bold(formatProject(project))}.\n📊 Horas: ${Number(project.horas_reales)} / ${Number(project.horas_estimadas)}h (${formatPct(horasPct)})`;
     await ctx.sendMessage(msg);
   } else {
     await ctx.sendMessage(`✅ ${c.parsed_fields?.hours}h registradas.`);
@@ -1615,6 +1587,7 @@ async function executeW04(ctx: HandlerContext): Promise<void> {
     monto: c.amount,
     fecha: new Date().toISOString().slice(0, 10),
     canal_registro: 'whatsapp',
+    mensaje_original: c.parsed_fields?.mensaje_original || null,
     created_by: user.user_id ?? null,
   };
   if (c.factura_id) insertData.factura_id = c.factura_id;

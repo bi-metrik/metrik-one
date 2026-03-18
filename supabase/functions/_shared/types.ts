@@ -30,7 +30,7 @@ export interface ParsedFields {
   amount?: number;
   concept?: string;
   entity_hint?: string;
-  project_code?: number;  // Short numeric code (e.g. 12 from "P-012")
+  project_code?: string | number;  // Code: "KAE-2", "P-012", or numeric 12
   category_hint?: string;
   hours?: number;
   date_hint?: string;
@@ -38,6 +38,7 @@ export interface ParsedFields {
   phone?: string;
   role?: string;
   note?: string;
+  mensaje_original?: string;  // Full user message text (injected by webhook)
 }
 
 export interface ParseResult {

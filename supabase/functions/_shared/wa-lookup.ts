@@ -4,17 +4,22 @@
 
 import type { SupabaseClient } from './types.ts';
 
-/** Find a single active project by its short numeric code (P-012) */
+/** Find a single active project by its code (e.g., "KAE-1", "P-001", or numeric 12 → "P-012") */
 export async function findProjectByCode(
   supabase: SupabaseClient,
   workspaceId: string,
-  code: number,
+  code: number | string,
 ) {
+  // Normalize: if numeric, try "P-XXX" format; if string, match directly
+  const codeStr = typeof code === 'number'
+    ? `P-${String(code).padStart(3, '0')}`
+    : String(code).toUpperCase();
+
   const { data, error } = await supabase
     .from('v_proyecto_financiero')
     .select('*')
     .eq('workspace_id', workspaceId)
-    .eq('codigo', code)
+    .ilike('codigo', codeStr)
     .eq('estado', 'en_ejecucion')
     .single();
   if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findProjectByCode error:', error);

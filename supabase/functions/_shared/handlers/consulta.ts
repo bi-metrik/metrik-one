@@ -4,7 +4,7 @@
 
 import type { HandlerContext } from '../types.ts';
 import { PIPELINE_STAGE_LABELS, STREAK_MILESTONES } from '../types.ts';
-import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, currentMonthName, currentYear } from '../wa-format.ts';
+import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, currentMonthName, currentYear, formatProject } from '../wa-format.ts';
 import { findProjects, findContacts } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
 
@@ -46,7 +46,7 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
     }
 
     const list = projects.map((p: any, i: number) =>
-      `${i + 1}️⃣ ${bold(p.nombre)} — ${formatPct(Number(p.avance_porcentaje))} avance`
+      `${i + 1}️⃣ ${formatProject(p)} — ${formatPct(Number(p.avance_porcentaje))} avance`
     ).join('\n');
 
     await ctx.sendMessage(`📂 Tus proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
@@ -65,7 +65,7 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
     ? (Number(p.horas_reales) / Number(p.horas_estimadas)) * 100
     : 0;
 
-  let msg = `📂 ${bold(p.nombre)}\n\n├ Estado: Activo`;
+  let msg = `📂 ${bold(formatProject(p))}\n\n├ Estado: Activo`;
   msg += `\n├ ⏱️ Horas: ${Number(p.horas_reales) || 0} / ${Number(p.horas_estimadas) || 0}h (${formatPct(horasPct)})`;
   msg += `\n├ 💰 Presupuesto: ${formatCOP(Number(p.costo_acumulado))} / ${formatCOP(Number(p.presupuesto_total))} (${formatPct(Number(p.presupuesto_consumido_pct))})`;
   msg += `\n├ 📄 Facturado: ${formatCOP(Number(p.facturado))} — Cobrado: ${formatCOP(Number(p.cobrado))}`;

@@ -52,7 +52,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
   {
     let query = supabase
       .from('gastos')
-      .select('id, fecha, monto, descripcion, categoria, proyecto_id, proyectos(nombre), created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion')
+      .select('id, fecha, monto, descripcion, mensaje_original, categoria, proyecto_id, proyectos(nombre), created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion')
       .eq('workspace_id', workspaceId)
 
     if (tab === 'aprobados') {
@@ -78,7 +78,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         tabla: 'gastos',
         fecha: g.fecha,
         monto: Number(g.monto),
-        descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
+        descripcion: g.descripcion || g.mensaje_original || g.categoria || 'Gasto',
         categoria: g.categoria,
         proyecto: proy?.nombre ?? null,
         created_by_name: profile?.full_name ?? null,

@@ -89,7 +89,7 @@ export async function getMovimientos(filters?: {
     if (!skipGastos) {
       let query = supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
+        .select('id, fecha, monto, descripcion, mensaje_original, categoria, deducible, soporte_url, tipo, canal_registro, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
         .eq('workspace_id', workspaceId)
         .gte('fecha', startDate)
         .lte('fecha', endDate)
@@ -131,7 +131,7 @@ export async function getMovimientos(filters?: {
           tabla: 'gastos',
           fecha: g.fecha,
           monto: Number(g.monto),
-          descripcion: g.descripcion ?? g.categoria ?? 'Gasto',
+          descripcion: g.descripcion || g.mensaje_original || g.categoria || 'Gasto',
           categoria: g.categoria,
           proyecto: proy?.nombre ?? null,
           proyecto_codigo: proy?.codigo ?? null,

@@ -67,6 +67,12 @@ export function splitMessage(text: string, maxLen = 500): string[] {
   return chunks;
 }
 
+/** Format project label with codigo: "KAE-1 · Kaeser · Manufactura Trailer" */
+export function formatProject(p: { codigo?: string; nombre?: string }): string {
+  const code = p.codigo ? `${p.codigo}` : '';
+  return code ? `${code} · ${p.nombre}` : p.nombre || '?';
+}
+
 /** Current month name in Spanish */
 export function currentMonthName(): string {
   const months = [

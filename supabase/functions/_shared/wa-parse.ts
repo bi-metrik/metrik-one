@@ -19,7 +19,7 @@ REGLAS:
 - Extrae montos en formato numérico (sin puntos de miles, sin "$")
 - Los nombres de personas/empresas van tal cual los escribió el usuario
 - Si el mensaje menciona un proyecto/cliente, extráelo como "entity_hint"
-- Si el mensaje menciona un código de proyecto como "P-12", "#12", "proyecto 12", "el 12", extráelo como "project_code" (solo el número entero). project_code tiene prioridad sobre entity_hint.
+- Si el mensaje menciona un código de proyecto como "KAE-2", "FAB-1", "P-12", "#12", extráelo como "project_code" (string tal cual: "KAE-2", "P-12", etc.). Códigos alfanuméricos tipo "XXX-N" tienen prioridad máxima. project_code tiene prioridad sobre entity_hint.
 - Fechas: si no se menciona, no incluyas el campo (el sistema usa "hoy")
 - Montos en pesos colombianos por defecto
 
@@ -107,10 +107,12 @@ const FEW_SHOT_EXAMPLES = [
   { input: 'Parar', output: '{"intent":"TIMER_PARAR","confidence":0.95,"fields":{}}' },
   { input: 'Terminé', output: '{"intent":"TIMER_PARAR","confidence":0.92,"fields":{}}' },
   { input: '¿Cuánto llevo?', output: '{"intent":"TIMER_ESTADO","confidence":0.93,"fields":{}}' },
-  // Project code examples
-  { input: 'Carga al P-12 un gasto de 50 mil en materiales', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":12,"category_hint":"materiales"}}' },
-  { input: 'Iniciar timer en el 3', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"project_code":3}}' },
-  { input: 'Me pagaron 2 millones del P-5', output: '{"intent":"COBRO","confidence":0.92,"fields":{"amount":2000000,"project_code":5}}' },
+  // Project code examples (alphanumeric and numeric)
+  { input: 'Gasté 50 mil en materiales al KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"KAE-2","category_hint":"materiales"}}' },
+  { input: 'Carga al P-12 un gasto de 50 mil en materiales', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"P-012","category_hint":"materiales"}}' },
+  { input: 'Iniciar timer en FAB-1', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"project_code":"FAB-1"}}' },
+  { input: 'Me pagaron 2 millones del P-5', output: '{"intent":"COBRO","confidence":0.92,"fields":{"amount":2000000,"project_code":"P-005"}}' },
+  { input: 'Gaste 182300 insumos eléctricos al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
 ];
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {
@@ -200,17 +202,20 @@ function parseAmount(text: string): number | null {
   return null;
 }
 
-/** Extract project code (P-12, #12) or entity hint from text */
-function extractProjectRef(text: string): { entity_hint?: string; project_code?: number } {
+/** Extract project code (KAE-2, FAB-1, P-12, #12) or entity hint from text */
+function extractProjectRef(text: string): { entity_hint?: string; project_code?: string | number } {
+  // Priority 0: Alphanumeric code — "KAE-2", "FAB-1", "INT-3" (3 uppercase letters + dash + number)
+  let m = text.match(/\b([A-Z]{2,4}-\d{1,3})\b/);
+  if (m) return { project_code: m[1] };
   // Priority 1: Project code — "P-12", "P12", "#12"
-  let m = text.match(/(?:P-?|#)(\d{1,4})\b/i);
-  if (m) return { project_code: parseInt(m[1]) };
+  m = text.match(/(?:P-?|#)(\d{1,4})\b/i);
+  if (m) return { project_code: `P-${m[1].padStart(3, '0')}` };
   // "proyecto 12" / "el proyecto 12" (only if followed by a number)
   m = text.match(/(?:proyecto|proy)\s+(\d{1,4})\b/i);
-  if (m) return { project_code: parseInt(m[1]) };
+  if (m) return { project_code: `P-${m[1].padStart(3, '0')}` };
   // "al 12" / "del 12" / "en el 12" (short numeric reference after preposition)
   m = text.match(/(?:al|del|en\s+el)\s+(\d{1,4})\b/);
-  if (m) return { project_code: parseInt(m[1]) };
+  if (m) return { project_code: `P-${m[1].padStart(3, '0')}` };
 
   // Priority 2: Entity hint (fuzzy name) — existing logic
   // "para (lo de|el proyecto) X"
