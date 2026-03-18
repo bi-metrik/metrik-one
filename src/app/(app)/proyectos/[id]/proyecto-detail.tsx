@@ -320,76 +320,105 @@ export default function ProyectoDetail({
           )}
         </div>
 
-        {/* Presupuesto consumido (clickable to expand rubros) */}
-        {(f.presupuesto_total ?? 0) > 0 && (
-          <div>
-            <button
-              onClick={() => setShowRubros(!showRubros)}
-              className="flex w-full items-center justify-between mb-1 group"
-            >
-              <span className="text-xs font-medium flex items-center gap-1">
-                Presupuesto consumido
-                <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${showRubros ? 'rotate-180' : ''}`} />
-              </span>
-              <span className="text-xs font-semibold">{consumo}%</span>
-            </button>
+        {/* Costo por categoría (expandible) */}
+        <div>
+          <button
+            onClick={() => setShowRubros(!showRubros)}
+            className="flex w-full items-center justify-between mb-1 group"
+          >
+            <span className="text-xs font-medium flex items-center gap-1">
+              Costo por categoria
+              <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${showRubros ? 'rotate-180' : ''}`} />
+            </span>
+            <span className="text-xs font-semibold">{consumo > 0 ? `${consumo}%` : formatCOP(f.gastos_directos ?? 0)}</span>
+          </button>
+          {(f.presupuesto_total ?? 0) > 0 && (
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <div className={`h-full rounded-full ${semaforoBar}`} style={{ width: `${Math.min(consumo, 100)}%` }} />
             </div>
+          )}
 
-            {/* Rubros drill-down */}
-            {showRubros && (
-              <div className="mt-3 space-y-2 border-t pt-3">
-                {rubros.length >= 1 ? (
-                  rubros.map(r => {
-                    const pct = r.consumido_pct ?? 0
-                    const barColor = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-blue-500'
-                    return (
-                      <div key={r.rubro_id}>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="truncate font-medium">{r.rubro_nombre}</span>
-                          <span className="shrink-0 text-muted-foreground">
-                            {formatCOP(r.gastado_real ?? 0)} / {formatCOP(r.presupuestado ?? 0)}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-                        </div>
-                      </div>
-                    )
-                  })
-                ) : cotizacionId ? (
-                  <p className="text-xs text-muted-foreground">No hay costos sincronizados.</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Sin costos de presupuesto.</p>
-                )}
+          {showRubros && (
+            <div className="mt-3 space-y-2 border-t pt-3">
+              {(() => {
+                // Agrupar gastos por categoria
+                const catTotals = new Map<string, number>()
+                for (const g of gastosAll) {
+                  const cat = g.categoria || 'otros'
+                  catTotals.set(cat, (catTotals.get(cat) ?? 0) + g.monto)
+                }
 
-                {/* Sync button */}
-                {cotizacionId && (
-                  <button
-                    onClick={() => {
-                      startTransition(async () => {
-                        const { resyncRubrosProyecto } = await import('@/app/(app)/pipeline/actions-v2')
-                        const res = await resyncRubrosProyecto(proyectoId)
-                        if (res.success) {
-                          toast.success('Costos sincronizados desde cotización')
-                          router.refresh()
-                        } else {
-                          toast.error(res.error)
-                        }
-                      })
-                    }}
-                    disabled={isPending}
-                    className="inline-flex items-center gap-1 rounded-md bg-muted px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-3 w-3 ${isPending ? 'animate-spin' : ''}`} />
-                    {rubros.length > 0 ? 'Re-sincronizar costos' : 'Sincronizar desde cotización'}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+                // Mapear rubros a categorias para presupuesto
+                const RUBRO_TIPO_TO_CAT: Record<string, string> = {
+                  materiales: 'materiales',
+                  viaticos: 'transporte',
+                  software: 'software',
+                  servicios_prof: 'servicios_profesionales',
+                  mo_propia: 'servicios_profesionales',
+                  mo_terceros: 'servicios_profesionales',
+                }
+                const catPresupuesto = new Map<string, number>()
+                for (const r of rubros) {
+                  const cat = r.rubro_tipo ? RUBRO_TIPO_TO_CAT[r.rubro_tipo] : null
+                  if (cat) {
+                    catPresupuesto.set(cat, (catPresupuesto.get(cat) ?? 0) + (r.presupuestado ?? 0))
+                  }
+                }
+
+                // Unir: todas las categorias que tengan gastos O presupuesto
+                const allCats = new Set([...catTotals.keys(), ...catPresupuesto.keys()])
+                const rows = Array.from(allCats).map(cat => ({
+                  cat,
+                  gastado: catTotals.get(cat) ?? 0,
+                  presupuesto: catPresupuesto.get(cat) ?? 0,
+                })).sort((a, b) => b.gastado - a.gastado)
+
+                const totalGastado = rows.reduce((s, r) => s + r.gastado, 0)
+
+                if (rows.length === 0) {
+                  return <p className="text-xs text-muted-foreground">Sin gastos aprobados</p>
+                }
+
+                return (
+                  <>
+                    {rows.map(r => {
+                      const cfg = CATEGORIA_CONFIG[r.cat]
+                      const label = cfg?.label ?? r.cat.replace(/_/g, ' ')
+                      const pct = r.presupuesto > 0 ? Math.round((r.gastado / r.presupuesto) * 100) : (r.gastado > 0 ? 100 : 0)
+                      const barColor = r.presupuesto === 0
+                        ? 'bg-red-400'
+                        : pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-blue-500'
+                      const diff = r.presupuesto - r.gastado
+                      return (
+                        <div key={r.cat}>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="truncate font-medium capitalize">{label}</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {formatCOP(r.gastado)}{r.presupuesto > 0 && ` / ${formatCOP(r.presupuesto)}`}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                          {r.presupuesto > 0 && diff < 0 && (
+                            <p className="mt-0.5 text-[10px] text-red-500 font-medium">Excedido {formatCOP(Math.abs(diff))}</p>
+                          )}
+                          {r.presupuesto === 0 && r.gastado > 0 && (
+                            <p className="mt-0.5 text-[10px] text-muted-foreground">Sin presupuesto asignado</p>
+                          )}
+                        </div>
+                      )
+                    })}
+                    <div className="flex items-center justify-between border-t pt-2 text-xs font-semibold">
+                      <span>Total gastado</span>
+                      <span className="text-red-600 dark:text-red-400 tabular-nums">{formatCOP(totalGastado)}</span>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ─── Resumen financiero ─── */}

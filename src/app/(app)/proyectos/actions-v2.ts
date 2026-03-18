@@ -128,7 +128,7 @@ export async function getProyectoDetalle(id: string) {
         .from('gastos')
         .select('id, fecha, monto, descripcion, mensaje_original, categoria, created_at, tipo, estado_pago, estado_causacion, soporte_url, deducible, canal_registro, created_by, created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
         .eq('proyecto_id', id)
-        .in('estado_causacion', ['APROBADO', 'CAUSADO'])
+        .eq('estado_causacion', 'APROBADO')
         .order('fecha', { ascending: false }),
       supabase
         .from('cobros')
