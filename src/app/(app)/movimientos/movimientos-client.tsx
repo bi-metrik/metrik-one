@@ -608,17 +608,13 @@ export default function MovimientosClient({
 
                           {/* Line 3: Status badges */}
                           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                            {/* D246: Causación badge */}
-                            {causacionBadge && (
-                              <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium ${causacionBadge.className}`}>
-                                {mov.estado_causacion === 'PENDIENTE' && <Clock className="h-2.5 w-2.5" />}
-                                {mov.estado_causacion === 'APROBADO' && <ShieldCheck className="h-2.5 w-2.5" />}
-                                {mov.estado_causacion === 'RECHAZADO' && <XCircle className="h-2.5 w-2.5" />}
-                                {causacionBadge.label}
+                            {/* D246: Causación badge — only show RECHAZADO (PENDIENTE/APROBADO are redundant with action buttons) */}
+                            {mov.estado_causacion === 'RECHAZADO' && (
+                              <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                <XCircle className="h-2.5 w-2.5" />
+                                Rechazado
                               </span>
                             )}
-
-                            {/* D246: Rechazo motivo tooltip */}
                             {mov.estado_causacion === 'RECHAZADO' && mov.rechazo_motivo && (
                               <span className="text-[10px] text-muted-foreground italic truncate max-w-[120px]" title={mov.rechazo_motivo}>
                                 {mov.rechazo_motivo}
