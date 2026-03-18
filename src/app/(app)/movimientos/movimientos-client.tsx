@@ -90,15 +90,48 @@ export default function MovimientosClient({
   const [rechazoModal, setRechazoModal] = useState<{ tabla: 'gastos' | 'cobros'; id: string; descripcion: string } | null>(null)
   const [rechazoMotivo, setRechazoMotivo] = useState('')
 
-  // Soporte upload
+  // Soporte upload with image compression
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingId, setUploadingId] = useState<string | null>(null)
+
+  const compressImage = useCallback(async (file: File, maxWidth = 1600, quality = 0.8): Promise<File> => {
+    if (file.type === 'application/pdf') return file
+    if (file.size <= 500 * 1024) return file // Skip if already < 500KB
+
+    return new Promise((resolve) => {
+      const img = document.createElement('img')
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / Math.max(img.width, img.height))
+        const w = Math.round(img.width * scale)
+        const h = Math.round(img.height * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }))
+            } else {
+              resolve(file) // Original is smaller, keep it
+            }
+          },
+          'image/jpeg',
+          quality,
+        )
+      }
+      img.onerror = () => resolve(file)
+      img.src = URL.createObjectURL(file)
+    })
+  }, [])
 
   const handleSoporteUpload = useCallback(async (gastoId: string, file: File) => {
     setUploadingId(gastoId)
     try {
+      const compressed = await compressImage(file)
       const fd = new FormData()
-      fd.append('file', file)
+      fd.append('file', compressed)
       const result = await attachSoporte(gastoId, fd)
       if (result.success) {
         toast.success('Soporte agregado')
@@ -653,9 +686,15 @@ export default function MovimientosClient({
                                   type="file"
                                   accept="image/jpeg,image/png,image/webp,application/pdf"
                                   className="hidden"
-                                  onChange={(e) => {
+                                  onChange={async (e) => {
                                     const file = e.target.files?.[0]
-                                    if (file) handleSoporteUpload(mov.id, file)
+                                    if (file) {
+                                      if (file.size > 20 * 1024 * 1024) {
+                                        toast.error('El archivo supera 20MB')
+                                      } else {
+                                        handleSoporteUpload(mov.id, file)
+                                      }
+                                    }
                                     e.target.value = ''
                                   }}
                                 />

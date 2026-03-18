@@ -93,16 +93,48 @@ export default function NuevoGastoForm({ proyectos }: Props) {
     }
   }, [categoriasVisibles, categoria])
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const compressImage = async (file: File, maxWidth = 1600, quality = 0.8): Promise<File> => {
+    if (file.type === 'application/pdf') return file
+    if (file.size <= 500 * 1024) return file
+    return new Promise((resolve) => {
+      const img = document.createElement('img')
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / Math.max(img.width, img.height))
+        const w = Math.round(img.width * scale)
+        const h = Math.round(img.height * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }))
+            } else {
+              resolve(file)
+            }
+          },
+          'image/jpeg',
+          quality,
+        )
+      }
+      img.onerror = () => resolve(file)
+      img.src = URL.createObjectURL(file)
+    })
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('El archivo supera 5MB')
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error('El archivo supera 20MB')
       return
     }
-    setSoporteFile(file)
-    if (file.type.startsWith('image/')) {
-      setSoportePreview(URL.createObjectURL(file))
+    const compressed = await compressImage(file)
+    setSoporteFile(compressed)
+    if (compressed.type.startsWith('image/')) {
+      setSoportePreview(URL.createObjectURL(compressed))
     } else {
       setSoportePreview(null)
     }
