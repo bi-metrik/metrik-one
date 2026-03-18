@@ -14,6 +14,19 @@ import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento, aprobarTodos, 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
 
+// Category display config
+const CATEGORIA_CONFIG: Record<string, { label: string; color: string }> = {
+  materiales: { label: 'Materiales', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+  transporte: { label: 'Transporte', color: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400' },
+  alimentacion: { label: 'Alimentación', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  servicios_profesionales: { label: 'Servicios prof.', color: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' },
+  software: { label: 'Software', color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+  arriendo: { label: 'Arriendo', color: 'bg-stone-100 text-stone-700 dark:bg-stone-800/50 dark:text-stone-400' },
+  marketing: { label: 'Marketing', color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
+  capacitacion: { label: 'Capacitación', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+  otros: { label: 'Otros', color: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+}
+
 function esCategoriaDeducible(categoria: string | null): boolean {
   if (!categoria) return false
   return CATEGORIAS_DEDUCIBLES.includes(categoria)
@@ -561,19 +574,28 @@ export default function MovimientosClient({
                             </span>
                           </div>
 
-                          {/* Line 2: Proyecto (con codigo) + Categoria */}
+                          {/* Line 2: Proyecto + Categoria badge */}
                           {(mov.proyecto || mov.categoria) && (
-                            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                               {mov.proyecto_codigo && (
-                                <span className="font-medium text-foreground/70">{mov.proyecto_codigo}</span>
+                                <span className="text-[11px] font-medium text-foreground/70">{mov.proyecto_codigo}</span>
                               )}
-                              {mov.proyecto_codigo && mov.proyecto && ' '}
-                              {mov.proyecto}
-                              {mov.proyecto && mov.categoria && ' · '}
-                              {mov.categoria && (
-                                <span className="capitalize">{mov.categoria.replace(/_/g, ' ')}</span>
+                              {mov.proyecto && (
+                                <span className="text-[11px] text-muted-foreground truncate">{mov.proyecto}</span>
                               )}
-                            </p>
+                              {mov.categoria && (() => {
+                                const cfg = CATEGORIA_CONFIG[mov.categoria]
+                                return cfg ? (
+                                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${cfg.color}`}>
+                                    {cfg.label}
+                                  </span>
+                                ) : (
+                                  <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400 capitalize">
+                                    {mov.categoria.replace(/_/g, ' ')}
+                                  </span>
+                                )
+                              })()}
+                            </div>
                           )}
 
                           {/* Line 3: Registrado por — separate line for traceability */}
@@ -645,16 +667,6 @@ export default function MovimientosClient({
 
                             {/* Spacer */}
                             <div className="flex-1" />
-
-                            {/* User initials avatar */}
-                            {mov.created_by_initials && (
-                              <span
-                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[9px] font-bold text-primary ring-1 ring-primary/20"
-                                title={mov.created_by_name ?? undefined}
-                              >
-                                {mov.created_by_initials}
-                              </span>
-                            )}
 
                             {/* Soporte indicator / upload */}
                             {hasSoporteImage ? (

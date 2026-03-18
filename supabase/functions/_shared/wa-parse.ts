@@ -7,142 +7,54 @@ import type { ParseResult } from './types.ts';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
-const SYSTEM_PROMPT = `Eres el parser de MéTRIK ONE, un sistema financiero para independientes colombianos.
+const SYSTEM_PROMPT = `Parser de MéTRIK ONE. Recibe mensaje de WhatsApp en español colombiano y devuelve JSON.
 
-Tu trabajo: recibir un mensaje de WhatsApp en español colombiano informal y devolver un JSON estructurado con:
-1. La intención del mensaje (una de las categorías listadas)
-2. Los campos extraídos del texto
+RESPONDE SOLO JSON. Sin texto adicional. Sin markdown.
+
+INTENCIONES:
+GASTO_DIRECTO: gasto con proyecto/cliente ("Gasté X en Y para Z")
+GASTO_OPERATIVO: gasto empresa sin proyecto ("Pagué arriendo")
+HORAS: registro tiempo ("Trabajé X horas en Y")
+TIMER_INICIAR/TIMER_PARAR/TIMER_ESTADO: cronómetro
+COBRO: pago recibido ("Me pagaron X de Y")
+CONTACTO_NUEVO: crear contacto
+SALDO_BANCARIO: reporte saldo banco (NO cobro, NO gasto)
+NOTA_OPORTUNIDAD/NOTA_PROYECTO: notas
+ESTADO_PROYECTO/ESTADO_PIPELINE/MIS_NUMEROS/CARTERA/INFO_CONTACTO: consultas
+OPP_GANADA/OPP_PERDIDA: resultado oportunidad
+AYUDA: saludo o help
+UNCLEAR: no determinable
+
+CAMPOS GASTOS (obligatorios amount, concept, category_hint):
+- amount: número sin puntos ni $
+- concept: título corto 2-5 palabras, sin montos ni verbos
+- category_hint: materiales|transporte|alimentacion|servicios_profesionales|software|arriendo|marketing|capacitacion|otros
+- entity_hint: nombre persona/empresa mencionada
+- project_code: código "KAE-2","FAB-1","P-12" tal cual (prioridad sobre entity_hint)
+
+CATEGORÍAS:
+materiales = compras físicas: insumos, herramientas, ferretería, cables, pintura, cemento, repuestos
+transporte = movilidad: taxi, uber, gasolina, peaje, montacarga, grúa, flete
+alimentacion = comida laboral: almuerzo, tinto, restaurante
+servicios_profesionales = pagos a personas: soldador, contador, abogado, diseñador, freelancer
+software = digital: licencias, suscripciones, hosting, apps
+arriendo = fijo oficina: arriendo, luz, agua, gas, internet (casi siempre GASTO_OPERATIVO)
+marketing = promoción: pauta, publicidad, ads (casi siempre GASTO_OPERATIVO)
+capacitacion = formación: cursos, libros (casi siempre GASTO_OPERATIVO)
+otros = solo si nada aplica
 
 REGLAS:
-- Responde SOLO con JSON válido, sin texto adicional
-- Si no puedes determinar la intención con confianza >70%, usa "UNCLEAR"
-- Extrae montos en formato numérico (sin puntos de miles, sin "$")
-- "concept" es OBLIGATORIO para gastos. Es el título corto (2-5 palabras) que describe el gasto. Sin montos, sin verbos ("gasté/pagué/compré"), sin nombres de personas. Ej: "insumos eléctricos", "taxi a reunión", "almuerzo equipo", "alquiler montacarga"
-- Los nombres de personas/empresas van tal cual los escribió el usuario
-- Si el mensaje menciona un proyecto/cliente, extráelo como "entity_hint"
-- Si el mensaje menciona un código de proyecto como "KAE-2", "FAB-1", "P-12", "#12", extráelo como "project_code" (string tal cual: "KAE-2", "P-12", etc.). Códigos alfanuméricos tipo "XXX-N" tienen prioridad máxima. project_code tiene prioridad sobre entity_hint.
-- Fechas: si no se menciona, no incluyas el campo (el sistema usa "hoy")
-- Montos en pesos colombianos por defecto
+- Menciona proyecto/código/cliente → GASTO_DIRECTO
+- arriendo/marketing/capacitacion sin proyecto → GASTO_OPERATIVO
+- Ambiguo sin proyecto → GASTO_OPERATIVO
+- "X palos/barras" = X×1000000, "X lucas" = X×1000, "medio palo" = 500000
+- "me consignaron/giraron" = COBRO
+- confidence < 0.7 → UNCLEAR
 
-CATEGORÍAS DE GASTO (category_hint) — IMPORTANTE:
-"category_hint" es obligatorio para gastos. Clasifica semánticamente así:
-- "materiales": Compras físicas para un proyecto — insumos, herramientas, ferretería, cables, tornillos, láminas, pintura, cemento, madera, repuestos
-- "transporte": Movilidad — taxi, uber, gasolina, peaje, parqueadero, bus, vuelos, alquiler de vehículo, montacarga, grúa, flete, envío
-- "alimentacion": Comida en contexto laboral — almuerzo, tinto, restaurante, onces, desayuno
-- "servicios_profesionales": Pagos a personas por su trabajo — contador, abogado, asesor, consultor, diseñador, programador, freelancer, honorarios, subcontrato
-- "software": Herramientas digitales — licencias, suscripciones, hosting, dominio, apps, cloud, SaaS
-- "arriendo": Gastos fijos de local/oficina — arriendo, alquiler de espacio, servicios públicos (luz, agua, gas, internet). Casi siempre gasto de EMPRESA, no de proyecto.
-- "marketing": Promoción — pauta digital, publicidad, Google Ads, redes sociales, tarjetas de presentación. Casi siempre gasto de EMPRESA.
-- "capacitacion": Formación — cursos, diplomados, libros, talleres. Casi siempre gasto de EMPRESA.
-- "otros": Solo si ninguna categoría aplica
+FORMATO: {"intent":"...","confidence":0.9,"fields":{...}}`;
 
-GASTO_DIRECTO vs GASTO_OPERATIVO:
-- Si menciona proyecto, código de proyecto o cliente → GASTO_DIRECTO
-- Si es arriendo, marketing, capacitacion, servicios públicos, o gasto recurrente sin proyecto → GASTO_OPERATIVO
-- Si es ambiguo (materiales, transporte, alimentacion, software, servicios_profesionales) y NO menciona proyecto → GASTO_OPERATIVO
-
-INTENCIONES MVP:
-
-REGISTRO:
-- GASTO_DIRECTO: Gasto asociable a proyecto ("Gasté X en Y para Z")
-- GASTO_OPERATIVO: Gasto general/fijo ("Pagué el arriendo", "Compré internet")
-- HORAS: Registro manual de tiempo ("Trabajé X horas en Y") — SOLO para owners
-- TIMER_INICIAR: Iniciar cronómetro ("Iniciar en X", "Empezar X", "Arrancar en X", "Dale a X")
-- TIMER_PARAR: Detener cronómetro ("Parar", "Terminé", "Listo", "Ya acabé")
-- TIMER_ESTADO: Consultar tiempo transcurrido ("¿Cuánto llevo?", "¿Cuánto tiempo?")
-- COBRO: Pago recibido ("Me pagaron X de Y")
-- CONTACTO_NUEVO: Crear contacto ("Nuevo contacto: nombre, teléfono")
-- SALDO_BANCARIO: El usuario reporta cuánto tiene en el banco ("Mi saldo es X", "Tengo X en el banco")
-
-NOVEDADES:
-- NOTA_OPORTUNIDAD: Nota sobre prospecto ("Lo de Torres se enfrió")
-- NOTA_PROYECTO: Nota sobre proyecto activo ("Nota para Pérez: cambió el color")
-
-CONSULTAS:
-- ESTADO_PROYECTO: "¿Cómo va lo de X?"
-- ESTADO_PIPELINE: "¿Qué tengo en el horno?"
-- MIS_NUMEROS: "¿Cómo estoy este mes?"
-- CARTERA: "¿Quién me debe?"
-- INFO_CONTACTO: "¿Cuál es el teléfono de X?"
-
-ACCIONES:
-- OPP_GANADA: "X aceptó" / "Ganamos lo de X"
-- OPP_PERDIDA: "Lo de X no se dio" / "Perdimos X"
-- AYUDA: "¿Qué puedo hacer?" / "help" / "?"
-
-UNCLEAR: No se puede determinar
-
-NOTAS PARA SALDO_BANCARIO:
-- TRIGGER: El usuario reporta cuánto tiene en el banco o su saldo actual.
-- Saldo = estado actual de la cuenta. No es un movimiento.
-- Extraer SOLO monto (obligatorio). No extraer nombre de banco ni fecha.
-- CONFUSIÓN FRECUENTE:
-  - "Me pagaron 3 millones" → COBRO, NO saldo
-  - "Tengo 3 millones en cartera" → CONSULTA (CARTERA), NO saldo
-  - "Gasté 500 mil" → GASTO, NO saldo
-
-COLOQUIALISMOS COLOMBIANOS:
-- "X palos" = X × 1,000,000
-- "X lucas" = X × 1,000
-- "X barras" = X × 1,000,000
-- "una luca" = 1,000
-- "medio palo" = 500,000
-- "le metí X horas" = Trabajé X horas
-- "me consignaron" = Me pagaron
-- "me giraron" = Me pagaron
-- "quedó en veremos" = Oportunidad estancada
-- "se cayó" = Oportunidad perdida
-- "lo de [nombre]" = Proyecto o oportunidad asociada a [nombre]
-
-FORMATO DE RESPUESTA:
-{
-  "intent": "GASTO_DIRECTO",
-  "confidence": 0.92,
-  "fields": {
-    "amount": 180000,
-    "concept": "transporte",
-    "entity_hint": "Pérez",
-    "category_hint": "transporte"
-  }
-}`;
-
-const FEW_SHOT_EXAMPLES = [
-  // Gastos directos (con proyecto)
-  { input: 'Gasté 180 mil en transporte para lo de Pérez', output: '{"intent":"GASTO_DIRECTO","confidence":0.91,"fields":{"amount":180000,"concept":"transporte a obra","entity_hint":"Pérez","category_hint":"transporte"}}' },
-  { input: 'Gasté 50 mil en materiales al KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"KAE-2","category_hint":"materiales"}}' },
-  { input: 'Gaste 182300 insumos eléctricos al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
-  { input: 'Gaste 182300 para compra de insumos eléctricos. Presta Mauricio Moreno. Al proyecto tráiler KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":182300,"concept":"insumos eléctricos","project_code":"KAE-2","category_hint":"materiales"}}' },
-  { input: 'Pagué 350 mil de montacarga para el KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.93,"fields":{"amount":350000,"concept":"alquiler montacarga","project_code":"KAE-2","category_hint":"transporte"}}' },
-  { input: 'Pagué 80 mil de taxi para ir a reunión con cliente Pérez', output: '{"intent":"GASTO_DIRECTO","confidence":0.88,"fields":{"amount":80000,"concept":"taxi reunión cliente","entity_hint":"Pérez","category_hint":"transporte"}}' },
-  { input: 'Carga al P-12 un gasto de 50 mil en materiales', output: '{"intent":"GASTO_DIRECTO","confidence":0.95,"fields":{"amount":50000,"concept":"materiales","project_code":"P-012","category_hint":"materiales"}}' },
-  { input: 'Le pagué al soldador 800 mil por el trabajo en KAE-2', output: '{"intent":"GASTO_DIRECTO","confidence":0.92,"fields":{"amount":800000,"concept":"soldador","project_code":"KAE-2","category_hint":"servicios_profesionales"}}' },
-  { input: 'Almuerzo con el equipo del proyecto FAB-1, 120 mil', output: '{"intent":"GASTO_DIRECTO","confidence":0.90,"fields":{"amount":120000,"concept":"almuerzo equipo","project_code":"FAB-1","category_hint":"alimentacion"}}' },
-  // Gastos operativos (empresa, sin proyecto)
-  { input: 'Pagué el arriendo, 2 palos', output: '{"intent":"GASTO_OPERATIVO","confidence":0.94,"fields":{"amount":2000000,"concept":"arriendo oficina","category_hint":"arriendo"}}' },
-  { input: 'Pagué la pauta de Instagram, 500 lucas', output: '{"intent":"GASTO_OPERATIVO","confidence":0.92,"fields":{"amount":500000,"concept":"pauta Instagram","category_hint":"marketing"}}' },
-  { input: 'Compré un curso de Excel, 180 mil', output: '{"intent":"GASTO_OPERATIVO","confidence":0.90,"fields":{"amount":180000,"concept":"curso Excel","category_hint":"capacitacion"}}' },
-  { input: 'Pagué internet y luz, 280 mil', output: '{"intent":"GASTO_OPERATIVO","confidence":0.91,"fields":{"amount":280000,"concept":"internet y luz","category_hint":"arriendo"}}' },
-  { input: 'Renovación de licencia AutoCAD 1.2 palos', output: '{"intent":"GASTO_OPERATIVO","confidence":0.90,"fields":{"amount":1200000,"concept":"licencia AutoCAD","category_hint":"software"}}' },
-  // Otros intents
-  { input: 'Hoy le metí 4 horas a lo de María', output: '{"intent":"HORAS","confidence":0.93,"fields":{"hours":4,"entity_hint":"María","date_hint":"hoy"}}' },
-  { input: 'Me consignaron 3 millones del edificio', output: '{"intent":"COBRO","confidence":0.90,"fields":{"amount":3000000,"entity_hint":"edificio"}}' },
-  { input: 'Me pagaron 2 millones del P-5', output: '{"intent":"COBRO","confidence":0.92,"fields":{"amount":2000000,"project_code":"P-005"}}' },
-  { input: 'Anota: Ana Gómez, 315 555 1234, arquitecta', output: '{"intent":"CONTACTO_NUEVO","confidence":0.95,"fields":{"name":"Ana Gómez","phone":"3155551234","role":"arquitecta"}}' },
-  { input: 'Lo de Torres se puso difícil, el gerente viajó', output: '{"intent":"NOTA_OPORTUNIDAD","confidence":0.85,"fields":{"entity_hint":"Torres","note":"se puso difícil, el gerente viajó"}}' },
-  { input: '¿Cómo vamos con Pérez?', output: '{"intent":"ESTADO_PROYECTO","confidence":0.88,"fields":{"entity_hint":"Pérez"}}' },
-  { input: 'Pérez aceptó la propuesta, ganamos', output: '{"intent":"OPP_GANADA","confidence":0.92,"fields":{"entity_hint":"Pérez"}}' },
-  { input: 'Mi saldo es 12 millones', output: '{"intent":"SALDO_BANCARIO","confidence":0.93,"fields":{"amount":12000000}}' },
-  { input: 'Tengo 4.800.000 en el banco', output: '{"intent":"SALDO_BANCARIO","confidence":0.91,"fields":{"amount":4800000}}' },
-  { input: '¿Cómo estoy este mes?', output: '{"intent":"MIS_NUMEROS","confidence":0.90,"fields":{}}' },
-  { input: '¿Quién me debe?', output: '{"intent":"CARTERA","confidence":0.92,"fields":{}}' },
-  { input: 'Hola', output: '{"intent":"AYUDA","confidence":0.90,"fields":{}}' },
-  { input: 'Iniciar en lo de Pérez', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"entity_hint":"Pérez"}}' },
-  { input: 'Dale al proyecto Test', output: '{"intent":"TIMER_INICIAR","confidence":0.90,"fields":{"entity_hint":"Test"}}' },
-  { input: 'Parar', output: '{"intent":"TIMER_PARAR","confidence":0.95,"fields":{}}' },
-  { input: 'Terminé', output: '{"intent":"TIMER_PARAR","confidence":0.92,"fields":{}}' },
-  { input: '¿Cuánto llevo?', output: '{"intent":"TIMER_ESTADO","confidence":0.93,"fields":{}}' },
-  { input: 'Iniciar timer en FAB-1', output: '{"intent":"TIMER_INICIAR","confidence":0.93,"fields":{"project_code":"FAB-1"}}' },
-];
+// Track last Gemini failure reason for debugging
+let _lastGeminiFail = '';
 
 export async function parseMessage(userMessage: string): Promise<ParseResult> {
   // Try Gemini first, fall back to regex if unavailable
@@ -150,7 +62,7 @@ export async function parseMessage(userMessage: string): Promise<ParseResult> {
   if (geminiResult) return geminiResult;
 
   // Fallback: regex-based parser for common patterns
-  console.log('[wa-parse] Using regex fallback');
+  console.log('[wa-parse] Using regex fallback, reason:', _lastGeminiFail);
   return regexParse(userMessage);
 }
 
@@ -160,12 +72,7 @@ export async function parseMessage(userMessage: string): Promise<ParseResult> {
 
 async function tryGemini(userMessage: string): Promise<ParseResult | null> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey) return null;
-
-  const fewShotParts = FEW_SHOT_EXAMPLES.flatMap((ex) => [
-    { role: 'user', parts: [{ text: ex.input }] },
-    { role: 'model', parts: [{ text: ex.output }] },
-  ]);
+  if (!apiKey) { _lastGeminiFail = 'no_api_key'; return null; }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
@@ -176,31 +83,36 @@ async function tryGemini(userMessage: string): Promise<ParseResult | null> {
       body: JSON.stringify({
         system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents: [
-          ...fewShotParts,
           { role: 'user', parts: [{ text: userMessage }] },
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 256,
+          maxOutputTokens: 1024,
           responseMimeType: 'application/json',
         },
       }),
     });
 
     if (!res.ok) {
-      const err = await res.text();
-      console.error(`[wa-parse] Gemini error: ${res.status} — falling back to regex`);
-      return null; // Fall back to regex
+      const errBody = await res.text();
+      _lastGeminiFail = `http_${res.status}: ${errBody.slice(0, 500)}`;
+      console.error(`[wa-parse] Gemini error: ${res.status} — ${errBody.slice(0, 300)}`);
+      return null;
     }
 
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return null;
+    if (!text) {
+      _lastGeminiFail = `no_text: finish=${data.candidates?.[0]?.finishReason || 'unknown'}`;
+      return null;
+    }
 
     const parsed: ParseResult = JSON.parse(text);
+    _lastGeminiFail = '';
     if (parsed.confidence < 0.6) return { ...parsed, intent: 'UNCLEAR' };
     return parsed;
   } catch (err) {
+    _lastGeminiFail = `exception: ${String(err).slice(0, 100)}`;
     console.error('[wa-parse] Gemini exception:', err);
     return null;
   }

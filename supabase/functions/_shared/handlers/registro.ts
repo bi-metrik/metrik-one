@@ -46,6 +46,7 @@ async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
 
   // Resolve category — trust Gemini's category_hint first, matchCategory() as fallback
   const categoria = category_hint || matchCategory(concept || '') || 'otros';
+  console.log(`[registro] W01 category_hint=${category_hint}, concept=${concept}, matchCategory=${matchCategory(concept || '')}, final=${categoria}`);
 
   // Fast path: project_code → exact match by código
   if (project_code) {
@@ -167,6 +168,7 @@ async function showGastoDirectoConfirmation(ctx: HandlerContext, project: any, a
   const pctNuevo = presupuesto > 0 ? (costoNuevo / presupuesto) * 100 : 0;
 
   let msg = `📂 ${bold(formatProject(project))}\n💰 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}`;
+  if (concept) msg += `\n📝 ${concept}`;
 
   if (presupuesto > 0) {
     msg += `\n📊 Presupuesto: ${formatCOP(costoNuevo)} / ${formatCOP(presupuesto)} (${formatPct(pctNuevo)})`;
@@ -1102,7 +1104,7 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     // Default: 'pagado' (already set on insert)
 
     // Advance to soporte prompt
-    await ctx.sendButtons('📷 ¿Tienes soporte fotográfico?', [
+    await ctx.sendButtons('📷 Envía el soporte fotográfico. Si no lo tienes, lo puedes agregar después.', [
       { id: 'btn_despues', title: '⏰ Después' },
     ]);
     await ctx.updateSession('awaiting_image', {});
@@ -1128,7 +1130,7 @@ async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
       }
     } else if (message.type === 'audio') {
       await ctx.sendMessage('📷 Necesito una foto del soporte, no un audio.');
-      await ctx.sendButtons('Envía la imagen o presiona Después.', [
+      await ctx.sendButtons('📷 Envía la foto del soporte, no un audio. Si no lo tienes, lo puedes agregar después.', [
         { id: 'btn_despues', title: '⏰ Después' },
       ]);
       return; // Stay in awaiting_image
