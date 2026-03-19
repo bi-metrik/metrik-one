@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Trash2, Phone, Briefcase, X, Check } from 'lucide-react'
+import { Plus, Pencil, Trash2, Phone, Briefcase, X, Check, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Staff } from '@/types/database'
 import { createStaffMember, updateStaffMember, deleteStaffMember } from './staff-actions'
@@ -11,17 +11,11 @@ interface StaffSectionProps {
   initialData: Staff[]
 }
 
-const CONTRACT_TYPES = [
-  { value: 'fijo', label: 'Contrato fijo' },
-  { value: 'prestacion', label: 'Prestacion de servicios' },
-  { value: 'obra', label: 'Obra labor' },
-  { value: 'otro', label: 'Otro' },
-]
-
 const TIPO_VINCULO = [
-  { value: 'empleado', label: 'Empleado' },
-  { value: 'contratista', label: 'Contratista' },
-  { value: 'freelance', label: 'Freelance' },
+  { value: 'empleado', label: 'Empleado', defaultHoras: 160 },
+  { value: 'contratista', label: 'Contratista', defaultHoras: 0 },
+  { value: 'freelance', label: 'Freelance', defaultHoras: 0 },
+  { value: 'obra', label: 'Obra labor', defaultHoras: 0 },
 ]
 
 const ROL_OPTIONS = [
@@ -32,10 +26,10 @@ const ROL_OPTIONS = [
 ]
 
 const AREA_OPTIONS = [
-  { value: 'comercial', label: 'Comercial', desc: 'Ventas, atencion al cliente, cotizaciones.' },
-  { value: 'operaciones', label: 'Operaciones', desc: 'Ejecucion de proyectos, campo, produccion.' },
-  { value: 'admin_finanzas', label: 'Admin y Finanzas', desc: 'Contabilidad, facturacion, cartera, RRHH.' },
-  { value: 'direccion', label: 'Direccion', desc: 'Gerencia general, decisiones estrategicas.' },
+  { value: 'comercial', label: 'Comercial' },
+  { value: 'operaciones', label: 'Operaciones' },
+  { value: 'admin_finanzas', label: 'Admin y Finanzas' },
+  { value: 'direccion', label: 'Direccion' },
 ]
 
 const fmt = (v: number) =>
@@ -45,12 +39,12 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
   const router = useRouter()
   const [staff, setStaff] = useState<Staff[]>(initialData)
   const [showForm, setShowForm] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     full_name: '',
     position: '',
-    department: '',
     contract_type: 'fijo',
     salary: 0,
     phone_whatsapp: '',
@@ -60,9 +54,15 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     area: '',
   })
 
+  // Sync state when server re-renders with new data
+  useEffect(() => {
+    setStaff(initialData)
+  }, [initialData])
+
   const resetForm = () => {
-    setForm({ full_name: '', position: '', department: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', area: '' })
+    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', area: '' })
     setShowForm(false)
+    setShowDetails(false)
     setEditingId(null)
   }
 
@@ -86,7 +86,7 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     const res = await updateStaffMember(editingId, {
       full_name: form.full_name,
       position: form.position || null,
-      department: form.department || null,
+      department: null,
       contract_type: form.contract_type,
       salary: form.salary,
       phone_whatsapp: form.phone_whatsapp || null,
@@ -120,7 +120,6 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     setForm({
       full_name: s.full_name,
       position: s.position || '',
-      department: s.department || '',
       contract_type: s.contract_type ?? 'fijo',
       salary: s.salary ?? 0,
       phone_whatsapp: s.phone_whatsapp || '',
@@ -131,6 +130,22 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     })
     setEditingId(s.id)
     setShowForm(true)
+    // Show details if there's data in detail fields
+    if (s.phone_whatsapp || (s.salary ?? 0) > 0 || s.tipo_vinculo) {
+      setShowDetails(true)
+    }
+  }
+
+  const handleVinculoChange = (value: string) => {
+    const opt = TIPO_VINCULO.find(t => t.value === value)
+    setForm(prev => ({
+      ...prev,
+      tipo_vinculo: value,
+      // Auto-set contract_type from vinculo
+      contract_type: value === 'empleado' ? 'fijo' : value === 'contratista' ? 'prestacion' : value === 'obra' ? 'obra' : prev.contract_type,
+      // Auto-set horas for empleado
+      ...(value === 'empleado' && !prev.horas_disponibles_mes ? { horas_disponibles_mes: 160 } : {}),
+    }))
   }
 
   const activeStaff = staff.filter(s => s.is_active)
@@ -157,6 +172,7 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
       {/* Form */}
       {showForm && (
         <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+          {/* Esencial: 4 campos */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground">Nombre completo *</label>
@@ -165,7 +181,7 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                 value={form.full_name}
                 onChange={e => setForm({ ...form, full_name: e.target.value })}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="Juan Pérez"
+                placeholder="Juan Perez"
               />
             </div>
             <div>
@@ -175,75 +191,8 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                 value={form.position}
                 onChange={e => setForm({ ...form, position: e.target.value })}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="Diseñador"
+                placeholder="Disenador"
               />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Departamento</label>
-              <input
-                type="text"
-                value={form.department}
-                onChange={e => setForm({ ...form, department: e.target.value })}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="Diseño"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Tipo contrato</label>
-              <select
-                value={form.contract_type}
-                onChange={e => setForm({ ...form, contract_type: e.target.value })}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                {CONTRACT_TYPES.map(ct => (
-                  <option key={ct.value} value={ct.value}>{ct.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Salario / Honorario</label>
-              <input
-                type="number"
-                value={form.salary || ''}
-                onChange={e => setForm({ ...form, salary: Number(e.target.value) })}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="0"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">WhatsApp</label>
-              <input
-                type="text"
-                value={form.phone_whatsapp}
-                onChange={e => setForm({ ...form, phone_whatsapp: e.target.value })}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="+57 300 123 4567"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Horas disponibles/mes</label>
-              <input
-                type="number"
-                value={form.horas_disponibles_mes || ''}
-                onChange={e => setForm({ ...form, horas_disponibles_mes: Number(e.target.value) || 160 })}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="160"
-                min={1}
-                max={744}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Tipo vinculo</label>
-              <select
-                value={form.tipo_vinculo}
-                onChange={e => setForm({ ...form, tipo_vinculo: e.target.value })}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                <option value="">Sin especificar</option>
-                {TIPO_VINCULO.map(tv => (
-                  <option key={tv.value} value={tv.value}>{tv.label}</option>
-                ))}
-              </select>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Rol en plataforma</label>
@@ -272,26 +221,77 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                   <option key={a.value} value={a.value}>{a.label}</option>
                 ))}
               </select>
-              {form.area && (
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  {AREA_OPTIONS.find(a => a.value === form.area)?.desc}
-                </p>
-              )}
             </div>
           </div>
-          {/* Etiqueta calculada */}
-          {form.rol_plataforma && (
-            <p className="text-xs font-medium text-primary">
-              {ROL_OPTIONS.find(r => r.value === form.rol_plataforma)?.label}
-              {form.area ? ` - ${AREA_OPTIONS.find(a => a.value === form.area)?.label}` : ''}
-            </p>
+
+          {/* Toggle detalles */}
+          <button
+            type="button"
+            onClick={() => setShowDetails(!showDetails)}
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showDetails ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showDetails ? 'Ocultar detalles' : 'Detalles (pago, contacto, vinculo)'}
+          </button>
+
+          {/* Detalles: colapsable */}
+          {showDetails && (
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">WhatsApp</label>
+                <input
+                  type="text"
+                  value={form.phone_whatsapp}
+                  onChange={e => setForm({ ...form, phone_whatsapp: e.target.value })}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  placeholder="+57 300 123 4567"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Pago mensual</label>
+                <input
+                  type="number"
+                  value={form.salary || ''}
+                  onChange={e => setForm({ ...form, salary: Number(e.target.value) })}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Horas disponibles/mes</label>
+                <input
+                  type="number"
+                  value={form.horas_disponibles_mes || ''}
+                  onChange={e => setForm({ ...form, horas_disponibles_mes: Number(e.target.value) || 160 })}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  placeholder="160"
+                  min={1}
+                  max={744}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Tipo vinculo</label>
+                <select
+                  value={form.tipo_vinculo}
+                  onChange={e => handleVinculoChange(e.target.value)}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Sin especificar</option>
+                  {TIPO_VINCULO.map(tv => (
+                    <option key={tv.value} value={tv.value}>{tv.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           )}
+
           {/* Costo/hora calculado */}
           {form.salary > 0 && form.horas_disponibles_mes > 0 && (
             <p className="text-xs text-muted-foreground">
               Costo/hora: <span className="font-medium text-primary">{fmt(Math.round(form.salary / form.horas_disponibles_mes))}</span>
             </p>
           )}
+
           <div className="flex justify-end gap-2">
             <button
               onClick={resetForm}
@@ -313,7 +313,7 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
       {/* Staff list */}
       {activeStaff.length === 0 && !showForm ? (
         <div className="rounded-lg border border-dashed p-6 text-center">
-          <p className="text-sm text-muted-foreground">No has registrado personal aún.</p>
+          <p className="text-sm text-muted-foreground">No has registrado personal aun.</p>
           <p className="mt-1 text-xs text-muted-foreground">Registra tu equipo para tener mejor control de costos.</p>
         </div>
       ) : (
@@ -324,42 +324,43 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                 {s.full_name.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium truncate">{s.full_name}</p>
-                  {s.rol_plataforma && s.rol_plataforma !== 'ejecutor' && (
-                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                <p className="text-sm font-medium truncate">{s.full_name}</p>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  {s.rol_plataforma && (
+                    <span className="inline-flex shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
                       {ROL_OPTIONS.find(r => r.value === s.rol_plataforma)?.label || s.rol_plataforma}
                     </span>
                   )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {s.area && (
+                    <span className="inline-flex shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {AREA_OPTIONS.find(a => a.value === s.area)?.label || s.area}
+                    </span>
+                  )}
                   {s.position && (
-                    <span className="flex items-center gap-0.5">
+                    <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
                       <Briefcase className="h-3 w-3" /> {s.position}
                     </span>
                   )}
-                  {s.area && (
-                    <span>{AREA_OPTIONS.find(a => a.value === s.area)?.label || s.area}</span>
-                  )}
                   {s.phone_whatsapp && (
-                    <span className="flex items-center gap-0.5">
+                    <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
                       <Phone className="h-3 w-3" /> {s.phone_whatsapp}
                     </span>
                   )}
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm font-medium">{fmt(s.salary ?? 0)}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {CONTRACT_TYPES.find(ct => ct.value === s.contract_type)?.label || s.contract_type}
-                </p>
-                {(s.salary ?? 0) > 0 && (s.horas_disponibles_mes ?? 160) > 0 && (
-                  <p className="text-[10px] text-primary">
-                    {fmt(Math.round((s.salary ?? 0) / (s.horas_disponibles_mes ?? 160)))}/h
-                  </p>
+              <div className="text-right shrink-0">
+                {(s.salary ?? 0) > 0 && (
+                  <>
+                    <p className="text-sm font-medium">{fmt(s.salary ?? 0)}</p>
+                    {(s.horas_disponibles_mes ?? 160) > 0 && (
+                      <p className="text-[10px] text-primary">
+                        {fmt(Math.round((s.salary ?? 0) / (s.horas_disponibles_mes ?? 160)))}/h
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1 shrink-0">
                 <button onClick={() => startEdit(s)} className="rounded p-1 hover:bg-accent">
                   <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                 </button>

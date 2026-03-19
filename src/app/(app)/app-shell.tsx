@@ -70,7 +70,7 @@ function getAdminItemsForRole(role: string) {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: 'Dueño',
+  owner: 'Empresario',
   admin: 'Admin',
   supervisor: 'Supervisor',
   operator: 'Ejecutor',
@@ -297,7 +297,7 @@ export default function AppShell({
             </div>
             {sidebarExpanded && (
               <div className="flex-1 overflow-hidden min-w-0">
-                <p className="truncate text-xs font-bold" style={{ color: 'var(--sidebar-primary-foreground)' }}>{fullName}</p>
+                <p className="truncate text-xs font-bold" style={{ color: 'var(--sidebar-foreground)' }}>{fullName}</p>
                 <p className="text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{ROLE_LABELS[role] || role}</p>
               </div>
             )}

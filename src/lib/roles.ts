@@ -5,7 +5,7 @@
 
 export const ROLE_PERMISSIONS = {
   owner: {
-    label: 'Dueño',
+    label: 'Empresario',
     canInvite: true,
     canDeleteRecords: true,
     canConfigFiscal: true,
