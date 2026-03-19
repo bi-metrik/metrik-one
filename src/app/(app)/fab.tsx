@@ -40,7 +40,7 @@ const FAB_ACTIONS: FABAction[] = [
     label: 'Nueva oportunidad',
     icon: Flame,
     href: '/nuevo/oportunidad',
-    roles: ['owner', 'admin'],
+    roles: ['owner', 'admin', 'supervisor'],
   },
   {
     label: 'Actualizar saldo',

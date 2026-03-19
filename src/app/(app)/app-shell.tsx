@@ -39,11 +39,11 @@ interface AppShellProps {
 // Sidebar adaptativo por rol
 const ALL_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
-  { href: '/pipeline', label: 'Oportunidades', icon: Flame, roles: ['owner', 'admin'] },
-  { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'operator'] },
+  { href: '/pipeline', label: 'Oportunidades', icon: Flame, roles: ['owner', 'admin', 'supervisor', 'operator'] },
+  { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'read_only'] },
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin'] },
-  { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin'] },
+  { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'operator'] },
 ]
 
@@ -72,7 +72,8 @@ function getAdminItemsForRole(role: string) {
 const ROLE_LABELS: Record<string, string> = {
   owner: 'Dueño',
   admin: 'Admin',
-  operator: 'Operador',
+  supervisor: 'Supervisor',
+  operator: 'Ejecutor',
   read_only: 'Lectura',
 }
 

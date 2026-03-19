@@ -33,6 +33,8 @@ export async function createStaffMember(formData: {
   phone_whatsapp?: string
   horas_disponibles_mes?: number
   tipo_vinculo?: string
+  rol_plataforma?: string
+  area?: string
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -60,6 +62,8 @@ export async function createStaffMember(formData: {
     phone_whatsapp: formData.phone_whatsapp || null,
     horas_disponibles_mes: formData.horas_disponibles_mes ?? 160,
     tipo_vinculo: formData.tipo_vinculo || null,
+    rol_plataforma: formData.rol_plataforma || 'ejecutor',
+    area: formData.area || null,
   })
 
   if (error) return { error: error.message }
@@ -80,6 +84,8 @@ export async function updateStaffMember(
     is_active?: boolean
     horas_disponibles_mes?: number
     tipo_vinculo?: string | null
+    rol_plataforma?: string
+    area?: string | null
   }
 ) {
   const supabase = await createClient()

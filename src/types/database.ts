@@ -14,6 +14,76 @@ export type Database = {
   }
   public: {
     Tables: {
+      activity_log: {
+        Row: {
+          autor_id: string | null
+          campo_modificado: string | null
+          contenido: string | null
+          created_at: string | null
+          entidad_id: string
+          entidad_tipo: string
+          id: string
+          link_url: string | null
+          mencion_id: string | null
+          tipo: string
+          valor_anterior: string | null
+          valor_nuevo: string | null
+          workspace_id: string
+        }
+        Insert: {
+          autor_id?: string | null
+          campo_modificado?: string | null
+          contenido?: string | null
+          created_at?: string | null
+          entidad_id: string
+          entidad_tipo: string
+          id?: string
+          link_url?: string | null
+          mencion_id?: string | null
+          tipo: string
+          valor_anterior?: string | null
+          valor_nuevo?: string | null
+          workspace_id: string
+        }
+        Update: {
+          autor_id?: string | null
+          campo_modificado?: string | null
+          contenido?: string | null
+          created_at?: string | null
+          entidad_id?: string
+          entidad_tipo?: string
+          id?: string
+          link_url?: string | null
+          mencion_id?: string | null
+          tipo?: string
+          valor_anterior?: string | null
+          valor_nuevo?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activity_log_autor_id_fkey"
+            columns: ["autor_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activity_log_mencion_id_fkey"
+            columns: ["mencion_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activity_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_log: {
         Row: {
           action: string
@@ -2008,6 +2078,7 @@ export type Database = {
         Row: {
           carpeta_url: string | null
           codigo: string
+          colaboradores: string[] | null
           contacto_id: string
           created_at: string | null
           descripcion: string
@@ -2017,6 +2088,7 @@ export type Database = {
           id: string
           probabilidad: number
           razon_perdida: string | null
+          responsable_id: string | null
           ultima_accion: string | null
           ultima_accion_fecha: string | null
           updated_at: string | null
@@ -2026,6 +2098,7 @@ export type Database = {
         Insert: {
           carpeta_url?: string | null
           codigo: string
+          colaboradores?: string[] | null
           contacto_id: string
           created_at?: string | null
           descripcion: string
@@ -2035,6 +2108,7 @@ export type Database = {
           id?: string
           probabilidad?: number
           razon_perdida?: string | null
+          responsable_id?: string | null
           ultima_accion?: string | null
           ultima_accion_fecha?: string | null
           updated_at?: string | null
@@ -2044,6 +2118,7 @@ export type Database = {
         Update: {
           carpeta_url?: string | null
           codigo?: string
+          colaboradores?: string[] | null
           contacto_id?: string
           created_at?: string | null
           descripcion?: string
@@ -2053,6 +2128,7 @@ export type Database = {
           id?: string
           probabilidad?: number
           razon_perdida?: string | null
+          responsable_id?: string | null
           ultima_accion?: string | null
           ultima_accion_fecha?: string | null
           updated_at?: string | null
@@ -2072,6 +2148,13 @@ export type Database = {
             columns: ["empresa_id"]
             isOneToOne: false
             referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "oportunidades_responsable_id_fkey"
+            columns: ["responsable_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
             referencedColumns: ["id"]
           },
           {
@@ -2557,6 +2640,7 @@ export type Database = {
           carpeta_url: string | null
           cierre_snapshot: Json | null
           codigo: string
+          colaboradores: string[] | null
           contacto_id: string | null
           cotizacion_id: string | null
           created_at: string | null
@@ -2573,6 +2657,7 @@ export type Database = {
           notas_cierre: string | null
           oportunidad_id: string | null
           presupuesto_total: number | null
+          responsable_id: string | null
           retenciones_estimadas: number | null
           roi_descripcion: string | null
           roi_retorno_estimado: number | null
@@ -2586,6 +2671,7 @@ export type Database = {
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
           codigo: string
+          colaboradores?: string[] | null
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -2602,6 +2688,7 @@ export type Database = {
           notas_cierre?: string | null
           oportunidad_id?: string | null
           presupuesto_total?: number | null
+          responsable_id?: string | null
           retenciones_estimadas?: number | null
           roi_descripcion?: string | null
           roi_retorno_estimado?: number | null
@@ -2615,6 +2702,7 @@ export type Database = {
           carpeta_url?: string | null
           cierre_snapshot?: Json | null
           codigo?: string
+          colaboradores?: string[] | null
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
@@ -2631,6 +2719,7 @@ export type Database = {
           notas_cierre?: string | null
           oportunidad_id?: string | null
           presupuesto_total?: number | null
+          responsable_id?: string | null
           retenciones_estimadas?: number | null
           roi_descripcion?: string | null
           roi_retorno_estimado?: number | null
@@ -2665,6 +2754,13 @@ export type Database = {
             columns: ["oportunidad_id"]
             isOneToOne: false
             referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_responsable_id_fkey"
+            columns: ["responsable_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
             referencedColumns: ["id"]
           },
           {
@@ -3045,6 +3141,7 @@ export type Database = {
       }
       staff: {
         Row: {
+          area: string | null
           contract_type: string | null
           created_at: string | null
           department: string | null
@@ -3055,6 +3152,8 @@ export type Database = {
           is_active: boolean | null
           phone_whatsapp: string | null
           position: string | null
+          profile_id: string | null
+          rol_plataforma: string | null
           salary: number | null
           tipo_acceso: string | null
           tipo_vinculo: string | null
@@ -3062,6 +3161,7 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          area?: string | null
           contract_type?: string | null
           created_at?: string | null
           department?: string | null
@@ -3072,6 +3172,8 @@ export type Database = {
           is_active?: boolean | null
           phone_whatsapp?: string | null
           position?: string | null
+          profile_id?: string | null
+          rol_plataforma?: string | null
           salary?: number | null
           tipo_acceso?: string | null
           tipo_vinculo?: string | null
@@ -3079,6 +3181,7 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          area?: string | null
           contract_type?: string | null
           created_at?: string | null
           department?: string | null
@@ -3089,6 +3192,8 @@ export type Database = {
           is_active?: boolean | null
           phone_whatsapp?: string | null
           position?: string | null
+          profile_id?: string | null
+          rol_plataforma?: string | null
           salary?: number | null
           tipo_acceso?: string | null
           tipo_vinculo?: string | null
@@ -3096,6 +3201,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "staff_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "staff_workspace_id_fkey"
             columns: ["workspace_id"]
@@ -3565,6 +3677,21 @@ export type Database = {
           },
         ]
       }
+      v_equipo_activo: {
+        Row: {
+          tiene_equipo: boolean | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_facturas_estado: {
         Row: {
           cobrado: number | null
@@ -3735,6 +3862,8 @@ export type Database = {
         Args: { p_workspace_id: string }
         Returns: string
       }
+      get_user_role: { Args: never; Returns: string }
+      is_admin_or_owner: { Args: never; Returns: boolean }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       unaccent: { Args: { "": string }; Returns: string }
@@ -3923,6 +4052,7 @@ export const Constants = {
 } as const
 
 // ── Custom type aliases ──────────────────────────────────
+export type ActivityLog = Database['public']['Tables']['activity_log']['Row']
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type BankBalance = Database['public']['Tables']['bank_balances']['Row']
 export type CausacionLog = Database['public']['Tables']['causaciones_log']['Row']
