@@ -288,20 +288,16 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 **Branch:** main
 
 Que se hizo:
-- Fix costo_horas = 0: migracion para calcular tarifa por staff individual (salary/horas_disponibles_mes) en vez de depender de un staff principal
-- Rediseno "Costos ejecutados" en proyecto: barras por categoria ordenadas por monto, con/sin presupuesto, mano de obra con horas como dato secundario, umbrales de color, totales y saldo
-- Consulta con Vera, Kenji, Kaori, Hana para definir estructura visual de control de costos
-- Nuevo modulo `/equipo`: bandeja de horas con flujo de aprobacion (PENDIENTE->APROBADO/RECHAZADO), filtros por mes/staff/proyecto/estado, perfil de staff con metricas mensuales, auto-aprobacion owner/admin
-- Migracion horas_aprobacion: estado_aprobacion, aprobado_por, fecha_aprobacion, rechazo_motivo, created_by en tabla horas. Vistas SQL filtran solo horas APROBADAS
-- Fix interfaces Financiero: alineadas con vista SQL (ganancia_actual en vez de ganancia_real, cartera calculada client-side)
-- Regeneracion database.ts con nuevas columnas
-- Solo gastos APROBADO cuentan en proyecto (no CAUSADO — es contable, no operativo)
-- Soporte lightbox overflow fix, deducible default false, PDF MIME type fix
-- Unificacion formulario de gasto (un solo form desde FAB, proyecto, etc.)
-- Back button usa router.back() en todos los formularios
-- Tarjetas de gasto en proyecto con diseno de movimientos
+- Botones interactivos WhatsApp: reemplazo de todas las confirmaciones texto "¿Confirmo? (Si/No)" por botones tappables (Confirmar/Cancelar) en registro.ts, accion.ts, novedad.ts
+- Botones para soporte fotografico: mensaje afirmativo "Envia el soporte fotografico. Si no lo tienes, lo puedes agregar despues." + boton "Despues"
+- `sendButtons` agregado a `HandlerContext` interface y wired en ambos `ctx` del webhook
+- Retrocompatibilidad: handlers siguen aceptando texto ademas de botones (btn_confirm/btn_cancel/btn_despues)
+- `awaiting_selection` handler actualizado para reconocer interactive_reply por ID de opcion
+- Fix deploy: `--no-verify-jwt` requerido para wa-webhook (Meta no envia JWT, usa HMAC signature)
+- Edge function desplegada v47 con botones interactivos
 
 **Ultimo commit:** `7f4c510 feat: modulo /equipo — gestion y aprobacion de horas del equipo`
+**Edge function:** wa-webhook v47 (desplegada, cambios locales pendientes de commit)
 
 ## Estado actual (2026-03-18)
 
@@ -330,6 +326,7 @@ Que se hizo:
 - **Siempre commit + push** despues de completar un task. El usuario espera deploy despues de cada cambio.
 - **Paths con parentesis** en git: quotear para zsh — `git add "src/app/(app)/..."`.
 - **Supabase CLI:** Necesita `SUPABASE_ACCESS_TOKEN=sbp_...` como env var y `2>/dev/null` para type gen.
+- **Edge Functions deploy:** `wa-webhook` SIEMPRE con `--no-verify-jwt` (Meta usa HMAC, no JWT). Comando: `SUPABASE_ACCESS_TOKEN=sbp_... npx supabase functions deploy wa-webhook --project-ref yfjqscvvxetobiidnepa --no-verify-jwt`
 - **database.ts:** Despues de `supabase gen types`, re-agregar los ~26 type aliases custom al final del archivo (Gasto, Proyecto, Oportunidad, Profile, Workspace, etc.).
 - **PostgreSQL views:** Usar `DROP VIEW` + `CREATE VIEW` (no `CREATE OR REPLACE`) cuando se agregan columnas.
 - **Nombres de migracion:** formato `YYYYMMDD000000_descripcion.sql`.
@@ -361,6 +358,7 @@ Que se hizo:
 - [x] Costo horas por tarifa individual de staff — completado 2026-03-18
 - [ ] Deducible toggle en modulo causacion (contador activa/desactiva)
 - [ ] AI-suggested deducibility para gastos
+- [ ] Commitear cambios de botones WhatsApp (accion.ts, novedad.ts, types.ts, wa-webhook/index.ts)
 - [ ] WhatsApp bot: titulo limpio de gastos (no usar mensaje_original como titulo)
 - [ ] Verificar que registro de horas desde proyecto pasa created_by correctamente
 
@@ -378,3 +376,5 @@ Que se hizo:
 | 2026-03-18 | Auto-aprobacion de horas para owner/admin | Reduce friccion. Solo operadores necesitan aprobacion explicita |
 | 2026-03-18 | Solo APROBADO cuenta en proyecto (no CAUSADO) | CAUSADO es contable, no operativo. El PM solo ve gastos aprobados |
 | 2026-03-18 | Barras de costos: umbrales 70/90/100, slate sin presupuesto | Consenso Vera+Kenji+Kaori+Hana. Estandar EVM simplificado |
+| 2026-03-18 | WhatsApp botones interactivos para confirmaciones | UX mejorada: botones tappables en vez de texto libre. IDs estandar: btn_confirm, btn_cancel, btn_despues |
+| 2026-03-18 | wa-webhook deploy siempre con --no-verify-jwt | Meta envia HMAC signature, no JWT. Sin este flag el webhook rechaza todo con 401 |
