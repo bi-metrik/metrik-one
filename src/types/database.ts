@@ -3599,6 +3599,44 @@ export type Database = {
           },
         ]
       }
+      workspace_features: {
+        Row: {
+          activated_at: string | null
+          created_at: string | null
+          feature_key: string
+          id: string
+          is_active: boolean
+          price_cop: number
+          workspace_id: string
+        }
+        Insert: {
+          activated_at?: string | null
+          created_at?: string | null
+          feature_key: string
+          id?: string
+          is_active?: boolean
+          price_cop?: number
+          workspace_id: string
+        }
+        Update: {
+          activated_at?: string | null
+          created_at?: string | null
+          feature_key?: string
+          id?: string
+          is_active?: boolean
+          price_cop?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_features_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           color_primario: string | null
@@ -4090,3 +4128,4 @@ export type Staff = Database['public']['Tables']['staff']['Row']
 export type TeamInvitation = Database['public']['Tables']['team_invitations']['Row']
 export type TimeEntry = Database['public']['Tables']['time_entries']['Row']
 export type Workspace = Database['public']['Tables']['workspaces']['Row']
+export type WorkspaceFeature = Database['public']['Tables']['workspace_features']['Row']

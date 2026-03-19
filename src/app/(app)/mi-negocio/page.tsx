@@ -29,6 +29,7 @@ export default async function MiNegocioPage() {
     categoriesResult,
     serviciosResult,
     configFinancieraResult,
+    featuresResult,
   ] = await Promise.all([
     supabase
       .from('workspaces')
@@ -87,6 +88,11 @@ export default async function MiNegocioPage() {
       .select('margen_contribucion_estimado, margen_fuente, n_proyectos_margen')
       .eq('workspace_id', workspaceId)
       .maybeSingle(),
+
+    supabase
+      .from('workspace_features')
+      .select('*')
+      .eq('workspace_id', workspaceId),
   ])
 
   const workspace = workspaceResult.data
@@ -106,6 +112,7 @@ export default async function MiNegocioPage() {
   const categories = categoriesResult.data || []
   const servicios = serviciosResult.data || []
   const configFinanciera = configFinancieraResult.data
+  const workspaceFeatures = featuresResult.data || []
 
   // D129: Nómina = solo empleados directos (no contratistas/freelance)
   const staffNomina = staffMembers
@@ -159,6 +166,7 @@ export default async function MiNegocioPage() {
       currentUserRole={profile.role}
       licenseUsed={licenseUsed}
       licenseMax={licenseMax}
+      workspaceFeatures={workspaceFeatures}
       sectionScores={{
         fiscal: fiscalScore,
         marca: marcaScore,

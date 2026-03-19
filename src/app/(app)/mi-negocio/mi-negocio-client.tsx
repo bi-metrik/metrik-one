@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from 'react'
 import { ChevronRight, Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
-import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio } from '@/types/database'
+import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
 // Existing config sections — reused via import
 import StaffSection from '../config/staff-section'
@@ -19,6 +19,7 @@ import PerfilFiscalExtended from './perfil-fiscal-extended'
 import MarcaSection from './marca-section'
 import GastosFijosSection from './gastos-fijos-section'
 import EquipoSection from './equipo-section'
+import PlanSection from './plan-section'
 
 // ── Types ──────────────────────────────────────────
 
@@ -39,6 +40,7 @@ interface MiNegocioClientProps {
   currentUserRole: string
   licenseUsed: number
   licenseMax: number
+  workspaceFeatures: WorkspaceFeature[]
   sectionScores: {
     fiscal: number
     marca: number
@@ -111,6 +113,7 @@ export default function MiNegocioClient({
   currentUserRole,
   licenseUsed,
   licenseMax,
+  workspaceFeatures,
   sectionScores,
 }: MiNegocioClientProps) {
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -222,6 +225,17 @@ export default function MiNegocioClient({
             Completa cada sección para que MéTRIK one calcule tus números con precisión.
             No necesitas hacerlo todo hoy — puedes avanzar a tu ritmo.
           </p>
+        </div>
+      )}
+
+      {/* ── Mi Plan ── */}
+      {currentUserRole === 'owner' && (
+        <div className="rounded-xl border bg-card p-6">
+          <PlanSection
+            licenseUsed={licenseUsed}
+            licenseMax={licenseMax}
+            workspaceFeatures={workspaceFeatures}
+          />
         </div>
       )}
 
