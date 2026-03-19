@@ -128,6 +128,7 @@ export interface HandlerContext {
   supabase: SupabaseClient;
   sendMessage: (text: string) => Promise<void>;
   sendOptions: (body: string, options: string[]) => Promise<void>;
+  sendButtons: (body: string, buttons: Array<{ id: string; title: string }>) => Promise<void>;
   updateSession: (state: SessionState, context?: Partial<SessionContext>) => Promise<void>;
 }
 

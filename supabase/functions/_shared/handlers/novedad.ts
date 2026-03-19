@@ -54,8 +54,11 @@ async function handleNotaOportunidad(ctx: HandlerContext): Promise<void> {
     const stageLabel = PIPELINE_STAGE_LABELS[opp.etapa] || opp.etapa;
     const diasSinActividad = daysSince(opp.updated_at);
 
-    const msg = `📝 Voy a agregar esta nota a ${bold(opp.descripcion)} (${stageLabel}):\n\n"${noteText}"\n\n¿Confirmo? (Sí/No)`;
-    await ctx.sendMessage(msg);
+    const msg = `📝 Voy a agregar esta nota a ${bold(opp.descripcion)} (${stageLabel}):\n\n"${noteText}"`;
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     await ctx.updateSession('confirming', {
       intent: 'NOTA_OPORTUNIDAD', pending_action: 'W09',
       oportunidad_id: opp.id,
@@ -109,8 +112,11 @@ async function handleNotaProyecto(ctx: HandlerContext): Promise<void> {
 
   if (projects.length === 1) {
     const p = projects[0];
-    const msg = `📝 Voy a agregar nota a ${bold(p.nombre)}:\n\n"${noteText}"\n\n¿Confirmo? (Sí/No)`;
-    await ctx.sendMessage(msg);
+    const msg = `📝 Voy a agregar nota a ${bold(p.nombre)}:\n\n"${noteText}"`;
+    await ctx.sendButtons(msg, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     await ctx.updateSession('confirming', {
       intent: 'NOTA_PROYECTO', pending_action: 'W11',
       proyecto_id: p.id, proyecto_nombre: p.nombre,
@@ -145,15 +151,19 @@ async function handleResumeNovedad(ctx: HandlerContext): Promise<void> {
   const context = session.context;
   const text = message.text.trim().toLowerCase();
 
-  // Confirmation
+  // Confirmation (buttons or text)
   if (session.state === 'confirming') {
-    if (['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
+    const btnId = message.interactive_reply;
+    if (btnId === 'btn_confirm' || ['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
       if (context.pending_action === 'W09') await executeW09(ctx);
       else if (context.pending_action === 'W11') await executeW11(ctx);
-    } else if (['no', 'cancelar', 'cancel', '❌'].includes(text)) {
+    } else if (btnId === 'btn_cancel' || ['no', 'cancelar', 'cancel', '❌'].includes(text)) {
       await ctx.sendMessage('❌ Cancelado.');
     } else {
-      await ctx.sendMessage('Responde *Sí* para confirmar o *No* para cancelar.');
+      await ctx.sendButtons('Presiona un botón para confirmar o cancelar.', [
+        { id: 'btn_confirm', title: '✅ Confirmar' },
+        { id: 'btn_cancel', title: '❌ Cancelar' },
+      ]);
       return;
     }
     await completeSession(supabase, session.id);
@@ -174,10 +184,16 @@ async function handleResumeNovedad(ctx: HandlerContext): Promise<void> {
 
     if (context.pending_action === 'W09') {
       await ctx.updateSession('confirming', { oportunidad_id: selected.id });
-      await ctx.sendMessage(`📝 Agregar nota a ${selected.label}.\n\n¿Confirmo? (Sí/No)`);
+      await ctx.sendButtons(`📝 Agregar nota a ${selected.label}.`, [
+        { id: 'btn_confirm', title: '✅ Confirmar' },
+        { id: 'btn_cancel', title: '❌ Cancelar' },
+      ]);
     } else if (context.pending_action === 'W11') {
       await ctx.updateSession('confirming', { proyecto_id: selected.id, proyecto_nombre: selected.label });
-      await ctx.sendMessage(`📝 Agregar nota a ${selected.label}.\n\n¿Confirmo? (Sí/No)`);
+      await ctx.sendButtons(`📝 Agregar nota a ${selected.label}.`, [
+        { id: 'btn_confirm', title: '✅ Confirmar' },
+        { id: 'btn_cancel', title: '❌ Cancelar' },
+      ]);
     }
     return;
   }

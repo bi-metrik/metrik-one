@@ -71,8 +71,11 @@ async function handleOppGanada(ctx: HandlerContext): Promise<void> {
   }
 
   // Confirm
-  const msg = `🎉 Voy a mover ${bold(opp.descripcion)} a Ganada.\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n👤 ${opp.contacto_nombre} — ${opp.empresa_nombre}\n\nSe creará un proyecto automáticamente.\n\n¿Confirmo? (Sí/No)`;
-  await ctx.sendMessage(msg);
+  const msg = `🎉 Voy a mover ${bold(opp.descripcion)} a Ganada.\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n👤 ${opp.contacto_nombre} — ${opp.empresa_nombre}\n\nSe creará un proyecto automáticamente.`;
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
   await ctx.updateSession('confirming', {
     intent: 'OPP_GANADA', pending_action: 'W22',
     oportunidad_id: opp.id,
@@ -189,16 +192,20 @@ async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
   const context = session.context;
   const text = message.text.trim().toLowerCase();
 
-  // Confirmation
+  // Confirmation (buttons or text)
   if (session.state === 'confirming') {
-    if (['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
+    const btnId = message.interactive_reply;
+    if (btnId === 'btn_confirm' || ['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
       if (context.pending_action === 'W22') {
         await executeW22(ctx);
       }
-    } else if (['no', 'cancelar', 'cancel', '❌'].includes(text)) {
+    } else if (btnId === 'btn_cancel' || ['no', 'cancelar', 'cancel', '❌'].includes(text)) {
       await ctx.sendMessage('❌ Cancelado.');
     } else {
-      await ctx.sendMessage('Responde *Sí* para confirmar o *No* para cancelar.');
+      await ctx.sendButtons('Presiona un botón para confirmar o cancelar.', [
+        { id: 'btn_confirm', title: '✅ Confirmar' },
+        { id: 'btn_cancel', title: '❌ Cancelar' },
+      ]);
       return; // Don't complete session
     }
     await completeSession(supabase, session.id);

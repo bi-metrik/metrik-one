@@ -6,7 +6,7 @@
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
-import { sendTextMessage } from '../_shared/wa-respond.ts';
+import { sendTextMessage, sendButtons } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { handleRegistro } from '../_shared/handlers/registro.ts';
@@ -153,6 +153,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       const numbered = options.map((opt, i) => `${i + 1}️⃣ ${opt}`).join('\n');
       return sendTextMessage(message.phone, `${body}\n\n${numbered}\n\nResponde con el número.`);
     },
+    sendButtons: (body: string, btns: Array<{ id: string; title: string }>) => sendButtons(message.phone, body, btns),
     updateSession: (state, context) => updateSession(supabase, session.id, state, context),
   };
 
@@ -230,6 +231,7 @@ async function handleSessionResponse(
       const numbered = options.map((opt, i) => `${i + 1}️⃣ ${opt}`).join('\n');
       return sendTextMessage(message.phone, `${body}\n\n${numbered}\n\nResponde con el número.`);
     },
+    sendButtons: (body: string, btns: Array<{ id: string; title: string }>) => sendButtons(message.phone, body, btns),
     updateSession: (state, context) => updateSession(supabase, (session as any).id, state, context),
   };
 
