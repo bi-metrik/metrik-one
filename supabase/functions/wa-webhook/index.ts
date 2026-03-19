@@ -9,7 +9,7 @@ import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage, sendButtons } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
-import { handleRegistro } from '../_shared/handlers/registro.ts';
+import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleAccion } from '../_shared/handlers/accion.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleNovedad } from '../_shared/handlers/novedad.ts';
