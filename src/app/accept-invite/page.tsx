@@ -140,12 +140,13 @@ export default async function AcceptInvitePage({
   }
 
   // Create profile in the invitation's workspace
+  const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Nuevo miembro'
   const { error: profileError } = await supabase
     .from('profiles')
     .insert({
       id: user.id,
       workspace_id: invitation.workspace_id,
-      full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Nuevo miembro',
+      full_name: fullName,
       role: invitation.role,
     })
 
@@ -160,6 +161,39 @@ export default async function AcceptInvitePage({
         </div>
       </div>
     )
+  }
+
+  // Link staff record: find by email or name match in same workspace
+  const userEmail = user.email?.toLowerCase()
+  if (userEmail) {
+    // Try to find a staff without profile_id that was invited via this email
+    const { data: staffByInvite } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('workspace_id', invitation.workspace_id)
+      .is('profile_id', null)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle()
+
+    // Also try matching by name
+    const { data: staffByName } = !staffByInvite ? await supabase
+      .from('staff')
+      .select('id')
+      .eq('workspace_id', invitation.workspace_id)
+      .ilike('full_name', fullName)
+      .is('profile_id', null)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle() : { data: null }
+
+    const staffToLink = staffByInvite || staffByName
+    if (staffToLink) {
+      await supabase
+        .from('staff')
+        .update({ profile_id: user.id })
+        .eq('id', staffToLink.id)
+    }
   }
 
   // Mark invitation as accepted

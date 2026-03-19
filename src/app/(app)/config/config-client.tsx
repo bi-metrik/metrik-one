@@ -37,6 +37,8 @@ interface ConfigClientProps {
   bankAccounts?: BankAccount[]
   monthlyTargets?: MonthlyTarget[]
   servicios?: Servicio[]
+  licenseUsed?: number
+  licenseMax?: number
 }
 
 // ── Component ──────────────────────────────────────────
@@ -52,6 +54,8 @@ export default function ConfigClient({
   bankAccounts = [],
   monthlyTargets = [],
   servicios = [],
+  licenseUsed = 0,
+  licenseMax = 1,
 }: ConfigClientProps) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -435,7 +439,7 @@ export default function ConfigClient({
       {/* ── F7: Personal Section ── */}
       {activeSection === 'personal' && (
         <div className="space-y-4 rounded-xl border bg-card p-6">
-          <StaffSection initialData={staffMembers} />
+          <StaffSection initialData={staffMembers} licenseUsed={licenseUsed} licenseMax={licenseMax} currentUserRole={currentUserRole} />
         </div>
       )}
 

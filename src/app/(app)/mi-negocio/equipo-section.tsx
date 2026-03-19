@@ -11,12 +11,15 @@ import type { Staff } from '@/types/database'
 interface Props {
   workspace: any
   staffMembers: Staff[]
+  licenseUsed: number
+  licenseMax: number
+  currentUserRole: string
 }
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-export default function EquipoSection({ workspace, staffMembers }: Props) {
+export default function EquipoSection({ workspace, staffMembers, licenseUsed, licenseMax, currentUserRole }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [equipoDeclarado, setEquipoDeclarado] = useState(workspace?.equipo_declarado || 1)
@@ -94,7 +97,7 @@ export default function EquipoSection({ workspace, staffMembers }: Props) {
 
       {/* Staff Section */}
       <div className="border-t pt-4">
-        <StaffSection initialData={staffMembers} />
+        <StaffSection initialData={staffMembers} licenseUsed={licenseUsed} licenseMax={licenseMax} currentUserRole={currentUserRole} />
       </div>
     </div>
   )

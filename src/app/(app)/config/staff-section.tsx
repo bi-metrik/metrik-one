@@ -2,13 +2,16 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Trash2, Phone, X, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Pencil, Trash2, Phone, X, Check, ChevronDown, ChevronUp, Mail, UserPlus, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Staff } from '@/types/database'
-import { createStaffMember, updateStaffMember, deleteStaffMember } from './staff-actions'
+import { createStaffMember, updateStaffMember, deleteStaffMember, inviteStaffToPlataform } from './staff-actions'
 
 interface StaffSectionProps {
   initialData: Staff[]
+  licenseUsed: number
+  licenseMax: number
+  currentUserRole: string
 }
 
 const TIPO_VINCULO = [
@@ -61,13 +64,16 @@ const AREA_COLORS: Record<string, string> = {
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-export default function StaffSection({ initialData }: StaffSectionProps) {
+export default function StaffSection({ initialData, licenseUsed, licenseMax, currentUserRole }: StaffSectionProps) {
   const router = useRouter()
   const [staff, setStaff] = useState<Staff[]>(initialData)
   const [showForm, setShowForm] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [invitingId, setInvitingId] = useState<string | null>(null)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [sendingInvite, setSendingInvite] = useState(false)
   const [form, setForm] = useState({
     full_name: '',
     position: '',
@@ -142,6 +148,24 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
     }
   }
 
+  const handleInvite = async (staffId: string) => {
+    if (!inviteEmail.trim() || !inviteEmail.includes('@')) {
+      toast.error('Ingresa un email valido')
+      return
+    }
+    setSendingInvite(true)
+    const res = await inviteStaffToPlataform(staffId, inviteEmail)
+    if ('success' in res && res.success) {
+      toast.success(`Invitacion enviada a ${res.email}`)
+      setInvitingId(null)
+      setInviteEmail('')
+      router.refresh()
+    } else {
+      toast.error(res.error || 'Error al invitar')
+    }
+    setSendingInvite(false)
+  }
+
   const startEdit = (s: Staff) => {
     setForm({
       full_name: s.full_name,
@@ -183,6 +207,10 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
           <h3 className="font-semibold">Personal</h3>
           <p className="text-xs text-muted-foreground">
             {activeStaff.length} miembro{activeStaff.length !== 1 ? 's' : ''} activo{activeStaff.length !== 1 ? 's' : ''}
+            {' · '}
+            <span className={licenseUsed >= licenseMax ? 'text-red-500 font-medium' : 'text-primary font-medium'}>
+              {licenseUsed}/{licenseMax} licencia{licenseMax !== 1 ? 's' : ''}
+            </span>
           </p>
         </div>
         {!showForm && (
@@ -395,6 +423,52 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
                       </div>
                     )}
                   </div>
+                  {/* Invite to platform */}
+                  {!s.profile_id && currentUserRole === 'owner' && (
+                    <div className="pt-1 border-t mt-1">
+                      {invitingId === s.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <Mail className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <input
+                            type="email"
+                            value={inviteEmail}
+                            onChange={e => setInviteEmail(e.target.value)}
+                            placeholder="email@ejemplo.com"
+                            className="flex-1 min-w-0 rounded border bg-background px-2 py-1 text-xs"
+                            onKeyDown={e => e.key === 'Enter' && handleInvite(s.id)}
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleInvite(s.id)}
+                            disabled={sendingInvite}
+                            className="rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                          >
+                            {sendingInvite ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Enviar'}
+                          </button>
+                          <button
+                            onClick={() => { setInvitingId(null); setInviteEmail('') }}
+                            className="rounded p-1 hover:bg-accent"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setInvitingId(s.id); setInviteEmail('') }}
+                          disabled={licenseUsed >= licenseMax}
+                          className="flex items-center gap-1 text-[10px] text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+                        >
+                          <UserPlus className="h-3 w-3" />
+                          {licenseUsed >= licenseMax ? 'Sin licencias disponibles' : 'Invitar a la plataforma'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {s.profile_id && (
+                    <p className="text-[10px] text-muted-foreground pt-1 border-t mt-1 flex items-center gap-1">
+                      <Check className="h-3 w-3 text-primary" /> Con acceso a la plataforma
+                    </p>
+                  )}
                 </div>
               </div>
             )

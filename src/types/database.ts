@@ -3607,6 +3607,7 @@ export type Database = {
           equipo_declarado: number | null
           id: string
           logo_url: string | null
+          max_seats: number
           name: string
           onboarding_completed: boolean | null
           profession: string | null
@@ -3625,6 +3626,7 @@ export type Database = {
           equipo_declarado?: number | null
           id?: string
           logo_url?: string | null
+          max_seats?: number
           name: string
           onboarding_completed?: boolean | null
           profession?: string | null
@@ -3643,6 +3645,7 @@ export type Database = {
           equipo_declarado?: number | null
           id?: string
           logo_url?: string | null
+          max_seats?: number
           name?: string
           onboarding_completed?: boolean | null
           profession?: string | null
@@ -4051,10 +4054,9 @@ export const Constants = {
   },
 } as const
 
-// ── Custom type aliases ──────────────────────────────────
+// ── Custom type aliases ──────────────────────────────
 export type ActivityLog = Database['public']['Tables']['activity_log']['Row']
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
-export type BankBalance = Database['public']['Tables']['bank_balances']['Row']
 export type CausacionLog = Database['public']['Tables']['causaciones_log']['Row']
 export type Client = Database['public']['Tables']['clients']['Row']
 export type Cobro = Database['public']['Tables']['cobros']['Row']

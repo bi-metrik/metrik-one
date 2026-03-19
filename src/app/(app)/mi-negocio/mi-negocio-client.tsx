@@ -37,6 +37,8 @@ interface MiNegocioClientProps {
   configFinanciera: { margen_contribucion_estimado: number | null; margen_fuente: string | null; n_proyectos_margen: number | null } | null
   progressPct: number
   currentUserRole: string
+  licenseUsed: number
+  licenseMax: number
   sectionScores: {
     fiscal: number
     marca: number
@@ -107,6 +109,8 @@ export default function MiNegocioClient({
   configFinanciera,
   progressPct,
   currentUserRole,
+  licenseUsed,
+  licenseMax,
   sectionScores,
 }: MiNegocioClientProps) {
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -277,6 +281,8 @@ export default function MiNegocioClient({
                       configFinanciera,
                       totalFixed,
                       currentUserRole,
+                      licenseUsed,
+                      licenseMax,
                       onClose: () => setActiveSection(null),
                     })}
                   </div>
@@ -307,6 +313,8 @@ function renderSection(
     configFinanciera: { margen_contribucion_estimado: number | null; margen_fuente: string | null; n_proyectos_margen: number | null } | null
     totalFixed: number
     currentUserRole: string
+    licenseUsed: number
+    licenseMax: number
     onClose: () => void
   },
 ) {
@@ -351,6 +359,9 @@ function renderSection(
         <EquipoSection
           workspace={props.workspace}
           staffMembers={props.staffMembers}
+          licenseUsed={props.licenseUsed}
+          licenseMax={props.licenseMax}
+          currentUserRole={props.currentUserRole}
         />
       )
 
