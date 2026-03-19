@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Trash2, Phone, Briefcase, X, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Pencil, Trash2, Phone, X, Check, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Staff } from '@/types/database'
 import { createStaffMember, updateStaffMember, deleteStaffMember } from './staff-actions'
@@ -25,12 +25,38 @@ const ROL_OPTIONS = [
   { value: 'campo', label: 'Campo', desc: 'Solo reporta via WhatsApp. Gastos y horas en proyectos activos.' },
 ]
 
+// Display labels for all roles (including dueno which is not in the form dropdown)
+const ROL_DISPLAY: Record<string, string> = {
+  dueno: 'Empresario',
+  administrador: 'Administrador',
+  supervisor: 'Supervisor',
+  ejecutor: 'Ejecutor',
+  campo: 'Campo',
+}
+
+// Color classes per role — Ren's palette
+const ROL_COLORS: Record<string, string> = {
+  dueno: 'bg-primary/10 text-primary',
+  administrador: 'bg-violet-100 text-violet-700',
+  supervisor: 'bg-amber-100 text-amber-700',
+  ejecutor: 'bg-sky-100 text-sky-700',
+  campo: 'bg-orange-100 text-orange-700',
+}
+
 const AREA_OPTIONS = [
   { value: 'comercial', label: 'Comercial' },
   { value: 'operaciones', label: 'Operaciones' },
   { value: 'admin_finanzas', label: 'Admin y Finanzas' },
   { value: 'direccion', label: 'Direccion' },
 ]
+
+// Color classes per area
+const AREA_COLORS: Record<string, string> = {
+  comercial: 'bg-emerald-50 text-emerald-600',
+  operaciones: 'bg-slate-100 text-slate-600',
+  admin_finanzas: 'bg-blue-50 text-blue-600',
+  direccion: 'bg-primary/10 text-primary',
+}
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
@@ -318,58 +344,61 @@ export default function StaffSection({ initialData }: StaffSectionProps) {
         </div>
       ) : (
         <div className="space-y-2">
-          {activeStaff.map(s => (
-            <div key={s.id} className="flex items-center gap-3 rounded-lg border p-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                {s.full_name.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{s.full_name}</p>
-                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  {s.rol_plataforma && (
-                    <span className="inline-flex shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                      {ROL_OPTIONS.find(r => r.value === s.rol_plataforma)?.label || s.rol_plataforma}
+          {activeStaff.map(s => {
+            const rol = s.rol_plataforma || 'ejecutor'
+            const rolColor = ROL_COLORS[rol] || 'bg-sky-100 text-sky-700'
+            const areaColor = s.area ? (AREA_COLORS[s.area] || 'bg-slate-100 text-slate-600') : ''
+            return (
+              <div key={s.id} className="flex gap-3 rounded-lg border p-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary mt-0.5">
+                  {s.full_name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold truncate">{s.full_name}</p>
+                    <div className="flex gap-1 shrink-0">
+                      <button onClick={() => startEdit(s)} className="rounded p-1 hover:bg-accent">
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                      <button onClick={() => handleDelete(s.id)} className="rounded p-1 hover:bg-accent">
+                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${rolColor}`}>
+                      {ROL_DISPLAY[rol] || rol}
                     </span>
-                  )}
-                  {s.area && (
-                    <span className="inline-flex shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                      {AREA_OPTIONS.find(a => a.value === s.area)?.label || s.area}
-                    </span>
-                  )}
+                    {s.area && (
+                      <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${areaColor}`}>
+                        {AREA_OPTIONS.find(a => a.value === s.area)?.label || s.area}
+                      </span>
+                    )}
+                  </div>
                   {s.position && (
-                    <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                      <Briefcase className="h-3 w-3" /> {s.position}
-                    </span>
+                    <p className="text-xs text-muted-foreground">{s.position}</p>
                   )}
-                  {s.phone_whatsapp && (
-                    <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                      <Phone className="h-3 w-3" /> {s.phone_whatsapp}
-                    </span>
-                  )}
+                  <div className="flex items-center justify-between gap-2">
+                    {s.phone_whatsapp ? (
+                      <span className="flex items-center gap-1 text-xs text-emerald-600">
+                        <Phone className="h-3 w-3" /> {s.phone_whatsapp}
+                      </span>
+                    ) : <span />}
+                    {(s.salary ?? 0) > 0 && (
+                      <div className="text-right">
+                        <span className="text-sm font-semibold">{fmt(s.salary ?? 0)}</span>
+                        {(s.horas_disponibles_mes ?? 160) > 0 && (
+                          <span className="ml-1.5 text-[10px] text-primary">
+                            {fmt(Math.round((s.salary ?? 0) / (s.horas_disponibles_mes ?? 160)))}/h
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="text-right shrink-0">
-                {(s.salary ?? 0) > 0 && (
-                  <>
-                    <p className="text-sm font-medium">{fmt(s.salary ?? 0)}</p>
-                    {(s.horas_disponibles_mes ?? 160) > 0 && (
-                      <p className="text-[10px] text-primary">
-                        {fmt(Math.round((s.salary ?? 0) / (s.horas_disponibles_mes ?? 160)))}/h
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="flex gap-1 shrink-0">
-                <button onClick={() => startEdit(s)} className="rounded p-1 hover:bg-accent">
-                  <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-                </button>
-                <button onClick={() => handleDelete(s.id)} className="rounded p-1 hover:bg-accent">
-                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                </button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
