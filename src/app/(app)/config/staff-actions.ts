@@ -2,9 +2,6 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { Resend } from 'resend'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function getStaff() {
   const supabase = await createClient()
@@ -286,6 +283,11 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
       : `https://${ws?.slug || 'app'}.${baseDomain}/accept-invite?token=${inv.token}`
 
     // Send invitation email via Resend
+    const apiKey = process.env.RESEND_API_KEY
+    if (!apiKey) return { error: 'RESEND_API_KEY no configurada en el servidor' }
+
+    const { Resend } = await import('resend')
+    const resend = new Resend(apiKey)
     await resend.emails.send({
       from: 'MéTRIK ONE <cotizaciones@metrikone.co>',
       to: normalizedEmail,
