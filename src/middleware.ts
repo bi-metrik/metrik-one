@@ -52,8 +52,9 @@ export async function middleware(request: NextRequest) {
   if (slug) {
     supabaseResponse.headers.set('x-tenant-slug', slug)
 
-    // Always allow auth callback
+    // Always allow auth callback and accept-invite
     if (pathname.startsWith('/auth/callback')) return supabaseResponse
+    if (pathname === '/accept-invite') return supabaseResponse
 
     // Not authenticated → login on marketing domain
     if (!user) {
@@ -76,6 +77,7 @@ export async function middleware(request: NextRequest) {
   // --- MARKETING DOMAIN (no subdomain) ---
   if (pathname.startsWith('/auth/callback')) return supabaseResponse
   if (pathname === '/registro') return supabaseResponse
+  if (pathname === '/accept-invite') return supabaseResponse
 
   // Onboarding route — allow for authenticated users without profile
   if (pathname === '/onboarding') {
@@ -112,7 +114,11 @@ export async function middleware(request: NextRequest) {
         }
       }
 
-      // User exists but no profile → onboarding
+      // User exists but no profile → check for invite redirect, otherwise onboarding
+      const redirectParam = request.nextUrl.searchParams.get('redirectTo')
+      if (redirectParam === '/accept-invite') {
+        return NextResponse.redirect(new URL('/accept-invite', request.url))
+      }
       return NextResponse.redirect(new URL('/onboarding', request.url))
     }
     return supabaseResponse
