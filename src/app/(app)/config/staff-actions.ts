@@ -261,16 +261,40 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     })
 
     if (inviteErr) {
-      // If user already exists in auth, send magic link instead
+      // If user already exists in auth, generate link + send via Resend
       if (inviteErr.message?.includes('already been registered') || inviteErr.status === 422) {
-        const { error: otpErr } = await serviceClient.auth.admin.generateLink({
+        const { data: linkData, error: otpErr } = await serviceClient.auth.admin.generateLink({
           type: 'magiclink',
           email: normalizedEmail,
           options: {
             redirectTo: `${siteUrl}/auth/callback?redirectTo=/accept-invite`,
           },
         })
-        if (otpErr) return { error: `Error enviando magic link: ${otpErr.message}` }
+        if (otpErr) return { error: `Error generando magic link: ${otpErr.message}` }
+
+        // generateLink only creates the link, does NOT send email — send via Resend
+        const magicLink = linkData?.properties?.action_link
+        if (magicLink) {
+          const resendKey = process.env.RESEND_API_KEY
+          if (resendKey) {
+            const res = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                from: 'MéTRIK ONE <noreply@metrikone.co>',
+                to: [normalizedEmail],
+                subject: 'Te invitaron a MéTRIK ONE',
+                html: `<h2>Te invitaron a MéTRIK ONE</h2><p>${staffMember.full_name}, haz clic en el siguiente enlace para acceder:</p><p><a href="${magicLink}">Acceder a MéTRIK ONE</a></p><p>Este enlace expira en 1 hora.</p>`,
+              }),
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              return { error: `Error enviando email: ${(err as any).message || res.statusText}` }
+            }
+          } else {
+            return { error: 'RESEND_API_KEY no configurada' }
+          }
+        }
       } else {
         return { error: `Error invitando: ${inviteErr.message}` }
       }
