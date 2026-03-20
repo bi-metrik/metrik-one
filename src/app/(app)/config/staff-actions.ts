@@ -179,110 +179,113 @@ export async function getLicenseInfo() {
 
 /** Invite a staff member to the platform (create profile + send magic link) */
 export async function inviteStaffToPlataform(staffId: string, email: string) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autenticado' }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('workspace_id, role')
-    .eq('id', user.id)
-    .single()
-  if (!profile) return { error: 'Sin perfil' }
-
-  if (profile.role !== 'owner') {
-    return { error: 'Solo el empresario puede invitar a la plataforma' }
-  }
-
-  // Validate staff belongs to this workspace and has no profile_id
-  const { data: staffMember } = await supabase
-    .from('staff')
-    .select('id, full_name, profile_id, rol_plataforma, workspace_id')
-    .eq('id', staffId)
-    .eq('workspace_id', profile.workspace_id)
-    .single()
-
-  if (!staffMember) return { error: 'Miembro no encontrado' }
-  if (staffMember.profile_id) return { error: 'Este miembro ya tiene acceso a la plataforma' }
-
-  // Check seat availability
-  const { used, max } = await getLicenseInfo()
-  if (used >= max) {
-    return { error: `Sin licencias disponibles (${used}/${max}). Contacta soporte para ampliar tu plan.` }
-  }
-
-  // Map staff rol_plataforma to profiles.role
-  const roleMap: Record<string, string> = {
-    dueno: 'owner',
-    administrador: 'admin',
-    supervisor: 'supervisor',
-    ejecutor: 'operator',
-    campo: 'read_only',
-  }
-  const inviteRole = roleMap[staffMember.rol_plataforma || 'ejecutor'] || 'operator'
-
-  // Check if invitation already pending
-  const normalizedEmail = email.trim().toLowerCase()
-  const { data: existing } = await supabase
-    .from('team_invitations')
-    .select('id, status')
-    .eq('workspace_id', profile.workspace_id)
-    .eq('email', normalizedEmail)
-    .maybeSingle()
-
-  if (existing?.status === 'pending') {
-    return { error: 'Ya existe una invitacion pendiente para este email' }
-  }
-
-  // Upsert invitation
-  if (existing) {
-    await supabase
-      .from('team_invitations')
-      .update({
-        role: inviteRole,
-        status: 'pending',
-        invited_by: user.id,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      })
-      .eq('id', existing.id)
-  } else {
-    const { error: insertError } = await supabase
-      .from('team_invitations')
-      .insert({
-        workspace_id: profile.workspace_id,
-        email: normalizedEmail,
-        role: inviteRole,
-        invited_by: user.id,
-      })
-    if (insertError) return { error: insertError.message }
-  }
-
-  // Get the invitation token
-  const { data: inv } = await supabase
-    .from('team_invitations')
-    .select('token')
-    .eq('workspace_id', profile.workspace_id)
-    .eq('email', normalizedEmail)
-    .eq('status', 'pending')
-    .single()
-
-  if (!inv) return { error: 'Error creando invitacion' }
-
-  // Get workspace name
-  const { data: ws } = await supabase
-    .from('workspaces')
-    .select('name, slug')
-    .eq('id', profile.workspace_id)
-    .single()
-
-  const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
-  const isLocal = process.env.NODE_ENV === 'development'
-  const acceptUrl = isLocal
-    ? `http://localhost:3000/accept-invite?token=${inv.token}`
-    : `https://${ws?.slug || 'app'}.${baseDomain}/accept-invite?token=${inv.token}`
-
-  // Send invitation email via Resend
   try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'No autenticado' }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('workspace_id, role')
+      .eq('id', user.id)
+      .single()
+    if (!profile) return { error: 'Sin perfil' }
+
+    if (profile.role !== 'owner') {
+      return { error: 'Solo el empresario puede invitar a la plataforma' }
+    }
+
+    // Validate staff belongs to this workspace and has no profile_id
+    const { data: staffMember, error: staffErr } = await supabase
+      .from('staff')
+      .select('id, full_name, profile_id, rol_plataforma, workspace_id')
+      .eq('id', staffId)
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle()
+
+    if (staffErr) return { error: `Error buscando staff: ${staffErr.message}` }
+    if (!staffMember) return { error: 'Miembro no encontrado' }
+    if (staffMember.profile_id) return { error: 'Este miembro ya tiene acceso a la plataforma' }
+
+    // Check seat availability
+    const { used, max } = await getLicenseInfo()
+    if (used >= max) {
+      return { error: `Sin licencias disponibles (${used}/${max}). Contacta soporte para ampliar tu plan.` }
+    }
+
+    // Map staff rol_plataforma to profiles.role
+    const roleMap: Record<string, string> = {
+      dueno: 'owner',
+      administrador: 'admin',
+      supervisor: 'supervisor',
+      ejecutor: 'operator',
+      campo: 'read_only',
+    }
+    const inviteRole = roleMap[staffMember.rol_plataforma || 'ejecutor'] || 'operator'
+
+    // Check if invitation already pending
+    const normalizedEmail = email.trim().toLowerCase()
+    const { data: existing } = await supabase
+      .from('team_invitations')
+      .select('id, status')
+      .eq('workspace_id', profile.workspace_id)
+      .eq('email', normalizedEmail)
+      .maybeSingle()
+
+    if (existing?.status === 'pending') {
+      return { error: 'Ya existe una invitacion pendiente para este email' }
+    }
+
+    // Upsert invitation
+    if (existing) {
+      const { error: updErr } = await supabase
+        .from('team_invitations')
+        .update({
+          role: inviteRole,
+          status: 'pending',
+          invited_by: user.id,
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        })
+        .eq('id', existing.id)
+      if (updErr) return { error: `Error actualizando invitacion: ${updErr.message}` }
+    } else {
+      const { error: insertError } = await supabase
+        .from('team_invitations')
+        .insert({
+          workspace_id: profile.workspace_id,
+          email: normalizedEmail,
+          role: inviteRole,
+          invited_by: user.id,
+        })
+      if (insertError) return { error: `Error creando invitacion: ${insertError.message}` }
+    }
+
+    // Get the invitation token
+    const { data: inv, error: invErr } = await supabase
+      .from('team_invitations')
+      .select('token')
+      .eq('workspace_id', profile.workspace_id)
+      .eq('email', normalizedEmail)
+      .eq('status', 'pending')
+      .maybeSingle()
+
+    if (invErr) return { error: `Error obteniendo token: ${invErr.message}` }
+    if (!inv) return { error: 'No se pudo crear la invitacion. Revisa los permisos de la tabla.' }
+
+    // Get workspace name
+    const { data: ws } = await supabase
+      .from('workspaces')
+      .select('name, slug')
+      .eq('id', profile.workspace_id)
+      .maybeSingle()
+
+    const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
+    const isLocal = process.env.NODE_ENV === 'development'
+    const acceptUrl = isLocal
+      ? `http://localhost:3000/accept-invite?token=${inv.token}`
+      : `https://${ws?.slug || 'app'}.${baseDomain}/accept-invite?token=${inv.token}`
+
+    // Send invitation email via Resend
     await resend.emails.send({
       from: 'MéTRIK ONE <cotizaciones@metrikone.co>',
       to: normalizedEmail,
@@ -302,11 +305,11 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
         </div>
       `,
     })
-  } catch {
-    return { error: 'Error enviando email. Verifica el correo e intenta de nuevo.' }
-  }
 
-  revalidatePath('/config')
-  revalidatePath('/mi-negocio')
-  return { success: true, email: normalizedEmail }
+    revalidatePath('/config')
+    revalidatePath('/mi-negocio')
+    return { success: true, email: normalizedEmail }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Error inesperado al invitar' }
+  }
 }
