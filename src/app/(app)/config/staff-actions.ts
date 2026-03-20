@@ -221,24 +221,20 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     const inviteRole = roleMap[staffMember.rol_plataforma || 'ejecutor'] || 'operator'
     const normalizedEmail = email.trim().toLowerCase()
 
-    // Expire any previous pending invitations for this email
-    await supabase
+    // Upsert invitation: reuse existing row or create new
+    const { error: upsertError } = await supabase
       .from('team_invitations')
-      .update({ status: 'expired' })
-      .eq('workspace_id', profile.workspace_id)
-      .eq('email', normalizedEmail)
-      .eq('status', 'pending')
-
-    // Create new invitation
-    const { error: insertError } = await supabase
-      .from('team_invitations')
-      .insert({
+      .upsert({
         workspace_id: profile.workspace_id,
         email: normalizedEmail,
         role: inviteRole,
         invited_by: user.id,
+        status: 'pending',
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      }, {
+        onConflict: 'workspace_id,email',
       })
-    if (insertError) return { error: `Error creando invitacion: ${insertError.message}` }
+    if (upsertError) return { error: `Error creando invitacion: ${upsertError.message}` }
 
     // Get workspace slug for redirect
     const { data: ws } = await supabase
