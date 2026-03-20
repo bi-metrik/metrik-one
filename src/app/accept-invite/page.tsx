@@ -21,11 +21,14 @@ export default async function AcceptInvitePage({
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
+  // Use service client to bypass RLS — invited user has no profile yet
+  const serviceClient = createServiceClient()
+
   // Find invitation: by token or by authenticated user's email
   let invitation: any = null
 
   if (token) {
-    const { data } = await supabase
+    const { data } = await serviceClient
       .from('team_invitations')
       .select('*')
       .eq('token', token)
@@ -36,7 +39,7 @@ export default async function AcceptInvitePage({
 
   if (!invitation && user?.email) {
     // Magic link flow: find pending invitation by email
-    const { data } = await supabase
+    const { data } = await serviceClient
       .from('team_invitations')
       .select('*')
       .eq('email', user.email.toLowerCase())
@@ -72,7 +75,7 @@ export default async function AcceptInvitePage({
 
   // Check if expired
   if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
-    await supabase
+    await serviceClient
       .from('team_invitations')
       .update({ status: 'expired' })
       .eq('id', invitation.id)
@@ -101,7 +104,7 @@ export default async function AcceptInvitePage({
   }
 
   // User is logged in — check if they already have a profile
-  const { data: existingProfile } = await supabase
+  const { data: existingProfile } = await serviceClient
     .from('profiles')
     .select('id, workspace_id')
     .eq('id', user.id)
@@ -110,13 +113,12 @@ export default async function AcceptInvitePage({
   if (existingProfile) {
     if (existingProfile.workspace_id === invitation.workspace_id) {
       // Already in this workspace — just accept and redirect
-      await supabase
+      await serviceClient
         .from('team_invitations')
         .update({ status: 'accepted', accepted_at: new Date().toISOString() })
         .eq('id', invitation.id)
 
       // Link staff if not already linked
-      const serviceClient = createServiceClient()
       await serviceClient
         .from('staff')
         .update({ profile_id: user.id })
@@ -149,7 +151,7 @@ export default async function AcceptInvitePage({
 
   // Create profile in the invitation's workspace
   const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Nuevo miembro'
-  const { error: profileError } = await supabase
+  const { error: profileError } = await serviceClient
     .from('profiles')
     .insert({
       id: user.id,
@@ -172,7 +174,6 @@ export default async function AcceptInvitePage({
   }
 
   // Link staff record by matching invitation email
-  const serviceClient = createServiceClient()
   const { data: staffMatch } = await serviceClient
     .from('team_invitations')
     .select('email')
@@ -191,7 +192,7 @@ export default async function AcceptInvitePage({
   }
 
   // Mark invitation as accepted
-  await supabase
+  await serviceClient
     .from('team_invitations')
     .update({ status: 'accepted', accepted_at: new Date().toISOString() })
     .eq('id', invitation.id)
