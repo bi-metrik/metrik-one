@@ -1,15 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
 /**
- * Accept Invitation Page — D99: <2 min onboarding
- * URL: /accept-invite?token=xxx
+ * Accept Invitation Page
  *
- * Flow:
- * 1. Validate token
- * 2. If user logged in → join workspace
- * 3. If not logged in → redirect to signup with token in searchParams
+ * Two flows:
+ * 1. Token-based: /accept-invite?token=xxx (legacy, link compartido)
+ * 2. Magic link: /accept-invite (usuario llega autenticado via magic link, busca invitacion por email)
  */
 export default async function AcceptInvitePage({
   searchParams,
@@ -19,42 +18,46 @@ export default async function AcceptInvitePage({
   const params = await searchParams
   const token = params.token
 
-  if (!token) {
-    return (
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-8 text-center">
-          <h1 className="text-xl font-bold">Invitación inválida</h1>
-          <p className="text-sm text-muted-foreground">
-            Este enlace de invitación no es válido o ha expirado.
-          </p>
-          <Link
-            href="/login"
-            className="inline-flex items-center justify-center rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            Ir al login
-          </Link>
-        </div>
-      </div>
-    )
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // Find invitation: by token or by authenticated user's email
+  let invitation: any = null
+
+  if (token) {
+    const { data } = await supabase
+      .from('team_invitations')
+      .select('*')
+      .eq('token', token)
+      .eq('status', 'pending')
+      .maybeSingle()
+    invitation = data
   }
 
-  const supabase = await createClient()
+  if (!invitation && user?.email) {
+    // Magic link flow: find pending invitation by email
+    const { data } = await supabase
+      .from('team_invitations')
+      .select('*')
+      .eq('email', user.email.toLowerCase())
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    invitation = data
+  }
 
-  // Find the invitation
-  const { data: invitation, error: invError } = await supabase
-    .from('team_invitations')
-    .select('*')
-    .eq('token', token)
-    .eq('status', 'pending')
-    .single()
-
-  if (invError || !invitation) {
+  if (!invitation) {
+    // No token and not authenticated, or no invitation found
+    if (!user && token) {
+      redirect(`/login?invite_token=${token}`)
+    }
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-8 text-center">
-          <h1 className="text-xl font-bold">Invitación no encontrada</h1>
+          <h1 className="text-xl font-bold">Invitacion no encontrada</h1>
           <p className="text-sm text-muted-foreground">
-            Esta invitación ya fue usada, revocada o expiró.
+            Esta invitacion ya fue usada, revocada o expiro.
           </p>
           <Link
             href="/login"
@@ -69,7 +72,6 @@ export default async function AcceptInvitePage({
 
   // Check if expired
   if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
-    // Mark as expired
     await supabase
       .from('team_invitations')
       .update({ status: 'expired' })
@@ -78,9 +80,9 @@ export default async function AcceptInvitePage({
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-8 text-center">
-          <h1 className="text-xl font-bold">Invitación expirada</h1>
+          <h1 className="text-xl font-bold">Invitacion expirada</h1>
           <p className="text-sm text-muted-foreground">
-            Esta invitación expiró. Pídele al dueño del workspace que te envíe una nueva.
+            Esta invitacion expiro. Pidele al dueno del workspace que te envie una nueva.
           </p>
           <Link
             href="/login"
@@ -93,12 +95,9 @@ export default async function AcceptInvitePage({
     )
   }
 
-  // Check if user is authenticated
-  const { data: { user } } = await supabase.auth.getUser()
-
   if (!user) {
-    // Not logged in → redirect to signup with token
-    redirect(`/login?invite_token=${token}&email=${encodeURIComponent(invitation.email)}`)
+    // Not logged in → redirect to login
+    redirect(`/login?invite_token=${invitation.token}&email=${encodeURIComponent(invitation.email)}`)
   }
 
   // User is logged in — check if they already have a profile
@@ -106,33 +105,42 @@ export default async function AcceptInvitePage({
     .from('profiles')
     .select('id, workspace_id')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
   if (existingProfile) {
-    // User already has a workspace
     if (existingProfile.workspace_id === invitation.workspace_id) {
-      // Already in this workspace
+      // Already in this workspace — just accept and redirect
       await supabase
         .from('team_invitations')
         .update({ status: 'accepted', accepted_at: new Date().toISOString() })
         .eq('id', invitation.id)
 
+      // Link staff if not already linked
+      const serviceClient = createServiceClient()
+      await serviceClient
+        .from('staff')
+        .update({ profile_id: user.id })
+        .eq('workspace_id', invitation.workspace_id)
+        .is('profile_id', null)
+        .eq('is_active', true)
+        .ilike('full_name', user.user_metadata?.full_name || user.email?.split('@')[0] || '')
+
       redirect('/numeros')
     }
 
-    // Different workspace — for now, show message
+    // Different workspace
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-8 text-center">
           <h1 className="text-xl font-bold">Ya tienes un workspace</h1>
           <p className="text-sm text-muted-foreground">
-            Tu cuenta ya pertenece a otro workspace. En una próxima versión podrás pertenecer a múltiples workspaces.
+            Tu cuenta ya pertenece a otro workspace. En una proxima version podras pertenecer a multiples workspaces.
           </p>
           <Link
             href="/numeros"
             className="inline-flex items-center justify-center rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
-            Ir a Números
+            Ir a Numeros
           </Link>
         </div>
       </div>
@@ -156,44 +164,30 @@ export default async function AcceptInvitePage({
         <div className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-8 text-center">
           <h1 className="text-xl font-bold">Error</h1>
           <p className="text-sm text-muted-foreground">
-            No se pudo unirte al workspace. Intenta de nuevo o contacta al dueño.
+            No se pudo unirte al workspace: {profileError.message}
           </p>
         </div>
       </div>
     )
   }
 
-  // Link staff record: find by email or name match in same workspace
-  const userEmail = user.email?.toLowerCase()
-  if (userEmail) {
-    // Try to find a staff without profile_id that was invited via this email
-    const { data: staffByInvite } = await supabase
+  // Link staff record by matching invitation email
+  const serviceClient = createServiceClient()
+  const { data: staffMatch } = await serviceClient
+    .from('team_invitations')
+    .select('email')
+    .eq('id', invitation.id)
+    .single()
+
+  if (staffMatch) {
+    // Find staff that was invited with this email (match by name since staff doesn't store email)
+    await serviceClient
       .from('staff')
-      .select('id')
+      .update({ profile_id: user.id })
       .eq('workspace_id', invitation.workspace_id)
       .is('profile_id', null)
       .eq('is_active', true)
-      .limit(1)
-      .maybeSingle()
-
-    // Also try matching by name
-    const { data: staffByName } = !staffByInvite ? await supabase
-      .from('staff')
-      .select('id')
-      .eq('workspace_id', invitation.workspace_id)
       .ilike('full_name', fullName)
-      .is('profile_id', null)
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle() : { data: null }
-
-    const staffToLink = staffByInvite || staffByName
-    if (staffToLink) {
-      await supabase
-        .from('staff')
-        .update({ profile_id: user.id })
-        .eq('id', staffToLink.id)
-    }
   }
 
   // Mark invitation as accepted

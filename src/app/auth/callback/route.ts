@@ -38,7 +38,36 @@ export async function GET(request: Request) {
         }
       }
 
-      // New user → redirect to onboarding
+      // New user — check if they have a pending invitation
+      const userEmail = data.user.email?.toLowerCase()
+      if (userEmail) {
+        const { data: pendingInvite } = await supabase
+          .from('team_invitations')
+          .select('workspace_id')
+          .eq('email', userEmail)
+          .eq('status', 'pending')
+          .limit(1)
+          .maybeSingle()
+
+        if (pendingInvite) {
+          // Invited user → redirect to accept-invite (skips onboarding)
+          const targetPath = '/accept-invite'
+          if (isLocalEnv) {
+            return NextResponse.redirect(`${origin}${targetPath}`)
+          }
+          const { data: invWs } = await supabase
+            .from('workspaces')
+            .select('slug')
+            .eq('id', pendingInvite.workspace_id)
+            .single()
+          if (invWs?.slug) {
+            return NextResponse.redirect(`https://${invWs.slug}.${baseDomain}${targetPath}`)
+          }
+          return NextResponse.redirect(`${origin}${targetPath}`)
+        }
+      }
+
+      // No invitation → regular onboarding
       if (isLocalEnv) {
         return NextResponse.redirect(`${origin}/onboarding`)
       }

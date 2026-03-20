@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
 export async function getStaff() {
@@ -174,7 +174,7 @@ export async function getLicenseInfo() {
   }
 }
 
-/** Invite a staff member to the platform (create profile + send magic link) */
+/** Invite a staff member to the platform via Supabase magic link */
 export async function inviteStaffToPlataform(staffId: string, email: string) {
   try {
     const supabase = await createClient()
@@ -219,102 +219,70 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
       campo: 'read_only',
     }
     const inviteRole = roleMap[staffMember.rol_plataforma || 'ejecutor'] || 'operator'
-
-    // Check if invitation already pending
     const normalizedEmail = email.trim().toLowerCase()
-    const { data: existing } = await supabase
+
+    // Expire any previous pending invitations for this email
+    await supabase
       .from('team_invitations')
-      .select('id, status')
-      .eq('workspace_id', profile.workspace_id)
-      .eq('email', normalizedEmail)
-      .maybeSingle()
-
-    if (existing?.status === 'pending') {
-      return { error: 'Ya existe una invitacion pendiente para este email' }
-    }
-
-    // Upsert invitation
-    if (existing) {
-      const { error: updErr } = await supabase
-        .from('team_invitations')
-        .update({
-          role: inviteRole,
-          status: 'pending',
-          invited_by: user.id,
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .eq('id', existing.id)
-      if (updErr) return { error: `Error actualizando invitacion: ${updErr.message}` }
-    } else {
-      const { error: insertError } = await supabase
-        .from('team_invitations')
-        .insert({
-          workspace_id: profile.workspace_id,
-          email: normalizedEmail,
-          role: inviteRole,
-          invited_by: user.id,
-        })
-      if (insertError) return { error: `Error creando invitacion: ${insertError.message}` }
-    }
-
-    // Get the invitation token
-    const { data: inv, error: invErr } = await supabase
-      .from('team_invitations')
-      .select('token')
+      .update({ status: 'expired' })
       .eq('workspace_id', profile.workspace_id)
       .eq('email', normalizedEmail)
       .eq('status', 'pending')
-      .maybeSingle()
 
-    if (invErr) return { error: `Error obteniendo token: ${invErr.message}` }
-    if (!inv) return { error: 'No se pudo crear la invitacion. Revisa los permisos de la tabla.' }
+    // Create new invitation
+    const { error: insertError } = await supabase
+      .from('team_invitations')
+      .insert({
+        workspace_id: profile.workspace_id,
+        email: normalizedEmail,
+        role: inviteRole,
+        invited_by: user.id,
+      })
+    if (insertError) return { error: `Error creando invitacion: ${insertError.message}` }
 
-    // Get workspace name
+    // Get workspace slug for redirect
     const { data: ws } = await supabase
       .from('workspaces')
-      .select('name, slug')
+      .select('slug')
       .eq('id', profile.workspace_id)
       .maybeSingle()
 
     const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
     const isLocal = process.env.NODE_ENV === 'development'
-    const acceptUrl = isLocal
-      ? `http://localhost:3000/accept-invite?token=${inv.token}`
-      : `https://${ws?.slug || 'app'}.${baseDomain}/accept-invite?token=${inv.token}`
+    const siteUrl = isLocal
+      ? 'http://localhost:3000'
+      : `https://${ws?.slug || 'app'}.${baseDomain}`
 
-    // Send invitation email via Resend (optional — skip if not configured)
-    const apiKey = process.env.RESEND_API_KEY
-    if (apiKey) {
-      try {
-        const { Resend } = await import('resend')
-        const resend = new Resend(apiKey)
-        await resend.emails.send({
-          from: 'MéTRIK ONE <cotizaciones@metrikone.co>',
-          to: normalizedEmail,
-          subject: `${ws?.name || 'Tu empresa'} te invita a MéTRIK ONE`,
-          html: `
-            <div style="font-family: 'Montserrat', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-              <h2 style="color: #1A1A1A; margin-bottom: 8px;">Hola ${staffMember.full_name},</h2>
-              <p style="color: #6B7280; font-size: 14px; line-height: 1.6;">
-                <strong>${ws?.name || 'Tu empresa'}</strong> te invita a usar MéTRIK ONE para gestionar el negocio juntos.
-              </p>
-              <a href="${acceptUrl}" style="display: inline-block; background: #10B981; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; margin: 24px 0;">
-                Aceptar invitacion
-              </a>
-              <p style="color: #9CA3AF; font-size: 12px; margin-top: 24px;">
-                Este enlace expira en 7 dias. Si no esperabas esta invitacion, puedes ignorar este correo.
-              </p>
-            </div>
-          `,
+    // Send magic link via Supabase Auth (uses Supabase's built-in email)
+    const serviceClient = createServiceClient()
+    const { error: inviteErr } = await serviceClient.auth.admin.inviteUserByEmail(normalizedEmail, {
+      redirectTo: `${siteUrl}/auth/callback?redirectTo=/accept-invite`,
+      data: {
+        full_name: staffMember.full_name,
+        invited_role: inviteRole,
+        workspace_id: profile.workspace_id,
+      },
+    })
+
+    if (inviteErr) {
+      // If user already exists in auth, send magic link instead
+      if (inviteErr.message?.includes('already been registered') || inviteErr.status === 422) {
+        const { error: otpErr } = await serviceClient.auth.admin.generateLink({
+          type: 'magiclink',
+          email: normalizedEmail,
+          options: {
+            redirectTo: `${siteUrl}/auth/callback?redirectTo=/accept-invite`,
+          },
         })
-      } catch {
-        // Email failed but invitation was created — continue with link
+        if (otpErr) return { error: `Error enviando magic link: ${otpErr.message}` }
+      } else {
+        return { error: `Error invitando: ${inviteErr.message}` }
       }
     }
 
     revalidatePath('/config')
     revalidatePath('/mi-negocio')
-    return { success: true, email: normalizedEmail, inviteUrl: acceptUrl }
+    return { success: true, email: normalizedEmail }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Error inesperado al invitar' }
   }
