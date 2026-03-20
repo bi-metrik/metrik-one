@@ -261,39 +261,30 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     })
 
     if (inviteErr) {
-      // If user already exists in auth, generate link + send via Resend
+      // If user already exists in auth, send login email via Resend
+      // (can't use generateLink because PKCE requires browser-side code_verifier)
       if (inviteErr.message?.includes('already been registered') || inviteErr.status === 422) {
-        const { data: linkData, error: otpErr } = await serviceClient.auth.admin.generateLink({
-          type: 'magiclink',
-          email: normalizedEmail,
-          options: {
-            redirectTo: `${siteUrl}/auth/callback?redirectTo=/accept-invite`,
-          },
-        })
-        if (otpErr) return { error: `Error generando magic link: ${otpErr.message}` }
+        const resendKey = process.env.RESEND_API_KEY
+        if (!resendKey) return { error: 'RESEND_API_KEY no configurada' }
 
-        // generateLink only creates the link, does NOT send email — send via Resend
-        const magicLink = linkData?.properties?.action_link
-        if (magicLink) {
-          const resendKey = process.env.RESEND_API_KEY
-          if (resendKey) {
-            const res = await fetch('https://api.resend.com/emails', {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                from: 'MéTRIK ONE <noreply@metrikone.co>',
-                to: [normalizedEmail],
-                subject: 'Te invitaron a MéTRIK ONE',
-                html: `<h2>Te invitaron a MéTRIK ONE</h2><p>${staffMember.full_name}, haz clic en el siguiente enlace para acceder:</p><p><a href="${magicLink}">Acceder a MéTRIK ONE</a></p><p>Este enlace expira en 1 hora.</p>`,
-              }),
-            })
-            if (!res.ok) {
-              const err = await res.json().catch(() => ({}))
-              return { error: `Error enviando email: ${(err as any).message || res.statusText}` }
-            }
-          } else {
-            return { error: 'RESEND_API_KEY no configurada' }
-          }
+        const loginUrl = `${siteUrl}/login`
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'MéTRIK ONE <noreply@metrikone.co>',
+            to: [normalizedEmail],
+            subject: 'Te invitaron a MéTRIK ONE',
+            html: `<h2>Te invitaron a MéTRIK ONE</h2>
+<p>${staffMember.full_name}, te invitaron a unirte al equipo en MéTRIK ONE.</p>
+<p>Inicia sesion con tu correo para aceptar la invitacion:</p>
+<p><a href="${loginUrl}" style="display:inline-block;padding:12px 24px;background-color:#10B981;color:white;text-decoration:none;border-radius:8px;font-weight:600;">Iniciar sesion</a></p>
+<p style="color:#6B7280;font-size:14px;">Al iniciar sesion, seras redirigido automaticamente al workspace.</p>`,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          return { error: `Error enviando email: ${(err as any).message || res.statusText}` }
         }
       } else {
         return { error: `Error invitando: ${inviteErr.message}` }
