@@ -13,16 +13,24 @@ export default function LoginPage() {
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
 
+  // Pass redirectTo through to auth callback (e.g. /accept-invite from invitation emails)
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const redirectTo = searchParams?.get('redirectTo')
+
   const handleMagicLink = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
 
+    const callbackUrl = redirectTo
+      ? `${window.location.origin}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`
+      : `${window.location.origin}/auth/callback`
+
     const supabase = createClient()
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: callbackUrl,
       },
     })
 

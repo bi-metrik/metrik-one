@@ -69,6 +69,15 @@ export async function GET(request: Request) {
         }
       }
 
+      // If redirectTo is /accept-invite, honor it even without finding invitation
+      // (invitation might exist but lookup failed for other reasons)
+      if (redirectTo === '/accept-invite') {
+        if (isLocalEnv) {
+          return NextResponse.redirect(`${origin}/accept-invite`)
+        }
+        return NextResponse.redirect(`${origin}/accept-invite`)
+      }
+
       // No invitation → regular onboarding
       if (isLocalEnv) {
         return NextResponse.redirect(`${origin}/onboarding`)

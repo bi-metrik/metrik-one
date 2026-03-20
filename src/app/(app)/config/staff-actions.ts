@@ -267,7 +267,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
         const resendKey = process.env.RESEND_API_KEY
         if (!resendKey) return { error: 'RESEND_API_KEY no configurada' }
 
-        const loginUrl = `${siteUrl}/login`
+        const loginUrl = `${siteUrl}/login?redirectTo=/accept-invite`
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
