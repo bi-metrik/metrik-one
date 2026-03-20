@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Trash2, Phone, X, Check, ChevronDown, ChevronUp, Mail, UserPlus, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Phone, X, Check, ChevronDown, ChevronUp, Mail, UserPlus, Loader2, Copy, Link } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Staff } from '@/types/database'
 import { createStaffMember, updateStaffMember, deleteStaffMember, inviteStaffToPlataform } from './staff-actions'
@@ -74,6 +74,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   const [invitingId, setInvitingId] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
   const [sendingInvite, setSendingInvite] = useState(false)
+  const [inviteLink, setInviteLink] = useState<{ staffId: string; url: string } | null>(null)
   const [form, setForm] = useState({
     full_name: '',
     position: '',
@@ -156,14 +157,22 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
     setSendingInvite(true)
     const res = await inviteStaffToPlataform(staffId, inviteEmail)
     if ('success' in res && res.success) {
-      toast.success(`Invitacion enviada a ${res.email}`)
+      toast.success('Invitacion creada')
       setInvitingId(null)
       setInviteEmail('')
+      if ('inviteUrl' in res && res.inviteUrl) {
+        setInviteLink({ staffId, url: res.inviteUrl as string })
+      }
       router.refresh()
     } else {
       toast.error(res.error || 'Error al invitar')
     }
     setSendingInvite(false)
+  }
+
+  const copyLink = (url: string) => {
+    navigator.clipboard.writeText(url)
+    toast.success('Link copiado al portapapeles')
   }
 
   const startEdit = (s: Staff) => {
@@ -426,7 +435,34 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                   {/* Invite to platform */}
                   {!s.profile_id && currentUserRole === 'owner' && (
                     <div className="pt-1 border-t mt-1">
-                      {invitingId === s.id ? (
+                      {inviteLink?.staffId === s.id ? (
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <Link className="h-3 w-3 text-primary" /> Comparte este link de invitacion:
+                          </p>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={inviteLink.url}
+                              readOnly
+                              className="flex-1 min-w-0 rounded border bg-muted px-2 py-1 text-[10px] text-muted-foreground select-all"
+                              onClick={e => (e.target as HTMLInputElement).select()}
+                            />
+                            <button
+                              onClick={() => copyLink(inviteLink.url)}
+                              className="flex items-center gap-1 shrink-0 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
+                            >
+                              <Copy className="h-3 w-3" /> Copiar
+                            </button>
+                          </div>
+                          <button
+                            onClick={() => setInviteLink(null)}
+                            className="text-[10px] text-muted-foreground hover:text-foreground"
+                          >
+                            Cerrar
+                          </button>
+                        </div>
+                      ) : invitingId === s.id ? (
                         <div className="flex items-center gap-1.5">
                           <Mail className="h-3 w-3 text-muted-foreground shrink-0" />
                           <input
@@ -443,7 +479,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                             disabled={sendingInvite}
                             className="rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                           >
-                            {sendingInvite ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Enviar'}
+                            {sendingInvite ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Crear'}
                           </button>
                           <button
                             onClick={() => { setInvitingId(null); setInviteEmail('') }}
@@ -454,7 +490,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                         </div>
                       ) : (
                         <button
-                          onClick={() => { setInvitingId(s.id); setInviteEmail('') }}
+                          onClick={() => { setInvitingId(s.id); setInviteEmail(''); setInviteLink(null) }}
                           disabled={licenseUsed >= licenseMax}
                           className="flex items-center gap-1 text-[10px] text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
                         >

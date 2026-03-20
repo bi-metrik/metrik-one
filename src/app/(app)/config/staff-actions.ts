@@ -282,35 +282,39 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
       ? `http://localhost:3000/accept-invite?token=${inv.token}`
       : `https://${ws?.slug || 'app'}.${baseDomain}/accept-invite?token=${inv.token}`
 
-    // Send invitation email via Resend
+    // Send invitation email via Resend (optional — skip if not configured)
     const apiKey = process.env.RESEND_API_KEY
-    if (!apiKey) return { error: 'RESEND_API_KEY no configurada en el servidor' }
-
-    const { Resend } = await import('resend')
-    const resend = new Resend(apiKey)
-    await resend.emails.send({
-      from: 'MéTRIK ONE <cotizaciones@metrikone.co>',
-      to: normalizedEmail,
-      subject: `${ws?.name || 'Tu empresa'} te invita a MéTRIK ONE`,
-      html: `
-        <div style="font-family: 'Montserrat', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-          <h2 style="color: #1A1A1A; margin-bottom: 8px;">Hola ${staffMember.full_name},</h2>
-          <p style="color: #6B7280; font-size: 14px; line-height: 1.6;">
-            <strong>${ws?.name || 'Tu empresa'}</strong> te invita a usar MéTRIK ONE para gestionar el negocio juntos.
-          </p>
-          <a href="${acceptUrl}" style="display: inline-block; background: #10B981; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; margin: 24px 0;">
-            Aceptar invitacion
-          </a>
-          <p style="color: #9CA3AF; font-size: 12px; margin-top: 24px;">
-            Este enlace expira en 7 dias. Si no esperabas esta invitacion, puedes ignorar este correo.
-          </p>
-        </div>
-      `,
-    })
+    if (apiKey) {
+      try {
+        const { Resend } = await import('resend')
+        const resend = new Resend(apiKey)
+        await resend.emails.send({
+          from: 'MéTRIK ONE <cotizaciones@metrikone.co>',
+          to: normalizedEmail,
+          subject: `${ws?.name || 'Tu empresa'} te invita a MéTRIK ONE`,
+          html: `
+            <div style="font-family: 'Montserrat', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
+              <h2 style="color: #1A1A1A; margin-bottom: 8px;">Hola ${staffMember.full_name},</h2>
+              <p style="color: #6B7280; font-size: 14px; line-height: 1.6;">
+                <strong>${ws?.name || 'Tu empresa'}</strong> te invita a usar MéTRIK ONE para gestionar el negocio juntos.
+              </p>
+              <a href="${acceptUrl}" style="display: inline-block; background: #10B981; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; margin: 24px 0;">
+                Aceptar invitacion
+              </a>
+              <p style="color: #9CA3AF; font-size: 12px; margin-top: 24px;">
+                Este enlace expira en 7 dias. Si no esperabas esta invitacion, puedes ignorar este correo.
+              </p>
+            </div>
+          `,
+        })
+      } catch {
+        // Email failed but invitation was created — continue with link
+      }
+    }
 
     revalidatePath('/config')
     revalidatePath('/mi-negocio')
-    return { success: true, email: normalizedEmail }
+    return { success: true, email: normalizedEmail, inviteUrl: acceptUrl }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Error inesperado al invitar' }
   }
