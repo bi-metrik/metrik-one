@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -39,9 +39,11 @@ export async function GET(request: Request) {
       }
 
       // New user — check if they have a pending invitation
+      // Use service client because the user has no profile yet → RLS blocks team_invitations
       const userEmail = data.user.email?.toLowerCase()
       if (userEmail) {
-        const { data: pendingInvite } = await supabase
+        const serviceClient = createServiceClient()
+        const { data: pendingInvite } = await serviceClient
           .from('team_invitations')
           .select('workspace_id')
           .eq('email', userEmail)
@@ -55,7 +57,7 @@ export async function GET(request: Request) {
           if (isLocalEnv) {
             return NextResponse.redirect(`${origin}${targetPath}`)
           }
-          const { data: invWs } = await supabase
+          const { data: invWs } = await serviceClient
             .from('workspaces')
             .select('slug')
             .eq('id', pendingInvite.workspace_id)
