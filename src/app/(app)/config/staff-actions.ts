@@ -228,7 +228,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     .select('id, status')
     .eq('workspace_id', profile.workspace_id)
     .eq('email', normalizedEmail)
-    .single()
+    .maybeSingle()
 
   if (existing?.status === 'pending') {
     return { error: 'Ya existe una invitacion pendiente para este email' }
@@ -284,7 +284,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
   // Send invitation email via Resend
   try {
     await resend.emails.send({
-      from: 'MéTRIK ONE <invitaciones@metrikone.co>',
+      from: 'MéTRIK ONE <cotizaciones@metrikone.co>',
       to: normalizedEmail,
       subject: `${ws?.name || 'Tu empresa'} te invita a MéTRIK ONE`,
       html: `
