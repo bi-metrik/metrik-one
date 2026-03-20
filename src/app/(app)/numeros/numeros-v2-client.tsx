@@ -91,7 +91,7 @@ export default function NumerosV2Client({ initialData }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-base font-bold">
-          Hola {data.nombreUsuario}
+          Mis Numeros
         </h1>
         <div className="flex items-center gap-1">
           <button

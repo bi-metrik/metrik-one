@@ -105,7 +105,7 @@ export interface CarteraItem {
 // ── getNumeros ────────────────────────────────────────
 
 export async function getNumeros(mesRef?: string) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
   const now = new Date()
@@ -252,12 +252,11 @@ export async function getNumeros(mesRef?: string) {
       .eq('tipo', 'conciliacion')
       .maybeSingle(),
 
-    // Profile name
+    // Profile name — current logged-in user
     supabase
       .from('profiles')
       .select('full_name')
-      .eq('workspace_id', workspaceId)
-      .limit(1)
+      .eq('id', userId!)
       .single(),
 
     // Semáforo: empresas with fiscal data

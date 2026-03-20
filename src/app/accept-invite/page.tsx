@@ -3,6 +3,13 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
+/** Landing page based on role permissions */
+function getLandingForRole(role: string): string {
+  const rolesWithNumbers = ['owner', 'admin', 'read_only']
+  if (rolesWithNumbers.includes(role)) return '/numeros'
+  return '/pipeline'
+}
+
 /**
  * Accept Invitation Page
  *
@@ -127,7 +134,7 @@ export default async function AcceptInvitePage({
         .eq('is_active', true)
         .ilike('full_name', user.user_metadata?.full_name || user.email?.split('@')[0] || '')
 
-      redirect('/numeros')
+      redirect(getLandingForRole(invitation.role))
     }
 
     // Different workspace
@@ -197,5 +204,5 @@ export default async function AcceptInvitePage({
     .update({ status: 'accepted', accepted_at: new Date().toISOString() })
     .eq('id', invitation.id)
 
-  redirect('/numeros')
+  redirect(getLandingForRole(invitation.role))
 }

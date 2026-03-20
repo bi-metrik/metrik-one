@@ -327,11 +327,17 @@ export default function AppShell({
 
       {/* ── Main Area ── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Desktop header — date left, brand logo right */}
+        {/* Desktop header — greeting + date left, brand logo right */}
         <header className="hidden md:flex h-12 items-center justify-between border-b border-border bg-background px-6 shrink-0">
-          <p className="text-xs font-medium text-muted-foreground">
-            {(() => { const d = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm font-semibold text-foreground">
+              Hola {fullName.split(' ')[0]}
+            </p>
+            <span className="text-muted-foreground">·</span>
+            <p className="text-xs font-medium text-muted-foreground">
+              {(() => { const d = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
+            </p>
+          </div>
           {hasLogo && (
             <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
           )}
