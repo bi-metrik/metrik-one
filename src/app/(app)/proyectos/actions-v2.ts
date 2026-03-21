@@ -24,6 +24,7 @@ export async function crearProyectoInterno(input: {
   fecha_inicio?: string
   fecha_fin_estimada?: string
   carpeta_url?: string
+  responsable_id?: string
   rubros?: { nombre: string; tipo: string; cantidad: number; unidad: string; valor_unitario: number; presupuestado: number }[]
 }): Promise<ActionResult & { proyectoId?: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -48,6 +49,7 @@ export async function crearProyectoInterno(input: {
       fecha_inicio: input.fecha_inicio || new Date().toISOString().split('T')[0],
       fecha_fin_estimada: input.fecha_fin_estimada || null,
       carpeta_url: input.carpeta_url?.trim() || null,
+      responsable_id: input.responsable_id || null,
       canal_creacion: 'app',
     })
     .select('id')
@@ -76,8 +78,31 @@ export async function crearProyectoInterno(input: {
 // ── Get projects list (from financial view) ─────────────
 
 export async function getProyectos() {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return []
+
+  const perms = getRolePermissions(role || '')
+
+  // Operator: filter to only assigned projects
+  if (!perms.canViewAllProjects && staffId) {
+    // Get allowed project IDs from proyectos table
+    const { data: allowed } = await supabase
+      .from('proyectos')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .or(`responsable_id.eq.${staffId},colaboradores.cs.{${staffId}}`)
+
+    const ids = (allowed ?? []).map(p => p.id)
+    if (ids.length === 0) return []
+
+    const { data } = await supabase
+      .from('v_proyecto_financiero')
+      .select('*')
+      .in('proyecto_id', ids)
+      .order('created_at', { ascending: false })
+
+    return data ?? []
+  }
 
   const { data } = await supabase
     .from('v_proyecto_financiero')
@@ -91,8 +116,23 @@ export async function getProyectos() {
 // ── Get single project detail ───────────────────────────
 
 export async function getProyectoDetalle(id: string) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
+
+  const perms = getRolePermissions(role || '')
+
+  // Operator guard: if not allowed to view all projects, check assignment
+  if (!perms.canViewAllProjects && staffId) {
+    const { data: check } = await supabase
+      .from('proyectos')
+      .select('id')
+      .eq('id', id)
+      .eq('workspace_id', workspaceId)
+      .or(`responsable_id.eq.${staffId},colaboradores.cs.{${staffId}}`)
+      .single()
+
+    if (!check) return null
+  }
 
   // Parallel fetches
   const [financieroRes, rubrosRes, facturasRes, ultimosRes, staffRes] = await Promise.all([
@@ -201,12 +241,25 @@ export async function getProyectoDetalle(id: string) {
     .eq('proyecto_id', id)
     .order('nombre')
 
-  // D131: Fetch cotizacion_id for link to approved cotización
+  // D131: Fetch cotizacion_id + responsable for link to approved cotización
   const { data: proyectoBase } = await supabase
     .from('proyectos')
-    .select('cotizacion_id, oportunidad_id')
+    .select('cotizacion_id, oportunidad_id, responsable_id')
     .eq('id', id)
     .single()
+
+  // Fetch responsable staff record if assigned
+  let responsable: { id: string; full_name: string } | null = null
+  if (proyectoBase?.responsable_id) {
+    const { data: staffRecord } = await supabase
+      .from('staff')
+      .select('id, full_name')
+      .eq('id', proyectoBase.responsable_id)
+      .single()
+    if (staffRecord) {
+      responsable = { id: staffRecord.id, full_name: staffRecord.full_name ?? 'Sin nombre' }
+    }
+  }
 
   // Separate lists for tabs
   const gastosAll = (gastosRes.data ?? []).map(g => {
@@ -256,6 +309,7 @@ export async function getProyectoDetalle(id: string) {
     })),
     cotizacionId: proyectoBase?.cotizacion_id ?? null,
     oportunidadId: proyectoBase?.oportunidad_id ?? null,
+    responsable,
   }
 }
 

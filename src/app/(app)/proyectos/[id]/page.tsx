@@ -24,6 +24,7 @@ export default async function ProyectoDetailPage({ params }: Props) {
       staffList={data.staffList}
       cotizacionId={data.cotizacionId}
       oportunidadId={data.oportunidadId}
+      responsable={data.responsable}
     />
   )
 }

@@ -1,5 +1,7 @@
+import { redirect } from 'next/navigation'
 import { getMovimientos, getFilterOptions } from './actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import MovimientosClient from './movimientos-client'
 
 interface Props {
@@ -17,10 +19,13 @@ export default async function MovimientosPage({ searchParams }: Props) {
   const estadoCausacion = params.estadoCausacion ?? 'todos'
   const createdBy = params.createdBy ?? 'todos'
 
-  const [{ movimientos, totales, regimenFiscal }, { proyectos, miembros }, { role }] = await Promise.all([
+  const { role } = await getWorkspace()
+  const perms = getRolePermissions(role || '')
+  if (!perms.canViewNumbers) redirect('/pipeline')
+
+  const [{ movimientos, totales, regimenFiscal }, { proyectos, miembros }] = await Promise.all([
     getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago, estadoCausacion, createdBy }),
     getFilterOptions(),
-    getWorkspace(),
   ])
 
   return (

@@ -138,6 +138,7 @@ interface Props {
   staffList: StaffOption[]
   cotizacionId?: string | null
   oportunidadId?: string | null
+  responsable?: { id: string; full_name: string } | null
 }
 
 // ── Component ─────────────────────────────────────────
@@ -153,6 +154,7 @@ export default function ProyectoDetail({
   staffList,
   cotizacionId,
   oportunidadId,
+  responsable,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -234,6 +236,12 @@ export default function ProyectoDetail({
             )}
             {!isInterno && f.empresa_nombre && (
               <span className="text-xs text-muted-foreground">{f.empresa_nombre}</span>
+            )}
+            {responsable && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <User className="h-3 w-3" />
+                {responsable.full_name}
+              </span>
             )}
           </div>
         </div>

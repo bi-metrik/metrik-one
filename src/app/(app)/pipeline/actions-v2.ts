@@ -1,19 +1,29 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 
 // ── Oportunidades ─────────────────────────────────────────
 
 export async function getOportunidades() {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
-  const { data } = await supabase
+  const perms = getRolePermissions(role || '')
+
+  let query = supabase
     .from('oportunidades')
     .select('*, contactos(nombre), empresas(nombre, codigo, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
+
+  // Operator: only see assigned records
+  if (!perms.canViewAllProjects && staffId) {
+    query = query.or(`responsable_id.eq.${staffId},colaboradores.cs.{${staffId}}`)
+  }
+
+  const { data } = await query
 
   return data ?? []
 }
@@ -24,7 +34,7 @@ export async function getOportunidad(id: string) {
 
   const { data } = await supabase
     .from('oportunidades')
-    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, codigo, sector, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor)')
+    .select('*, contactos(id, nombre, telefono, email), empresas(id, nombre, codigo, sector, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor), staff:responsable_id(id, full_name)')
     .eq('id', id)
     .single()
 
@@ -42,6 +52,7 @@ export async function createOportunidad(input: {
   es_persona_natural?: boolean
   descripcion: string
   valor_estimado: number
+  responsable_id?: string
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -125,6 +136,7 @@ export async function createOportunidad(input: {
       empresa_id: empresaId,
       descripcion: input.descripcion.trim(),
       valor_estimado: input.valor_estimado,
+      responsable_id: input.responsable_id || null,
       etapa: 'lead_nuevo',
       codigo: '',
     })
@@ -200,7 +212,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   // Get the oportunidad to find empresa_id
   const { data: opp } = await supabase
     .from('oportunidades')
-    .select('empresa_id, descripcion, valor_estimado, contacto_id')
+    .select('empresa_id, descripcion, valor_estimado, contacto_id, responsable_id')
     .eq('id', id)
     .single()
 
@@ -322,6 +334,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
       cotizacion_id: cotizacion?.id ?? null,
       empresa_id: empresaId,
       contacto_id: opp.contacto_id,
+      responsable_id: opp.responsable_id,
       nombre: opp.descripcion ?? 'Proyecto sin nombre',
       codigo: '',
       estado: 'en_ejecucion',

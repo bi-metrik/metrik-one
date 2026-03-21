@@ -60,6 +60,7 @@ interface SectionDef {
   icon: React.ElementType
   maxScore: number
   scoreKey: keyof MiNegocioClientProps['sectionScores']
+  roles: string[]
 }
 
 const CHAPTERS: { title: string; emoji: string; sections: SectionDef[] }[] = [
@@ -67,31 +68,31 @@ const CHAPTERS: { title: string; emoji: string; sections: SectionDef[] }[] = [
     title: 'Tu Identidad',
     emoji: '1',
     sections: [
-      { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal' },
-      { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca' },
+      { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
+      { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin', 'operator'] },
     ],
   },
   {
     title: 'Tu Operación',
     emoji: '2',
     sections: [
-      { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios' },
-      { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos' },
-      { key: 'cuentas-bancarias', label: 'Mi cuenta bancaria', icon: Landmark, maxScore: 2, scoreKey: 'banco' },
+      { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'operator'] },
+      { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'] },
+      { key: 'cuentas-bancarias', label: 'Mi cuenta bancaria', icon: Landmark, maxScore: 2, scoreKey: 'banco', roles: ['owner', 'admin'] },
     ],
   },
   {
     title: 'Tu Equipo',
     emoji: '3',
     sections: [
-      { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo' },
+      { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
     ],
   },
   {
     title: 'Tus Metas',
     emoji: '4',
     sections: [
-      { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas' },
+      { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'] },
     ],
   },
 ]
@@ -240,7 +241,10 @@ export default function MiNegocioClient({
       )}
 
       {/* ── Chapters & Sections ── */}
-      {CHAPTERS.map((chapter) => (
+      {CHAPTERS.map((chapter) => {
+        const visibleSections = chapter.sections.filter(s => s.roles.includes(currentUserRole))
+        if (visibleSections.length === 0) return null
+        return (
         <div key={chapter.title} className="space-y-2">
           {/* Chapter header */}
           <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
@@ -251,7 +255,7 @@ export default function MiNegocioClient({
           </h2>
 
           {/* Section cards */}
-          {chapter.sections.map((section) => {
+          {visibleSections.map((section) => {
             const score = sectionScores[section.scoreKey]
             const isOpen = activeSection === section.key
             const Icon = section.icon
@@ -305,7 +309,8 @@ export default function MiNegocioClient({
             )
           })}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

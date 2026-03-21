@@ -17,7 +17,7 @@ const STEPS = [
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null; numero_documento: string | null }
 
-export default function StepperForm() {
+export default function StepperForm({ staffList }: { staffList: { id: string; full_name: string }[] }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
@@ -54,6 +54,7 @@ export default function StepperForm() {
   // Step 3 — Trabajo
   const [descripcion, setDescripcion] = useState('')
   const [valorEstimado, setValorEstimado] = useState('')
+  const [responsableId, setResponsableId] = useState('')
 
   // If prefilled with contacto, start at step 1 (empresa)
   // If prefilled with both contacto + empresa, start at step 2 (trabajo)
@@ -168,6 +169,7 @@ export default function StepperForm() {
         es_persona_natural: esPersonaNatural,
         descripcion,
         valor_estimado: Number(valorEstimado),
+        responsable_id: responsableId || undefined,
       })
       if (res.success) {
         toast.success('Oportunidad creada')
@@ -433,6 +435,23 @@ export default function StepperForm() {
                 <input type="number" value={valorEstimado} onChange={e => setValorEstimado(e.target.value)} placeholder="8000000" min="0" className="w-full rounded-md border bg-background py-2.5 pl-7 pr-3 text-sm" />
               </div>
             </div>
+
+            {/* Responsable (optional) */}
+            {staffList.length > 0 && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Responsable</label>
+                <select
+                  value={responsableId}
+                  onChange={(e) => setResponsableId(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
+                >
+                  <option value="">Sin asignar</option>
+                  {staffList.map((s) => (
+                    <option key={s.id} value={s.id}>{s.full_name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -11,7 +11,7 @@ export async function getWorkspace() {
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) {
-    return { supabase, workspaceId: null, userId: null, role: null, error: 'No autenticado' as const }
+    return { supabase, workspaceId: null, userId: null, role: null, staffId: null, error: 'No autenticado' as const }
   }
 
   const { data: profile } = await supabase
@@ -21,14 +21,22 @@ export async function getWorkspace() {
     .single()
 
   if (!profile?.workspace_id) {
-    return { supabase, workspaceId: null, userId: user.id, role: null, error: 'Sin perfil' as const }
+    return { supabase, workspaceId: null, userId: user.id, role: null, staffId: null, error: 'Sin perfil' as const }
   }
+
+  const { data: staffRecord } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('profile_id', user.id)
+    .eq('is_active', true)
+    .maybeSingle()
 
   return {
     supabase,
     workspaceId: profile.workspace_id as string,
     userId: user.id,
     role: (profile.role ?? 'read_only') as string,
+    staffId: staffRecord?.id ?? null,
     error: null,
   }
 }

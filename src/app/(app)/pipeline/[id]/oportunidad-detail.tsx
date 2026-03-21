@@ -31,6 +31,7 @@ interface OportunidadRow {
   ultima_accion_fecha: string | null
   razon_perdida: string | null
   carpeta_url: string | null
+  responsable_id: string | null
   contactos: { id: string; nombre: string; telefono: string | null; email: string | null } | null
   empresas: { id: string; nombre: string; sector: string | null; numero_documento: string | null; tipo_documento: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null; autorretenedor: boolean | null } | null
 }
@@ -50,9 +51,10 @@ interface CotizacionRow {
 interface Props {
   oportunidad: OportunidadRow
   cotizaciones: CotizacionRow[]
+  staffList: { id: string; full_name: string }[]
 }
 
-export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) {
+export default function OportunidadDetail({ oportunidad, cotizaciones, staffList }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [showLossModal, setShowLossModal] = useState(false)
@@ -60,6 +62,7 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
   const [lossReason, setLossReason] = useState('')
   const [carpetaUrl, setCarpetaUrl] = useState(oportunidad.carpeta_url ?? '')
   const [carpetaEditing, setCarpetaEditing] = useState(false)
+  const [responsableId, setResponsableId] = useState(oportunidad.responsable_id ?? '')
 
   const etapa = oportunidad.etapa as EtapaPipeline
   const etapaConfig = ETAPA_CONFIG[etapa]
@@ -262,6 +265,33 @@ export default function OportunidadDetail({ oportunidad, cotizaciones }: Props) 
           </div>
         )}
       </div>
+
+      {/* Responsable */}
+      {staffList.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border p-3">
+          <User className="h-4 w-4 text-muted-foreground shrink-0" />
+          <div className="flex flex-1 items-center justify-between min-w-0">
+            <label className="text-xs text-muted-foreground shrink-0 mr-2">Responsable</label>
+            <select
+              value={responsableId}
+              onChange={(e) => {
+                const newVal = e.target.value
+                setResponsableId(newVal)
+                startTransition(async () => {
+                  await updateOportunidad(oportunidad.id, { responsable_id: newVal || null })
+                  toast.success('Responsable actualizado')
+                })
+              }}
+              className="flex-1 rounded-md border bg-background px-2 py-1 text-sm min-w-0"
+            >
+              <option value="">Sin asignar</option>
+              {staffList.map((s) => (
+                <option key={s.id} value={s.id}>{s.full_name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* Contacto + Empresa info */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
