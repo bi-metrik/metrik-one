@@ -32,8 +32,13 @@ function extractSlug(hostname: string): string | null {
   return null
 }
 
-/** Check if workspace has config_metas → /numeros, otherwise /mi-negocio */
-async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase']): Promise<string> {
+/** Role-aware landing: check permissions + workspace config */
+const ROLES_WITH_NUMBERS = ['owner', 'admin', 'read_only']
+
+async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string): Promise<string> {
+  if (role && !ROLES_WITH_NUMBERS.includes(role)) {
+    return '/pipeline'
+  }
   const { count } = await supabase
     .from('config_metas')
     .select('*', { count: 'exact', head: true })
@@ -65,9 +70,14 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl)
     }
 
-    // Root → /numeros (if configured) or /mi-negocio (if new)
+    // Root → role-based landing
     if (pathname === '/') {
-      const landing = await getLanding(supabase)
+      const { data: tenantProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+      const landing = await getLanding(supabase, tenantProfile?.role ?? undefined)
       return NextResponse.redirect(new URL(landing, request.url))
     }
 
@@ -93,7 +103,7 @@ export async function middleware(request: NextRequest) {
       // Authenticated → check if has workspace → redirect to tenant subdomain
       const { data: profile } = await supabase
         .from('profiles')
-        .select('workspace_id')
+        .select('workspace_id, role')
         .eq('id', user.id)
         .single()
 
@@ -105,8 +115,7 @@ export async function middleware(request: NextRequest) {
           .single()
 
         if (ws?.slug) {
-          // Decide landing: /numeros if configured, /mi-negocio if new
-          const landing = await getLanding(supabase)
+          const landing = await getLanding(supabase, profile.role ?? undefined)
           if (IS_DEV) {
             return NextResponse.redirect(new URL(landing, request.url))
           }
@@ -129,7 +138,7 @@ export async function middleware(request: NextRequest) {
     if (user) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('workspace_id')
+        .select('workspace_id, role')
         .eq('id', user.id)
         .single()
 
@@ -141,7 +150,7 @@ export async function middleware(request: NextRequest) {
           .single()
 
         if (ws?.slug) {
-          const landing = await getLanding(supabase)
+          const landing = await getLanding(supabase, profile.role ?? undefined)
           if (IS_DEV) {
             return NextResponse.redirect(new URL(landing, request.url))
           }

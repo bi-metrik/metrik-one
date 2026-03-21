@@ -16,7 +16,7 @@ export async function GET(request: Request) {
       // Check if user has a profile (existing user vs new registration)
       const { data: profile } = await supabase
         .from('profiles')
-        .select('workspace_id')
+        .select('workspace_id, role')
         .eq('id', data.user.id)
         .single()
 
@@ -29,8 +29,14 @@ export async function GET(request: Request) {
           .single()
 
         if (ws?.slug) {
-          // Sanitize redirectTo to prevent open redirect
-          const safePath = redirectTo.startsWith('/') ? redirectTo : '/dashboard'
+          // Use explicit redirectTo if provided, otherwise role-based landing
+          let safePath = redirectTo
+          if (!searchParams.get('redirectTo') && !searchParams.get('next')) {
+            // No explicit redirect → role-based landing
+            const rolesWithNumbers = ['owner', 'admin', 'read_only']
+            safePath = rolesWithNumbers.includes(profile.role || '') ? '/numeros' : '/pipeline'
+          }
+          if (!safePath.startsWith('/')) safePath = '/pipeline'
           if (isLocalEnv) {
             return NextResponse.redirect(`${origin}${safePath}`)
           }
