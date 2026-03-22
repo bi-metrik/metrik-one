@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { ChevronRight, Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
@@ -52,7 +52,7 @@ interface MiNegocioClientProps {
   }
 }
 
-// ── Section definitions ──────────────────────────────
+// ── Section definitions (flat) ──────────────────────────────
 
 interface SectionDef {
   key: string
@@ -63,38 +63,14 @@ interface SectionDef {
   roles: string[]
 }
 
-const CHAPTERS: { title: string; emoji: string; sections: SectionDef[] }[] = [
-  {
-    title: 'Tu Identidad',
-    emoji: '1',
-    sections: [
-      { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
-      { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
-    ],
-  },
-  {
-    title: 'Tu Operación',
-    emoji: '2',
-    sections: [
-      { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'] },
-      { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'] },
-      { key: 'cuentas-bancarias', label: 'Mi cuenta bancaria', icon: Landmark, maxScore: 2, scoreKey: 'banco', roles: ['owner', 'admin'] },
-    ],
-  },
-  {
-    title: 'Tu Equipo',
-    emoji: '3',
-    sections: [
-      { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
-    ],
-  },
-  {
-    title: 'Tus Metas',
-    emoji: '4',
-    sections: [
-      { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'] },
-    ],
-  },
+const SECTIONS: SectionDef[] = [
+  { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
+  { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
+  { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'] },
+  { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'] },
+  { key: 'cuentas-bancarias', label: 'Mi cuenta bancaria', icon: Landmark, maxScore: 2, scoreKey: 'banco', roles: ['owner', 'admin'] },
+  { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
+  { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'] },
 ]
 
 // ── Component ──────────────────────────────────────
@@ -128,10 +104,38 @@ export default function MiNegocioClient({
     }
   }, [progressPct])
 
-  const getStatusEmoji = (score: number, max: number) => {
-    if (score >= max) return '✅'
-    if (score > 0) return '🟡'
-    return '⬜'
+  const getMainValue = (key: string): string => {
+    switch (key) {
+      case 'perfil-fiscal':
+        return fiscalProfile?.is_complete ? 'Completo' : 'Pendiente'
+      case 'mi-marca':
+        return workspace?.name || 'Pendiente'
+      case 'mis-servicios': {
+        const active = servicios.filter(s => s.activo !== false)
+        return active.length > 0 ? `${active.length} servicio${active.length !== 1 ? 's' : ''}` : 'Pendiente'
+      }
+      case 'gastos-fijos': {
+        const active = fixedExpenses.filter(f => f.is_active)
+        if (active.length === 0) return 'Pendiente'
+        const total = active.reduce((s, f) => s + f.monthly_amount, 0)
+        if (total >= 1_000_000) {
+          return `$${(total / 1_000_000).toFixed(1).replace('.0', '')}M/mes`
+        }
+        return `$${total.toLocaleString('es-CO')}/mes`
+      }
+      case 'cuentas-bancarias': {
+        const active = bankAccounts.filter(a => a.is_active)
+        return active.length > 0 ? `${active.length} cuenta${active.length !== 1 ? 's' : ''}` : 'Pendiente'
+      }
+      case 'mi-equipo': {
+        const withSalary = staffMembers.filter(s => (s.salary ?? 0) > 0)
+        return withSalary.length > 0 ? `${staffMembers.length} persona${staffMembers.length !== 1 ? 's' : ''}` : 'Pendiente'
+      }
+      case 'metas-mensuales':
+        return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
+      default:
+        return ''
+    }
   }
 
   const getStatusBadge = (key: string) => {
@@ -175,27 +179,21 @@ export default function MiNegocioClient({
 
   const totalFixed = fixedExpenses.filter(f => f.is_active).reduce((s, f) => s + f.monthly_amount, 0)
 
+  const visibleSections = SECTIONS.filter(s => s.roles.includes(currentUserRole))
+  const activeSectionDef = SECTIONS.find(s => s.key === activeSection)
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      {/* ── Header ── */}
-      <div>
-        <h1 className="text-2xl font-bold">Mi Negocio</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Configura tu negocio paso a paso para que tus números sean más precisos.
-        </p>
-      </div>
-
-      {/* ── Progress Bar (sticky) ── */}
-      <div className="sticky top-0 z-10 bg-background pb-2 pt-1">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Progreso de ajustes</span>
-          <span className="text-xs font-bold text-primary">{progressPct}%</span>
+      {/* ── Header with progress circle ── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-base font-bold">Mi Negocio</h1>
+          <p className="text-xs text-muted-foreground">Configura tu negocio para numeros mas precisos</p>
         </div>
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-700 ease-out"
-            style={{ width: `${progressPct}%` }}
-          />
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-8 rounded-full border-2 border-primary flex items-center justify-center">
+            <span className="text-xs font-bold text-primary">{progressPct}%</span>
+          </div>
         </div>
       </div>
 
@@ -206,10 +204,10 @@ export default function MiNegocioClient({
             <Sparkles className="h-6 w-6 text-green-600 dark:text-green-400 shrink-0" />
             <div>
               <p className="text-sm font-bold text-green-700 dark:text-green-300">
-                🎉 ¡Tu negocio esta listo!
+                Tu negocio esta listo!
               </p>
               <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                Has completado todos los ajustes. Tus números ahora son 100% precisos.
+                Has completado todos los ajustes. Tus numeros ahora son 100% precisos.
               </p>
             </div>
           </div>
@@ -220,11 +218,11 @@ export default function MiNegocioClient({
       {progressPct === 0 && (
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
           <p className="text-sm font-medium">
-            👋 Bienvenido a <span className="font-bold">Mi Negocio</span>
+            Bienvenido a <span className="font-bold">Mi Negocio</span>
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Completa cada sección para que MéTRIK one calcule tus números con precisión.
-            No necesitas hacerlo todo hoy — puedes avanzar a tu ritmo.
+            Completa cada seccion para que MeTRIK one calcule tus numeros con precision.
+            No necesitas hacerlo todo hoy -- puedes avanzar a tu ritmo.
           </p>
         </div>
       )}
@@ -240,77 +238,61 @@ export default function MiNegocioClient({
         </div>
       )}
 
-      {/* ── Chapters & Sections ── */}
-      {CHAPTERS.map((chapter) => {
-        const visibleSections = chapter.sections.filter(s => s.roles.includes(currentUserRole))
-        if (visibleSections.length === 0) return null
-        return (
-        <div key={chapter.title} className="space-y-2">
-          {/* Chapter header */}
-          <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
-              {chapter.emoji}
-            </span>
-            {chapter.title}
-          </h2>
+      {/* ── Cards Grid ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {visibleSections.map((section) => {
+          const score = sectionScores[section.scoreKey]
+          const isComplete = score >= section.maxScore
+          const Icon = section.icon
+          const mainValue = getMainValue(section.key)
+          const badge = getStatusBadge(section.key)
 
-          {/* Section cards */}
-          {visibleSections.map((section) => {
-            const score = sectionScores[section.scoreKey]
-            const isOpen = activeSection === section.key
-            const Icon = section.icon
-            const badge = getStatusBadge(section.key)
-            const isPending = badge === 'Pendiente'
-
-            return (
-              <div key={section.key}>
-                <button
-                  onClick={() => toggleSection(section.key)}
-                  className="flex w-full items-center gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:bg-accent/50"
-                >
-                  <span className="text-base">{getStatusEmoji(score, section.maxScore)}</span>
-                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{section.label}</p>
-                  </div>
-                  <span className={`text-xs font-medium ${
-                    isPending ? 'text-muted-foreground' : 'text-green-600'
-                  }`}>
-                    {badge}
-                  </span>
-                  <ChevronRight className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
-                    isOpen ? 'rotate-90' : ''
-                  }`} />
-                </button>
-
-                {/* Expanded section content */}
-                {isOpen && (
-                  <div className="mt-2 rounded-xl border bg-card p-5">
-                    {renderSection(section.key, {
-                      workspace,
-                      fiscalProfile,
-                      staffMembers,
-                      bankAccounts,
-                      monthlyTargets,
-                      fixedExpenses,
-                      categories,
-                      servicios,
-                      staffNomina,
-                      configFinanciera,
-                      totalFixed,
-                      currentUserRole,
-                      licenseUsed,
-                      licenseMax,
-                      onClose: () => setActiveSection(null),
-                    })}
-                  </div>
-                )}
+          return (
+            <button key={section.key} onClick={() => toggleSection(section.key)} className="text-left">
+              <div
+                className="border-l-4 rounded-xl border bg-card p-4 hover:bg-accent/30 transition-colors w-full"
+                style={{ borderLeftColor: isComplete ? '#10B981' : '#F59E0B' }}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <Icon className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm font-semibold flex-1">{section.label}</span>
+                </div>
+                <p className="text-lg font-bold">{mainValue}</p>
+                <p className="text-xs text-muted-foreground">{badge}</p>
               </div>
-            )
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ── Expanded section (full width, below grid) ── */}
+      {activeSection && activeSectionDef && (
+        <div className="rounded-xl border bg-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold">{activeSectionDef.label}</h3>
+            <button onClick={() => setActiveSection(null)} className="rounded p-1 hover:bg-accent">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {renderSection(activeSection, {
+            workspace,
+            fiscalProfile,
+            staffMembers,
+            bankAccounts,
+            monthlyTargets,
+            fixedExpenses,
+            categories,
+            servicios,
+            staffNomina,
+            configFinanciera,
+            totalFixed,
+            currentUserRole,
+            licenseUsed,
+            licenseMax,
+            onClose: () => setActiveSection(null),
           })}
         </div>
-        )
-      })}
+      )}
     </div>
   )
 }
@@ -400,7 +382,7 @@ function renderSection(
   }
 }
 
-// ── D130: Margen de Contribución Section ──────────────
+// ── D130: Margen de Contribucion Section ──────────────
 
 const MARGEN_OPTIONS = [
   { label: 'Casi nada — vendo mi tiempo', value: 0.95 },
@@ -439,14 +421,14 @@ function MargenContribucionSection({ configFinanciera }: {
       <div>
         <h4 className="text-sm font-semibold">Margen de contribucion</h4>
         <p className="text-xs text-muted-foreground mt-0.5">
-          ¿Que porcentaje de lo que vendes se lo llevan los costos directos del proyecto? (materiales, subcontratistas, etc.)
+          Que porcentaje de lo que vendes se lo llevan los costos directos del proyecto? (materiales, subcontratistas, etc.)
         </p>
       </div>
 
       {fuente === 'calculado' ? (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/20">
           <p className="text-xs text-green-700 dark:text-green-400">
-            ✅ Tu margen se calcula automaticamente con datos de {nProyectos} proyecto{nProyectos !== 1 ? 's' : ''} cerrado{nProyectos !== 1 ? 's' : ''}: <strong>{Math.round((1 - currentMargen) * 100)}% costo directo</strong> → <strong>{Math.round(currentMargen * 100)}% margen</strong>
+            Tu margen se calcula automaticamente con datos de {nProyectos} proyecto{nProyectos !== 1 ? 's' : ''} cerrado{nProyectos !== 1 ? 's' : ''}: <strong>{Math.round((1 - currentMargen) * 100)}% costo directo</strong> → <strong>{Math.round(currentMargen * 100)}% margen</strong>
           </p>
         </div>
       ) : (
