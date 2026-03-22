@@ -15,6 +15,7 @@ import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import ProyectoAlertas from './proyecto-alertas'
+import ActivityLog from '@/components/activity-log'
 
 // Category display config (same as movimientos)
 const CATEGORIA_CONFIG: Record<string, { label: string; color: string }> = {
@@ -698,6 +699,12 @@ export default function ProyectoDetail({
             </div>
           )
         )}
+      </div>
+
+      {/* ─── Actividad ─── */}
+      <div className="space-y-3 rounded-lg border p-4">
+        <h2 className="text-sm font-semibold">Actividad</h2>
+        <ActivityLog entidadTipo="proyecto" entidadId={proyectoId} staffList={staffList} />
       </div>
 
       {/* ─── State controls (bottom) ─── */}

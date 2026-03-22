@@ -16,7 +16,7 @@ import { duplicarCotizacion, enviarCotizacion, aceptarCotizacion, rechazarCotiza
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, RAZONES_PERDIDA, ESTADO_COTIZACION_CONFIG } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { EtapaPipeline, EstadoCotizacion } from '@/lib/pipeline/constants'
-import NotesSection from '@/components/notes-section'
+import ActivityLog from '@/components/activity-log'
 import FiscalGateForm from './fiscal-gate-form'
 
 interface OportunidadRow {
@@ -485,10 +485,10 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
         )}
       </div>
 
-      {/* Notas */}
+      {/* Actividad */}
       <div className="space-y-3 rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Notas y actividad</h2>
-        <NotesSection entityType="oportunidad" entityId={oportunidad.id} />
+        <h2 className="text-sm font-semibold">Actividad</h2>
+        <ActivityLog entidadTipo="oportunidad" entidadId={oportunidad.id} staffList={staffList} />
       </div>
 
       {/* Loss modal */}

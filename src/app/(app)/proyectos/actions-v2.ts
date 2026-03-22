@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
+import { logSystemChange } from '@/app/(app)/activity-actions'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -423,6 +424,10 @@ export async function cambiarEstadoProyecto(
 
   if (dbError) return { success: false, error: dbError.message }
 
+  if (workspaceId) {
+    await logSystemChange(workspaceId, 'proyecto', id, 'estado', estadoActual, nuevoEstado, null)
+  }
+
   revalidatePath('/proyectos')
   revalidatePath(`/proyectos/${id}`)
   return { success: true, proyectoId: id }
@@ -492,6 +497,11 @@ async function cerrarProyecto(
     .select('oportunidad_id, tipo')
     .eq('id', id)
     .single()
+
+  // Log project closure
+  if (workspaceId) {
+    await logSystemChange(workspaceId, 'proyecto', id, 'estado', 'en_ejecucion', 'cerrado', null)
+  }
 
   if (proyecto?.tipo !== 'interno' && proyecto?.oportunidad_id) {
     const { data: opp } = await supabase

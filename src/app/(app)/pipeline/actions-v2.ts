@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
+import { logSystemChange } from '@/app/(app)/activity-actions'
 
 // ── Oportunidades ─────────────────────────────────────────
 
@@ -152,8 +153,15 @@ export async function createOportunidad(input: {
 }
 
 export async function moveOportunidad(id: string, nuevaEtapa: string) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  // Get current etapa for logging
+  const { data: current } = await supabase
+    .from('oportunidades')
+    .select('etapa')
+    .eq('id', id)
+    .single()
 
   const { error: dbError } = await supabase
     .from('oportunidades')
@@ -166,14 +174,25 @@ export async function moveOportunidad(id: string, nuevaEtapa: string) {
 
   if (dbError) return { success: false, error: dbError.message }
 
+  // Log activity
+  if (workspaceId) {
+    await logSystemChange(workspaceId, 'oportunidad', id, 'etapa', current?.etapa ?? null, nuevaEtapa, staffId)
+  }
+
   revalidatePath('/pipeline')
   revalidatePath(`/pipeline/${id}`)
   return { success: true }
 }
 
 export async function perderOportunidad(id: string, razon: string) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  const { data: current } = await supabase
+    .from('oportunidades')
+    .select('etapa')
+    .eq('id', id)
+    .single()
 
   const { error: dbError } = await supabase
     .from('oportunidades')
@@ -186,6 +205,10 @@ export async function perderOportunidad(id: string, razon: string) {
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  if (workspaceId) {
+    await logSystemChange(workspaceId, 'oportunidad', id, 'etapa', current?.etapa ?? null, `perdida (${razon})`, staffId)
+  }
 
   revalidatePath('/pipeline')
   revalidatePath(`/pipeline/${id}`)
@@ -314,6 +337,12 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     .single()
 
   // Move to ganada
+  const { data: currentOpp } = await supabase
+    .from('oportunidades')
+    .select('etapa')
+    .eq('id', id)
+    .single()
+
   const { error: moveError } = await supabase
     .from('oportunidades')
     .update({
@@ -324,6 +353,10 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     .eq('id', id)
 
   if (moveError) return { success: false, error: moveError.message }
+
+  if (wsId) {
+    await logSystemChange(wsId, 'oportunidad', id, 'etapa', currentOpp?.etapa ?? null, 'ganada', null)
+  }
 
   // Create proyecto with full data
   const { data: proyecto, error: projError } = await supabase
@@ -495,8 +528,21 @@ export async function resyncRubrosProyecto(proyectoId: string) {
 }
 
 export async function updateOportunidad(id: string, updates: Record<string, unknown>) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  // Get current values for fields being changed (for logging)
+  const logFields = ['responsable_id'] as const
+  const changedLogFields = logFields.filter(f => f in updates)
+  let currentData: Record<string, unknown> | null = null
+  if (changedLogFields.length > 0) {
+    const { data } = await supabase
+      .from('oportunidades')
+      .select(changedLogFields.join(', '))
+      .eq('id', id)
+      .single()
+    currentData = data as Record<string, unknown> | null
+  }
 
   const { error: dbError } = await supabase
     .from('oportunidades')
@@ -504,6 +550,30 @@ export async function updateOportunidad(id: string, updates: Record<string, unkn
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  // Log changes
+  if (workspaceId && currentData) {
+    for (const field of changedLogFields) {
+      const oldVal = currentData[field]
+      const newVal = updates[field]
+      if (oldVal !== newVal) {
+        // For responsable_id, resolve staff names
+        let oldLabel = String(oldVal ?? '')
+        let newLabel = String(newVal ?? '')
+        if (field === 'responsable_id') {
+          if (oldVal) {
+            const { data: s } = await supabase.from('staff').select('full_name').eq('id', String(oldVal)).single()
+            oldLabel = s?.full_name ?? 'Sin asignar'
+          } else { oldLabel = 'Sin asignar' }
+          if (newVal) {
+            const { data: s } = await supabase.from('staff').select('full_name').eq('id', String(newVal)).single()
+            newLabel = s?.full_name ?? 'Sin asignar'
+          } else { newLabel = 'Sin asignar' }
+        }
+        await logSystemChange(workspaceId, 'oportunidad', id, field, oldLabel, newLabel, staffId)
+      }
+    }
+  }
 
   revalidatePath('/pipeline')
   revalidatePath(`/pipeline/${id}`)
