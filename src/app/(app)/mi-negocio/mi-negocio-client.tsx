@@ -221,10 +221,51 @@ export default function MiNegocioClient({
         </div>
       )}
 
-      {/* ── Main layout: sidebar cards + content panel ── */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        {/* ── Cards sidebar (navigation) ── */}
-        <div className="sm:w-56 shrink-0 space-y-1.5">
+      {/* ── Mobile: accordion (cards expand inline) ── */}
+      <div className="sm:hidden space-y-1.5">
+        {visibleSections.map((section) => {
+          const score = sectionScores[section.scoreKey]
+          const isComplete = section.key === 'mi-plan' || score >= section.maxScore
+          const isActive = activeSection === section.key
+          const Icon = section.icon
+          const mainValue = getMainValue(section.key)
+
+          return (
+            <div key={section.key}>
+              <button
+                onClick={() => toggleSection(section.key)}
+                className={`flex w-full items-center gap-3 rounded-lg border-l-3 px-3 py-2.5 text-left transition-colors ${
+                  isActive
+                    ? 'bg-primary/5 border-l-primary'
+                    : 'hover:bg-accent/40 border-l-transparent'
+                }`}
+                style={!isActive ? { borderLeftColor: isComplete ? '#10B981' : '#F59E0B' } : undefined}
+              >
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium truncate ${isActive ? 'text-primary' : ''}`}>{section.label}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{mainValue}</p>
+                </div>
+              </button>
+              {isActive && (
+                <div className="mt-1.5 rounded-xl border bg-card p-4">
+                  {renderSection(section.key, {
+                    workspace, fiscalProfile, staffMembers, bankAccounts, monthlyTargets,
+                    fixedExpenses, categories, servicios, staffNomina, configFinanciera,
+                    totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
+                    onClose: () => setActiveSection(null),
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Desktop: sidebar + content panel ── */}
+      <div className="hidden sm:flex gap-4">
+        {/* ── Sidebar ── */}
+        <div className="w-56 shrink-0 space-y-1.5">
           {visibleSections.map((section) => {
             const score = sectionScores[section.scoreKey]
             const isComplete = section.key === 'mi-plan' || score >= section.maxScore
@@ -262,26 +303,11 @@ export default function MiNegocioClient({
                   {(() => { const Icon = activeSectionDef.icon; return <Icon className="h-4 w-4 text-primary" /> })()}
                   <h3 className="text-sm font-semibold">{activeSectionDef.label}</h3>
                 </div>
-                <button onClick={() => setActiveSection(null)} className="rounded p-1 hover:bg-accent sm:hidden">
-                  <X className="h-4 w-4" />
-                </button>
               </div>
               {renderSection(activeSection, {
-                workspace,
-                fiscalProfile,
-                staffMembers,
-                bankAccounts,
-                monthlyTargets,
-                fixedExpenses,
-                categories,
-                servicios,
-                staffNomina,
-                configFinanciera,
-                totalFixed,
-                currentUserRole,
-                licenseUsed,
-                licenseMax,
-                workspaceFeatures,
+                workspace, fiscalProfile, staffMembers, bankAccounts, monthlyTargets,
+                fixedExpenses, categories, servicios, staffNomina, configFinanciera,
+                totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
                 onClose: () => setActiveSection(null),
               })}
             </div>
