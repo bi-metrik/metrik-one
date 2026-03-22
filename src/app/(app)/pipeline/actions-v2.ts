@@ -14,7 +14,7 @@ export async function getOportunidades() {
 
   let query = supabase
     .from('oportunidades')
-    .select('*, contactos(nombre), empresas(nombre, codigo, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
+    .select('*, contactos(nombre), empresas(nombre, codigo, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor), staff:responsable_id(id, full_name)')
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
 
@@ -334,7 +334,8 @@ export async function ganarOportunidad(id: string, fiscalData?: {
       cotizacion_id: cotizacion?.id ?? null,
       empresa_id: empresaId,
       contacto_id: opp.contacto_id,
-      responsable_id: opp.responsable_id,
+      responsable_comercial_id: opp.responsable_id,
+      responsable_id: null,
       nombre: opp.descripcion ?? 'Proyecto sin nombre',
       codigo: '',
       estado: 'en_ejecucion',

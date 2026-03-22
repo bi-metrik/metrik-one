@@ -34,13 +34,13 @@ const FAB_ACTIONS: FABAction[] = [
     label: 'Registrar gasto',
     icon: Receipt,
     href: '/nuevo/gasto',
-    roles: ['owner', 'admin', 'operator'],
+    roles: ['owner', 'admin', 'operator', 'supervisor'],
   },
   {
     label: 'Nueva oportunidad',
     icon: Flame,
     href: '/nuevo/oportunidad',
-    roles: ['owner', 'admin', 'supervisor'],
+    roles: ['owner', 'admin', 'supervisor', 'operator'],
   },
   {
     label: 'Actualizar saldo',

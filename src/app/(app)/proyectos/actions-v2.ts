@@ -95,22 +95,52 @@ export async function getProyectos() {
     const ids = (allowed ?? []).map(p => p.id)
     if (ids.length === 0) return []
 
-    const { data } = await supabase
-      .from('v_proyecto_financiero')
-      .select('*')
-      .in('proyecto_id', ids)
-      .order('created_at', { ascending: false })
+    const [finRes, respRes] = await Promise.all([
+      supabase
+        .from('v_proyecto_financiero')
+        .select('*')
+        .in('proyecto_id', ids)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('proyectos')
+        .select('id, responsable_id, staff:responsable_id(full_name)')
+        .in('id', ids),
+    ])
 
-    return data ?? []
+    return mergeResponsable(finRes.data ?? [], respRes.data ?? [])
   }
 
-  const { data } = await supabase
-    .from('v_proyecto_financiero')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
+  const [finRes, respRes] = await Promise.all([
+    supabase
+      .from('v_proyecto_financiero')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('proyectos')
+      .select('id, responsable_id, staff:responsable_id(full_name)')
+      .eq('workspace_id', workspaceId),
+  ])
 
-  return data ?? []
+  return mergeResponsable(finRes.data ?? [], respRes.data ?? [])
+}
+
+// Merge responsable info from proyectos table into v_proyecto_financiero results
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mergeResponsable(financieros: any[], responsables: any[]) {
+  const map = new Map<string, { responsable_id: string | null; responsable_nombre: string | null }>()
+  for (const r of responsables) {
+    const staff = r.staff as { full_name: string } | null
+    map.set(r.id, {
+      responsable_id: r.responsable_id,
+      responsable_nombre: staff?.full_name ?? null,
+    })
+  }
+  return financieros.map(f => ({
+    ...f,
+    responsable_id: map.get(f.proyecto_id)?.responsable_id ?? null,
+    responsable_nombre: map.get(f.proyecto_id)?.responsable_nombre ?? null,
+  }))
 }
 
 // ── Get single project detail ───────────────────────────
@@ -244,7 +274,7 @@ export async function getProyectoDetalle(id: string) {
   // D131: Fetch cotizacion_id + responsable for link to approved cotización
   const { data: proyectoBase } = await supabase
     .from('proyectos')
-    .select('cotizacion_id, oportunidad_id, responsable_id')
+    .select('cotizacion_id, oportunidad_id, responsable_id, responsable_comercial_id')
     .eq('id', id)
     .single()
 
@@ -258,6 +288,19 @@ export async function getProyectoDetalle(id: string) {
       .single()
     if (staffRecord) {
       responsable = { id: staffRecord.id, full_name: staffRecord.full_name ?? 'Sin nombre' }
+    }
+  }
+
+  // Fetch responsable comercial staff record if assigned
+  let responsableComercial: { id: string; full_name: string } | null = null
+  if (proyectoBase?.responsable_comercial_id) {
+    const { data: staffRecord } = await supabase
+      .from('staff')
+      .select('id, full_name')
+      .eq('id', proyectoBase.responsable_comercial_id)
+      .single()
+    if (staffRecord) {
+      responsableComercial = { id: staffRecord.id, full_name: staffRecord.full_name ?? 'Sin nombre' }
     }
   }
 
@@ -310,6 +353,7 @@ export async function getProyectoDetalle(id: string) {
     cotizacionId: proyectoBase?.cotizacion_id ?? null,
     oportunidadId: proyectoBase?.oportunidad_id ?? null,
     responsable,
+    responsableComercial,
   }
 }
 

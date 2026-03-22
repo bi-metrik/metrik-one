@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight } from 'lucide-react'
+import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS, RAZONES_PERDIDA } from '@/lib/pipeline/constants'
@@ -22,13 +22,16 @@ interface OportunidadRow {
   ultima_accion_fecha: string | null
   contactos: { nombre: string } | null
   empresas: { nombre: string; numero_documento: string | null; tipo_documento: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null } | null
+  responsable_id: string | null
+  staff: { id: string; full_name: string } | null
 }
 
 interface Props {
   oportunidades: OportunidadRow[]
+  sinResponsableCount?: number
 }
 
-export default function PipelineList({ oportunidades }: Props) {
+export default function PipelineList({ oportunidades, sinResponsableCount = 0 }: Props) {
   const [search, setSearch] = useState('')
   const [etapaFilter, setEtapaFilter] = useState<string | null>('activas')
   const [isPending, startTransition] = useTransition()
@@ -141,6 +144,16 @@ export default function PipelineList({ oportunidades }: Props) {
 
   return (
     <div className="space-y-3">
+      {/* Unassigned warning banner */}
+      {sinResponsableCount > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/40">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <span className="text-amber-800 dark:text-amber-300">
+            Tienes {sinResponsableCount} oportunidad{sinResponsableCount !== 1 ? 'es' : ''} sin responsable comercial asignado
+          </span>
+        </div>
+      )}
+
       {/* Pipeline summary */}
       <div className="flex gap-3 rounded-lg bg-muted/50 p-3">
         <div className="flex-1">
@@ -212,6 +225,7 @@ export default function PipelineList({ oportunidades }: Props) {
           const etapaConfig = ETAPA_CONFIG[o.etapa as EtapaPipeline]
           const empresa = o.empresas as { nombre: string } | null
           const contacto = o.contactos as { nombre: string } | null
+          const responsable = o.staff as { id: string; full_name: string } | null
           const dias = diasSinActividad(o.ultima_accion_fecha ?? o.created_at)
           const stale = dias !== null && dias > 7
 
@@ -229,6 +243,7 @@ export default function PipelineList({ oportunidades }: Props) {
               summaryLines={[
                 ...(empresa ? [{ icon: <Building2 className="h-3 w-3" />, text: empresa.nombre }] : []),
                 ...(contacto ? [{ icon: <User className="h-3 w-3" />, text: contacto.nombre }] : []),
+                ...(responsable ? [{ icon: <User className="h-3 w-3 text-blue-500" />, text: responsable.full_name }] : [{ icon: <AlertTriangle className="h-3 w-3 text-amber-500" />, text: 'Sin responsable' }]),
                 ...(stale ? [{ icon: <Clock className="h-3 w-3 text-amber-500" />, text: `${dias} días sin actividad` }] : []),
               ]}
               badges={etapaConfig ? [{

@@ -69,14 +69,14 @@ const CHAPTERS: { title: string; emoji: string; sections: SectionDef[] }[] = [
     emoji: '1',
     sections: [
       { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
-      { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin', 'operator'] },
+      { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
     ],
   },
   {
     title: 'Tu Operación',
     emoji: '2',
     sections: [
-      { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'operator'] },
+      { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'] },
       { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'] },
       { key: 'cuentas-bancarias', label: 'Mi cuenta bancaria', icon: Landmark, maxScore: 2, scoreKey: 'banco', roles: ['owner', 'admin'] },
     ],

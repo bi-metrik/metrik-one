@@ -22,10 +22,10 @@ const TIPO_VINCULO = [
 ]
 
 const ROL_OPTIONS = [
-  { value: 'administrador', label: 'Administrador', desc: 'Acceso completo. Socios, persona de confianza.' },
-  { value: 'supervisor', label: 'Supervisor', desc: 'Gestiona equipo. Asigna responsables, supervisa pipeline y proyectos.' },
-  { value: 'ejecutor', label: 'Ejecutor', desc: 'Trabaja en oportunidades y proyectos asignados.' },
-  { value: 'campo', label: 'Campo', desc: 'Solo reporta via WhatsApp. Gastos y horas en proyectos activos.' },
+  { value: 'administrador', label: 'Administrador', desc: 'Acceso completo a toda la plataforma. Ideal para socios o persona de confianza.' },
+  { value: 'supervisor', label: 'Supervisor', desc: 'Ve todo el pipeline y proyectos. Asigna responsables. No ejecuta directamente.' },
+  { value: 'ejecutor', label: 'Ejecutor', desc: 'Trabaja en oportunidades y proyectos asignados. Registra gastos y horas.' },
+  { value: 'campo', label: 'Campo', desc: 'Solo reporta vía WhatsApp. Registra gastos y horas en proyectos activos.' },
 ]
 
 // Display labels for all roles (including dueno which is not in the form dropdown)
@@ -47,10 +47,10 @@ const ROL_COLORS: Record<string, string> = {
 }
 
 const AREA_OPTIONS = [
-  { value: 'comercial', label: 'Comercial' },
-  { value: 'operaciones', label: 'Operaciones' },
-  { value: 'admin_finanzas', label: 'Admin y Finanzas' },
-  { value: 'direccion', label: 'Direccion' },
+  { value: 'comercial', label: 'Comercial', desc: 'Ventas, atención al cliente, cotizaciones, seguimiento de oportunidades.' },
+  { value: 'operaciones', label: 'Operaciones', desc: 'Ejecución de proyectos, coordinación de campo, producción.' },
+  { value: 'admin_finanzas', label: 'Admin y Finanzas', desc: 'Contabilidad, facturación, cartera, nómina, RRHH.' },
+  { value: 'direccion', label: 'Direccion', desc: 'Gerencia general, socios, decisiones estratégicas.' },
 ]
 
 // Color classes per area
@@ -83,7 +83,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
     horas_disponibles_mes: 160,
     tipo_vinculo: '',
     rol_plataforma: 'ejecutor',
-    area: '',
+    area: 'operaciones',
   })
 
   // Sync state when server re-renders with new data
@@ -92,7 +92,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   }, [initialData])
 
   const resetForm = () => {
-    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', area: '' })
+    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', area: 'operaciones' })
     setShowForm(false)
     setShowDetails(false)
     setEditingId(null)
@@ -176,7 +176,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       horas_disponibles_mes: s.horas_disponibles_mes ?? 160,
       tipo_vinculo: s.tipo_vinculo || '',
       rol_plataforma: s.rol_plataforma || 'ejecutor',
-      area: s.area || '',
+      area: s.area || 'operaciones',
     })
     setEditingId(s.id)
     setShowForm(true)
@@ -270,11 +270,13 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                 onChange={e => setForm({ ...form, area: e.target.value })}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
               >
-                <option value="">Sin especificar</option>
                 {AREA_OPTIONS.map(a => (
                   <option key={a.value} value={a.value}>{a.label}</option>
                 ))}
               </select>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                {AREA_OPTIONS.find(a => a.value === form.area)?.desc}
+              </p>
             </div>
           </div>
 

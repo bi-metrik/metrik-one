@@ -2657,6 +2657,7 @@ export type Database = {
           notas_cierre: string | null
           oportunidad_id: string | null
           presupuesto_total: number | null
+          responsable_comercial_id: string | null
           responsable_id: string | null
           retenciones_estimadas: number | null
           roi_descripcion: string | null
@@ -2688,6 +2689,7 @@ export type Database = {
           notas_cierre?: string | null
           oportunidad_id?: string | null
           presupuesto_total?: number | null
+          responsable_comercial_id?: string | null
           responsable_id?: string | null
           retenciones_estimadas?: number | null
           roi_descripcion?: string | null
@@ -2719,6 +2721,7 @@ export type Database = {
           notas_cierre?: string | null
           oportunidad_id?: string | null
           presupuesto_total?: number | null
+          responsable_comercial_id?: string | null
           responsable_id?: string | null
           retenciones_estimadas?: number | null
           roi_descripcion?: string | null
@@ -2754,6 +2757,13 @@ export type Database = {
             columns: ["oportunidad_id"]
             isOneToOne: false
             referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_responsable_comercial_id_fkey"
+            columns: ["responsable_comercial_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
             referencedColumns: ["id"]
           },
           {

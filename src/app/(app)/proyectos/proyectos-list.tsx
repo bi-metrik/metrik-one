@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { FolderOpen, Play, Square, Plus, Receipt, FileText, Clock } from 'lucide-react'
+import { FolderOpen, Play, Square, Plus, Receipt, FileText, Clock, AlertTriangle, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
@@ -32,6 +32,8 @@ interface ProyectoFinanciero {
   facturado: number | null
   horas_reales: number | null
   created_at: string | null
+  responsable_id: string | null
+  responsable_nombre: string | null
 }
 
 interface Props {
@@ -134,6 +136,22 @@ export default function ProyectosList({ proyectos, activeTimer: serverTimer }: P
           )
         })}
       </div>
+
+      {/* Warning banner: projects without execution responsable */}
+      {(() => {
+        const sinResponsable = filtered.filter(p => !p.responsable_id && ESTADOS_ACTIVOS.includes(p.estado ?? ''))
+        if (sinResponsable.length === 0) return null
+        return (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>
+              {sinResponsable.length === 1
+                ? '1 proyecto activo sin responsable de ejecucion asignado'
+                : `${sinResponsable.length} proyectos activos sin responsable de ejecucion asignado`}
+            </span>
+          </div>
+        )
+      })()}
 
       {/* Nuevo proyecto interno button */}
       {tipoTab === 'interno' && (
@@ -349,6 +367,19 @@ function ProyectoCard({
           ) : p.empresa_nombre ? (
             <p className="mt-0.5 truncate text-xs text-muted-foreground">{p.empresa_nombre}</p>
           ) : null}
+          <div className="mt-0.5 flex items-center gap-2">
+            {p.responsable_nombre ? (
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <User className="h-3 w-3" />
+                {p.responsable_nombre}
+              </span>
+            ) : estado !== 'cerrado' ? (
+              <span className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-3 w-3" />
+                Sin responsable
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {p.presupuesto_total ? (

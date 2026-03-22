@@ -5,6 +5,7 @@ import { Plus } from 'lucide-react'
 
 export default async function PipelinePage() {
   const oportunidades = await getOportunidades()
+  const sinResponsableCount = oportunidades.filter(o => o.responsable_id === null || o.responsable_id === undefined).length
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -26,7 +27,7 @@ export default async function PipelinePage() {
       </div>
 
       {/* List */}
-      <PipelineList oportunidades={oportunidades} />
+      <PipelineList oportunidades={oportunidades} sinResponsableCount={sinResponsableCount} />
     </div>
   )
 }

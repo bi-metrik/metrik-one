@@ -139,6 +139,7 @@ interface Props {
   cotizacionId?: string | null
   oportunidadId?: string | null
   responsable?: { id: string; full_name: string } | null
+  responsableComercial?: { id: string; full_name: string } | null
 }
 
 // ── Component ─────────────────────────────────────────
@@ -155,6 +156,7 @@ export default function ProyectoDetail({
   cotizacionId,
   oportunidadId,
   responsable,
+  responsableComercial,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -241,6 +243,11 @@ export default function ProyectoDetail({
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <User className="h-3 w-3" />
                 {responsable.full_name}
+              </span>
+            )}
+            {responsableComercial && (
+              <span className="text-[11px] text-muted-foreground">
+                Vendio: {responsableComercial.full_name}
               </span>
             )}
           </div>

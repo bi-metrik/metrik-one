@@ -44,7 +44,7 @@ const ALL_NAV_ITEMS = [
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'read_only'] },
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
-  { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'operator'] },
+  { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
 // D246: Sección contable separada (futuro: visible para rol contador)
