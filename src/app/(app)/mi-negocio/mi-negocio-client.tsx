@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles, X } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles, X, CreditCard } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
@@ -64,6 +64,7 @@ interface SectionDef {
 }
 
 const SECTIONS: SectionDef[] = [
+  { key: 'mi-plan', label: 'Mi plan', icon: CreditCard, maxScore: 1, scoreKey: 'fiscal', roles: ['owner'] },
   { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
   { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
   { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'] },
@@ -106,6 +107,8 @@ export default function MiNegocioClient({
 
   const getMainValue = (key: string): string => {
     switch (key) {
+      case 'mi-plan':
+        return `${licenseUsed}/${licenseMax} licencias`
       case 'perfil-fiscal':
         return fiscalProfile?.is_complete ? 'Completo' : 'Pendiente'
       case 'mi-marca':
@@ -140,6 +143,8 @@ export default function MiNegocioClient({
 
   const getStatusBadge = (key: string) => {
     switch (key) {
+      case 'mi-plan':
+        return 'Activo'
       case 'perfil-fiscal':
         return fiscalProfile?.is_complete
           ? 'Completo'
@@ -183,17 +188,15 @@ export default function MiNegocioClient({
   const activeSectionDef = SECTIONS.find(s => s.key === activeSection)
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      {/* ── Header with progress circle ── */}
+    <div className="mx-auto max-w-4xl space-y-4">
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-bold">Mi Negocio</h1>
           <p className="text-xs text-muted-foreground">Configura tu negocio para numeros mas precisos</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-full border-2 border-primary flex items-center justify-center">
-            <span className="text-xs font-bold text-primary">{progressPct}%</span>
-          </div>
+        <div className="h-8 w-8 rounded-full border-2 border-primary flex items-center justify-center">
+          <span className="text-xs font-bold text-primary">{progressPct}%</span>
         </div>
       </div>
 
@@ -203,96 +206,92 @@ export default function MiNegocioClient({
           <div className="flex items-center gap-3">
             <Sparkles className="h-6 w-6 text-green-600 dark:text-green-400 shrink-0" />
             <div>
-              <p className="text-sm font-bold text-green-700 dark:text-green-300">
-                Tu negocio esta listo!
-              </p>
-              <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                Has completado todos los ajustes. Tus numeros ahora son 100% precisos.
-              </p>
+              <p className="text-sm font-bold text-green-700 dark:text-green-300">Tu negocio esta listo!</p>
+              <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">Todos los ajustes completos. Tus numeros son 100% precisos.</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Onboarding Welcome (first visit, no progress) ── */}
+      {/* ── Onboarding Welcome ── */}
       {progressPct === 0 && (
-        <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
-          <p className="text-sm font-medium">
-            Bienvenido a <span className="font-bold">Mi Negocio</span>
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Completa cada seccion para que MeTRIK one calcule tus numeros con precision.
-            No necesitas hacerlo todo hoy -- puedes avanzar a tu ritmo.
-          </p>
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+          <p className="text-sm font-medium">Bienvenido a <span className="font-bold">Mi Negocio</span></p>
+          <p className="mt-1 text-xs text-muted-foreground">Completa cada seccion para numeros mas precisos. Avanza a tu ritmo.</p>
         </div>
       )}
 
-      {/* ── Mi Plan ── */}
-      {currentUserRole === 'owner' && (
-        <div className="rounded-xl border bg-card p-6">
-          <PlanSection
-            licenseUsed={licenseUsed}
-            licenseMax={licenseMax}
-            workspaceFeatures={workspaceFeatures}
-          />
-        </div>
-      )}
+      {/* ── Main layout: sidebar cards + content panel ── */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        {/* ── Cards sidebar (navigation) ── */}
+        <div className="sm:w-56 shrink-0 space-y-1.5">
+          {visibleSections.map((section) => {
+            const score = sectionScores[section.scoreKey]
+            const isComplete = section.key === 'mi-plan' || score >= section.maxScore
+            const isActive = activeSection === section.key
+            const Icon = section.icon
+            const mainValue = getMainValue(section.key)
 
-      {/* ── Cards Grid ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {visibleSections.map((section) => {
-          const score = sectionScores[section.scoreKey]
-          const isComplete = score >= section.maxScore
-          const Icon = section.icon
-          const mainValue = getMainValue(section.key)
-          const badge = getStatusBadge(section.key)
-
-          return (
-            <button key={section.key} onClick={() => toggleSection(section.key)} className="text-left">
-              <div
-                className="border-l-4 rounded-xl border bg-card p-4 hover:bg-accent/30 transition-colors w-full"
-                style={{ borderLeftColor: isComplete ? '#10B981' : '#F59E0B' }}
+            return (
+              <button
+                key={section.key}
+                onClick={() => toggleSection(section.key)}
+                className={`flex w-full items-center gap-3 rounded-lg border-l-3 px-3 py-2.5 text-left transition-colors ${
+                  isActive
+                    ? 'bg-primary/5 border-l-primary'
+                    : 'hover:bg-accent/40 border-l-transparent'
+                }`}
+                style={!isActive ? { borderLeftColor: isComplete ? '#10B981' : '#F59E0B' } : undefined}
               >
-                <div className="flex items-center gap-3 mb-2">
-                  <Icon className="h-5 w-5 text-muted-foreground" />
-                  <span className="text-sm font-semibold flex-1">{section.label}</span>
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium truncate ${isActive ? 'text-primary' : ''}`}>{section.label}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{mainValue}</p>
                 </div>
-                <p className="text-lg font-bold">{mainValue}</p>
-                <p className="text-xs text-muted-foreground">{badge}</p>
-              </div>
-            </button>
-          )
-        })}
-      </div>
-
-      {/* ── Expanded section (full width, below grid) ── */}
-      {activeSection && activeSectionDef && (
-        <div className="rounded-xl border bg-card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold">{activeSectionDef.label}</h3>
-            <button onClick={() => setActiveSection(null)} className="rounded p-1 hover:bg-accent">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          {renderSection(activeSection, {
-            workspace,
-            fiscalProfile,
-            staffMembers,
-            bankAccounts,
-            monthlyTargets,
-            fixedExpenses,
-            categories,
-            servicios,
-            staffNomina,
-            configFinanciera,
-            totalFixed,
-            currentUserRole,
-            licenseUsed,
-            licenseMax,
-            onClose: () => setActiveSection(null),
+              </button>
+            )
           })}
         </div>
-      )}
+
+        {/* ── Content panel ── */}
+        <div className="flex-1 min-w-0">
+          {activeSection && activeSectionDef ? (
+            <div className="rounded-xl border bg-card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  {(() => { const Icon = activeSectionDef.icon; return <Icon className="h-4 w-4 text-primary" /> })()}
+                  <h3 className="text-sm font-semibold">{activeSectionDef.label}</h3>
+                </div>
+                <button onClick={() => setActiveSection(null)} className="rounded p-1 hover:bg-accent sm:hidden">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {renderSection(activeSection, {
+                workspace,
+                fiscalProfile,
+                staffMembers,
+                bankAccounts,
+                monthlyTargets,
+                fixedExpenses,
+                categories,
+                servicios,
+                staffNomina,
+                configFinanciera,
+                totalFixed,
+                currentUserRole,
+                licenseUsed,
+                licenseMax,
+                workspaceFeatures,
+                onClose: () => setActiveSection(null),
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed p-8 text-center">
+              <p className="text-sm text-muted-foreground">Selecciona una seccion para ver o editar</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -316,10 +315,20 @@ function renderSection(
     currentUserRole: string
     licenseUsed: number
     licenseMax: number
+    workspaceFeatures: WorkspaceFeature[]
     onClose: () => void
   },
 ) {
   switch (key) {
+    case 'mi-plan':
+      return (
+        <PlanSection
+          workspaceFeatures={props.workspaceFeatures}
+          licenseUsed={props.licenseUsed}
+          licenseMax={props.licenseMax}
+        />
+      )
+
     case 'perfil-fiscal':
       return (
         <PerfilFiscalExtended
