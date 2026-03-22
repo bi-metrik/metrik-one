@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
   BarChart3,
+  LayoutDashboard,
   Flame,
   FolderKanban,
   Briefcase,
@@ -39,6 +40,7 @@ interface AppShellProps {
 // Sidebar adaptativo por rol
 const ALL_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
   { href: '/pipeline', label: 'Oportunidades', icon: Flame, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'read_only'] },
