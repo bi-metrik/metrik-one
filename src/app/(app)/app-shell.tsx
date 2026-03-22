@@ -16,6 +16,7 @@ import {
   BookOpen,
   Activity,
   UserCheck,
+  MoreHorizontal,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -59,6 +60,15 @@ const ADMIN_NAV_ITEMS = [
   { href: '/admin/mibolsillo', label: 'Mi Bolsillo', icon: Activity, roles: ['owner'] },
 ]
 
+// Mobile: 4 primary tabs per role, rest goes to "Más" panel
+const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
+  owner: ['/numeros', '/pipeline', '/proyectos', '/tableros'],
+  admin: ['/numeros', '/pipeline', '/proyectos', '/tableros'],
+  supervisor: ['/pipeline', '/proyectos', '/directorio', '/mi-negocio'],
+  operator: ['/pipeline', '/proyectos', '/directorio'],
+  read_only: ['/numeros', '/movimientos', '/tableros'],
+}
+
 function getNavItemsForRole(role: string) {
   return ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
 }
@@ -101,6 +111,7 @@ export default function AppShell({
 }: AppShellProps) {
   const pathname = usePathname()
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
 
   const handleSignOut = async () => {
     const supabase = createClient()
@@ -118,6 +129,13 @@ export default function AppShell({
   const navItems = getNavItemsForRole(role)
   const contabilidadItems = getContabilidadItemsForRole(role)
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
+
+  // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
+  const allMobileItems = [...navItems, ...contabilidadItems]
+  const primaryHrefs = MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator
+  const mobilePrimary = allMobileItems.filter(item => primaryHrefs.includes(item.href))
+  const mobileSecondary = allMobileItems.filter(item => !primaryHrefs.includes(item.href))
+  const showMoreButton = mobileSecondary.length > 0
 
   // Dynamic branding: override CSS custom properties when workspace has custom colors
   const brandingStyle: Record<string, string> = {}
@@ -387,18 +405,50 @@ export default function AppShell({
           <div className="p-6 pb-24 md:pb-6">{children}</div>
         </main>
 
+        {/* ── Mobile "Más" panel + backdrop ── */}
+        {mobileMoreOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/10 md:hidden"
+              onClick={() => setMobileMoreOpen(false)}
+            />
+            <div className="fixed bottom-14 left-3 right-3 z-50 rounded-t-2xl border bg-card shadow-xl md:hidden"
+              style={{ paddingBottom: '0' }}
+            >
+              {mobileSecondary.map((item, i) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileMoreOpen(false)}
+                    className={`flex items-center gap-3 px-5 py-3 text-sm font-medium transition-colors ${
+                      i < mobileSecondary.length - 1 ? 'border-b' : ''
+                    } ${isActive ? 'text-primary' : 'text-foreground hover:bg-accent/50'}`}
+                  >
+                    <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </>
+        )}
+
         {/* ── Mobile Bottom Tab Bar ── */}
         <nav
           className="flex md:hidden h-14 items-center justify-around border-t border-border bg-background shrink-0"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
-          {navItems.map((item) => {
+          {mobilePrimary.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
             const Icon = item.icon
             return (
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => setMobileMoreOpen(false)}
                 className={`flex flex-col items-center gap-0.5 px-1 py-1 text-[10px] font-medium transition-colors ${
                   isActive ? 'text-primary' : 'text-muted-foreground'
                 }`}
@@ -408,6 +458,17 @@ export default function AppShell({
               </Link>
             )
           })}
+          {showMoreButton && (
+            <button
+              onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
+              className={`flex flex-col items-center gap-0.5 px-1 py-1 text-[10px] font-medium transition-colors ${
+                mobileMoreOpen ? 'text-primary' : 'text-muted-foreground'
+              }`}
+            >
+              <MoreHorizontal className="h-5 w-5" />
+              <span>Más</span>
+            </button>
+          )}
         </nav>
       </div>
 
