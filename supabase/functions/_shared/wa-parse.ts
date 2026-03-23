@@ -11,7 +11,7 @@ const SYSTEM_PROMPT = `Parser de MéTRIK ONE. Recibe mensaje de WhatsApp en espa
 
 RESPONDE SOLO JSON. Sin texto adicional. Sin markdown.
 
-INTENCIONES:
+INTENCIONES (21):
 GASTO_DIRECTO: gasto con proyecto/cliente ("Gasté X en Y para Z")
 GASTO_OPERATIVO: gasto empresa sin proyecto ("Pagué arriendo")
 HORAS: registro tiempo ("Trabajé X horas en Y")
@@ -22,6 +22,9 @@ SALDO_BANCARIO: reporte saldo banco (NO cobro, NO gasto)
 NOTA_OPORTUNIDAD/NOTA_PROYECTO: notas
 ESTADO_PROYECTO/ESTADO_PIPELINE/MIS_NUMEROS/CARTERA/INFO_CONTACTO: consultas
 OPP_GANADA/OPP_PERDIDA: resultado oportunidad
+OPP_NUEVA: crear nueva oportunidad ("tengo un prospecto", "nueva oportunidad con X", "me contactó Y")
+OPP_AVANZAR: mover oportunidad de etapa ("mandé la propuesta a X", "hice discovery con Y", "ya contacté a Z")
+ACTIVIDAD: registrar actividad comercial ("llamé a X", "reunión con Y", "envié correo a Z")
 AYUDA: saludo o help
 UNCLEAR: no determinable
 
@@ -31,6 +34,19 @@ CAMPOS GASTOS (obligatorios amount, concept, category_hint):
 - category_hint: materiales|transporte|alimentacion|servicios_profesionales|software|arriendo|marketing|capacitacion|otros
 - entity_hint: nombre persona/empresa mencionada
 - project_code: código "KAE-2","FAB-1","P-12" tal cual (prioridad sobre entity_hint)
+
+CAMPOS OPP_NUEVA:
+- entity_hint: nombre del prospecto/empresa
+- amount: valor estimado si lo menciona
+- note: contexto adicional
+
+CAMPOS OPP_AVANZAR:
+- entity_hint: nombre oportunidad/prospecto
+- stage_hint: etapa destino (contacto_inicial|discovery_hecha|propuesta_enviada|negociacion)
+
+CAMPOS ACTIVIDAD:
+- entity_hint: nombre del contacto/empresa
+- activity_text: descripción breve de la actividad ("llamada de seguimiento", "reunión discovery", "envío de propuesta")
 
 CATEGORÍAS:
 materiales = compras físicas: insumos, herramientas, ferretería, cables, pintura, cemento, repuestos
@@ -49,7 +65,10 @@ REGLAS:
 - Ambiguo sin proyecto → GASTO_OPERATIVO
 - "X palos/barras" = X×1000000, "X lucas" = X×1000, "medio palo" = 500000
 - "me consignaron/giraron" = COBRO
-- confidence < 0.7 → UNCLEAR
+- "llamé/reunión/correo/visité" + persona = ACTIVIDAD
+- "mandé propuesta/hice discovery/contacté" + prospecto = OPP_AVANZAR
+- "nuevo prospecto/me contactó/oportunidad nueva" = OPP_NUEVA
+- Si confidence < 0.7, intent=UNCLEAR y agrega "suggested_actions": array de 2-3 intenciones probables en español natural (ej: ["Registrar un gasto", "Consultar proyecto"])
 
 FORMATO: {"intent":"...","confidence":0.9,"fields":{...}}`;
 
@@ -109,7 +128,16 @@ async function tryGemini(userMessage: string): Promise<ParseResult | null> {
 
     const parsed: ParseResult = JSON.parse(text);
     _lastGeminiFail = '';
-    if (parsed.confidence < 0.6) return { ...parsed, intent: 'UNCLEAR' };
+    if (parsed.confidence < 0.6) {
+      return {
+        ...parsed,
+        intent: 'UNCLEAR',
+        fields: {
+          ...parsed.fields,
+          suggested_actions: parsed.fields.suggested_actions || [],
+        },
+      };
+    }
     return parsed;
   } catch (err) {
     _lastGeminiFail = `exception: ${String(err).slice(0, 100)}`;
@@ -277,6 +305,31 @@ function regexParse(text: string): ParseResult {
   // OPP_PERDIDA — "se cayó", "no se dio", "perdimos"
   if (/se\s+cay[oó]|no\s+se\s+dio|perdimos|descart[oó]/i.test(lower)) {
     return { intent: 'OPP_PERDIDA', confidence: 0.80, fields: { entity_hint: projectRef.entity_hint } };
+  }
+
+  // OPP_NUEVA — "nuevo prospecto", "nueva oportunidad", "me contactó"
+  if (/nuev[oa]\s+(prospecto|oportunidad|lead)|me\s+contact[oó]/i.test(lower)) {
+    return { intent: 'OPP_NUEVA', confidence: 0.80, fields: { entity_hint: projectRef.entity_hint } };
+  }
+
+  // OPP_AVANZAR — "mandé propuesta", "hice discovery", "contacté a"
+  if (/mand[eé]\s+(la\s+)?propuesta|hice\s+discovery|ya\s+contact[eé]/i.test(lower)) {
+    const stageMap: Record<string, string> = {
+      'propuesta': 'propuesta_enviada',
+      'discovery': 'discovery_hecha',
+      'contact': 'contacto_inicial',
+    };
+    let stage = 'contacto_inicial';
+    for (const [kw, s] of Object.entries(stageMap)) {
+      if (lower.includes(kw)) { stage = s; break; }
+    }
+    return { intent: 'OPP_AVANZAR', confidence: 0.80, fields: { entity_hint: projectRef.entity_hint, stage_hint: stage } };
+  }
+
+  // ACTIVIDAD — "llamé a", "reunión con", "visité a", "envié correo"
+  if (/llam[eé]\s+a|reuni[oó]n\s+con|visit[eé]|envi[eé]\s+correo/i.test(lower)) {
+    const actMatch = text.match(/(?:llam[eé]\s+a|reuni[oó]n\s+con|visit[eé]\s+a?|envi[eé]\s+correo\s+a)\s+(.+)/i);
+    return { intent: 'ACTIVIDAD', confidence: 0.80, fields: { entity_hint: projectRef.entity_hint, activity_text: actMatch?.[1]?.trim() || text } };
   }
 
   // NOTA_OPORTUNIDAD / NOTA_PROYECTO

@@ -3,9 +3,9 @@
 // ============================================================
 
 import type { HandlerContext } from '../types.ts';
-import { PIPELINE_STAGE_LABELS } from '../types.ts';
-import { formatCOP, bold, daysSince } from '../wa-format.ts';
-import { findOpportunities } from '../wa-lookup.ts';
+import { PIPELINE_STAGE_LABELS, PIPELINE_STAGES } from '../types.ts';
+import { formatCOP, formatCOPShort, bold, daysSince } from '../wa-format.ts';
+import { findOpportunities, findContacts } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
 
 export async function handleAccion(ctx: HandlerContext): Promise<void> {
@@ -20,6 +20,9 @@ export async function handleAccion(ctx: HandlerContext): Promise<void> {
   switch (parsed.intent) {
     case 'OPP_GANADA': await handleOppGanada(ctx); break;
     case 'OPP_PERDIDA': await handleOppPerdida(ctx); break;
+    case 'OPP_NUEVA': await handleOppNueva(ctx); break;
+    case 'OPP_AVANZAR': await handleOppAvanzar(ctx); break;
+    case 'ACTIVIDAD': await handleActividad(ctx); break;
     case 'AYUDA': await handleAyuda(ctx); break;
     case 'UNCLEAR': await handleUnclear(ctx); break;
   }
@@ -122,65 +125,346 @@ async function handleOppPerdida(ctx: HandlerContext): Promise<void> {
 // ============================================================
 
 async function handleAyuda(ctx: HandlerContext): Promise<void> {
-  const msg = `👋 ¡Hola! Soy tu asistente MéTRIK ONE. Puedo ayudarte con:
+  const msg = `👋 Soy tu asistente MéTRIK ONE. Escríbeme con naturalidad:
 
-⏱️ *Timer de horas:*
-• "Iniciar en [proyecto]"
-• "Parar"
-• "¿Cuánto llevo?"
+⏱️ *Timer:* "Iniciar en [proyecto]" · "Parar" · "¿Cuánto llevo?"
 
-💰 *Registrar:*
-• "Gasté [monto] en [concepto] para [proyecto]"
-• "Me pagaron [monto] de [proyecto]"
-• "Mi saldo es [monto]"
+💰 *Registrar:* "Gasté 180K en materiales para Pérez" · "Me pagaron 3M de Torres" · "Mi saldo es 5M"
 
-📋 *Consultar:*
-• "¿Cómo va [proyecto]?"
-• "¿Cómo estoy este mes?"
-• "¿Quién me debe?"
+📋 *Consultar:* "¿Cómo va Pérez?" · "Mis números" · "¿Quién me debe?"
 
-🎯 *Actualizar:*
-• "[Prospecto] aceptó" / "no se dio"
-• "Nota para [proyecto]: [texto]"
+🎯 *Pipeline:* "Nueva oportunidad con García" · "Mandé propuesta a López" · "García aceptó"
 
-Escríbeme con naturalidad, no necesitas comandos exactos.`;
+📝 *Actividad:* "Llamé a Pérez" · "Reunión con Torres" · "Nota para proyecto: texto"
+
+No necesitas comandos exactos.`;
 
   await ctx.sendMessage(msg);
   await completeSession(ctx.supabase, ctx.session.id);
 }
 
 // ============================================================
-// UNCLEAR — Fallback (D96)
+// W25 — Nueva Oportunidad
+// ============================================================
+
+async function handleOppNueva(ctx: HandlerContext): Promise<void> {
+  const { parsed, user, supabase } = ctx;
+  const { entity_hint, amount, note } = parsed.fields;
+
+  if (!entity_hint) {
+    await ctx.sendMessage('¿Cómo se llama el prospecto o empresa?');
+    await ctx.updateSession('collecting', {
+      intent: 'OPP_NUEVA', pending_action: 'W25',
+      parsed_fields: parsed.fields,
+    });
+    return;
+  }
+
+  // Check if contact exists
+  const contacts = await findContacts(supabase, user.workspace_id, entity_hint);
+  let contactId: string | null = null;
+  let empresaId: string | null = null;
+  let contactName = entity_hint;
+
+  if (contacts.length > 0) {
+    contactId = contacts[0].id;
+    contactName = contacts[0].nombre;
+    // Try to find linked empresa via oportunidades or proyectos
+    const { data: existingOpp } = await supabase
+      .from('oportunidades')
+      .select('empresa_id')
+      .eq('contacto_id', contactId)
+      .eq('workspace_id', user.workspace_id)
+      .limit(1)
+      .single();
+    empresaId = existingOpp?.empresa_id || null;
+
+    if (!empresaId) {
+      const { data: proj } = await supabase
+        .from('proyectos')
+        .select('empresa_id')
+        .eq('contacto_id', contactId)
+        .eq('workspace_id', user.workspace_id)
+        .limit(1)
+        .single();
+      empresaId = proj?.empresa_id || null;
+    }
+  }
+
+  // If no contact, create one automatically
+  if (!contactId) {
+    const { data: newContact, error: cErr } = await supabase.from('contactos').insert({
+      workspace_id: user.workspace_id,
+      nombre: entity_hint,
+    }).select().single();
+    if (cErr || !newContact) {
+      console.error('[accion] OPP_NUEVA contact create error:', cErr);
+      await ctx.sendMessage('❌ No pude crear el contacto. Intenta desde la app.');
+      await completeSession(supabase, ctx.session.id);
+      return;
+    }
+    contactId = newContact.id;
+    contactName = newContact.nombre;
+  }
+
+  // If no empresa, create one automatically
+  if (!empresaId) {
+    const { data: newEmpresa, error: eErr } = await supabase.from('empresas').insert({
+      workspace_id: user.workspace_id,
+      nombre: entity_hint,
+    }).select().single();
+    if (eErr || !newEmpresa) {
+      console.error('[accion] OPP_NUEVA empresa create error:', eErr);
+      await ctx.sendMessage('❌ No pude crear la empresa. Intenta desde la app.');
+      await completeSession(supabase, ctx.session.id);
+      return;
+    }
+    empresaId = newEmpresa.id;
+  }
+
+  // Create opportunity
+  const { data: opp, error } = await supabase.from('oportunidades').insert({
+    workspace_id: user.workspace_id,
+    descripcion: `Oportunidad ${contactName}`,
+    contacto_id: contactId,
+    empresa_id: empresaId,
+    etapa: 'lead_nuevo',
+    valor_estimado: amount || 0,
+    probabilidad: 10,
+  }).select().single();
+
+  if (error) {
+    console.error('[accion] OPP_NUEVA error:', error);
+    await ctx.sendMessage('❌ No pude crear la oportunidad. Intenta desde la app.');
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  let msg = `🎯 Oportunidad creada: ${bold(opp.descripcion)}\n\n├ Etapa: Lead nuevo`;
+  if (amount) msg += `\n├ Valor: ${formatCOP(amount)}`;
+  msg += `\n└ Contacto: ${contactName}`;
+  msg += `\n\n💡 Completa datos fiscales en la app para poder cotizar.`;
+
+  await ctx.sendMessage(msg);
+  await completeSession(supabase, ctx.session.id);
+}
+
+// ============================================================
+// W26 — Avanzar Oportunidad (mover etapa)
+// ============================================================
+
+async function handleOppAvanzar(ctx: HandlerContext): Promise<void> {
+  const { parsed, user, supabase } = ctx;
+  const { entity_hint, stage_hint } = parsed.fields;
+
+  if (!entity_hint) {
+    await ctx.sendMessage('¿Cuál oportunidad quieres avanzar?');
+    await ctx.updateSession('collecting', {
+      intent: 'OPP_AVANZAR', pending_action: 'W26',
+      parsed_fields: parsed.fields,
+    });
+    return;
+  }
+
+  const opps = await findOpportunities(supabase, user.workspace_id, entity_hint);
+  if (opps.length === 0) {
+    await ctx.sendMessage(`❌ No encontré oportunidad activa con "${entity_hint}".`);
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  const opp = opps[0];
+  const currentIdx = PIPELINE_STAGES.indexOf(opp.etapa as typeof PIPELINE_STAGES[number]);
+
+  // Determine target stage
+  let targetStage = stage_hint;
+  if (!targetStage) {
+    // Auto-advance to next stage
+    if (currentIdx >= 0 && currentIdx < PIPELINE_STAGES.length - 2) {
+      targetStage = PIPELINE_STAGES[currentIdx + 1];
+    } else {
+      targetStage = opp.etapa;
+    }
+  }
+
+  // Validate stage
+  if (!PIPELINE_STAGE_LABELS[targetStage!]) {
+    await ctx.sendMessage(`❌ Etapa "${targetStage}" no válida.`);
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
+  // Update
+  await supabase.from('oportunidades')
+    .update({ etapa: targetStage })
+    .eq('id', opp.id);
+
+  const msg = `📋 ${bold(opp.descripcion)} movida a ${bold(PIPELINE_STAGE_LABELS[targetStage!])}\n\n├ Anterior: ${PIPELINE_STAGE_LABELS[opp.etapa] || opp.etapa}\n├ Valor: ${formatCOP(Number(opp.valor_estimado))}\n└ ${opp.contacto_nombre}`;
+  await ctx.sendMessage(msg);
+  await completeSession(supabase, ctx.session.id);
+}
+
+// ============================================================
+// W27 — Registrar Actividad Comercial
+// ============================================================
+
+async function handleActividad(ctx: HandlerContext): Promise<void> {
+  const { parsed, user, supabase } = ctx;
+  const { entity_hint, activity_text } = parsed.fields;
+
+  if (!entity_hint && !activity_text) {
+    await ctx.sendMessage('¿Con quién fue la actividad? Ejemplo: "Llamé a Pérez para seguimiento"');
+    await ctx.updateSession('collecting', {
+      intent: 'ACTIVIDAD', pending_action: 'W27',
+      parsed_fields: parsed.fields,
+    });
+    return;
+  }
+
+  // Try to find related opportunity or contact
+  let oppId: string | null = null;
+  let refName = entity_hint || 'Sin contacto';
+
+  if (entity_hint) {
+    const opps = await findOpportunities(supabase, user.workspace_id, entity_hint);
+    if (opps.length > 0) {
+      oppId = opps[0].id;
+      refName = opps[0].descripcion;
+    } else {
+      // Try contacts → find their opp
+      const contacts = await findContacts(supabase, user.workspace_id, entity_hint);
+      if (contacts.length > 0) {
+        refName = contacts[0].nombre;
+        // Check if contact has active opportunity
+        const { data: contactOpp } = await supabase
+          .from('oportunidades')
+          .select('id, descripcion')
+          .eq('contacto_id', contacts[0].id)
+          .eq('workspace_id', user.workspace_id)
+          .not('etapa', 'in', '(ganada,perdida)')
+          .limit(1)
+          .single();
+        if (contactOpp) {
+          oppId = contactOpp.id;
+          refName = contactOpp.descripcion;
+        }
+      }
+    }
+  }
+
+  // Determine activity type label
+  const text = (activity_text || parsed.fields.mensaje_original || '').toLowerCase();
+  let tipoLabel = '📝 Actividad';
+  if (/llam[eé]|llamada|telef/i.test(text)) tipoLabel = '📞 Llamada';
+  else if (/reuni[oó]n|meeting|junta/i.test(text)) tipoLabel = '🤝 Reunión';
+  else if (/correo|email|mail/i.test(text)) tipoLabel = '📧 Email';
+  else if (/visit[eé]|visita|fu[ií]\s+a/i.test(text)) tipoLabel = '🚗 Visita';
+  else if (/whatsapp|mensaje|chat/i.test(text)) tipoLabel = '💬 Mensaje';
+
+  const contenido = (activity_text || parsed.fields.mensaje_original || 'Actividad comercial').slice(0, 280);
+
+  // If we found an opportunity, log as activity_log comment on it
+  if (oppId) {
+    // Find staff record for this user
+    let autorId: string | null = null;
+    if (user.user_id) {
+      const { data: staff } = await supabase
+        .from('staff')
+        .select('id')
+        .eq('workspace_id', user.workspace_id)
+        .eq('profile_id', user.user_id)
+        .single();
+      autorId = staff?.id || null;
+    }
+
+    const { error } = await supabase.from('activity_log').insert({
+      workspace_id: user.workspace_id,
+      entidad_tipo: 'oportunidad',
+      entidad_id: oppId,
+      tipo: 'comentario',
+      contenido: `${tipoLabel} ${contenido}`,
+      autor_id: autorId,
+    });
+
+    if (error) {
+      console.error('[accion] ACTIVIDAD error:', error);
+      await ctx.sendMessage('❌ No pude registrar la actividad. Intenta desde la app.');
+      await completeSession(supabase, ctx.session.id);
+      return;
+    }
+
+    // Refresh opportunity updated_at so pipeline shows recent activity
+    await supabase.from('oportunidades')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', oppId);
+
+    const msg = `✅ ${tipoLabel} registrada en ${bold(refName)}\n\n${contenido}`;
+    await ctx.sendMessage(msg);
+  } else {
+    // No opportunity found — just confirm the note
+    await ctx.sendMessage(`✅ ${tipoLabel}: ${contenido}\n\n💡 No encontré oportunidad para "${entity_hint}". Créala con: "Nueva oportunidad con ${entity_hint}"`);
+  }
+
+  await completeSession(supabase, ctx.session.id);
+}
+
+// ============================================================
+// UNCLEAR — Smart AI Suggestions (D96 v2)
 // ============================================================
 
 async function handleUnclear(ctx: HandlerContext): Promise<void> {
-  const { session, supabase } = ctx;
+  const { session, supabase, parsed } = ctx;
   const unclearCount = (session.context.unclear_count || 0) + 1;
 
   if (unclearCount >= 3) {
     const appUrl = Deno.env.get('APP_BASE_URL') || 'https://metrikone.co';
     await ctx.sendMessage(
-      `Parece que no estoy entendiendo bien. Te recomiendo usar la app para esto: ${appUrl}\n\nSi crees que debería entender tu mensaje, escríbeme 'ayuda' para ver qué puedo hacer.`
+      `Parece que no estoy entendiendo bien. Te recomiendo usar la app: ${appUrl}\n\nEscríbeme "ayuda" para ver qué puedo hacer.`
     );
     await completeSession(supabase, session.id);
     return;
   }
 
-  await ctx.sendMessage(
-    `No estoy seguro de entender. ¿Qué quieres hacer?\n\n1️⃣ Registrar un gasto\n2️⃣ Registrar horas\n3️⃣ Registrar un cobro\n4️⃣ Consultar un proyecto\n5️⃣ Ver mis números\n6️⃣ Otra cosa\n\nResponde con el número.`
-  );
-  await ctx.updateSession('awaiting_selection', {
-    intent: 'UNCLEAR', pending_action: 'W24',
-    unclear_count: unclearCount,
-    options: [
-      { id: 'GASTO_DIRECTO', label: 'Registrar un gasto' },
-      { id: 'HORAS', label: 'Registrar horas' },
-      { id: 'COBRO', label: 'Registrar un cobro' },
-      { id: 'ESTADO_PROYECTO', label: 'Consultar un proyecto' },
-      { id: 'MIS_NUMEROS', label: 'Ver mis números' },
-      { id: 'OTHER', label: 'Otra cosa' },
-    ],
-  });
+  // Use AI-suggested actions if available, otherwise fallback
+  const suggestions = parsed.fields.suggested_actions;
+  if (suggestions && suggestions.length > 0) {
+    // Build buttons from AI suggestions (max 3)
+    const buttons = suggestions.slice(0, 3).map((s: string, i: number) => ({
+      id: `btn_suggest_${i}`,
+      title: s.slice(0, 20),
+    }));
+    await ctx.sendButtons(
+      `No estoy seguro de entender. ¿Quisiste decir algo como...?`,
+      buttons,
+    );
+    await ctx.updateSession('awaiting_selection', {
+      intent: 'UNCLEAR', pending_action: 'W24',
+      unclear_count: unclearCount,
+      options: suggestions.map((s: string, i: number) => ({
+        id: `suggest_${i}`,
+        label: s,
+      })),
+    });
+  } else {
+    // Fallback: generic suggestions with buttons
+    await ctx.sendButtons(
+      `No estoy seguro de entender. ¿Qué quieres hacer?`,
+      [
+        { id: 'btn_suggest_0', title: 'Registrar algo' },
+        { id: 'btn_suggest_1', title: 'Consultar algo' },
+        { id: 'btn_suggest_2', title: 'Ver ayuda' },
+      ],
+    );
+    await ctx.updateSession('awaiting_selection', {
+      intent: 'UNCLEAR', pending_action: 'W24',
+      unclear_count: unclearCount,
+      options: [
+        { id: 'registro', label: 'Registrar algo' },
+        { id: 'consulta', label: 'Consultar algo' },
+        { id: 'ayuda', label: 'Ver ayuda' },
+      ],
+    });
+  }
 }
 
 // ============================================================
@@ -219,42 +503,48 @@ async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Selection (UNCLEAR fallback)
+  // Selection (UNCLEAR smart suggestions)
   if (session.state === 'awaiting_selection') {
     const options = context.options || [];
-    const selection = parseInt(text);
+    const btnId = message.interactive_reply;
 
-    if (isNaN(selection) || selection < 1 || selection > options.length) {
-      await ctx.sendMessage(`Responde con un número del 1 al ${options.length}.`);
-      return;
+    // Match button ID or number
+    let selected: typeof options[0] | undefined;
+    if (btnId) {
+      const idx = btnId.match(/btn_suggest_(\d)/)?.[1];
+      if (idx !== undefined) selected = options[parseInt(idx)];
+    }
+    if (!selected) {
+      const num = parseInt(text);
+      if (!isNaN(num) && num >= 1 && num <= options.length) {
+        selected = options[num - 1];
+      }
     }
 
-    const selected = options[selection - 1];
-
-    if (selected.id === 'OTHER') {
-      const appUrl = Deno.env.get('APP_BASE_URL') || 'https://metrikone.co';
-      await ctx.sendMessage(
-        `Escríbeme con más detalle qué necesitas y lo intento de nuevo. Si prefieres, entra a la app: ${appUrl}`
-      );
+    if (!selected) {
+      // User typed something new — treat as a fresh message, complete this session
       await completeSession(supabase, session.id);
       return;
     }
 
-    // User selected a specific intent — guide them
-    const intentGuide: Record<string, string> = {
-      GASTO_DIRECTO: 'Escríbeme algo como: "Gasté 180 mil en transporte para Pérez"',
-      HORAS: 'Escríbeme algo como: "Trabajé 4 horas en lo de María"',
-      COBRO: 'Escríbeme algo como: "Me pagaron 3 millones de Torres"',
-      ESTADO_PROYECTO: 'Escríbeme algo como: "¿Cómo va lo de Pérez?"',
-      MIS_NUMEROS: 'Escríbeme algo como: "¿Cómo estoy este mes?"',
-    };
-
-    await ctx.sendMessage(intentGuide[selected.id] || 'Escríbeme qué necesitas.');
+    // Route based on selection
+    if (selected.id === 'registro') {
+      await ctx.sendMessage('Escríbeme qué quieres registrar. Ejemplo:\n• "Gasté 180 mil en transporte para Pérez"\n• "Trabajé 4 horas en lo de María"\n• "Me pagaron 3 millones de Torres"');
+    } else if (selected.id === 'consulta') {
+      await ctx.sendMessage('Escríbeme qué quieres consultar. Ejemplo:\n• "¿Cómo va lo de Pérez?"\n• "¿Cómo estoy este mes?"\n• "¿Quién me debe?"');
+    } else if (selected.id === 'ayuda') {
+      await completeSession(supabase, session.id);
+      await handleAyuda(ctx);
+      return;
+    } else {
+      // AI-suggested action — guide the user
+      await ctx.sendMessage(`Escríbeme con más detalle. Por ejemplo si quieres "${selected.label}", escríbelo de forma natural.`);
+    }
     await completeSession(supabase, session.id);
     return;
   }
 
-  // Collecting (entity_hint for W22/W23)
+  // Collecting (entity_hint for W22/W23/W25/W26/W27)
   if (session.state === 'collecting') {
     const newCtx = {
       ...ctx,
@@ -262,12 +552,15 @@ async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
         ...ctx.parsed,
         intent: context.intent!,
         confidence: 1,
-        fields: { entity_hint: message.text.trim() },
+        fields: { ...context.parsed_fields, entity_hint: message.text.trim() },
       },
     };
     await completeSession(supabase, session.id);
     if (context.pending_action === 'W22') await handleOppGanada(newCtx);
     else if (context.pending_action === 'W23') await handleOppPerdida(newCtx);
+    else if (context.pending_action === 'W25') await handleOppNueva(newCtx);
+    else if (context.pending_action === 'W26') await handleOppAvanzar(newCtx);
+    else if (context.pending_action === 'W27') await handleActividad(newCtx);
     return;
   }
 }

@@ -185,6 +185,9 @@ async function routeToHandler(ctx: HandlerContext): Promise<void> {
     // Acción
     case 'OPP_GANADA':
     case 'OPP_PERDIDA':
+    case 'OPP_NUEVA':
+    case 'OPP_AVANZAR':
+    case 'ACTIVIDAD':
     case 'AYUDA':
     case 'UNCLEAR':
       await handleAccion(ctx);
@@ -240,7 +243,7 @@ async function handleSessionResponse(
   // Route to the appropriate handler based on pending action
   if (['W01', 'W02', 'W03', 'W03T', 'W04', 'W06', 'W32'].includes(pendingAction)) {
     await handleRegistro(ctx);
-  } else if (['W22', 'W23', 'W24'].includes(pendingAction)) {
+  } else if (['W22', 'W23', 'W24', 'W25', 'W26', 'W27'].includes(pendingAction)) {
     await handleAccion(ctx);
   } else if (['W14', 'W15', 'W16', 'W17', 'W19'].includes(pendingAction)) {
     await handleConsulta(ctx);
@@ -325,6 +328,14 @@ function extractMessage(payload: any): IncomingMessage | null {
     const value = changes?.value;
 
     if (!value?.messages?.[0]) return null;
+
+    // Ignore messages sent to other phone numbers (e.g. Mi Bolsillo)
+    const receivedPhoneNumberId = value?.metadata?.phone_number_id;
+    const ownPhoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+    if (ownPhoneNumberId && receivedPhoneNumberId && receivedPhoneNumberId !== ownPhoneNumberId) {
+      console.log(`[wa-webhook] Ignoring message for phone_number_id ${receivedPhoneNumberId} (not ours: ${ownPhoneNumberId})`);
+      return null;
+    }
 
     const msg = value.messages[0];
     const phone = msg.from;

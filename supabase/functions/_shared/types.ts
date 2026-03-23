@@ -23,6 +23,9 @@ export type Intent =
   | 'INFO_CONTACTO'
   | 'OPP_GANADA'
   | 'OPP_PERDIDA'
+  | 'OPP_NUEVA'
+  | 'OPP_AVANZAR'
+  | 'ACTIVIDAD'
   | 'AYUDA'
   | 'UNCLEAR';
 
@@ -39,6 +42,10 @@ export interface ParsedFields {
   role?: string;
   note?: string;
   mensaje_original?: string;  // Full user message text (injected by webhook)
+  stage_hint?: string;         // Target pipeline stage for OPP_AVANZAR
+  activity_text?: string;      // Activity description for ACTIVIDAD
+  suggested_actions?: string[]; // AI-suggested actions for smart UNCLEAR
+  saldo_teorico?: number;      // Theoretical balance (injected by handler)
 }
 
 export interface ParseResult {
@@ -79,6 +86,13 @@ export interface SessionContext {
   borrador_id?: string;
   gasto_id?: string;
   unclear_count?: number;
+  // Session memory (persists across interactions)
+  last_project_id?: string;
+  last_project_name?: string;
+  // OPP_AVANZAR
+  target_stage?: string;
+  // ACTIVIDAD
+  activity_text?: string;
 }
 
 export interface BotSession {
@@ -180,6 +194,7 @@ export const COLLABORATOR_ALLOWED_INTENTS: Intent[] = [
   'TIMER_ESTADO',
   'NOTA_PROYECTO',
   'ESTADO_PROYECTO',
+  'ACTIVIDAD',
   'AYUDA',
 ];
 

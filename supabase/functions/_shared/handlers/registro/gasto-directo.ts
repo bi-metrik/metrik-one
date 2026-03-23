@@ -6,6 +6,7 @@ import type { HandlerContext } from '../../types.ts';
 import { CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP, formatPct, bold, formatProject } from '../../wa-format.ts';
 import { findProjects, findProjectByCode, findActiveProjects, matchCategory, findMatchingBorrador } from '../../wa-lookup.ts';
+import { executeRegistro } from './execute.ts';
 
 export async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
@@ -20,6 +21,8 @@ export async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
   const categoria = category_hint || matchCategory(concept || '') || 'otros';
   console.log(`[registro] W01 category_hint=${category_hint}, concept=${concept}, matchCategory=${matchCategory(concept || '')}, final=${categoria}`);
 
+  const isHighConfidence = parsed.confidence >= 0.8;
+
   // Fast path: project_code → exact match by código
   if (project_code) {
     const project = await findProjectByCode(supabase, user.workspace_id, project_code);
@@ -27,6 +30,8 @@ export async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
       const borrador = await findMatchingBorrador(supabase, user.workspace_id, concept || '', categoria, amount);
       if (borrador) {
         await showBorradorMatch(ctx, borrador, project, amount, categoria);
+      } else if (isHighConfidence) {
+        await autoRegisterGasto(ctx, project, amount, categoria, concept);
       } else {
         await showGastoDirectoConfirmation(ctx, project, amount, categoria, concept);
       }
@@ -111,6 +116,8 @@ export async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     const borrador = await findMatchingBorrador(supabase, user.workspace_id, concept || '', categoria, amount);
     if (borrador) {
       await showBorradorMatch(ctx, borrador, p, amount, categoria);
+    } else if (isHighConfidence) {
+      await autoRegisterGasto(ctx, p, amount, categoria, concept);
     } else {
       await showGastoDirectoConfirmation(ctx, p, amount, categoria, concept);
     }
@@ -162,6 +169,19 @@ export async function showGastoDirectoConfirmation(ctx: HandlerContext, project:
     amount, categoria,
     parsed_fields: { ...ctx.parsed.fields, concept },
   });
+}
+
+/** Auto-register gasto without confirmation (high confidence, single match) */
+async function autoRegisterGasto(ctx: HandlerContext, project: any, amount: number, categoria: string, concept?: string): Promise<void> {
+  const proyectoId = project.proyecto_id || project.id;
+  // Set up session as if confirmed, then execute directly
+  await ctx.updateSession('confirming', {
+    intent: 'GASTO_DIRECTO', pending_action: 'W01',
+    proyecto_id: proyectoId, proyecto_nombre: project.nombre,
+    amount, categoria,
+    parsed_fields: { ...ctx.parsed.fields, concept },
+  });
+  await executeRegistro(ctx);
 }
 
 export async function showBorradorMatch(ctx: HandlerContext, borrador: any, project: any, amount: number, categoria: string): Promise<void> {

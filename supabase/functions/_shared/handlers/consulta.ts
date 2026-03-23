@@ -65,19 +65,21 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
     ? (Number(p.horas_reales) / Number(p.horas_estimadas)) * 100
     : 0;
 
-  let msg = `📂 ${bold(formatProject(p))}\n\n├ Estado: Activo`;
-  msg += `\n├ ⏱️ Horas: ${Number(p.horas_reales) || 0} / ${Number(p.horas_estimadas) || 0}h (${formatPct(horasPct)})`;
-  msg += `\n├ 💰 Presupuesto: ${formatCOP(Number(p.costo_acumulado))} / ${formatCOP(Number(p.presupuesto_total))} (${formatPct(Number(p.presupuesto_consumido_pct))})`;
-  msg += `\n├ 📄 Facturado: ${formatCOP(Number(p.facturado))} — Cobrado: ${formatCOP(Number(p.cobrado))}`;
-  msg += `\n├ 💵 Cartera: ${formatCOP(Number(p.cartera))}`;
+  let msg = `📂 ${bold(formatProject(p))}`;
+  msg += `\n⏱ ${Number(p.horas_reales) || 0}/${Number(p.horas_estimadas) || 0}h (${formatPct(horasPct)})`;
+  msg += `\n💰 ${formatCOP(Number(p.costo_acumulado))}/${formatCOP(Number(p.presupuesto_total))} (${formatPct(Number(p.presupuesto_consumido_pct))})`;
+  const facturado = Number(p.facturado);
+  const cobrado = Number(p.cobrado);
+  if (facturado > 0 || cobrado > 0) {
+    msg += `\n📄 Fact: ${formatCOPShort(facturado)} · Cobr: ${formatCOPShort(cobrado)} · Cart: ${formatCOPShort(facturado - cobrado)}`;
+  }
 
   // Warning if hours ahead of progress
-  // (We don't have avance_porcentaje in the view directly, fetch from proyectos)
   const { data: proyecto } = await supabase.from('proyectos').select('avance_porcentaje').eq('id', p.id).single();
   const avance = proyecto?.avance_porcentaje || 0;
 
   if (horasPct > avance + 20 && avance > 0) {
-    msg += `\n\n⚠️ Horas avanzadas (${formatPct(horasPct)}) vs avance reportado (${avance}%). Revisa si necesitas ajustar el estimado.`;
+    msg += `\n⚠️ Horas (${formatPct(horasPct)}) > avance (${avance}%)`;
   }
 
   await ctx.sendMessage(msg);
@@ -115,25 +117,22 @@ async function handleEstadoPipeline(ctx: HandlerContext): Promise<void> {
     weightedValue += Number(o.valor_estimado || 0) * (Number(o.probabilidad) / 100);
   }
 
-  let msg = '📊 Tu pipeline:\n';
+  let msg = `📊 Pipeline: ${opps.length} oportunidades\n`;
   const stageOrder = ['lead_nuevo', 'contacto_inicial', 'discovery_hecha', 'propuesta_enviada', 'negociacion'];
 
   for (const stage of stageOrder) {
     const s = stages[stage];
     if (s) {
-      msg += `\n├ ${PIPELINE_STAGE_LABELS[stage]}: ${s.count} (${formatCOPShort(s.value)})`;
-    } else {
-      msg += `\n├ ${PIPELINE_STAGE_LABELS[stage]}: 0`;
+      msg += `\n${PIPELINE_STAGE_LABELS[stage]}: ${s.count} · ${formatCOPShort(s.value)}`;
     }
   }
 
-  msg += `\n\n💰 Valor total: ${formatCOPShort(totalValue)}`;
-  msg += `\n💰 Ponderado: ${formatCOPShort(weightedValue)}`;
+  msg += `\n\n💰 Total: ${formatCOPShort(totalValue)} · Pond: ${formatCOPShort(weightedValue)}`;
 
-  // Check for stale opportunities (>10 days without activity)
+  // Stale opportunities (>10 days without activity)
   const stale = opps.filter((o: any) => daysSince(o.updated_at) > 10);
   if (stale.length > 0) {
-    msg += `\n\n⚠️ ${bold(stale[0].descripcion)} sin actividad hace ${daysSince(stale[0].updated_at)} días`;
+    msg += `\n⚠️ ${bold(stale[0].descripcion)} sin mov. ${daysSince(stale[0].updated_at)}d`;
   }
 
   await ctx.sendMessage(msg);
@@ -187,41 +186,33 @@ async function handleMisNumeros(ctx: HandlerContext): Promise<void> {
     .eq('tipo', 'conciliacion')
     .single();
 
-  let msg = `📊 Tus números — ${currentMonthName()} ${currentYear()}:\n`;
+  let msg = `📊 ${currentMonthName()} ${currentYear()}`;
 
-  // Bank balance line
+  // Bank balance
   if (saldo) {
     const dias = daysSince(saldo.fecha);
     const diff = Number(saldo.diferencia);
     if (dias > 7) {
-      msg += `\n├ 🏦 Banco: sin actualizar hace ${dias} días ⚠️ Escríbeme tu saldo`;
-    } else if (Math.abs(diff) <= 50000) {
-      msg += `\n├ 🏦 Banco: ${formatCOP(Number(saldo.saldo_real))} (${formatAgo(dias)}) ✅`;
-    } else if (Math.abs(diff) <= 500000) {
-      msg += `\n├ 🏦 Banco: ${formatCOP(Number(saldo.saldo_real))} (${formatAgo(dias)}) ⚠️ Dif: ${formatCOPShort(diff)}`;
+      msg += `\n🏦 ${formatCOPShort(Number(saldo.saldo_real))} (${formatAgo(dias)}) ⚠️ Actualiza`;
     } else {
-      msg += `\n├ 🏦 Banco: ${formatCOP(Number(saldo.saldo_real))} (${formatAgo(dias)}) ⚠️ Dif: ${formatCOPShort(diff)} — Revisa en app`;
+      const diffIcon = Math.abs(diff) <= 50000 ? '✅' : `⚠️ Dif: ${formatCOPShort(diff)}`;
+      msg += `\n🏦 ${formatCOP(Number(saldo.saldo_real))} ${diffIcon}`;
     }
-  } else {
-    msg += `\n├ 🏦 Banco: sin configurar. Escríbeme "Mi saldo es [monto]"`;
   }
 
-  msg += `\n├ 💵 Ingresos cobrados: ${formatCOP(totalCobros)}`;
-  msg += `\n├ 💸 Gastos: ${formatCOP(totalGastos)}`;
-  msg += `\n├ 📈 Utilidad bruta: ${formatCOP(utilidad)}`;
-  msg += `\n├ 🏛️ Provisión impuestos: ~${formatCOP(impuestos)}`;
-  msg += `\n└ 💰 Disponible para ti: ~${formatCOP(disponible)}`;
+  msg += `\n💵 Ingresos: ${formatCOPShort(totalCobros)} · Gastos: ${formatCOPShort(totalGastos)}`;
+  msg += `\n📈 Utilidad: ${formatCOPShort(utilidad)} · Disp: ~${formatCOPShort(disponible)}`;
 
   // Runway
   if (saldo && totalGastos > 0) {
     const runway = Number(saldo.saldo_real) / (totalGastos || 1);
-    msg += `\n\n🏦 Runway: ${runway.toFixed(1)} meses`;
+    msg += `\n🏦 Runway: ${runway.toFixed(1)} meses`;
   }
 
   // Streak
   if (streak && streak.semanas_actuales > 0) {
     const medal = STREAK_MILESTONES[streak.semanas_actuales] || '';
-    msg += `\n🏃 Racha conciliación: ${streak.semanas_actuales} semanas ${medal}`;
+    msg += `\n🏃 Racha: ${streak.semanas_actuales} sem ${medal}`;
   }
 
   await ctx.sendMessage(msg);
