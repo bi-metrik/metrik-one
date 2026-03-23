@@ -17,6 +17,7 @@ import { ETAPA_CONFIG, ETAPAS_ACTIVAS, RAZONES_PERDIDA, ESTADO_COTIZACION_CONFIG
 import { formatCOP } from '@/lib/contacts/constants'
 import type { EtapaPipeline, EstadoCotizacion } from '@/lib/pipeline/constants'
 import ActivityLog from '@/components/activity-log'
+import CustomFieldsSection from '@/components/custom-fields-section'
 import FiscalGateForm from './fiscal-gate-form'
 
 interface OportunidadRow {
@@ -32,6 +33,7 @@ interface OportunidadRow {
   razon_perdida: string | null
   carpeta_url: string | null
   responsable_id: string | null
+  custom_data: unknown
   contactos: { id: string; nombre: string; telefono: string | null; email: string | null } | null
   empresas: { id: string; nombre: string; sector: string | null; numero_documento: string | null; tipo_documento: string | null; tipo_persona: string | null; regimen_tributario: string | null; gran_contribuyente: boolean | null; agente_retenedor: boolean | null; autorretenedor: boolean | null } | null
 }
@@ -484,6 +486,13 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
           </div>
         )}
       </div>
+
+      {/* Campos custom + Labels */}
+      <CustomFieldsSection
+        entidad="oportunidad"
+        entidadId={oportunidad.id}
+        initialCustomData={(oportunidad.custom_data as Record<string, unknown> | null) ?? {}}
+      />
 
       {/* Actividad */}
       <div className="space-y-3 rounded-lg border p-4">

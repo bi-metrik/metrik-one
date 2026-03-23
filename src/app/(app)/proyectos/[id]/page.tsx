@@ -26,6 +26,7 @@ export default async function ProyectoDetailPage({ params }: Props) {
       oportunidadId={data.oportunidadId}
       responsable={data.responsable}
       responsableComercial={data.responsableComercial}
+      customData={data.customData}
     />
   )
 }

@@ -235,7 +235,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   // Get the oportunidad to find empresa_id
   const { data: opp } = await supabase
     .from('oportunidades')
-    .select('empresa_id, descripcion, valor_estimado, contacto_id, responsable_id')
+    .select('empresa_id, descripcion, valor_estimado, contacto_id, responsable_id, custom_data')
     .eq('id', id)
     .single()
 
@@ -384,6 +384,34 @@ export async function ganarOportunidad(id: string, fiscalData?: {
 
   if (projError || !proyecto) {
     return { success: false, error: projError?.message ?? 'Error creando proyecto' }
+  }
+
+  // Inherit custom_data via field mappings (oportunidad → proyecto)
+  const oppCustomData = (opp.custom_data as Record<string, unknown>) ?? {}
+  if (Object.keys(oppCustomData).length > 0) {
+    const { data: mappings } = await supabase
+      .from('custom_field_mappings')
+      .select('origen_slug, destino_slug')
+      .eq('workspace_id', wsId)
+      .eq('origen_entidad', 'oportunidad')
+      .eq('destino_entidad', 'proyecto')
+      .eq('activo', true)
+
+    if (mappings && mappings.length > 0) {
+      const proyCustomData: Record<string, unknown> = {}
+      for (const m of mappings) {
+        const val = oppCustomData[m.origen_slug]
+        if (val !== undefined && val !== null) {
+          proyCustomData[m.destino_slug] = val
+        }
+      }
+      if (Object.keys(proyCustomData).length > 0) {
+        await supabase
+          .from('proyectos')
+          .update({ custom_data: proyCustomData as unknown as Record<string, never> })
+          .eq('id', proyecto.id)
+      }
+    }
   }
 
   // Create proyecto_rubros from cotización items (with full detail inheritance)

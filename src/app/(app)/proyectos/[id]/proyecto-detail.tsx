@@ -16,6 +16,7 @@ import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
 import ProyectoAlertas from './proyecto-alertas'
 import ActivityLog from '@/components/activity-log'
+import CustomFieldsSection from '@/components/custom-fields-section'
 
 // Category display config (same as movimientos)
 const CATEGORIA_CONFIG: Record<string, { label: string; color: string }> = {
@@ -141,6 +142,7 @@ interface Props {
   oportunidadId?: string | null
   responsable?: { id: string; full_name: string } | null
   responsableComercial?: { id: string; full_name: string } | null
+  customData?: Record<string, unknown>
 }
 
 // ── Component ─────────────────────────────────────────
@@ -158,6 +160,7 @@ export default function ProyectoDetail({
   oportunidadId,
   responsable,
   responsableComercial,
+  customData,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -700,6 +703,13 @@ export default function ProyectoDetail({
           )
         )}
       </div>
+
+      {/* ─── Campos custom + Labels ─── */}
+      <CustomFieldsSection
+        entidad="proyecto"
+        entidadId={proyectoId}
+        initialCustomData={customData ?? {}}
+      />
 
       {/* ─── Actividad ─── */}
       <div className="space-y-3 rounded-lg border p-4">

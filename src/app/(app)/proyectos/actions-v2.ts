@@ -275,7 +275,7 @@ export async function getProyectoDetalle(id: string) {
   // D131: Fetch cotizacion_id + responsable for link to approved cotización
   const { data: proyectoBase } = await supabase
     .from('proyectos')
-    .select('cotizacion_id, oportunidad_id, responsable_id, responsable_comercial_id')
+    .select('cotizacion_id, oportunidad_id, responsable_id, responsable_comercial_id, custom_data')
     .eq('id', id)
     .single()
 
@@ -355,6 +355,7 @@ export async function getProyectoDetalle(id: string) {
     oportunidadId: proyectoBase?.oportunidad_id ?? null,
     responsable,
     responsableComercial,
+    customData: (proyectoBase?.custom_data as Record<string, unknown>) ?? {},
   }
 }
 

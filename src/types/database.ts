@@ -598,6 +598,7 @@ export type Database = {
         Row: {
           comision_porcentaje: number | null
           created_at: string | null
+          custom_data: Json | null
           email: string | null
           fuente_adquisicion: string | null
           fuente_detalle: string | null
@@ -614,6 +615,7 @@ export type Database = {
         Insert: {
           comision_porcentaje?: number | null
           created_at?: string | null
+          custom_data?: Json | null
           email?: string | null
           fuente_adquisicion?: string | null
           fuente_detalle?: string | null
@@ -630,6 +632,7 @@ export type Database = {
         Update: {
           comision_porcentaje?: number | null
           created_at?: string | null
+          custom_data?: Json | null
           email?: string | null
           fuente_adquisicion?: string | null
           fuente_detalle?: string | null
@@ -887,6 +890,97 @@ export type Database = {
           },
         ]
       }
+      custom_field_mappings: {
+        Row: {
+          activo: boolean | null
+          destino_entidad: string
+          destino_slug: string
+          id: string
+          origen_entidad: string
+          origen_slug: string
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean | null
+          destino_entidad: string
+          destino_slug: string
+          id?: string
+          origen_entidad: string
+          origen_slug: string
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean | null
+          destino_entidad?: string
+          destino_slug?: string
+          id?: string
+          origen_entidad?: string
+          origen_slug?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custom_field_mappings_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      custom_fields: {
+        Row: {
+          activo: boolean | null
+          created_at: string | null
+          entidad: string
+          id: string
+          nombre: string
+          obligatorio: boolean | null
+          opciones: Json | null
+          orden: number | null
+          slug: string
+          tipo: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean | null
+          created_at?: string | null
+          entidad: string
+          id?: string
+          nombre: string
+          obligatorio?: boolean | null
+          opciones?: Json | null
+          orden?: number | null
+          slug: string
+          tipo: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean | null
+          created_at?: string | null
+          entidad?: string
+          id?: string
+          nombre?: string
+          obligatorio?: boolean | null
+          opciones?: Json | null
+          orden?: number | null
+          slug?: string
+          tipo?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custom_fields_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       empresas: {
         Row: {
           actividad_ciiu: string | null
@@ -898,6 +992,7 @@ export type Database = {
           contacto_id: string | null
           contacto_nombre: string | null
           created_at: string | null
+          custom_data: Json | null
           departamento: string | null
           direccion_fiscal: string | null
           email_fiscal: string | null
@@ -932,6 +1027,7 @@ export type Database = {
           contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
+          custom_data?: Json | null
           departamento?: string | null
           direccion_fiscal?: string | null
           email_fiscal?: string | null
@@ -966,6 +1062,7 @@ export type Database = {
           contacto_id?: string | null
           contacto_nombre?: string | null
           created_at?: string | null
+          custom_data?: Json | null
           departamento?: string | null
           direccion_fiscal?: string | null
           email_fiscal?: string | null
@@ -1000,6 +1097,51 @@ export type Database = {
           },
           {
             foreignKeyName: "empresas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      entity_labels: {
+        Row: {
+          applied_by: string | null
+          created_at: string | null
+          entidad: string
+          entidad_id: string
+          id: string
+          label_id: string
+          workspace_id: string
+        }
+        Insert: {
+          applied_by?: string | null
+          created_at?: string | null
+          entidad: string
+          entidad_id: string
+          id?: string
+          label_id: string
+          workspace_id: string
+        }
+        Update: {
+          applied_by?: string | null
+          created_at?: string | null
+          entidad?: string
+          entidad_id?: string
+          id?: string
+          label_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_labels_label_id_fkey"
+            columns: ["label_id"]
+            isOneToOne: false
+            referencedRelation: "labels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_labels_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -1906,6 +2048,41 @@ export type Database = {
           },
         ]
       }
+      labels: {
+        Row: {
+          color: string
+          created_by: string | null
+          entidad: string
+          id: string
+          nombre: string
+          workspace_id: string
+        }
+        Insert: {
+          color?: string
+          created_by?: string | null
+          entidad: string
+          id?: string
+          nombre: string
+          workspace_id: string
+        }
+        Update: {
+          color?: string
+          created_by?: string | null
+          entidad?: string
+          id?: string
+          nombre?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "labels_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       monthly_targets: {
         Row: {
           collection_target: number | null
@@ -2081,6 +2258,7 @@ export type Database = {
           colaboradores: string[] | null
           contacto_id: string
           created_at: string | null
+          custom_data: Json | null
           descripcion: string
           empresa_id: string
           etapa: string
@@ -2101,6 +2279,7 @@ export type Database = {
           colaboradores?: string[] | null
           contacto_id: string
           created_at?: string | null
+          custom_data?: Json | null
           descripcion: string
           empresa_id: string
           etapa?: string
@@ -2121,6 +2300,7 @@ export type Database = {
           colaboradores?: string[] | null
           contacto_id?: string
           created_at?: string | null
+          custom_data?: Json | null
           descripcion?: string
           empresa_id?: string
           etapa?: string
@@ -2644,6 +2824,7 @@ export type Database = {
           contacto_id: string | null
           cotizacion_id: string | null
           created_at: string | null
+          custom_data: Json | null
           empresa_id: string | null
           estado: string
           fecha_cierre: string | null
@@ -2676,6 +2857,7 @@ export type Database = {
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
+          custom_data?: Json | null
           empresa_id?: string | null
           estado?: string
           fecha_cierre?: string | null
@@ -2708,6 +2890,7 @@ export type Database = {
           contacto_id?: string | null
           cotizacion_id?: string | null
           created_at?: string | null
+          custom_data?: Json | null
           empresa_id?: string | null
           estado?: string
           fecha_cierre?: string | null
@@ -4111,7 +4294,10 @@ export type Cobro = Database['public']['Tables']['cobros']['Row']
 export type Contact = Database['public']['Tables']['contacts']['Row']
 export type Contacto = Database['public']['Tables']['contactos']['Row']
 export type Cotizacion = Database['public']['Tables']['cotizaciones']['Row']
+export type CustomField = Database['public']['Tables']['custom_fields']['Row']
+export type CustomFieldMapping = Database['public']['Tables']['custom_field_mappings']['Row']
 export type Empresa = Database['public']['Tables']['empresas']['Row']
+export type EntityLabel = Database['public']['Tables']['entity_labels']['Row']
 export type Expense = Database['public']['Tables']['expenses']['Row']
 export type ExpenseCategory = Database['public']['Tables']['expense_categories']['Row']
 export type Factura = Database['public']['Tables']['facturas']['Row']
@@ -4120,6 +4306,7 @@ export type FixedExpense = Database['public']['Tables']['fixed_expenses']['Row']
 export type Gasto = Database['public']['Tables']['gastos']['Row']
 export type Hora = Database['public']['Tables']['horas']['Row']
 export type Invoice = Database['public']['Tables']['invoices']['Row']
+export type Label = Database['public']['Tables']['labels']['Row']
 export type MonthlyTarget = Database['public']['Tables']['monthly_targets']['Row']
 export type Note = Database['public']['Tables']['notes']['Row']
 export type Oportunidad = Database['public']['Tables']['oportunidades']['Row']
