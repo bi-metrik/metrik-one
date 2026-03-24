@@ -189,7 +189,7 @@ metrik-one/
 
 ## Base de datos
 
-48 tablas + 5 vistas SQL + 4 funciones PostgreSQL. Todas las tablas con `workspace_id` + RLS.
+52 tablas + 5 vistas SQL + 4 funciones PostgreSQL. Todas las tablas con `workspace_id` + RLS.
 
 ### Tablas principales
 - `workspaces` — Tenant: slug, nombre, suscripcion, branding (colores, logo)
@@ -204,6 +204,9 @@ metrik-one/
 - `empresas` + `contactos` — Directorio
 - `causaciones_log` — Auditoria flujo contable
 - `horas` + `staff` — Registro de horas y equipo interno
+- `custom_fields` + `custom_field_mappings` — Campos custom por tenant + herencia entre entidades
+- `labels` + `entity_labels` — Etiquetas con colores, many-to-many con entidades
+- `activity_log` — Timeline de comentarios + cambios automaticos del sistema
 
 ### Vistas
 - `v_proyecto_financiero` — Resumen financiero por proyecto
@@ -284,22 +287,22 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-03-18
+**Sesion:** 2026-03-22
 **Branch:** main
 
 Que se hizo:
-- Botones interactivos WhatsApp: reemplazo de todas las confirmaciones texto "¿Confirmo? (Si/No)" por botones tappables (Confirmar/Cancelar) en registro.ts, accion.ts, novedad.ts
-- Botones para soporte fotografico: mensaje afirmativo "Envia el soporte fotografico. Si no lo tienes, lo puedes agregar despues." + boton "Despues"
-- `sendButtons` agregado a `HandlerContext` interface y wired en ambos `ctx` del webhook
-- Retrocompatibilidad: handlers siguen aceptando texto ademas de botones (btn_confirm/btn_cancel/btn_despues)
-- `awaiting_selection` handler actualizado para reconocer interactive_reply por ID de opcion
-- Fix deploy: `--no-verify-jwt` requerido para wa-webhook (Meta no envia JWT, usa HMAC signature)
-- Edge function desplegada v47 con botones interactivos
+- [98G] Activity Log: componente timeline (comentarios 280 chars + menciones + links + cambios automaticos), reemplaza NotesSection en oportunidad y proyecto detail
+- Logging automatico: moveOportunidad, perderOportunidad, ganarOportunidad logean cambios de etapa; updateOportunidad logea cambios de responsable; cambiarEstadoProyecto y cerrarProyecto logean cambios de estado
+- [98H] Nivel 1 — Custom Fields + Labels + Herencia: migration con 4 tablas (custom_fields, custom_field_mappings, labels, entity_labels) + custom_data JSONB en oportunidades/proyectos/contactos/empresas + GIN indexes + RLS
+- CustomFieldsSection: componente dinamico que renderiza campos (text/number/select/boolean/date) + toggle de labels como pills con color
+- Herencia custom_data en handoff: ganarOportunidad copia campos segun custom_field_mappings configurados
+- Integrado en oportunidad-detail y proyecto-detail
+- Skill `/configure-fields` creado para configurar campos custom, labels y mappings por workspace via SQL (operacion Clarity)
 
-**Ultimo commit:** `7f4c510 feat: modulo /equipo — gestion y aprobacion de horas del equipo`
-**Edge function:** wa-webhook v47 (desplegada, cambios locales pendientes de commit)
+**Ultimo commit:** `220fdff feat: [98H] custom fields, labels, and field inheritance`
+**Edge function:** wa-webhook v47 (cambios locales pendientes de commit)
 
-## Estado actual (2026-03-18)
+## Estado actual (2026-03-22)
 
 - **Branch:** main (up to date con remote)
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
@@ -309,7 +312,7 @@ Que se hizo:
 
 | Feature | Prioridad | Estado |
 |---------|-----------|--------|
-| Multiusuario completo (98G) — 5 niveles de rol | Alta | Planeado |
+| Notificaciones in-app | Alta | Tabla existe, frontend pendiente — ultimo feature MVP |
 | Rol contador (solo causacion) | Alta | Planeado |
 | Wizard fiscal Felipe (D234-D236) | Media | Schema listo |
 | Nomina/Payroll (D129) | Media | Schema listo |
@@ -318,7 +321,6 @@ Que se hizo:
 | Alegra sync (contabilidad) | Baja | 5% (schema listo) |
 | Subscriptions/Billing (Stripe) | Baja | No iniciado |
 | Reconciliacion bancaria | Baja | Schema listo |
-| Notificaciones in-app | Baja | Tabla existe |
 | Dark mode | Baja | next-themes instalado, parcial |
 
 ## Gotchas y convenciones
@@ -356,11 +358,18 @@ Que se hizo:
 - [x] Modulo /equipo con gestion de horas — completado 2026-03-18
 - [x] Costos ejecutados por categoria en proyecto — completado 2026-03-18
 - [x] Costo horas por tarifa individual de staff — completado 2026-03-18
+- [x] Sistema de roles [98G]: 5 niveles, proteccion paginas, filtrado operador, dual responsables — completado 2026-03-22
+- [x] Mi Negocio rediseno: sidebar + acordeon mobile + Mi Plan card — completado 2026-03-22
+- [x] Tab bar mobile: 4 tabs + "Mas" overflow — completado 2026-03-22
+- [x] Activity Log / Comentarios: timeline con menciones, links, cambios automaticos — completado 2026-03-22
+- [x] [98H] Custom Fields + Labels + Herencia nivel 1 — completado 2026-03-22
+- [ ] Notificaciones in-app — ultimo feature antes de cerrar MVP
 - [ ] Deducible toggle en modulo causacion (contador activa/desactiva)
 - [ ] AI-suggested deducibility para gastos
 - [ ] Commitear cambios de botones WhatsApp (accion.ts, novedad.ts, types.ts, wa-webhook/index.ts)
 - [ ] WhatsApp bot: titulo limpio de gastos (no usar mensaje_original como titulo)
 - [ ] Verificar que registro de horas desde proyecto pasa created_by correctamente
+- [ ] Custom fields en contactos/empresas detail (cuando se creen esas vistas)
 
 ## Decisiones clave
 
@@ -378,3 +387,8 @@ Que se hizo:
 | 2026-03-18 | Barras de costos: umbrales 70/90/100, slate sin presupuesto | Consenso Vera+Kenji+Kaori+Hana. Estandar EVM simplificado |
 | 2026-03-18 | WhatsApp botones interactivos para confirmaciones | UX mejorada: botones tappables en vez de texto libre. IDs estandar: btn_confirm, btn_cancel, btn_despues |
 | 2026-03-18 | wa-webhook deploy siempre con --no-verify-jwt | Meta envia HMAC signature, no JWT. Sin este flag el webhook rechaza todo con 401 |
+| 2026-03-22 | Mi Negocio: sidebar desktop + acordeon mobile | Cards en sidebar, contenido expande al lado (desktop) o inline debajo (mobile). Mi Plan es card regular |
+| 2026-03-22 | Tab bar mobile: 4 primarios + "Mas" | owner/admin: Numeros, Oportunidades, Proyectos, Tableros. Resto en panel expandible. Roles con <=4 items no ven boton Mas |
+| 2026-03-22 | Activity Log reemplaza notes-section | Comentarios tipo tweet (280 chars) + menciones + links + cambios automaticos del sistema. Tabla activity_log ya en produccion |
+| 2026-03-22 | [98H] Custom fields JSONB, no ALTER TABLE por cliente | D154: Campos custom en custom_data JSONB. Solo MéTRIK configura via Clarity (skill /configure-fields). Labels como many-to-many con colores |
+| 2026-03-22 | Herencia custom_data en handoff via mappings | Oportunidad→Proyecto: custom_field_mappings define que slugs se copian. Idempotente, configurable por workspace |
