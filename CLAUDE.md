@@ -287,37 +287,45 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-03-22
+**Sesion:** 2026-03-24
 **Branch:** main
 
 Que se hizo:
-- [98G] Activity Log: componente timeline (comentarios 280 chars + menciones + links + cambios automaticos), reemplaza NotesSection en oportunidad y proyecto detail
-- Logging automatico: moveOportunidad, perderOportunidad, ganarOportunidad logean cambios de etapa; updateOportunidad logea cambios de responsable; cambiarEstadoProyecto y cerrarProyecto logean cambios de estado
-- [98H] Nivel 1 — Custom Fields + Labels + Herencia: migration con 4 tablas (custom_fields, custom_field_mappings, labels, entity_labels) + custom_data JSONB en oportunidades/proyectos/contactos/empresas + GIN indexes + RLS
-- CustomFieldsSection: componente dinamico que renderiza campos (text/number/select/boolean/date) + toggle de labels como pills con color
-- Herencia custom_data en handoff: ganarOportunidad copia campos segun custom_field_mappings configurados
-- Integrado en oportunidad-detail y proyecto-detail
-- Skill `/configure-fields` creado para configurar campos custom, labels y mappings por workspace via SQL (operacion Clarity)
+- Seed transcripcion sistema de notificaciones (sesion 2026-03-23) → ficha en `metrik-docs/docs/95_ideas/20260323_sistema-notificaciones-one.md`
+- Modulo completo notificaciones in-app: N1-N8b + D170 (avance calculado) + D171 (soft gates) + D172 (etapa_historial) + D173 (fecha_entrega_estimada) + D176 (tres estados proyecto)
+- CRON_SECRET agregado a Vercel con `printf` (sin whitespace), redesploy exitoso
+- Analisis de estructura de roles por etapa de empresa (Hana + Kaori + debate directivo)
+- Decision: roles genericos (no especializados) + area como tag en profiles
+- Supervisor (5° rol): permisos operativo-comerciales, ve todo sin delete ni causacion
+- Contador (6° rol): solo causacion, ilimitado por workspace sin costo de licencia
+- profiles.area (comercial/operaciones/null) afecta routing N1/N7, no permisos
+- Commit docs + MVP_PLAN_CONSOLIDADO.md
 
-**Ultimo commit:** `220fdff feat: [98H] custom fields, labels, and field inheritance`
-**Edge function:** wa-webhook v47 (cambios locales pendientes de commit)
+**Commits de sesion:**
+- `81d57fc` feat: modulo completo de notificaciones in-app (N1-N8b + D170-D176)
+- `efd8ded` feat: [sprint-10] agregar roles supervisor y contador
+- `f5fc31f` docs: actualizar contexto sesion 2026-03-22 y agregar plan MVP consolidado
 
-## Estado actual (2026-03-22)
+## Estado actual (2026-03-24)
 
 - **Branch:** main (up to date con remote)
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
+- **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
 
 ## Features NO implementados (Roadmap)
 
 | Feature | Prioridad | Estado |
 |---------|-----------|--------|
-| Notificaciones in-app | Alta | Tabla existe, frontend pendiente — ultimo feature MVP |
-| Rol contador (solo causacion) | Alta | Planeado |
+| Notificaciones in-app | Alta | COMPLETADO 2026-03-24 |
+| Rol supervisor (5°) | Alta | COMPLETADO 2026-03-24 |
+| Rol contador (6°, solo causacion) | Alta | COMPLETADO 2026-03-24 |
+| D168 Campanazo digital (confetti al cerrar deal) | Media | Post-MVP, diseno cerrado, 2-3h |
+| Google OAuth | Media | Codigo listo, faltan credenciales en Supabase |
 | Wizard fiscal Felipe (D234-D236) | Media | Schema listo |
 | Nomina/Payroll (D129) | Media | Schema listo |
 | Health Score calculo (D105) | Media | Schema listo |
-| WhatsApp bot completo | Media | 20% (webhook + handlers parciales) |
+| WhatsApp bot completo | Media | ~60% (3-wave overhaul hecho, titulo gastos pendiente) |
 | Alegra sync (contabilidad) | Baja | 5% (schema listo) |
 | Subscriptions/Billing (Stripe) | Baja | No iniciado |
 | Reconciliacion bancaria | Baja | Schema listo |
@@ -363,13 +371,16 @@ Que se hizo:
 - [x] Tab bar mobile: 4 tabs + "Mas" overflow — completado 2026-03-22
 - [x] Activity Log / Comentarios: timeline con menciones, links, cambios automaticos — completado 2026-03-22
 - [x] [98H] Custom Fields + Labels + Herencia nivel 1 — completado 2026-03-22
-- [ ] Notificaciones in-app — ultimo feature antes de cerrar MVP
+- [x] Notificaciones in-app N1-N8b + D170-D176 — completado 2026-03-24
+- [x] Rol supervisor (5°) con routing por area — completado 2026-03-24
+- [x] Rol contador (6°, solo causacion) — completado 2026-03-24
+- [x] WhatsApp bot 3-wave overhaul (nuevos intents, UNCLEAR, alertas proactivas) — completado 2026-03-22
+- [ ] WhatsApp bot: titulo limpio de gastos (no usar mensaje_original como titulo)
 - [ ] Deducible toggle en modulo causacion (contador activa/desactiva)
 - [ ] AI-suggested deducibility para gastos
-- [ ] Commitear cambios de botones WhatsApp (accion.ts, novedad.ts, types.ts, wa-webhook/index.ts)
-- [ ] WhatsApp bot: titulo limpio de gastos (no usar mensaje_original como titulo)
 - [ ] Verificar que registro de horas desde proyecto pasa created_by correctamente
 - [ ] Custom fields en contactos/empresas detail (cuando se creen esas vistas)
+- [ ] Items pendientes de docs/MVP_PLAN_CONSOLIDADO.md
 
 ## Decisiones clave
 
@@ -392,3 +403,10 @@ Que se hizo:
 | 2026-03-22 | Activity Log reemplaza notes-section | Comentarios tipo tweet (280 chars) + menciones + links + cambios automaticos del sistema. Tabla activity_log ya en produccion |
 | 2026-03-22 | [98H] Custom fields JSONB, no ALTER TABLE por cliente | D154: Campos custom en custom_data JSONB. Solo MéTRIK configura via Clarity (skill /configure-fields). Labels como many-to-many con colores |
 | 2026-03-22 | Herencia custom_data en handoff via mappings | Oportunidad→Proyecto: custom_field_mappings define que slugs se copian. Idempotente, configurable por workspace |
+| 2026-03-24 | Notificacion = tarea pendiente, no log (D163) | Solo se notifica lo que requiere accion. Estado tripartito: pendiente/completada/descartada. Max 2-4 por dia |
+| 2026-03-24 | 9 tipos de notificacion (N1-N8b), crons 13:00 UTC | N1 escalamiento 3-5-7-15d por rol. N7 inactividad proyecto 2-5d. Realtime via Supabase |
+| 2026-03-24 | Roles genericos > roles especializados para ICP ONE | Consenso Hana+Kaori+directivos. 5 roles + area como tag. Roles especializados generan friccion en onboarding PYME |
+| 2026-03-24 | Supervisor (5° rol): permisos operativo-comerciales | Ve pipeline + proyectos completos. Sin delete ni causacion. area (comercial/operaciones/null) solo afecta routing N1/N7 |
+| 2026-03-24 | Contador (6° rol): solo causacion, ilimitado gratis | Puede causar (PUC+CC), no puede aprobar. Solo ve /causacion. No consume licencia del plan |
+| 2026-03-24 | profiles.area afecta routing notificaciones, no permisos | N1 busca supervisor con area=comercial o null. N7 busca supervisor con area=operaciones o null. Fallback a owner |
+| 2026-03-24 | CRON_SECRET en Vercel con printf (no echo) | echo agrega trailing newline. Vercel rechaza CRON_SECRET con whitespace. Usar printf para env vars en CLI |
