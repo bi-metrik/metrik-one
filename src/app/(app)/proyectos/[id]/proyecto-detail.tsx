@@ -6,11 +6,11 @@ import Link from 'next/link'
 import {
   ArrowLeft, FolderOpen, Clock, Receipt, Banknote, Pause, Play,
   Lock, Plus, TrendingUp, TrendingDown, FileText, AlertTriangle,
-  ChevronDown, RefreshCw, ArrowUpCircle, User, Smartphone, Upload, Loader2,
+  ChevronDown, RefreshCw, ArrowUpCircle, User, Smartphone, Upload, Loader2, Calendar,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { updateAvance, cambiarEstadoProyecto } from '../actions-v2'
+import { updateAvance, cambiarEstadoProyecto, marcarEntregado } from '../actions-v2'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
@@ -46,6 +46,7 @@ interface Financiero {
   tipo: string | null
   presupuesto_total: number | null
   avance_porcentaje: number | null
+  avance_calculado: number | null
   presupuesto_consumido_pct: number | null
   costo_acumulado: number | null
   costo_horas: number | null
@@ -60,6 +61,9 @@ interface Financiero {
   contacto_nombre: string | null
   carpeta_url: string | null
   oportunidad_id: string | null
+  fecha_entrega_estimada: string | null
+  fecha_fin_estimada: string | null
+  fecha_cierre: string | null
 }
 
 interface Rubro {
@@ -167,6 +171,7 @@ export default function ProyectoDetail({
   const [isPending, startTransition] = useTransition()
   const [avance, setAvance] = useState(f.avance_porcentaje ?? 0)
   const [dialog, setDialog] = useState<'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
+  const [entregarModal, setEntregarModal] = useState(false)
   const [showRubros, setShowRubros] = useState(false)
   const [registrosTab, setRegistrosTab] = useState<'gastos' | 'horas' | 'facturas'>('gastos')
   const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
@@ -186,9 +191,18 @@ export default function ProyectoDetail({
   const estado = (f.estado ?? 'en_ejecucion') as EstadoProyecto
   const config = ESTADO_PROYECTO_CONFIG[estado]
   const isCerrado = estado === 'cerrado'
+  const isEntregado = estado === 'entregado'
   const isPausado = estado === 'pausado'
   const isInterno = f.tipo === 'interno'
   const proyectoId = f.proyecto_id ?? ''
+
+  // D173: días hasta entrega estimada
+  const diasEntrega = (() => {
+    const fecha = f.fecha_entrega_estimada
+    if (!fecha) return null
+    const diff = new Date(fecha).getTime() - Date.now()
+    return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  })()
 
   const consumo = Math.min(f.presupuesto_consumido_pct ?? 0, 150)
   const semaforoBar = consumo > 90 ? 'bg-red-500' : consumo > 70 ? 'bg-yellow-500' : 'bg-green-500'
@@ -199,6 +213,30 @@ export default function ProyectoDetail({
     startTransition(async () => {
       const res = await updateAvance(proyectoId, newVal)
       if (!res.success) toast.error(res.error)
+    })
+  }
+
+  const cartera = (f.facturado ?? 0) - (f.cobrado ?? 0)
+
+  // D176: Marcar como entregado — soft gate si hay cartera pendiente
+  const handleEntregado = () => {
+    if (cartera > 0) {
+      setEntregarModal(true)
+      return
+    }
+    ejecutarEntregado()
+  }
+
+  const ejecutarEntregado = () => {
+    setEntregarModal(false)
+    startTransition(async () => {
+      const res = await marcarEntregado(proyectoId)
+      if (res.success) {
+        toast.success('Proyecto marcado como entregado')
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error al marcar como entregado')
+      }
     })
   }
 
@@ -252,6 +290,20 @@ export default function ProyectoDetail({
             {responsableComercial && (
               <span className="text-[11px] text-muted-foreground">
                 Vendio: {responsableComercial.full_name}
+              </span>
+            )}
+            {/* D173: Fecha entrega estimada */}
+            {f.fecha_entrega_estimada && diasEntrega !== null && (
+              <span className={`flex items-center gap-1 text-[11px] font-medium ${
+                diasEntrega < 0
+                  ? 'text-red-600'
+                  : diasEntrega <= 3
+                  ? 'text-amber-600'
+                  : 'text-muted-foreground'
+              }`}>
+                <Calendar className="h-3 w-3" />
+                Entrega: {new Date(f.fecha_entrega_estimada + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
+                {diasEntrega === 0 ? ' (hoy)' : diasEntrega < 0 ? ` (hace ${Math.abs(diasEntrega)} d)` : ` (${diasEntrega} d)`}
               </span>
             )}
           </div>
@@ -316,27 +368,19 @@ export default function ProyectoDetail({
 
       {/* ─── Barras duales ─── */}
       <div className="space-y-3 rounded-lg border p-4">
-        {/* Avance slider (editable only if not cerrado) */}
+        {/* D170: Avance calculado (40% horas, 30% presupuesto, 30% facturación) */}
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-medium">Avance del proyecto</span>
-            <span className="text-xs font-semibold">{avance}%</span>
+            <span className="text-xs font-semibold">{Math.round(f.avance_calculado ?? 0)}%</span>
           </div>
-          {!isCerrado ? (
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={avance}
-              onChange={e => handleAvanceChange(Number(e.target.value))}
-              className="w-full h-2 rounded-full appearance-none bg-muted accent-blue-500"
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-all"
+              style={{ width: `${Math.min(f.avance_calculado ?? 0, 100)}%` }}
             />
-          ) : (
-            <div className="h-2 rounded-full bg-muted overflow-hidden">
-              <div className="h-full rounded-full bg-blue-500" style={{ width: `${avance}%` }} />
-            </div>
-          )}
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">Calculado automáticamente (horas, presupuesto, facturación)</p>
         </div>
 
         {/* Costos ejecutados (expandible) */}
@@ -718,7 +762,7 @@ export default function ProyectoDetail({
       </div>
 
       {/* ─── State controls (bottom) ─── */}
-      {!isCerrado && (
+      {!isCerrado && !isEntregado && (
         <div className="flex items-center gap-2 rounded-lg border border-dashed p-3">
           {isPausado ? (
             <button
@@ -737,6 +781,17 @@ export default function ProyectoDetail({
             >
               <Pause className="h-3.5 w-3.5" />
               Pausar
+            </button>
+          )}
+          {/* D176: Marcar como entregado (soft gate si cartera > 0) */}
+          {!isInterno && !isPausado && (
+            <button
+              onClick={() => handleEntregado()}
+              disabled={isPending}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-900 dark:text-blue-400 dark:hover:bg-blue-950/30"
+            >
+              <ArrowUpCircle className="h-3.5 w-3.5" />
+              Entregar
             </button>
           )}
           <button
@@ -759,6 +814,39 @@ export default function ProyectoDetail({
           <Banknote className="h-3.5 w-3.5" />
           Registrar cobro pendiente
         </button>
+      )}
+
+      {/* D176: Modal soft gate entrega */}
+      {entregarModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl border bg-background p-6 shadow-xl">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div>
+                <h3 className="text-base font-semibold">Hay cartera pendiente</h3>
+                <p className="mt-1.5 text-sm text-muted-foreground">
+                  Este proyecto tiene <span className="font-medium text-foreground">{formatCOP(cartera)}</span> pendiente por cobrar.
+                  Puedes marcarlo como entregado igualmente y gestionar el cobro después.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setEntregarModal(false)}
+                className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-background text-sm font-medium transition-colors hover:bg-accent"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={ejecutarEntregado}
+                disabled={isPending}
+                className="flex h-10 flex-1 items-center justify-center rounded-lg bg-blue-600 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+              >
+                Marcar como entregado
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ─── Dialogs ─── */}

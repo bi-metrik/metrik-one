@@ -2,13 +2,21 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight, AlertTriangle } from 'lucide-react'
+import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight, AlertTriangle, Info } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS, RAZONES_PERDIDA } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { moveOportunidad, ganarOportunidad, perderOportunidad } from './actions-v2'
+import { moveOportunidad, ganarOportunidad, perderOportunidad, checkCotizacionExiste } from './actions-v2'
 import type { EtapaPipeline } from '@/lib/pipeline/constants'
+
+// D171: Soft gate messages por etapa destino
+const SOFT_GATE_MSGS: Partial<Record<EtapaPipeline, string>> = {
+  contacto_inicial: '¿Ya tomaste el primer contacto con este prospecto?',
+  discovery_hecha: '¿Identificaste claramente la necesidad del cliente?',
+  propuesta_enviada: '¿Tienes una cotización lista para presentar?',
+  negociacion: '¿El cliente recibió y está evaluando la propuesta?',
+}
 
 interface OportunidadRow {
   id: string
@@ -37,16 +45,20 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
   const [isPending, startTransition] = useTransition()
   const [lostModal, setLostModal] = useState<{ id: string; name: string } | null>(null)
   const [selectedReason, setSelectedReason] = useState('')
+  // D171: Soft gate state
+  const [softGateModal, setSoftGateModal] = useState<{
+    id: string
+    currentEtapa: string | null
+    nextEtapa: EtapaPipeline
+    mensaje: string
+    bloqueado?: boolean
+    motivoBloqueado?: string
+  } | null>(null)
   const router = useRouter()
 
-  const cycleEtapa = (id: string, currentEtapa: string | null) => {
-    const current = currentEtapa ?? 'lead_nuevo'
-    const currentIdx = ETAPAS_ACTIVAS.indexOf(current as EtapaPipeline)
-    if (currentIdx === -1) return // terminal state — don't cycle
-    const nextIdx = (currentIdx + 1) % ETAPAS_ACTIVAS.length
-    const next = ETAPAS_ACTIVAS[nextIdx]
+  // D171: Ejecutar movimiento real de etapa
+  const ejecutarMoveEtapa = (id: string, next: EtapaPipeline) => {
     const nextLabel = ETAPA_CONFIG[next]?.label ?? next
-
     startTransition(async () => {
       const res = await moveOportunidad(id, next)
       if (res.success) {
@@ -56,6 +68,46 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
         toast.error(res.error ?? 'Error')
       }
     })
+  }
+
+  // D171: Soft gate — muestra prompt antes de mover etapa
+  const cycleEtapa = (id: string, currentEtapa: string | null) => {
+    const current = currentEtapa ?? 'lead_nuevo'
+    const currentIdx = ETAPAS_ACTIVAS.indexOf(current as EtapaPipeline)
+    if (currentIdx === -1) return // terminal state — don't cycle
+    const nextIdx = (currentIdx + 1) % ETAPAS_ACTIVAS.length
+    const next = ETAPAS_ACTIVAS[nextIdx]
+
+    const mensaje = SOFT_GATE_MSGS[next]
+    if (!mensaje) {
+      ejecutarMoveEtapa(id, next)
+      return
+    }
+
+    // Semi-hard gate: propuesta_enviada requiere cotización existente
+    if (next === 'propuesta_enviada') {
+      startTransition(async () => {
+        const { tieneCotizacion } = await checkCotizacionExiste(id)
+        setSoftGateModal({
+          id,
+          currentEtapa,
+          nextEtapa: next,
+          mensaje,
+          bloqueado: !tieneCotizacion,
+          motivoBloqueado: tieneCotizacion ? undefined : 'Esta etapa requiere una cotización creada. Crea una cotización primero.',
+        })
+      })
+      return
+    }
+
+    setSoftGateModal({ id, currentEtapa, nextEtapa: next, mensaje })
+  }
+
+  const handleConfirmarSoftGate = () => {
+    if (!softGateModal || softGateModal.bloqueado) return
+    const { id, nextEtapa } = softGateModal
+    setSoftGateModal(null)
+    ejecutarMoveEtapa(id, nextEtapa)
   }
 
   const handleGanar = (id: string) => {
@@ -294,6 +346,46 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
           </p>
         )}
       </div>
+
+      {/* D171: Soft Gate Modal */}
+      {softGateModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl border bg-background p-6 shadow-xl">
+            <div className="flex items-start gap-3">
+              {softGateModal.bloqueado ? (
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              ) : (
+                <Info className="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
+              )}
+              <div>
+                <h3 className="text-base font-semibold">
+                  Mover a {ETAPA_CONFIG[softGateModal.nextEtapa]?.label}
+                </h3>
+                <p className="mt-1.5 text-sm text-muted-foreground">
+                  {softGateModal.bloqueado ? softGateModal.motivoBloqueado : softGateModal.mensaje}
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setSoftGateModal(null)}
+                className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-background text-sm font-medium transition-colors hover:bg-accent"
+              >
+                {softGateModal.bloqueado ? 'Entendido' : 'Cancelar'}
+              </button>
+              {!softGateModal.bloqueado && (
+                <button
+                  onClick={handleConfirmarSoftGate}
+                  disabled={isPending}
+                  className="flex h-10 flex-1 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                >
+                  Si, mover
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Lost Reason Modal */}
       {lostModal && (

@@ -9,12 +9,13 @@ import { logSystemChange } from '@/app/(app)/activity-actions'
 
 type ActionResult = { success: true } | { success: false; error: string }
 
-export type EstadoProyectoV2 = 'en_ejecucion' | 'pausado' | 'cerrado'
+export type EstadoProyectoV2 = 'en_ejecucion' | 'pausado' | 'cerrado' | 'entregado'
 
-// State machine: from → allowed targets
+// D176: State machine: from → allowed targets
 const TRANSICIONES: Record<EstadoProyectoV2, EstadoProyectoV2[]> = {
-  en_ejecucion: ['pausado', 'cerrado'],
+  en_ejecucion: ['pausado', 'entregado', 'cerrado'],
   pausado: ['en_ejecucion', 'cerrado'],
+  entregado: ['cerrado'], // auto-cierre via trigger cuando cartera == 0
   cerrado: [], // terminal
 }
 
@@ -772,4 +773,44 @@ export async function addCobro(facturaId: string, input: {
   revalidatePath(`/proyectos/${factura.proyecto_id}`)
   revalidatePath('/proyectos')
   return { success: true }
+}
+
+// ── D176: Marcar proyecto como entregado ────────────────
+
+export async function marcarEntregado(id: string): Promise<ActionResult & { proyectoId?: string }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const { data: proyecto } = await supabase
+    .from('proyectos')
+    .select('estado, nombre')
+    .eq('id', id)
+    .single()
+
+  if (!proyecto) return { success: false, error: 'Proyecto no encontrado' }
+
+  const estadoActual = proyecto.estado as EstadoProyectoV2
+  const permitidos = TRANSICIONES[estadoActual] ?? []
+
+  if (!permitidos.includes('entregado')) {
+    return { success: false, error: `No se puede marcar como entregado desde "${estadoActual}"` }
+  }
+
+  const { error: dbError } = await supabase
+    .from('proyectos')
+    .update({
+      estado: 'entregado',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+
+  if (dbError) return { success: false, error: dbError.message }
+
+  if (workspaceId) {
+    await logSystemChange(workspaceId, 'proyecto', id, 'estado', estadoActual, 'entregado', null)
+  }
+
+  revalidatePath('/proyectos')
+  revalidatePath(`/proyectos/${id}`)
+  return { success: true, proyectoId: id }
 }

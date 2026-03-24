@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/crons/inactividad-oportunidades",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/crons/inactividad-proyectos",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/crons/streak-roto",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}

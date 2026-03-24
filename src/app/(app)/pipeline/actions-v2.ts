@@ -607,3 +607,19 @@ export async function updateOportunidad(id: string, updates: Record<string, unkn
   revalidatePath(`/pipeline/${id}`)
   return { success: true }
 }
+
+// ── D171: Verificar cotización existente (semi-hard gate) ──
+
+export async function checkCotizacionExiste(oportunidadId: string): Promise<{ tieneCotizacion: boolean }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { tieneCotizacion: false }
+
+  const { data } = await supabase
+    .from('cotizaciones')
+    .select('id')
+    .eq('oportunidad_id', oportunidadId)
+    .limit(1)
+    .maybeSingle()
+
+  return { tieneCotizacion: !!data }
+}

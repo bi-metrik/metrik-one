@@ -156,7 +156,7 @@ export const ESTADO_COTIZACION_CONFIG: Record<EstadoCotizacion, {
 
 // ── Estados de proyecto ─────────────────────────────────────
 
-export type EstadoProyecto = 'en_ejecucion' | 'pausado' | 'cerrado'
+export type EstadoProyecto = 'en_ejecucion' | 'pausado' | 'cerrado' | 'entregado'
 
 export const ESTADO_PROYECTO_CONFIG: Record<EstadoProyecto, {
   label: string
@@ -164,6 +164,7 @@ export const ESTADO_PROYECTO_CONFIG: Record<EstadoProyecto, {
 }> = {
   en_ejecucion: { label: 'En ejecución', chipClass: 'bg-blue-100 text-blue-700' },
   pausado:      { label: 'Pausado',       chipClass: 'bg-yellow-100 text-yellow-700' },
+  entregado:    { label: 'Entregado',     chipClass: 'bg-purple-100 text-purple-700' },
   cerrado:      { label: 'Cerrado',       chipClass: 'bg-green-100 text-green-700' },
 }
 

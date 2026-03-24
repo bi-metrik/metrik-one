@@ -36,6 +36,7 @@ interface AppShellProps {
   role: string
   isAdminWorkspace?: boolean
   branding?: BrandingProps
+  notificationBell?: React.ReactNode
 }
 
 // Sidebar adaptativo por rol
@@ -108,6 +109,7 @@ export default function AppShell({
   role,
   isAdminWorkspace,
   branding,
+  notificationBell,
 }: AppShellProps) {
   const pathname = usePathname()
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
@@ -347,7 +349,7 @@ export default function AppShell({
 
       {/* ── Main Area ── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Desktop header — greeting + date left, brand logo right */}
+        {/* Desktop header — greeting + date left, bell + brand logo right */}
         <header className="hidden md:flex h-12 items-center justify-between border-b border-border bg-background px-6 shrink-0">
           <div className="flex items-center gap-3">
             <p className="text-sm font-semibold text-foreground">
@@ -358,9 +360,12 @@ export default function AppShell({
               {(() => { const d = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
             </p>
           </div>
-          {hasLogo && (
-            <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
-          )}
+          <div className="flex items-center gap-3">
+            {notificationBell}
+            {hasLogo && (
+              <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
+            )}
+          </div>
         </header>
 
         {/* Mobile header — MéTRIK isotipo + company logo + avatar/logout */}
@@ -383,6 +388,7 @@ export default function AppShell({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {notificationBell}
             <div
               className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold"
               style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}

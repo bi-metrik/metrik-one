@@ -1149,6 +1149,58 @@ export type Database = {
           },
         ]
       }
+      etapa_historial: {
+        Row: {
+          cambiado_por: string | null
+          created_at: string | null
+          etapa_anterior: string | null
+          etapa_nueva: string
+          id: string
+          oportunidad_id: string
+          workspace_id: string
+        }
+        Insert: {
+          cambiado_por?: string | null
+          created_at?: string | null
+          etapa_anterior?: string | null
+          etapa_nueva: string
+          id?: string
+          oportunidad_id: string
+          workspace_id: string
+        }
+        Update: {
+          cambiado_por?: string | null
+          created_at?: string | null
+          etapa_anterior?: string | null
+          etapa_nueva?: string
+          id?: string
+          oportunidad_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "etapa_historial_cambiado_por_fkey"
+            columns: ["cambiado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "etapa_historial_oportunidad_id_fkey"
+            columns: ["oportunidad_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "etapa_historial_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expense_categories: {
         Row: {
           created_at: string | null
@@ -2165,6 +2217,66 @@ export type Database = {
           },
         ]
       }
+      notificaciones: {
+        Row: {
+          contenido: string
+          created_at: string | null
+          deep_link: string | null
+          destinatario_id: string
+          entidad_id: string | null
+          entidad_tipo: string | null
+          estado: string
+          id: string
+          metadata: Json | null
+          tipo: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          contenido: string
+          created_at?: string | null
+          deep_link?: string | null
+          destinatario_id: string
+          entidad_id?: string | null
+          entidad_tipo?: string | null
+          estado?: string
+          id?: string
+          metadata?: Json | null
+          tipo: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          contenido?: string
+          created_at?: string | null
+          deep_link?: string | null
+          destinatario_id?: string
+          entidad_id?: string | null
+          entidad_tipo?: string | null
+          estado?: string
+          id?: string
+          metadata?: Json | null
+          tipo?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notificaciones_destinatario_id_fkey"
+            columns: ["destinatario_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notificaciones_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           action_url: string | null
@@ -2828,6 +2940,7 @@ export type Database = {
           empresa_id: string | null
           estado: string
           fecha_cierre: string | null
+          fecha_entrega_estimada: string | null
           fecha_fin_estimada: string | null
           fecha_inicio: string | null
           ganancia_estimada: number | null
@@ -2861,6 +2974,7 @@ export type Database = {
           empresa_id?: string | null
           estado?: string
           fecha_cierre?: string | null
+          fecha_entrega_estimada?: string | null
           fecha_fin_estimada?: string | null
           fecha_inicio?: string | null
           ganancia_estimada?: number | null
@@ -2894,6 +3008,7 @@ export type Database = {
           empresa_id?: string | null
           estado?: string
           fecha_cierre?: string | null
+          fecha_entrega_estimada?: string | null
           fecha_fin_estimada?: string | null
           fecha_inicio?: string | null
           ganancia_estimada?: number | null
@@ -3989,6 +4104,7 @@ export type Database = {
       }
       v_proyecto_financiero: {
         Row: {
+          avance_calculado: number | null
           avance_porcentaje: number | null
           canal_creacion: string | null
           carpeta_url: string | null
@@ -4003,6 +4119,7 @@ export type Database = {
           estado: string | null
           facturado: number | null
           fecha_cierre: string | null
+          fecha_entrega_estimada: string | null
           fecha_fin_estimada: string | null
           fecha_inicio: string | null
           ganancia_actual: number | null
@@ -4083,6 +4200,19 @@ export type Database = {
         Args: { p_empresa_id: string }
         Returns: boolean
       }
+      crear_notificacion: {
+        Args: {
+          p_contenido: string
+          p_deep_link?: string
+          p_destinatario_id: string
+          p_entidad_id?: string
+          p_entidad_tipo?: string
+          p_metadata?: Json
+          p_tipo: string
+          p_workspace_id: string
+        }
+        Returns: undefined
+      }
       current_user_workspace_id: { Args: never; Returns: string }
       generate_empresa_codigo: {
         Args: { p_nombre: string; p_workspace_id: string }
@@ -4094,6 +4224,10 @@ export type Database = {
       }
       get_next_cotizacion_consecutivo: {
         Args: { p_workspace_id: string }
+        Returns: string
+      }
+      get_profile_by_role: {
+        Args: { p_role: string; p_workspace_id: string }
         Returns: string
       }
       get_user_role: { Args: never; Returns: string }
@@ -4298,6 +4432,7 @@ export type CustomField = Database['public']['Tables']['custom_fields']['Row']
 export type CustomFieldMapping = Database['public']['Tables']['custom_field_mappings']['Row']
 export type Empresa = Database['public']['Tables']['empresas']['Row']
 export type EntityLabel = Database['public']['Tables']['entity_labels']['Row']
+export type EtapaHistorial = Database['public']['Tables']['etapa_historial']['Row']
 export type Expense = Database['public']['Tables']['expenses']['Row']
 export type ExpenseCategory = Database['public']['Tables']['expense_categories']['Row']
 export type Factura = Database['public']['Tables']['facturas']['Row']
@@ -4308,6 +4443,7 @@ export type Hora = Database['public']['Tables']['horas']['Row']
 export type Invoice = Database['public']['Tables']['invoices']['Row']
 export type Label = Database['public']['Tables']['labels']['Row']
 export type MonthlyTarget = Database['public']['Tables']['monthly_targets']['Row']
+export type Notificacion = Database['public']['Tables']['notificaciones']['Row']
 export type Note = Database['public']['Tables']['notes']['Row']
 export type Oportunidad = Database['public']['Tables']['oportunidades']['Row']
 export type OpportunityLegacy = Database['public']['Tables']['opportunities']['Row']

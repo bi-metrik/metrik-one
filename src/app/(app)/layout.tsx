@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
 import FiscalNudge from './fiscal-nudge'
+import NotificationBell from '@/components/notification-bell'
 
 export default async function AppLayout({
   children,
@@ -59,6 +60,7 @@ export default async function AppLayout({
         colorSecundario: workspace.color_secundario ?? undefined,
         logoUrl: workspace.logo_url ?? undefined,
       }}
+      notificationBell={<NotificationBell userId={user.id} />}
     >
       {/* D235/D236: Fiscal nudge banner — shows when profile incomplete, max 3 nudges */}
       {fiscal && !fiscal.is_complete && (
