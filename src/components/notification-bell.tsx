@@ -167,11 +167,18 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
         )}
       </button>
 
-      {/* Panel dropdown */}
+      {/* Overlay móvil */}
       {open && (
         <div
-          className="absolute right-0 top-10 z-50 w-[360px] max-h-[480px] overflow-hidden rounded-xl border border-border bg-card shadow-xl flex flex-col"
-          style={{ maxWidth: 'calc(100vw - 24px)' }}
+          className="fixed inset-0 z-40 bg-black/30 sm:hidden"
+          onClick={() => setOpen(false)}
+        />
+      )}
+
+      {/* Panel: full-screen en móvil, dropdown en sm+ */}
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col bg-card sm:absolute sm:inset-auto sm:right-0 sm:top-10 sm:w-[360px] sm:max-h-[480px] sm:rounded-xl sm:border sm:border-border sm:shadow-xl overflow-hidden"
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -187,15 +194,24 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
                 </span>
               )}
             </div>
-            {count > 0 && (
+            <div className="flex items-center gap-1">
+              {count > 0 && (
+                <button
+                  onClick={handleMarcarTodas}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+                >
+                  <CheckCheck className="h-3 w-3" />
+                  Marcar todas
+                </button>
+              )}
               <button
-                onClick={handleMarcarTodas}
-                className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+                onClick={() => setOpen(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="Cerrar"
               >
-                <CheckCheck className="h-3 w-3" />
-                Marcar todas
+                <X className="h-4 w-4" />
               </button>
-            )}
+            </div>
           </div>
 
           {/* Lista */}
