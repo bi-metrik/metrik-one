@@ -90,19 +90,31 @@ export async function GET(req: NextRequest) {
     // Perfiles del workspace
     const { data: perfiles } = await supabase
       .from('profiles')
-      .select('id, role')
+      .select('id, role, area')
       .eq('workspace_id', proyecto.workspace_id)
 
     if (!perfiles) continue
 
     const destinatarios = new Set<string>()
 
-    const supervisor = perfiles.find(p => p.role === 'admin')
+    // N7 (proyectos): supervisor con area='operaciones' O area IS NULL
+    // Si no hay supervisor calificado → escalar directo al owner
+    const supervisorOperaciones = perfiles.find(p =>
+      p.role === 'supervisor' && (p.area === 'operaciones' || p.area === null)
+    )
+    // Admin también recibe si hay uno (legacy behavior)
+    const admin = perfiles.find(p => p.role === 'admin')
     const owner = perfiles.find(p => p.role === 'owner')
 
     if (diasSinActividad >= 2) {
-      if (supervisor) destinatarios.add(supervisor.id)
-      else if (owner) destinatarios.add(owner.id) // fallback
+      if (supervisorOperaciones) {
+        destinatarios.add(supervisorOperaciones.id)
+      } else if (admin) {
+        destinatarios.add(admin.id)
+      } else if (owner) {
+        // Sin supervisor ni admin: escalar directo al owner
+        destinatarios.add(owner.id)
+      }
     }
     if (diasSinActividad >= 5 && owner) {
       destinatarios.add(owner.id)

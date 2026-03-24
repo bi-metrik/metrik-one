@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
     // Resolver destinatarios según roles en el workspace
     const { data: perfiles } = await supabase
       .from('profiles')
-      .select('id, role')
+      .select('id, role, area')
       .eq('workspace_id', opp.workspace_id)
 
     if (!perfiles) continue
@@ -122,8 +122,15 @@ export async function GET(req: NextRequest) {
     for (const rol of nivelActual.roles) {
       if (rol === 'operator' && responsableProfileId) {
         destinatarios.add(responsableProfileId)
+      } else if (rol === 'supervisor') {
+        // N1 (oportunidades): solo supervisores con area='comercial' O area IS NULL
+        // Si no hay ninguno → escalar directo al owner (se hace en fallback)
+        const supervisorComercial = perfiles.find(p =>
+          p.role === 'supervisor' && (p.area === 'comercial' || p.area === null)
+        )
+        if (supervisorComercial) destinatarios.add(supervisorComercial.id)
       } else {
-        const perfil = perfiles.find(p => p.role === rol || (rol === 'supervisor' && p.role === 'admin'))
+        const perfil = perfiles.find(p => p.role === rol)
         if (perfil) destinatarios.add(perfil.id)
       }
     }

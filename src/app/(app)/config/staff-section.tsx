@@ -22,10 +22,11 @@ const TIPO_VINCULO = [
 ]
 
 const ROL_OPTIONS = [
-  { value: 'administrador', label: 'Administrador', desc: 'Acceso completo a toda la plataforma. Ideal para socios o persona de confianza.' },
-  { value: 'supervisor', label: 'Supervisor', desc: 'Ve todo el pipeline y proyectos. Asigna responsables. No ejecuta directamente.' },
+  { value: 'administrador', label: 'Administrador', desc: 'Maneja finanzas, contabilidad y equipo. Acceso total excepto config fiscal.' },
+  { value: 'supervisor', label: 'Supervisor', desc: 'Ve todo el trabajo. Asigna responsables, crea oportunidades y cotizaciones.' },
   { value: 'ejecutor', label: 'Ejecutor', desc: 'Trabaja en oportunidades y proyectos asignados. Registra gastos y horas.' },
-  { value: 'campo', label: 'Campo', desc: 'Solo reporta vía WhatsApp. Registra gastos y horas en proyectos activos.' },
+  { value: 'contador', label: 'Contador', desc: 'Solo acceso al modulo de causacion contable. Ilimitado, no afecta el plan.' },
+  { value: 'campo', label: 'Campo', desc: 'Solo reporta via WhatsApp. Registra gastos y horas en proyectos activos.' },
 ]
 
 // Display labels for all roles (including dueno which is not in the form dropdown)
@@ -34,6 +35,7 @@ const ROL_DISPLAY: Record<string, string> = {
   administrador: 'Administrador',
   supervisor: 'Supervisor',
   ejecutor: 'Ejecutor',
+  contador: 'Contador',
   campo: 'Campo',
 }
 
@@ -84,6 +86,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
     tipo_vinculo: '',
     rol_plataforma: 'ejecutor',
     area: 'operaciones',
+    display_role: '',
   })
 
   // Sync state when server re-renders with new data
@@ -92,7 +95,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   }, [initialData])
 
   const resetForm = () => {
-    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', area: 'operaciones' })
+    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', area: 'operaciones', display_role: '' })
     setShowForm(false)
     setShowDetails(false)
     setEditingId(null)
@@ -101,7 +104,10 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   const handleCreate = async () => {
     if (!form.full_name.trim()) return
     setSaving(true)
-    const res = await createStaffMember(form)
+    const res = await createStaffMember({
+      ...form,
+      display_role: form.display_role.trim() || undefined,
+    })
     if (res.success) {
       toast.success('Personal agregado')
       resetForm()
@@ -126,6 +132,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       tipo_vinculo: form.tipo_vinculo || null,
       rol_plataforma: form.rol_plataforma,
       area: form.area || null,
+      display_role: form.display_role.trim() || null,
     })
     if (res.success) {
       toast.success('Personal actualizado')
@@ -177,6 +184,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       tipo_vinculo: s.tipo_vinculo || '',
       rol_plataforma: s.rol_plataforma || 'ejecutor',
       area: s.area || 'operaciones',
+      display_role: (s as any).display_role || '',
     })
     setEditingId(s.id)
     setShowForm(true)
@@ -262,23 +270,69 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
               <p className="mt-0.5 text-[10px] text-muted-foreground">
                 {ROL_OPTIONS.find(r => r.value === form.rol_plataforma)?.desc}
               </p>
+              {/* Nota de billing para contador */}
+              {form.rol_plataforma === 'contador' && (
+                <p className="mt-1 text-[10px] font-medium text-emerald-600">
+                  Los usuarios Contador son ilimitados y no afectan tu plan.
+                </p>
+              )}
             </div>
+            {/* Area — solo visible para supervisor (afecta routing N1/N7) */}
+            {form.rol_plataforma === 'supervisor' ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Area del supervisor</label>
+                <select
+                  value={form.area}
+                  onChange={e => setForm({ ...form, area: e.target.value })}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Ambas areas</option>
+                  {AREA_OPTIONS.filter(a => a.value !== 'direccion').map(a => (
+                    <option key={a.value} value={a.value}>{a.label}</option>
+                  ))}
+                </select>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  {form.area
+                    ? AREA_OPTIONS.find(a => a.value === form.area)?.desc
+                    : 'Recibe alertas de oportunidades y proyectos'}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Area</label>
+                <select
+                  value={form.area}
+                  onChange={e => setForm({ ...form, area: e.target.value })}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  {AREA_OPTIONS.map(a => (
+                    <option key={a.value} value={a.value}>{a.label}</option>
+                  ))}
+                </select>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  {AREA_OPTIONS.find(a => a.value === form.area)?.desc}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* display_role — nombre personalizado opcional (solo para supervisor) */}
+          {form.rol_plataforma === 'supervisor' && (
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Area</label>
-              <select
-                value={form.area}
-                onChange={e => setForm({ ...form, area: e.target.value })}
+              <label className="text-xs font-medium text-muted-foreground">Nombre personalizado (opcional)</label>
+              <input
+                type="text"
+                value={form.display_role}
+                onChange={e => setForm({ ...form, display_role: e.target.value })}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                {AREA_OPTIONS.map(a => (
-                  <option key={a.value} value={a.value}>{a.label}</option>
-                ))}
-              </select>
+                placeholder="Supervisor"
+                maxLength={50}
+              />
               <p className="mt-0.5 text-[10px] text-muted-foreground">
-                {AREA_OPTIONS.find(a => a.value === form.area)?.desc}
+                Ej: Supervisor Comercial, Jefe de Obra. Se muestra en vez de &quot;Supervisor&quot; en el workspace.
               </p>
             </div>
-          </div>
+          )}
 
           {/* Toggle detalles */}
           <button

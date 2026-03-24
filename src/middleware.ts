@@ -33,9 +33,12 @@ function extractSlug(hostname: string): string | null {
 }
 
 /** Role-aware landing: check permissions + workspace config */
-const ROLES_WITH_NUMBERS = ['owner', 'admin', 'read_only']
+const ROLES_WITH_NUMBERS = ['owner', 'admin', 'supervisor', 'read_only']
+// Contador: acceso exclusivo a /causacion
+const CONTADOR_ONLY_ROLE = 'contador'
 
 async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string): Promise<string> {
+  if (role === CONTADOR_ONLY_ROLE) return '/causacion'
   if (role && !ROLES_WITH_NUMBERS.includes(role)) {
     return '/pipeline'
   }
@@ -79,6 +82,18 @@ export async function middleware(request: NextRequest) {
         .single()
       const landing = await getLanding(supabase, tenantProfile?.role ?? undefined)
       return NextResponse.redirect(new URL(landing, request.url))
+    }
+
+    // Guard: contador can only access /causacion
+    if (pathname !== '/causacion' && !pathname.startsWith('/causacion/') && !pathname.startsWith('/auth/')) {
+      const { data: tenantProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+      if (tenantProfile?.role === 'contador') {
+        return NextResponse.redirect(new URL('/causacion', request.url))
+      }
     }
 
     return supabaseResponse

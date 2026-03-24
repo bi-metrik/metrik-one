@@ -1,5 +1,6 @@
 /**
  * Sprint 9 — D97/D166: Role permissions
+ * Sprint 10: Agrega supervisor (5) y contador (6)
  * Shared constants — NOT a server action file
  */
 
@@ -17,6 +18,9 @@ export const ROLE_PERMISSIONS = {
     canRegisterExpense: true,
     canRegisterHours: true,
     canRegisterCobro: true,
+    canAssignResponsable: true,
+    canCreateOportunidad: true,
+    canCreateCotizacion: true,
     canExportCSV: true,
     canManageTeam: true,
     canApproveCausacion: true,   // D246: aprobar PENDIENTE → APROBADO
@@ -37,6 +41,9 @@ export const ROLE_PERMISSIONS = {
     canRegisterExpense: true,
     canRegisterHours: true,
     canRegisterCobro: true,
+    canAssignResponsable: true,
+    canCreateOportunidad: true,
+    canCreateCotizacion: true,
     canExportCSV: true,
     canManageTeam: false,
     canApproveCausacion: true,
@@ -49,15 +56,18 @@ export const ROLE_PERMISSIONS = {
     canInvite: false,
     canDeleteRecords: false,
     canConfigFiscal: false,
-    canViewNumbers: false,
+    canViewNumbers: true,
     canViewPipeline: true,
     canViewProjects: true,
     canViewAllProjects: true,
-    canUseFab: false,
-    canRegisterExpense: false,
-    canRegisterHours: false,
-    canRegisterCobro: false,
-    canExportCSV: false,
+    canUseFab: true,
+    canRegisterExpense: true,
+    canRegisterHours: true,
+    canRegisterCobro: true,
+    canAssignResponsable: true,
+    canCreateOportunidad: true,
+    canCreateCotizacion: true,
+    canExportCSV: true,
     canManageTeam: false,
     canApproveCausacion: false,
     canCausar: false,
@@ -77,11 +87,37 @@ export const ROLE_PERMISSIONS = {
     canRegisterExpense: true,
     canRegisterHours: true,
     canRegisterCobro: false,
+    canAssignResponsable: false,
+    canCreateOportunidad: false,
+    canCreateCotizacion: false,
     canExportCSV: false,
     canManageTeam: false,
     canApproveCausacion: false,
     canCausar: false,
     canViewCausacion: false,
+    canRevertApproval: false,
+  },
+  contador: {
+    label: 'Contador',
+    canInvite: false,
+    canDeleteRecords: false,
+    canConfigFiscal: false,
+    canViewNumbers: false,
+    canViewPipeline: false,
+    canViewProjects: false,
+    canViewAllProjects: false,
+    canUseFab: false,
+    canRegisterExpense: false,
+    canRegisterHours: false,
+    canRegisterCobro: false,
+    canAssignResponsable: false,
+    canCreateOportunidad: false,
+    canCreateCotizacion: false,
+    canExportCSV: false,
+    canManageTeam: false,
+    canApproveCausacion: false,   // NO puede aprobar (solo owner/admin)
+    canCausar: true,              // SI puede causar (asignar PUC+CC)
+    canViewCausacion: true,       // SI puede ver /causacion
     canRevertApproval: false,
   },
   read_only: {
@@ -97,6 +133,9 @@ export const ROLE_PERMISSIONS = {
     canRegisterExpense: false,
     canRegisterHours: false,
     canRegisterCobro: false,
+    canAssignResponsable: false,
+    canCreateOportunidad: false,
+    canCreateCotizacion: false,
     canExportCSV: true,
     canManageTeam: false,
     canApproveCausacion: false,
@@ -111,3 +150,61 @@ export type RoleKey = keyof typeof ROLE_PERMISSIONS
 export function getRolePermissions(role: string) {
   return ROLE_PERMISSIONS[role as RoleKey] || ROLE_PERMISSIONS.read_only
 }
+
+// ── UI metadata para config de equipo ────────────────────────────────────────
+
+export const ROLE_UI_CONFIG = [
+  {
+    value: 'owner',
+    label: 'Dueño',
+    description: 'Acceso total. Solo uno por workspace.',
+  },
+  {
+    value: 'admin',
+    label: 'Administrador',
+    description: 'Maneja finanzas, contabilidad y equipo.',
+  },
+  {
+    value: 'supervisor',
+    label: 'Supervisor',
+    description: 'Coordina el equipo, ve todo el trabajo.',
+  },
+  {
+    value: 'operator',
+    label: 'Ejecutor',
+    description: 'Realiza el trabajo: ventas, operaciones o campo.',
+  },
+  {
+    value: 'contador',
+    label: 'Contador',
+    description: 'Solo acceso al modulo de causacion contable.',
+  },
+  {
+    value: 'read_only',
+    label: 'Solo lectura',
+    description: 'Ve reportes, no puede modificar.',
+  },
+] as const
+
+export const AREA_UI_CONFIG = [
+  {
+    value: null,
+    label: 'Ambas areas',
+    description: 'Ve oportunidades y proyectos',
+  },
+  {
+    value: 'comercial',
+    label: 'Comercial',
+    description: 'Coordina el pipeline de ventas',
+  },
+  {
+    value: 'operaciones',
+    label: 'Operaciones',
+    description: 'Coordina la ejecucion de proyectos',
+  },
+  {
+    value: 'administrativo',
+    label: 'Administrativo',
+    description: 'Reservado para uso futuro',
+  },
+] as const

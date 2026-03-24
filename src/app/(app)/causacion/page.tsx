@@ -25,6 +25,7 @@ export default async function CausacionPage({ searchParams }: Props) {
       counts={counts}
       activeTab={tab}
       mes={mes}
+      role={role ?? undefined}
     />
   )
 }

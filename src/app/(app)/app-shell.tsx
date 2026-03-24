@@ -34,6 +34,7 @@ interface AppShellProps {
   workspaceName: string
   workspaceSlug: string
   role: string
+  displayRole?: string | null
   isAdminWorkspace?: boolean
   branding?: BrandingProps
   notificationBell?: React.ReactNode
@@ -41,19 +42,19 @@ interface AppShellProps {
 
 // Sidebar adaptativo por rol
 const ALL_NAV_ITEMS = [
-  { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
   { href: '/pipeline', label: 'Oportunidades', icon: Flame, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'supervisor', 'operator'] },
-  { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'read_only'] },
-  { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin'] },
+  { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
-// D246: Sección contable separada (futuro: visible para rol contador)
+// D246: Sección contable separada — visible para owner/admin/contador
 const CONTABILIDAD_NAV_ITEMS = [
-  { href: '/causacion', label: 'Causacion', icon: BookOpen, roles: ['owner', 'admin'] },
+  { href: '/causacion', label: 'Causacion', icon: BookOpen, roles: ['owner', 'admin', 'contador'] },
 ]
 
 // Admin section — solo owner
@@ -65,8 +66,9 @@ const ADMIN_NAV_ITEMS = [
 const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
   owner: ['/numeros', '/pipeline', '/proyectos', '/tableros'],
   admin: ['/numeros', '/pipeline', '/proyectos', '/tableros'],
-  supervisor: ['/pipeline', '/proyectos', '/directorio', '/mi-negocio'],
+  supervisor: ['/numeros', '/pipeline', '/proyectos', '/movimientos'],
   operator: ['/pipeline', '/proyectos', '/directorio'],
+  contador: ['/causacion'],
   read_only: ['/numeros', '/movimientos', '/tableros'],
 }
 
@@ -87,6 +89,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   supervisor: 'Supervisor',
   operator: 'Ejecutor',
+  contador: 'Contador',
   read_only: 'Lectura',
 }
 
@@ -107,6 +110,7 @@ export default function AppShell({
   workspaceName,
   workspaceSlug,
   role,
+  displayRole,
   isAdminWorkspace,
   branding,
   notificationBell,
@@ -207,7 +211,7 @@ export default function AppShell({
           </button>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation — contador sees empty navItems, only contabilidad section below */}
         <nav className="flex-1 space-y-0.5 px-2 py-1 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
@@ -320,7 +324,7 @@ export default function AppShell({
             {sidebarExpanded && (
               <div className="flex-1 overflow-hidden min-w-0">
                 <p className="truncate text-xs font-bold" style={{ color: 'var(--sidebar-foreground)' }}>{fullName}</p>
-                <p className="text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{ROLE_LABELS[role] || role}</p>
+                <p className="text-[10px]" style={{ color: 'var(--sidebar-muted)' }}>{displayRole || ROLE_LABELS[role] || role}</p>
               </div>
             )}
             {sidebarExpanded && (

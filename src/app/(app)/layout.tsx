@@ -16,10 +16,10 @@ export default async function AppLayout({
     redirect('/login')
   }
 
-  // Get user profile + workspace
+  // Get user profile + workspace — includes display_role added in sprint 10
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, role, workspace_id')
+    .select('full_name, role, workspace_id, display_role')
     .eq('id', user.id)
     .single()
 
@@ -54,6 +54,7 @@ export default async function AppLayout({
       workspaceName={workspace.name}
       workspaceSlug={workspace.slug}
       role={profile.role}
+      displayRole={profile.display_role ?? null}
       isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}
       branding={{
         colorPrimario: workspace.color_primario ?? undefined,
@@ -62,8 +63,8 @@ export default async function AppLayout({
       }}
       notificationBell={<NotificationBell userId={user.id} />}
     >
-      {/* D235/D236: Fiscal nudge banner — shows when profile incomplete, max 3 nudges */}
-      {fiscal && !fiscal.is_complete && (
+      {/* D235/D236: Fiscal nudge — shows when profile incomplete, max 3 nudges. Not for contador. */}
+      {fiscal && !fiscal.is_complete && profile.role !== 'contador' && (
         <div className="mb-4">
           <FiscalNudge
             isComplete={fiscal.is_complete ?? false}

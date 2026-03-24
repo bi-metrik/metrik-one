@@ -35,6 +35,7 @@ export async function createStaffMember(formData: {
   tipo_vinculo?: string
   rol_plataforma?: string
   area?: string
+  display_role?: string
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -64,6 +65,7 @@ export async function createStaffMember(formData: {
     tipo_vinculo: formData.tipo_vinculo || null,
     rol_plataforma: formData.rol_plataforma || 'ejecutor',
     area: formData.area || null,
+    display_role: formData.display_role || null,
   })
 
   if (error) return { error: error.message }
@@ -86,6 +88,7 @@ export async function updateStaffMember(
     tipo_vinculo?: string | null
     rol_plataforma?: string
     area?: string | null
+    display_role?: string | null
   }
 ) {
   const supabase = await createClient()
@@ -195,7 +198,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     // Validate staff belongs to this workspace and has no profile_id
     const { data: staffMember, error: staffErr } = await supabase
       .from('staff')
-      .select('id, full_name, profile_id, rol_plataforma, workspace_id')
+      .select('id, full_name, profile_id, rol_plataforma, workspace_id, display_role')
       .eq('id', staffId)
       .eq('workspace_id', profile.workspace_id)
       .maybeSingle()
@@ -204,10 +207,13 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     if (!staffMember) return { error: 'Miembro no encontrado' }
     if (staffMember.profile_id) return { error: 'Este miembro ya tiene acceso a la plataforma' }
 
-    // Check seat availability
-    const { used, max } = await getLicenseInfo()
-    if (used >= max) {
-      return { error: `Sin licencias disponibles (${used}/${max}). Contacta soporte para ampliar tu plan.` }
+    // Check seat availability — contador es ilimitado (no cuenta en el plan)
+    const isContador = (staffMember.rol_plataforma === 'contador')
+    if (!isContador) {
+      const { used, max } = await getLicenseInfo()
+      if (used >= max) {
+        return { error: `Sin licencias disponibles (${used}/${max}). Contacta soporte para ampliar tu plan.` }
+      }
     }
 
     // Map staff rol_plataforma to profiles.role
@@ -216,6 +222,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
       administrador: 'admin',
       supervisor: 'supervisor',
       ejecutor: 'operator',
+      contador: 'contador',
       campo: 'read_only',
     }
     const inviteRole = roleMap[staffMember.rol_plataforma || 'ejecutor'] || 'operator'
@@ -257,6 +264,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
         full_name: staffMember.full_name,
         invited_role: inviteRole,
         workspace_id: profile.workspace_id,
+        display_role: (staffMember as any).display_role || null,
       },
     })
 

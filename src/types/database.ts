@@ -2629,8 +2629,10 @@ export type Database = {
       }
       profiles: {
         Row: {
+          area: string | null
           avatar_url: string | null
           created_at: string | null
+          display_role: string | null
           full_name: string | null
           id: string
           role: string
@@ -2638,8 +2640,10 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          area?: string | null
           avatar_url?: string | null
           created_at?: string | null
+          display_role?: string | null
           full_name?: string | null
           id: string
           role?: string
@@ -2647,8 +2651,10 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          area?: string | null
           avatar_url?: string | null
           created_at?: string | null
+          display_role?: string | null
           full_name?: string | null
           id?: string
           role?: string
@@ -3453,6 +3459,7 @@ export type Database = {
           contract_type: string | null
           created_at: string | null
           department: string | null
+          display_role: string | null
           es_principal: boolean | null
           full_name: string
           horas_disponibles_mes: number | null
@@ -3473,6 +3480,7 @@ export type Database = {
           contract_type?: string | null
           created_at?: string | null
           department?: string | null
+          display_role?: string | null
           es_principal?: boolean | null
           full_name: string
           horas_disponibles_mes?: number | null
@@ -3493,6 +3501,7 @@ export type Database = {
           contract_type?: string | null
           created_at?: string | null
           department?: string | null
+          display_role?: string | null
           es_principal?: boolean | null
           full_name?: string
           horas_disponibles_mes?: number | null
