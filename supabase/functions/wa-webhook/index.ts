@@ -76,7 +76,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   const user = await identifyUser(supabase, message.phone);
   if (!user) {
     await sendTextMessage(message.phone,
-      '❌ No te tengo registrado. Pídele a tu jefe que te agregue en la app.');
+      '❌ No encuentro tu número en ningún workspace de MéTRIK ONE.\n\nSi eres nuevo, regístrate en metrikone.co\nSi ya tienes cuenta, pídele a tu admin que agregue este número en Configuración → Equipo.');
     return;
   }
 

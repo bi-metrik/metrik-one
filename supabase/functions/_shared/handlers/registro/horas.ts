@@ -112,7 +112,7 @@ export async function showHorasConfirmation(ctx: HandlerContext, project: any, h
   if (isAutoAssign) {
     msg = `⏱️ ${hours}h para ${bold(formatProject(project))} (tu único proyecto activo).`;
   } else {
-    msg = `📂 ${bold(formatProject(project))}\n🕐 ${hours}h (hoy)`;
+    msg = `📁 ${bold(formatProject(project))}\n🕐 ${hours}h (hoy)`;
   }
 
   if (horasEstimadas > 0) {

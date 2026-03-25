@@ -74,7 +74,7 @@ async function handleOppGanada(ctx: HandlerContext): Promise<void> {
   }
 
   // Confirm
-  const msg = `🎉 Voy a mover ${bold(opp.descripcion)} a Ganada.\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n👤 ${opp.contacto_nombre} — ${opp.empresa_nombre}\n\nSe creará un proyecto automáticamente.`;
+  const msg = `🎯 Voy a mover a Ganada:\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n👤 ${opp.contacto_nombre} — ${opp.empresa_nombre}\n\nSe creará un proyecto automáticamente.`;
   await ctx.sendButtons(msg, [
     { id: 'btn_confirm', title: '✅ Confirmar' },
     { id: 'btn_cancel', title: '❌ Cancelar' },
@@ -598,7 +598,7 @@ async function executeW22(ctx: HandlerContext): Promise<void> {
 
     if (error) console.error('[accion] Create project error:', error);
 
-    const msg = `🎉 ¡Oportunidad ganada!\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n📂 Proyecto creado automáticamente\n\nSiguiente paso: Registra la primera factura en la app.`;
+    const msg = `🎉 ¡Oportunidad ganada!\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n📁 Proyecto creado automáticamente\n\nSiguiente paso: Registra la primera factura en la app.`;
     await ctx.sendMessage(msg);
   }
 }

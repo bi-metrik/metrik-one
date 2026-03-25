@@ -250,7 +250,7 @@ export async function handleTimerParar(ctx: HandlerContext): Promise<void> {
     const horasPct = Number(project.horas_estimadas) > 0
       ? (Number(project.horas_reales) / Number(project.horas_estimadas)) * 100
       : 0;
-    const msg = `✅ ${elapsed.label} registradas en ${bold(project.nombre)}.\n\n📂 ${bold(project.nombre)}\n├ Horas: ${Number(project.horas_reales)} / ${Number(project.horas_estimadas)}h (${formatPct(horasPct)})\n├ Presupuesto usado: ${formatPct(Number(project.presupuesto_consumido_pct))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
+    const msg = `✅ ${elapsed.label} registradas en ${bold(project.nombre)}.\n\n📁 ${bold(project.nombre)}\n├ Horas: ${Number(project.horas_reales)} / ${Number(project.horas_estimadas)}h (${formatPct(horasPct)})\n├ Presupuesto usado: ${formatPct(Number(project.presupuesto_consumido_pct))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
     await ctx.sendMessage(msg);
   } else {
     await ctx.sendMessage(`✅ ${elapsed.label} registradas.`);

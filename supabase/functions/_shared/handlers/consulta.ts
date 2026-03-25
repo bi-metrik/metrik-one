@@ -49,7 +49,7 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
       `${i + 1}️⃣ ${formatProject(p)} — ${formatPct(Number(p.avance_porcentaje))} avance`
     ).join('\n');
 
-    await ctx.sendMessage(`📂 Tus proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
+    await ctx.sendMessage(`📁 Tus proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
     return;
   }
 
@@ -65,8 +65,8 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
     ? (Number(p.horas_reales) / Number(p.horas_estimadas)) * 100
     : 0;
 
-  let msg = `📂 ${bold(formatProject(p))}`;
-  msg += `\n⏱ ${Number(p.horas_reales) || 0}/${Number(p.horas_estimadas) || 0}h (${formatPct(horasPct)})`;
+  let msg = `📁 ${bold(formatProject(p))}`;
+  msg += `\n⏱️ ${Number(p.horas_reales) || 0}/${Number(p.horas_estimadas) || 0}h (${formatPct(horasPct)})`;
   msg += `\n💰 ${formatCOP(Number(p.costo_acumulado))}/${formatCOP(Number(p.presupuesto_total))} (${formatPct(Number(p.presupuesto_consumido_pct))})`;
   const facturado = Number(p.facturado);
   const cobrado = Number(p.cobrado);
@@ -178,13 +178,19 @@ async function handleMisNumeros(ctx: HandlerContext): Promise<void> {
     .limit(1)
     .single();
 
-  // Streak
-  const { data: streak } = await supabase
-    .from('streaks')
-    .select('semanas_actuales, semanas_record')
-    .eq('workspace_id', user.workspace_id)
-    .eq('tipo', 'conciliacion')
-    .single();
+  // Streak — graceful fallback if table missing or no record
+  let streak: { semanas_actuales: number; semanas_record: number } | null = null;
+  try {
+    const { data: streakData } = await supabase
+      .from('streaks')
+      .select('semanas_actuales, semanas_record')
+      .eq('workspace_id', user.workspace_id)
+      .eq('tipo', 'conciliacion')
+      .maybeSingle();
+    streak = streakData;
+  } catch {
+    // Table may not exist yet — skip streak block silently
+  }
 
   let msg = `📊 ${currentMonthName()} ${currentYear()}`;
 
@@ -294,7 +300,7 @@ async function handleInfoContacto(ctx: HandlerContext): Promise<void> {
     .limit(3);
 
   if (projects && projects.length > 0) {
-    msg += '\n\n📂 Proyectos:';
+    msg += '\n\n📁 Proyectos:';
     for (const p of projects) {
       msg += ` ${p.nombre} (${p.estado === 'en_ejecucion' ? 'activo' : p.estado})`;
     }
