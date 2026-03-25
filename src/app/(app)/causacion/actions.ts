@@ -23,6 +23,8 @@ export type ItemCausacion = {
   notas_causacion: string | null
   retencion_aplicada: number | null
   fecha_causacion: string | null
+  // Deducibilidad fiscal (solo gastos)
+  deducible: boolean | null
 }
 
 function getInitials(name: string | null): string | null {
@@ -52,7 +54,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
   {
     let query = supabase
       .from('gastos')
-      .select('id, fecha, monto, descripcion, mensaje_original, categoria, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion')
+      .select('id, fecha, monto, descripcion, mensaje_original, categoria, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, deducible')
       .eq('workspace_id', workspaceId)
 
     if (tab === 'aprobados') {
@@ -88,6 +90,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         notas_causacion: g.notas_causacion ?? null,
         retencion_aplicada: g.retencion_aplicada ? Number(g.retencion_aplicada) : null,
         fecha_causacion: g.fecha_causacion ?? null,
+        deducible: g.deducible ?? null,
       })
     }
   }
@@ -131,6 +134,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         notas_causacion: c.notas_causacion ?? null,
         retencion_aplicada: c.retencion_aplicada ? Number(c.retencion_aplicada) : null,
         fecha_causacion: c.fecha_causacion ?? null,
+        deducible: null, // cobros no tienen deducibilidad fiscal
       })
     }
   }
@@ -258,6 +262,40 @@ export async function causarMovimiento(input: {
     },
     realizado_por: userId,
   })
+
+  revalidatePath('/causacion')
+  revalidatePath('/movimientos')
+  return { success: true }
+}
+
+// ── toggleDeducible ───────────────────────────────────────
+
+export async function toggleDeducible(gastoId: string, deducible: boolean) {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canToggleDeducible) return { success: false, error: 'Sin permisos para modificar deducibilidad' }
+
+  // Validate gasto belongs to workspace
+  const { data: gasto } = await supabase
+    .from('gastos')
+    .select('id, estado_causacion')
+    .eq('id', gastoId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  if (!gasto) return { success: false, error: 'Gasto no encontrado' }
+  if (gasto.estado_causacion !== 'APROBADO' && gasto.estado_causacion !== 'CAUSADO') {
+    return { success: false, error: 'Solo se puede modificar deducibilidad en gastos APROBADOS o CAUSADOS' }
+  }
+
+  const { error: updateError } = await supabase
+    .from('gastos')
+    .update({ deducible })
+    .eq('id', gastoId)
+
+  if (updateError) return { success: false, error: updateError.message }
 
   revalidatePath('/causacion')
   revalidatePath('/movimientos')

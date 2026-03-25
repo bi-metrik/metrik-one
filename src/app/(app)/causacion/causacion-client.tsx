@@ -4,9 +4,10 @@ import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Zap, ArrowDownCircle, ArrowUpCircle, Info, ChevronDown, CheckCircle2 } from 'lucide-react'
 import { formatCOP } from '@/lib/contacts/constants'
+import { getRolePermissions } from '@/lib/roles'
 import { toast } from 'sonner'
 import type { ItemCausacion } from './actions'
-import { causarMovimiento, getCausacionData } from './actions'
+import { causarMovimiento, getCausacionData, toggleDeducible } from './actions'
 
 interface Props {
   items: ItemCausacion[]
@@ -36,6 +37,42 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
   const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  // Permisos del rol actual
+  const perms = getRolePermissions(role ?? 'read_only')
+
+  // Estado optimista para deducible (gastoId → boolean)
+  const [deducibleState, setDeducibleState] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    for (const item of items) {
+      if (item.tabla === 'gastos' && item.deducible !== null) {
+        initial[item.id] = item.deducible
+      }
+    }
+    return initial
+  })
+  const [togglePending, setTogglePending] = useState<string | null>(null)
+
+  function getDeducible(item: ItemCausacion): boolean {
+    if (item.id in deducibleState) return deducibleState[item.id]
+    return item.deducible ?? false
+  }
+
+  function handleToggleDeducible(item: ItemCausacion) {
+    const nuevoValor = !getDeducible(item)
+    // Optimistic update
+    setDeducibleState(prev => ({ ...prev, [item.id]: nuevoValor }))
+    setTogglePending(item.id)
+    startTransition(async () => {
+      const res = await toggleDeducible(item.id, nuevoValor)
+      setTogglePending(null)
+      if (!res.success) {
+        // Revert on error
+        setDeducibleState(prev => ({ ...prev, [item.id]: !nuevoValor }))
+        toast.error(res.error ?? 'Error al actualizar deducibilidad')
+      }
+    })
+  }
 
   // Form state for causación
   const [formData, setFormData] = useState<Record<string, {
@@ -240,6 +277,31 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
                               Ret: {formatCOP(item.retencion_aplicada)}
                             </span>
                           )}
+                        </div>
+                      )}
+
+                      {/* Deducible toggle — solo gastos, solo roles con permiso */}
+                      {item.tabla === 'gastos' && perms.canToggleDeducible && (
+                        <div className="mt-1.5 flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={getDeducible(item)}
+                            disabled={togglePending === item.id}
+                            onClick={() => handleToggleDeducible(item)}
+                            className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 disabled:opacity-50 ${
+                              getDeducible(item) ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition-transform ${
+                                getDeducible(item) ? 'translate-x-3' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                          <span className={`text-[10px] ${getDeducible(item) ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-muted-foreground'}`}>
+                            {getDeducible(item) ? 'Deducible' : 'No deducible'}
+                          </span>
                         </div>
                       )}
 

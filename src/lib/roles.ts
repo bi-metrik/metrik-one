@@ -27,6 +27,7 @@ export const ROLE_PERMISSIONS = {
     canCausar: true,             // D246: causar APROBADO → CAUSADO
     canViewCausacion: true,      // D246: ver /causacion
     canRevertApproval: true,     // Revertir APROBADO → RECHAZADO (solo owner)
+    canToggleDeducible: true,    // Marcar/desmarcar deducible fiscal en gastos
   },
   admin: {
     label: 'Admin',
@@ -50,6 +51,7 @@ export const ROLE_PERMISSIONS = {
     canCausar: true,
     canViewCausacion: true,
     canRevertApproval: false,
+    canToggleDeducible: true,
   },
   supervisor: {
     label: 'Supervisor',
@@ -73,6 +75,7 @@ export const ROLE_PERMISSIONS = {
     canCausar: false,
     canViewCausacion: false,
     canRevertApproval: false,
+    canToggleDeducible: false,
   },
   operator: {
     label: 'Ejecutor',
@@ -96,6 +99,7 @@ export const ROLE_PERMISSIONS = {
     canCausar: false,
     canViewCausacion: false,
     canRevertApproval: false,
+    canToggleDeducible: false,
   },
   contador: {
     label: 'Contador',
@@ -119,6 +123,7 @@ export const ROLE_PERMISSIONS = {
     canCausar: true,              // SI puede causar (asignar PUC+CC)
     canViewCausacion: true,       // SI puede ver /causacion
     canRevertApproval: false,
+    canToggleDeducible: true,     // SI puede marcar/desmarcar deducible fiscal
   },
   read_only: {
     label: 'Lectura',
@@ -142,6 +147,7 @@ export const ROLE_PERMISSIONS = {
     canCausar: false,
     canViewCausacion: false,
     canRevertApproval: false,
+    canToggleDeducible: false,
   },
 } as const
 
