@@ -256,51 +256,66 @@ export default function FAB({ role }: FABProps) {
       {/* ── Action menu (card style) ───────────────────── */}
       {open && (
         <div className="fixed bottom-[9.5rem] right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
-          {/* Active timer row (when running, replaces "Iniciar timer") */}
-          {timer.isRunning && timerLoaded && (
-            <div className="flex items-center gap-2 border-b px-4 py-3">
-              <div className="h-2 w-2 shrink-0 rounded-full bg-green-500 animate-pulse" />
-              <div className="min-w-0 flex-1">
-                <span className="text-xs font-mono font-semibold tabular-nums">{formatTime(elapsed)}</span>
-                <p className="truncate text-[10px] text-muted-foreground">{timer.proyectoNombre}</p>
+          {/* Vista simplificada cuando hay timer corriendo */}
+          {timer.isRunning && timerLoaded ? (
+            <>
+              {/* Timer activo con proyecto */}
+              <div className="flex items-center gap-2 border-b px-4 py-3">
+                <div className="h-2 w-2 shrink-0 rounded-full bg-green-500 animate-pulse" />
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs font-mono font-semibold tabular-nums">{formatTime(elapsed)}</span>
+                  <p className="truncate text-[10px] text-muted-foreground">{timer.proyectoNombre}</p>
+                </div>
               </div>
+              {/* Detener timer */}
               <button
-                onClick={handleStopTimer}
+                onClick={() => { handleStopTimer(); setOpen(false) }}
                 disabled={isPending}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 disabled:opacity-50 transition-colors"
+                className="flex w-full items-center gap-3 border-b px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50"
               >
-                <Square className="h-3 w-3" />
+                <Square className="h-4 w-4 shrink-0" />
+                {isPending ? 'Deteniendo...' : 'Detener timer'}
               </button>
-            </div>
-          )}
-
-          {/* Timer start action (when not running) */}
-          {timerLoaded && projects.length > 0 && !timer.isRunning && (
-            <button
-              onClick={handleOpenTimer}
-              className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/20 transition-colors border-b"
-            >
-              <Clock className="h-4 w-4 shrink-0" />
-              Iniciar timer
-            </button>
-          )}
-
-          {/* Regular actions */}
-          {visibleActions.map((action, i) => {
-            const Icon = action.icon
-            return (
+              {/* Cancelar (cerrar menú) */}
               <button
-                key={action.href ?? action.action}
-                onClick={() => handleAction(action)}
-                className={`flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors ${
-                  i < visibleActions.length - 1 ? 'border-b' : ''
-                }`}
+                onClick={() => setOpen(false)}
+                className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-accent transition-colors"
               >
-                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                {action.label}
+                <X className="h-4 w-4 shrink-0" />
+                Cancelar
               </button>
-            )
-          })}
+            </>
+          ) : (
+            <>
+              {/* Timer start action (when not running) */}
+              {timerLoaded && projects.length > 0 && (
+                <button
+                  onClick={handleOpenTimer}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/20 transition-colors border-b"
+                >
+                  <Clock className="h-4 w-4 shrink-0" />
+                  Iniciar timer
+                </button>
+              )}
+
+              {/* Regular actions */}
+              {visibleActions.map((action, i) => {
+                const Icon = action.icon
+                return (
+                  <button
+                    key={action.href ?? action.action}
+                    onClick={() => handleAction(action)}
+                    className={`flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors ${
+                      i < visibleActions.length - 1 ? 'border-b' : ''
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    {action.label}
+                  </button>
+                )
+              })}
+            </>
+          )}
         </div>
       )}
 
