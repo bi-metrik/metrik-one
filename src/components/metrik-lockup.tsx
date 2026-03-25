@@ -27,10 +27,10 @@ export default function MetrikLockup({ size = 'md', linkTo }: MetrikLockupProps)
   const lockup = (
     <div className="inline-flex flex-col">
       <div className="flex items-baseline" style={{ fontFamily: font, fontSize: s.fontSize }}>
-        <span style={{ fontWeight: 700, letterSpacing: '-0.02em', color: '#1A1A1A' }}>
+        <span style={{ fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--foreground)' }}>
           MéTRIK
         </span>
-        <span style={{ fontWeight: 300, letterSpacing: '-0.01em', color: '#1A1A1A', marginLeft: s.gap }}>
+        <span style={{ fontWeight: 300, letterSpacing: '-0.01em', color: 'var(--foreground)', marginLeft: s.gap }}>
           one
         </span>
       </div>
