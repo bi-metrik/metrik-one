@@ -146,7 +146,7 @@ export async function showGastoDirectoConfirmation(ctx: HandlerContext, project:
   const costoNuevo = costoActual + amount;
   const pctNuevo = presupuesto > 0 ? (costoNuevo / presupuesto) * 100 : 0;
 
-  let msg = `📂 ${bold(formatProject(project))}\n💰 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}`;
+  let msg = `📁 ${bold(formatProject(project))}\n💰 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}`;
   if (concept) msg += `\n📝 ${concept}`;
 
   if (presupuesto > 0) {

@@ -1,8 +1,89 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { createClient } from '@/lib/supabase/server'
 
 type Entidad = 'oportunidad' | 'proyecto' | 'contacto' | 'empresa'
+
+// ── Helper: evaluar y aplicar transición automática de etapa ──────────────────
+
+async function applyAutoTransition(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  workspaceId: string,
+  entidadId: string,
+  entidadTipo: 'oportunidad' | 'proyecto',
+) {
+  // Llamar a la función PostgreSQL
+  const { data: destStageId, error: rpcError } = await supabase.rpc('evaluate_stage_rules', {
+    p_entidad_id: entidadId,
+    p_workspace_id: workspaceId,
+    p_entidad_tipo: entidadTipo,
+  })
+
+  if (rpcError || !destStageId) return // Sin transición aplicable
+
+  // Obtener slug del stage destino
+  const { data: stage } = await supabase
+    .from('workspace_stages')
+    .select('slug, sistema_slug, nombre')
+    .eq('id', destStageId)
+    .single()
+
+  if (!stage) return
+
+  const nuevoSlug = stage.sistema_slug || stage.slug
+  const table = entidadTipo === 'oportunidad' ? 'oportunidades' : 'proyectos'
+  const campo = entidadTipo === 'oportunidad' ? 'etapa' : 'estado'
+
+  // Obtener etapa actual para el log
+  let etapaAnterior: string | null = null
+  if (entidadTipo === 'oportunidad') {
+    const { data } = await supabase
+      .from('oportunidades')
+      .select('etapa')
+      .eq('id', entidadId)
+      .eq('workspace_id', workspaceId)
+      .single()
+    etapaAnterior = data?.etapa ?? null
+  } else {
+    const { data } = await supabase
+      .from('proyectos')
+      .select('estado')
+      .eq('id', entidadId)
+      .eq('workspace_id', workspaceId)
+      .single()
+    etapaAnterior = data?.estado ?? null
+  }
+
+  if (etapaAnterior === nuevoSlug) return // Ya está en esa etapa
+
+  // Aplicar la transición
+  if (entidadTipo === 'oportunidad') {
+    await supabase
+      .from('oportunidades')
+      .update({ etapa: nuevoSlug })
+      .eq('id', entidadId)
+      .eq('workspace_id', workspaceId)
+  } else {
+    await supabase
+      .from('proyectos')
+      .update({ estado: nuevoSlug })
+      .eq('id', entidadId)
+      .eq('workspace_id', workspaceId)
+  }
+
+  // Registrar en activity_log
+  await supabase.from('activity_log').insert({
+    workspace_id: workspaceId,
+    entidad_tipo: entidadTipo,
+    entidad_id: entidadId,
+    tipo: 'stage_auto_transition',
+    campo_modificado: campo,
+    valor_anterior: etapaAnterior,
+    valor_nuevo: nuevoSlug,
+    contenido: `Transición automática: ${etapaAnterior} → ${nuevoSlug} (regla de flujo aplicada)`,
+  })
+}
 
 export async function getCustomFields(entidad: Entidad) {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -66,6 +147,12 @@ export async function updateCustomData(
     .eq('workspace_id', workspaceId)
 
   if (dbError) return { error: dbError.message }
+
+  // Evaluar transiciones automáticas solo para oportunidades y proyectos
+  if (entidad === 'oportunidad' || entidad === 'proyecto') {
+    await applyAutoTransition(supabase, workspaceId, entidadId, entidad)
+  }
+
   return { success: true }
 }
 

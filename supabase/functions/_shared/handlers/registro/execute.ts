@@ -223,7 +223,7 @@ async function executeW04(ctx: HandlerContext): Promise<void> {
     .single();
 
   if (project) {
-    const msg = `✅ Cobro registrado.\n\n📂 ${bold(project.nombre)}\n├ Facturado: ${formatCOP(Number(project.facturado))}\n├ Cobrado: ${formatCOP(Number(project.cobrado))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
+    const msg = `✅ Cobro registrado.\n\n📁 ${bold(project.nombre)}\n├ Facturado: ${formatCOP(Number(project.facturado))}\n├ Cobrado: ${formatCOP(Number(project.cobrado))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
     await ctx.sendMessage(msg);
   } else {
     await ctx.sendMessage(`✅ Cobro de ${formatCOP(c.amount!)} registrado.`);

@@ -3534,6 +3534,67 @@ export type Database = {
           },
         ]
       }
+      stage_transition_rules: {
+        Row: {
+          activo: boolean | null
+          condicion_config: Json | null
+          condicion_tipo: string | null
+          created_at: string | null
+          desde_stage_id: string | null
+          entidad: string
+          hasta_stage_id: string
+          id: string
+          tipo: string
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean | null
+          condicion_config?: Json | null
+          condicion_tipo?: string | null
+          created_at?: string | null
+          desde_stage_id?: string | null
+          entidad: string
+          hasta_stage_id: string
+          id?: string
+          tipo: string
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean | null
+          condicion_config?: Json | null
+          condicion_tipo?: string | null
+          created_at?: string | null
+          desde_stage_id?: string | null
+          entidad?: string
+          hasta_stage_id?: string
+          id?: string
+          tipo?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stage_transition_rules_desde_stage_id_fkey"
+            columns: ["desde_stage_id"]
+            isOneToOne: false
+            referencedRelation: "workspace_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stage_transition_rules_hasta_stage_id_fkey"
+            columns: ["hasta_stage_id"]
+            isOneToOne: false
+            referencedRelation: "workspace_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stage_transition_rules_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       streaks: {
         Row: {
           created_at: string | null
@@ -3954,6 +4015,59 @@ export type Database = {
           },
         ]
       }
+      workspace_stages: {
+        Row: {
+          activo: boolean | null
+          color: string | null
+          created_at: string | null
+          entidad: string
+          es_sistema: boolean | null
+          es_terminal: boolean | null
+          id: string
+          nombre: string
+          orden: number
+          sistema_slug: string | null
+          slug: string
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean | null
+          color?: string | null
+          created_at?: string | null
+          entidad: string
+          es_sistema?: boolean | null
+          es_terminal?: boolean | null
+          id?: string
+          nombre: string
+          orden?: number
+          sistema_slug?: string | null
+          slug: string
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean | null
+          color?: string | null
+          created_at?: string | null
+          entidad?: string
+          es_sistema?: boolean | null
+          es_terminal?: boolean | null
+          id?: string
+          nombre?: string
+          orden?: number
+          sistema_slug?: string | null
+          slug?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_stages_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           color_primario: string | null
@@ -4223,6 +4337,14 @@ export type Database = {
         Returns: undefined
       }
       current_user_workspace_id: { Args: never; Returns: string }
+      evaluate_stage_rules: {
+        Args: {
+          p_entidad_id: string
+          p_entidad_tipo: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
       generate_empresa_codigo: {
         Args: { p_nombre: string; p_workspace_id: string }
         Returns: string
@@ -4467,7 +4589,9 @@ export type Rubro = Database['public']['Tables']['rubros']['Row']
 export type SaldoBanco = Database['public']['Tables']['saldos_banco']['Row']
 export type Servicio = Database['public']['Tables']['servicios']['Row']
 export type Staff = Database['public']['Tables']['staff']['Row']
+export type StageTransitionRule = Database['public']['Tables']['stage_transition_rules']['Row']
 export type TeamInvitation = Database['public']['Tables']['team_invitations']['Row']
 export type TimeEntry = Database['public']['Tables']['time_entries']['Row']
 export type Workspace = Database['public']['Tables']['workspaces']['Row']
 export type WorkspaceFeature = Database['public']['Tables']['workspace_features']['Row']
+export type WorkspaceStageRow = Database['public']['Tables']['workspace_stages']['Row']

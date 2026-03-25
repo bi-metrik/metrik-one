@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles, X, CreditCard } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles, X, CreditCard, GitBranch } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
@@ -20,6 +20,7 @@ import MarcaSection from './marca-section'
 import GastosFijosSection from './gastos-fijos-section'
 import EquipoSection from './equipo-section'
 import PlanSection from './plan-section'
+import WorkflowSection from './workflow-section'
 
 // ── Types ──────────────────────────────────────────
 
@@ -72,6 +73,7 @@ const SECTIONS: SectionDef[] = [
   { key: 'cuentas-bancarias', label: 'Mi cuenta bancaria', icon: Landmark, maxScore: 2, scoreKey: 'banco', roles: ['owner', 'admin'] },
   { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
   { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'] },
+  { key: 'flujo-trabajo', label: 'Flujo de trabajo', icon: GitBranch, maxScore: 0, scoreKey: 'metas', roles: ['owner'] },
 ]
 
 // ── Component ──────────────────────────────────────
@@ -136,6 +138,8 @@ export default function MiNegocioClient({
       }
       case 'metas-mensuales':
         return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
+      case 'flujo-trabajo':
+        return 'Etapas y reglas'
       default:
         return ''
     }
@@ -173,6 +177,8 @@ export default function MiNegocioClient({
       }
       case 'metas-mensuales':
         return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
+      case 'flujo-trabajo':
+        return 'Configurar'
       default:
         return ''
     }
@@ -250,7 +256,7 @@ export default function MiNegocioClient({
                   <p className={`text-sm font-medium truncate ${isActive ? 'text-primary' : ''}`}>{section.label}</p>
                   <p className="text-[11px] text-muted-foreground truncate">{mainValue}</p>
                 </div>
-                {section.key !== 'mi-plan' && (
+                {section.maxScore > 0 && (
                   <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${badgeColor}`}>
                     {Math.min(score, section.maxScore)}/{section.maxScore}
                   </span>
@@ -302,7 +308,7 @@ export default function MiNegocioClient({
                   <p className={`text-sm font-medium truncate ${isActive ? 'text-primary' : ''}`}>{section.label}</p>
                   <p className="text-[11px] text-muted-foreground truncate">{mainValue}</p>
                 </div>
-                {section.key !== 'mi-plan' && (
+                {section.maxScore > 0 && (
                   <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${badgeColor}`}>
                     {Math.min(score, section.maxScore)}/{section.maxScore}
                   </span>
@@ -428,6 +434,11 @@ function renderSection(
           />
           <MargenContribucionSection configFinanciera={props.configFinanciera} />
         </div>
+      )
+
+    case 'flujo-trabajo':
+      return (
+        <WorkflowSection currentUserRole={props.currentUserRole} />
       )
 
     default:
