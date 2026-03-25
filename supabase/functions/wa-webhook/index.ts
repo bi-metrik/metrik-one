@@ -390,8 +390,15 @@ function extractMessage(payload: any): IncomingMessage | null {
 async function verifySignature(body: string, signature: string | null): Promise<boolean> {
   const appSecret = Deno.env.get('WHATSAPP_APP_SECRET');
   if (!appSecret) {
-    console.warn('[wa-webhook] WHATSAPP_APP_SECRET not set — skipping verification');
-    return true; // Allow in dev
+    // In production, missing secret is a security error — reject the request
+    const isProduction = !!Deno.env.get('DENO_DEPLOYMENT_ID') || Deno.env.get('NODE_ENV') === 'production';
+    if (isProduction) {
+      console.error('[wa-webhook] WHATSAPP_APP_SECRET not set in production — rejecting request');
+      return false;
+    }
+    // In local dev, allow without verification (for testing)
+    console.warn('[wa-webhook] WHATSAPP_APP_SECRET not set — skipping verification (dev only)');
+    return true;
   }
   if (!signature) return false;
 
