@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight, AlertTriangle, Info } from 'lucide-react'
+import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight, AlertTriangle, Info, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS, RAZONES_PERDIDA } from '@/lib/pipeline/constants'
@@ -366,22 +366,35 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
                 </p>
               </div>
             </div>
-            <div className="mt-5 flex gap-3">
-              <button
-                onClick={() => setSoftGateModal(null)}
-                className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-background text-sm font-medium transition-colors hover:bg-accent"
-              >
-                {softGateModal.bloqueado ? 'Entendido' : 'Cancelar'}
-              </button>
-              {!softGateModal.bloqueado && (
-                <button
-                  onClick={handleConfirmarSoftGate}
-                  disabled={isPending}
-                  className="flex h-10 flex-1 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            <div className="mt-5 flex flex-col gap-2">
+              {/* Cuando está bloqueado por falta de cotización, ofrecer CTA para crear una */}
+              {softGateModal.bloqueado && (
+                <a
+                  href={`/pipeline/${softGateModal.id}/cotizacion/nueva`}
+                  onClick={() => setSoftGateModal(null)}
+                  className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
-                  Si, mover
-                </button>
+                  <FileText className="h-4 w-4" />
+                  Crear cotizacion
+                </a>
               )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSoftGateModal(null)}
+                  className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-background text-sm font-medium transition-colors hover:bg-accent"
+                >
+                  {softGateModal.bloqueado ? 'Cancelar' : 'Cancelar'}
+                </button>
+                {!softGateModal.bloqueado && (
+                  <button
+                    onClick={handleConfirmarSoftGate}
+                    disabled={isPending}
+                    className="flex h-10 flex-1 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    Si, mover
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
