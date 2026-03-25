@@ -7,6 +7,7 @@
 export type Intent =
   | 'GASTO_DIRECTO'
   | 'GASTO_OPERATIVO'
+  | 'EDITAR_GASTO'
   | 'HORAS'
   | 'TIMER_INICIAR'
   | 'TIMER_PARAR'

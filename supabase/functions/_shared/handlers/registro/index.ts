@@ -6,6 +6,7 @@
 import type { HandlerContext } from '../../types.ts';
 import { handleGastoDirecto } from './gasto-directo.ts';
 import { handleGastoOperativo } from './gasto-operativo.ts';
+import { handleEditarGasto } from './editar-gasto.ts';
 import { handleHoras } from './horas.ts';
 import { handleTimerIniciar, handleTimerParar, handleTimerEstado } from './timer.ts';
 import { handleCobro } from './cobro.ts';
@@ -18,6 +19,11 @@ export async function handleRegistro(ctx: HandlerContext): Promise<void> {
 
   // If resuming a multi-step flow
   if (session.state !== 'started') {
+    // EDITAR_GASTO has its own resume logic inside its handler
+    if (session.context?.pending_action === 'W33') {
+      await handleEditarGasto(ctx);
+      return;
+    }
     await handleResumeRegistro(ctx);
     return;
   }
@@ -25,6 +31,7 @@ export async function handleRegistro(ctx: HandlerContext): Promise<void> {
   switch (parsed.intent) {
     case 'GASTO_DIRECTO': await handleGastoDirecto(ctx); break;
     case 'GASTO_OPERATIVO': await handleGastoOperativo(ctx); break;
+    case 'EDITAR_GASTO': await handleEditarGasto(ctx); break;
     case 'HORAS': await handleHoras(ctx); break;
     case 'TIMER_INICIAR': await handleTimerIniciar(ctx); break;
     case 'TIMER_PARAR': await handleTimerParar(ctx); break;

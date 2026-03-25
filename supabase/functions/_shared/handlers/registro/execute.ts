@@ -34,17 +34,26 @@ export async function executeRegistro(ctx: HandlerContext): Promise<void> {
   }
 }
 
+/** Build a clean title for a gasto: use NLP concept if short, else "[Categoria] — [Monto]" */
+function buildGastoTitle(concept: string | undefined, categoria: string, amount: number): string {
+  const categoriaLabel = CATEGORIA_LABELS[categoria] || categoria;
+  if (concept && concept.length <= 40) return concept;
+  const montoStr = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
+  return `${categoriaLabel} — ${montoStr}`;
+}
+
 async function executeW01(ctx: HandlerContext): Promise<boolean> {
   const { supabase, user, session } = ctx;
   const c = session.context;
+  const titulo = buildGastoTitle(c.parsed_fields?.concept, c.categoria || 'otros', c.amount!);
 
   const { data: gasto, error } = await supabase.from('gastos').insert({
     workspace_id: user.workspace_id,
     proyecto_id: c.proyecto_id,
     monto: c.amount,
     categoria: c.categoria || 'otros',
-    descripcion: c.parsed_fields?.concept || CATEGORIA_LABELS[c.categoria || ''] || c.categoria || '',
-    mensaje_original: c.parsed_fields?.mensaje_original || null,
+    descripcion: titulo,
+    notas: c.parsed_fields?.mensaje_original || null,
     tipo: 'directo',
     canal_registro: 'whatsapp',
     created_by_wa_name: user.name,
@@ -86,12 +95,13 @@ async function executeW02(ctx: HandlerContext): Promise<boolean> {
     return false;
   }
 
+  const titulo = buildGastoTitle(c.parsed_fields?.concept, c.categoria || 'otros', c.amount!);
   const { data: gasto, error } = await supabase.from('gastos').insert({
     workspace_id: user.workspace_id,
     monto: c.amount,
     categoria: c.categoria || 'otros',
-    descripcion: c.parsed_fields?.concept || CATEGORIA_LABELS[c.categoria || ''] || c.categoria || '',
-    mensaje_original: c.parsed_fields?.mensaje_original || null,
+    descripcion: titulo,
+    notas: c.parsed_fields?.mensaje_original || null,
     tipo: 'empresa',
     canal_registro: 'whatsapp',
     created_by_wa_name: user.name,
@@ -125,12 +135,13 @@ export async function executeBorradorConfirmation(ctx: HandlerContext): Promise<
   const c = session.context;
 
   // Create gasto from borrador
+  const titulo = buildGastoTitle(c.parsed_fields?.concept, c.categoria || 'otros', c.amount!);
   const { data: gasto, error } = await supabase.from('gastos').insert({
     workspace_id: user.workspace_id,
     monto: c.amount,
     categoria: c.categoria || 'otros',
-    descripcion: c.parsed_fields?.concept || CATEGORIA_LABELS[c.categoria || ''] || c.categoria || '',
-    mensaje_original: c.parsed_fields?.mensaje_original || null,
+    descripcion: titulo,
+    notas: c.parsed_fields?.mensaje_original || null,
     tipo: 'fijo',
     canal_registro: 'whatsapp',
     created_by_wa_name: user.name,

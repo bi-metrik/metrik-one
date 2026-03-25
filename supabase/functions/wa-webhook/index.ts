@@ -172,6 +172,7 @@ async function routeToHandler(ctx: HandlerContext): Promise<void> {
     // Registro
     case 'GASTO_DIRECTO':
     case 'GASTO_OPERATIVO':
+    case 'EDITAR_GASTO':
     case 'HORAS':
     case 'TIMER_INICIAR':
     case 'TIMER_PARAR':
@@ -241,7 +242,7 @@ async function handleSessionResponse(
   const pendingAction = (session as any).context?.pending_action;
 
   // Route to the appropriate handler based on pending action
-  if (['W01', 'W02', 'W03', 'W03T', 'W04', 'W06', 'W32'].includes(pendingAction)) {
+  if (['W01', 'W02', 'W03', 'W03T', 'W04', 'W06', 'W32', 'W33'].includes(pendingAction)) {
     await handleRegistro(ctx);
   } else if (['W22', 'W23', 'W24', 'W25', 'W26', 'W27'].includes(pendingAction)) {
     await handleAccion(ctx);
