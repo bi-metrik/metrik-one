@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package } from 'lucide-react'
+import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { createClient } from '@/lib/supabase/client'
 import {
   getNotificaciones,
@@ -217,8 +218,8 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
           {/* Lista */}
           <div className="flex-1 overflow-y-auto">
             {loading && (
-              <div className="flex items-center justify-center py-8">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+              <div className="py-8">
+                <LoadingSpinner size="sm" />
               </div>
             )}
 
