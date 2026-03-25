@@ -64,6 +64,7 @@ export type SessionState =
   | 'awaiting_reason'
   | 'awaiting_payment_status'
   | 'awaiting_image'
+  | 'awaiting_timeout_confirm'
   | 'completed'
   | 'expired';
 
@@ -93,6 +94,8 @@ export interface SessionContext {
   target_stage?: string;
   // ACTIVIDAD
   activity_text?: string;
+  // Timeout tracking: ISO timestamp when awaiting_selection started
+  awaiting_since?: string;
 }
 
 export interface BotSession {

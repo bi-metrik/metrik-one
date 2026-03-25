@@ -90,5 +90,5 @@ export async function completeSession(
 
 /** Check if session is in a multi-step flow (awaiting user response) */
 export function isAwaitingResponse(session: BotSession): boolean {
-  return ['confirming', 'awaiting_selection', 'awaiting_reason', 'awaiting_payment_status', 'awaiting_image', 'collecting'].includes(session.state);
+  return ['confirming', 'awaiting_selection', 'awaiting_reason', 'awaiting_payment_status', 'awaiting_image', 'collecting', 'awaiting_timeout_confirm'].includes(session.state);
 }

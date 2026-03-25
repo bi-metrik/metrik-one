@@ -15,10 +15,30 @@ import { startTimer } from './timer.ts';
 import { proceedCobroWithProject } from './cobro.ts';
 import { executeRegistro, executeBorradorConfirmation } from './execute.ts';
 
+const AWAITING_SELECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
 export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
   const { session, message, supabase, user } = ctx;
   const context = session.context;
   const text = message.text.trim().toLowerCase();
+
+  // Handle timeout confirmation (sent after 10 min in awaiting_selection)
+  if (session.state === 'awaiting_timeout_confirm') {
+    const btnId = message.interactive_reply;
+    if (btnId === 'btn_timeout_yes' || ['sí', 'si', 'yes', '1'].includes(text)) {
+      // Restore awaiting_selection so user can continue
+      await ctx.updateSession('awaiting_selection', {});
+      const options = context.options || [];
+      await ctx.sendOptions(
+        'Perfecto, continuemos. ¿Cuál proyecto?',
+        options.map((o: any) => o.label),
+      );
+    } else {
+      await ctx.sendMessage('❌ Registro cancelado.');
+      await completeSession(supabase, session.id);
+    }
+    return;
+  }
 
   // Handle confirmation (buttons or text)
   if (session.state === 'confirming') {
@@ -39,6 +59,24 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
 
   // Handle selection (numbered options or button reply)
   if (session.state === 'awaiting_selection') {
+    // Timeout check: if no awaiting_since, stamp it now and continue
+    if (!context.awaiting_since) {
+      await ctx.updateSession('awaiting_selection', { awaiting_since: new Date().toISOString() });
+    } else {
+      const elapsed = Date.now() - new Date(context.awaiting_since).getTime();
+      if (elapsed > AWAITING_SELECTION_TIMEOUT_MS) {
+        await ctx.sendButtons(
+          '⏰ Tu registro quedó pendiente. ¿Quieres continuarlo?',
+          [
+            { id: 'btn_timeout_yes', title: '✅ Sí, continuar' },
+            { id: 'btn_timeout_no', title: '❌ No, cancelar' },
+          ],
+        );
+        await ctx.updateSession('awaiting_timeout_confirm', {});
+        return;
+      }
+    }
+
     const options = context.options || [];
 
     // Check if response came from an interactive button matching an option ID
