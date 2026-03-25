@@ -229,6 +229,10 @@ export default function MiNegocioClient({
           const isActive = activeSection === section.key
           const Icon = section.icon
           const mainValue = getMainValue(section.key)
+          const pctScore = section.key === 'mi-plan' ? 1 : (section.maxScore > 0 ? score / section.maxScore : 0)
+          const badgeColor = pctScore >= 1 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+            : pctScore > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+            : 'bg-muted text-muted-foreground'
 
           return (
             <div key={section.key}>
@@ -246,6 +250,11 @@ export default function MiNegocioClient({
                   <p className={`text-sm font-medium truncate ${isActive ? 'text-primary' : ''}`}>{section.label}</p>
                   <p className="text-[11px] text-muted-foreground truncate">{mainValue}</p>
                 </div>
+                {section.key !== 'mi-plan' && (
+                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${badgeColor}`}>
+                    {Math.min(score, section.maxScore)}/{section.maxScore}
+                  </span>
+                )}
               </button>
               {isActive && (
                 <div className="mt-1.5 rounded-xl border bg-card p-4">
@@ -272,6 +281,10 @@ export default function MiNegocioClient({
             const isActive = activeSection === section.key
             const Icon = section.icon
             const mainValue = getMainValue(section.key)
+            const pctScore = section.key === 'mi-plan' ? 1 : (section.maxScore > 0 ? score / section.maxScore : 0)
+            const badgeColor = pctScore >= 1 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+              : pctScore > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+              : 'bg-muted text-muted-foreground'
 
             return (
               <button
@@ -289,6 +302,11 @@ export default function MiNegocioClient({
                   <p className={`text-sm font-medium truncate ${isActive ? 'text-primary' : ''}`}>{section.label}</p>
                   <p className="text-[11px] text-muted-foreground truncate">{mainValue}</p>
                 </div>
+                {section.key !== 'mi-plan' && (
+                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${badgeColor}`}>
+                    {Math.min(score, section.maxScore)}/{section.maxScore}
+                  </span>
+                )}
               </button>
             )
           })}
