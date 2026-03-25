@@ -33,7 +33,15 @@ export default function NumerosV2Client({ initialData }: Props) {
     }
   }, [searchParams, router])
 
+  // C12: límite 24 meses atrás
+  const minMes = (() => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - 24)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })()
+
   const navigateMonth = (direction: -1 | 1) => {
+    if (direction === -1 && mesRef <= minMes) return
     const [y, m] = mesRef.split('-').map(Number)
     const newDate = new Date(y, m - 1 + direction, 1)
     const newMes = `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`
@@ -96,8 +104,8 @@ export default function NumerosV2Client({ initialData }: Props) {
         <div className="flex items-center gap-1">
           <button
             onClick={() => navigateMonth(-1)}
-            className="p-1 rounded hover:bg-accent"
-            disabled={isPending}
+            className={`p-1 rounded hover:bg-accent transition-opacity ${mesRef <= minMes ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={isPending || mesRef <= minMes}
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
