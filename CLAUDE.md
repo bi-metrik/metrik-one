@@ -287,31 +287,64 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-03-24
+**Sesion:** 2026-03-25
 **Branch:** main
 
 Que se hizo:
-- Seed transcripcion sistema de notificaciones (sesion 2026-03-23) → ficha en `metrik-docs/docs/95_ideas/20260323_sistema-notificaciones-one.md`
-- Modulo completo notificaciones in-app: N1-N8b + D170 (avance calculado) + D171 (soft gates) + D172 (etapa_historial) + D173 (fecha_entrega_estimada) + D176 (tres estados proyecto)
-- CRON_SECRET agregado a Vercel con `printf` (sin whitespace), redesploy exitoso
-- Analisis de estructura de roles por etapa de empresa (Hana + Kaori + debate directivo)
-- Decision: roles genericos (no especializados) + area como tag en profiles
-- Supervisor (5° rol): permisos operativo-comerciales, ve todo sin delete ni causacion
-- Contador (6° rol): solo causacion, ilimitado por workspace sin costo de licencia
-- profiles.area (comercial/operaciones/null) afecta routing N1/N7, no permisos
-- Commit docs + MVP_PLAN_CONSOLIDADO.md
+- Fix panel notificaciones movil: `fixed inset-0` (pantalla completa), overlay semitransparente, boton X en header
+- Deducible toggle en modulo causacion: permiso `canToggleDeducible` para owner/admin/contador, server action con validacion workspace + estado, UI inline optimista con revert
+- Auditoria UX/UI completa con Noor: 24 hallazgos criticos, 17 medios, 8 recomendaciones priorizadas
+- 8 mejoras UX implementadas por Max+Vera en produccion:
+  - C15: confirmacion antes de cambiar mes en causacion con formulario activo
+  - C16: validacion inputs PUC (solo digitos, min 4) y Centro Costo (max 50 chars), errores inline
+  - C10: CTA "Crear cotizacion" en soft gate modal del pipeline
+  - C12: limite navegacion meses en /numeros a 24 meses atras
+  - CX2: componente LoadingSpinner reutilizable (sm/md/lg)
+  - C18: badges puntos actuales/maximos por seccion en Mi Negocio
+  - C4: FAB simplificado cuando timer activo (solo detener/cancelar)
+  - CX4: dark mode — MetrikLockup, login y registro usan variables CSS
+- Sprint WhatsApp completo (5 grupos, edge function deployada):
+  - Hotfix HMAC: falla en prod si falta WHATSAPP_APP_SECRET
+  - W01 timeout awaiting_selection: 10min → pregunta si continuar, cierre garantizado
+  - Titulo limpio de gastos: `[categoria] — $monto` en vez de mensaje_original
+  - Intent EDITAR_GASTO (W33): editar monto/categoria/proyecto de ultimos 5 gastos del dia
+  - 6 roles reales en bot: owner/admin (completo), operator/supervisor (registro), contador (solo consulta), read_only (basico)
+  - Fixes calidad: streaks con maybeSingle(), mensaje usuario no registrado con link, OPP_GANADA sin descripcion duplicada, emojis estandarizados
+- Auditoria go-to-market Mateo + Sami (ultrathink): estrategia 90 dias, meta 1K cuentas, $28.6M MRR
+  - Motor de referidos sobre /promotores existente (CAC $3-5K)
+  - Meta Ads con audiencias y creativos definidos (CAC $15-38K)
+  - Alianza contadores como canal multiplicador (CAC ~$0)
+  - WhatsApp loops virales (coeficiente >1.0 potencial)
+  - Presupuesto 90d: $8.7M COP
 
 **Commits de sesion:**
-- `81d57fc` feat: modulo completo de notificaciones in-app (N1-N8b + D170-D176)
-- `efd8ded` feat: [sprint-10] agregar roles supervisor y contador
-- `f5fc31f` docs: actualizar contexto sesion 2026-03-22 y agregar plan MVP consolidado
+- `f9d5fd6` fix: panel notificaciones full-screen en movil con boton cerrar
+- `22c544a` feat: deducible toggle en modulo causacion
+- `22494fa` fix: C15 confirmacion antes de cambiar mes en causacion
+- `74e7922` feat: C10 CTA crear cotizacion en soft gate modal
+- `f4e7181` fix: C12 limitar navegacion meses en numeros a 24 meses
+- `a9ad544` feat: CX2 LoadingSpinner reutilizable
+- `3c37d4e` feat: C18 badges puntos en secciones Mi Negocio
+- `cf868bc` feat: C4 FAB simplificado con timer activo
+- `03f1b8c` + `237b789` fix: CX4 dark mode variables CSS
+- `68735ba` fix(wa): hotfix HMAC seguridad
+- `fa15a79` feat(wa): W01 timeout awaiting_selection
+- `d79d6b7` feat(wa): titulo limpio + EDITAR_GASTO (W33)
+- `dcf31f4` feat(wa): 6 roles reales en bot
+- `3333fe9` fix(wa): fixes menores calidad y robustez
 
-## Estado actual (2026-03-24)
+**Cambios sin commit (residuales del sprint WA):**
+- `supabase/functions/_shared/handlers/registro/execute.ts` — 2 lineas modificadas
+- `supabase/functions/_shared/handlers/registro/gasto-directo.ts` — 2 lineas modificadas
 
-- **Branch:** main (up to date con remote)
+## Estado actual (2026-03-25)
+
+- **Branch:** main (up to date con remote, 2 archivos locales modificados sin commit)
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
+- **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
 - **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
+- **Estado MVP:** COMPLETO — todos los pendientes del roadmap MVP cerrados
 
 ## Features NO implementados (Roadmap)
 
@@ -325,11 +358,13 @@ Que se hizo:
 | Wizard fiscal Felipe (D234-D236) | Media | Schema listo |
 | Nomina/Payroll (D129) | Media | Schema listo |
 | Health Score calculo (D105) | Media | Schema listo |
-| WhatsApp bot completo | Media | ~60% (3-wave overhaul hecho, titulo gastos pendiente) |
+| WhatsApp bot: wizard fiscal OPP_GANADA | Media | Pendiente — hard gate actual rompe flujo end-to-end |
+| WhatsApp bot: templates + media (facturas) | Media | Pendiente — solo type:text implementado, falta sendTemplate() |
+| Motor referidos (go-to-market) | Alta | Pendiente — /promotores existe, falta UI incentivos + tracking |
 | Alegra sync (contabilidad) | Baja | 5% (schema listo) |
 | Subscriptions/Billing (Stripe) | Baja | No iniciado |
 | Reconciliacion bancaria | Baja | Schema listo |
-| Dark mode | Baja | next-themes instalado, parcial |
+| Dark mode completo | Baja | Parcial — login/registro/lockup completados, otros pendientes |
 
 ## Gotchas y convenciones
 
@@ -375,12 +410,16 @@ Que se hizo:
 - [x] Rol supervisor (5°) con routing por area — completado 2026-03-24
 - [x] Rol contador (6°, solo causacion) — completado 2026-03-24
 - [x] WhatsApp bot 3-wave overhaul (nuevos intents, UNCLEAR, alertas proactivas) — completado 2026-03-22
-- [ ] WhatsApp bot: titulo limpio de gastos (no usar mensaje_original como titulo)
-- [ ] Deducible toggle en modulo causacion (contador activa/desactiva)
+- [x] WhatsApp bot: titulo limpio de gastos — completado 2026-03-25
+- [x] Deducible toggle en modulo causacion — completado 2026-03-25
+- [ ] Activar programa referidos (/promotores): UI incentivos + deep links + tracking — pendiente sprint go-to-market
+- [ ] Wizard fiscal en WhatsApp para OPP_GANADA (hard gate actual rompe flujo end-to-end)
+- [ ] Templates + media en wa-respond.ts (facturas por WhatsApp, compliance Meta)
+- [ ] Google OAuth (codigo listo, faltan credenciales en Supabase)
 - [ ] AI-suggested deducibility para gastos
 - [ ] Verificar que registro de horas desde proyecto pasa created_by correctamente
 - [ ] Custom fields en contactos/empresas detail (cuando se creen esas vistas)
-- [ ] Items pendientes de docs/MVP_PLAN_CONSOLIDADO.md
+- [ ] Commit residuales WA sprint: execute.ts + gasto-directo.ts (2 lineas c/u)
 
 ## Decisiones clave
 
@@ -410,3 +449,11 @@ Que se hizo:
 | 2026-03-24 | Contador (6° rol): solo causacion, ilimitado gratis | Puede causar (PUC+CC), no puede aprobar. Solo ve /causacion. No consume licencia del plan |
 | 2026-03-24 | profiles.area afecta routing notificaciones, no permisos | N1 busca supervisor con area=comercial o null. N7 busca supervisor con area=operaciones o null. Fallback a owner |
 | 2026-03-24 | CRON_SECRET en Vercel con printf (no echo) | echo agrega trailing newline. Vercel rechaza CRON_SECRET con whitespace. Usar printf para env vars en CLI |
+| 2026-03-25 | Panel notificaciones movil: fixed inset-0 (full-screen) | El dropdown absolute right-0 se corria a la izquierda en movil. Full-screen con overlay es el patron correcto |
+| 2026-03-25 | Deducible toggle: permiso canToggleDeducible en roles.ts | Solo owner/admin/contador pueden cambiar deducibilidad. Validacion en server action antes de UPDATE |
+| 2026-03-25 | WhatsApp HMAC: fallar hard en prod si falta APP_SECRET | Sin validacion cualquiera puede inyectar mensajes. DENO_DEPLOYMENT_ID como proxy de produccion |
+| 2026-03-25 | Titulo de gasto: buildGastoTitle() no mensaje_original | Formato: concepto NLP (si <=40 chars) o "[categoria] — $monto". mensaje_original va a campo notas |
+| 2026-03-25 | 6 roles reales en WhatsApp bot | operator/supervisor: mismos permisos que collaborator anterior. contador: solo consultas. read_only: consultas basicas |
+| 2026-03-25 | MVP declarado completo | Todos los pendientes del roadmap MVP cerrados. Proximos pasos: go-to-market + features post-MVP |
+| 2026-03-25 | Go-to-market: referidos primero (CAC $3-5K), Meta Ads segundo (CAC $15-38K) | Consenso Mateo+Sami. /promotores ya existe en producto. Meta con gate semanal de CAC |
+| 2026-03-25 | Alianza contadores como canal multiplicador | 60K contadores en Colombia. Referral fee post-conversion. Landing metrikone.co/programa-contadores |
