@@ -287,64 +287,39 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-03-25
+**Sesion:** 2026-03-26
 **Branch:** main
 
 Que se hizo:
-- Fix panel notificaciones movil: `fixed inset-0` (pantalla completa), overlay semitransparente, boton X en header
-- Deducible toggle en modulo causacion: permiso `canToggleDeducible` para owner/admin/contador, server action con validacion workspace + estado, UI inline optimista con revert
-- Auditoria UX/UI completa con Noor: 24 hallazgos criticos, 17 medios, 8 recomendaciones priorizadas
-- 8 mejoras UX implementadas por Max+Vera en produccion:
-  - C15: confirmacion antes de cambiar mes en causacion con formulario activo
-  - C16: validacion inputs PUC (solo digitos, min 4) y Centro Costo (max 50 chars), errores inline
-  - C10: CTA "Crear cotizacion" en soft gate modal del pipeline
-  - C12: limite navegacion meses en /numeros a 24 meses atras
-  - CX2: componente LoadingSpinner reutilizable (sm/md/lg)
-  - C18: badges puntos actuales/maximos por seccion en Mi Negocio
-  - C4: FAB simplificado cuando timer activo (solo detener/cancelar)
-  - CX4: dark mode — MetrikLockup, login y registro usan variables CSS
-- Sprint WhatsApp completo (5 grupos, edge function deployada):
-  - Hotfix HMAC: falla en prod si falta WHATSAPP_APP_SECRET
-  - W01 timeout awaiting_selection: 10min → pregunta si continuar, cierre garantizado
-  - Titulo limpio de gastos: `[categoria] — $monto` en vez de mensaje_original
-  - Intent EDITAR_GASTO (W33): editar monto/categoria/proyecto de ultimos 5 gastos del dia
-  - 6 roles reales en bot: owner/admin (completo), operator/supervisor (registro), contador (solo consulta), read_only (basico)
-  - Fixes calidad: streaks con maybeSingle(), mensaje usuario no registrado con link, OPP_GANADA sin descripcion duplicada, emojis estandarizados
-- Auditoria go-to-market Mateo + Sami (ultrathink): estrategia 90 dias, meta 1K cuentas, $28.6M MRR
-  - Motor de referidos sobre /promotores existente (CAC $3-5K)
-  - Meta Ads con audiencias y creativos definidos (CAC $15-38K)
-  - Alianza contadores como canal multiplicador (CAC ~$0)
-  - WhatsApp loops virales (coeficiente >1.0 potencial)
-  - Presupuesto 90d: $8.7M COP
+- Workflow engine completo deployado en produccion (3 commits):
+  - Migraciones `workspace_stages` + `stage_transition_rules` + funcion `evaluate_stage_rules`
+  - Seed de etapas de sistema para todos los workspaces existentes + trigger para nuevos
+  - Auto-transiciones: cada update de `custom_data` evalua reglas y mueve etapa automaticamente
+  - Registro de cambios automaticos en `activity_log` como `stage_auto_transition`
+  - UI de configuracion creada y removida — solo uso interno via `/configure-workflow`
+- Skill `/configure-workflow [slug]` creado en `.claude/skills/configure-workflow/`
+- Modelo AI-first formalizado — validado con datos reales de sesion:
+  - Ejecucion Max: 10-30 min (no es cuello de botella)
+  - Discovery cliente: 2-5h (cuello de botella real)
+  - Documentado en `.claude/rules/execution-model.md` y agentes (Vera v6, Max v4, [51], Santiago)
+- Hana: template de discovery Clarity-ONE en 3 bloques (mapeo → datos → automatizaciones)
+- Kaori: proceso [34] `docs/30_operaciones/34_METRIK_Proceso_Clarity_ONE_Config.md`
+- Residuales WA sprint (execute.ts + gasto-directo.ts) incluidos en commit `2ca4980`
 
 **Commits de sesion:**
-- `f9d5fd6` fix: panel notificaciones full-screen en movil con boton cerrar
-- `22c544a` feat: deducible toggle en modulo causacion
-- `22494fa` fix: C15 confirmacion antes de cambiar mes en causacion
-- `74e7922` feat: C10 CTA crear cotizacion en soft gate modal
-- `f4e7181` fix: C12 limitar navegacion meses en numeros a 24 meses
-- `a9ad544` feat: CX2 LoadingSpinner reutilizable
-- `3c37d4e` feat: C18 badges puntos en secciones Mi Negocio
-- `cf868bc` feat: C4 FAB simplificado con timer activo
-- `03f1b8c` + `237b789` fix: CX4 dark mode variables CSS
-- `68735ba` fix(wa): hotfix HMAC seguridad
-- `fa15a79` feat(wa): W01 timeout awaiting_selection
-- `d79d6b7` feat(wa): titulo limpio + EDITAR_GASTO (W33)
-- `dcf31f4` feat(wa): 6 roles reales en bot
-- `3333fe9` fix(wa): fixes menores calidad y robustez
+- `6fb8706` feat: workflow engine — workspace_stages, stage_transition_rules, evaluate_stage_rules
+- `2ca4980` feat: workflow engine — transiciones automaticas + panel de config
+- `78c2d0e` feat: workflow engine interno — remover UI de usuario, mantener capa de datos
 
-**Cambios sin commit (residuales del sprint WA):**
-- `supabase/functions/_shared/handlers/registro/execute.ts` — 2 lineas modificadas
-- `supabase/functions/_shared/handlers/registro/gasto-directo.ts` — 2 lineas modificadas
+## Estado actual (2026-03-26)
 
-## Estado actual (2026-03-25)
-
-- **Branch:** main (up to date con remote, 2 archivos locales modificados sin commit)
+- **Branch:** main (up to date con remote, sin cambios pendientes)
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
 - **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
 - **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
-- **Estado MVP:** COMPLETO — todos los pendientes del roadmap MVP cerrados
+- **Workflow engine:** Activo en produccion. Tablas `workspace_stages` + `stage_transition_rules` con etapas de sistema seedeadas en todos los workspaces
+- **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
 
 ## Features NO implementados (Roadmap)
 
@@ -360,6 +335,7 @@ Que se hizo:
 | Health Score calculo (D105) | Media | Schema listo |
 | WhatsApp bot: wizard fiscal OPP_GANADA | Media | Pendiente — hard gate actual rompe flujo end-to-end |
 | WhatsApp bot: templates + media (facturas) | Media | Pendiente — solo type:text implementado, falta sendTemplate() |
+| Workflow engine: etapas custom + reglas automaticas | Alta | COMPLETADO 2026-03-26 — uso interno via /configure-workflow |
 | Motor referidos (go-to-market) | Alta | Pendiente — /promotores existe, falta UI incentivos + tracking |
 | Alegra sync (contabilidad) | Baja | 5% (schema listo) |
 | Subscriptions/Billing (Stripe) | Baja | No iniciado |
@@ -412,6 +388,9 @@ Que se hizo:
 - [x] WhatsApp bot 3-wave overhaul (nuevos intents, UNCLEAR, alertas proactivas) — completado 2026-03-22
 - [x] WhatsApp bot: titulo limpio de gastos — completado 2026-03-25
 - [x] Deducible toggle en modulo causacion — completado 2026-03-25
+- [x] Workflow engine: workspace_stages + stage_transition_rules + evaluate_stage_rules — completado 2026-03-26
+- [x] Commit residuales WA sprint: execute.ts + gasto-directo.ts — incluidos en 2ca4980
+- [ ] Piloto workflow engine con primer cliente Clarity — configurar via `/configure-workflow [slug]`
 - [ ] Activar programa referidos (/promotores): UI incentivos + deep links + tracking — pendiente sprint go-to-market
 - [ ] Wizard fiscal en WhatsApp para OPP_GANADA (hard gate actual rompe flujo end-to-end)
 - [ ] Templates + media en wa-respond.ts (facturas por WhatsApp, compliance Meta)
@@ -419,7 +398,6 @@ Que se hizo:
 - [ ] AI-suggested deducibility para gastos
 - [ ] Verificar que registro de horas desde proyecto pasa created_by correctamente
 - [ ] Custom fields en contactos/empresas detail (cuando se creen esas vistas)
-- [ ] Commit residuales WA sprint: execute.ts + gasto-directo.ts (2 lineas c/u)
 
 ## Decisiones clave
 
@@ -457,3 +435,7 @@ Que se hizo:
 | 2026-03-25 | MVP declarado completo | Todos los pendientes del roadmap MVP cerrados. Proximos pasos: go-to-market + features post-MVP |
 | 2026-03-25 | Go-to-market: referidos primero (CAC $3-5K), Meta Ads segundo (CAC $15-38K) | Consenso Mateo+Sami. /promotores ya existe en producto. Meta con gate semanal de CAC |
 | 2026-03-25 | Alianza contadores como canal multiplicador | 60K contadores en Colombia. Referral fee post-conversion. Landing metrikone.co/programa-contadores |
+| 2026-03-26 | Workflow engine: etapas minimas sistema + custom entre ellas | Opcion 2 aprobada — sin duplicidad de estados. etapas_sistema protegidas (es_sistema=true), custom insertables entre ellas |
+| 2026-03-26 | UI configuracion workflow solo interna — no visible al usuario ONE | Usuarios de ONE no deben ver ni configurar etapas. MeTRIK configura via /configure-workflow |
+| 2026-03-26 | Modelo AI-first: cuello de botella es diseno, no ejecucion | Validado con datos: Max ejecuta en 10-30min, discovery cliente toma 2-5h. Documentado en execution-model.md y agentes |
+| 2026-03-26 | Proceso discovery Clarity-ONE: 3 bloques → Brief → /configure-workflow → QA | Hana + Kaori. Brief de configuracion es requisito antes de ejecutar. Proceso [34] en metrik-docs |
