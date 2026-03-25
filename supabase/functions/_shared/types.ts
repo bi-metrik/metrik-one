@@ -112,11 +112,11 @@ export interface BotSession {
 
 // --- User Identity ---
 
-export type UserRole = 'owner' | 'collaborator';
+export type UserRole = 'owner' | 'admin' | 'operator' | 'supervisor' | 'contador' | 'read_only';
 
 export interface WaUser {
   workspace_id: string;
-  user_id?: string;        // auth.users.id (only for owners)
+  user_id?: string;        // auth.users.id (only for owners/staff)
   phone: string;
   name: string;
   role: UserRole;
@@ -189,10 +189,15 @@ export const AMBIGUOUS_CATEGORIES = [
   'servicios_profesionales',
 ];
 
-// --- Collaborator allowed intents (D99) ---
+// --- Role-based intent permissions (D99) ---
+// owner + admin: all intents (no restriction needed)
+// operator + supervisor: same as previous "collaborator" — can register + consult their projects
+// contador: only read/consult intents — cannot register gastos
+// read_only: only basic consult, no modifications
 
-export const COLLABORATOR_ALLOWED_INTENTS: Intent[] = [
+export const OPERATOR_ALLOWED_INTENTS: Intent[] = [
   'GASTO_DIRECTO',
+  'EDITAR_GASTO',
   'TIMER_INICIAR',
   'TIMER_PARAR',
   'TIMER_ESTADO',
@@ -201,6 +206,25 @@ export const COLLABORATOR_ALLOWED_INTENTS: Intent[] = [
   'ACTIVIDAD',
   'AYUDA',
 ];
+
+export const CONTADOR_ALLOWED_INTENTS: Intent[] = [
+  'MIS_NUMEROS',
+  'CARTERA',
+  'INFO_CONTACTO',
+  'ESTADO_PROYECTO',
+  'ESTADO_PIPELINE',
+  'AYUDA',
+];
+
+export const READ_ONLY_ALLOWED_INTENTS: Intent[] = [
+  'MIS_NUMEROS',
+  'CARTERA',
+  'ESTADO_PROYECTO',
+  'AYUDA',
+];
+
+// Legacy alias kept for backward-compat with existing imports
+export const COLLABORATOR_ALLOWED_INTENTS: Intent[] = OPERATOR_ALLOWED_INTENTS;
 
 // --- Pipeline stages ---
 

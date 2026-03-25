@@ -13,8 +13,8 @@ import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleAccion } from '../_shared/handlers/accion.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleNovedad } from '../_shared/handlers/novedad.ts';
-import type { HandlerContext, IncomingMessage, Intent, WaUser, COLLABORATOR_ALLOWED_INTENTS as _ } from '../_shared/types.ts';
-import { COLLABORATOR_ALLOWED_INTENTS } from '../_shared/types.ts';
+import type { HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
+import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
 Deno.serve(async (req) => {
   // --- GET: Webhook verification ---
@@ -125,12 +125,26 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   const parsed = await parseMessage(message.text);
   console.log(`[wa-webhook] Intent: ${parsed.intent} (${parsed.confidence}) for ${message.phone}`);
 
-  // 7. Check collaborator permissions (D99)
-  if (user.role === 'collaborator' && !COLLABORATOR_ALLOWED_INTENTS.includes(parsed.intent)) {
-    // Special message for collaborators trying manual HORAS
-    if (parsed.intent === 'HORAS') {
+  // 7. Check role-based permissions (D99)
+  // owner + admin have full access — no restriction
+  const restrictedRoles: Record<string, Intent[]> = {
+    operator: OPERATOR_ALLOWED_INTENTS,
+    supervisor: OPERATOR_ALLOWED_INTENTS,
+    contador: CONTADOR_ALLOWED_INTENTS,
+    read_only: READ_ONLY_ALLOWED_INTENTS,
+  };
+  const allowedIntents = restrictedRoles[user.role];
+  if (allowedIntents && !allowedIntents.includes(parsed.intent)) {
+    // Special message for operator/supervisor trying manual HORAS
+    if (parsed.intent === 'HORAS' && ['operator', 'supervisor'].includes(user.role)) {
       await sendTextMessage(message.phone,
         '⏱️ Las horas se registran con el timer.\n\nEscribe *iniciar en [proyecto]* para empezar y *parar* cuando termines.');
+    } else if (user.role === 'contador') {
+      await sendTextMessage(message.phone,
+        '❌ Tu rol solo permite consultar información. Para registrar gastos, contacta al administrador.');
+    } else if (user.role === 'read_only') {
+      await sendTextMessage(message.phone,
+        '❌ Tu rol es de solo lectura. Contacta al administrador si necesitas hacer cambios.');
     } else {
       await sendTextMessage(message.phone,
         '❌ No tienes permiso para esta acción. Solo puedes registrar gastos, iniciar timer y notas de tus proyectos.');
@@ -280,11 +294,23 @@ async function identifyUser(
       .eq('id', staffMatch.workspace_id)
       .single();
 
+    // Map the profile role from the DB: owner, admin, operator, supervisor, contador, read_only
+    // wa_identify_user RPC returns es_principal (bool) and optionally role
+    let role: import('../_shared/types.ts').UserRole = 'operator';
+    if (staffMatch.es_principal) {
+      role = 'owner';
+    } else if (staffMatch.role) {
+      // Trust the role from the profiles table if RPC returns it
+      const validRoles = ['owner', 'admin', 'operator', 'supervisor', 'contador', 'read_only'];
+      role = validRoles.includes(staffMatch.role) ? staffMatch.role : 'operator';
+    }
+
     return {
       workspace_id: staffMatch.workspace_id,
       phone: normalized,
       name: staffMatch.full_name,
-      role: staffMatch.es_principal ? 'owner' : 'collaborator',
+      role,
+      user_id: staffMatch.user_id || undefined,
       subscription_status: workspace?.subscription_status || 'trial',
     };
   }
@@ -292,7 +318,7 @@ async function identifyUser(
   // 2. Check if phone belongs to a WA collaborator (also flexible matching)
   const { data: collabMatch } = await supabase
     .from('wa_collaborators')
-    .select('id, workspace_id, name, phone')
+    .select('id, workspace_id, name, phone, role')
     .or(`phone.eq.${normalized},phone.eq.+${normalized}`)
     .eq('is_active', true)
     .limit(1)
@@ -305,11 +331,16 @@ async function identifyUser(
       .eq('id', collabMatch.workspace_id)
       .single();
 
+    // Map collaborator role — wa_collaborators may have a 'role' column
+    const validRoles = ['owner', 'admin', 'operator', 'supervisor', 'contador', 'read_only'];
+    const collabRole: import('../_shared/types.ts').UserRole =
+      collabMatch.role && validRoles.includes(collabMatch.role) ? collabMatch.role : 'operator';
+
     return {
       workspace_id: collabMatch.workspace_id,
       phone: normalized,
       name: collabMatch.name,
-      role: 'collaborator',
+      role: collabRole,
       collaborator_id: collabMatch.id,
       subscription_status: workspace?.subscription_status || 'trial',
     };
