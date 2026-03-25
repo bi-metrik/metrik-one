@@ -9,6 +9,43 @@ import { toast } from 'sonner'
 import type { ItemCausacion } from './actions'
 import { causarMovimiento, getCausacionData, toggleDeducible } from './actions'
 
+// ── Diálogo de confirmación inline (sin AlertDialog de Radix para mantener dependencias minimas) ──
+function ConfirmDialog({
+  open,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-sm rounded-xl border bg-background p-6 shadow-xl">
+        <h3 className="text-base font-semibold">¿Cambiar de mes?</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Tienes un formulario abierto con datos ingresados. Si cambias de mes se perderán los datos no guardados.
+        </p>
+        <div className="mt-5 flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-background text-sm font-medium transition-colors hover:bg-accent"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex h-10 flex-1 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Cambiar mes
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   items: ItemCausacion[]
   counts: { aprobados: number; causados: number }
@@ -52,6 +89,7 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
     return initial
   })
   const [togglePending, setTogglePending] = useState<string | null>(null)
+  const [pendingDelta, setPendingDelta] = useState<number | null>(null)
 
   function getDeducible(item: ItemCausacion): boolean {
     if (item.id in deducibleState) return deducibleState[item.id]
@@ -81,6 +119,7 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
     notas_causacion: string
     retencion_aplicada: string
   }>>({})
+  const [formErrors, setFormErrors] = useState<Record<string, { cuenta_contable?: string; centro_costo?: string }>>({})
 
   function navigate(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -92,10 +131,27 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
     router.push(`/causacion?${params.toString()}`)
   }
 
-  function cambiarMes(delta: number) {
+  function hasFormData(): boolean {
+    if (expandedId === null) return false
+    const form = formData[expandedId]
+    if (!form) return false
+    return form.cuenta_contable.trim().length > 0 || form.centro_costo.trim().length > 0
+  }
+
+  function doChangeMes(delta: number) {
     const [y, m] = mes.split('-').map(Number)
     const d = new Date(y, m - 1 + delta, 1)
+    setExpandedId(null)
+    setFormData({})
     navigate('mes', d.toISOString().slice(0, 7))
+  }
+
+  function cambiarMes(delta: number) {
+    if (hasFormData()) {
+      setPendingDelta(delta)
+    } else {
+      doChangeMes(delta)
+    }
   }
 
   function toggleExpand(id: string) {
@@ -114,6 +170,21 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
   }
 
   function updateForm(id: string, field: string, value: string) {
+    // Cuenta PUC: solo dígitos, max 9 chars
+    if (field === 'cuenta_contable') {
+      value = value.replace(/\D/g, '').slice(0, 9)
+      // Limpiar error si ahora es válido
+      if (value.length >= 4) {
+        setFormErrors(prev => ({ ...prev, [id]: { ...prev[id], cuenta_contable: undefined } }))
+      }
+    }
+    // Centro de costo: max 50 chars
+    if (field === 'centro_costo') {
+      value = value.slice(0, 50)
+      if (value.trim().length > 0) {
+        setFormErrors(prev => ({ ...prev, [id]: { ...prev[id], centro_costo: undefined } }))
+      }
+    }
     setFormData(prev => ({
       ...prev,
       [id]: { ...prev[id], [field]: value },
@@ -122,12 +193,19 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
 
   function handleCausar(item: ItemCausacion) {
     const form = formData[item.id]
+    const errors: { cuenta_contable?: string; centro_costo?: string } = {}
+
     if (!form?.cuenta_contable.trim()) {
-      toast.error('Cuenta contable es obligatoria')
-      return
+      errors.cuenta_contable = 'La cuenta PUC es obligatoria'
+    } else if (form.cuenta_contable.trim().length < 4) {
+      errors.cuenta_contable = 'La cuenta PUC debe tener al menos 4 dígitos'
     }
     if (!form?.centro_costo.trim()) {
-      toast.error('Centro de costo es obligatorio')
+      errors.centro_costo = 'El centro de costo es obligatorio'
+    }
+
+    if (errors.cuenta_contable || errors.centro_costo) {
+      setFormErrors(prev => ({ ...prev, [item.id]: errors }))
       return
     }
 
@@ -135,8 +213,8 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
       const res = await causarMovimiento({
         tabla: item.tabla,
         registroId: item.id,
-        cuenta_contable: form.cuenta_contable,
-        centro_costo: form.centro_costo,
+        cuenta_contable: form.cuenta_contable.trim(),
+        centro_costo: form.centro_costo.trim(),
         notas_causacion: form.notas_causacion || undefined,
         retencion_aplicada: form.retencion_aplicada ? Number(form.retencion_aplicada) : undefined,
       })
@@ -152,6 +230,11 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+      <ConfirmDialog
+        open={pendingDelta !== null}
+        onConfirm={() => { const d = pendingDelta!; setPendingDelta(null); doChangeMes(d) }}
+        onCancel={() => setPendingDelta(null)}
+      />
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Causacion Contable</h1>
@@ -319,28 +402,43 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
                 {/* Expanded form (only for aprobados tab) */}
                 {activeTab === 'aprobados' && isExpanded && form && (
                   <div className="border-t bg-muted/30 px-3 py-3 space-y-3">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="mb-1 block text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Cuenta PUC *</label>
-                        <input
-                          type="text"
-                          value={form.cuenta_contable}
-                          onChange={e => updateForm(item.id, 'cuenta_contable', e.target.value)}
-                          placeholder="Ej: 519595"
-                          className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Centro costo *</label>
-                        <input
-                          type="text"
-                          value={form.centro_costo}
-                          onChange={e => updateForm(item.id, 'centro_costo', e.target.value)}
-                          placeholder="Ej: Operaciones"
-                          className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm"
-                        />
-                      </div>
-                    </div>
+                    {(() => {
+                      const errs = formErrors[item.id] ?? {}
+                      return (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="mb-1 block text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Cuenta PUC *</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              maxLength={9}
+                              value={form.cuenta_contable}
+                              onChange={e => updateForm(item.id, 'cuenta_contable', e.target.value)}
+                              placeholder="Ej: 519595"
+                              className={`w-full rounded-md border bg-background px-2.5 py-1.5 text-sm ${errs.cuenta_contable ? 'border-destructive' : ''}`}
+                            />
+                            {errs.cuenta_contable && (
+                              <p className="mt-0.5 text-[10px] text-destructive">{errs.cuenta_contable}</p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Centro costo *</label>
+                            <input
+                              type="text"
+                              maxLength={50}
+                              value={form.centro_costo}
+                              onChange={e => updateForm(item.id, 'centro_costo', e.target.value)}
+                              placeholder="Ej: Operaciones"
+                              className={`w-full rounded-md border bg-background px-2.5 py-1.5 text-sm ${errs.centro_costo ? 'border-destructive' : ''}`}
+                            />
+                            {errs.centro_costo && (
+                              <p className="mt-0.5 text-[10px] text-destructive">{errs.centro_costo}</p>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })()}
 
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -369,7 +467,7 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
 
                     <button
                       onClick={() => handleCausar(item)}
-                      disabled={isPending || !form.cuenta_contable.trim() || !form.centro_costo.trim()}
+                      disabled={isPending || form.cuenta_contable.length < 4 || !form.centro_costo.trim()}
                       className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
                     >
                       <Zap className="h-4 w-4" />
