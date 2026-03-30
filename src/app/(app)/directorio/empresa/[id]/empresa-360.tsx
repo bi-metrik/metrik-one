@@ -87,12 +87,12 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Link
-          href="/directorio/empresas"
+        <button
+          onClick={() => router.back()}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
         <div className="flex-1">
           <h1 className="text-lg font-bold">
             <span className="text-muted-foreground font-medium">{empresa.codigo}</span>{' '}

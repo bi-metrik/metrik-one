@@ -58,12 +58,12 @@ export default function Contacto360({ contacto, oportunidades, empresaVinculada 
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Link
-          href="/directorio/contactos"
+        <button
+          onClick={() => router.back()}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
         <div className="flex-1">
           <h1 className="text-lg font-bold">{contacto.nombre}</h1>
           <div className="flex items-center gap-2">
