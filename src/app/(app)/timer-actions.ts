@@ -163,10 +163,10 @@ export async function getProyectosActivos() {
 
   const { data } = await supabase
     .from('proyectos')
-    .select('id, nombre, proyecto_codigo')
+    .select('id, nombre, codigo')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'en_ejecucion')
-    .order('proyecto_codigo')
+    .order('codigo')
 
-  return (data ?? []).map(p => ({ id: p.id, name: p.nombre ?? 'Sin nombre', code: p.proyecto_codigo ?? '' }))
+  return (data ?? []).map(p => ({ id: p.id, name: p.nombre ?? 'Sin nombre', code: p.codigo ?? '' }))
 }
