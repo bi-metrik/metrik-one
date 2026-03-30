@@ -17,6 +17,16 @@ const CATEGORIAS_PROYECTO = CATEGORIAS_GASTO.filter(c =>
   !['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
 )
 
+// Mapping categoría → tipos de rubro compatibles (para auto-asignación)
+const CAT_TO_RUBRO_TIPOS: Record<string, string[]> = {
+  materiales:               ['materiales'],
+  transporte:               ['viaticos'],
+  alimentacion:             ['viaticos'],
+  software:                 ['software'],
+  servicios_profesionales:  ['servicios_prof', 'mo_terceros'],
+  mano_de_obra:             ['mo_propia', 'mo_terceros'],
+}
+
 interface Props {
   proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
   defaultProyectoId?: string
@@ -43,21 +53,17 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
 
   // Rubros for selected project
   const [rubros, setRubros] = useState<{ id: string; nombre: string; tipo: string | null }[]>([])
-  const [loadingRubros, setLoadingRubros] = useState(false)
 
   const isEmpresa = proyectoId === 'empresa'
   const isProyecto = proyectoId !== 'empresa'
 
   const categoriasVisibles = isEmpresa ? CATEGORIAS_EMPRESA : CATEGORIAS_PROYECTO
 
-  // Fetch rubros when project changes
+  // Fetch rubros al cambiar proyecto
   useEffect(() => {
     if (isProyecto) {
-      setLoadingRubros(true)
       getRubrosProyecto(proyectoId).then(data => {
         setRubros(data)
-        setRubroId(data.length === 1 ? data[0].id : '')
-        setLoadingRubros(false)
       })
     } else {
       setRubros([])
@@ -65,12 +71,20 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
     }
   }, [proyectoId, isProyecto])
 
-  // Reset categoría al cambiar entre empresa/proyecto si la actual no aplica
+  // Reset categoría al cambiar entre empresa/proyecto
   useEffect(() => {
     if (!categoriasVisibles.some(c => c.value === categoria)) {
       setCategoria(categoriasVisibles[0]?.value ?? 'otros')
     }
   }, [isEmpresa, categoriasVisibles, categoria])
+
+  // Auto-asignar rubro según categoría seleccionada (transparente para el usuario)
+  useEffect(() => {
+    if (!isProyecto || rubros.length === 0) { setRubroId(''); return }
+    const tiposCompatibles = CAT_TO_RUBRO_TIPOS[categoria] ?? []
+    const match = rubros.find(r => r.tipo && tiposCompatibles.includes(r.tipo))
+    setRubroId(match?.id ?? '')
+  }, [categoria, rubros, isProyecto])
 
   const compressImage = async (file: File, maxWidth = 1600, quality = 0.8): Promise<File> => {
     if (file.type === 'application/pdf') return file
@@ -228,22 +242,6 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
           </div>
         )}
 
-        {/* Rubro (only when project selected and has >1 rubro) */}
-        {isProyecto && !loadingRubros && rubros.length > 1 && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Costo</label>
-            <select
-              value={rubroId}
-              onChange={e => setRubroId(e.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
-            >
-              <option value="">Sin costo</option>
-              {rubros.map(r => (
-                <option key={r.id} value={r.id}>{r.nombre}</option>
-              ))}
-            </select>
-          </div>
-        )}
 
         {/* Categoria */}
         <div>
