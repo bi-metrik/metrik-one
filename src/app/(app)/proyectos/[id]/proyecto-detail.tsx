@@ -758,7 +758,7 @@ export default function ProyectoDetail({
       {/* ─── Actividad ─── */}
       <div className="space-y-3 rounded-lg border p-4">
         <h2 className="text-sm font-semibold">Actividad</h2>
-        <ActivityLog entidadTipo="proyecto" entidadId={proyectoId} staffList={staffList} />
+        <ActivityLog entidadTipo="proyecto" entidadId={proyectoId} staffList={staffList} oportunidadId={oportunidadId} />
       </div>
 
       {/* ─── State controls (bottom) ─── */}

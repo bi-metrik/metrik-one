@@ -2,16 +2,18 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 
-export async function getActivityLog(entidadTipo: string, entidadId: string) {
+export async function getActivityLog(entidadTipo: string, entidadId: string, oportunidadId?: string | null) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
+
+  // Si hay oportunidad vinculada, traer el log de ambas entidades
+  const ids = [entidadId, ...(oportunidadId ? [oportunidadId] : [])]
 
   const { data } = await supabase
     .from('activity_log')
     .select('*, autor:staff!activity_log_autor_id_fkey(id, full_name), mencion:staff!activity_log_mencion_id_fkey(id, full_name)')
     .eq('workspace_id', workspaceId)
-    .eq('entidad_tipo', entidadTipo)
-    .eq('entidad_id', entidadId)
+    .in('entidad_id', ids)
     .order('created_at', { ascending: false })
     .limit(50)
 

@@ -30,6 +30,7 @@ interface ActivityLogProps {
   entidadTipo: 'oportunidad' | 'proyecto'
   entidadId: string
   staffList: StaffOption[]
+  oportunidadId?: string | null
 }
 
 const CAMPO_LABELS: Record<string, string> = {
@@ -64,7 +65,7 @@ function timeAgo(dateStr: string) {
   return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
 }
 
-export default function ActivityLog({ entidadTipo, entidadId, staffList }: ActivityLogProps) {
+export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId }: ActivityLogProps) {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [isPending, startTransition] = useTransition()
@@ -79,12 +80,12 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList }: Activ
 
   useEffect(() => {
     async function load() {
-      const data = await getActivityLog(entidadTipo, entidadId)
+      const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)
       setEntries(data as ActivityEntry[])
       setLoading(false)
     }
     load()
-  }, [entidadTipo, entidadId])
+  }, [entidadTipo, entidadId, oportunidadId])
 
   const handleSubmit = () => {
     if (!content.trim()) return
@@ -92,7 +93,7 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList }: Activ
       const res = await addComment(entidadTipo, entidadId, content.trim(), mencionId, linkUrl || null)
       if (res.success) {
         // Reload to get full entry with joins
-        const data = await getActivityLog(entidadTipo, entidadId)
+        const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)
         setEntries(data as ActivityEntry[])
         setContent('')
         setMencionId(null)
