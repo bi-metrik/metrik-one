@@ -54,27 +54,32 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
   const isEmpresa = proyectoId === 'empresa'
   const isProyecto = proyectoId !== 'empresa'
 
-  // When project is selected, filter categories to only those matching the project's rubro types
+  // Categorías permitidas según el rubro seleccionado (o todos los rubros del proyecto)
   const categoriasVisibles = (() => {
     if (isEmpresa) return CATEGORIAS_EMPRESA
-    // Categorías de proyecto (excluye las exclusivas de empresa)
     const CATEGORIAS_PROYECTO = CATEGORIAS_GASTO.filter(c =>
       !['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
     )
     if (rubros.length === 0) return CATEGORIAS_PROYECTO
-    // Collect only categories that map from the project's rubros
+    // Si hay un rubro seleccionado, filtrar por ese rubro
+    const rubroActivo = rubroId ? rubros.find(r => r.id === rubroId) : null
+    const rubrosParaFiltrar = rubroActivo ? [rubroActivo] : rubros
     const allowedCats = new Set<string>()
-    for (const rubro of rubros) {
+    for (const rubro of rubrosParaFiltrar) {
       const cats = rubro.tipo ? RUBRO_TO_CATEGORIAS[rubro.tipo] : null
-      if (cats) {
-        cats.forEach(c => allowedCats.add(c))
-      }
+      if (cats) cats.forEach(c => allowedCats.add(c))
     }
-    // Si ningun rubro mapea, mostrar categorias de proyecto (no empresa)
-    if (allowedCats.size === 0) return CATEGORIAS_GASTO.filter(c =>
-      !['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
-    )
+    if (allowedCats.size === 0) return CATEGORIAS_PROYECTO
     return CATEGORIAS_GASTO.filter(c => allowedCats.has(c.value))
+  })()
+
+  // Si el rubro seleccionado mapea a exactamente 1 categoría, la categoría queda determinada
+  const categoriaFijadaPorRubro = (() => {
+    if (!rubroId) return false
+    const rubro = rubros.find(r => r.id === rubroId)
+    if (!rubro?.tipo) return false
+    const cats = RUBRO_TO_CATEGORIAS[rubro.tipo]
+    return cats?.length === 1
   })()
 
   // Fetch rubros when project changes
@@ -92,12 +97,14 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
     }
   }, [proyectoId, isProyecto])
 
-  // Reset categoria when available categories change and current isn't in the list
+  // Cuando el rubro determina una sola categoría, auto-asignarla
   useEffect(() => {
-    if (!categoriasVisibles.some(c => c.value === categoria)) {
+    if (categoriaFijadaPorRubro && categoriasVisibles.length === 1) {
+      setCategoria(categoriasVisibles[0].value)
+    } else if (!categoriasVisibles.some(c => c.value === categoria)) {
       setCategoria(categoriasVisibles[0]?.value ?? 'otros')
     }
-  }, [categoriasVisibles, categoria])
+  }, [categoriasVisibles, categoriaFijadaPorRubro, categoria])
 
   const compressImage = async (file: File, maxWidth = 1600, quality = 0.8): Promise<File> => {
     if (file.type === 'application/pdf') return file
@@ -272,19 +279,21 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
           </div>
         )}
 
-        {/* Categoria */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Categoria</label>
-          <select
-            value={categoria}
-            onChange={e => setCategoria(e.target.value)}
-            className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
-          >
-            {categoriasVisibles.map(c => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        </div>
+        {/* Categoria — oculta cuando el rubro ya la determina unívocamente */}
+        {!categoriaFijadaPorRubro && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Categoria</label>
+            <select
+              value={categoria}
+              onChange={e => setCategoria(e.target.value)}
+              className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
+            >
+              {categoriasVisibles.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Fecha */}
         <div>
