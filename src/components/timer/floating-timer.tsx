@@ -28,7 +28,7 @@ export default function FloatingTimer() {
   const [state, setState] = useState<LocalState>(DEFAULT_STATE)
   const [elapsed, setElapsed] = useState(0)
   const [expanded, setExpanded] = useState(false)
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
+  const [projects, setProjects] = useState<{ id: string; name: string; code: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -194,7 +194,7 @@ export default function FloatingTimer() {
             >
               <option value="">Seleccionar...</option>
               {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+                <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>
               ))}
             </select>
           </div>

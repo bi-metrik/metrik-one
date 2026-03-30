@@ -76,7 +76,7 @@ export default function FAB({ role }: FABProps) {
   // Timer state
   const [timer, setTimer] = useState<TimerLocal>(DEFAULT_TIMER)
   const [elapsed, setElapsed] = useState(0)
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
+  const [projects, setProjects] = useState<{ id: string; name: string; code: string }[]>([])
   const [timerLoaded, setTimerLoaded] = useState(false)
   const [isPending, startTransition] = useTransition()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -238,7 +238,7 @@ export default function FAB({ role }: FABProps) {
           >
             <option value="">Seleccionar proyecto...</option>
             {projects.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+              <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>
             ))}
           </select>
 
