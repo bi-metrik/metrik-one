@@ -13,8 +13,8 @@ export async function uploadSoporteGasto(formData: FormData) {
   const file = formData.get('file') as File | null
   if (!file || file.size === 0) return { success: false, error: 'Sin archivo', url: null }
 
-  const MAX_SIZE = 5 * 1024 * 1024 // 5MB
-  if (file.size > MAX_SIZE) return { success: false, error: 'El archivo supera 5MB', url: null }
+  const MAX_SIZE = 20 * 1024 * 1024 // 20MB
+  if (file.size > MAX_SIZE) return { success: false, error: 'El archivo supera 20MB', url: null }
 
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
   if (!allowed.includes(file.type)) return { success: false, error: 'Solo JPEG, PNG, WebP o PDF', url: null }
