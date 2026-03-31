@@ -8,6 +8,7 @@ import {
   Flame,
   FolderKanban,
   Briefcase,
+  Store,
   LogOut,
   Users,
   ChevronLeft,
@@ -44,6 +45,7 @@ interface AppShellProps {
 const ALL_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/negocios', label: 'Negocios', icon: Store, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/pipeline', label: 'Oportunidades', icon: Flame, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
