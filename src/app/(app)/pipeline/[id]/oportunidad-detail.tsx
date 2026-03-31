@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, User, ChevronRight, Flame, XCircle,
   Trophy, FileText, Plus, Clock, ShieldAlert, Copy, Send, Check, X,
-  FolderOpen, Link as LinkIcon,
+  FolderOpen,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -130,10 +130,10 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="truncate text-lg font-bold">
-            <span className="text-muted-foreground font-medium">{oportunidad.codigo}·C</span>{' '}
+            <span className="font-medium text-amber-600">{oportunidad.codigo}·C</span>{' '}
             {oportunidad.descripcion || 'Sin descripcion'}
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {etapaConfig && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${etapaConfig.chipClass}`}>
                 {etapaConfig.label} · {etapaConfig.probabilidad}%
@@ -144,7 +144,76 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
             )}
           </div>
         </div>
+        {/* Drive icon — activo si tiene URL, apagado si no */}
+        {carpetaUrl ? (
+          <a
+            href={carpetaUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md p-1.5 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30"
+            title="Abrir carpeta Drive"
+          >
+            <FolderOpen className="h-5 w-5" />
+          </a>
+        ) : (
+          <button
+            onClick={() => setCarpetaEditing(true)}
+            className="rounded-md p-1.5 text-muted-foreground/40 hover:bg-accent hover:text-muted-foreground"
+            title="Agregar carpeta Drive"
+          >
+            <FolderOpen className="h-5 w-5" />
+          </button>
+        )}
       </div>
+
+      {/* Carpeta URL — inline edit cuando no hay URL */}
+      {carpetaEditing && (
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+          <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
+          <input
+            type="url"
+            value={carpetaUrl}
+            onChange={e => setCarpetaUrl(e.target.value)}
+            placeholder="https://drive.google.com/..."
+            className="flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+            autoFocus
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                setCarpetaEditing(false)
+                startTransition(async () => {
+                  await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
+                  toast.success('Carpeta guardada')
+                })
+              }
+              if (e.key === 'Escape') {
+                setCarpetaEditing(false)
+                setCarpetaUrl(oportunidad.carpeta_url ?? '')
+              }
+            }}
+          />
+          <button
+            onClick={() => {
+              setCarpetaEditing(false)
+              startTransition(async () => {
+                await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
+                toast.success('Carpeta guardada')
+              })
+            }}
+            className="rounded-md p-1 text-green-600 hover:bg-green-50"
+          >
+            <Check className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              setCarpetaEditing(false)
+              setCarpetaUrl(oportunidad.carpeta_url ?? '')
+            }}
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Etapa progress bar */}
       {!isTerminal && (
@@ -204,69 +273,6 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
           onCancel={() => setShowFiscalGate(false)}
         />
       )}
-
-      {/* Carpeta URL */}
-      <div className="flex items-center gap-2 rounded-lg border p-3">
-        <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
-        {carpetaEditing ? (
-          <div className="flex flex-1 items-center gap-2">
-            <input
-              type="url"
-              value={carpetaUrl}
-              onChange={e => setCarpetaUrl(e.target.value)}
-              placeholder="https://drive.google.com/..."
-              className="flex-1 rounded-md border px-2 py-1 text-xs"
-              autoFocus
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  setCarpetaEditing(false)
-                  startTransition(async () => {
-                    await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
-                    toast.success('Carpeta actualizada')
-                  })
-                }
-                if (e.key === 'Escape') {
-                  setCarpetaEditing(false)
-                  setCarpetaUrl(oportunidad.carpeta_url ?? '')
-                }
-              }}
-            />
-            <button
-              onClick={() => {
-                setCarpetaEditing(false)
-                startTransition(async () => {
-                  await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
-                  toast.success('Carpeta actualizada')
-                })
-              }}
-              className="rounded-md p-1 text-green-600 hover:bg-green-50"
-            >
-              <Check className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-1 items-center justify-between min-w-0">
-            <button
-              onClick={() => setCarpetaEditing(true)}
-              className="text-xs text-muted-foreground hover:text-foreground truncate"
-            >
-              {carpetaUrl ? carpetaUrl : 'Agregar enlace a carpeta...'}
-            </button>
-            {carpetaUrl && (
-              <a
-                href={carpetaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={e => e.stopPropagation()}
-                className="shrink-0 rounded-md p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
-                title="Abrir carpeta"
-              >
-                <LinkIcon className="h-3.5 w-3.5" />
-              </a>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Responsable */}
       {staffList.length > 0 && (

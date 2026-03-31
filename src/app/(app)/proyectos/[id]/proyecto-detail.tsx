@@ -7,10 +7,11 @@ import {
   ArrowLeft, FolderOpen, Clock, Banknote, Pause, Play,
   Lock, Plus, TrendingUp, TrendingDown, FileText, AlertTriangle,
   ChevronDown, RefreshCw, ArrowUpCircle, User, Smartphone, Upload, Loader2, Calendar,
+  Check, X,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { updateAvance, cambiarEstadoProyecto, marcarEntregado } from '../actions-v2'
+import { updateAvance, cambiarEstadoProyecto, marcarEntregado, updateProyectoCarpeta } from '../actions-v2'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
@@ -173,6 +174,8 @@ export default function ProyectoDetail({
   const [avance, setAvance] = useState(f.avance_porcentaje ?? 0)
   const [dialog, setDialog] = useState<'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
   const [entregarModal, setEntregarModal] = useState(false)
+  const [carpetaUrl, setCarpetaUrl] = useState(f.carpeta_url ?? '')
+  const [carpetaEditing, setCarpetaEditing] = useState(false)
   const [showRubros, setShowRubros] = useState(false)
   const [registrosTab, setRegistrosTab] = useState<'gastos' | 'horas' | 'facturas'>('gastos')
   const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
@@ -249,6 +252,14 @@ export default function ProyectoDetail({
     return ''
   }
 
+  const stageSuffixColor = (estado: string | null) => {
+    if (!estado) return 'text-muted-foreground'
+    if (['en_ejecucion', 'pausado'].includes(estado)) return 'text-blue-600'
+    if (estado === 'entregado') return 'text-green-600'
+    if (estado === 'cerrado') return 'text-slate-500'
+    return 'text-muted-foreground'
+  }
+
   const handleEstado = (nuevoEstado: 'pausado' | 'en_ejecucion') => {
     startTransition(async () => {
       const res = await cambiarEstadoProyecto(proyectoId, nuevoEstado)
@@ -274,13 +285,13 @@ export default function ProyectoDetail({
         <div className="flex-1 min-w-0">
           <h1 className="truncate text-lg font-bold">
             {(f.oportunidad_codigo ?? f.codigo) && (
-              <span className="text-muted-foreground font-medium">
+              <span className={`font-medium ${stageSuffixColor(f.estado)}`}>
                 {f.oportunidad_codigo ?? f.codigo}{stageSuffix(f.estado)}{' '}
               </span>
             )}
             {f.nombre ?? 'Sin nombre'}
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {config && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${config.chipClass}`}>
                 {config.label}
@@ -321,29 +332,103 @@ export default function ProyectoDetail({
             )}
           </div>
         </div>
-        {f.carpeta_url && (
+        {/* Drive icon — activo si tiene URL, apagado si no */}
+        {carpetaUrl ? (
           <a
-            href={f.carpeta_url}
+            href={carpetaUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="Abrir carpeta"
+            className={`rounded-md p-1.5 hover:bg-accent ${
+              ['en_ejecucion','pausado'].includes(f.estado ?? '')
+                ? 'text-blue-500 hover:text-blue-600'
+                : f.estado === 'entregado'
+                ? 'text-green-500 hover:text-green-600'
+                : 'text-slate-500 hover:text-slate-600'
+            }`}
+            title="Abrir carpeta Drive"
           >
             <FolderOpen className="h-5 w-5" />
           </a>
+        ) : (
+          <button
+            onClick={() => setCarpetaEditing(true)}
+            className="rounded-md p-1.5 text-muted-foreground/40 hover:bg-accent hover:text-muted-foreground"
+            title="Agregar carpeta Drive"
+          >
+            <FolderOpen className="h-5 w-5" />
+          </button>
         )}
       </div>
 
+      {/* Carpeta URL — inline edit */}
+      {carpetaEditing && (
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+          <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
+          <input
+            type="url"
+            value={carpetaUrl}
+            onChange={e => setCarpetaUrl(e.target.value)}
+            placeholder="https://drive.google.com/..."
+            className="flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+            autoFocus
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                setCarpetaEditing(false)
+                startTransition(async () => {
+                  await updateProyectoCarpeta(proyectoId, carpetaUrl.trim() || null)
+                  toast.success('Carpeta guardada')
+                })
+              }
+              if (e.key === 'Escape') {
+                setCarpetaEditing(false)
+                setCarpetaUrl(f.carpeta_url ?? '')
+              }
+            }}
+          />
+          <button
+            onClick={() => {
+              setCarpetaEditing(false)
+              startTransition(async () => {
+                await updateProyectoCarpeta(proyectoId, carpetaUrl.trim() || null)
+                toast.success('Carpeta guardada')
+              })
+            }}
+            className="rounded-md p-1 text-green-600 hover:bg-green-50"
+          >
+            <Check className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              setCarpetaEditing(false)
+              setCarpetaUrl(f.carpeta_url ?? '')
+            }}
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
-      {/* D131: Link to approved cotización */}
+
+      {/* D131: Link to approved cotización — microlink discreto */}
       {cotizacionId && oportunidadId && (
-        <Link
-          href={`/pipeline/${oportunidadId}/cotizacion/${cotizacionId}`}
-          className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm transition-colors hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/30 dark:hover:bg-blue-950/50"
-        >
-          <FileText className="h-4 w-4 text-blue-500 shrink-0" />
-          <span className="text-blue-700 dark:text-blue-300 font-medium">Ver cotizacion aprobada →</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/pipeline/${oportunidadId}/cotizacion/${cotizacionId}`}
+            className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/30"
+          >
+            <FileText className="h-3 w-3" />
+            Ver cotizacion aprobada →
+          </Link>
+          {oportunidadId && (
+            <Link
+              href={`/pipeline/${oportunidadId}`}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-amber-200 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30"
+            >
+              Ver negocio ·C →
+            </Link>
+          )}
+        </div>
       )}
 
       {/* ─── Alertas ─── */}
