@@ -137,6 +137,20 @@ export default function NumerosV2Client({ initialData }: Props) {
         </div>
       ) : (
         <>
+          {/* Pipeline + Contratado (2 nuevos KPIs al principio) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border bg-card p-4 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Pipeline</p>
+              <p className="text-base font-bold tabular-nums leading-tight">{formatCOP(data.pipelineActivo)}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Oportunidades abiertas</p>
+            </div>
+            <div className="rounded-xl border bg-card p-4 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Contratado</p>
+              <p className="text-base font-bold tabular-nums leading-tight">{formatCOP(data.valorContratado)}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Proyectos en ejecucion</p>
+            </div>
+          </div>
+
           {/* P1 + P2 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* P1: ¿Cuánta plata tengo? — Saldo bancario + meta de cobro del mes */}

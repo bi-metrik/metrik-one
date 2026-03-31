@@ -50,6 +50,10 @@ export interface NumerosData {
   cxpTotal: number
   cxpCount: number
 
+  // KPIs adicionales de negocio
+  pipelineActivo: number       // SUM(valor_estimado) oportunidades no ganadas/perdidas
+  valorContratado: number      // SUM(presupuesto_total) proyectos en_ejecucion
+
   // Semáforo
   semaforo: SemaforoData
 
@@ -155,6 +159,9 @@ export async function getNumeros(mesRef?: string) {
     fiscalProfileRes,
     // D119: Cuentas por pagar
     cxpRes,
+    // KPIs negocio
+    pipelineActivoRes,
+    valorContratadoRes,
   ] = await Promise.all([
     // Latest bank balance (order by created_at — fecha can be NULL in old records)
     supabase
@@ -316,6 +323,20 @@ export async function getNumeros(mesRef?: string) {
       .select('monto')
       .eq('workspace_id', workspaceId)
       .eq('estado_pago', 'pendiente'),
+
+    // KPI: Pipeline activo — oportunidades no ganadas/perdidas
+    supabase
+      .from('oportunidades')
+      .select('valor_estimado')
+      .eq('workspace_id', workspaceId)
+      .not('etapa', 'in', '(ganada,perdida)'),
+
+    // KPI: Valor contratado — proyectos en ejecución
+    supabase
+      .from('proyectos')
+      .select('presupuesto_total')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'en_ejecucion'),
   ])
 
   // ── Calculate values ─────────────────────────────
@@ -352,6 +373,10 @@ export async function getNumeros(mesRef?: string) {
   const cxpData = cxpRes.data ?? []
   const cxpTotal = cxpData.reduce((s, g) => s + Number(g.monto), 0)
   const cxpCount = cxpData.length
+
+  // KPIs negocio
+  const pipelineActivo = (pipelineActivoRes.data ?? []).reduce((s, o) => s + Number(o.valor_estimado ?? 0), 0)
+  const valorContratado = (valorContratadoRes.data ?? []).reduce((s, p) => s + Number(p.presupuesto_total ?? 0), 0)
 
   // Gastos avg (3 months)
   const gastos3m = gastos3mRes.data ?? []
@@ -608,6 +633,8 @@ export async function getNumeros(mesRef?: string) {
     gastosSinSoporteMes,
     cxpTotal,
     cxpCount,
+    pipelineActivo,
+    valorContratado,
     semaforo,
     conciliacion,
     mesRef: mes,
