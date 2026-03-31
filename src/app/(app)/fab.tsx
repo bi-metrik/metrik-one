@@ -8,6 +8,7 @@ import {
   startTimer, stopTimer, getActiveTimer, getProyectosActivos,
   type ActiveTimer,
 } from './timer-actions'
+import { FEATURES } from '@/lib/feature-flags'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -21,6 +22,7 @@ interface FABAction {
   roles: string[]
   href?: string
   action?: string
+  feature?: keyof typeof FEATURES
 }
 
 const FAB_ACTIONS: FABAction[] = [
@@ -47,6 +49,7 @@ const FAB_ACTIONS: FABAction[] = [
     icon: Landmark,
     roles: ['owner', 'admin'],
     action: 'saldo',
+    feature: 'CONCILIACION',
   },
 ]
 
@@ -81,7 +84,9 @@ export default function FAB({ role }: FABProps) {
   const [isPending, startTransition] = useTransition()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const visibleActions = FAB_ACTIONS.filter(a => a.roles.includes(role))
+  const visibleActions = FAB_ACTIONS.filter(a =>
+    a.roles.includes(role) && (a.feature === undefined || FEATURES[a.feature])
+  )
 
   // ── Hydrate timer from server ──────────────────────
 

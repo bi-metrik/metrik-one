@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { FEATURES } from '@/lib/feature-flags'
 
 // N6 — Cron de streak roto
 // Si el usuario no registró ningún gasto, cobro, hora NI cambio de saldo_banco ayer
 // y tenía streak activo (>0 días), generar notificación.
 
 export async function GET(req: NextRequest) {
+  if (!FEATURES.CONCILIACION) return NextResponse.json({ skipped: true })
+
   const authHeader = req.headers.get('authorization')
   const cronHeader = req.headers.get('x-vercel-cron')
 

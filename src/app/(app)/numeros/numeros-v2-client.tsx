@@ -11,6 +11,7 @@ import SaldoDialog from './saldo-dialog'
 import DrillDownSheet from './drill-down-sheet'
 import type { NumerosData } from './actions-v2'
 import { getNumeros } from './actions-v2'
+import { FEATURES } from '@/lib/feature-flags'
 
 interface Props {
   initialData: NumerosData | null
@@ -25,9 +26,9 @@ export default function NumerosV2Client({ initialData }: Props) {
   const [showSaldoDialog, setShowSaldoDialog] = useState(false)
   const [activeDrill, setActiveDrill] = useState<1 | 2 | 3 | 4 | 5 | null>(null)
 
-  // Open saldo dialog when arriving via ?saldo=1
+  // Open saldo dialog when arriving via ?saldo=1 (only when CONCILIACION is enabled)
   useEffect(() => {
-    if (searchParams.get('saldo') === '1') {
+    if (FEATURES.CONCILIACION && searchParams.get('saldo') === '1') {
       setShowSaldoDialog(true)
       router.replace('/numeros', { scroll: false })
     }
@@ -126,7 +127,7 @@ export default function NumerosV2Client({ initialData }: Props) {
       <Semaforo data={data.semaforo} />
 
       {/* Franja Conciliación */}
-      <FranjaConciliacion data={data.conciliacion} />
+      {FEATURES.CONCILIACION && data.conciliacion && <FranjaConciliacion data={data.conciliacion} />}
 
       {/* Cards or placeholder */}
       {!showCards ? (

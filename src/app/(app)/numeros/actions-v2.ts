@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { FEATURES } from '@/lib/feature-flags'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ export interface NumerosData {
   semaforo: SemaforoData
 
   // Franja conciliación
-  conciliacion: ConciliacionData
+  conciliacion: ConciliacionData | null
 
   // D129/D141: Deducibles
   totalDeduciblesMes: number     // sum of deducible fixed expenses monthly_amount
@@ -558,7 +559,7 @@ export async function getNumeros(mesRef?: string) {
     carteraPendiente,
   })
 
-  const conciliacion: ConciliacionData = {
+  const conciliacion: ConciliacionData | null = FEATURES.CONCILIACION ? {
     saldoReal: ultimoSaldo ? Number(ultimoSaldo.saldo_real) : null,
     saldoTeorico,
     diferencia,
@@ -567,7 +568,7 @@ export async function getNumeros(mesRef?: string) {
     streakRecord,
     streakMilestone,
     estado: conciliacionEstado,
-  }
+  } : null
 
   const nombre = profileRes.data?.full_name ?? 'Usuario'
 
