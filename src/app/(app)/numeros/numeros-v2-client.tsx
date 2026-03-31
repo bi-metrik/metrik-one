@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { formatCOP } from '@/lib/contacts/constants'
 import QuestionCard from './question-card'
-import Semaforo from './semaforo'
+// import Semaforo from './semaforo'  // apagado temporalmente
 import FranjaConciliacion from './franja-conciliacion'
 import SaldoDialog from './saldo-dialog'
 import DrillDownSheet from './drill-down-sheet'
@@ -122,9 +122,6 @@ export default function NumerosV2Client({ initialData }: Props) {
           </button>
         </div>
       </div>
-
-      {/* Semáforo */}
-      <Semaforo data={data.semaforo} />
 
       {/* Franja Conciliación */}
       {FEATURES.CONCILIACION && data.conciliacion && <FranjaConciliacion data={data.conciliacion} />}
