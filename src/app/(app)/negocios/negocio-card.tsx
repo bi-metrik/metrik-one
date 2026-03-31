@@ -3,6 +3,12 @@ import Link from 'next/link'
 import { FolderOpen } from 'lucide-react'
 import type { NegocioItem } from './negocios-actions'
 
+function openFolder(url: string, e: React.MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 const PILL_COLORS: Record<string, string> = {
   amber: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
   green: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
@@ -45,11 +51,9 @@ export default function NegocioCard({ negocio }: { negocio: NegocioItem }) {
         <div className="text-right shrink-0 flex flex-col items-end gap-1">
           <div className="flex items-center gap-1.5">
             {negocio.carpetaUrl && (
-              <a
-                href={negocio.carpetaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={e => e.stopPropagation()}
+              <button
+                type="button"
+                onClick={e => openFolder(negocio.carpetaUrl!, e)}
                 className={`rounded p-0.5 transition-colors hover:bg-accent ${
                   negocio.colorStage === 'green' ? 'text-green-600 dark:text-green-400'
                   : negocio.colorStage === 'blue' ? 'text-blue-600 dark:text-blue-400'
@@ -59,7 +63,7 @@ export default function NegocioCard({ negocio }: { negocio: NegocioItem }) {
                 aria-label="Abrir carpeta Drive"
               >
                 <FolderOpen className="h-3.5 w-3.5" />
-              </a>
+              </button>
             )}
             <p className="text-sm font-bold tabular-nums">{fmt(negocio.valor)}</p>
           </div>

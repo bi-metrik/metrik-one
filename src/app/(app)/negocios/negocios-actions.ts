@@ -103,7 +103,7 @@ export async function getNegocios(): Promise<{
       tipo: 'proyecto',
       codigo: codigoBase,
       codigoDisplay: codigoBase ? `${codigoBase}·${sufijoCodigo(estado)}` : `·${sufijoCodigo(estado)}`,
-      nombre: p.nombre ?? 'Sin nombre',
+      nombre: stripEmpresaPrefix(p.nombre ?? ''),
       cliente: (p.empresa_nombre ?? p.contacto_nombre) ?? 'Sin cliente',
       valor: p.presupuesto_total ?? 0,
       stage,
@@ -190,4 +190,12 @@ function calcDiasSinActividad(fechaStr: string | null): number {
   if (!fechaStr) return 0
   const diff = Date.now() - new Date(fechaStr).getTime()
   return Math.floor(diff / (1000 * 60 * 60 * 24))
+}
+
+// Proyectos se almacenan como "Empresa · Descripción" por el trigger.
+// En la tarjeta solo mostramos la descripción (empresa ya aparece en cliente).
+function stripEmpresaPrefix(nombre: string): string {
+  if (!nombre) return 'Sin nombre'
+  const idx = nombre.indexOf(' · ')
+  return idx !== -1 ? nombre.slice(idx + 3) || nombre : nombre
 }
