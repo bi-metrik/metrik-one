@@ -1,7 +1,5 @@
 'use client'
 import { useState } from 'react'
-import Link from 'next/link'
-import { LayoutGrid } from 'lucide-react'
 import NegocioCard from './negocio-card'
 import type { NegocioItem, NegocioStage } from './negocios-actions'
 
@@ -70,21 +68,10 @@ export default function NegociosClient({ propuestas, enCurso, porCobrar, histori
         })}
       </div>
 
-      {/* Resumen del filtro activo + acceso kanban */}
-      <div className="flex items-center justify-between">
-        {resumen[filtro] ? (
-          <p className="text-xs font-medium text-muted-foreground">{resumen[filtro]}</p>
-        ) : <span />}
-        {filtro === 'propuestas' && (
-          <Link
-            href="/pipeline"
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            <LayoutGrid className="h-3 w-3" />
-            Vista pipeline
-          </Link>
-        )}
-      </div>
+      {/* Resumen del filtro activo */}
+      {resumen[filtro] && (
+        <p className="text-xs font-medium text-muted-foreground">{resumen[filtro]}</p>
+      )}
 
       {/* Lista */}
       {current.length === 0 ? (
