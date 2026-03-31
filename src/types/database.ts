@@ -4227,7 +4227,6 @@ export type Database = {
       }
       v_proyecto_financiero: {
         Row: {
-          avance_calculado: number | null
           avance_porcentaje: number | null
           canal_creacion: string | null
           carpeta_url: string | null
@@ -4242,7 +4241,6 @@ export type Database = {
           estado: string | null
           facturado: number | null
           fecha_cierre: string | null
-          fecha_entrega_estimada: string | null
           fecha_fin_estimada: string | null
           fecha_inicio: string | null
           ganancia_actual: number | null
@@ -4253,12 +4251,15 @@ export type Database = {
           nombre: string | null
           num_cobros: number | null
           num_facturas: number | null
+          oportunidad_codigo: string | null
           oportunidad_id: string | null
           presupuesto_consumido_pct: number | null
           presupuesto_total: number | null
           proyecto_id: string | null
+          responsable_nombre: string | null
           retenciones_estimadas: number | null
           tipo: string | null
+          ultima_actividad: string | null
           updated_at: string | null
           workspace_id: string | null
         }
