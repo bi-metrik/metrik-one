@@ -46,8 +46,6 @@ const ALL_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
   { href: '/negocios', label: 'Negocios', icon: Store, roles: ['owner', 'admin', 'supervisor', 'operator'] },
-  { href: '/pipeline', label: 'Oportunidades', icon: Flame, roles: ['owner', 'admin', 'supervisor', 'operator'] },
-  { href: '/proyectos', label: 'Proyectos', icon: FolderKanban, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
@@ -66,10 +64,10 @@ const ADMIN_NAV_ITEMS = [
 
 // Mobile: 4 primary tabs per role, rest goes to "Más" panel
 const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
-  owner: ['/numeros', '/negocios', '/pipeline', '/proyectos'],
-  admin: ['/numeros', '/negocios', '/pipeline', '/proyectos'],
-  supervisor: ['/numeros', '/pipeline', '/proyectos', '/movimientos'],
-  operator: ['/pipeline', '/proyectos', '/directorio'],
+  owner: ['/numeros', '/negocios', '/movimientos', '/tableros'],
+  admin: ['/numeros', '/negocios', '/movimientos', '/tableros'],
+  supervisor: ['/numeros', '/negocios', '/movimientos', '/directorio'],
+  operator: ['/negocios', '/directorio'],
   contador: ['/causacion'],
   read_only: ['/numeros', '/movimientos', '/tableros'],
 }
