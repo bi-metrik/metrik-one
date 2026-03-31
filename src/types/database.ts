@@ -655,6 +655,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "contactos_fuente_promotor_id_fkey"
+            columns: ["fuente_promotor_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["contacto_id"]
+          },
+          {
             foreignKeyName: "contactos_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
@@ -1094,6 +1101,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "contactos"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "empresas_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["contacto_id"]
           },
           {
             foreignKeyName: "empresas_workspace_id_fkey"
@@ -1721,6 +1735,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "empresas"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gastos_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["empresa_id"]
           },
           {
             foreignKeyName: "gastos_proyecto_id_fkey"
@@ -2439,11 +2460,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "oportunidades_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["contacto_id"]
+          },
+          {
             foreignKeyName: "oportunidades_empresa_id_fkey"
             columns: ["empresa_id"]
             isOneToOne: false
             referencedRelation: "empresas"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "oportunidades_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["empresa_id"]
           },
           {
             foreignKeyName: "oportunidades_responsable_id_fkey"
@@ -3049,6 +3084,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "proyectos_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["contacto_id"]
+          },
+          {
             foreignKeyName: "proyectos_cotizacion_id_fkey"
             columns: ["cotizacion_id"]
             isOneToOne: false
@@ -3061,6 +3103,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "empresas"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proyectos_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["empresa_id"]
           },
           {
             foreignKeyName: "proyectos_oportunidad_id_fkey"
@@ -4239,11 +4288,13 @@ export type Database = {
           carpeta_url: string | null
           cobrado: number | null
           codigo: string | null
+          contacto_id: string | null
           contacto_nombre: string | null
           costo_acumulado: number | null
           costo_horas: number | null
           cotizacion_id: string | null
           created_at: string | null
+          empresa_id: string | null
           empresa_nombre: string | null
           estado: string | null
           estado_changed_at: string | null
@@ -4560,7 +4611,12 @@ export const Constants = {
   },
 } as const
 
+export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
+export type Client = Database['public']['Tables']['clients']['Row']
+export type Contacto = Database['public']['Tables']['contactos']['Row']
 export type CustomFieldMapping = Database['public']['Tables']['custom_field_mappings']['Row']
+export type DBClient = Database['public']['Tables']['clients']['Row']
+export type DBFiscalProfile = Database['public']['Tables']['fiscal_profiles']['Row']
 export type Empresa = Database['public']['Tables']['empresas']['Row']
 export type EntityLabel = Database['public']['Tables']['entity_labels']['Row']
 export type EtapaHistorial = Database['public']['Tables']['etapa_historial']['Row']

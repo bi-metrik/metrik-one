@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, FolderOpen, Clock, Banknote, Pause, Play,
   Lock, Plus, TrendingUp, TrendingDown, FileText, AlertTriangle,
-  ChevronDown, RefreshCw, ArrowUpCircle, User, Smartphone, Upload, Loader2, Calendar,
+  ChevronDown, RefreshCw, ArrowUpCircle, User, Building2, Smartphone, Upload, Loader2, Calendar,
   Check, X,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -68,6 +68,8 @@ interface Financiero {
   fecha_cierre: string | null
   estado_changed_at: string | null
   ultima_actividad: string | null
+  empresa_id: string | null
+  contacto_id: string | null
 }
 
 interface Rubro {
@@ -259,8 +261,8 @@ export default function ProyectoDetail({
     if (!fecha) return 0
     return Math.floor((Date.now() - new Date(fecha).getTime()) / (1000 * 60 * 60 * 24))
   }
-  const diasEnStage = calcDias(f.estado_changed_at ?? f.updated_at)
-  const diasSinActividad = calcDias(f.ultima_actividad ?? f.updated_at)
+  const diasEnStage = calcDias(f.estado_changed_at)
+  const diasSinActividad = calcDias(f.ultima_actividad)
 
   const stageSuffixColor = (estado: string | null) => {
     if (!estado) return 'text-muted-foreground'
@@ -338,21 +340,6 @@ export default function ProyectoDetail({
                 <Calendar className="h-3 w-3" />
                 Entrega: {new Date(f.fecha_entrega_estimada + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
                 {diasEntrega === 0 ? ' (hoy)' : diasEntrega < 0 ? ` (hace ${Math.abs(diasEntrega)} d)` : ` (${diasEntrega} d)`}
-              </span>
-            )}
-          </div>
-          {/* Contadores de tiempo */}
-          <div className="mt-1.5 flex items-center gap-3">
-            <span className="text-[10px] text-muted-foreground">
-              {diasEnStage}d en este estado
-            </span>
-            {diasSinActividad >= 4 && (
-              <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
-                diasSinActividad >= 8
-                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-              }`}>
-                {diasSinActividad}d sin actividad
               </span>
             )}
           </div>
@@ -448,6 +435,38 @@ export default function ProyectoDetail({
         </div>
       )}
 
+      {/* ─── Avance del proyecto (misma posición que barra en oportunidad) ─── */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs font-medium">Avance del proyecto</span>
+          <span className="text-xs font-semibold">{Math.round(f.avance_calculado ?? 0)}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${
+              ['en_ejecucion', 'pausado'].includes(f.estado ?? '')
+                ? 'bg-green-500'
+                : f.estado === 'entregado'
+                ? 'bg-blue-500'
+                : 'bg-slate-400'
+            }`}
+            style={{ width: `${Math.min(f.avance_calculado ?? 0, 100)}%` }}
+          />
+        </div>
+        <div className="mt-1.5 flex items-center gap-3">
+          <span className="text-[10px] text-muted-foreground">{diasEnStage}d en este estado</span>
+          {diasSinActividad >= 4 && (
+            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+              diasSinActividad >= 8
+                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+            }`}>
+              {diasSinActividad}d sin actividad
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* ─── Acciones de estado (zona primaria, igual que oportunidad) ─── */}
       {!isCerrado && !isEntregado && (
         <div className="flex items-center gap-2">
@@ -528,26 +547,41 @@ export default function ProyectoDetail({
         </div>
       )}
 
+      {/* ─── Contacto + Empresa ─── */}
+      {(f.contacto_id || f.empresa_id) && !isInterno && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {f.contacto_id && f.contacto_nombre && (
+            <Link
+              href={`/directorio/contacto/${f.contacto_id}`}
+              className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/50"
+            >
+              <User className="h-5 w-5 text-blue-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{f.contacto_nombre}</p>
+                <p className="text-xs text-muted-foreground">Contacto</p>
+              </div>
+            </Link>
+          )}
+          {f.empresa_id && f.empresa_nombre && (
+            <Link
+              href={`/directorio/empresa/${f.empresa_id}`}
+              className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/50"
+            >
+              <Building2 className="h-5 w-5 text-purple-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{f.empresa_nombre}</p>
+                <p className="text-xs text-muted-foreground">Empresa</p>
+              </div>
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* ─── Alertas ─── */}
       <ProyectoAlertas financiero={f} facturas={facturas} />
 
-      {/* ─── Barras duales ─── */}
+      {/* ─── Costos ejecutados ─── */}
       <div className="space-y-3 rounded-lg border p-4">
-        {/* D170: Avance calculado (40% horas, 30% presupuesto, 30% facturación) */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium">Avance del proyecto</span>
-            <span className="text-xs font-semibold">{Math.round(f.avance_calculado ?? 0)}%</span>
-          </div>
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-blue-500 transition-all"
-              style={{ width: `${Math.min(f.avance_calculado ?? 0, 100)}%` }}
-            />
-          </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">Calculado automáticamente (horas, presupuesto, facturación)</p>
-        </div>
-
         {/* Costos ejecutados (expandible) */}
         <div>
           <button
@@ -558,7 +592,12 @@ export default function ProyectoDetail({
               Costos ejecutados
               <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${showRubros ? 'rotate-180' : ''}`} />
             </span>
-            <span className="text-xs font-semibold tabular-nums">{formatCOP(f.costo_acumulado ?? 0)}</span>
+            <span className="text-xs font-semibold tabular-nums">
+              {formatCOP(f.costo_acumulado ?? 0)}
+              {(f.presupuesto_total ?? 0) > 0 && (
+                <span className="text-[10px] font-normal text-muted-foreground"> / {formatCOP(f.presupuesto_total!)}</span>
+              )}
+            </span>
           </button>
           {(f.presupuesto_total ?? 0) > 0 && (
             <div className="h-2 rounded-full bg-muted overflow-hidden">
