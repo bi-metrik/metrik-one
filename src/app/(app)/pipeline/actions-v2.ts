@@ -608,6 +608,7 @@ export async function updateOportunidad(id: string, updates: Record<string, unkn
 
   revalidatePath('/pipeline')
   revalidatePath(`/pipeline/${id}`)
+  revalidatePath('/negocios')
   return { success: true }
 }
 

@@ -181,8 +181,9 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
               if (e.key === 'Enter') {
                 setCarpetaEditing(false)
                 startTransition(async () => {
-                  await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
-                  toast.success('Carpeta guardada')
+                  const res = await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
+                  if (res?.success) { toast.success('Carpeta guardada'); router.refresh() }
+                  else { toast.error(res?.error ?? 'Error al guardar'); setCarpetaUrl(oportunidad.carpeta_url ?? '') }
                 })
               }
               if (e.key === 'Escape') {
@@ -195,8 +196,9 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
             onClick={() => {
               setCarpetaEditing(false)
               startTransition(async () => {
-                await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
-                toast.success('Carpeta guardada')
+                const res = await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
+                if (res?.success) { toast.success('Carpeta guardada'); router.refresh() }
+                else { toast.error(res?.error ?? 'Error al guardar'); setCarpetaUrl(oportunidad.carpeta_url ?? '') }
               })
             }}
             className="rounded-md p-1 text-green-600 hover:bg-green-50"

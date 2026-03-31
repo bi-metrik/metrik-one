@@ -848,5 +848,6 @@ export async function updateProyectoCarpeta(id: string, carpetaUrl: string | nul
 
   if (dbError) return { success: false, error: dbError.message }
   revalidatePath(`/proyectos/${id}`)
+  revalidatePath('/negocios')
   return { success: true }
 }
