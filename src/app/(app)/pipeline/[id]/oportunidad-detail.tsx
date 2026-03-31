@@ -144,30 +144,22 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
             )}
           </div>
         </div>
-        {/* Drive icon — activo si tiene URL, apagado si no */}
-        {carpetaUrl ? (
-          <a
-            href={carpetaUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-md p-1.5 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30"
-            title="Abrir carpeta Drive"
-          >
-            <FolderOpen className="h-5 w-5" />
-          </a>
-        ) : (
+        {/* Drive icon — visible y clicable cuando hay URL; clic abre la carpeta, clic largo edita */}
+        {carpetaUrl && !carpetaEditing && (
           <button
-            onClick={() => setCarpetaEditing(true)}
-            className="rounded-md p-1.5 text-muted-foreground/40 hover:bg-accent hover:text-muted-foreground"
-            title="Agregar carpeta Drive"
+            onClick={() => window.open(carpetaUrl, '_blank')}
+            onContextMenu={e => { e.preventDefault(); setCarpetaEditing(true) }}
+            onDoubleClick={() => setCarpetaEditing(true)}
+            className="rounded-md p-1.5 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30"
+            title="Abrir carpeta Drive (doble clic para editar)"
           >
             <FolderOpen className="h-5 w-5" />
           </button>
         )}
       </div>
 
-      {/* Carpeta URL — inline edit cuando no hay URL */}
-      {carpetaEditing && (
+      {/* Carpeta URL — siempre visible si no hay URL, editable al hacer clic si ya hay */}
+      {(!carpetaUrl || carpetaEditing) && (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
           <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
           <input

@@ -332,12 +332,12 @@ export default function ProyectoDetail({
             )}
           </div>
         </div>
-        {/* Drive icon — activo si tiene URL, apagado si no */}
-        {carpetaUrl ? (
-          <a
-            href={carpetaUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+        {/* Drive icon — solo cuando ya hay URL */}
+        {carpetaUrl && !carpetaEditing && (
+          <button
+            onClick={() => window.open(carpetaUrl, '_blank')}
+            onContextMenu={e => { e.preventDefault(); setCarpetaEditing(true) }}
+            onDoubleClick={() => setCarpetaEditing(true)}
             className={`rounded-md p-1.5 hover:bg-accent ${
               ['en_ejecucion','pausado'].includes(f.estado ?? '')
                 ? 'text-green-500 hover:text-green-600'
@@ -345,23 +345,15 @@ export default function ProyectoDetail({
                 ? 'text-blue-500 hover:text-blue-600'
                 : 'text-slate-500 hover:text-slate-600'
             }`}
-            title="Abrir carpeta Drive"
-          >
-            <FolderOpen className="h-5 w-5" />
-          </a>
-        ) : (
-          <button
-            onClick={() => setCarpetaEditing(true)}
-            className="rounded-md p-1.5 text-muted-foreground/40 hover:bg-accent hover:text-muted-foreground"
-            title="Agregar carpeta Drive"
+            title="Abrir carpeta Drive (doble clic para editar)"
           >
             <FolderOpen className="h-5 w-5" />
           </button>
         )}
       </div>
 
-      {/* Carpeta URL — inline edit */}
-      {carpetaEditing && (
+      {/* Carpeta URL — siempre visible si no hay URL, editable si está en modo edición */}
+      {(!carpetaUrl || carpetaEditing) && (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
           <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
           <input
