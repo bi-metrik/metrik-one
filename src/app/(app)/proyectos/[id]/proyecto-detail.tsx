@@ -898,9 +898,23 @@ export default function ProyectoDetail({
 
         {/* Tab: Facturas */}
         {registrosTab === 'facturas' && !isInterno && (
-          facturas.length === 0 ? (
-            <p className="py-3 text-center text-xs text-muted-foreground">Sin facturas</p>
-          ) : (
+          <>
+            {!isCerrado && !isEntregado && (
+              <div className="flex justify-end pb-1">
+                <button
+                  onClick={() => setDialog('factura')}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  <Plus className="h-3 w-3" />
+                  Programar cobro
+                </button>
+              </div>
+            )}
+            {facturas.length === 0 ? (
+              <p className="py-3 text-center text-xs text-muted-foreground">
+                {!isCerrado && !isEntregado ? 'No hay cobros programados aún.' : 'Sin facturas'}
+              </p>
+            ) : (
             <div className="space-y-1.5">
               {facturas.map(fac => {
                 const estadoPago = fac.estado_pago ?? 'pendiente'
@@ -948,7 +962,8 @@ export default function ProyectoDetail({
                 )
               })}
             </div>
-          )
+            )}
+          </>
         )}
       </div>
 

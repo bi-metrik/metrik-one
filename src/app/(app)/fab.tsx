@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote } from 'lucide-react'
+import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getProyectosActivos,
@@ -24,6 +24,7 @@ interface FABAction {
   action?: string
   feature?: keyof typeof FEATURES
   contextAware?: boolean
+  contextOnly?: boolean  // Only visible when in a project context
 }
 
 const FAB_ACTIONS: FABAction[] = [
@@ -52,6 +53,13 @@ const FAB_ACTIONS: FABAction[] = [
     icon: Flame,
     href: '/nuevo/oportunidad',
     roles: ['owner', 'admin', 'supervisor', 'operator'],
+  },
+  {
+    label: 'Programar cobro',
+    icon: FileText,
+    roles: ['owner', 'admin'],
+    action: 'factura',
+    contextOnly: true,
   },
   {
     label: 'Actualizar saldo',
@@ -97,7 +105,9 @@ export default function FAB({ role }: FABProps) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const visibleActions = FAB_ACTIONS.filter(a =>
-    a.roles.includes(role) && (a.feature === undefined || FEATURES[a.feature])
+    a.roles.includes(role) &&
+    (a.feature === undefined || FEATURES[a.feature]) &&
+    (!a.contextOnly || contextProyectoId !== null)
   )
 
   // ── Hydrate timer from server ──────────────────────
@@ -169,6 +179,8 @@ export default function FAB({ role }: FABProps) {
     setOpen(false)
     if (action.action === 'saldo') {
       router.push('/numeros?saldo=1')
+    } else if (action.action === 'factura' && contextProyectoId) {
+      router.push(`/proyectos/${contextProyectoId}?action=factura`)
     } else if (action.href) {
       const href = contextProyectoId && action.contextAware
         ? `${action.href}?proyecto=${contextProyectoId}`
