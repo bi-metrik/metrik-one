@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import { FolderOpen } from 'lucide-react'
 import type { NegocioItem } from './negocios-actions'
 
 const PILL_COLORS: Record<string, string> = {
@@ -42,7 +43,26 @@ export default function NegocioCard({ negocio }: { negocio: NegocioItem }) {
           )}
         </div>
         <div className="text-right shrink-0 flex flex-col items-end gap-1">
-          <p className="text-sm font-bold tabular-nums">{fmt(negocio.valor)}</p>
+          <div className="flex items-center gap-1.5">
+            {negocio.carpetaUrl && (
+              <a
+                href={negocio.carpetaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className={`rounded p-0.5 transition-colors hover:bg-accent ${
+                  negocio.colorStage === 'green' ? 'text-green-600 dark:text-green-400'
+                  : negocio.colorStage === 'blue' ? 'text-blue-600 dark:text-blue-400'
+                  : negocio.colorStage === 'amber' ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-slate-500 dark:text-slate-400'
+                }`}
+                aria-label="Abrir carpeta Drive"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+              </a>
+            )}
+            <p className="text-sm font-bold tabular-nums">{fmt(negocio.valor)}</p>
+          </div>
           <div className="flex flex-col items-end gap-0.5">
             {negocio.diasEnStage > 0 && (
               <span className="text-[9px] text-muted-foreground/60 tabular-nums">

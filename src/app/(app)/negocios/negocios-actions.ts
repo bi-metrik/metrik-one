@@ -22,6 +22,7 @@ export type NegocioItem = {
   responsableNombre: string | null
   diasSinActividad: number
   diasEnStage: number
+  carpetaUrl: string | null
 }
 
 export async function getNegocios(): Promise<{
@@ -49,7 +50,7 @@ export async function getNegocios(): Promise<{
   // Fetch oportunidades activas (no ganadas ni perdidas)
   const { data: opps } = await supabase
     .from('oportunidades')
-    .select('id, descripcion, etapa, valor_estimado, updated_at, etapa_changed_at, empresas(nombre), contactos(nombre), codigo, responsable:staff!oportunidades_responsable_id_fkey(full_name)')
+    .select('id, descripcion, etapa, valor_estimado, updated_at, etapa_changed_at, carpeta_url, empresas(nombre), contactos(nombre), codigo, responsable:staff!oportunidades_responsable_id_fkey(full_name)')
     .eq('workspace_id', workspaceId)
     .not('etapa', 'in', '(ganada,perdida)')
     .order('updated_at', { ascending: false })
@@ -57,7 +58,7 @@ export async function getNegocios(): Promise<{
   // Fetch proyectos (todos menos cancelados — estados reales: en_ejecucion, pausado, entregado, cerrado)
   const { data: proyectos } = await supabase
     .from('v_proyecto_financiero')
-    .select('proyecto_id, nombre, estado, presupuesto_total, costo_acumulado, presupuesto_consumido_pct, empresa_nombre, contacto_nombre, codigo, oportunidad_id, oportunidad_codigo, responsable_nombre, ultima_actividad, updated_at, estado_changed_at')
+    .select('proyecto_id, nombre, estado, presupuesto_total, costo_acumulado, presupuesto_consumido_pct, empresa_nombre, contacto_nombre, codigo, oportunidad_id, oportunidad_codigo, responsable_nombre, ultima_actividad, updated_at, estado_changed_at, carpeta_url')
     .eq('workspace_id', workspaceId)
     .order('updated_at', { ascending: false })
 
@@ -85,6 +86,7 @@ export async function getNegocios(): Promise<{
       responsableNombre: responsable,
       diasSinActividad,
       diasEnStage: calcDiasSinActividad((o.etapa_changed_at ?? o.updated_at) as string | null),
+      carpetaUrl: o.carpeta_url ?? null,
     }
   })
 
@@ -114,6 +116,7 @@ export async function getNegocios(): Promise<{
       responsableNombre: (p.responsable_nombre as string | null) ?? null,
       diasSinActividad: calcDiasSinActividad((p.ultima_actividad ?? p.updated_at) as string | null),
       diasEnStage: calcDiasSinActividad((p.estado_changed_at ?? p.updated_at) as string | null),
+      carpetaUrl: (p.carpeta_url as string | null) ?? null,
     }
     if (stage === 'en-curso') enCurso.push(item)
     else if (stage === 'por-cobrar') porCobrar.push(item)
