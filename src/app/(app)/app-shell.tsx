@@ -66,8 +66,8 @@ const ADMIN_NAV_ITEMS = [
 
 // Mobile: 4 primary tabs per role, rest goes to "Más" panel
 const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
-  owner: ['/numeros', '/pipeline', '/proyectos', '/tableros'],
-  admin: ['/numeros', '/pipeline', '/proyectos', '/tableros'],
+  owner: ['/numeros', '/negocios', '/pipeline', '/proyectos'],
+  admin: ['/numeros', '/negocios', '/pipeline', '/proyectos'],
   supervisor: ['/numeros', '/pipeline', '/proyectos', '/movimientos'],
   operator: ['/pipeline', '/proyectos', '/directorio'],
   contador: ['/causacion'],

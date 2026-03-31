@@ -19,6 +19,8 @@ export type NegocioItem = {
   presupuestoTotal: number | null
   costoAcumulado: number | null
   fechaActualizacion: string
+  responsableNombre: string | null
+  diasSinActividad: number
 }
 
 export async function getNegocios(): Promise<{
@@ -46,7 +48,7 @@ export async function getNegocios(): Promise<{
   // Fetch oportunidades activas (no ganadas ni perdidas)
   const { data: opps } = await supabase
     .from('oportunidades')
-    .select('id, descripcion, etapa, valor_estimado, updated_at, empresas(nombre), contactos(nombre), codigo')
+    .select('id, descripcion, etapa, valor_estimado, updated_at, empresas(nombre), contactos(nombre), codigo, responsable:staff!oportunidades_responsable_id_fkey(full_name)')
     .eq('workspace_id', workspaceId)
     .not('etapa', 'in', '(ganada,perdida)')
     .order('updated_at', { ascending: false })
@@ -54,7 +56,7 @@ export async function getNegocios(): Promise<{
   // Fetch proyectos (todos menos cancelados — estados reales: en_ejecucion, pausado, entregado, cerrado)
   const { data: proyectos } = await supabase
     .from('v_proyecto_financiero')
-    .select('proyecto_id, nombre, estado, presupuesto_total, costo_acumulado, presupuesto_consumido_pct, empresa_nombre, contacto_nombre, updated_at, codigo')
+    .select('proyecto_id, nombre, estado, presupuesto_total, costo_acumulado, presupuesto_consumido_pct, empresa_nombre, contacto_nombre, codigo, oportunidad_id, oportunidad_codigo, responsable_nombre, ultima_actividad, updated_at')
     .eq('workspace_id', workspaceId)
     .order('updated_at', { ascending: false })
 
@@ -62,11 +64,13 @@ export async function getNegocios(): Promise<{
     const empresa = (o.empresas as { nombre: string } | null)?.nombre
     const contacto = (o.contactos as { nombre: string } | null)?.nombre
     const codigoBase = o.codigo ?? ''
+    const responsable = (o.responsable as { full_name: string } | null)?.full_name ?? null
+    const diasSinActividad = calcDiasSinActividad(o.updated_at)
     return {
       id: o.id,
       tipo: 'oportunidad',
       codigo: codigoBase,
-      codigoDisplay: codigoBase ? `${codigoBase}·C` : 'OPP·C',
+      codigoDisplay: codigoBase ? `${codigoBase}·C` : '·C',
       nombre: o.descripcion ?? 'Sin nombre',
       cliente: empresa ?? contacto ?? 'Sin cliente',
       valor: o.valor_estimado ?? 0,
@@ -77,6 +81,8 @@ export async function getNegocios(): Promise<{
       presupuestoTotal: null,
       costoAcumulado: null,
       fechaActualizacion: o.updated_at ?? '',
+      responsableNombre: responsable,
+      diasSinActividad,
     }
   })
 
@@ -87,11 +93,12 @@ export async function getNegocios(): Promise<{
   for (const p of (proyectos ?? [])) {
     const estado = p.estado ?? 'cerrado'
     const stage = stageProyecto(estado)
+    const codigoBase = (p.oportunidad_codigo ?? p.codigo ?? '') as string
     const item: NegocioItem = {
       id: p.proyecto_id ?? '',
       tipo: 'proyecto',
-      codigo: p.codigo ? `P-${String(p.codigo).padStart(3, '0')}` : '',
-      codigoDisplay: sufijoCodigo(p.codigo as number | null, estado),
+      codigo: codigoBase,
+      codigoDisplay: codigoBase ? `${codigoBase}·${sufijoCodigo(estado)}` : `·${sufijoCodigo(estado)}`,
       nombre: p.nombre ?? 'Sin nombre',
       cliente: (p.empresa_nombre ?? p.contacto_nombre) ?? 'Sin cliente',
       valor: p.presupuesto_total ?? 0,
@@ -102,6 +109,8 @@ export async function getNegocios(): Promise<{
       presupuestoTotal: p.presupuesto_total ?? null,
       costoAcumulado: p.costo_acumulado ?? null,
       fechaActualizacion: p.updated_at ?? '',
+      responsableNombre: (p.responsable_nombre as string | null) ?? null,
+      diasSinActividad: calcDiasSinActividad((p.ultima_actividad ?? p.updated_at) as string | null),
     }
     if (stage === 'en-curso') enCurso.push(item)
     else if (stage === 'por-cobrar') porCobrar.push(item)
@@ -164,10 +173,15 @@ function colorProyecto(estado: string): string {
   return 'slate'
 }
 
-function sufijoCodigo(codigo: number | null, estado: string): string {
-  const base = codigo ? `P-${String(codigo).padStart(3, '0')}` : 'P'
-  if (['en_ejecucion', 'pausado'].includes(estado)) return `${base}·E`
-  if (estado === 'entregado') return `${base}·R`
-  if (estado === 'cerrado') return `${base}·X`
-  return `${base}·E`
+function sufijoCodigo(estado: string): string {
+  if (['en_ejecucion', 'pausado'].includes(estado)) return 'E'
+  if (estado === 'entregado') return 'R'
+  if (estado === 'cerrado') return 'X'
+  return 'E'
+}
+
+function calcDiasSinActividad(fechaStr: string | null): number {
+  if (!fechaStr) return 0
+  const diff = Date.now() - new Date(fechaStr).getTime()
+  return Math.floor(diff / (1000 * 60 * 60 * 24))
 }
