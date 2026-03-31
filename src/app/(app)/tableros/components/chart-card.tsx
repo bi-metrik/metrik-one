@@ -5,11 +5,15 @@ interface ChartCardProps {
   subtitle?: string
   children: React.ReactNode
   className?: string
+  accentColor?: string
 }
 
-export function ChartCard({ title, subtitle, children, className = '' }: ChartCardProps) {
+export function ChartCard({ title, subtitle, children, className = '', accentColor }: ChartCardProps) {
   return (
-    <div className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ${className}`}>
+    <div
+      className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ${className}`}
+      style={accentColor ? { borderTop: `2px solid ${accentColor}` } : undefined}
+    >
       <div className="mb-4">
         <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
         {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
