@@ -61,6 +61,7 @@ interface Financiero {
   contacto_nombre: string | null
   carpeta_url: string | null
   oportunidad_id: string | null
+  oportunidad_codigo: string | null
   fecha_entrega_estimada: string | null
   fecha_fin_estimada: string | null
   fecha_cierre: string | null
@@ -240,6 +241,14 @@ export default function ProyectoDetail({
     })
   }
 
+  const stageSuffix = (estado: string | null) => {
+    if (!estado) return ''
+    if (['en_ejecucion', 'pausado'].includes(estado)) return '·E'
+    if (estado === 'entregado') return '·R'
+    if (estado === 'cerrado') return '·X'
+    return ''
+  }
+
   const handleEstado = (nuevoEstado: 'pausado' | 'en_ejecucion') => {
     startTransition(async () => {
       const res = await cambiarEstadoProyecto(proyectoId, nuevoEstado)
@@ -264,7 +273,11 @@ export default function ProyectoDetail({
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="truncate text-lg font-bold">
-            {f.codigo && <span className="text-muted-foreground font-medium">P {f.codigo} </span>}
+            {(f.oportunidad_codigo ?? f.codigo) && (
+              <span className="text-muted-foreground font-medium">
+                {f.oportunidad_codigo ?? f.codigo}{stageSuffix(f.estado)}{' '}
+              </span>
+            )}
             {f.nombre ?? 'Sin nombre'}
           </h1>
           <div className="flex items-center gap-2">

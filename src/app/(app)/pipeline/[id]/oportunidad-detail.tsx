@@ -130,7 +130,7 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="truncate text-lg font-bold">
-            <span className="text-muted-foreground font-medium">O {oportunidad.codigo}</span>{' '}
+            <span className="text-muted-foreground font-medium">{oportunidad.codigo}·C</span>{' '}
             {oportunidad.descripcion || 'Sin descripcion'}
           </h1>
           <div className="flex items-center gap-2">
