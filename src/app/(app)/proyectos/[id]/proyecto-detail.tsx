@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { updateAvance, cambiarEstadoProyecto, marcarEntregado, updateProyectoCarpeta } from '../actions-v2'
+import { updateAvance, cambiarEstadoProyecto, marcarEntregado, updateProyectoCarpeta, updateProyectoResponsable } from '../actions-v2'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
@@ -176,6 +176,7 @@ export default function ProyectoDetail({
   const [entregarModal, setEntregarModal] = useState(false)
   const [carpetaUrl, setCarpetaUrl] = useState(f.carpeta_url ?? '')
   const [carpetaEditing, setCarpetaEditing] = useState(false)
+  const [responsableId, setResponsableId] = useState(responsable?.id ?? '')
   const [showRubros, setShowRubros] = useState(false)
   const [registrosTab, setRegistrosTab] = useState<'gastos' | 'horas' | 'facturas'>('gastos')
   const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
@@ -474,6 +475,33 @@ export default function ProyectoDetail({
           <Banknote className="h-3.5 w-3.5" />
           Registrar cobro pendiente
         </button>
+      )}
+
+      {/* Responsable de ejecución */}
+      {staffList.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border p-3">
+          <User className="h-4 w-4 text-muted-foreground shrink-0" />
+          <div className="flex flex-1 items-center justify-between min-w-0">
+            <label className="text-xs text-muted-foreground shrink-0 mr-2">Responsable</label>
+            <select
+              value={responsableId}
+              onChange={(e) => {
+                const newVal = e.target.value
+                setResponsableId(newVal)
+                startTransition(async () => {
+                  await updateProyectoResponsable(proyectoId, newVal || null)
+                  toast.success('Responsable actualizado')
+                })
+              }}
+              className="flex-1 rounded-md border bg-background px-2 py-1 text-sm min-w-0"
+            >
+              <option value="">Sin asignar</option>
+              {staffList.map((s) => (
+                <option key={s.id} value={s.id}>{s.full_name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       )}
 
       {/* ─── Alertas ─── */}

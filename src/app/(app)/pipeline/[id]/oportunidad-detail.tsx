@@ -208,16 +208,19 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
       )}
 
       {/* Etapa progress bar */}
-      {!isTerminal && (
-        <div className="flex gap-1">
-          {ETAPAS_ACTIVAS.map((e, i) => (
+      {!isTerminal && etapaConfig && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium">{etapaConfig.label}</span>
+            <span className="text-xs font-semibold text-amber-600">{etapaConfig.probabilidad}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
             <div
-              key={e}
-              className={`h-1.5 flex-1 rounded-full transition-colors ${
-                i <= currentIdx ? etapaConfig?.dotClass ?? 'bg-gray-400' : 'bg-muted'
-              }`}
+              className="h-full rounded-full bg-amber-500 transition-all"
+              style={{ width: `${etapaConfig.probabilidad}%` }}
             />
-          ))}
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">Probabilidad estimada de cierre</p>
         </div>
       )}
 

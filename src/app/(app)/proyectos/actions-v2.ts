@@ -815,6 +815,23 @@ export async function marcarEntregado(id: string): Promise<ActionResult & { proy
   return { success: true, proyectoId: id }
 }
 
+// ── Actualizar responsable ───────────────────────────────
+
+export async function updateProyectoResponsable(id: string, responsableId: string | null): Promise<ActionResult> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const { error: dbError } = await supabase
+    .from('proyectos')
+    .update({ responsable_id: responsableId || null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('workspace_id', workspaceId)
+
+  if (dbError) return { success: false, error: dbError.message }
+  revalidatePath(`/proyectos/${id}`)
+  return { success: true }
+}
+
 // ── Actualizar carpeta URL ────────────────────────────────
 
 export async function updateProyectoCarpeta(id: string, carpetaUrl: string | null): Promise<ActionResult> {
