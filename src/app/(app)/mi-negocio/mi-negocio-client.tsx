@@ -1,13 +1,12 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, Landmark, UsersRound, Target, Sparkles, X, CreditCard } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, X, CreditCard } from 'lucide-react'
 import { toast } from 'sonner'
-import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
+import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
 // Existing config sections — reused via import
 import StaffSection from '../config/staff-section'
-import BankAccountsSection from '../config/bank-accounts-section'
 import MonthlyTargetsSection from '../config/monthly-targets-section'
 import ServiciosSection from '../config/servicios-section'
 
@@ -29,7 +28,6 @@ interface MiNegocioClientProps {
   workspace: any
   fiscalProfile: FiscalProfile | null
   staffMembers: Staff[]
-  bankAccounts: BankAccount[]
   monthlyTargets: MonthlyTarget[]
   fixedExpenses: FixedExpenseWithCategory[]
   categories: ExpenseCategory[]
@@ -46,7 +44,6 @@ interface MiNegocioClientProps {
     marca: number
     servicios: number
     gastos: number
-    banco: number
     equipo: number
     metas: number
   }
@@ -69,7 +66,6 @@ const SECTIONS: SectionDef[] = [
   { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
   { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'] },
   { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'] },
-  { key: 'cuentas-bancarias', label: 'Mi cuenta bancaria', icon: Landmark, maxScore: 2, scoreKey: 'banco', roles: ['owner', 'admin'] },
   { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
   { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'] },
 ]
@@ -80,7 +76,6 @@ export default function MiNegocioClient({
   workspace,
   fiscalProfile,
   staffMembers,
-  bankAccounts,
   monthlyTargets,
   fixedExpenses,
   categories,
@@ -126,10 +121,6 @@ export default function MiNegocioClient({
         }
         return `$${total.toLocaleString('es-CO')}/mes`
       }
-      case 'cuentas-bancarias': {
-        const active = bankAccounts.filter(a => a.is_active)
-        return active.length > 0 ? `${active.length} cuenta${active.length !== 1 ? 's' : ''}` : 'Pendiente'
-      }
       case 'mi-equipo': {
         const withSalary = staffMembers.filter(s => (s.salary ?? 0) > 0)
         return withSalary.length > 0 ? `${staffMembers.length} persona${staffMembers.length !== 1 ? 's' : ''}` : 'Pendiente'
@@ -162,10 +153,6 @@ export default function MiNegocioClient({
         if (active.length === 0) return 'Pendiente'
         const total = active.reduce((s, f) => s + f.monthly_amount, 0)
         return `$${total.toLocaleString('es-CO')}/mes`
-      }
-      case 'cuentas-bancarias': {
-        const active = bankAccounts.filter(a => a.is_active)
-        return active.length > 0 ? `${active.length} cuenta${active.length !== 1 ? 's' : ''}` : 'Pendiente'
       }
       case 'mi-equipo': {
         const withSalary = staffMembers.filter(s => (s.salary ?? 0) > 0)
@@ -259,7 +246,7 @@ export default function MiNegocioClient({
               {isActive && (
                 <div className="mt-1.5 rounded-xl border bg-card p-4">
                   {renderSection(section.key, {
-                    workspace, fiscalProfile, staffMembers, bankAccounts, monthlyTargets,
+                    workspace, fiscalProfile, staffMembers, monthlyTargets,
                     fixedExpenses, categories, servicios, staffNomina, configFinanciera,
                     totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
                     onClose: () => setActiveSection(null),
@@ -323,7 +310,7 @@ export default function MiNegocioClient({
                 </div>
               </div>
               {renderSection(activeSection, {
-                workspace, fiscalProfile, staffMembers, bankAccounts, monthlyTargets,
+                workspace, fiscalProfile, staffMembers, monthlyTargets,
                 fixedExpenses, categories, servicios, staffNomina, configFinanciera,
                 totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
                 onClose: () => setActiveSection(null),
@@ -348,7 +335,6 @@ function renderSection(
     workspace: any
     fiscalProfile: FiscalProfile | null
     staffMembers: Staff[]
-    bankAccounts: BankAccount[]
     monthlyTargets: MonthlyTarget[]
     fixedExpenses: (FixedExpense & { categoryName: string | null })[]
     categories: ExpenseCategory[]
@@ -401,11 +387,6 @@ function renderSection(
           totalFixed={props.totalFixed}
           staffNomina={props.staffNomina}
         />
-      )
-
-    case 'cuentas-bancarias':
-      return (
-        <BankAccountsSection initialData={props.bankAccounts} />
       )
 
     case 'mi-equipo':

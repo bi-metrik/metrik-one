@@ -23,7 +23,6 @@ export default async function MiNegocioPage() {
     workspaceResult,
     fiscalResult,
     staffResult,
-    bankAccountsResult,
     monthlyTargetsResult,
     fixedResult,
     categoriesResult,
@@ -49,12 +48,6 @@ export default async function MiNegocioPage() {
       .eq('workspace_id', workspaceId)
       .eq('is_active', true)
       .order('full_name'),
-
-    supabase
-      .from('bank_accounts')
-      .select('*')
-      .eq('workspace_id', workspaceId)
-      .order('created_at'),
 
     supabase
       .from('monthly_targets')
@@ -106,7 +99,6 @@ export default async function MiNegocioPage() {
     .eq('workspace_id', workspaceId)
   const licenseUsed = profileCount ?? 0
   const licenseMax = workspace?.max_seats ?? 1
-  const bankAccounts = bankAccountsResult.data || []
   const monthlyTargets = monthlyTargetsResult.data || []
   const fixedExpenses = fixedResult.data || []
   const categories = categoriesResult.data || []
@@ -138,24 +130,20 @@ export default async function MiNegocioPage() {
   const activeFixed = fixedExpenses.filter(f => f.is_active)
   const totalGastosItems = staffNomina.length + activeFixed.length
   const gastosScore = totalGastosItems >= 3 ? 3 : totalGastosItems > 0 ? 1.5 : 0
-  // §7 Cuenta bancaria: 2 pts
-  const activeBanks = bankAccounts.filter(a => a.is_active)
-  const bancoScore = activeBanks.length >= 1 ? 2 : 0
   // §8 Equipo: 2 pts
   const staffWithSalary = staffMembers.filter(s => (s.salary ?? 0) > 0 && (s.horas_disponibles_mes ?? 0) > 0)
   const equipoScore = staffWithSalary.length >= 1 ? 2 : 0
   // §9 Metas: 3 pts
   const metasScore = monthlyTargets.length >= 1 ? 3 : 0
 
-  const totalScore = fiscalScore + marcaScore + serviciosScore + gastosScore + bancoScore + equipoScore + metasScore
-  const progressPct = Math.round((totalScore / 16) * 100)
+  const totalScore = fiscalScore + marcaScore + serviciosScore + gastosScore + equipoScore + metasScore
+  const progressPct = Math.round((totalScore / 14) * 100)
 
   return (
     <MiNegocioClient
       workspace={workspace}
       fiscalProfile={fiscalProfile}
       staffMembers={staffMembers}
-      bankAccounts={bankAccounts}
       monthlyTargets={monthlyTargets}
       fixedExpenses={fixedWithCat}
       categories={categories}
@@ -172,7 +160,6 @@ export default async function MiNegocioPage() {
         marca: marcaScore,
         servicios: serviciosScore,
         gastos: gastosScore,
-        banco: bancoScore,
         equipo: equipoScore,
         metas: metasScore,
       }}

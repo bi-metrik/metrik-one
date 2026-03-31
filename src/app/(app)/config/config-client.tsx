@@ -8,10 +8,9 @@ import { createFixedExpense, deleteFixedExpense, toggleFixedExpense } from '../g
 import WizardFelipe from './wizard-felipe'
 import TeamSection from './team-section'
 import StaffSection from './staff-section'
-import BankAccountsSection from './bank-accounts-section'
 import MonthlyTargetsSection from './monthly-targets-section'
 import ServiciosSection from './servicios-section'
-import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, BankAccount, MonthlyTarget, Servicio } from '@/types/database'
+import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio } from '@/types/database'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -34,7 +33,6 @@ interface ConfigClientProps {
   fiscalProfile: FiscalProfile | null
   currentUserRole?: string
   staffMembers?: Staff[]
-  bankAccounts?: BankAccount[]
   monthlyTargets?: MonthlyTarget[]
   servicios?: Servicio[]
   licenseUsed?: number
@@ -51,7 +49,6 @@ export default function ConfigClient({
   fiscalProfile,
   currentUserRole = 'owner',
   staffMembers = [],
-  bankAccounts = [],
   monthlyTargets = [],
   servicios = [],
   licenseUsed = 0,
@@ -440,13 +437,6 @@ export default function ConfigClient({
       {activeSection === 'personal' && (
         <div className="space-y-4 rounded-xl border bg-card p-6">
           <StaffSection initialData={staffMembers} licenseUsed={licenseUsed} licenseMax={licenseMax} currentUserRole={currentUserRole} />
-        </div>
-      )}
-
-      {/* ── F18: Cuentas Bancarias Section ── */}
-      {activeSection === 'cuentas-bancarias' && (
-        <div className="space-y-4 rounded-xl border bg-card p-6">
-          <BankAccountsSection initialData={bankAccounts} />
         </div>
       )}
 
