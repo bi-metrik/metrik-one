@@ -254,8 +254,8 @@ export default function ProyectoDetail({
 
   const stageSuffixColor = (estado: string | null) => {
     if (!estado) return 'text-muted-foreground'
-    if (['en_ejecucion', 'pausado'].includes(estado)) return 'text-blue-600'
-    if (estado === 'entregado') return 'text-green-600'
+    if (['en_ejecucion', 'pausado'].includes(estado)) return 'text-green-600'
+    if (estado === 'entregado') return 'text-blue-600'
     if (estado === 'cerrado') return 'text-slate-500'
     return 'text-muted-foreground'
   }
@@ -340,9 +340,9 @@ export default function ProyectoDetail({
             rel="noopener noreferrer"
             className={`rounded-md p-1.5 hover:bg-accent ${
               ['en_ejecucion','pausado'].includes(f.estado ?? '')
-                ? 'text-blue-500 hover:text-blue-600'
-                : f.estado === 'entregado'
                 ? 'text-green-500 hover:text-green-600'
+                : f.estado === 'entregado'
+                ? 'text-blue-500 hover:text-blue-600'
                 : 'text-slate-500 hover:text-slate-600'
             }`}
             title="Abrir carpeta Drive"
@@ -429,6 +429,59 @@ export default function ProyectoDetail({
             </Link>
           )}
         </div>
+      )}
+
+      {/* ─── Acciones de estado (zona primaria, igual que oportunidad) ─── */}
+      {!isCerrado && !isEntregado && (
+        <div className="flex items-center gap-2">
+          {isPausado ? (
+            <button
+              onClick={() => handleEstado('en_ejecucion')}
+              disabled={isPending}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              <Play className="h-4 w-4" />
+              Reanudar
+            </button>
+          ) : (
+            <button
+              onClick={() => handleEstado('pausado')}
+              disabled={isPending}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              <Pause className="h-4 w-4" />
+              Pausar
+            </button>
+          )}
+          {!isInterno && !isPausado && (
+            <button
+              onClick={() => handleEntregado()}
+              disabled={isPending}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              <ArrowUpCircle className="h-4 w-4" />
+              Entregar
+            </button>
+          )}
+          <button
+            onClick={() => setDialog('cierre')}
+            disabled={isPending}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800/50"
+          >
+            <Lock className="h-4 w-4" />
+            Cerrar
+          </button>
+        </div>
+      )}
+      {!isInterno && isCerrado && facturas.some(fac => fac.estado_pago !== 'pagada') && (
+        <button
+          onClick={() => setDialog('cobro')}
+          disabled={isPending}
+          className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+        >
+          <Banknote className="h-3.5 w-3.5" />
+          Registrar cobro pendiente
+        </button>
       )}
 
       {/* ─── Alertas ─── */}
@@ -828,61 +881,6 @@ export default function ProyectoDetail({
         <h2 className="text-sm font-semibold">Actividad</h2>
         <ActivityLog entidadTipo="proyecto" entidadId={proyectoId} staffList={staffList} oportunidadId={oportunidadId} />
       </div>
-
-      {/* ─── State controls (bottom) ─── */}
-      {!isCerrado && !isEntregado && (
-        <div className="flex items-center gap-2 rounded-lg border border-dashed p-3">
-          {isPausado ? (
-            <button
-              onClick={() => handleEstado('en_ejecucion')}
-              disabled={isPending}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              <Play className="h-3.5 w-3.5" />
-              Reanudar proyecto
-            </button>
-          ) : (
-            <button
-              onClick={() => handleEstado('pausado')}
-              disabled={isPending}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-yellow-200 py-2 text-xs font-medium text-yellow-700 hover:bg-yellow-50 disabled:opacity-50 dark:border-yellow-900 dark:text-yellow-400 dark:hover:bg-yellow-950/30"
-            >
-              <Pause className="h-3.5 w-3.5" />
-              Pausar
-            </button>
-          )}
-          {/* D176: Marcar como entregado (soft gate si cartera > 0) */}
-          {!isInterno && !isPausado && (
-            <button
-              onClick={() => handleEntregado()}
-              disabled={isPending}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-900 dark:text-blue-400 dark:hover:bg-blue-950/30"
-            >
-              <ArrowUpCircle className="h-3.5 w-3.5" />
-              Entregar
-            </button>
-          )}
-          <button
-            onClick={() => setDialog('cierre')}
-            disabled={isPending}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-green-200 py-2 text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-50 dark:border-green-900 dark:text-green-400 dark:hover:bg-green-950/30"
-          >
-            <Lock className="h-3.5 w-3.5" />
-            Cerrar proyecto
-          </button>
-        </div>
-      )}
-      {/* Cobro allowed on closed client projects */}
-      {!isInterno && isCerrado && facturas.some(f => f.estado_pago !== 'pagada') && (
-        <button
-          onClick={() => setDialog('cobro')}
-          disabled={isPending}
-          className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 py-2.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-        >
-          <Banknote className="h-3.5 w-3.5" />
-          Registrar cobro pendiente
-        </button>
-      )}
 
       {/* D176: Modal soft gate entrega */}
       {entregarModal && (
