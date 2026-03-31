@@ -287,31 +287,22 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-03-26
+**Sesion:** 2026-03-31
 **Branch:** main
 
 Que se hizo:
-- Workflow engine completo deployado en produccion (3 commits):
-  - Migraciones `workspace_stages` + `stage_transition_rules` + funcion `evaluate_stage_rules`
-  - Seed de etapas de sistema para todos los workspaces existentes + trigger para nuevos
-  - Auto-transiciones: cada update de `custom_data` evalua reglas y mueve etapa automaticamente
-  - Registro de cambios automaticos en `activity_log` como `stage_auto_transition`
-  - UI de configuracion creada y removida — solo uso interno via `/configure-workflow`
-- Skill `/configure-workflow [slug]` creado en `.claude/skills/configure-workflow/`
-- Modelo AI-first formalizado — validado con datos reales de sesion:
-  - Ejecucion Max: 10-30 min (no es cuello de botella)
-  - Discovery cliente: 2-5h (cuello de botella real)
-  - Documentado en `.claude/rules/execution-model.md` y agentes (Vera v6, Max v4, [51], Santiago)
-- Hana: template de discovery Clarity-ONE en 3 bloques (mapeo → datos → automatizaciones)
-- Kaori: proceso [34] `docs/30_operaciones/34_METRIK_Proceso_Clarity_ONE_Config.md`
-- Residuales WA sprint (execute.ts + gasto-directo.ts) incluidos en commit `2ca4980`
+- Rediseno completo de `/tableros` (commit `6457994`) — BI-grade dashboards con 3 tabs:
+  - **Sprint 1 (P0):** F1 flujo neto hero, F2 saldo+runway, F3 I vs E con breakeven ReferenceLine y egresos slate-500, F4 cartera con dias atraso. C1 recaudo+meta+dias, C2 pipeline con degradado verde, C3 AlertCard urgentes, C4 ProgressGauge conversion. O1 RadialBarChart semicircular, O2 alertas unificadas con emptyMessage positivo, O6 costo por proyecto con gauges
+  - **Sprint 2 (P1):** F5 posicion neta, F6 gastos anomalos condicional. C5 ritmo narrativo, C6 ROI canal condicional (>=10 ops). O3 solo count>0, O4 dos gauges, O5 rentabilidad cerrados
+  - **Sprint 3 (P2):** F7 impuestos, O7 productividad condicional (>1 staff), responsive padding
+- Fix `/negocios` card (commit `ac30123`) — codigo unificado (oportunidad), responsable y dias sin actividad
+- `npm run build` verificado — `Compiled successfully`, 35 paginas sin errores TypeScript
 
 **Commits de sesion:**
-- `6fb8706` feat: workflow engine — workspace_stages, stage_transition_rules, evaluate_stage_rules
-- `2ca4980` feat: workflow engine — transiciones automaticas + panel de config
-- `78c2d0e` feat: workflow engine interno — remover UI de usuario, mantener capa de datos
+- `ac30123` feat: negocios card — codigo unificado, responsable y dias sin actividad
+- `6457994` feat: rediseno completo tableros — BI-grade dashboards
 
-## Estado actual (2026-03-26)
+## Estado actual (2026-03-31)
 
 - **Branch:** main (up to date con remote, sin cambios pendientes)
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
@@ -390,6 +381,9 @@ Que se hizo:
 - [x] Deducible toggle en modulo causacion — completado 2026-03-25
 - [x] Workflow engine: workspace_stages + stage_transition_rules + evaluate_stage_rules — completado 2026-03-26
 - [x] Commit residuales WA sprint: execute.ts + gasto-directo.ts — incluidos en 2ca4980
+- [x] Rediseno completo `/tableros` — Sprint 1+2+3 implementados, build limpio — completado 2026-03-31
+- [ ] Verificar tableros en browser real (desktop + mobile viewport)
+- [ ] Verificar cards condicionales en ambiente real (F6, C6, O7, O2 emptyMessage)
 - [ ] Piloto workflow engine con primer cliente Clarity — configurar via `/configure-workflow [slug]`
 - [ ] Activar programa referidos (/promotores): UI incentivos + deep links + tracking — pendiente sprint go-to-market
 - [ ] Wizard fiscal en WhatsApp para OPP_GANADA (hard gate actual rompe flujo end-to-end)

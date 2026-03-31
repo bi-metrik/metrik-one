@@ -2374,6 +2374,7 @@ export type Database = {
           descripcion: string
           empresa_id: string
           etapa: string
+          etapa_changed_at: string
           fecha_cierre_estimada: string | null
           id: string
           probabilidad: number
@@ -2395,6 +2396,7 @@ export type Database = {
           descripcion: string
           empresa_id: string
           etapa?: string
+          etapa_changed_at?: string
           fecha_cierre_estimada?: string | null
           id?: string
           probabilidad?: number
@@ -2416,6 +2418,7 @@ export type Database = {
           descripcion?: string
           empresa_id?: string
           etapa?: string
+          etapa_changed_at?: string
           fecha_cierre_estimada?: string | null
           id?: string
           probabilidad?: number
@@ -2945,6 +2948,7 @@ export type Database = {
           custom_data: Json | null
           empresa_id: string | null
           estado: string
+          estado_changed_at: string
           fecha_cierre: string | null
           fecha_entrega_estimada: string | null
           fecha_fin_estimada: string | null
@@ -2979,6 +2983,7 @@ export type Database = {
           custom_data?: Json | null
           empresa_id?: string | null
           estado?: string
+          estado_changed_at?: string
           fecha_cierre?: string | null
           fecha_entrega_estimada?: string | null
           fecha_fin_estimada?: string | null
@@ -3013,6 +3018,7 @@ export type Database = {
           custom_data?: Json | null
           empresa_id?: string | null
           estado?: string
+          estado_changed_at?: string
           fecha_cierre?: string | null
           fecha_entrega_estimada?: string | null
           fecha_fin_estimada?: string | null
@@ -4240,6 +4246,7 @@ export type Database = {
           created_at: string | null
           empresa_nombre: string | null
           estado: string | null
+          estado_changed_at: string | null
           facturado: number | null
           fecha_cierre: string | null
           fecha_entrega_estimada: string | null
@@ -4553,16 +4560,6 @@ export const Constants = {
   },
 } as const
 
-// ── Custom type aliases ──────────────────────────────
-export type ActivityLog = Database['public']['Tables']['activity_log']['Row']
-export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
-export type CausacionLog = Database['public']['Tables']['causaciones_log']['Row']
-export type Client = Database['public']['Tables']['clients']['Row']
-export type Cobro = Database['public']['Tables']['cobros']['Row']
-export type Contact = Database['public']['Tables']['contacts']['Row']
-export type Contacto = Database['public']['Tables']['contactos']['Row']
-export type Cotizacion = Database['public']['Tables']['cotizaciones']['Row']
-export type CustomField = Database['public']['Tables']['custom_fields']['Row']
 export type CustomFieldMapping = Database['public']['Tables']['custom_field_mappings']['Row']
 export type Empresa = Database['public']['Tables']['empresas']['Row']
 export type EntityLabel = Database['public']['Tables']['entity_labels']['Row']

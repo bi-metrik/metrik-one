@@ -417,6 +417,7 @@ export async function cambiarEstadoProyecto(
   const updates: Record<string, unknown> = {
     estado: nuevoEstado,
     updated_at: new Date().toISOString(),
+    estado_changed_at: new Date().toISOString(),
   }
 
   const { error: dbError } = await supabase
@@ -801,6 +802,7 @@ export async function marcarEntregado(id: string): Promise<ActionResult & { proy
     .update({
       estado: 'entregado',
       updated_at: new Date().toISOString(),
+      estado_changed_at: new Date().toISOString(),
     })
     .eq('id', id)
 

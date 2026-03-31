@@ -66,6 +66,8 @@ interface Financiero {
   fecha_entrega_estimada: string | null
   fecha_fin_estimada: string | null
   fecha_cierre: string | null
+  estado_changed_at: string | null
+  ultima_actividad: string | null
 }
 
 interface Rubro {
@@ -253,6 +255,13 @@ export default function ProyectoDetail({
     return ''
   }
 
+  const calcDias = (fecha: string | null) => {
+    if (!fecha) return 0
+    return Math.floor((Date.now() - new Date(fecha).getTime()) / (1000 * 60 * 60 * 24))
+  }
+  const diasEnStage = calcDias(f.estado_changed_at ?? f.updated_at)
+  const diasSinActividad = calcDias(f.ultima_actividad ?? f.updated_at)
+
   const stageSuffixColor = (estado: string | null) => {
     if (!estado) return 'text-muted-foreground'
     if (['en_ejecucion', 'pausado'].includes(estado)) return 'text-green-600'
@@ -329,6 +338,21 @@ export default function ProyectoDetail({
                 <Calendar className="h-3 w-3" />
                 Entrega: {new Date(f.fecha_entrega_estimada + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
                 {diasEntrega === 0 ? ' (hoy)' : diasEntrega < 0 ? ` (hace ${Math.abs(diasEntrega)} d)` : ` (${diasEntrega} d)`}
+              </span>
+            )}
+          </div>
+          {/* Contadores de tiempo */}
+          <div className="mt-1.5 flex items-center gap-3">
+            <span className="text-[10px] text-muted-foreground">
+              {diasEnStage}d en este estado
+            </span>
+            {diasSinActividad >= 4 && (
+              <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                diasSinActividad >= 8
+                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+              }`}>
+                {diasSinActividad}d sin actividad
               </span>
             )}
           </div>

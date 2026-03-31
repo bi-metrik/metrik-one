@@ -43,15 +43,22 @@ export default function NegocioCard({ negocio }: { negocio: NegocioItem }) {
         </div>
         <div className="text-right shrink-0 flex flex-col items-end gap-1">
           <p className="text-sm font-bold tabular-nums">{fmt(negocio.valor)}</p>
-          {negocio.diasSinActividad >= 4 && (
-            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
-              negocio.diasSinActividad >= 8
-                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-            }`}>
-              {negocio.diasSinActividad}d
-            </span>
-          )}
+          <div className="flex flex-col items-end gap-0.5">
+            {negocio.diasEnStage > 0 && (
+              <span className="text-[9px] text-muted-foreground/60 tabular-nums">
+                {negocio.diasEnStage}d en etapa
+              </span>
+            )}
+            {negocio.diasSinActividad >= 4 && (
+              <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                negocio.diasSinActividad >= 8
+                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+              }`}>
+                {negocio.diasSinActividad}d sin actividad
+              </span>
+            )}
+          </div>
         </div>
       </div>
       {pct !== null && (

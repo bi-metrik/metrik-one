@@ -169,6 +169,7 @@ export async function moveOportunidad(id: string, nuevaEtapa: string) {
       etapa: nuevaEtapa,
       ultima_accion: `Movida a ${nuevaEtapa}`,
       ultima_accion_fecha: new Date().toISOString(),
+      etapa_changed_at: new Date().toISOString(),
     })
     .eq('id', id)
 
@@ -201,6 +202,7 @@ export async function perderOportunidad(id: string, razon: string) {
       razon_perdida: razon,
       ultima_accion: 'Marcada como perdida',
       ultima_accion_fecha: new Date().toISOString(),
+      etapa_changed_at: new Date().toISOString(),
     })
     .eq('id', id)
 
@@ -349,6 +351,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
       etapa: 'ganada',
       ultima_accion: 'Oportunidad ganada',
       ultima_accion_fecha: new Date().toISOString(),
+      etapa_changed_at: new Date().toISOString(),
     })
     .eq('id', id)
 

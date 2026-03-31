@@ -30,6 +30,7 @@ interface OportunidadRow {
   created_at: string | null
   ultima_accion: string | null
   ultima_accion_fecha: string | null
+  etapa_changed_at: string | null
   razon_perdida: string | null
   carpeta_url: string | null
   responsable_id: string | null
@@ -71,6 +72,13 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
   const empresa = oportunidad.empresas as OportunidadRow['empresas']
   const contacto = oportunidad.contactos as OportunidadRow['contactos']
   const isTerminal = etapa === 'ganada' || etapa === 'perdida'
+
+  const calcDias = (fecha: string | null) => {
+    if (!fecha) return 0
+    return Math.floor((Date.now() - new Date(fecha).getTime()) / (1000 * 60 * 60 * 24))
+  }
+  const diasEnStage = calcDias(oportunidad.etapa_changed_at ?? oportunidad.ultima_accion_fecha)
+  const diasSinActividad = calcDias(oportunidad.ultima_accion_fecha ?? oportunidad.created_at)
 
   const currentIdx = ETAPAS_ACTIVAS.indexOf(etapa as EtapaPipeline)
   const nextEtapa = !isTerminal && currentIdx < ETAPAS_ACTIVAS.length - 1
@@ -220,7 +228,20 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
               style={{ width: `${etapaConfig.probabilidad}%` }}
             />
           </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">Probabilidad estimada de cierre</p>
+          <div className="mt-1.5 flex items-center gap-3">
+            <span className="text-[10px] text-muted-foreground">
+              {diasEnStage}d en esta etapa
+            </span>
+            {diasSinActividad >= 4 && (
+              <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                diasSinActividad >= 8
+                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+              }`}>
+                {diasSinActividad}d sin actividad
+              </span>
+            )}
+          </div>
         </div>
       )}
 
