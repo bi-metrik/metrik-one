@@ -4,7 +4,7 @@ import { useState, useTransition, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, FolderOpen, Clock, Receipt, Banknote, Pause, Play,
+  ArrowLeft, FolderOpen, Clock, Banknote, Pause, Play,
   Lock, Plus, TrendingUp, TrendingDown, FileText, AlertTriangle,
   ChevronDown, RefreshCw, ArrowUpCircle, User, Smartphone, Upload, Loader2, Calendar,
 } from 'lucide-react'
@@ -334,36 +334,6 @@ export default function ProyectoDetail({
         )}
       </div>
 
-      {/* ─── Quick register bar (top) ─── */}
-      {!isCerrado && !isPausado && (
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/nuevo/gasto?proyecto=${proyectoId}`}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-orange-50 border border-orange-200 py-2.5 text-xs font-medium text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:border-orange-900 dark:text-orange-400 dark:hover:bg-orange-950/50"
-          >
-            <Receipt className="h-4 w-4" />
-            Gasto
-          </Link>
-          <button
-            onClick={() => setDialog('horas')}
-            disabled={isPending}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 border border-blue-200 py-2.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-400 dark:hover:bg-blue-950/50"
-          >
-            <Clock className="h-4 w-4" />
-            Horas
-          </button>
-          {!isInterno && (
-            <button
-              onClick={() => setDialog('factura')}
-              disabled={isPending}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 border border-green-200 py-2.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50 dark:bg-green-950/30 dark:border-green-900 dark:text-green-400 dark:hover:bg-green-950/50"
-            >
-              <FileText className="h-4 w-4" />
-              Factura
-            </button>
-          )}
-        </div>
-      )}
 
       {/* D131: Link to approved cotización */}
       {cotizacionId && oportunidadId && (

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -23,6 +23,7 @@ interface FABAction {
   href?: string
   action?: string
   feature?: keyof typeof FEATURES
+  contextAware?: boolean
 }
 
 const FAB_ACTIONS: FABAction[] = [
@@ -33,10 +34,18 @@ const FAB_ACTIONS: FABAction[] = [
     roles: ['owner', 'admin'],
   },
   {
+    label: 'Registrar horas',
+    icon: Clock,
+    href: '/nuevo/horas',
+    roles: ['owner', 'admin', 'operator', 'supervisor'],
+    contextAware: true,
+  },
+  {
     label: 'Registrar gasto',
     icon: Receipt,
     href: '/nuevo/gasto',
     roles: ['owner', 'admin', 'operator', 'supervisor'],
+    contextAware: true,
   },
   {
     label: 'Nueva oportunidad',
@@ -75,6 +84,9 @@ export default function FAB({ role }: FABProps) {
   const [open, setOpen] = useState(false)
   const [timerPanel, setTimerPanel] = useState(false)
   const router = useRouter()
+  const pathname = usePathname()
+  const projectContextMatch = pathname.match(/^\/proyectos\/([a-f0-9-]{36})/)
+  const contextProyectoId = projectContextMatch?.[1] ?? null
 
   // Timer state
   const [timer, setTimer] = useState<TimerLocal>(DEFAULT_TIMER)
@@ -158,9 +170,12 @@ export default function FAB({ role }: FABProps) {
     if (action.action === 'saldo') {
       router.push('/numeros?saldo=1')
     } else if (action.href) {
-      router.push(action.href)
+      const href = contextProyectoId && action.contextAware
+        ? `${action.href}?proyecto=${contextProyectoId}`
+        : action.href
+      router.push(href)
     }
-  }, [router])
+  }, [router, contextProyectoId])
 
   const handleOpenTimer = () => {
     setOpen(false)
