@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { logSystemChange } from '@/app/(app)/activity-actions'
+import { checkTenantRules, BlockTransitionError } from '@/lib/tenant-rules'
 
 // ── Oportunidades ─────────────────────────────────────────
 
@@ -154,14 +155,38 @@ export async function createOportunidad(input: {
 
 export async function moveOportunidad(id: string, nuevaEtapa: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Get current etapa for logging
+  // Get current etapa + custom_data para contexto de reglas
   const { data: current } = await supabase
     .from('oportunidades')
-    .select('etapa')
+    .select('etapa, custom_data')
     .eq('id', id)
     .single()
+
+  // ── Evaluar gates (tenant_rules) ANTES de persistir el cambio ──
+  // estado_nuevo y estado_anterior en el contexto para que las reglas
+  // puedan filtrar por etapa destino específica (ej: solo bloquear "ganada").
+  try {
+    await checkTenantRules(
+      workspaceId,
+      'oportunidad',
+      'status_change',
+      {
+        id,
+        workspace_id: workspaceId,
+        estado_nuevo: nuevaEtapa,
+        estado_anterior: current?.etapa ?? null,
+        ...(current?.custom_data as Record<string, unknown> ?? {}),
+        custom_data: current?.custom_data,
+      },
+    )
+  } catch (e) {
+    if (e instanceof BlockTransitionError) {
+      return { success: false, error: e.message }
+    }
+    // Error de infraestructura — no bloquear al usuario
+  }
 
   const { error: dbError } = await supabase
     .from('oportunidades')
@@ -187,13 +212,34 @@ export async function moveOportunidad(id: string, nuevaEtapa: string) {
 
 export async function perderOportunidad(id: string, razon: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const { data: current } = await supabase
     .from('oportunidades')
-    .select('etapa')
+    .select('etapa, custom_data')
     .eq('id', id)
     .single()
+
+  // ── Evaluar gates ANTES de persistir ──
+  try {
+    await checkTenantRules(
+      workspaceId,
+      'oportunidad',
+      'status_change',
+      {
+        id,
+        workspace_id: workspaceId,
+        estado_nuevo: 'perdida',
+        estado_anterior: current?.etapa ?? null,
+        ...(current?.custom_data as Record<string, unknown> ?? {}),
+        custom_data: current?.custom_data,
+      },
+    )
+  } catch (e) {
+    if (e instanceof BlockTransitionError) {
+      return { success: false, error: e.message }
+    }
+  }
 
   const { error: dbError } = await supabase
     .from('oportunidades')

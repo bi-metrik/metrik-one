@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { logSystemChange } from '@/app/(app)/activity-actions'
+import { checkTenantRules, BlockTransitionError } from '@/lib/tenant-rules'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -393,10 +394,10 @@ export async function cambiarEstadoProyecto(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Get current state
+  // Get current state + custom_data para contexto de reglas
   const { data: proyecto } = await supabase
     .from('proyectos')
-    .select('estado')
+    .select('estado, custom_data')
     .eq('id', id)
     .single()
 
@@ -407,6 +408,30 @@ export async function cambiarEstadoProyecto(
 
   if (!permitidos.includes(nuevoEstado)) {
     return { success: false, error: `No se puede cambiar de "${estadoActual}" a "${nuevoEstado}"` }
+  }
+
+  // ── Evaluar gates (tenant_rules) ANTES de persistir el cambio ──
+  // El contexto incluye custom_data + estado_nuevo y estado_anterior
+  // para que las reglas puedan filtrar por etapa destino específica.
+  try {
+    await checkTenantRules(
+      workspaceId,
+      'proyecto',
+      'status_change',
+      {
+        id,
+        workspace_id: workspaceId,
+        estado_nuevo: nuevoEstado,
+        estado_anterior: estadoActual,
+        ...(proyecto.custom_data as Record<string, unknown> ?? {}),
+        custom_data: proyecto.custom_data,
+      },
+    )
+  } catch (e) {
+    if (e instanceof BlockTransitionError) {
+      return { success: false, error: e.message }
+    }
+    // Error de infraestructura — no bloquear al usuario
   }
 
   // If closing, do the full closure flow
@@ -784,7 +809,7 @@ export async function marcarEntregado(id: string): Promise<ActionResult & { proy
 
   const { data: proyecto } = await supabase
     .from('proyectos')
-    .select('estado, nombre')
+    .select('estado, nombre, custom_data')
     .eq('id', id)
     .single()
 
@@ -795,6 +820,27 @@ export async function marcarEntregado(id: string): Promise<ActionResult & { proy
 
   if (!permitidos.includes('entregado')) {
     return { success: false, error: `No se puede marcar como entregado desde "${estadoActual}"` }
+  }
+
+  // ── Evaluar gates ANTES de persistir ──
+  try {
+    await checkTenantRules(
+      workspaceId,
+      'proyecto',
+      'status_change',
+      {
+        id,
+        workspace_id: workspaceId,
+        estado_nuevo: 'entregado',
+        estado_anterior: estadoActual,
+        ...(proyecto.custom_data as Record<string, unknown> ?? {}),
+        custom_data: proyecto.custom_data,
+      },
+    )
+  } catch (e) {
+    if (e instanceof BlockTransitionError) {
+      return { success: false, error: e.message }
+    }
   }
 
   const { error: dbError } = await supabase
