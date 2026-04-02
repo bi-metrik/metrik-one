@@ -152,10 +152,10 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
             )}
           </div>
         </div>
-        {/* Drive icon — visible y clicable cuando hay URL; clic abre la carpeta, clic largo edita */}
-        {carpetaUrl && !carpetaEditing && (
+        {/* Drive icon — visible y clicable cuando hay URL confirmada en servidor */}
+        {oportunidad.carpeta_url && !carpetaEditing && (
           <button
-            onClick={() => window.open(carpetaUrl, '_blank')}
+            onClick={() => window.open(oportunidad.carpeta_url!, '_blank')}
             onContextMenu={e => { e.preventDefault(); setCarpetaEditing(true) }}
             onDoubleClick={() => setCarpetaEditing(true)}
             className="rounded-md p-1.5 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30"
@@ -166,8 +166,8 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
         )}
       </div>
 
-      {/* Carpeta URL — siempre visible si no hay URL, editable al hacer clic si ya hay */}
-      {(!carpetaUrl || carpetaEditing) && (
+      {/* Carpeta URL — visible si no hay URL en servidor, o si está editando */}
+      {(!oportunidad.carpeta_url || carpetaEditing) && (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
           <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
           <input

@@ -344,10 +344,10 @@ export default function ProyectoDetail({
             )}
           </div>
         </div>
-        {/* Drive icon — solo cuando ya hay URL */}
-        {carpetaUrl && !carpetaEditing && (
+        {/* Drive icon — solo cuando hay URL confirmada en servidor */}
+        {f.carpeta_url && !carpetaEditing && (
           <button
-            onClick={() => window.open(carpetaUrl, '_blank')}
+            onClick={() => window.open(f.carpeta_url!, '_blank')}
             onContextMenu={e => { e.preventDefault(); setCarpetaEditing(true) }}
             onDoubleClick={() => setCarpetaEditing(true)}
             className={`rounded-md p-1.5 hover:bg-accent ${
@@ -364,8 +364,8 @@ export default function ProyectoDetail({
         )}
       </div>
 
-      {/* Carpeta URL — siempre visible si no hay URL, editable si está en modo edición */}
-      {(!carpetaUrl || carpetaEditing) && (
+      {/* Carpeta URL — visible si no hay URL en servidor, o si está editando */}
+      {(!f.carpeta_url || carpetaEditing) && (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
           <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
           <input
