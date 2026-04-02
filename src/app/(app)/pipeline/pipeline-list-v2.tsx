@@ -8,6 +8,7 @@ import EntityCard from '@/components/entity-card'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS, RAZONES_PERDIDA } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { moveOportunidad, ganarOportunidad, perderOportunidad, checkCotizacionExiste } from './actions-v2'
+import type { WorkspaceStageWithProceso } from './actions-v2'
 import type { EtapaPipeline } from '@/lib/pipeline/constants'
 
 // D171: Soft gate messages por etapa destino
@@ -34,14 +35,23 @@ interface OportunidadRow {
   staff: { id: string; full_name: string } | null
 }
 
+// Labels para nombres de proceso mostrados en el selector
+const PROCESO_LABELS: Record<string, string> = {
+  ve: 'VE',
+  kaeser: 'Kaeser',
+  incentivos_b2b: 'Incentivos B2B',
+}
+
 interface Props {
   oportunidades: OportunidadRow[]
   sinResponsableCount?: number
+  stages?: WorkspaceStageWithProceso[]
 }
 
-export default function PipelineList({ oportunidades, sinResponsableCount = 0 }: Props) {
+export default function PipelineList({ oportunidades, sinResponsableCount = 0, stages = [] }: Props) {
   const [search, setSearch] = useState('')
   const [etapaFilter, setEtapaFilter] = useState<string | null>('activas')
+  const [procesoFilter, setProcesoFilter] = useState<string | null>(null) // null = Todos
   const [isPending, startTransition] = useTransition()
   const [lostModal, setLostModal] = useState<{ id: string; name: string } | null>(null)
   const [selectedReason, setSelectedReason] = useState('')
@@ -55,6 +65,43 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
     motivoBloqueado?: string
   } | null>(null)
   const router = useRouter()
+
+  // Calcular procesos disponibles a partir de las etapas del workspace
+  // Solo mostrar selector si hay al menos un proceso definido
+  const procesosDisponibles = Array.from(
+    new Set(stages.filter(s => s.proceso !== null).map(s => s.proceso as string))
+  )
+  const tieneMultiProceso = procesosDisponibles.length > 0
+
+  // Etapas activas para un proceso dado (o todas las etapas si proceso = null)
+  // Una etapa aplica si: proceso IS NULL O proceso = procesoSeleccionado
+  const getEtapasActivas = (proceso: string | null): string[] => {
+    if (stages.length === 0) {
+      // Sin stages de DB — usar constantes hardcodeadas (compatibilidad)
+      return ETAPAS_ACTIVAS as unknown as string[]
+    }
+    return stages
+      .filter(s => !s.es_terminal && s.activo)
+      .filter(s => proceso === null || s.proceso === null || s.proceso === proceso)
+      .sort((a, b) => a.orden - b.orden)
+      .map(s => s.sistema_slug || s.slug)
+  }
+
+  // getNextEtapa para una oportunidad específica usando las etapas de su proceso
+  const getNextEtapaForOpp = (currentEtapa: string | null, proceso: string | null): EtapaPipeline | null => {
+    const etapasActivas = getEtapasActivas(proceso)
+    const current = currentEtapa ?? 'lead_nuevo'
+    const idx = etapasActivas.indexOf(current)
+    if (idx === -1 || idx >= etapasActivas.length - 1) return null
+    return etapasActivas[idx + 1] as EtapaPipeline
+  }
+
+  // Inferir el proceso de una oportunidad a partir de su etapa actual
+  const getProcesoForEtapa = (etapaSlug: string | null): string | null => {
+    if (!etapaSlug || stages.length === 0) return null
+    const stage = stages.find(s => (s.sistema_slug || s.slug) === etapaSlug)
+    return stage?.proceso ?? null
+  }
 
   // D171: Ejecutar movimiento real de etapa
   const ejecutarMoveEtapa = (id: string, next: EtapaPipeline) => {
@@ -72,11 +119,11 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
 
   // D171: Soft gate — muestra prompt antes de mover etapa
   const cycleEtapa = (id: string, currentEtapa: string | null) => {
-    const current = currentEtapa ?? 'lead_nuevo'
-    const currentIdx = ETAPAS_ACTIVAS.indexOf(current as EtapaPipeline)
-    if (currentIdx === -1) return // terminal state — don't cycle
-    const nextIdx = (currentIdx + 1) % ETAPAS_ACTIVAS.length
-    const next = ETAPAS_ACTIVAS[nextIdx]
+    // Inferir el proceso de la oportunidad a partir de su etapa actual
+    const opp = oportunidades.find(o => o.id === id)
+    const proceso = getProcesoForEtapa(currentEtapa ?? opp?.etapa ?? null)
+    const next = getNextEtapaForOpp(currentEtapa, proceso)
+    if (!next) return // terminal state — don't cycle
 
     const mensaje = SOFT_GATE_MSGS[next]
     if (!mensaje) {
@@ -138,11 +185,12 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
     })
   }
 
-  const getNextEtapa = (current: string | null): EtapaPipeline | null => {
-    const idx = ETAPAS_ACTIVAS.indexOf((current ?? 'lead_nuevo') as EtapaPipeline)
-    if (idx === -1 || idx >= ETAPAS_ACTIVAS.length - 1) return null
-    return ETAPAS_ACTIVAS[idx + 1]
+  const getNextEtapa = (current: string | null, proceso: string | null): EtapaPipeline | null => {
+    return getNextEtapaForOpp(current, proceso)
   }
+
+  // Etapas activas del proceso seleccionado (para filtro "activas")
+  const etapasActivasActuales = getEtapasActivas(procesoFilter)
 
   const filtered = oportunidades.filter(o => {
     const matchSearch = !search ||
@@ -150,9 +198,17 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
       (o.contactos as { nombre: string } | null)?.nombre?.toLowerCase().includes(search.toLowerCase()) ||
       (o.empresas as { nombre: string } | null)?.nombre?.toLowerCase().includes(search.toLowerCase())
     const matchEtapa = !etapaFilter
-      || (etapaFilter === 'activas' && ETAPAS_ACTIVAS.includes(o.etapa as EtapaPipeline))
+      || (etapaFilter === 'activas' && etapasActivasActuales.includes(o.etapa ?? ''))
       || o.etapa === etapaFilter
-    return matchSearch && matchEtapa
+
+    // Filtro de proceso: si hay proceso seleccionado, mostrar solo ops cuya etapa pertenece a ese proceso
+    // (proceso IS NULL = etapa estándar que aparece en todos) O (proceso = procesoSeleccionado)
+    const matchProceso = procesoFilter === null || (() => {
+      const proceso = getProcesoForEtapa(o.etapa)
+      return proceso === null || proceso === procesoFilter
+    })()
+
+    return matchSearch && matchEtapa && matchProceso
   })
 
   const diasSinActividad = (fecha: string | null) => {
@@ -172,8 +228,8 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
     return `Hace ${Math.floor(days / 365)} años`
   }
 
-  // Value pipeline summary
-  const activeOps = oportunidades.filter(o => ETAPAS_ACTIVAS.includes(o.etapa as EtapaPipeline))
+  // Value pipeline summary — usar etapas activas del proceso seleccionado
+  const activeOps = oportunidades.filter(o => etapasActivasActuales.includes(o.etapa ?? ''))
   const totalPipeline = activeOps.reduce((sum, o) => sum + (o.valor_estimado ?? 0), 0)
   const totalPonderado = activeOps.reduce((sum, o) => {
     const prob = (o.probabilidad ?? 0) / 100
@@ -234,6 +290,31 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
         />
       </div>
 
+      {/* Selector de proceso (chips) — solo visible si hay multi-proceso configurado */}
+      {tieneMultiProceso && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          <button
+            onClick={() => setProcesoFilter(null)}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              procesoFilter === null ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:bg-accent'
+            }`}
+          >
+            Todos
+          </button>
+          {procesosDisponibles.map(p => (
+            <button
+              key={p}
+              onClick={() => setProcesoFilter(procesoFilter === p ? null : p)}
+              className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                procesoFilter === p ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              {PROCESO_LABELS[p] ?? p}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Filter chips */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         <button
@@ -274,15 +355,27 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
       {/* Cards */}
       <div className="space-y-2">
         {filtered.map(o => {
-          const etapaConfig = ETAPA_CONFIG[o.etapa as EtapaPipeline]
+          // Para etapas custom (no en ETAPA_CONFIG), construir config básica desde stages
+          const etapaConfig = ETAPA_CONFIG[o.etapa as EtapaPipeline] ?? (() => {
+            const stage = stages.find(s => (s.sistema_slug || s.slug) === o.etapa || s.slug === o.etapa)
+            if (!stage) return undefined
+            return {
+              label: stage.nombre,
+              probabilidad: 50,
+              chipClass: 'bg-slate-100 text-slate-700',
+              dotClass: 'bg-slate-400',
+              order: stage.orden,
+            }
+          })()
           const empresa = o.empresas as { nombre: string } | null
           const contacto = o.contactos as { nombre: string } | null
           const responsable = o.staff as { id: string; full_name: string } | null
           const dias = diasSinActividad(o.ultima_accion_fecha ?? o.created_at)
           const stale = dias !== null && dias > 7
 
-          const isActive = ETAPAS_ACTIVAS.includes(o.etapa as EtapaPipeline)
-          const nextEtapa = getNextEtapa(o.etapa)
+          const oppProceso = getProcesoForEtapa(o.etapa)
+          const isActive = etapasActivasActuales.includes(o.etapa ?? '')
+          const nextEtapa = getNextEtapa(o.etapa, oppProceso)
 
           return (
             <EntityCard
@@ -313,7 +406,7 @@ export default function PipelineList({ oportunidades, sinResponsableCount = 0 }:
                       disabled={isPending}
                       className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
                     >
-                      {ETAPA_CONFIG[nextEtapa].label}
+                      {ETAPA_CONFIG[nextEtapa]?.label ?? nextEtapa}
                       <ChevronRight className="h-3 w-3" />
                     </button>
                   )}

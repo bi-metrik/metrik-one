@@ -938,6 +938,7 @@ export type Database = {
       custom_fields: {
         Row: {
           activo: boolean | null
+          condicion_visibilidad: Json | null
           created_at: string | null
           entidad: string
           id: string
@@ -952,6 +953,7 @@ export type Database = {
         }
         Insert: {
           activo?: boolean | null
+          condicion_visibilidad?: Json | null
           created_at?: string | null
           entidad: string
           id?: string
@@ -966,6 +968,7 @@ export type Database = {
         }
         Update: {
           activo?: boolean | null
+          condicion_visibilidad?: Json | null
           created_at?: string | null
           entidad?: string
           id?: string
@@ -3803,6 +3806,59 @@ export type Database = {
           },
         ]
       }
+      tenant_rules: {
+        Row: {
+          acciones: Json
+          activo: boolean | null
+          condiciones: Json
+          created_at: string | null
+          descripcion: string | null
+          entidad: string
+          evento: string
+          id: string
+          nombre: string
+          prioridad: number | null
+          tenant_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          acciones: Json
+          activo?: boolean | null
+          condiciones: Json
+          created_at?: string | null
+          descripcion?: string | null
+          entidad: string
+          evento: string
+          id?: string
+          nombre: string
+          prioridad?: number | null
+          tenant_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          acciones?: Json
+          activo?: boolean | null
+          condiciones?: Json
+          created_at?: string | null
+          descripcion?: string | null
+          entidad?: string
+          evento?: string
+          id?: string
+          nombre?: string
+          prioridad?: number | null
+          tenant_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_rules_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       testimonials: {
         Row: {
           answer_1: string | null
@@ -4081,6 +4137,7 @@ export type Database = {
           id: string
           nombre: string
           orden: number
+          proceso: string | null
           sistema_slug: string | null
           slug: string
           workspace_id: string
@@ -4095,6 +4152,7 @@ export type Database = {
           id?: string
           nombre: string
           orden?: number
+          proceso?: string | null
           sistema_slug?: string | null
           slug: string
           workspace_id: string
@@ -4109,6 +4167,7 @@ export type Database = {
           id?: string
           nombre?: string
           orden?: number
+          proceso?: string | null
           sistema_slug?: string | null
           slug?: string
           workspace_id?: string

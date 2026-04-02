@@ -91,7 +91,7 @@ export async function getCustomFields(entidad: Entidad) {
 
   const { data } = await supabase
     .from('custom_fields')
-    .select('*')
+    .select('id, nombre, slug, tipo, opciones, obligatorio, orden, condicion_visibilidad')
     .eq('workspace_id', workspaceId)
     .eq('entidad', entidad)
     .eq('activo', true)

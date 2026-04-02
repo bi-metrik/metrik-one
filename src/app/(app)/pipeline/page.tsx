@@ -1,10 +1,13 @@
-import { getOportunidades } from './actions-v2'
+import { getOportunidades, getWorkspaceStagesPipeline } from './actions-v2'
 import PipelineList from './pipeline-list-v2'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
 
 export default async function PipelinePage() {
-  const oportunidades = await getOportunidades()
+  const [oportunidades, stages] = await Promise.all([
+    getOportunidades(),
+    getWorkspaceStagesPipeline(),
+  ])
   const sinResponsableCount = oportunidades.filter(o => o.responsable_id === null || o.responsable_id === undefined).length
 
   return (
@@ -27,7 +30,7 @@ export default async function PipelinePage() {
       </div>
 
       {/* List */}
-      <PipelineList oportunidades={oportunidades} sinResponsableCount={sinResponsableCount} />
+      <PipelineList oportunidades={oportunidades} sinResponsableCount={sinResponsableCount} stages={stages} />
     </div>
   )
 }

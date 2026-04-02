@@ -10,6 +10,11 @@ import {
 
 type Entidad = 'oportunidad' | 'proyecto' | 'contacto' | 'empresa'
 
+interface CondicionVisibilidad {
+  campo: string
+  valor: unknown
+}
+
 interface FieldDef {
   id: string
   nombre: string
@@ -17,6 +22,7 @@ interface FieldDef {
   tipo: string
   opciones: string[] | null
   obligatorio: boolean
+  condicion_visibilidad?: CondicionVisibilidad | null
 }
 
 interface LabelDef {
@@ -29,6 +35,13 @@ interface Props {
   entidad: Entidad
   entidadId: string
   initialCustomData?: Record<string, unknown>
+}
+
+// Evalúa si un campo debe mostrarse dada la condicion_visibilidad y los valores actuales
+function campoEsVisible(field: FieldDef, currentValues: Record<string, unknown>): boolean {
+  if (!field.condicion_visibilidad) return true
+  const { campo, valor } = field.condicion_visibilidad
+  return currentValues[campo] === valor
 }
 
 export default function CustomFieldsSection({ entidad, entidadId, initialCustomData }: Props) {
@@ -98,7 +111,8 @@ export default function CustomFieldsSection({ entidad, entidadId, initialCustomD
     })
   }
 
-  if (fields.length === 0 && labels.length === 0) return null
+  const visibleFields = fields.filter(f => campoEsVisible(f, values))
+  if (visibleFields.length === 0 && labels.length === 0) return null
 
   return (
     <div className="space-y-4">
@@ -136,14 +150,14 @@ export default function CustomFieldsSection({ entidad, entidadId, initialCustomD
         </div>
       )}
 
-      {fields.length > 0 && (
+      {visibleFields.length > 0 && (
         <div>
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <Settings2 className="w-3.5 h-3.5" />
             Campos adicionales
           </h3>
           <div className="space-y-3">
-            {fields.map(field => (
+            {visibleFields.map(field => (
               <CustomFieldInput
                 key={field.id}
                 field={field}

@@ -6,6 +6,37 @@ import { revalidatePath } from 'next/cache'
 import { logSystemChange } from '@/app/(app)/activity-actions'
 import { checkTenantRules, BlockTransitionError } from '@/lib/tenant-rules'
 
+// ── Tipo extendido para etapas con proceso (post-migración multi-proceso) ──
+
+export interface WorkspaceStageWithProceso {
+  id: string
+  nombre: string
+  slug: string
+  sistema_slug: string | null
+  orden: number
+  es_sistema: boolean
+  es_terminal: boolean
+  proceso: string | null
+  activo: boolean
+}
+
+// ── Etapas del workspace (con proceso) ────────────────────
+
+export async function getWorkspaceStagesPipeline(): Promise<WorkspaceStageWithProceso[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  const { data } = await supabase
+    .from('workspace_stages')
+    .select('id, nombre, slug, sistema_slug, orden, es_sistema, es_terminal, proceso, activo')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad', 'oportunidad')
+    .eq('activo', true)
+    .order('orden', { ascending: true })
+
+  return (data ?? []) as WorkspaceStageWithProceso[]
+}
+
 // ── Oportunidades ─────────────────────────────────────────
 
 export async function getOportunidades() {
