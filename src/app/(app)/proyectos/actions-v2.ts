@@ -840,13 +840,15 @@ export async function updateProyectoCarpeta(id: string, carpetaUrl: string | nul
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  const { error: dbError } = await supabase
+  const { data: updated, error: dbError } = await supabase
     .from('proyectos')
     .update({ carpeta_url: carpetaUrl?.trim() || null, updated_at: new Date().toISOString() })
     .eq('id', id)
     .eq('workspace_id', workspaceId)
+    .select('id, carpeta_url')
 
   if (dbError) return { success: false, error: dbError.message }
+  if (!updated || updated.length === 0) return { success: false, error: `0 filas actualizadas (id=${id}, ws=${workspaceId})` }
   revalidatePath(`/proyectos/${id}`)
   revalidatePath('/negocios')
   return { success: true }

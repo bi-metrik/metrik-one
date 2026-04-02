@@ -575,12 +575,14 @@ export async function updateOportunidad(id: string, updates: Record<string, unkn
     currentData = data as Record<string, unknown> | null
   }
 
-  const { error: dbError } = await supabase
+  const { data: updated, error: dbError } = await supabase
     .from('oportunidades')
     .update(updates)
     .eq('id', id)
+    .select('id')
 
   if (dbError) return { success: false, error: dbError.message }
+  if (!updated || updated.length === 0) return { success: false, error: `0 filas actualizadas (id=${id})` }
 
   // Log changes
   if (workspaceId && currentData) {
