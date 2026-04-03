@@ -191,7 +191,7 @@ export default function StepperForm({ staffList }: { staffList: { id: string; fu
       })
       if (res.success) {
         toast.success('Oportunidad creada')
-        router.back()
+        router.push(`/pipeline/${res.id}`)
       } else {
         toast.error(res.error)
       }
