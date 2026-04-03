@@ -2,8 +2,8 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import { getServerKey } from '@/lib/server-keys'
+import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
 
 // ── Tipos ──────────────────────────────────────────────────
 
@@ -221,20 +221,16 @@ export async function actualizarCamposVehiculo(
   return { success: true }
 }
 
-// ── Helpers Gemini Vision ──────────────────────────────────
+// ── Helpers de deteccion de MIME por extension ────────────
 
-async function urlToBase64Part(url: string): Promise<{ inlineData: { data: string; mimeType: string } } | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const contentType = res.headers.get('content-type') || 'application/octet-stream'
-    const mimeType = contentType.split(';')[0].trim()
-    const buffer = await res.arrayBuffer()
-    const data = Buffer.from(buffer).toString('base64')
-    return { inlineData: { data, mimeType } }
-  } catch {
-    return null
-  }
+function mimeTypeFromUrl(url: string): string {
+  const path = url.split('?')[0].toLowerCase()
+  if (path.endsWith('.pdf')) return 'application/pdf'
+  if (path.endsWith('.png')) return 'image/png'
+  if (path.endsWith('.webp')) return 'image/webp'
+  if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg'
+  // Fallback: intentar con PDF (documentos colombianos suelen ser PDF)
+  return 'application/pdf'
 }
 
 // ── Procesar documentos con Gemini Vision ─────────────────
@@ -257,12 +253,11 @@ export async function procesarDocumentosVe(
   if (!opp?.custom_data) return { success: false, error: 'Oportunidad no encontrada' }
 
   const cd = opp.custom_data as Record<string, unknown>
-  const docs = (cd.docs as Record<string, string>) ?? {}
+  const docsUrls = (cd.docs as Record<string, string>) ?? {}
 
   // Requiere al menos factura o ficha_tecnica
-  const urlFactura = docs.factura
-  const urlFicha = docs.ficha_tecnica
-  const urlRut = docs.rut
+  const urlFactura = docsUrls.factura
+  const urlFicha = docsUrls.ficha_tecnica
 
   if (!urlFactura && !urlFicha) {
     return { success: false, error: 'Se necesita al menos la Factura o la Ficha Tecnica para procesar' }
@@ -273,63 +268,41 @@ export async function procesarDocumentosVe(
     return { success: false, error: 'GEMINI_API_KEY no configurada en el servidor' }
   }
 
-  // Construir partes para Gemini Vision (texto + imágenes inline en base64)
-  const promptText = `Analiza los siguientes documentos de un vehiculo electrico/hibrido y extrae los datos del vehiculo.
-Devuelve UNICAMENTE un JSON con esta estructura exacta (sin explicaciones adicionales):
-{
-  "marca": "string o null",
-  "linea": "string o null",
-  "modelo": "string o null (año, ej: 2023)",
-  "tecnologia": "string o null (EV/HEV/PHEV/MOTO EV)",
-  "tipo": "string o null (Automovil/Camioneta)"
-}
-Si no encuentras un dato, usa null. Extrae principalmente del documento de Factura o Ficha Tecnica.`
+  // Construir lista de documentos relevantes para extraccion VE
+  // (factura primero — prioridad para datos de identificacion del vehiculo)
+  const docEntries: { url: string; slug: string }[] = []
+  if (urlFactura) docEntries.push({ url: urlFactura, slug: 'factura' })
+  if (urlFicha) docEntries.push({ url: urlFicha, slug: 'ficha_tecnica' })
 
-  const docEntries: { url: string; label: string }[] = []
-  if (urlFactura) docEntries.push({ url: urlFactura, label: 'Factura de compra' })
-  if (urlFicha) docEntries.push({ url: urlFicha, label: 'Ficha tecnica' })
-  if (urlRut) docEntries.push({ url: urlRut, label: 'RUT' })
+  const slugsProcesados = docEntries.map(d => d.slug)
 
-  const slugsProcesados = docEntries.map(d => d.label.toLowerCase().replace(/ /g, '_'))
-
-  // Convertir documentos a base64 para enviar inline a Gemini
-  type GeminiPart =
-    | { text: string }
-    | { inlineData: { data: string; mimeType: string } }
-
-  const parts: GeminiPart[] = [{ text: promptText }]
-
+  // Fetch + convertir cada documento a ArrayBuffer para envio inline a Gemini
+  const docsPayload: Array<{ buffer: ArrayBuffer; mimeType: string; slug: string }> = []
   for (const entry of docEntries) {
-    const part = await urlToBase64Part(entry.url)
-    if (part) {
-      parts.push({ text: `Documento: ${entry.label}` })
-      parts.push(part)
+    try {
+      const res = await fetch(entry.url)
+      if (!res.ok) {
+        console.warn(`[procesarDocumentosVe] No se pudo descargar ${entry.slug}: HTTP ${res.status}`)
+        continue
+      }
+      const buffer = await res.arrayBuffer()
+      // Preferir content-type del servidor; fallback por extension de URL
+      const contentType = res.headers.get('content-type') || ''
+      const mimeType = contentType.split(';')[0].trim() || mimeTypeFromUrl(entry.url)
+      docsPayload.push({ buffer, mimeType, slug: entry.slug })
+    } catch (fetchErr) {
+      console.warn(`[procesarDocumentosVe] Error descargando ${entry.slug}:`, fetchErr)
     }
   }
 
-  let extracted: CamposVehiculo | null = null
-  let exitoso = false
+  if (docsPayload.length === 0) {
+    return { success: false, error: 'No se pudieron descargar los documentos para procesar' }
+  }
 
-  try {
-    const genai = new GoogleGenerativeAI(apiKey)
-    const model = genai.getGenerativeModel({ model: 'gemini-2.5-flash-preview-04-17' })
+  // Llamar al parser con el patron identico a parse-rut.ts
+  const { data: veData, error: parseError } = await parseVeDocuments(docsPayload, apiKey)
 
-    const result = await model.generateContent(parts as Parameters<typeof model.generateContent>[0])
-    const responseText = result.response.text().trim()
-
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      throw new Error('No se pudo extraer JSON de la respuesta')
-    }
-
-    extracted = JSON.parse(jsonMatch[0]) as CamposVehiculo
-    exitoso = true
-
-    // Persistir los campos extraidos en custom_data
-    await actualizarCamposVehiculo(oportunidadId, extracted)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Error desconocido'
-
+  if (parseError || !veData) {
     // Registrar intento fallido en log
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (admin as any).from('ve_procesamiento_log').insert({
@@ -339,18 +312,36 @@ Si no encuentras un dato, usa null. Extrae principalmente del documento de Factu
       campos_extraidos: null,
       exitoso: false,
     })
-
-    return { success: false, error: `Error procesando con Gemini: ${msg}` }
+    return { success: false, error: parseError ?? 'Error desconocido al procesar documentos' }
   }
 
-  // Registrar extraccion exitosa en log de facturacion
+  // Mapear VeVehicleData → CamposVehiculo (estructura legacy del action)
+  const extracted: CamposVehiculo = {
+    marca: veData.marca_vehiculo.value ?? undefined,
+    linea: veData.linea_vehiculo.value ?? undefined,
+    modelo: veData.modelo_ano.value ?? undefined,
+    tecnologia: veData.tecnologia.value ?? undefined,
+    tipo: veData.tipo_vehiculo.value ?? undefined,
+  }
+
+  // Persistir campos extraidos en custom_data de la oportunidad
+  await actualizarCamposVehiculo(oportunidadId, extracted)
+
+  // Registrar extraccion exitosa en log
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any).from('ve_procesamiento_log').insert({
     workspace_id: workspaceId,
     oportunidad_id: oportunidadId,
     documentos_procesados: slugsProcesados,
-    campos_extraidos: extracted as unknown as Record<string, unknown>,
-    exitoso,
+    campos_extraidos: {
+      marca_vehiculo: veData.marca_vehiculo,
+      linea_vehiculo: veData.linea_vehiculo,
+      modelo_ano: veData.modelo_ano,
+      tecnologia: veData.tecnologia,
+      tipo_vehiculo: veData.tipo_vehiculo,
+      overall_confidence: veData.overall_confidence,
+    } as unknown as Record<string, unknown>,
+    exitoso: true,
   })
 
   return { success: true, data: extracted }
