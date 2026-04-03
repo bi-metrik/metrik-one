@@ -2,7 +2,8 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import { getServerKey } from '@/lib/server-keys'
 
 // ── Tipos ──────────────────────────────────────────────────
 
@@ -220,13 +221,31 @@ export async function actualizarCamposVehiculo(
   return { success: true }
 }
 
-// ── Procesar documentos con Claude Vision ──────────────────
+// ── Helpers Gemini Vision ──────────────────────────────────
+
+async function urlToBase64Part(url: string): Promise<{ inlineData: { data: string; mimeType: string } } | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const contentType = res.headers.get('content-type') || 'application/octet-stream'
+    const mimeType = contentType.split(';')[0].trim()
+    const buffer = await res.arrayBuffer()
+    const data = Buffer.from(buffer).toString('base64')
+    return { inlineData: { data, mimeType } }
+  } catch {
+    return null
+  }
+}
+
+// ── Procesar documentos con Gemini Vision ─────────────────
 
 export async function procesarDocumentosVe(
   oportunidadId: string,
 ): Promise<{ success: boolean; data?: CamposVehiculo; error?: string }> {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const admin = createServiceClient()
 
   // Leer URLs de documentos actuales
   const { data: opp } = await supabase
@@ -249,91 +268,90 @@ export async function procesarDocumentosVe(
     return { success: false, error: 'Se necesita al menos la Factura o la Ficha Tecnica para procesar' }
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = getServerKey('gemini')
   if (!apiKey) {
-    return { success: false, error: 'ANTHROPIC_API_KEY no configurada en el servidor' }
+    return { success: false, error: 'GEMINI_API_KEY no configurada en el servidor' }
   }
 
-  // Construir contenido para Claude Vision
-  type ContentBlock =
-    | { type: 'text'; text: string }
-    | { type: 'image'; source: { type: 'url'; url: string } }
-    | { type: 'document'; source: { type: 'url'; url: string } }
-
-  const contentBlocks: ContentBlock[] = [
-    {
-      type: 'text',
-      text: `Analiza los siguientes documentos de un vehiculo electrico/hibrido y extrae los datos del vehiculo.
+  // Construir partes para Gemini Vision (texto + imágenes inline en base64)
+  const promptText = `Analiza los siguientes documentos de un vehiculo electrico/hibrido y extrae los datos del vehiculo.
 Devuelve UNICAMENTE un JSON con esta estructura exacta (sin explicaciones adicionales):
 {
   "marca": "string o null",
   "linea": "string o null",
   "modelo": "string o null (año, ej: 2023)",
-  "tecnologia": "string o null (ej: BEV, HEV, PHEV, MHEV)",
-  "tipo": "string o null (ej: automovil, camioneta, motocicleta)"
+  "tecnologia": "string o null (EV/HEV/PHEV/MOTO EV)",
+  "tipo": "string o null (Automovil/Camioneta)"
 }
-Si no encuentras un dato, usa null. Extrae del documento de Factura o Ficha Tecnica principalmente.`,
-    },
-  ]
+Si no encuentras un dato, usa null. Extrae principalmente del documento de Factura o Ficha Tecnica.`
 
-  // Agregar documentos como URLs
-  // Claude Vision acepta URLs directas de imágenes
-  // Para PDFs se usa document source type
-  const addDoc = (url: string, label: string) => {
-    contentBlocks.push({ type: 'text', text: `Documento: ${label}` })
-    // Detectar si es PDF por la URL o extensión
-    const isPdf = url.includes('.pdf') || url.includes('content-type=application%2Fpdf')
-    if (isPdf) {
-      contentBlocks.push({
-        type: 'document',
-        source: { type: 'url', url },
-      })
-    } else {
-      contentBlocks.push({
-        type: 'image',
-        source: { type: 'url', url },
-      })
+  const docEntries: { url: string; label: string }[] = []
+  if (urlFactura) docEntries.push({ url: urlFactura, label: 'Factura de compra' })
+  if (urlFicha) docEntries.push({ url: urlFicha, label: 'Ficha tecnica' })
+  if (urlRut) docEntries.push({ url: urlRut, label: 'RUT' })
+
+  const slugsProcesados = docEntries.map(d => d.label.toLowerCase().replace(/ /g, '_'))
+
+  // Convertir documentos a base64 para enviar inline a Gemini
+  type GeminiPart =
+    | { text: string }
+    | { inlineData: { data: string; mimeType: string } }
+
+  const parts: GeminiPart[] = [{ text: promptText }]
+
+  for (const entry of docEntries) {
+    const part = await urlToBase64Part(entry.url)
+    if (part) {
+      parts.push({ text: `Documento: ${entry.label}` })
+      parts.push(part)
     }
   }
 
-  if (urlFactura) addDoc(urlFactura, 'Factura de compra')
-  if (urlFicha) addDoc(urlFicha, 'Ficha tecnica')
-  if (urlRut) addDoc(urlRut, 'RUT')
+  let extracted: CamposVehiculo | null = null
+  let exitoso = false
 
   try {
-    const client = new Anthropic({ apiKey })
+    const genai = new GoogleGenerativeAI(apiKey)
+    const model = genai.getGenerativeModel({ model: 'gemini-2.5-flash-preview-04-17' })
 
-    const message = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 512,
-      messages: [
-        {
-          role: 'user',
-          content: contentBlocks as Parameters<typeof client.messages.create>[0]['messages'][0]['content'],
-        },
-      ],
-    })
+    const result = await model.generateContent(parts as Parameters<typeof model.generateContent>[0])
+    const responseText = result.response.text().trim()
 
-    const textContent = message.content.find(b => b.type === 'text')
-    if (!textContent || textContent.type !== 'text') {
-      return { success: false, error: 'Respuesta vacia de Claude Vision' }
-    }
-
-    // Extraer JSON de la respuesta
-    const responseText = textContent.text.trim()
     const jsonMatch = responseText.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      return { success: false, error: 'No se pudo extraer JSON de la respuesta' }
+      throw new Error('No se pudo extraer JSON de la respuesta')
     }
 
-    const extracted = JSON.parse(jsonMatch[0]) as CamposVehiculo
+    extracted = JSON.parse(jsonMatch[0]) as CamposVehiculo
+    exitoso = true
 
-    // Persistir los campos extraidos
+    // Persistir los campos extraidos en custom_data
     await actualizarCamposVehiculo(oportunidadId, extracted)
-
-    return { success: true, data: extracted }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error desconocido'
-    return { success: false, error: `Error procesando con Claude: ${msg}` }
+
+    // Registrar intento fallido en log
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from('ve_procesamiento_log').insert({
+      workspace_id: workspaceId,
+      oportunidad_id: oportunidadId,
+      documentos_procesados: slugsProcesados,
+      campos_extraidos: null,
+      exitoso: false,
+    })
+
+    return { success: false, error: `Error procesando con Gemini: ${msg}` }
   }
+
+  // Registrar extraccion exitosa en log de facturacion
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin as any).from('ve_procesamiento_log').insert({
+    workspace_id: workspaceId,
+    oportunidad_id: oportunidadId,
+    documentos_procesados: slugsProcesados,
+    campos_extraidos: extracted as unknown as Record<string, unknown>,
+    exitoso,
+  })
+
+  return { success: true, data: extracted }
 }
