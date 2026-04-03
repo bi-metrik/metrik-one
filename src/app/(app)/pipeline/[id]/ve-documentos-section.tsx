@@ -1,0 +1,375 @@
+'use client'
+
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { Bot, Sparkles } from 'lucide-react'
+import DocUploadSlot, { SlotState } from './doc-upload-slot'
+import {
+  subirDocumentoVe,
+  actualizarVehiculoEnUpme,
+  procesarDocumentosVe,
+  actualizarCamposVehiculo,
+  type DocumentoSlug,
+  type VeDocumentoState,
+  type CamposVehiculo,
+} from '@/lib/actions/ve-documentos'
+
+// ── Definicion de documentos ───────────────────────────────
+
+const DOCS_SIEMPRE: { slug: DocumentoSlug; label: string }[] = [
+  { slug: 'cedula', label: 'Cedula' },
+  { slug: 'factura', label: 'Factura' },
+  { slug: 'rut', label: 'RUT' },
+  { slug: 'soporte_upme', label: 'Soporte pago UPME' },
+]
+
+const DOCS_CONDICIONALES: { slug: DocumentoSlug; label: string }[] = [
+  { slug: 'ficha_tecnica', label: 'Ficha Tecnica' },
+  { slug: 'cert_emisiones', label: 'Cert. de Emisiones' },
+]
+
+// ── Props ──────────────────────────────────────────────────
+
+interface Props {
+  oportunidadId: string
+  vehiculoEnUpme: boolean | null
+  documentosActuales: VeDocumentoState[]
+  camposVehiculo: CamposVehiculo | null
+}
+
+// ── Dot indicator ──────────────────────────────────────────
+
+function Dot({ state }: { state: 'uploaded' | 'pending' | 'error' }) {
+  if (state === 'uploaded') return <span className="text-green-500 text-xs">●</span>
+  if (state === 'error') return <span className="text-red-500 text-xs">!</span>
+  return <span className="text-muted-foreground/40 text-xs">○</span>
+}
+
+// ── Campos del vehiculo ────────────────────────────────────
+
+interface CamposVehiculoFormProps {
+  oportunidadId: string
+  campos: CamposVehiculo
+  onChange: (updated: CamposVehiculo) => void
+  highlighted: boolean
+}
+
+function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: CamposVehiculoFormProps) {
+  const [isPending, startTransition] = useTransition()
+
+  const handleBlur = (key: keyof CamposVehiculo, value: string) => {
+    const updated = { ...campos, [key]: value || undefined }
+    onChange(updated)
+    startTransition(async () => {
+      await actualizarCamposVehiculo(oportunidadId, { [key]: value || undefined })
+    })
+  }
+
+  const fieldClass = `w-full rounded-md border bg-background px-2.5 py-1.5 text-sm transition-all ${
+    highlighted ? 'border-green-400 bg-green-50/30' : ''
+  } ${isPending ? 'opacity-60' : ''}`
+
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {(
+        [
+          { key: 'marca' as const, label: 'Marca' },
+          { key: 'linea' as const, label: 'Linea / Modelo' },
+          { key: 'modelo' as const, label: 'Ano' },
+          { key: 'tecnologia' as const, label: 'Tecnologia' },
+          { key: 'tipo' as const, label: 'Tipo vehiculo' },
+        ] as const
+      ).map(({ key, label }) => (
+        <div key={key}>
+          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{label}</label>
+          <input
+            type="text"
+            defaultValue={campos[key] ?? ''}
+            onBlur={e => handleBlur(key, e.target.value)}
+            placeholder="—"
+            className={fieldClass}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Skeleton durante procesamiento ─────────────────────────
+
+function CamposVehiculoSkeleton() {
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 animate-pulse">
+      {[1, 2, 3, 4, 5].map(i => (
+        <div key={i}>
+          <div className="mb-0.5 h-2.5 w-12 rounded bg-muted" />
+          <div className="h-8 rounded-md bg-muted" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Componente principal ───────────────────────────────────
+
+export default function VeDocumentosSection({
+  oportunidadId,
+  vehiculoEnUpme: initialVehiculoEnUpme,
+  documentosActuales,
+  camposVehiculo: initialCamposVehiculo,
+}: Props) {
+  const router = useRouter()
+
+  // Estado vehiculo_en_upme
+  const [vehiculoEnUpme, setVehiculoEnUpme] = useState<boolean | null>(initialVehiculoEnUpme)
+  const [upmeTransition, startUpmeTransition] = useTransition()
+
+  // Estado de cada slot: mapa slug → estado
+  const buildInitialSlotStates = (): Record<DocumentoSlug, SlotState> => {
+    const m = {} as Record<DocumentoSlug, SlotState>
+    const allSlugs: DocumentoSlug[] = [
+      'cedula', 'factura', 'rut', 'soporte_upme', 'ficha_tecnica', 'cert_emisiones',
+    ]
+    for (const slug of allSlugs) {
+      m[slug] = documentosActuales.find(d => d.slug === slug) ? 'uploaded' : 'empty'
+    }
+    return m
+  }
+
+  const buildInitialFileNames = (): Record<DocumentoSlug, string | undefined> => {
+    const m = {} as Record<DocumentoSlug, string | undefined>
+    for (const doc of documentosActuales) {
+      // Extraer nombre del archivo de la URL
+      const parts = doc.url.split('/')
+      m[doc.slug] = parts[parts.length - 1]?.split('?')[0]
+    }
+    return m
+  }
+
+  const [slotStates, setSlotStates] = useState<Record<DocumentoSlug, SlotState>>(buildInitialSlotStates)
+  const [fileNames, setFileNames] = useState<Record<DocumentoSlug, string | undefined>>(buildInitialFileNames)
+
+  // Estado procesamiento AI
+  const [procesando, setProcesando] = useState(false)
+  const [camposVehiculo, setCamposVehiculo] = useState<CamposVehiculo | null>(initialCamposVehiculo)
+  const [justProcessed, setJustProcessed] = useState(false)
+
+  // Docs visibles
+  const docsVisibles = vehiculoEnUpme === false
+    ? [...DOCS_SIEMPRE, ...DOCS_CONDICIONALES]
+    : DOCS_SIEMPRE
+
+  // Conteo para el badge
+  const uploadedCount = docsVisibles.filter(d => slotStates[d.slug] === 'uploaded').length
+  const totalCount = docsVisibles.length
+
+  // Habilitar boton procesar: factura + rut subidos
+  const puedeProc = slotStates.factura === 'uploaded' && slotStates.rut === 'uploaded'
+
+  // ── Handlers ───────────────────────────────────────────────
+
+  const handleUpmeChange = (val: boolean) => {
+    setVehiculoEnUpme(val)
+    startUpmeTransition(async () => {
+      const res = await actualizarVehiculoEnUpme(oportunidadId, val)
+      if (!res.success) {
+        toast.error(res.error ?? 'Error al guardar')
+      }
+    })
+  }
+
+  const handleFileSelected = async (slug: DocumentoSlug, file: File) => {
+    // Validaciones client-side
+    const MAX_SIZE = 10 * 1024 * 1024
+    const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+
+    if (file.size > MAX_SIZE) {
+      toast.error('Archivo demasiado grande. Max 10MB')
+      setSlotStates(prev => ({ ...prev, [slug]: 'empty' }))
+      return
+    }
+    if (!ALLOWED.includes(file.type)) {
+      toast.error('Solo PDF, JPG, PNG o WebP')
+      setSlotStates(prev => ({ ...prev, [slug]: 'empty' }))
+      return
+    }
+
+    // Estado uploading
+    setSlotStates(prev => ({ ...prev, [slug]: 'uploading' }))
+
+    const fd = new FormData()
+    fd.append('file', file)
+
+    const res = await subirDocumentoVe(oportunidadId, slug, fd)
+
+    if (res.success) {
+      setSlotStates(prev => ({ ...prev, [slug]: 'uploaded' }))
+      setFileNames(prev => ({ ...prev, [slug]: file.name }))
+      router.refresh()
+    } else {
+      setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
+      toast.error(res.error ?? 'Error al subir archivo')
+    }
+  }
+
+  const handleProcesar = async () => {
+    setProcesando(true)
+    setJustProcessed(false)
+    const res = await procesarDocumentosVe(oportunidadId)
+    setProcesando(false)
+
+    if (res.success && res.data) {
+      setCamposVehiculo(prev => ({ ...prev, ...res.data }))
+      setJustProcessed(true)
+      toast.success('Datos del vehiculo extraidos correctamente')
+      router.refresh()
+    } else {
+      toast.error(res.error ?? 'Error al procesar documentos')
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────────────
+
+  return (
+    <div className="rounded-lg border p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">Documentos VE</h2>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold tabular-nums">
+            {uploadedCount}/{totalCount}
+          </span>
+        </div>
+        {/* Progress dots */}
+        <div className="flex items-center gap-1">
+          {docsVisibles.map(doc => (
+            <Dot
+              key={doc.slug}
+              state={
+                slotStates[doc.slug] === 'uploaded'
+                  ? 'uploaded'
+                  : slotStates[doc.slug] === 'error'
+                  ? 'error'
+                  : 'pending'
+              }
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Toggle vehiculo_en_upme */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-medium text-muted-foreground">
+          Vehiculo en UPME?
+        </p>
+        <div className="inline-flex rounded-lg border overflow-hidden">
+          <button
+            type="button"
+            onClick={() => handleUpmeChange(true)}
+            disabled={upmeTransition}
+            className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+              vehiculoEnUpme === true
+                ? 'bg-primary text-primary-foreground'
+                : 'border-r hover:bg-accent'
+            }`}
+          >
+            Si
+          </button>
+          <button
+            type="button"
+            onClick={() => handleUpmeChange(false)}
+            disabled={upmeTransition}
+            className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+              vehiculoEnUpme === false
+                ? 'bg-primary text-primary-foreground'
+                : 'hover:bg-accent'
+            }`}
+          >
+            No
+          </button>
+        </div>
+      </div>
+
+      {/* Slots siempre visibles */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {DOCS_SIEMPRE.map(doc => (
+          <DocUploadSlot
+            key={doc.slug}
+            label={doc.label}
+            state={slotStates[doc.slug]}
+            fileName={fileNames[doc.slug]}
+            onFileSelected={file => handleFileSelected(doc.slug, file)}
+          />
+        ))}
+      </div>
+
+      {/* Slots condicionales — solo si vehiculo_en_upme === false */}
+      <div
+        className={`grid grid-cols-2 gap-2 overflow-hidden transition-all duration-300 ${
+          vehiculoEnUpme === false
+            ? 'max-h-40 opacity-100'
+            : 'max-h-0 opacity-0 pointer-events-none'
+        }`}
+      >
+        {DOCS_CONDICIONALES.map(doc => (
+          <DocUploadSlot
+            key={doc.slug}
+            label={doc.label}
+            state={slotStates[doc.slug]}
+            fileName={fileNames[doc.slug]}
+            onFileSelected={file => handleFileSelected(doc.slug, file)}
+          />
+        ))}
+      </div>
+
+      {/* Boton procesar */}
+      <div className="space-y-2">
+        {!puedeProc && (
+          <p className="text-[11px] text-muted-foreground">
+            Carga al menos la Factura y el RUT para procesar
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={handleProcesar}
+          disabled={!puedeProc || procesando}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {procesando ? (
+            <>
+              <Sparkles className="h-4 w-4 animate-pulse" />
+              Extrayendo datos del vehiculo con IA...
+            </>
+          ) : (
+            <>
+              <Bot className="h-4 w-4" />
+              Procesar documentos
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Campos del vehiculo */}
+      {(camposVehiculo || procesando) && (
+        <>
+          <div className="border-t pt-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Datos del vehiculo
+            </p>
+          </div>
+          {procesando ? (
+            <CamposVehiculoSkeleton />
+          ) : camposVehiculo ? (
+            <CamposVehiculoForm
+              oportunidadId={oportunidadId}
+              campos={camposVehiculo}
+              onChange={setCamposVehiculo}
+              highlighted={justProcessed}
+            />
+          ) : null}
+        </>
+      )}
+    </div>
+  )
+}

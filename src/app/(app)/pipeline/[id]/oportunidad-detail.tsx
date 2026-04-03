@@ -19,6 +19,8 @@ import type { EtapaPipeline, EstadoCotizacion } from '@/lib/pipeline/constants'
 import ActivityLog from '@/components/activity-log'
 import CustomFieldsSection from '@/components/custom-fields-section'
 import FiscalGateForm from './fiscal-gate-form'
+import VeDocumentosSection from './ve-documentos-section'
+import type { VeDocumentoState, CamposVehiculo } from '@/lib/actions/ve-documentos'
 
 interface OportunidadRow {
   id: string
@@ -55,9 +57,19 @@ interface Props {
   oportunidad: OportunidadRow
   cotizaciones: CotizacionRow[]
   staffList: { id: string; full_name: string }[]
+  veDocumentos?: VeDocumentoState[]
+  veVehiculoEnUpme?: boolean | null
+  veCamposVehiculo?: CamposVehiculo | null
 }
 
-export default function OportunidadDetail({ oportunidad, cotizaciones, staffList }: Props) {
+export default function OportunidadDetail({
+  oportunidad,
+  cotizaciones,
+  staffList,
+  veDocumentos = [],
+  veVehiculoEnUpme = null,
+  veCamposVehiculo = null,
+}: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [showLossModal, setShowLossModal] = useState(false)
@@ -517,6 +529,16 @@ export default function OportunidadDetail({ oportunidad, cotizaciones, staffList
         entidadId={oportunidad.id}
         initialCustomData={(oportunidad.custom_data as Record<string, unknown> | null) ?? {}}
       />
+
+      {/* Documentos VE — visible solo para oportunidades con linea_negocio = 've' */}
+      {(oportunidad.custom_data as Record<string, unknown> | null)?.linea_negocio === 've' && (
+        <VeDocumentosSection
+          oportunidadId={oportunidad.id}
+          vehiculoEnUpme={veVehiculoEnUpme}
+          documentosActuales={veDocumentos}
+          camposVehiculo={veCamposVehiculo}
+        />
+      )}
 
       {/* Actividad */}
       <div className="space-y-3 rounded-lg border p-4">
