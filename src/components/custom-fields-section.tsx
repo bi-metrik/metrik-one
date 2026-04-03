@@ -1,12 +1,21 @@
 'use client'
 
 import { useState, useEffect, useTransition, useCallback } from 'react'
-import { Settings2, Tag, X, Check } from 'lucide-react'
+import { Settings2, Tag, X, Check, Bot } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getCustomFields, getLabels, getEntityLabels,
   updateCustomData, toggleEntityLabel,
 } from '@/app/(app)/custom-fields-actions'
+
+// Campos de datos de vehiculo VE — llenados por Claude Vision (read-only para el usuario)
+const CAMPOS_AI_READONLY = new Set([
+  'marca_vehiculo',
+  'linea_vehiculo',
+  'modelo_ano',
+  'tecnologia',
+  'tipo_vehiculo',
+])
 
 type Entidad = 'oportunidad' | 'proyecto' | 'contacto' | 'empresa'
 
@@ -163,6 +172,7 @@ export default function CustomFieldsSection({ entidad, entidadId, initialCustomD
                 field={field}
                 value={values[field.slug]}
                 onChange={(val) => handleFieldChange(field.slug, val)}
+                readOnly={CAMPOS_AI_READONLY.has(field.slug)}
               />
             ))}
           </div>
@@ -181,16 +191,42 @@ export default function CustomFieldsSection({ entidad, entidadId, initialCustomD
   )
 }
 
+function AiBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-600 border border-violet-200">
+      <Bot className="h-2.5 w-2.5" />
+      Auto-completado por IA
+    </span>
+  )
+}
+
 function CustomFieldInput({
   field,
   value,
   onChange,
+  readOnly = false,
 }: {
   field: FieldDef
   value: unknown
   onChange: (val: unknown) => void
+  readOnly?: boolean
 }) {
   const baseClass = 'w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm'
+  const readOnlyClass = 'w-full rounded-md border border-input bg-muted px-3 py-1.5 text-sm text-muted-foreground cursor-not-allowed'
+
+  // Render read-only fields with AI badge
+  if (readOnly) {
+    const displayValue = value != null && value !== '' ? String(value) : '—'
+    return (
+      <div>
+        <div className="flex items-center gap-2 mb-1">
+          <label className="block text-sm font-medium">{field.nombre}</label>
+          <AiBadge />
+        </div>
+        <div className={readOnlyClass}>{displayValue}</div>
+      </div>
+    )
+  }
 
   switch (field.tipo) {
     case 'text':

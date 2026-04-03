@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } f
 import { toast } from 'sonner'
 import { createOportunidad } from '@/app/(app)/pipeline/actions-v2'
 import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
+import { getCustomFields } from '@/app/(app)/custom-fields-actions'
 import { FUENTES_ADQUISICION, SECTORES_EMPRESA } from '@/lib/pipeline/constants'
 
 const STEPS = [
@@ -55,6 +56,8 @@ export default function StepperForm({ staffList }: { staffList: { id: string; fu
   const [descripcion, setDescripcion] = useState('')
   const [valorEstimado, setValorEstimado] = useState('')
   const [responsableId, setResponsableId] = useState('')
+  const [lineaNegocio, setLineaNegocio] = useState('')
+  const [lineaNegocioOpciones, setLineaNegocioOpciones] = useState<string[]>([])
 
   // If prefilled with contacto, start at step 1 (empresa)
   // If prefilled with both contacto + empresa, start at step 2 (trabajo)
@@ -69,6 +72,17 @@ export default function StepperForm({ staffList }: { staffList: { id: string; fu
     // When only prefillContactoId, stay on step 0 so user can toggle persona natural
     setInitialStepSet(true)
   }, [prefillContactoId, prefillEmpresaId, initialStepSet])
+
+  // Load linea_negocio options from custom_fields
+  useEffect(() => {
+    let mounted = true
+    getCustomFields('oportunidad').then((fields) => {
+      if (!mounted) return
+      const f = (fields as { slug: string; opciones: string[] | null }[]).find(f => f.slug === 'linea_negocio')
+      if (f?.opciones) setLineaNegocioOpciones(f.opciones)
+    })
+    return () => { mounted = false }
+  }, [])
 
   // ── Contacto search ───────────────────────────────────────
   const doSearchContactos = useCallback(async (query: string) => {
@@ -158,6 +172,9 @@ export default function StepperForm({ staffList }: { staffList: { id: string; fu
 
   const handleSubmit = () => {
     startTransition(async () => {
+      const customData: Record<string, unknown> = {}
+      if (lineaNegocio) customData.linea_negocio = lineaNegocio
+
       const res = await createOportunidad({
         contacto_id: contactoId ?? undefined,
         empresa_id: esPersonaNatural ? undefined : (empresaId ?? undefined),
@@ -170,6 +187,7 @@ export default function StepperForm({ staffList }: { staffList: { id: string; fu
         descripcion,
         valor_estimado: Number(valorEstimado),
         responsable_id: responsableId || undefined,
+        custom_data: Object.keys(customData).length > 0 ? customData : undefined,
       })
       if (res.success) {
         toast.success('Oportunidad creada')
@@ -448,6 +466,23 @@ export default function StepperForm({ staffList }: { staffList: { id: string; fu
                   <option value="">Sin asignar</option>
                   {staffList.map((s) => (
                     <option key={s.id} value={s.id}>{s.full_name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Linea de negocio (optional — loaded from custom_fields) */}
+            {lineaNegocioOpciones.length > 0 && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Linea de negocio</label>
+                <select
+                  value={lineaNegocio}
+                  onChange={(e) => setLineaNegocio(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
+                >
+                  <option value="">Seleccionar...</option>
+                  {lineaNegocioOpciones.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>
               </div>

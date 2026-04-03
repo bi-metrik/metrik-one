@@ -86,6 +86,7 @@ export async function createOportunidad(input: {
   descripcion: string
   valor_estimado: number
   responsable_id?: string
+  custom_data?: Record<string, unknown>
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -172,6 +173,9 @@ export async function createOportunidad(input: {
       responsable_id: input.responsable_id || null,
       etapa: 'lead_nuevo',
       codigo: '',
+      ...(input.custom_data && Object.keys(input.custom_data).length > 0
+        ? { custom_data: input.custom_data as unknown as Record<string, never> }
+        : {}),
     })
     .select('id')
     .single()
