@@ -60,22 +60,6 @@ FORMATO DE RESPUESTA:
   "numero_cus": { "value": null, "confidence": 0.0 }
 }`
 
-// JSON Schema for Gemini structured output — forces valid JSON at decode level
-const VE_RESPONSE_SCHEMA = {
-  type: 'OBJECT',
-  properties: Object.fromEntries(
-    ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion', 'numero_cus'].map(k => [k, {
-      type: 'OBJECT',
-      properties: {
-        value: { type: 'STRING', nullable: true },
-        confidence: { type: 'NUMBER' },
-      },
-      required: ['value', 'confidence'],
-    }])
-  ),
-  required: ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion', 'numero_cus'],
-}
-
 /** Per-field structure returned by Gemini */
 export interface VeVehicleField {
   value: string | null
@@ -106,7 +90,7 @@ const SUPPORTED_MIMES: Record<string, string> = {
 
 /**
  * Attempt to repair malformed JSON from Gemini.
- * Handles: single quotes, unquoted keys, trailing commas, truncated output.
+ * Handles: markdown fences, Python literals, trailing commas, literal newlines in strings.
  */
 function repairJson(text: string): string {
   let s = text
@@ -122,14 +106,18 @@ function repairJson(text: string): string {
     s = s.slice(braceStart, braceEnd + 1)
   }
 
+  // Fix Python-style literals → JSON
+  s = s.replace(/\bNone\b/g, 'null')
+  s = s.replace(/\bTrue\b/g, '"true"')
+  s = s.replace(/\bFalse\b/g, '"false"')
+
+  // Collapse literal CR/LF inside JSON string values (e.g. addresses, names with newlines)
+  s = s.replace(/("(?:[^"\\]|\\.)*")/g, (match) =>
+    match.replace(/\r?\n/g, ' ').replace(/\t/g, ' ')
+  )
+
   // Fix trailing commas before } or ]
   s = s.replace(/,\s*([}\]])/g, '$1')
-
-  // Fix single-quoted strings → double-quoted
-  s = s.replace(/'/g, '"')
-
-  // Fix unquoted keys: word: → "word":
-  s = s.replace(/(?<=[\{,]\s*)(\w+)\s*:/g, '"$1":')
 
   return s
 }
@@ -191,9 +179,8 @@ export async function parseVeDocuments(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
           responseMimeType: 'application/json',
-          responseSchema: VE_RESPONSE_SCHEMA,
         },
       }),
     })
