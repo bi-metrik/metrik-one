@@ -261,7 +261,7 @@ export async function procesarDocumentoVe(
 
   const { data: opp } = await supabase
     .from('oportunidades')
-    .select('custom_data')
+    .select('custom_data, empresa_id')
     .eq('id', oportunidadId)
     .single()
 
@@ -340,6 +340,62 @@ export async function procesarDocumentoVe(
 
     if (Object.keys(camposMerge).length > 0) {
       await actualizarCamposVehiculo(oportunidadId, camposMerge)
+    }
+
+    // ── Actualizar perfil fiscal de la empresa vinculada ─────
+    const empresaId = (opp as Record<string, unknown>).empresa_id as string | null
+    if (empresaId) {
+      const applyEmpresaStr = (
+        key: string,
+        field: { value: string | null; confidence: number },
+      ) => {
+        if (field.value && field.confidence >= 0.7) empresaUpdate[key] = field.value
+      }
+      const applyEmpresaBool = (
+        key: string,
+        field: { value: boolean | null; confidence: number },
+      ) => {
+        if (field.value !== null && field.confidence >= 0.7) empresaUpdate[key] = field.value
+      }
+
+      const empresaUpdate: Record<string, unknown> = {
+        rut_documento_url: url,
+        rut_fecha_carga: new Date().toISOString(),
+        rut_confianza_ocr: rutData.overall_confidence,
+      }
+
+      applyEmpresaStr('numero_documento', rutData.nit)
+      applyEmpresaStr('tipo_documento', rutData.tipo_documento)
+      applyEmpresaStr('tipo_persona', rutData.tipo_persona)
+      applyEmpresaStr('regimen_tributario', rutData.regimen_tributario)
+      applyEmpresaStr('razon_social', rutData.razon_social)
+      applyEmpresaStr('direccion_fiscal', rutData.direccion_fiscal)
+      applyEmpresaStr('municipio', rutData.municipio)
+      applyEmpresaStr('departamento', rutData.departamento)
+      applyEmpresaStr('telefono', rutData.telefono)
+      applyEmpresaStr('email_fiscal', rutData.email_fiscal)
+      applyEmpresaStr('actividad_ciiu', rutData.actividad_ciiu)
+      applyEmpresaBool('gran_contribuyente', rutData.gran_contribuyente)
+      applyEmpresaBool('agente_retenedor', rutData.agente_retenedor)
+      applyEmpresaBool('autorretenedor', rutData.autorretenedor)
+      applyEmpresaBool('responsable_iva', rutData.responsable_iva)
+
+      // Recalcular estado_fiscal con los 6 hard gates
+      const { data: empresa } = await supabase
+        .from('empresas')
+        .select('numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
+        .eq('id', empresaId)
+        .single()
+
+      if (empresa) {
+        const merged = { ...empresa, ...empresaUpdate }
+        const textGates = [merged.numero_documento, merged.tipo_documento, merged.tipo_persona, merged.regimen_tributario]
+        const boolGates = [merged.gran_contribuyente, merged.agente_retenedor]
+        const completeCount = textGates.filter(Boolean).length + boolGates.filter(v => v !== null && v !== undefined).length
+        empresaUpdate.estado_fiscal = completeCount === 6 ? 'verificado' : completeCount > 0 ? 'parcial' : 'pendiente'
+
+        await supabase.from('empresas').update(empresaUpdate).eq('id', empresaId)
+      }
     }
 
     return { success: true, data: camposMerge }
