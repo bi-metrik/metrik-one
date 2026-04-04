@@ -181,11 +181,11 @@ export default function VeDocumentosSection({
 
   const handleFileSelected = async (slug: DocumentoSlug, file: File) => {
     // Validaciones client-side
-    const MAX_SIZE = 10 * 1024 * 1024
+    const MAX_SIZE = 20 * 1024 * 1024
     const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
     if (file.size > MAX_SIZE) {
-      toast.error('Archivo demasiado grande. Max 10MB')
+      toast.error('Archivo demasiado grande. Max 20MB')
       setSlotStates(prev => ({ ...prev, [slug]: 'empty' }))
       return
     }

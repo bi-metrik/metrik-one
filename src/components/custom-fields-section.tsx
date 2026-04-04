@@ -17,6 +17,9 @@ const CAMPOS_AI_READONLY = new Set([
   'tipo_vehiculo',
 ])
 
+// Campos visibles pero no editables (sin badge IA — son datos de configuracion)
+const CAMPOS_LOCKED = new Set(['linea_negocio'])
+
 type Entidad = 'oportunidad' | 'proyecto' | 'contacto' | 'empresa'
 
 interface CondicionVisibilidad {
@@ -174,6 +177,7 @@ export default function CustomFieldsSection({ entidad, entidadId, initialCustomD
                 value={values[field.slug]}
                 onChange={(val) => handleFieldChange(field.slug, val)}
                 readOnly={CAMPOS_AI_READONLY.has(field.slug)}
+                locked={CAMPOS_LOCKED.has(field.slug)}
               />
             ))}
           </div>
@@ -206,14 +210,27 @@ function CustomFieldInput({
   value,
   onChange,
   readOnly = false,
+  locked = false,
 }: {
   field: FieldDef
   value: unknown
   onChange: (val: unknown) => void
   readOnly?: boolean
+  locked?: boolean
 }) {
   const baseClass = 'w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm'
   const readOnlyClass = 'w-full rounded-md border border-input bg-muted px-3 py-1.5 text-sm text-muted-foreground cursor-not-allowed'
+
+  // Render locked fields — visible but not editable, no AI badge
+  if (locked) {
+    const displayValue = value != null && value !== '' ? String(value) : '—'
+    return (
+      <div>
+        <label className="block text-sm font-medium mb-1">{field.nombre}</label>
+        <div className={readOnlyClass}>{displayValue}</div>
+      </div>
+    )
+  }
 
   // Render read-only fields with AI badge
   if (readOnly) {
