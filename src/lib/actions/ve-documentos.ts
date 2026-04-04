@@ -87,7 +87,7 @@ export async function getUploadUrlDocumentoVe(
   const admin = createServiceClient()
   const { data, error: signError } = await admin.storage
     .from(BUCKET)
-    .createSignedUploadUrl(filePath)
+    .createSignedUploadUrl(filePath, { upsert: true })
 
   if (signError || !data) {
     return { success: false, error: signError?.message ?? 'Error generando URL de subida' }
