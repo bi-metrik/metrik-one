@@ -63,49 +63,9 @@ FORMATO DE RESPUESTA:
   "fecha_inicio_actividades": { "value": "2015-03-15", "confidence": 0.80 }
 }`
 
-// JSON Schema for Gemini structured output — forces valid JSON at decode level
-const RUT_RESPONSE_SCHEMA = {
-  type: 'OBJECT',
-  properties: Object.fromEntries(
-    [
-      'nit', 'digito_verificacion', 'razon_social', 'tipo_documento',
-      'tipo_persona', 'direccion_fiscal', 'municipio', 'departamento',
-      'telefono', 'email_fiscal', 'regimen_tributario', 'actividad_ciiu',
-      'actividad_secundaria', 'fecha_inicio_actividades',
-    ].map(k => [k, {
-      type: 'OBJECT',
-      properties: {
-        value: { type: 'STRING', nullable: true },
-        confidence: { type: 'NUMBER' },
-      },
-      required: ['value', 'confidence'],
-    }])
-    .concat(
-      // Boolean fields use STRING to avoid Gemini emitting Python-style True/False/None
-      // buildResult.boolField() handles string-to-boolean conversion
-      ['responsable_iva', 'gran_contribuyente', 'agente_retenedor', 'autorretenedor']
-        .map(k => [k, {
-          type: 'OBJECT',
-          properties: {
-            value: { type: 'STRING', nullable: true },
-            confidence: { type: 'NUMBER' },
-          },
-          required: ['value', 'confidence'],
-        }])
-    )
-  ),
-  required: [
-    'nit', 'digito_verificacion', 'razon_social', 'tipo_documento',
-    'tipo_persona', 'direccion_fiscal', 'municipio', 'departamento',
-    'telefono', 'email_fiscal', 'regimen_tributario', 'responsable_iva',
-    'gran_contribuyente', 'agente_retenedor', 'autorretenedor',
-    'actividad_ciiu', 'actividad_secundaria', 'fecha_inicio_actividades',
-  ],
-}
-
 /**
  * Attempt to repair malformed JSON from Gemini.
- * Handles: single quotes, unquoted keys, trailing commas, truncated output.
+ * Handles: markdown fences, Python literals, trailing commas, literal newlines in strings.
  */
 function repairJson(text: string): string {
   let s = text
@@ -126,11 +86,15 @@ function repairJson(text: string): string {
   s = s.replace(/\bTrue\b/g, '"true"')
   s = s.replace(/\bFalse\b/g, '"false"')
 
+  // Replace literal control characters inside JSON strings with escaped versions.
+  // Addresses/names can contain line breaks that make JSON invalid.
+  // Strategy: collapse any bare CR/LF that appears inside a string value to a space.
+  s = s.replace(/("(?:[^"\\]|\\.)*")/g, (match) =>
+    match.replace(/\r?\n/g, ' ').replace(/\t/g, ' ')
+  )
+
   // Fix trailing commas before } or ]
   s = s.replace(/,\s*([}\]])/g, '$1')
-
-  // Fix unquoted keys: word: → "word":  (before single-quote replacement)
-  s = s.replace(/(?<=[\{,]\s*)(\w+)\s*:/g, '"$1":')
 
   return s
 }
@@ -187,9 +151,8 @@ export async function parseRut(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 2048,
+          maxOutputTokens: 4096,
           responseMimeType: 'application/json',
-          responseSchema: RUT_RESPONSE_SCHEMA,
         },
       }),
     })
