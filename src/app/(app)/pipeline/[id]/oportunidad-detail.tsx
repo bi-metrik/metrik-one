@@ -538,6 +538,7 @@ export default function OportunidadDetail({
                 'nombre_propietario', 'numero_identificacion',
                 'regimen_tributario_cliente', 'tipo_persona_cliente',
                 'telefono_propietario', 'municipio_propietario', 'correo_propietario', 'direccion_propietario',
+                'numero_cus',
               ]
             : undefined
         }

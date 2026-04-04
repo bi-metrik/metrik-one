@@ -94,6 +94,7 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
   ] as const
 
   const hasFiscalData = campos.tipo_persona_cliente || campos.regimen_tributario_cliente
+  const hasCusData = !!campos.numero_cus
 
   return (
     <div className="mt-3 space-y-3">
@@ -130,6 +131,22 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
           ))}
         </div>
       </div>
+      {/* Numero CUS del soporte UPME */}
+      {hasCusData && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">UPME</p>
+          <div>
+            <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Numero CUS</label>
+            <input
+              type="text"
+              defaultValue={campos.numero_cus ?? ''}
+              onBlur={e => handleBlur('numero_cus', e.target.value)}
+              placeholder="—"
+              className={fieldClass}
+            />
+          </div>
+        </div>
+      )}
       {/* Datos fiscales del cliente (del RUT) */}
       {hasFiscalData && (
         <div>
@@ -281,14 +298,14 @@ export default function VeDocumentosSection({
       router.refresh()
 
       // Auto-procesar documentos con contenido extraible por AI
-      if (slug === 'factura' || slug === 'ficha_tecnica' || slug === 'cedula' || slug === 'rut') {
+      if (slug === 'factura' || slug === 'ficha_tecnica' || slug === 'cedula' || slug === 'rut' || slug === 'soporte_upme') {
         setProcessingSlots(prev => new Set([...prev, slug]))
         const procRes = await procesarDocumentoVe(oportunidadId, slug)
         setProcessingSlots(prev => { const n = new Set(prev); n.delete(slug); return n })
         if (procRes.success && procRes.data && Object.keys(procRes.data).length > 0) {
           setCamposVehiculo(prev => ({ ...(prev ?? {}), ...(procRes.data ?? {}) }))
           setJustProcessed(true)
-          const docLabel = slug === 'factura' ? 'la factura' : slug === 'cedula' ? 'la cedula' : slug === 'rut' ? 'el RUT' : 'la ficha tecnica'
+          const docLabel = slug === 'factura' ? 'la factura' : slug === 'cedula' ? 'la cedula' : slug === 'rut' ? 'el RUT' : slug === 'soporte_upme' ? 'el soporte UPME' : 'la ficha tecnica'
           toast.success(`Datos extraidos de ${docLabel}`)
         } else if (!procRes.success) {
           toast.error(`No se pudo procesar ${slug}: ${procRes.error ?? 'error desconocido'}`)

@@ -15,6 +15,7 @@ TIPOS DE DOCUMENTOS QUE PUEDES RECIBIR:
 - Factura de compraventa: contiene datos del vehiculo + datos del comprador (nombre, numero de identificacion)
 - Cedula de ciudadania: contiene datos del propietario (nombre completo, numero de cedula)
 - Certificado de emisiones: contiene datos del vehiculo
+- Soporte de pago UPME: recibo o comprobante de pago a la UPME (Unidad de Planeacion Minero-Energetica). Contiene el Numero CUS (Codigo Unico de Seguimiento).
 
 CAMPOS A EXTRAER:
 
@@ -35,6 +36,9 @@ DATOS DEL PROPIETARIO (presentes en cedulas y facturas de compraventa):
 - nombre_propietario: Nombre completo o razon social del propietario/comprador (ej: "MARIO ANDRES RESTREPO GARCIA")
 - numero_identificacion: Numero de cedula o NIT sin puntos ni guiones (ej: "52823610515", "900123456")
 
+DATOS DEL TRAMITE UPME (presentes en el soporte de pago UPME):
+- numero_cus: Numero CUS (Codigo Unico de Seguimiento) del pago UPME. Solo digitos, sin espacios ni guiones.
+
 REGLAS:
 - Responde SOLO con JSON valido, sin texto adicional
 - Para cada campo devuelve { "value": <valor>, "confidence": <0.0 a 1.0> }
@@ -42,7 +46,7 @@ REGLAS:
 - confidence refleja certeza de lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible)
 - Para tecnologia: "ELECTRICO" o "BEV" → "EV". "HIBRIDO" sin recarga → "HEV". "PLUG-IN" o "PHEV" → "PHEV"
 - Limpia valores: sin espacios al inicio/final, marca/linea/nombre en MAYUSCULAS
-- numero_identificacion: solo digitos, sin puntos, guiones ni espacios
+- numero_identificacion y numero_cus: solo digitos, sin puntos, guiones ni espacios
 
 FORMATO DE RESPUESTA:
 {
@@ -52,14 +56,15 @@ FORMATO DE RESPUESTA:
   "tecnologia": { "value": "EV", "confidence": 0.92 },
   "tipo_vehiculo": { "value": "Automovil", "confidence": 0.90 },
   "nombre_propietario": { "value": "MARIO ANDRES RESTREPO GARCIA", "confidence": 0.96 },
-  "numero_identificacion": { "value": "52823610515", "confidence": 0.98 }
+  "numero_identificacion": { "value": "52823610515", "confidence": 0.98 },
+  "numero_cus": { "value": null, "confidence": 0.0 }
 }`
 
 // JSON Schema for Gemini structured output — forces valid JSON at decode level
 const VE_RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: Object.fromEntries(
-    ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion'].map(k => [k, {
+    ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion', 'numero_cus'].map(k => [k, {
       type: 'OBJECT',
       properties: {
         value: { type: 'STRING', nullable: true },
@@ -68,7 +73,7 @@ const VE_RESPONSE_SCHEMA = {
       required: ['value', 'confidence'],
     }])
   ),
-  required: ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion'],
+  required: ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion', 'numero_cus'],
 }
 
 /** Per-field structure returned by Gemini */
@@ -86,6 +91,7 @@ export interface VeVehicleData {
   tipo_vehiculo: VeVehicleField
   nombre_propietario: VeVehicleField
   numero_identificacion: VeVehicleField
+  numero_cus: VeVehicleField
   overall_confidence: number
 }
 
@@ -263,9 +269,10 @@ function buildResult(raw: Record<string, VeVehicleField>): VeVehicleData {
   const tipo_vehiculo = strField('tipo_vehiculo')
   const nombre_propietario = strField('nombre_propietario')
   const numero_identificacion = strField('numero_identificacion')
+  const numero_cus = strField('numero_cus')
 
   // Calculate overall confidence (average of non-null fields)
-  const allFields = [marca_vehiculo, linea_vehiculo, modelo_ano, tecnologia, tipo_vehiculo, nombre_propietario, numero_identificacion]
+  const allFields = [marca_vehiculo, linea_vehiculo, modelo_ano, tecnologia, tipo_vehiculo, nombre_propietario, numero_identificacion, numero_cus]
   const nonNull = allFields.filter(f => f.value !== null)
   const overall_confidence = nonNull.length > 0
     ? nonNull.reduce((sum, f) => sum + f.confidence, 0) / nonNull.length
@@ -279,6 +286,7 @@ function buildResult(raw: Record<string, VeVehicleField>): VeVehicleData {
     tipo_vehiculo,
     nombre_propietario,
     numero_identificacion,
+    numero_cus,
     overall_confidence,
   }
 }
