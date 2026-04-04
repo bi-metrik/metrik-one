@@ -81,11 +81,13 @@ const RUT_RESPONSE_SCHEMA = {
       required: ['value', 'confidence'],
     }])
     .concat(
+      // Boolean fields use STRING to avoid Gemini emitting Python-style True/False/None
+      // buildResult.boolField() handles string-to-boolean conversion
       ['responsable_iva', 'gran_contribuyente', 'agente_retenedor', 'autorretenedor']
         .map(k => [k, {
           type: 'OBJECT',
           properties: {
-            value: { type: 'BOOLEAN', nullable: true },
+            value: { type: 'STRING', nullable: true },
             confidence: { type: 'NUMBER' },
           },
           required: ['value', 'confidence'],
@@ -119,14 +121,15 @@ function repairJson(text: string): string {
     s = s.slice(braceStart, braceEnd + 1)
   }
 
+  // Fix Python-style literals → JSON
+  s = s.replace(/\bNone\b/g, 'null')
+  s = s.replace(/\bTrue\b/g, '"true"')
+  s = s.replace(/\bFalse\b/g, '"false"')
+
   // Fix trailing commas before } or ]
   s = s.replace(/,\s*([}\]])/g, '$1')
 
-  // Fix single-quoted strings → double-quoted
-  // Only outside already double-quoted strings
-  s = s.replace(/'/g, '"')
-
-  // Fix unquoted keys: word: → "word":
+  // Fix unquoted keys: word: → "word":  (before single-quote replacement)
   s = s.replace(/(?<=[\{,]\s*)(\w+)\s*:/g, '"$1":')
 
   return s
