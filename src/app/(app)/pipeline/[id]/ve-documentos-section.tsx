@@ -84,6 +84,13 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
     { key: 'numero_identificacion' as const, label: 'N° identificacion' },
   ] as const
 
+  const fiscalFields = [
+    { key: 'tipo_persona_cliente' as const, label: 'Tipo persona' },
+    { key: 'regimen_tributario_cliente' as const, label: 'Regimen tributario' },
+  ] as const
+
+  const hasFiscalData = campos.tipo_persona_cliente || campos.regimen_tributario_cliente
+
   return (
     <div className="mt-3 space-y-3">
       {/* Datos del vehiculo */}
@@ -119,6 +126,26 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
           ))}
         </div>
       </div>
+      {/* Datos fiscales del cliente (del RUT) */}
+      {hasFiscalData && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Fiscal (RUT)</p>
+          <div className="grid grid-cols-2 gap-2">
+            {fiscalFields.map(({ key, label }) => (
+              <div key={key}>
+                <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{label}</label>
+                <input
+                  type="text"
+                  defaultValue={campos[key] ?? ''}
+                  onBlur={e => handleBlur(key, e.target.value)}
+                  placeholder="—"
+                  className={fieldClass}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -249,15 +276,15 @@ export default function VeDocumentosSection({
       setFileNames(prev => ({ ...prev, [slug]: file.name }))
       router.refresh()
 
-      // Auto-procesar documentos con contenido de vehiculo
-      if (slug === 'factura' || slug === 'ficha_tecnica' || slug === 'cedula') {
+      // Auto-procesar documentos con contenido extraible por AI
+      if (slug === 'factura' || slug === 'ficha_tecnica' || slug === 'cedula' || slug === 'rut') {
         setProcessingSlots(prev => new Set([...prev, slug]))
         const procRes = await procesarDocumentoVe(oportunidadId, slug)
         setProcessingSlots(prev => { const n = new Set(prev); n.delete(slug); return n })
         if (procRes.success && procRes.data && Object.keys(procRes.data).length > 0) {
-          setCamposVehiculo(prev => ({ ...(prev ?? {}), ...procRes.data }))
+          setCamposVehiculo(prev => ({ ...(prev ?? {}), ...(procRes.data ?? {}) }))
           setJustProcessed(true)
-          const docLabel = slug === 'factura' ? 'la factura' : slug === 'cedula' ? 'la cedula' : 'la ficha tecnica'
+          const docLabel = slug === 'factura' ? 'la factura' : slug === 'cedula' ? 'la cedula' : slug === 'rut' ? 'el RUT' : 'la ficha tecnica'
           toast.success(`Datos extraidos de ${docLabel}`)
         } else if (!procRes.success) {
           toast.error(`No se pudo procesar ${slug}: ${procRes.error ?? 'error desconocido'}`)

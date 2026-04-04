@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
+import { parseRut } from '@/lib/rut/parse-rut'
 
 // ── Tipos ──────────────────────────────────────────────────
 
@@ -29,6 +30,9 @@ export interface CamposVehiculo {
   tipo?: string
   nombre_propietario?: string
   numero_identificacion?: string
+  // Datos fiscales del cliente (extraidos del RUT)
+  regimen_tributario_cliente?: string
+  tipo_persona_cliente?: string
 }
 
 // ── Constantes ─────────────────────────────────────────────
@@ -69,6 +73,8 @@ export async function getVeDocumentos(
   if (cd.tipo_vehiculo) camposVehiculo.tipo = cd.tipo_vehiculo as string
   if (cd.nombre_propietario) camposVehiculo.nombre_propietario = cd.nombre_propietario as string
   if (cd.numero_identificacion) camposVehiculo.numero_identificacion = cd.numero_identificacion as string
+  if (cd.regimen_tributario_cliente) camposVehiculo.regimen_tributario_cliente = cd.regimen_tributario_cliente as string
+  if (cd.tipo_persona_cliente) camposVehiculo.tipo_persona_cliente = cd.tipo_persona_cliente as string
 
   const hasCampos = Object.keys(camposVehiculo).length > 0
 
@@ -194,6 +200,8 @@ export async function actualizarCamposVehiculo(
   if (campos.tipo !== undefined) updates.tipo_vehiculo = campos.tipo
   if (campos.nombre_propietario !== undefined) updates.nombre_propietario = campos.nombre_propietario
   if (campos.numero_identificacion !== undefined) updates.numero_identificacion = campos.numero_identificacion
+  if (campos.regimen_tributario_cliente !== undefined) updates.regimen_tributario_cliente = campos.regimen_tributario_cliente
+  if (campos.tipo_persona_cliente !== undefined) updates.tipo_persona_cliente = campos.tipo_persona_cliente
 
   const { error: updateError } = await supabase
     .from('oportunidades')
@@ -218,8 +226,8 @@ function mimeTypeFromUrl(url: string): string {
 
 // ── Procesar un documento individual con Gemini Vision ────
 
-// Slugs que tienen datos relevantes para extraccion de vehiculo
-const DOCS_AI_RELEVANTES: DocumentoSlug[] = ['factura', 'ficha_tecnica', 'cedula']
+// Slugs que tienen datos relevantes para extraccion AI
+const DOCS_AI_RELEVANTES: DocumentoSlug[] = ['factura', 'ficha_tecnica', 'cedula', 'rut']
 
 export async function procesarDocumentoVe(
   oportunidadId: string,
@@ -263,6 +271,59 @@ export async function procesarDocumentoVe(
     return { success: false, error: `Error descargando: ${String(fetchErr).slice(0, 80)}` }
   }
 
+  // ── RUT del cliente: parseRut especializado para 18 campos fiscales ──
+  if (slug === 'rut') {
+    const { data: rutData, error: parseError } = await parseRut(buffer, mimeType, apiKey)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from('ve_procesamiento_log').insert({
+      workspace_id: workspaceId,
+      oportunidad_id: oportunidadId,
+      documentos_procesados: ['rut'],
+      campos_extraidos: rutData ? {
+        nit: rutData.nit,
+        razon_social: rutData.razon_social,
+        regimen_tributario: rutData.regimen_tributario,
+        tipo_persona: rutData.tipo_persona,
+        overall_confidence: rutData.overall_confidence,
+      } : null,
+      exitoso: !parseError && !!rutData,
+    })
+
+    if (parseError || !rutData) {
+      return { success: false, error: parseError ?? 'Error desconocido procesando RUT' }
+    }
+
+    const camposMerge: CamposVehiculo = {}
+    const applyStr = (
+      key: keyof CamposVehiculo,
+      currentVal: unknown,
+      field: { value: string | null; confidence: number },
+    ) => {
+      if (!field.value) return
+      if (!currentVal || field.confidence >= 0.7) {
+        camposMerge[key] = field.value
+      }
+    }
+
+    // Nombre del cliente desde razon_social del RUT
+    applyStr('nombre_propietario', cd.nombre_propietario, rutData.razon_social)
+    // Numero de identificacion: solo si no hay valor (NIT puede diferir de cedula)
+    if (rutData.nit.value && !cd.numero_identificacion) {
+      camposMerge.numero_identificacion = rutData.nit.value
+    }
+    // Datos fiscales del cliente
+    applyStr('regimen_tributario_cliente', cd.regimen_tributario_cliente, rutData.regimen_tributario)
+    applyStr('tipo_persona_cliente', cd.tipo_persona_cliente, rutData.tipo_persona)
+
+    if (Object.keys(camposMerge).length > 0) {
+      await actualizarCamposVehiculo(oportunidadId, camposMerge)
+    }
+
+    return { success: true, data: camposMerge }
+  }
+
+  // ── Documentos vehiculares: factura, ficha_tecnica, cedula ──
   const { data: veData, error: parseError } = await parseVeDocuments(
     [{ buffer, mimeType, slug }],
     apiKey,
