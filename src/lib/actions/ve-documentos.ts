@@ -27,6 +27,8 @@ export interface CamposVehiculo {
   modelo?: string
   tecnologia?: string
   tipo?: string
+  nombre_propietario?: string
+  numero_identificacion?: string
 }
 
 // ── Constantes ─────────────────────────────────────────────
@@ -65,6 +67,8 @@ export async function getVeDocumentos(
   if (cd.modelo_ano) camposVehiculo.modelo = cd.modelo_ano as string
   if (cd.tecnologia) camposVehiculo.tecnologia = cd.tecnologia as string
   if (cd.tipo_vehiculo) camposVehiculo.tipo = cd.tipo_vehiculo as string
+  if (cd.nombre_propietario) camposVehiculo.nombre_propietario = cd.nombre_propietario as string
+  if (cd.numero_identificacion) camposVehiculo.numero_identificacion = cd.numero_identificacion as string
 
   const hasCampos = Object.keys(camposVehiculo).length > 0
 
@@ -188,6 +192,8 @@ export async function actualizarCamposVehiculo(
   if (campos.modelo !== undefined) updates.modelo_ano = campos.modelo
   if (campos.tecnologia !== undefined) updates.tecnologia = campos.tecnologia
   if (campos.tipo !== undefined) updates.tipo_vehiculo = campos.tipo
+  if (campos.nombre_propietario !== undefined) updates.nombre_propietario = campos.nombre_propietario
+  if (campos.numero_identificacion !== undefined) updates.numero_identificacion = campos.numero_identificacion
 
   const { error: updateError } = await supabase
     .from('oportunidades')
@@ -213,7 +219,7 @@ function mimeTypeFromUrl(url: string): string {
 // ── Procesar un documento individual con Gemini Vision ────
 
 // Slugs que tienen datos relevantes para extraccion de vehiculo
-const DOCS_AI_RELEVANTES: DocumentoSlug[] = ['factura', 'ficha_tecnica']
+const DOCS_AI_RELEVANTES: DocumentoSlug[] = ['factura', 'ficha_tecnica', 'cedula']
 
 export async function procesarDocumentoVe(
   oportunidadId: string,
@@ -301,6 +307,8 @@ export async function procesarDocumentoVe(
   apply('modelo', cd.modelo_ano, veData.modelo_ano)
   apply('tecnologia', cd.tecnologia, veData.tecnologia)
   apply('tipo', cd.tipo_vehiculo, veData.tipo_vehiculo)
+  apply('nombre_propietario', cd.nombre_propietario, veData.nombre_propietario)
+  apply('numero_identificacion', cd.numero_identificacion, veData.numero_identificacion)
 
   if (Object.keys(camposMerge).length > 0) {
     await actualizarCamposVehiculo(oportunidadId, camposMerge)
@@ -398,6 +406,8 @@ export async function procesarDocumentosVe(
     modelo: veData.modelo_ano.value ?? undefined,
     tecnologia: veData.tecnologia.value ?? undefined,
     tipo: veData.tipo_vehiculo.value ?? undefined,
+    nombre_propietario: veData.nombre_propietario.value ?? undefined,
+    numero_identificacion: veData.numero_identificacion.value ?? undefined,
   }
 
   // Persistir campos extraidos en custom_data de la oportunidad

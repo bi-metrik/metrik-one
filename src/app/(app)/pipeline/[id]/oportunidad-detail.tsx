@@ -535,6 +535,7 @@ export default function OportunidadDetail({
                 'link_ficha_tecnica', 'link_cert_emisiones',
                 'marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia',
                 'tipo_vehiculo', 'vehiculo_en_upme',
+                'nombre_propietario', 'numero_identificacion',
               ]
             : undefined
         }

@@ -71,28 +71,54 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
     highlighted ? 'border-green-400 bg-green-50/30' : ''
   } ${isPending ? 'opacity-60' : ''}`
 
+  const vehiculoFields = [
+    { key: 'marca' as const, label: 'Marca' },
+    { key: 'linea' as const, label: 'Linea / Modelo' },
+    { key: 'modelo' as const, label: 'Año' },
+    { key: 'tecnologia' as const, label: 'Tecnologia' },
+    { key: 'tipo' as const, label: 'Tipo vehiculo' },
+  ] as const
+
+  const propietarioFields = [
+    { key: 'nombre_propietario' as const, label: 'Nombre propietario' },
+    { key: 'numero_identificacion' as const, label: 'N° identificacion' },
+  ] as const
+
   return (
-    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-      {(
-        [
-          { key: 'marca' as const, label: 'Marca' },
-          { key: 'linea' as const, label: 'Linea / Modelo' },
-          { key: 'modelo' as const, label: 'Ano' },
-          { key: 'tecnologia' as const, label: 'Tecnologia' },
-          { key: 'tipo' as const, label: 'Tipo vehiculo' },
-        ] as const
-      ).map(({ key, label }) => (
-        <div key={key}>
-          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{label}</label>
-          <input
-            type="text"
-            defaultValue={campos[key] ?? ''}
-            onBlur={e => handleBlur(key, e.target.value)}
-            placeholder="—"
-            className={fieldClass}
-          />
+    <div className="mt-3 space-y-3">
+      {/* Datos del vehiculo */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {vehiculoFields.map(({ key, label }) => (
+          <div key={key}>
+            <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{label}</label>
+            <input
+              type="text"
+              defaultValue={campos[key] ?? ''}
+              onBlur={e => handleBlur(key, e.target.value)}
+              placeholder="—"
+              className={fieldClass}
+            />
+          </div>
+        ))}
+      </div>
+      {/* Datos del propietario */}
+      <div>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Propietario</p>
+        <div className="grid grid-cols-2 gap-2">
+          {propietarioFields.map(({ key, label }) => (
+            <div key={key}>
+              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{label}</label>
+              <input
+                type="text"
+                defaultValue={campos[key] ?? ''}
+                onBlur={e => handleBlur(key, e.target.value)}
+                placeholder="—"
+                className={fieldClass}
+              />
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
     </div>
   )
 }
@@ -224,14 +250,15 @@ export default function VeDocumentosSection({
       router.refresh()
 
       // Auto-procesar documentos con contenido de vehiculo
-      if (slug === 'factura' || slug === 'ficha_tecnica') {
+      if (slug === 'factura' || slug === 'ficha_tecnica' || slug === 'cedula') {
         setProcessingSlots(prev => new Set([...prev, slug]))
         const procRes = await procesarDocumentoVe(oportunidadId, slug)
         setProcessingSlots(prev => { const n = new Set(prev); n.delete(slug); return n })
         if (procRes.success && procRes.data && Object.keys(procRes.data).length > 0) {
           setCamposVehiculo(prev => ({ ...(prev ?? {}), ...procRes.data }))
           setJustProcessed(true)
-          toast.success(`Datos extraidos de ${slug === 'factura' ? 'la factura' : 'la ficha tecnica'}`)
+          const docLabel = slug === 'factura' ? 'la factura' : slug === 'cedula' ? 'la cedula' : 'la ficha tecnica'
+          toast.success(`Datos extraidos de ${docLabel}`)
         } else if (!procRes.success) {
           toast.error(`No se pudo procesar ${slug}: ${procRes.error ?? 'error desconocido'}`)
         }

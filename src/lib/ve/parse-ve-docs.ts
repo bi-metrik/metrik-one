@@ -6,32 +6,43 @@
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
-const SYSTEM_PROMPT = `Eres un extractor de datos de vehiculos colombianos.
+const SYSTEM_PROMPT = `Eres un extractor de datos de tramites de vehiculos colombianos.
 
-Tu trabajo: recibir documentos (facturas de compraventa y/o fichas tecnicas) de vehiculos electricos, hibridos o de combustion, y extraer datos estructurados del vehiculo en JSON.
+Tu trabajo: recibir uno o varios documentos relacionados con un tramite de vehiculo electrico (VE), hibrido (HEV/PHEV) o de combustion en Colombia, y extraer datos estructurados en JSON.
 
-Si llegan varios documentos, prioriza la factura para identificacion del vehiculo y la ficha tecnica para especificaciones tecnicas. Si hay datos contradictorios entre documentos, prioriza el documento con mayor claridad y baja la confianza.
+TIPOS DE DOCUMENTOS QUE PUEDES RECIBIR:
+- Ficha tecnica del vehiculo: contiene datos tecnicos del vehiculo (marca, linea, modelo, tecnologia, tipo)
+- Factura de compraventa: contiene datos del vehiculo + datos del comprador (nombre, numero de identificacion)
+- Cedula de ciudadania: contiene datos del propietario (nombre completo, numero de cedula)
+- Certificado de emisiones: contiene datos del vehiculo
 
 CAMPOS A EXTRAER:
-- marca_vehiculo: Marca del fabricante del vehiculo (ej: "RENAULT", "BYD", "CHEVROLET", "KIA", "NISSAN")
-- linea_vehiculo: Linea o referencia del modelo (ej: "KWID E-TECH", "DOLPHIN", "SPARK EV", "NIRO EV", "LEAF")
+
+DATOS DEL VEHICULO (presentes en facturas y fichas tecnicas):
+- marca_vehiculo: Marca del fabricante (ej: "RENAULT", "BYD", "CHEVROLET", "KIA", "NISSAN")
+- linea_vehiculo: Linea o referencia del modelo (ej: "KWID E-TECH", "DOLPHIN", "SPARK EV")
 - modelo_ano: Ano del modelo como string de 4 digitos (ej: "2024", "2023")
-- tecnologia: Tipo de propulsion del vehiculo. Valores permitidos: "EV", "HEV", "PHEV", "MOTO EV"
-  - EV: vehiculo 100% electrico (solo motor electrico, sin motor combustion)
-  - HEV: hibrido convencional (no recarga externa, motor combustion + motor electrico)
-  - PHEV: hibrido enchufable (recarga externa, ambos motores)
+- tecnologia: Tipo de propulsion. Valores: "EV", "HEV", "PHEV", "MOTO EV"
+  - EV: 100% electrico
+  - HEV: hibrido convencional (sin recarga externa)
+  - PHEV: hibrido enchufable (con recarga externa)
   - MOTO EV: motocicleta electrica
-- tipo_vehiculo: Tipo de carroceria. Valores permitidos: "Automovil", "Camioneta"
+- tipo_vehiculo: Tipo de carroceria. Valores: "Automovil", "Camioneta"
   - Automovil: sedan, hatchback, coupe, station wagon
   - Camioneta: SUV, pickup, van, furgon
 
+DATOS DEL PROPIETARIO (presentes en cedulas y facturas de compraventa):
+- nombre_propietario: Nombre completo o razon social del propietario/comprador (ej: "MARIO ANDRES RESTREPO GARCIA")
+- numero_identificacion: Numero de cedula o NIT sin puntos ni guiones (ej: "52823610515", "900123456")
+
 REGLAS:
 - Responde SOLO con JSON valido, sin texto adicional
-- Para cada campo devuelve un objeto { "value": <valor_extraido>, "confidence": <0.0 a 1.0> }
-- Si no puedes leer un campo, usa { "value": null, "confidence": 0.0 }
-- confidence refleja que tan seguro estas de la lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible)
-- Para tecnologia: si el documento dice "ELECTRICO" o "BEV" → "EV". Si dice "HIBRIDO" sin indicar recarga → "HEV". Si dice "PLUG-IN" o "PHEV" → "PHEV".
-- Limpia los valores: sin espacios al inicio/final, marca y linea en MAYUSCULAS.
+- Para cada campo devuelve { "value": <valor>, "confidence": <0.0 a 1.0> }
+- Si un campo no esta en el documento recibido, usa { "value": null, "confidence": 0.0 }
+- confidence refleja certeza de lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible)
+- Para tecnologia: "ELECTRICO" o "BEV" → "EV". "HIBRIDO" sin recarga → "HEV". "PLUG-IN" o "PHEV" → "PHEV"
+- Limpia valores: sin espacios al inicio/final, marca/linea/nombre en MAYUSCULAS
+- numero_identificacion: solo digitos, sin puntos, guiones ni espacios
 
 FORMATO DE RESPUESTA:
 {
@@ -39,14 +50,16 @@ FORMATO DE RESPUESTA:
   "linea_vehiculo": { "value": "DOLPHIN", "confidence": 0.95 },
   "modelo_ano": { "value": "2024", "confidence": 0.97 },
   "tecnologia": { "value": "EV", "confidence": 0.92 },
-  "tipo_vehiculo": { "value": "Automovil", "confidence": 0.90 }
+  "tipo_vehiculo": { "value": "Automovil", "confidence": 0.90 },
+  "nombre_propietario": { "value": "MARIO ANDRES RESTREPO GARCIA", "confidence": 0.96 },
+  "numero_identificacion": { "value": "52823610515", "confidence": 0.98 }
 }`
 
 // JSON Schema for Gemini structured output — forces valid JSON at decode level
 const VE_RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: Object.fromEntries(
-    ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo'].map(k => [k, {
+    ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion'].map(k => [k, {
       type: 'OBJECT',
       properties: {
         value: { type: 'STRING', nullable: true },
@@ -55,7 +68,7 @@ const VE_RESPONSE_SCHEMA = {
       required: ['value', 'confidence'],
     }])
   ),
-  required: ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo'],
+  required: ['marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia', 'tipo_vehiculo', 'nombre_propietario', 'numero_identificacion'],
 }
 
 /** Per-field structure returned by Gemini */
@@ -71,6 +84,8 @@ export interface VeVehicleData {
   modelo_ano: VeVehicleField
   tecnologia: VeVehicleField
   tipo_vehiculo: VeVehicleField
+  nombre_propietario: VeVehicleField
+  numero_identificacion: VeVehicleField
   overall_confidence: number
 }
 
@@ -246,9 +261,11 @@ function buildResult(raw: Record<string, VeVehicleField>): VeVehicleData {
   const modelo_ano = strField('modelo_ano')
   const tecnologia = strField('tecnologia')
   const tipo_vehiculo = strField('tipo_vehiculo')
+  const nombre_propietario = strField('nombre_propietario')
+  const numero_identificacion = strField('numero_identificacion')
 
   // Calculate overall confidence (average of non-null fields)
-  const allFields = [marca_vehiculo, linea_vehiculo, modelo_ano, tecnologia, tipo_vehiculo]
+  const allFields = [marca_vehiculo, linea_vehiculo, modelo_ano, tecnologia, tipo_vehiculo, nombre_propietario, numero_identificacion]
   const nonNull = allFields.filter(f => f.value !== null)
   const overall_confidence = nonNull.length > 0
     ? nonNull.reduce((sum, f) => sum + f.confidence, 0) / nonNull.length
@@ -260,6 +277,8 @@ function buildResult(raw: Record<string, VeVehicleField>): VeVehicleData {
     modelo_ano,
     tecnologia,
     tipo_vehiculo,
+    nombre_propietario,
+    numero_identificacion,
     overall_confidence,
   }
 }
