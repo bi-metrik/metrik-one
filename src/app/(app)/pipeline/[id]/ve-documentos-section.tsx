@@ -3,12 +3,11 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Bot, Sparkles } from 'lucide-react'
 import DocUploadSlot, { SlotState } from './doc-upload-slot'
 import {
   subirDocumentoVe,
   actualizarVehiculoEnUpme,
-  procesarDocumentosVe,
+  procesarDocumentoVe,
   actualizarCamposVehiculo,
   type DocumentoSlug,
   type VeDocumentoState,
@@ -96,21 +95,6 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
   )
 }
 
-// ── Skeleton durante procesamiento ─────────────────────────
-
-function CamposVehiculoSkeleton() {
-  return (
-    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 animate-pulse">
-      {[1, 2, 3, 4, 5].map(i => (
-        <div key={i}>
-          <div className="mb-0.5 h-2.5 w-12 rounded bg-muted" />
-          <div className="h-8 rounded-md bg-muted" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
 // ── Componente principal ───────────────────────────────────
 
 export default function VeDocumentosSection({
@@ -150,8 +134,8 @@ export default function VeDocumentosSection({
   const [slotStates, setSlotStates] = useState<Record<DocumentoSlug, SlotState>>(buildInitialSlotStates)
   const [fileNames, setFileNames] = useState<Record<DocumentoSlug, string | undefined>>(buildInitialFileNames)
 
-  // Estado procesamiento AI
-  const [procesando, setProcesando] = useState(false)
+  // Estado procesamiento AI por slot individual
+  const [processingSlots, setProcessingSlots] = useState<Set<DocumentoSlug>>(new Set())
   const [camposVehiculo, setCamposVehiculo] = useState<CamposVehiculo | null>(initialCamposVehiculo)
   const [justProcessed, setJustProcessed] = useState(false)
 
@@ -163,9 +147,6 @@ export default function VeDocumentosSection({
   // Conteo para el badge
   const uploadedCount = docsVisibles.filter(d => slotStates[d.slug] === 'uploaded').length
   const totalCount = docsVisibles.length
-
-  // Habilitar boton procesar: factura + rut subidos
-  const puedeProc = slotStates.factura === 'uploaded' && slotStates.rut === 'uploaded'
 
   // ── Handlers ───────────────────────────────────────────────
 
@@ -184,12 +165,24 @@ export default function VeDocumentosSection({
     const MAX_SIZE = 20 * 1024 * 1024
     const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
+    // Resolver tipo MIME: si file.type es vacio, inferir por extension
+    const resolveFileType = (f: File): string => {
+      if (f.type) return f.type
+      const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+      const map: Record<string, string> = {
+        pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        png: 'image/png', webp: 'image/webp',
+      }
+      return map[ext] ?? ''
+    }
+
     if (file.size > MAX_SIZE) {
       toast.error('Archivo demasiado grande. Max 20MB')
       setSlotStates(prev => ({ ...prev, [slug]: 'empty' }))
       return
     }
-    if (!ALLOWED.includes(file.type)) {
+    const resolvedType = resolveFileType(file)
+    if (resolvedType && !ALLOWED.includes(resolvedType)) {
       toast.error('Solo PDF, JPG, PNG o WebP')
       setSlotStates(prev => ({ ...prev, [slug]: 'empty' }))
       return
@@ -201,31 +194,37 @@ export default function VeDocumentosSection({
     const fd = new FormData()
     fd.append('file', file)
 
-    const res = await subirDocumentoVe(oportunidadId, slug, fd)
+    let res: { success: boolean; url?: string; error?: string }
+    try {
+      res = await subirDocumentoVe(oportunidadId, slug, fd)
+    } catch (err) {
+      setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
+      toast.error('Error inesperado al subir archivo')
+      console.error('[VeDocumentosSection] subirDocumentoVe error:', err)
+      return
+    }
 
     if (res.success) {
       setSlotStates(prev => ({ ...prev, [slug]: 'uploaded' }))
       setFileNames(prev => ({ ...prev, [slug]: file.name }))
       router.refresh()
+
+      // Auto-procesar documentos con contenido de vehiculo
+      if (slug === 'factura' || slug === 'ficha_tecnica') {
+        setProcessingSlots(prev => new Set([...prev, slug]))
+        const procRes = await procesarDocumentoVe(oportunidadId, slug)
+        setProcessingSlots(prev => { const n = new Set(prev); n.delete(slug); return n })
+        if (procRes.success && procRes.data && Object.keys(procRes.data).length > 0) {
+          setCamposVehiculo(prev => ({ ...(prev ?? {}), ...procRes.data }))
+          setJustProcessed(true)
+          toast.success(`Datos extraidos de ${slug === 'factura' ? 'la factura' : 'la ficha tecnica'}`)
+        } else if (!procRes.success) {
+          toast.error(`No se pudo procesar ${slug}: ${procRes.error ?? 'error desconocido'}`)
+        }
+      }
     } else {
       setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
       toast.error(res.error ?? 'Error al subir archivo')
-    }
-  }
-
-  const handleProcesar = async () => {
-    setProcesando(true)
-    setJustProcessed(false)
-    const res = await procesarDocumentosVe(oportunidadId)
-    setProcesando(false)
-
-    if (res.success && res.data) {
-      setCamposVehiculo(prev => ({ ...prev, ...res.data }))
-      setJustProcessed(true)
-      toast.success('Datos del vehiculo extraidos correctamente')
-      router.refresh()
-    } else {
-      toast.error(res.error ?? 'Error al procesar documentos')
     }
   }
 
@@ -299,6 +298,7 @@ export default function VeDocumentosSection({
             label={doc.label}
             state={slotStates[doc.slug]}
             fileName={fileNames[doc.slug]}
+            isProcessingAi={processingSlots.has(doc.slug)}
             onFileSelected={file => handleFileSelected(doc.slug, file)}
           />
         ))}
@@ -318,56 +318,26 @@ export default function VeDocumentosSection({
             label={doc.label}
             state={slotStates[doc.slug]}
             fileName={fileNames[doc.slug]}
+            isProcessingAi={processingSlots.has(doc.slug)}
             onFileSelected={file => handleFileSelected(doc.slug, file)}
           />
         ))}
       </div>
 
-      {/* Boton procesar */}
-      <div className="space-y-2">
-        {!puedeProc && (
-          <p className="text-[11px] text-muted-foreground">
-            Carga al menos la Factura y el RUT para procesar
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={handleProcesar}
-          disabled={!puedeProc || procesando}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {procesando ? (
-            <>
-              <Sparkles className="h-4 w-4 animate-pulse" />
-              Extrayendo datos del vehiculo con IA...
-            </>
-          ) : (
-            <>
-              <Bot className="h-4 w-4" />
-              Procesar documentos
-            </>
-          )}
-        </button>
-      </div>
-
       {/* Campos del vehiculo */}
-      {(camposVehiculo || procesando) && (
+      {camposVehiculo && (
         <>
           <div className="border-t pt-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Datos del vehiculo
             </p>
           </div>
-          {procesando ? (
-            <CamposVehiculoSkeleton />
-          ) : camposVehiculo ? (
-            <CamposVehiculoForm
-              oportunidadId={oportunidadId}
-              campos={camposVehiculo}
-              onChange={setCamposVehiculo}
-              highlighted={justProcessed}
-            />
-          ) : null}
+          <CamposVehiculoForm
+            oportunidadId={oportunidadId}
+            campos={camposVehiculo}
+            onChange={setCamposVehiculo}
+            highlighted={justProcessed}
+          />
         </>
       )}
     </div>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
-import { Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { Upload, Loader2, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react'
 
 export type SlotState = 'empty' | 'uploading' | 'uploaded' | 'error'
 
@@ -9,10 +9,11 @@ interface Props {
   label: string
   state: SlotState
   fileName?: string
+  isProcessingAi?: boolean
   onFileSelected: (file: File) => void
 }
 
-export default function DocUploadSlot({ label, state, fileName, onFileSelected }: Props) {
+export default function DocUploadSlot({ label, state, fileName, isProcessingAi, onFileSelected }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,14 +67,19 @@ export default function DocUploadSlot({ label, state, fileName, onFileSelected }
           onChange={handleChange}
           className="hidden"
         />
-        <CheckCircle2 className="h-5 w-5 text-green-600" />
+        {isProcessingAi ? (
+          <Sparkles className="h-5 w-5 animate-pulse text-primary" />
+        ) : (
+          <CheckCircle2 className="h-5 w-5 text-green-600" />
+        )}
         <span className="max-w-full truncate text-center text-xs font-medium text-green-800 leading-tight px-1">
-          {fileName || label}
+          {isProcessingAi ? 'Analizando...' : (fileName || label)}
         </span>
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="rounded-md border border-green-300 bg-white px-2 py-0.5 text-[10px] font-medium text-green-700 hover:bg-green-50"
+          disabled={isProcessingAi}
+          className="rounded-md border border-green-300 bg-white px-2 py-0.5 text-[10px] font-medium text-green-700 hover:bg-green-50 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Reemplazar
         </button>

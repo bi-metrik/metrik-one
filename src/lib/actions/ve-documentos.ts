@@ -33,7 +33,6 @@ export interface CamposVehiculo {
 
 const BUCKET = 've-documentos'
 const MAX_SIZE = 20 * 1024 * 1024 // 20MB
-const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -94,67 +93,69 @@ export async function subirDocumentoVe(
   slug: DocumentoSlug,
   formData: FormData,
 ): Promise<{ success: boolean; url?: string; error?: string }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
-  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  try {
+    const { supabase, workspaceId, error } = await getWorkspace()
+    if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  const file = formData.get('file') as File
-  if (!file || file.size === 0) return { success: false, error: 'No se selecciono archivo' }
-  if (file.size > MAX_SIZE) return { success: false, error: 'Archivo demasiado grande. Max 20MB' }
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return { success: false, error: 'Solo PDF, JPG, PNG o WebP' }
-  }
+    const file = formData.get('file') as File
+    if (!file || file.size === 0) return { success: false, error: 'No se selecciono archivo' }
+    if (file.size > MAX_SIZE) return { success: false, error: 'Archivo demasiado grande. Max 20MB' }
 
-  const ext = getExtension(file.name, file.type)
-  const filePath = `${workspaceId}/${oportunidadId}/${slug}.${ext}`
+    const ext = getExtension(file.name, file.type)
+    const filePath = `${workspaceId}/${oportunidadId}/${slug}.${ext}`
 
-  // Usar service client para bypasear RLS en storage
-  const admin = createServiceClient()
+    // Usar service client para bypasear RLS en storage
+    const admin = createServiceClient()
 
-  const { error: uploadError } = await admin.storage
-    .from(BUCKET)
-    .upload(filePath, file, { upsert: true })
+    const { error: uploadError } = await admin.storage
+      .from(BUCKET)
+      .upload(filePath, file, { upsert: true })
 
-  if (uploadError) {
-    // Si el bucket no existe, el error es claro
-    if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('bucket')) {
-      return {
-        success: false,
-        error: `Bucket '${BUCKET}' no existe. Crealo en Supabase Storage Dashboard.`,
+    if (uploadError) {
+      // Si el bucket no existe, el error es claro
+      if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('bucket')) {
+        return {
+          success: false,
+          error: `Bucket '${BUCKET}' no existe. Crealo en Supabase Storage Dashboard.`,
+        }
       }
+      return { success: false, error: `Error al subir: ${uploadError.message}` }
     }
-    return { success: false, error: `Error al subir: ${uploadError.message}` }
+
+    // URL publica (el bucket debe ser publico) o signed URL
+    const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(filePath)
+    const url = publicData.publicUrl
+
+    // Persistir en custom_data.docs
+    const { data: opp } = await supabase
+      .from('oportunidades')
+      .select('custom_data')
+      .eq('id', oportunidadId)
+      .single()
+
+    const currentCustomData = (opp?.custom_data as Record<string, unknown>) ?? {}
+    const currentDocs = (currentCustomData.docs as Record<string, string>) ?? {}
+
+    const updatedCustomData = {
+      ...currentCustomData,
+      docs: {
+        ...currentDocs,
+        [slug]: url,
+      },
+    }
+
+    const { error: updateError } = await supabase
+      .from('oportunidades')
+      .update({ custom_data: updatedCustomData as unknown as Record<string, never> })
+      .eq('id', oportunidadId)
+
+    if (updateError) return { success: false, error: `Archivo subido pero error guardando: ${updateError.message}` }
+
+    return { success: true, url }
+  } catch (err) {
+    console.error('[subirDocumentoVe] Error inesperado:', err)
+    return { success: false, error: `Error inesperado: ${String(err).slice(0, 100)}` }
   }
-
-  // URL publica (el bucket debe ser publico) o signed URL
-  const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(filePath)
-  const url = publicData.publicUrl
-
-  // Persistir en custom_data.docs
-  const { data: opp } = await supabase
-    .from('oportunidades')
-    .select('custom_data')
-    .eq('id', oportunidadId)
-    .single()
-
-  const currentCustomData = (opp?.custom_data as Record<string, unknown>) ?? {}
-  const currentDocs = (currentCustomData.docs as Record<string, string>) ?? {}
-
-  const updatedCustomData = {
-    ...currentCustomData,
-    docs: {
-      ...currentDocs,
-      [slug]: url,
-    },
-  }
-
-  const { error: updateError } = await supabase
-    .from('oportunidades')
-    .update({ custom_data: updatedCustomData as unknown as Record<string, never> })
-    .eq('id', oportunidadId)
-
-  if (updateError) return { success: false, error: `Archivo subido pero error guardando: ${updateError.message}` }
-
-  return { success: true, url }
 }
 
 // ── Actualizar vehiculo_en_upme en custom_data ─────────────
@@ -231,6 +232,105 @@ function mimeTypeFromUrl(url: string): string {
   if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg'
   // Fallback: intentar con PDF (documentos colombianos suelen ser PDF)
   return 'application/pdf'
+}
+
+// ── Procesar un documento individual con Gemini Vision ────
+
+// Slugs que tienen datos relevantes para extraccion de vehiculo
+const DOCS_AI_RELEVANTES: DocumentoSlug[] = ['factura', 'ficha_tecnica']
+
+export async function procesarDocumentoVe(
+  oportunidadId: string,
+  slug: DocumentoSlug,
+): Promise<{ success: boolean; data?: CamposVehiculo; error?: string }> {
+  if (!DOCS_AI_RELEVANTES.includes(slug)) {
+    return { success: false, error: `El documento '${slug}' no requiere procesamiento AI` }
+  }
+
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const admin = createServiceClient()
+
+  const { data: opp } = await supabase
+    .from('oportunidades')
+    .select('custom_data')
+    .eq('id', oportunidadId)
+    .single()
+
+  if (!opp?.custom_data) return { success: false, error: 'Oportunidad no encontrada' }
+
+  const cd = opp.custom_data as Record<string, unknown>
+  const docsUrls = (cd.docs as Record<string, string>) ?? {}
+  const url = docsUrls[slug]
+
+  if (!url) return { success: false, error: `Documento '${slug}' no ha sido cargado` }
+
+  const apiKey = getServerKey('gemini')
+  if (!apiKey) return { success: false, error: 'GEMINI_API_KEY no configurada' }
+
+  let buffer: ArrayBuffer
+  let mimeType: string
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return { success: false, error: `Error descargando documento (HTTP ${res.status})` }
+    buffer = await res.arrayBuffer()
+    const ct = res.headers.get('content-type') || ''
+    mimeType = ct.split(';')[0].trim() || mimeTypeFromUrl(url)
+  } catch (fetchErr) {
+    return { success: false, error: `Error descargando: ${String(fetchErr).slice(0, 80)}` }
+  }
+
+  const { data: veData, error: parseError } = await parseVeDocuments(
+    [{ buffer, mimeType, slug }],
+    apiKey,
+  )
+
+  // Registrar resultado en log (exitoso o fallido)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin as any).from('ve_procesamiento_log').insert({
+    workspace_id: workspaceId,
+    oportunidad_id: oportunidadId,
+    documentos_procesados: [slug],
+    campos_extraidos: veData ? {
+      marca_vehiculo: veData.marca_vehiculo,
+      linea_vehiculo: veData.linea_vehiculo,
+      modelo_ano: veData.modelo_ano,
+      tecnologia: veData.tecnologia,
+      tipo_vehiculo: veData.tipo_vehiculo,
+      overall_confidence: veData.overall_confidence,
+    } : null,
+    exitoso: !parseError && !!veData,
+  })
+
+  if (parseError || !veData) {
+    return { success: false, error: parseError ?? 'Error desconocido procesando documento' }
+  }
+
+  // Merge inteligente: sobreescribir solo si confidence >= 0.7 o si no hay valor actual
+  const camposMerge: CamposVehiculo = {}
+  const apply = (
+    key: keyof CamposVehiculo,
+    currentVal: unknown,
+    field: { value: string | null; confidence: number },
+  ) => {
+    if (!field.value) return
+    if (!currentVal || field.confidence >= 0.7) {
+      camposMerge[key] = field.value
+    }
+  }
+
+  apply('marca', cd.marca_vehiculo, veData.marca_vehiculo)
+  apply('linea', cd.linea_vehiculo, veData.linea_vehiculo)
+  apply('modelo', cd.modelo_ano, veData.modelo_ano)
+  apply('tecnologia', cd.tecnologia, veData.tecnologia)
+  apply('tipo', cd.tipo_vehiculo, veData.tipo_vehiculo)
+
+  if (Object.keys(camposMerge).length > 0) {
+    await actualizarCamposVehiculo(oportunidadId, camposMerge)
+  }
+
+  return { success: true, data: camposMerge }
 }
 
 // ── Procesar documentos con Gemini Vision ─────────────────
