@@ -44,6 +44,7 @@ interface Props {
   entidad: Entidad
   entidadId: string
   initialCustomData?: Record<string, unknown>
+  excludeSlugs?: string[]
 }
 
 // Evalúa si un campo debe mostrarse dada la condicion_visibilidad y los valores actuales
@@ -53,7 +54,7 @@ function campoEsVisible(field: FieldDef, currentValues: Record<string, unknown>)
   return currentValues[campo] === valor
 }
 
-export default function CustomFieldsSection({ entidad, entidadId, initialCustomData }: Props) {
+export default function CustomFieldsSection({ entidad, entidadId, initialCustomData, excludeSlugs }: Props) {
   const [fields, setFields] = useState<FieldDef[]>([])
   const [labels, setLabels] = useState<LabelDef[]>([])
   const [appliedLabelIds, setAppliedLabelIds] = useState<Set<string>>(new Set())
@@ -120,7 +121,7 @@ export default function CustomFieldsSection({ entidad, entidadId, initialCustomD
     })
   }
 
-  const visibleFields = fields.filter(f => campoEsVisible(f, values))
+  const visibleFields = fields.filter(f => campoEsVisible(f, values) && !excludeSlugs?.includes(f.slug))
   if (visibleFields.length === 0 && labels.length === 0) return null
 
   return (

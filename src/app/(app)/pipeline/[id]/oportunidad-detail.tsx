@@ -528,6 +528,16 @@ export default function OportunidadDetail({
         entidad="oportunidad"
         entidadId={oportunidad.id}
         initialCustomData={(oportunidad.custom_data as Record<string, unknown> | null) ?? {}}
+        excludeSlugs={
+          (oportunidad.custom_data as Record<string, unknown> | null)?.linea_negocio === 've'
+            ? [
+                'link_cedula', 'link_factura', 'link_rut', 'link_soporte_pago_upme',
+                'link_ficha_tecnica', 'link_cert_emisiones',
+                'marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia',
+                'tipo_vehiculo', 'vehiculo_en_upme',
+              ]
+            : undefined
+        }
       />
 
       {/* Documentos VE — visible solo para oportunidades con linea_negocio = 've' */}

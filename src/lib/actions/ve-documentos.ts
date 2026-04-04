@@ -32,7 +32,7 @@ export interface CamposVehiculo {
 // ── Constantes ─────────────────────────────────────────────
 
 const BUCKET = 've-documentos'
-const MAX_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_SIZE = 20 * 1024 * 1024 // 20MB
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
 // ── Helpers ────────────────────────────────────────────────
@@ -99,7 +99,7 @@ export async function subirDocumentoVe(
 
   const file = formData.get('file') as File
   if (!file || file.size === 0) return { success: false, error: 'No se selecciono archivo' }
-  if (file.size > MAX_SIZE) return { success: false, error: 'Archivo demasiado grande. Max 10MB' }
+  if (file.size > MAX_SIZE) return { success: false, error: 'Archivo demasiado grande. Max 20MB' }
   if (!ALLOWED_TYPES.includes(file.type)) {
     return { success: false, error: 'Solo PDF, JPG, PNG o WebP' }
   }
