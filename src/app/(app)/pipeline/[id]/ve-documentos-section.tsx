@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import DocUploadSlot, { SlotState } from './doc-upload-slot'
 import {
-  subirDocumentoVe,
+  getUploadUrlDocumentoVe,
+  confirmarUploadDocumentoVe,
   actualizarVehiculoEnUpme,
   procesarDocumentoVe,
   actualizarCamposVehiculo,
@@ -13,6 +14,7 @@ import {
   type VeDocumentoState,
   type CamposVehiculo,
 } from '@/lib/actions/ve-documentos'
+import { createClient } from '@/lib/supabase/client'
 
 // ── Definicion de documentos ───────────────────────────────
 
@@ -160,51 +162,63 @@ export default function VeDocumentosSection({
     })
   }
 
+  const resolveFileType = (f: File): string => {
+    if (f.type) return f.type
+    const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+    const map: Record<string, string> = {
+      pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      png: 'image/png', webp: 'image/webp',
+    }
+    return map[ext] ?? ''
+  }
+
   const handleFileSelected = async (slug: DocumentoSlug, file: File) => {
-    // Validaciones client-side
     const MAX_SIZE = 20 * 1024 * 1024
     const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
-    // Resolver tipo MIME: si file.type es vacio, inferir por extension
-    const resolveFileType = (f: File): string => {
-      if (f.type) return f.type
-      const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
-      const map: Record<string, string> = {
-        pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-        png: 'image/png', webp: 'image/webp',
-      }
-      return map[ext] ?? ''
-    }
-
     if (file.size > MAX_SIZE) {
       toast.error('Archivo demasiado grande. Max 20MB')
-      setSlotStates(prev => ({ ...prev, [slug]: 'empty' }))
       return
     }
     const resolvedType = resolveFileType(file)
     if (resolvedType && !ALLOWED.includes(resolvedType)) {
       toast.error('Solo PDF, JPG, PNG o WebP')
-      setSlotStates(prev => ({ ...prev, [slug]: 'empty' }))
       return
     }
 
-    // Estado uploading
     setSlotStates(prev => ({ ...prev, [slug]: 'uploading' }))
 
-    const fd = new FormData()
-    fd.append('file', file)
-
-    let res: { success: boolean; url?: string; error?: string }
     try {
-      res = await subirDocumentoVe(oportunidadId, slug, fd)
-    } catch (err) {
-      setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
-      toast.error('Error inesperado al subir archivo')
-      console.error('[VeDocumentosSection] subirDocumentoVe error:', err)
-      return
-    }
+      // Paso 1: Obtener URL firmada del servidor
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf'
+      const uploadInfo = await getUploadUrlDocumentoVe(oportunidadId, slug, ext)
+      if (!uploadInfo.success || !uploadInfo.path || !uploadInfo.token) {
+        setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
+        toast.error(uploadInfo.error ?? 'Error obteniendo URL de subida')
+        return
+      }
 
-    if (res.success) {
+      // Paso 2: Subir directamente a Supabase desde el browser
+      const supabase = createClient()
+      const { error: uploadError } = await supabase.storage
+        .from('ve-documentos')
+        .uploadToSignedUrl(uploadInfo.path, uploadInfo.token, file, {
+          contentType: file.type || 'application/octet-stream',
+        })
+      if (uploadError) {
+        setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
+        toast.error(`Error al subir: ${uploadError.message}`)
+        return
+      }
+
+      // Paso 3: Confirmar y guardar URL en custom_data
+      const confirmRes = await confirmarUploadDocumentoVe(oportunidadId, slug, uploadInfo.path)
+      if (!confirmRes.success) {
+        setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
+        toast.error(confirmRes.error ?? 'Error guardando documento')
+        return
+      }
+
       setSlotStates(prev => ({ ...prev, [slug]: 'uploaded' }))
       setFileNames(prev => ({ ...prev, [slug]: file.name }))
       router.refresh()
@@ -222,9 +236,10 @@ export default function VeDocumentosSection({
           toast.error(`No se pudo procesar ${slug}: ${procRes.error ?? 'error desconocido'}`)
         }
       }
-    } else {
+    } catch (err) {
       setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
-      toast.error(res.error ?? 'Error al subir archivo')
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      console.error('[VeDocumentosSection] upload error:', err)
     }
   }
 

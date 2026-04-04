@@ -32,21 +32,6 @@ export interface CamposVehiculo {
 // ── Constantes ─────────────────────────────────────────────
 
 const BUCKET = 've-documentos'
-const MAX_SIZE = 20 * 1024 * 1024 // 20MB
-
-// ── Helpers ────────────────────────────────────────────────
-
-function getExtension(filename: string, mimeType: string): string {
-  const extFromName = filename.split('.').pop()?.toLowerCase()
-  if (extFromName) return extFromName
-  const mimeMap: Record<string, string> = {
-    'application/pdf': 'pdf',
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-  }
-  return mimeMap[mimeType] || 'pdf'
-}
 
 // ── Leer documentos actuales de custom_data ────────────────
 
@@ -86,76 +71,67 @@ export async function getVeDocumentos(
   return { docs, vehiculoEnUpme, camposVehiculo: hasCampos ? camposVehiculo : null }
 }
 
-// ── Subir documento VE ─────────────────────────────────────
+// ── Paso 1: Generar URL firmada de upload ──────────────────
 
-export async function subirDocumentoVe(
+export async function getUploadUrlDocumentoVe(
   oportunidadId: string,
   slug: DocumentoSlug,
-  formData: FormData,
-): Promise<{ success: boolean; url?: string; error?: string }> {
-  try {
-    const { supabase, workspaceId, error } = await getWorkspace()
-    if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  fileExtension: string,
+): Promise<{ success: boolean; path?: string; token?: string; error?: string }> {
+  const { workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-    const file = formData.get('file') as File
-    if (!file || file.size === 0) return { success: false, error: 'No se selecciono archivo' }
-    if (file.size > MAX_SIZE) return { success: false, error: 'Archivo demasiado grande. Max 20MB' }
+  const ext = fileExtension.toLowerCase().replace(/^\./, '') || 'pdf'
+  const filePath = `${workspaceId}/${oportunidadId}/${slug}.${ext}`
 
-    const ext = getExtension(file.name, file.type)
-    const filePath = `${workspaceId}/${oportunidadId}/${slug}.${ext}`
+  const admin = createServiceClient()
+  const { data, error: signError } = await admin.storage
+    .from(BUCKET)
+    .createSignedUploadUrl(filePath)
 
-    // Usar service client para bypasear RLS en storage
-    const admin = createServiceClient()
-
-    const { error: uploadError } = await admin.storage
-      .from(BUCKET)
-      .upload(filePath, file, { upsert: true })
-
-    if (uploadError) {
-      // Si el bucket no existe, el error es claro
-      if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('bucket')) {
-        return {
-          success: false,
-          error: `Bucket '${BUCKET}' no existe. Crealo en Supabase Storage Dashboard.`,
-        }
-      }
-      return { success: false, error: `Error al subir: ${uploadError.message}` }
-    }
-
-    // URL publica (el bucket debe ser publico) o signed URL
-    const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(filePath)
-    const url = publicData.publicUrl
-
-    // Persistir en custom_data.docs
-    const { data: opp } = await supabase
-      .from('oportunidades')
-      .select('custom_data')
-      .eq('id', oportunidadId)
-      .single()
-
-    const currentCustomData = (opp?.custom_data as Record<string, unknown>) ?? {}
-    const currentDocs = (currentCustomData.docs as Record<string, string>) ?? {}
-
-    const updatedCustomData = {
-      ...currentCustomData,
-      docs: {
-        ...currentDocs,
-        [slug]: url,
-      },
-    }
-
-    const { error: updateError } = await supabase
-      .from('oportunidades')
-      .update({ custom_data: updatedCustomData as unknown as Record<string, never> })
-      .eq('id', oportunidadId)
-
-    if (updateError) return { success: false, error: `Archivo subido pero error guardando: ${updateError.message}` }
-
-    return { success: true, url }
-  } catch (err) {
-    console.error('[subirDocumentoVe] Error inesperado:', err)
-    return { success: false, error: `Error inesperado: ${String(err).slice(0, 100)}` }
+  if (signError || !data) {
+    return { success: false, error: signError?.message ?? 'Error generando URL de subida' }
   }
+
+  return { success: true, path: filePath, token: data.token }
+}
+
+// ── Paso 3: Confirmar upload y guardar URL en custom_data ──
+
+export async function confirmarUploadDocumentoVe(
+  oportunidadId: string,
+  slug: DocumentoSlug,
+  filePath: string,
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const admin = createServiceClient()
+  const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(filePath)
+  const url = publicData.publicUrl
+
+  const { data: opp } = await supabase
+    .from('oportunidades')
+    .select('custom_data')
+    .eq('id', oportunidadId)
+    .single()
+
+  const currentCustomData = (opp?.custom_data as Record<string, unknown>) ?? {}
+  const currentDocs = (currentCustomData.docs as Record<string, string>) ?? {}
+
+  const { error: updateError } = await supabase
+    .from('oportunidades')
+    .update({
+      custom_data: {
+        ...currentCustomData,
+        docs: { ...currentDocs, [slug]: url },
+      } as unknown as Record<string, never>,
+    })
+    .eq('id', oportunidadId)
+
+  if (updateError) return { success: false, error: `Error guardando: ${updateError.message}` }
+
+  return { success: true, url }
 }
 
 // ── Actualizar vehiculo_en_upme en custom_data ─────────────
