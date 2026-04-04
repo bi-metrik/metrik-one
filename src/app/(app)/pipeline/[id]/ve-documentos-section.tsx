@@ -73,8 +73,8 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
 
   const vehiculoFields = [
     { key: 'marca' as const, label: 'Marca' },
-    { key: 'linea' as const, label: 'Linea / Modelo' },
-    { key: 'modelo' as const, label: 'Año' },
+    { key: 'linea' as const, label: 'Linea' },
+    { key: 'modelo' as const, label: 'Modelo' },
     { key: 'tecnologia' as const, label: 'Tecnologia' },
     { key: 'tipo' as const, label: 'Tipo vehiculo' },
   ] as const
@@ -82,6 +82,10 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
   const propietarioFields = [
     { key: 'nombre_propietario' as const, label: 'Nombre propietario' },
     { key: 'numero_identificacion' as const, label: 'N° identificacion' },
+    { key: 'telefono_propietario' as const, label: 'Telefono' },
+    { key: 'municipio_propietario' as const, label: 'Municipio' },
+    { key: 'correo_propietario' as const, label: 'Correo' },
+    { key: 'direccion_propietario' as const, label: 'Direccion' },
   ] as const
 
   const fiscalFields = [

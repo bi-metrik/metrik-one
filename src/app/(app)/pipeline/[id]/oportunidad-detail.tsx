@@ -537,6 +537,7 @@ export default function OportunidadDetail({
                 'tipo_vehiculo', 'vehiculo_en_upme',
                 'nombre_propietario', 'numero_identificacion',
                 'regimen_tributario_cliente', 'tipo_persona_cliente',
+                'telefono_propietario', 'municipio_propietario', 'correo_propietario', 'direccion_propietario',
               ]
             : undefined
         }

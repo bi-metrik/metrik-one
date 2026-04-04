@@ -33,6 +33,11 @@ export interface CamposVehiculo {
   // Datos fiscales del cliente (extraidos del RUT)
   regimen_tributario_cliente?: string
   tipo_persona_cliente?: string
+  // Datos de contacto del propietario (extraidos del RUT)
+  telefono_propietario?: string
+  municipio_propietario?: string
+  correo_propietario?: string
+  direccion_propietario?: string
 }
 
 // ── Constantes ─────────────────────────────────────────────
@@ -75,6 +80,10 @@ export async function getVeDocumentos(
   if (cd.numero_identificacion) camposVehiculo.numero_identificacion = cd.numero_identificacion as string
   if (cd.regimen_tributario_cliente) camposVehiculo.regimen_tributario_cliente = cd.regimen_tributario_cliente as string
   if (cd.tipo_persona_cliente) camposVehiculo.tipo_persona_cliente = cd.tipo_persona_cliente as string
+  if (cd.telefono_propietario) camposVehiculo.telefono_propietario = cd.telefono_propietario as string
+  if (cd.municipio_propietario) camposVehiculo.municipio_propietario = cd.municipio_propietario as string
+  if (cd.correo_propietario) camposVehiculo.correo_propietario = cd.correo_propietario as string
+  if (cd.direccion_propietario) camposVehiculo.direccion_propietario = cd.direccion_propietario as string
 
   const hasCampos = Object.keys(camposVehiculo).length > 0
 
@@ -202,6 +211,10 @@ export async function actualizarCamposVehiculo(
   if (campos.numero_identificacion !== undefined) updates.numero_identificacion = campos.numero_identificacion
   if (campos.regimen_tributario_cliente !== undefined) updates.regimen_tributario_cliente = campos.regimen_tributario_cliente
   if (campos.tipo_persona_cliente !== undefined) updates.tipo_persona_cliente = campos.tipo_persona_cliente
+  if (campos.telefono_propietario !== undefined) updates.telefono_propietario = campos.telefono_propietario
+  if (campos.municipio_propietario !== undefined) updates.municipio_propietario = campos.municipio_propietario
+  if (campos.correo_propietario !== undefined) updates.correo_propietario = campos.correo_propietario
+  if (campos.direccion_propietario !== undefined) updates.direccion_propietario = campos.direccion_propietario
 
   const { error: updateError } = await supabase
     .from('oportunidades')
@@ -315,6 +328,11 @@ export async function procesarDocumentoVe(
     // Datos fiscales del cliente
     applyStr('regimen_tributario_cliente', cd.regimen_tributario_cliente, rutData.regimen_tributario)
     applyStr('tipo_persona_cliente', cd.tipo_persona_cliente, rutData.tipo_persona)
+    // Datos de contacto del propietario
+    applyStr('telefono_propietario', cd.telefono_propietario, rutData.telefono)
+    applyStr('municipio_propietario', cd.municipio_propietario, rutData.municipio)
+    applyStr('correo_propietario', cd.correo_propietario, rutData.email_fiscal)
+    applyStr('direccion_propietario', cd.direccion_propietario, rutData.direccion_fiscal)
 
     if (Object.keys(camposMerge).length > 0) {
       await actualizarCamposVehiculo(oportunidadId, camposMerge)
