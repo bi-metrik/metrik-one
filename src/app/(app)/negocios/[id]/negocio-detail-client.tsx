@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Circle,
   LayoutGrid,
-  MessageSquare,
   AlertTriangle,
   X,
 } from 'lucide-react'
@@ -19,7 +18,8 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, agregarComentarioNegocio } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate } from '../negocio-v2-actions'
+import ActivityLog from '@/components/activity-log'
 
 // Bloques renderers
 import BloqueEquipo from './bloques/BloqueEquipo'
@@ -601,91 +601,6 @@ function BloqueCard({
   )
 }
 
-// ── Actividad del negocio ─────────────────────────────────────────────────────
-
-function ActividadNegocio({
-  negocioId,
-  actividad,
-}: {
-  negocioId: string
-  actividad: Array<{
-    id: string
-    tipo: string
-    autor_id: string | null
-    contenido: string | null
-    created_at: string
-    autor_nombre: string | null
-  }>
-}) {
-  const [texto, setTexto] = useState('')
-  const [isPending, startTransition] = useTransition()
-
-  function handleEnviar() {
-    if (!texto.trim()) return
-    startTransition(async () => {
-      const result = await agregarComentarioNegocio(negocioId, texto.trim())
-      if (result.error) toast.error(result.error)
-      else setTexto('')
-    })
-  }
-
-  function fmtFecha(iso: string) {
-    return new Date(iso).toLocaleDateString('es-CO', {
-      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-    })
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <MessageSquare className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-sm font-semibold">Actividad</h3>
-      </div>
-
-      {/* Input comentario */}
-      <div className="flex gap-2 mb-4">
-        <input
-          type="text"
-          placeholder="Agrega un comentario..."
-          value={texto}
-          onChange={e => setTexto(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleEnviar()}
-          disabled={isPending}
-          className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60"
-        />
-        <button
-          onClick={handleEnviar}
-          disabled={isPending || !texto.trim()}
-          className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40 transition-colors"
-        >
-          {isPending ? '...' : 'Enviar'}
-        </button>
-      </div>
-
-      {/* Timeline */}
-      {actividad.length === 0 ? (
-        <p className="py-4 text-center text-xs text-muted-foreground">Sin actividad registrada</p>
-      ) : (
-        <div className="space-y-3">
-          {actividad.map(entry => (
-            <div key={entry.id} className="flex items-start gap-2.5">
-              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold uppercase text-muted-foreground">
-                {entry.autor_nombre ? entry.autor_nombre.charAt(0) : '?'}
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-foreground leading-snug">{entry.contenido}</p>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  {entry.autor_nombre ?? 'Usuario'} · {fmtFecha(entry.created_at)}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Tipos Props ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -727,6 +642,7 @@ interface Props {
     created_at: string
     autor_nombre: string | null
   }>
+  staffList: Array<{ id: string; full_name: string }>
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -741,6 +657,7 @@ export default function NegocioDetailClient({
   cotizacionesNegocio,
   actividad,
   resumenFinanciero,
+  staffList,
 }: Props) {
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const etapaActual = negocio.etapas_negocio
@@ -867,10 +784,13 @@ export default function NegocioDetailClient({
         </div>
 
         {/* ── Activity log ── */}
-        <ActividadNegocio
-          negocioId={negocio.id}
-          actividad={actividad}
-        />
+        <div className="rounded-xl border border-border bg-card p-4">
+          <ActivityLog
+            entidadTipo="negocio"
+            entidadId={negocio.id}
+            staffList={staffList}
+          />
+        </div>
       </div>
 
       {/* Breadcrumb de vuelta */}

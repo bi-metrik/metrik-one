@@ -999,6 +999,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     created_at: string
     autor_nombre: string | null
   }>
+  staffList: Array<{ id: string; full_name: string }>
 } | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -1166,5 +1167,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       costosEjecutados: 0,
     },
     actividad,
+    staffList: ((staffRes.data ?? []) as { id: string; full_name: string }[]).map(s => ({
+      id: s.id,
+      full_name: s.full_name,
+    })),
   }
 }

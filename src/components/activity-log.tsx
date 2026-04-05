@@ -27,7 +27,7 @@ interface ActivityEntry {
 }
 
 interface ActivityLogProps {
-  entidadTipo: 'oportunidad' | 'proyecto'
+  entidadTipo: 'oportunidad' | 'proyecto' | 'negocio'
   entidadId: string
   staffList: StaffOption[]
   oportunidadId?: string | null

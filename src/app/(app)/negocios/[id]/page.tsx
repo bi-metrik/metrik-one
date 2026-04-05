@@ -23,6 +23,7 @@ export default async function NegocioDetailPage({ params }: Props) {
       cotizacionesNegocio={data.cotizacionesNegocio}
       resumenFinanciero={data.resumenFinanciero}
       actividad={data.actividad}
+      staffList={data.staffList}
     />
   )
 }
