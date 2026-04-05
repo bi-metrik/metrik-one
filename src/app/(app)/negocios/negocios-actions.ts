@@ -192,9 +192,12 @@ function etiquetaOpp(etapa: string | null): string {
   const map: Record<string, string> = {
     lead_nuevo: 'LEAD',
     contacto_inicial: 'CONTACTO',
+    contactado: 'CONTACTADO',
     discovery_hecha: 'DISCOVERY',
     propuesta_enviada: 'EN PROPUESTA',
     negociacion: 'NEGOCIACION',
+    pago_anticipo: 'ANTICIPO',
+    recoleccion_docs: 'DOCUMENTOS',
     ganada: 'GANADA',
     perdida: 'PERDIDA',
   }

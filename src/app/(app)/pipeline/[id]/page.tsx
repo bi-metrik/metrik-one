@@ -1,4 +1,4 @@
-import { getOportunidad } from '../actions-v2'
+import { getOportunidad, getWorkspaceStagesPipeline } from '../actions-v2'
 import { notFound } from 'next/navigation'
 import OportunidadDetail from './oportunidad-detail'
 import { getCotizaciones } from './cotizaciones/actions-v2'
@@ -7,10 +7,11 @@ import { getVeDocumentos } from '@/lib/actions/ve-documentos'
 
 export default async function OportunidadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const [oportunidad, cotizaciones, staffList] = await Promise.all([
+  const [oportunidad, cotizaciones, staffList, stages] = await Promise.all([
     getOportunidad(id),
     getCotizaciones(id),
     getActiveStaffList(),
+    getWorkspaceStagesPipeline(),
   ])
 
   if (!oportunidad) notFound()
@@ -28,6 +29,7 @@ export default async function OportunidadDetailPage({ params }: { params: Promis
       oportunidad={oportunidad}
       cotizaciones={cotizaciones}
       staffList={staffList}
+      stages={stages}
       veDocumentos={veData.docs}
       veVehiculoEnUpme={veData.vehiculoEnUpme}
       veCamposVehiculo={veData.camposVehiculo}

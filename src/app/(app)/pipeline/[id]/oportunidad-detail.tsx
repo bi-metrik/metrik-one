@@ -16,6 +16,7 @@ import { duplicarCotizacion, enviarCotizacion, aceptarCotizacion, rechazarCotiza
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, RAZONES_PERDIDA, ESTADO_COTIZACION_CONFIG } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { EtapaPipeline, EstadoCotizacion } from '@/lib/pipeline/constants'
+import type { WorkspaceStageWithProceso } from '../actions-v2'
 import ActivityLog from '@/components/activity-log'
 import CustomFieldsSection from '@/components/custom-fields-section'
 import FiscalGateForm from './fiscal-gate-form'
@@ -57,6 +58,7 @@ interface Props {
   oportunidad: OportunidadRow
   cotizaciones: CotizacionRow[]
   staffList: { id: string; full_name: string }[]
+  stages?: WorkspaceStageWithProceso[]
   veDocumentos?: VeDocumentoState[]
   veVehiculoEnUpme?: boolean | null
   veCamposVehiculo?: CamposVehiculo | null
@@ -66,6 +68,7 @@ export default function OportunidadDetail({
   oportunidad,
   cotizaciones,
   staffList,
+  stages = [],
   veDocumentos = [],
   veVehiculoEnUpme = null,
   veCamposVehiculo = null,
@@ -79,11 +82,29 @@ export default function OportunidadDetail({
   const [carpetaEditing, setCarpetaEditing] = useState(false)
   const [responsableId, setResponsableId] = useState(oportunidad.responsable_id ?? '')
 
+  // Build dynamic stage list from workspace_stages, falling back to hardcoded constants
+  const etapasActivas: string[] = stages.length > 0
+    ? stages.filter(s => !s.es_terminal && s.activo).sort((a, b) => a.orden - b.orden).map(s => s.slug)
+    : (ETAPAS_ACTIVAS as string[])
+
+  const getStageLabel = (slug: string): string => {
+    const ws = stages.find(s => s.slug === slug)
+    if (ws) return ws.nombre
+    return ETAPA_CONFIG[slug as EtapaPipeline]?.label ?? slug
+  }
+
   const etapa = oportunidad.etapa as EtapaPipeline
-  const etapaConfig = ETAPA_CONFIG[etapa]
+  // Use hardcoded config if available, else build minimal config from workspace stage
+  const etapaConfig = ETAPA_CONFIG[etapa] ?? (() => {
+    const ws = stages.find(s => s.slug === etapa)
+    if (!ws) return undefined
+    return { label: ws.nombre, probabilidad: 50, chipClass: 'bg-slate-100 text-slate-700', dotClass: 'bg-slate-400', order: ws.orden }
+  })()
   const empresa = oportunidad.empresas as OportunidadRow['empresas']
   const contacto = oportunidad.contactos as OportunidadRow['contactos']
-  const isTerminal = etapa === 'ganada' || etapa === 'perdida'
+  const isTerminal = stages.length > 0
+    ? (stages.find(s => s.slug === etapa)?.es_terminal ?? (etapa === 'ganada' || etapa === 'perdida'))
+    : (etapa === 'ganada' || etapa === 'perdida')
 
   const calcDias = (fecha: string | null) => {
     if (!fecha) return 0
@@ -92,9 +113,9 @@ export default function OportunidadDetail({
   const diasEnStage = calcDias(oportunidad.etapa_changed_at ?? oportunidad.ultima_accion_fecha)
   const diasSinActividad = calcDias(oportunidad.ultima_accion_fecha ?? oportunidad.created_at)
 
-  const currentIdx = ETAPAS_ACTIVAS.indexOf(etapa as EtapaPipeline)
-  const nextEtapa = !isTerminal && currentIdx < ETAPAS_ACTIVAS.length - 1
-    ? ETAPAS_ACTIVAS[currentIdx + 1]
+  const currentIdx = etapasActivas.indexOf(etapa as string)
+  const nextEtapa = !isTerminal && currentIdx !== -1 && currentIdx < etapasActivas.length - 1
+    ? etapasActivas[currentIdx + 1] as EtapaPipeline
     : null
 
   const handleAdvance = () => {
@@ -102,7 +123,7 @@ export default function OportunidadDetail({
     startTransition(async () => {
       const res = await moveOportunidad(oportunidad.id, nextEtapa)
       if (res.success) {
-        toast.success(`Movida a ${ETAPA_CONFIG[nextEtapa].label}`)
+        toast.success(`Movida a ${getStageLabel(nextEtapa)}`)
         router.refresh()
       } else {
         toast.error(res.error)
@@ -269,7 +290,7 @@ export default function OportunidadDetail({
               className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               <ChevronRight className="h-4 w-4" />
-              Avanzar a {ETAPA_CONFIG[nextEtapa].label}
+              Avanzar a {getStageLabel(nextEtapa)}
             </button>
           )}
           <button
