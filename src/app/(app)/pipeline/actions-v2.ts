@@ -205,8 +205,8 @@ export async function moveOportunidad(id: string, nuevaEtapa: string) {
       .from('activity_log')
       .select('id', { count: 'exact', head: true })
       .eq('workspace_id', workspaceId)
-      .eq('entity_type', 'oportunidad')
-      .eq('entity_id', id)
+      .eq('entidad_tipo', 'oportunidad')
+      .eq('entidad_id', id)
 
     if (!count || count === 0) {
       return {
