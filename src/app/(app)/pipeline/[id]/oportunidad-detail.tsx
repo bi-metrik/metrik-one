@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, User, ChevronRight, Flame, XCircle,
   Trophy, FileText, Plus, Clock, ShieldAlert, Copy, Send, Check, X,
-  FolderOpen, ChevronDown,
+  FolderOpen, ChevronDown, TrendingUp, TrendingDown, Banknote,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -725,6 +725,80 @@ export default function OportunidadDetail({
           </div>
         )}
       </div>
+      )}
+
+      {/* ── Módulos financieros — solo en modo operativo VE ── */}
+      {modoOperativoVe && proyectoVe && (
+        <>
+          {/* Resumen Flujo de Caja */}
+          {proyectoVe.proyectoModules?.flujo_caja && proyectoVe.financiero && (
+            <div className="rounded-lg border p-4 space-y-3">
+              <h2 className="text-sm font-semibold">Flujo de caja</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { label: 'Presupuesto', v: proyectoVe.financiero.presupuesto_total },
+                  { label: 'Costo acumulado', v: proyectoVe.financiero.costo_acumulado },
+                  { label: 'Facturado', v: proyectoVe.financiero.facturado },
+                  { label: 'Cobrado', v: proyectoVe.financiero.cobrado },
+                  { label: 'Cartera', v: (proyectoVe.financiero.facturado ?? 0) - (proyectoVe.financiero.cobrado ?? 0) },
+                  { label: 'Por facturar', v: (proyectoVe.financiero.presupuesto_total ?? 0) - (proyectoVe.financiero.facturado ?? 0) },
+                ] as { label: string; v: number | null }[]).map(({ label, v }) => (
+                  <div key={label} className="rounded-lg border p-3">
+                    <p className="text-[10px] text-muted-foreground">{label}</p>
+                    <p className="text-sm font-bold mt-0.5 tabular-nums">{formatCOP(v ?? 0)}</p>
+                  </div>
+                ))}
+                <div className="col-span-2 rounded-lg border p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    {(proyectoVe.financiero.ganancia_actual ?? 0) >= 0
+                      ? <TrendingUp className="h-4 w-4 text-green-600" />
+                      : <TrendingDown className="h-4 w-4 text-red-600" />}
+                    <span className="text-xs font-medium">Ganancia actual</span>
+                  </div>
+                  <span className={`text-sm font-bold tabular-nums ${(proyectoVe.financiero.ganancia_actual ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(proyectoVe.financiero.ganancia_actual ?? 0) >= 0 ? '+' : ''}{formatCOP(proyectoVe.financiero.ganancia_actual ?? 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Cobros VE */}
+          {proyectoVe.proyectoModules?.detalle_ejecucion && proyectoVe.cobros.length > 0 && (
+            <div className="rounded-lg border p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Banknote className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">Cobros</h2>
+              </div>
+              <div className="space-y-2">
+                {proyectoVe.cobros.map(c => (
+                  <div key={c.id} className="flex items-center justify-between rounded-md border p-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                        c.tipo_cobro === 'anticipo' ? 'bg-amber-100 text-amber-700' :
+                        c.tipo_cobro === 'saldo'    ? 'bg-blue-100 text-blue-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {c.tipo_cobro === 'anticipo' ? 'Anticipo' : c.tipo_cobro === 'saldo' ? 'Saldo' : 'Cobro'}
+                      </span>
+                      <span className="text-xs text-muted-foreground truncate">{c.notas ?? c.fecha}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                        c.estado_causacion === 'PENDIENTE' ? 'bg-orange-100 text-orange-700' :
+                        c.estado_causacion === 'APROBADO'  ? 'bg-green-100 text-green-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {c.estado_causacion === 'PENDIENTE' ? 'Pendiente' : c.estado_causacion === 'APROBADO' ? 'Aprobado' : c.estado_causacion}
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums">{formatCOP(c.monto)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Campos custom + Labels */}

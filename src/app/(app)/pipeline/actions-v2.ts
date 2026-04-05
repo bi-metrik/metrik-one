@@ -512,6 +512,10 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     }
   }
 
+  // Bandera: hay anticipo registrado para auto-crear cobro después de crear el proyecto
+  const anticipoRef = oppCustomData.referencia_anticipo_epayco as string | undefined
+  const anticipoValor = oppCustomData.valor_anticipo ? Number(oppCustomData.valor_anticipo) : null
+
   // Create proyecto with full data
   const { data: proyecto, error: projError } = await supabase
     .from('proyectos')
@@ -578,6 +582,22 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   // Create proyecto_rubros from cotización items (with full detail inheritance)
   if (veCotizacionId) {
     await syncRubrosCotizacion(supabase, proyecto.id, veCotizacionId, esVe ? 'flash' : (cotizacion?.modo ?? null), presupuestoTotal)
+  }
+
+  // Auto-crear cobro anticipo si hay referencia Epayco + valor anticipo registrado
+  // (tipo_cobro y factura_id nullable se agregan via migration 20260404000002)
+  if (esVe && anticipoRef && anticipoValor && anticipoValor > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from('cobros') as any).insert({
+      workspace_id: wsId,
+      proyecto_id: proyecto.id,
+      fecha: new Date().toISOString().split('T')[0],
+      monto: anticipoValor,
+      tipo_cobro: 'anticipo',
+      external_ref: anticipoRef,
+      notas: `Anticipo VE — Ref. Epayco: ${anticipoRef}`,
+      estado_causacion: 'PENDIENTE',
+    })
   }
 
   revalidatePath('/pipeline')
@@ -791,17 +811,37 @@ export async function checkCotizacionExiste(oportunidadId: string): Promise<{ ti
 
 // ── Proyecto vinculado a una oportunidad ─────────────────────
 
+export interface ProyectoVinculadoCobro {
+  id: string
+  fecha: string
+  monto: number
+  tipo_cobro: string
+  notas: string | null
+  estado_causacion: string
+}
+
+export interface ProyectoVinculadoFinanciero {
+  presupuesto_total: number | null
+  costo_acumulado: number | null
+  facturado: number | null
+  cobrado: number | null
+  ganancia_actual: number | null
+}
+
 export interface ProyectoVinculado {
   id: string
   estado: string
   custom_data: Record<string, unknown> | null
   codigo: string | null
   presupuesto_total: number | null
+  financiero: ProyectoVinculadoFinanciero | null
+  cobros: ProyectoVinculadoCobro[]
+  proyectoModules: Record<string, boolean>
 }
 
 export async function getProyectoVinculado(oportunidadId: string): Promise<ProyectoVinculado | null> {
-  const { supabase, error } = await getWorkspace()
-  if (error) return null
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return null
 
   const { data } = await supabase
     .from('proyectos')
@@ -812,11 +852,57 @@ export async function getProyectoVinculado(oportunidadId: string): Promise<Proye
 
   if (!data) return null
 
+  // Fetch financial summary + cobros en paralelo
+  // cobros.tipo_cobro y workspaces.proyecto_modules se agregan via migrations 20260404000002/3
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cobrosQuery = (supabase.from('cobros') as any)
+    .select('id, fecha, monto, tipo_cobro, notas, estado_causacion')
+    .eq('proyecto_id', data.id)
+    .order('fecha', { ascending: true })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const workspaceQuery = (supabase.from('workspaces') as any)
+    .select('proyecto_modules')
+    .eq('id', workspaceId)
+    .single()
+
+  const [financieroRes, cobrosRes, workspaceRes] = await Promise.all([
+    supabase
+      .from('v_proyecto_financiero')
+      .select('presupuesto_total, costo_acumulado, facturado, cobrado, ganancia_actual')
+      .eq('proyecto_id', data.id)
+      .eq('workspace_id', workspaceId)
+      .single(),
+    cobrosQuery as Promise<{ data: { id: string; fecha: string | null; monto: number | null; tipo_cobro: string | null; notas: string | null; estado_causacion: string | null }[] | null; error: unknown }>,
+    workspaceQuery as Promise<{ data: { proyecto_modules: Record<string, boolean> | null } | null; error: unknown }>,
+  ])
+
+  const financiero = financieroRes.data ? {
+    presupuesto_total: financieroRes.data.presupuesto_total ?? null,
+    costo_acumulado: financieroRes.data.costo_acumulado ?? null,
+    facturado: financieroRes.data.facturado ?? null,
+    cobrado: financieroRes.data.cobrado ?? null,
+    ganancia_actual: financieroRes.data.ganancia_actual ?? null,
+  } : null
+
+  const cobros = (cobrosRes.data ?? []).map(c => ({
+    id: c.id,
+    fecha: c.fecha ?? '',
+    monto: c.monto ?? 0,
+    tipo_cobro: (c.tipo_cobro as string | null) ?? 'regular',
+    notas: c.notas ?? null,
+    estado_causacion: c.estado_causacion ?? 'PENDIENTE',
+  }))
+
+  const proyectoModules = (workspaceRes.data?.proyecto_modules as Record<string, boolean> | null) ?? {}
+
   return {
     id: data.id,
     estado: data.estado ?? '',
     custom_data: (data.custom_data as Record<string, unknown> | null) ?? null,
     codigo: data.codigo ?? null,
     presupuesto_total: data.presupuesto_total ?? null,
+    financiero,
+    cobros,
+    proyectoModules,
   }
 }

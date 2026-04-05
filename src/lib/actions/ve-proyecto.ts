@@ -63,7 +63,7 @@ export async function moveProyectoVe(
   // Leer estado actual para log y merge de custom_data
   const { data: proyecto } = await supabase
     .from('proyectos')
-    .select('custom_data, estado, oportunidad_id')
+    .select('custom_data, estado, oportunidad_id, presupuesto_total')
     .eq('id', proyectoId)
     .single()
 
@@ -118,6 +118,34 @@ export async function moveProyectoVe(
     .eq('workspace_id', workspaceId)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  // Auto-crear cobro saldo cuando llega a por_cobrar
+  // (tipo_cobro se agrega via migration 20260404000002 — cast necesario hasta regenerar tipos)
+  if (nuevoEstadoVe === 'por_cobrar') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anticiposQ = (supabase.from('cobros') as any)
+      .select('monto')
+      .eq('proyecto_id', proyectoId)
+      .eq('tipo_cobro', 'anticipo')
+    const { data: anticipos } = await anticiposQ as { data: { monto: number }[] | null }
+
+    const totalAnticipo = (anticipos ?? []).reduce((s, c) => s + (c.monto ?? 0), 0)
+    const saldo = (proyecto.presupuesto_total ?? 0) - totalAnticipo
+
+    if (saldo > 0) {
+      // (tipo_cobro y factura_id nullable se agregan via migration 20260404000002)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase.from('cobros') as any).insert({
+        workspace_id: workspaceId,
+        proyecto_id: proyectoId,
+        fecha: new Date().toISOString().split('T')[0],
+        monto: saldo,
+        tipo_cobro: 'saldo',
+        notas: 'Saldo VE — Pendiente de cobro',
+        estado_causacion: 'PENDIENTE',
+      })
+    }
+  }
 
   // Log en activity (registrado en proyecto; ActivityLog unificado lo recoge via oportunidadId)
   await logSystemChange(
