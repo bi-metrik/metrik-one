@@ -439,3 +439,474 @@ export async function cambiarEtapaNegocio(
   revalidatePath('/negocios')
   return { error: null }
 }
+
+// ── Cambiar etapa con gate check ──────────────────────────────────────────────
+
+export async function cambiarEtapaNegocioConGate(
+  negocioId: string,
+  nuevaEtapaId: string,
+  motivoOverride?: string
+): Promise<{
+  error: string | null
+  bloquesPendientes?: Array<{ nombre: string; es_gate: boolean }>
+}> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Obtener etapa actual del negocio
+  const { data: negocioRaw } = await db(supabase)
+    .from('negocios')
+    .select('etapa_actual_id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  const negocio = negocioRaw as { etapa_actual_id: string | null } | null
+  if (!negocio) return { error: 'Negocio no encontrado' }
+
+  // Verificar gates si no hay motivo de override
+  if (!motivoOverride && negocio.etapa_actual_id) {
+    const { data: puedeAvanzar } = await db(supabase)
+      .rpc('puede_avanzar_etapa', {
+        p_negocio_id: negocioId,
+        p_etapa_id: negocio.etapa_actual_id,
+      })
+
+    if (!puedeAvanzar) {
+      // Devolver lista de bloques gate pendientes
+      const { data: bloquesPendientesRaw } = await db(supabase)
+        .from('bloque_configs')
+        .select(`
+          es_gate,
+          bloque_definitions(nombre)
+        `)
+        .eq('etapa_id', negocio.etapa_actual_id)
+        .eq('workspace_id', workspaceId)
+        .eq('es_gate', true)
+
+      const configIds = ((bloquesPendientesRaw ?? []) as Record<string, unknown>[]).map(
+        (b: Record<string, unknown>) => b.id as string
+      )
+
+      const bloquesPendientes = ((bloquesPendientesRaw ?? []) as Record<string, unknown>[]).map(
+        (b: Record<string, unknown>) => ({
+          nombre: ((b.bloque_definitions as { nombre: string } | null)?.nombre ?? 'Bloque'),
+          es_gate: b.es_gate as boolean,
+        })
+      )
+
+      return { error: 'gate_bloqueado', bloquesPendientes }
+    }
+  }
+
+  // Si hay override: log del motivo en activity (simplificado por ahora)
+  // En producción completa: insertar en activity_log con el motivo
+  const resultCambio = await cambiarEtapaNegocio(negocioId, nuevaEtapaId)
+  return resultCambio
+}
+
+// ── Marcar bloque completo ─────────────────────────────────────────────────────
+
+export async function marcarBloqueCompleto(
+  negocioBloqueId: string,
+  data: Record<string, unknown>
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  const { error: updateError } = await db(supabase)
+    .from('negocio_bloques')
+    .update({
+      estado: 'completo',
+      data,
+      completado_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', negocioBloqueId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
+
+  // ── Trigger auto-cobros si el bloque tiene esa configuración ─────────
+  // Buscar el bloque_config y su config_extra para detectar el trigger
+  const { data: bloqueRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select(`
+      negocio_id,
+      bloque_config_id,
+      bloque_configs(
+        config_extra,
+        bloque_definitions(tipo)
+      )
+    `)
+    .eq('id', negocioBloqueId)
+    .single()
+
+  if (bloqueRaw) {
+    const bloque = bloqueRaw as {
+      negocio_id: string
+      bloque_config_id: string
+      bloque_configs: {
+        config_extra: Record<string, unknown>
+        bloque_definitions: { tipo: string } | null
+      } | null
+    }
+
+    const tipo = bloque.bloque_configs?.bloque_definitions?.tipo
+    const configExtra = bloque.bloque_configs?.config_extra ?? {}
+    const triggers = (configExtra.triggers ?? []) as Array<{ event: string; action: string; params?: Record<string, unknown> }>
+
+    const autoCobros = triggers.find(t => t.action === 'auto_cobros')
+    if (tipo === 'datos' && autoCobros) {
+      const valorAnticipo = data.valor_anticipo as number | undefined
+      if (valorAnticipo) {
+        await autoCrearCobros(bloque.negocio_id, valorAnticipo)
+      }
+    }
+  }
+
+  return { error: null }
+}
+
+// ── Actualizar data del bloque sin marcar completo ────────────────────────────
+
+export async function actualizarBloqueData(
+  negocioBloqueId: string,
+  data: Record<string, unknown>
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  const { error: updateError } = await db(supabase)
+    .from('negocio_bloques')
+    .update({
+      data,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', negocioBloqueId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
+  return { error: null }
+}
+
+// ── Marcar ítem de checklist / cronograma ─────────────────────────────────────
+
+export async function marcarBloqueItem(
+  bloqueItemId: string,
+  completado: boolean,
+  linkUrl?: string
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  const payload: Record<string, unknown> = {
+    completado,
+    completado_at: completado ? new Date().toISOString() : null,
+  }
+  if (linkUrl !== undefined) payload.link_url = linkUrl
+
+  const { error: updateError } = await db(supabase)
+    .from('bloque_items')
+    .update(payload)
+    .eq('id', bloqueItemId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
+  return { error: null }
+}
+
+// ── Auto-crear cobros (anticipo + saldo) ──────────────────────────────────────
+
+export async function autoCrearCobros(
+  negocioId: string,
+  valorAnticipo: number
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Obtener precio del negocio
+  const { data: negocioRaw } = await db(supabase)
+    .from('negocios')
+    .select('precio_aprobado, precio_estimado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  const negocio = negocioRaw as { precio_aprobado: number | null; precio_estimado: number | null } | null
+  if (!negocio) return { error: 'Negocio no encontrado' }
+
+  const precioTotal = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
+  const saldo = precioTotal - valorAnticipo
+
+  const cobros = [
+    {
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      concepto: 'Anticipo',
+      monto: valorAnticipo,
+      tipo_cobro: 'anticipo',
+      estado_causacion: 'PENDIENTE',
+      fecha: new Date().toISOString().split('T')[0],
+      // Required by schema but irrelevant here; migration will make them nullable
+      factura_id: null,
+      proyecto_id: null,
+    },
+    {
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      concepto: 'Saldo',
+      monto: saldo,
+      tipo_cobro: 'saldo',
+      estado_causacion: 'PENDIENTE',
+      fecha: new Date().toISOString().split('T')[0],
+      factura_id: null,
+      proyecto_id: null,
+    },
+  ]
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: insertError } = await (supabase as any).from('cobros').insert(cobros)
+  if (insertError) return { error: (insertError as { message: string }).message }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
+}
+
+// ── Confirmar pago de cobro ───────────────────────────────────────────────────
+
+export async function confirmarPagoCobro(
+  cobroId: string,
+  referencia?: string,
+  valorParcial?: number
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const payload: Record<string, unknown> = {
+    estado_causacion: 'APROBADO',
+    notas: referencia ? `Ref: ${referencia}` : undefined,
+  }
+  if (valorParcial) payload.monto = valorParcial
+
+  const { error: updateError } = await supabase
+    .from('cobros')
+    .update(payload)
+    .eq('id', cobroId)
+    .eq('workspace_id', workspaceId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
+
+  revalidatePath('/negocios')
+  return { error: null }
+}
+
+// ── Actualizar aprobación de bloque ──────────────────────────────────────────
+
+export async function actualizarAprobacion(
+  negocioBloqueId: string,
+  data: {
+    aprobador_id?: string
+    estado?: 'pendiente' | 'aprobado' | 'rechazado'
+    comentario?: string
+    aprobado_at?: string
+  }
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  const isComplete = data.estado === 'aprobado'
+
+  const payload: Record<string, unknown> = {
+    data,
+    updated_at: new Date().toISOString(),
+  }
+  if (isComplete) {
+    payload.estado = 'completo'
+    payload.completado_at = new Date().toISOString()
+  }
+
+  const { error: updateError } = await db(supabase)
+    .from('negocio_bloques')
+    .update(payload)
+    .eq('id', negocioBloqueId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
+  return { error: null }
+}
+
+// ── Cargar datos completos para detalle con bloques ───────────────────────────
+
+export async function getNegocioDetalleCompleto(id: string): Promise<{
+  negocio: NegocioDetalle
+  bloques: Array<BloqueConfig & {
+    instancia: NegocioBloque | null
+    config_extra: Record<string, unknown>
+    items: Array<{
+      id: string
+      label: string
+      tipo: string
+      completado: boolean
+      completado_por: string | null
+      completado_at: string | null
+      link_url: string | null
+      imagen_data: string | null
+      orden: number
+    }>
+  }>
+  etapasLinea: EtapaNegocio[]
+  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  cobros: Array<{
+    id: string
+    concepto: string | null
+    monto: number
+    estado_causacion: string
+    tipo_cobro: string | null
+    fecha: string | null
+    notas: string | null
+  }>
+  cotizacion: {
+    id: string
+    consecutivo: string
+    estado: string
+    valor_total: number | null
+    created_at: string
+    oportunidad_id: string | null
+  } | null
+  resumenFinanciero: {
+    totalCobrado: number
+    porCobrar: number
+    costosEjecutados: number
+  }
+} | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return null
+
+  // Cargar negocio base
+  const base = await getNegocioDetalle(id)
+  if (!base) return null
+
+  // Cargar config_extra de los bloque_configs
+  const bloqueConfigIds = base.bloques.map(b => b.id)
+  let bloqueConfigsExtra: Record<string, Record<string, unknown>> = {}
+  if (bloqueConfigIds.length > 0) {
+    const { data: extras } = await db(supabase)
+      .from('bloque_configs')
+      .select('id, config_extra')
+      .in('id', bloqueConfigIds)
+    if (extras) {
+      for (const e of extras as Record<string, unknown>[]) {
+        bloqueConfigsExtra[e.id as string] = (e.config_extra ?? {}) as Record<string, unknown>
+      }
+    }
+  }
+
+  // Cargar bloque_items de todos los negocio_bloques
+  const negocioBloqueIds = base.bloques.map(b => b.instancia?.id).filter(Boolean) as string[]
+  let itemsByBloqueId: Record<string, unknown[]> = {}
+  if (negocioBloqueIds.length > 0) {
+    const { data: itemsData } = await db(supabase)
+      .from('bloque_items')
+      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden')
+      .in('negocio_bloque_id', negocioBloqueIds)
+      .order('orden', { ascending: true })
+    if (itemsData) {
+      for (const item of itemsData as Record<string, unknown>[]) {
+        const bid = item.negocio_bloque_id as string
+        if (!itemsByBloqueId[bid]) itemsByBloqueId[bid] = []
+        itemsByBloqueId[bid].push(item)
+      }
+    }
+  }
+
+  // Cargar profiles del workspace
+  const { data: profilesData } = await supabase
+    .from('profiles')
+    .select('id, full_name')
+    .eq('workspace_id', workspaceId)
+    .order('full_name', { ascending: true })
+
+  // Cargar cobros del negocio (db() para evitar type errors en columnas nuevas)
+  const { data: cobrosData } = await db(supabase)
+    .from('cobros')
+    .select('id, notas, monto, estado_causacion, tipo_cobro, fecha')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', id)
+    .order('created_at', { ascending: true })
+
+  // Cargar cotizacion (buscar por negocio a través de oportunidad vinculada)
+  // Por ahora: buscar en data del bloque cotizacion
+  const cotizacionBloque = base.bloques.find(
+    b => b.bloque_definitions?.tipo === 'cotizacion'
+  )
+  const cotizacionId = (cotizacionBloque?.instancia?.data as Record<string, unknown>)?.cotizacion_id as string | undefined
+  let cotizacion = null
+  if (cotizacionId) {
+    const { data: cotData } = await supabase
+      .from('cotizaciones')
+      .select('id, consecutivo, estado, valor_total, created_at, oportunidad_id')
+      .eq('id', cotizacionId)
+      .single()
+    cotizacion = cotData
+  }
+
+  // Calcular resumen financiero
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cobrosList = ((cobrosData ?? []) as any[]) as Array<{
+    monto: number
+    estado_causacion: string
+  }>
+  const totalCobrado = cobrosList
+    .filter(c => c.estado_causacion === 'CAUSADO' || c.estado_causacion === 'APROBADO')
+    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  const porCobrar = cobrosList
+    .filter(c => c.estado_causacion === 'PENDIENTE')
+    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+
+  const bloquesConExtra = base.bloques.map(b => ({
+    ...b,
+    config_extra: bloqueConfigsExtra[b.id] ?? {},
+    items: (itemsByBloqueId[b.instancia?.id ?? ''] ?? []) as Array<{
+      id: string
+      label: string
+      tipo: string
+      completado: boolean
+      completado_por: string | null
+      completado_at: string | null
+      link_url: string | null
+      imagen_data: string | null
+      orden: number
+    }>,
+  }))
+
+  return {
+    negocio: base.negocio,
+    bloques: bloquesConExtra,
+    etapasLinea: base.etapasLinea,
+    profiles: (profilesData ?? []).map(p => ({
+      id: p.id,
+      full_name: p.full_name,
+      email: null as string | null,
+    })),
+    cobros: ((cobrosData ?? []) as Record<string, unknown>[]).map(c => ({
+      id: c.id as string,
+      concepto: c.notas as string | null,
+      monto: c.monto as number,
+      estado_causacion: c.estado_causacion as string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tipo_cobro: (c as any).tipo_cobro as string | null,
+      fecha: c.fecha as string | null,
+      notas: c.notas as string | null,
+    })),
+    cotizacion: cotizacion as {
+      id: string
+      consecutivo: string
+      estado: string
+      valor_total: number | null
+      created_at: string
+      oportunidad_id: string | null
+    } | null,
+    resumenFinanciero: {
+      totalCobrado,
+      porCobrar,
+      costosEjecutados: 0, // Placeholder hasta migrar proyectos
+    },
+  }
+}

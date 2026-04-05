@@ -10,6 +10,8 @@ import {
   LayoutGrid,
   ChevronDown,
   MessageSquare,
+  AlertTriangle,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
@@ -18,7 +20,22 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocio } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate } from '../negocio-v2-actions'
+
+// Bloques renderers
+import BloqueEquipo from './bloques/BloqueEquipo'
+import BloqueDatos from './bloques/BloqueDatos'
+import type { DatosField } from './bloques/BloqueDatos'
+import BloqueChecklist from './bloques/BloqueChecklist'
+import BloqueChecklistSoporte from './bloques/BloqueChecklistSoporte'
+import BloqueDocumentos from './bloques/BloqueDocumentos'
+import type { DocumentoConfig } from './bloques/BloqueDocumentos'
+import BloqueCotizacion from './bloques/BloqueCotizacion'
+import BloqueCobros from './bloques/BloqueCobros'
+import BloqueAprobacion from './bloques/BloqueAprobacion'
+import BloqueCronograma from './bloques/BloqueCronograma'
+import BloqueResumenFinanciero from './bloques/BloqueResumenFinanciero'
+import BloqueEjecucion from './bloques/BloqueEjecucion'
 
 // ── Helpers de formato ───────────────────────────────────────────────────────
 
@@ -65,7 +82,6 @@ function BarraProgreso({
 }) {
   if (etapasLinea.length === 0) return null
 
-  // Filtrar etapas del stage actual
   const etapasStage = etapasLinea.filter(e => e.stage === stageActual)
   if (etapasStage.length === 0) return null
 
@@ -92,6 +108,97 @@ function BarraProgreso({
   )
 }
 
+// ── Modal de gates bloqueados ─────────────────────────────────────────────────
+
+function ModalGateBloqueado({
+  bloques,
+  onClose,
+  onOverride,
+}: {
+  bloques: Array<{ nombre: string; es_gate: boolean }>
+  onClose: () => void
+  onOverride: (motivo: string) => void
+}) {
+  const [motivo, setMotivo] = useState('')
+  const [showOverride, setShowOverride] = useState(false)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white shadow-xl">
+        <div className="flex items-start gap-3 border-b border-[#E5E7EB] p-4">
+          <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-[#1A1A1A]">Bloques gate pendientes</h3>
+            <p className="mt-0.5 text-xs text-[#6B7280]">
+              Los siguientes bloques deben completarse antes de avanzar:
+            </p>
+          </div>
+          <button onClick={onClose} className="shrink-0 text-[#6B7280] hover:text-[#1A1A1A]">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-2">
+          {bloques.map((b, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <span className="text-xs text-[#1A1A1A]">{b.nombre}</span>
+              <span className="ml-auto text-[10px] font-semibold text-amber-600">GATE</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="border-t border-[#E5E7EB] p-4 space-y-3">
+          {!showOverride ? (
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-[#1A1A1A] hover:bg-slate-50"
+              >
+                Volver
+              </button>
+              <button
+                onClick={() => setShowOverride(true)}
+                className="flex-1 rounded-lg border border-amber-200 bg-amber-50 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100"
+              >
+                Omitir gate (owner)
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="block text-[11px] font-medium text-[#6B7280]">
+                Motivo del override <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={motivo}
+                onChange={e => setMotivo(e.target.value)}
+                placeholder="Explica por qué omites los gates..."
+                rows={2}
+                className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowOverride(false)}
+                  className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-[#6B7280]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => motivo.trim() && onOverride(motivo)}
+                  disabled={!motivo.trim()}
+                  className="flex-1 rounded-lg bg-amber-500 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-40"
+                >
+                  Confirmar override
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Selector de etapa ─────────────────────────────────────────────────────────
 
 function SelectorEtapa({
@@ -105,6 +212,10 @@ function SelectorEtapa({
 }) {
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [gateModal, setGateModal] = useState<{
+    etapaId: string
+    bloques: Array<{ nombre: string; es_gate: boolean }>
+  } | null>(null)
 
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
@@ -113,8 +224,10 @@ function SelectorEtapa({
   function handleSelect(etapaId: string) {
     setOpen(false)
     startTransition(async () => {
-      const result = await cambiarEtapaNegocio(negocioId, etapaId)
-      if (result.error) {
+      const result = await cambiarEtapaNegocioConGate(negocioId, etapaId)
+      if (result.error === 'gate_bloqueado') {
+        setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [] })
+      } else if (result.error) {
         toast.error('Error al cambiar etapa: ' + result.error)
       } else {
         toast.success('Etapa actualizada')
@@ -122,56 +235,310 @@ function SelectorEtapa({
     })
   }
 
+  function handleOverride(etapaId: string, motivo: string) {
+    setGateModal(null)
+    startTransition(async () => {
+      const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo)
+      if (result.error) {
+        toast.error('Error: ' + result.error)
+      } else {
+        toast.success('Etapa actualizada con override')
+      }
+    })
+  }
+
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        disabled={isPending}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-      >
-        {isPending ? (
-          <span className="text-muted-foreground">Cambiando...</span>
-        ) : (
+    <>
+      <div className="relative">
+        <button
+          onClick={() => setOpen(!open)}
+          disabled={isPending}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+        >
+          {isPending ? (
+            <span className="text-muted-foreground">Cambiando...</span>
+          ) : (
+            <>
+              <span>{etapaActual?.nombre ?? 'Seleccionar etapa'}</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </>
+          )}
+        </button>
+
+        {open && (
           <>
-            <span>{etapaActual?.nombre ?? 'Seleccionar etapa'}</span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+              {etapasLinea.map(etapa => {
+                const isActive = etapa.id === etapaActualId
+                return (
+                  <button
+                    key={etapa.id}
+                    onClick={() => handleSelect(etapa.id)}
+                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-accent ${
+                      isActive ? 'font-semibold text-primary' : 'text-foreground'
+                    }`}
+                  >
+                    <StageBadge stage={etapa.stage} />
+                    <span className="flex-1 truncate">{etapa.nombre}</span>
+                    {isActive && <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />}
+                  </button>
+                )
+              })}
+            </div>
           </>
         )}
-      </button>
+      </div>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
-            {etapasLinea.map(etapa => {
-              const isActive = etapa.id === etapaActualId
-              return (
-                <button
-                  key={etapa.id}
-                  onClick={() => handleSelect(etapa.id)}
-                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-accent ${
-                    isActive ? 'font-semibold text-primary' : 'text-foreground'
-                  }`}
-                >
-                  <StageBadge stage={etapa.stage} />
-                  <span className="flex-1 truncate">{etapa.nombre}</span>
-                  {isActive && <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />}
-                </button>
-              )
-            })}
-          </div>
-        </>
+      {gateModal && (
+        <ModalGateBloqueado
+          bloques={gateModal.bloques}
+          onClose={() => setGateModal(null)}
+          onOverride={motivo => handleOverride(gateModal.etapaId, motivo)}
+        />
       )}
-    </div>
+    </>
   )
+}
+
+// ── Renderer de bloque según tipo ─────────────────────────────────────────────
+
+interface BloqueExtendido extends BloqueConfig {
+  instancia: NegocioBloque | null
+  config_extra: Record<string, unknown>
+  items: Array<{
+    id: string
+    label: string
+    tipo: string
+    completado: boolean
+    completado_por: string | null
+    completado_at: string | null
+    link_url: string | null
+    imagen_data: string | null
+    orden: number
+  }>
+}
+
+function BloqueRenderer({
+  bloque,
+  negocioId,
+  profiles,
+  cobros,
+  cotizacion,
+  resumenFinanciero,
+}: {
+  bloque: BloqueExtendido
+  negocioId: string
+  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  cobros: Array<{
+    id: string
+    concepto: string | null
+    monto: number
+    estado_causacion: string
+    tipo_cobro: string | null
+    fecha: string | null
+    notas: string | null
+  }>
+  cotizacion: {
+    id: string
+    consecutivo: string
+    estado: string
+    valor_total: number | null
+    created_at: string
+    oportunidad_id: string | null
+  } | null
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+}) {
+  const tipo = bloque.bloque_definitions?.tipo ?? ''
+  const modo = bloque.estado
+  const instanciaId = bloque.instancia?.id ?? ''
+  const configExtra = bloque.config_extra
+  const profilesTyped = profiles.map(p => ({
+    id: p.id,
+    full_name: p.full_name,
+    email: p.email ?? undefined,
+  }))
+
+  switch (tipo) {
+    case 'equipo':
+      return (
+        <BloqueEquipo
+          negocioId={negocioId}
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          profiles={profilesTyped}
+        />
+      )
+
+    case 'datos': {
+      const fields = (configExtra.fields ?? []) as DatosField[]
+      return (
+        <BloqueDatos
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          fields={fields}
+        />
+      )
+    }
+
+    case 'checklist': {
+      const itemTemplates = (configExtra.items ?? []) as { label: string; tipo: string }[]
+      const items = bloque.items.map(i => ({
+        id: i.id,
+        label: i.label,
+        completado: i.completado,
+        completado_por: i.completado_por,
+        completado_at: i.completado_at,
+        link_url: i.link_url,
+      }))
+      return (
+        <BloqueChecklist
+          negocioId={negocioId}
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          itemTemplates={itemTemplates}
+          initialItems={items}
+        />
+      )
+    }
+
+    case 'checklist_soporte': {
+      const itemTemplates = (configExtra.items ?? []) as { label: string; tipo: string }[]
+      const items = bloque.items.map(i => ({
+        id: i.id,
+        label: i.label,
+        completado: i.completado,
+        completado_por: i.completado_por,
+        completado_at: i.completado_at,
+        link_url: i.link_url,
+      }))
+      return (
+        <BloqueChecklistSoporte
+          negocioId={negocioId}
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          itemTemplates={itemTemplates}
+          initialItems={items}
+        />
+      )
+    }
+
+    case 'documentos': {
+      const documentos = (configExtra.documentos ?? []) as DocumentoConfig[]
+      return (
+        <BloqueDocumentos
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          documentos={documentos}
+        />
+      )
+    }
+
+    case 'cotizacion':
+      return (
+        <BloqueCotizacion
+          negocioId={negocioId}
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          cotizacion={cotizacion}
+        />
+      )
+
+    case 'cobros':
+      return (
+        <BloqueCobros
+          negocioId={negocioId}
+          cobros={cobros}
+        />
+      )
+
+    case 'aprobacion':
+      return (
+        <BloqueAprobacion
+          negocioId={negocioId}
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          profiles={profilesTyped}
+        />
+      )
+
+    case 'cronograma': {
+      const items = bloque.items.map(i => ({
+        id: i.id,
+        label: i.label,
+        completado: i.completado,
+        completado_por: i.completado_por,
+        completado_at: i.completado_at,
+        link_url: i.link_url,
+        fecha_inicio: (i as Record<string, unknown>).fecha_inicio as string | null | undefined,
+        fecha_fin: (i as Record<string, unknown>).fecha_fin as string | null | undefined,
+      }))
+      return (
+        <BloqueCronograma
+          negocioId={negocioId}
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          initialItems={items}
+          requireAllDates={(configExtra.require_all_dates as boolean) ?? false}
+          profiles={profilesTyped}
+        />
+      )
+    }
+
+    case 'resumen_financiero':
+      return <BloqueResumenFinanciero data={resumenFinanciero} />
+
+    case 'ejecucion':
+      return <BloqueEjecucion negocioId={negocioId} hasProyecto={false} />
+
+    default:
+      return (
+        <p className="text-xs text-[#6B7280] italic">
+          Tipo de bloque &ldquo;{tipo}&rdquo; no soportado aún
+        </p>
+      )
+  }
 }
 
 // ── Card de bloque ────────────────────────────────────────────────────────────
 
 function BloqueCard({
   bloque,
+  negocioId,
+  profiles,
+  cobros,
+  cotizacion,
+  resumenFinanciero,
 }: {
-  bloque: BloqueConfig & { instancia: NegocioBloque | null }
+  bloque: BloqueExtendido
+  negocioId: string
+  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  cobros: Array<{
+    id: string
+    concepto: string | null
+    monto: number
+    estado_causacion: string
+    tipo_cobro: string | null
+    fecha: string | null
+    notas: string | null
+  }>
+  cotizacion: {
+    id: string
+    consecutivo: string
+    estado: string
+    valor_total: number | null
+    created_at: string
+    oportunidad_id: string | null
+  } | null
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -179,86 +546,152 @@ function BloqueCard({
   const estado = instancia?.estado ?? 'pendiente'
   const isCompleto = estado === 'completo'
   const isGate = bloque.es_gate
+  const [expanded, setExpanded] = useState(true)
 
   return (
     <div
-      className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+      className={`rounded-xl border transition-colors ${
         isGate
           ? 'border-amber-200 bg-amber-50/50 dark:border-amber-900/30 dark:bg-amber-950/10'
           : 'border-border bg-card'
       }`}
     >
-      {/* Estado icon — solo para bloques de registro */}
-      {!isVisualization && (
+      {/* Header del bloque */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-start gap-3 p-3 text-left"
+      >
         <div className="shrink-0 mt-0.5">
-          {isCompleto ? (
+          {isVisualization ? (
+            <LayoutGrid className="h-4 w-4 text-muted-foreground/40" />
+          ) : isCompleto ? (
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           ) : (
             <Circle className="h-4 w-4 text-muted-foreground/40" />
           )}
         </div>
-      )}
 
-      {isVisualization && (
-        <div className="shrink-0 mt-0.5">
-          <LayoutGrid className="h-4 w-4 text-muted-foreground/40" />
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-medium leading-tight ${isCompleto && !isVisualization ? 'text-muted-foreground' : 'text-foreground'}`}>
+            {def?.nombre ?? 'Bloque'}
+          </p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            {def?.tipo && (
+              <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wide">
+                {def.tipo}
+              </span>
+            )}
+            {isGate && (
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                GATE
+              </span>
+            )}
+            {isVisualization && (
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800">
+                Visualización
+              </span>
+            )}
+          </div>
         </div>
-      )}
 
-      <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium leading-tight ${isCompleto ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-          {def?.nombre ?? 'Bloque'}
-        </p>
-        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-          {def?.tipo && (
-            <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wide">
-              {def.tipo}
+        <div className="flex items-center gap-2 shrink-0">
+          {!isVisualization && (
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                isCompleto
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {isCompleto ? 'Completo' : 'Pendiente'}
             </span>
           )}
-          {isGate && (
-            <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-              GATE
-            </span>
-          )}
-          {isVisualization && (
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800">
-              Visualización
-            </span>
-          )}
+          <ChevronRight
+            className={`h-3.5 w-3.5 text-muted-foreground/40 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
         </div>
-      </div>
+      </button>
 
-      {!isVisualization && (
-        <div className="shrink-0">
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-              isCompleto
-                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                : 'bg-muted text-muted-foreground'
-            }`}
-          >
-            {isCompleto ? 'Completo' : 'Pendiente'}
-          </span>
+      {/* Contenido del bloque */}
+      {expanded && (
+        <div className="border-t border-border/50 px-3 py-3">
+          {!instancia ? (
+            <p className="text-xs text-muted-foreground italic">
+              Sin instancia creada para este bloque
+            </p>
+          ) : (
+            <BloqueRenderer
+              bloque={bloque}
+              negocioId={negocioId}
+              profiles={profiles}
+              cobros={cobros}
+              cotizacion={cotizacion}
+              resumenFinanciero={resumenFinanciero}
+            />
+          )}
         </div>
       )}
     </div>
   )
 }
 
-// ── Componente principal ──────────────────────────────────────────────────────
+// ── Tipos Props ────────────────────────────────────────────────────────────────
 
 interface Props {
   negocio: NegocioDetalle
-  bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }>
+  bloques: Array<BloqueConfig & {
+    instancia: NegocioBloque | null
+    config_extra: Record<string, unknown>
+    items: Array<{
+      id: string
+      label: string
+      tipo: string
+      completado: boolean
+      completado_por: string | null
+      completado_at: string | null
+      link_url: string | null
+      imagen_data: string | null
+      orden: number
+    }>
+  }>
   etapasLinea: EtapaNegocio[]
+  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  cobros: Array<{
+    id: string
+    concepto: string | null
+    monto: number
+    estado_causacion: string
+    tipo_cobro: string | null
+    fecha: string | null
+    notas: string | null
+  }>
+  cotizacion: {
+    id: string
+    consecutivo: string
+    estado: string
+    valor_total: number | null
+    created_at: string
+    oportunidad_id: string | null
+  } | null
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
 }
 
-export default function NegocioDetailClient({ negocio, bloques, etapasLinea }: Props) {
+// ── Componente principal ──────────────────────────────────────────────────────
+
+export default function NegocioDetailClient({
+  negocio,
+  bloques,
+  etapasLinea,
+  profiles,
+  cobros,
+  cotizacion,
+  resumenFinanciero,
+}: Props) {
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const etapaActual = negocio.etapas_negocio
-
-  // ID corto: últimos 6 chars del UUID
   const idCorto = negocio.id.slice(-6).toUpperCase()
+
+  const bloquesExtendidos = bloques as BloqueExtendido[]
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-4">
@@ -348,7 +781,7 @@ export default function NegocioDetailClient({ negocio, bloques, etapasLinea }: P
             )}
           </div>
 
-          {bloques.length === 0 ? (
+          {bloquesExtendidos.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border p-8 text-center">
               <p className="text-sm text-muted-foreground">
                 Sin bloques configurados para esta etapa
@@ -360,8 +793,16 @@ export default function NegocioDetailClient({ negocio, bloques, etapasLinea }: P
             </div>
           ) : (
             <div className="space-y-2">
-              {bloques.map(bloque => (
-                <BloqueCard key={bloque.id} bloque={bloque} />
+              {bloquesExtendidos.map(bloque => (
+                <BloqueCard
+                  key={bloque.id}
+                  bloque={bloque}
+                  negocioId={negocio.id}
+                  profiles={profiles}
+                  cobros={cobros}
+                  cotizacion={cotizacion}
+                  resumenFinanciero={resumenFinanciero}
+                />
               ))}
             </div>
           )}

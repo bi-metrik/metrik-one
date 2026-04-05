@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation'
-import Link from 'next/link'
-import { getNegocioDetalle } from '../negocio-v2-actions'
+import { getNegocioDetalleCompleto } from '../negocio-v2-actions'
 import NegocioDetailClient from './negocio-detail-client'
 
 interface Props {
@@ -9,7 +8,7 @@ interface Props {
 
 export default async function NegocioDetailPage({ params }: Props) {
   const { id } = await params
-  const data = await getNegocioDetalle(id)
+  const data = await getNegocioDetalleCompleto(id)
 
   if (!data) notFound()
 
@@ -18,6 +17,10 @@ export default async function NegocioDetailPage({ params }: Props) {
       negocio={data.negocio}
       bloques={data.bloques}
       etapasLinea={data.etapasLinea}
+      profiles={data.profiles}
+      cobros={data.cobros}
+      cotizacion={data.cotizacion}
+      resumenFinanciero={data.resumenFinanciero}
     />
   )
 }
