@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { CheckCircle, ArrowRight } from 'lucide-react'
 import DocUploadSlot, { SlotState } from './doc-upload-slot'
 import {
   getUploadUrlDocumentoVe,
@@ -14,6 +15,7 @@ import {
   type VeDocumentoState,
   type CamposVehiculo,
 } from '@/lib/actions/ve-documentos'
+import { ganarOportunidad } from '../actions-v2'
 import { createClient } from '@/lib/supabase/client'
 
 // ── Definicion de documentos ───────────────────────────────
@@ -32,8 +34,18 @@ const DOCS_CONDICIONALES: { slug: DocumentoSlug; label: string }[] = [
 
 // ── Props ──────────────────────────────────────────────────
 
+// Campos OCR críticos que deben estar llenos para habilitar el botón
+const CAMPOS_OCR_CRITICOS: (keyof CamposVehiculo)[] = [
+  'nombre_propietario',
+  'numero_identificacion',
+  'marca',
+  'linea',
+  'numero_cus',
+]
+
 interface Props {
   oportunidadId: string
+  etapaActual: string | null
   vehiculoEnUpme: boolean | null
   documentosActuales: VeDocumentoState[]
   camposVehiculo: CamposVehiculo | null
@@ -175,6 +187,7 @@ function CamposVehiculoForm({ oportunidadId, campos, onChange, highlighted }: Ca
 
 export default function VeDocumentosSection({
   oportunidadId,
+  etapaActual,
   vehiculoEnUpme: initialVehiculoEnUpme,
   documentosActuales,
   camposVehiculo: initialCamposVehiculo,
@@ -184,6 +197,7 @@ export default function VeDocumentosSection({
   // Estado vehiculo_en_upme
   const [vehiculoEnUpme, setVehiculoEnUpme] = useState<boolean | null>(initialVehiculoEnUpme)
   const [upmeTransition, startUpmeTransition] = useTransition()
+  const [completandoDocs, startCompletandoDocs] = useTransition()
 
   // Estado de cada slot: mapa slug → estado
   const buildInitialSlotStates = (): Record<DocumentoSlug, SlotState> => {
@@ -318,6 +332,40 @@ export default function VeDocumentosSection({
     }
   }
 
+  // ── Lógica botón "Documentos completos" ────────────────────
+
+  // Documentos base requeridos siempre
+  const DOCS_BASE: DocumentoSlug[] = ['factura', 'cedula', 'rut', 'soporte_upme']
+  const docsBaseCompletos = DOCS_BASE.every(s => slotStates[s] === 'uploaded')
+
+  // Documentos condicionales cuando vehiculo NO está en UPME
+  const docsCondicionalesCompletos = vehiculoEnUpme !== false ||
+    DOCS_CONDICIONALES.every(d => slotStates[d.slug] === 'uploaded')
+
+  // Campos OCR críticos llenos
+  const camposOcrCompletos = camposVehiculo !== null &&
+    CAMPOS_OCR_CRITICOS.every(k => {
+      const val = camposVehiculo[k]
+      return val !== undefined && val !== null && String(val).trim().length > 0
+    })
+
+  const puedeCompletarDocs = docsBaseCompletos && docsCondicionalesCompletos && camposOcrCompletos
+  const mostrarBotonCompletar = etapaActual === 'recoleccion_docs'
+
+  const handleDocumentosCompletos = () => {
+    startCompletandoDocs(async () => {
+      const res = await ganarOportunidad(oportunidadId)
+      if (res.success) {
+        toast.success('¡Documentos completos! Proyecto VE creado.')
+        router.refresh()
+      } else if (res.error === 'fiscal_incompleto') {
+        toast.error('Completa el perfil fiscal antes de continuar')
+      } else {
+        toast.error(res.error ?? 'Error al crear el proyecto')
+      }
+    })
+  }
+
   // ── Render ─────────────────────────────────────────────────
 
   return (
@@ -429,6 +477,39 @@ export default function VeDocumentosSection({
             highlighted={justProcessed}
           />
         </>
+      )}
+
+      {/* Botón "Documentos completos → En curso" */}
+      {mostrarBotonCompletar && (
+        <div className="border-t pt-3">
+          <button
+            type="button"
+            onClick={handleDocumentosCompletos}
+            disabled={!puedeCompletarDocs || completandoDocs}
+            className={`w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all ${
+              puedeCompletarDocs
+                ? 'bg-primary text-primary-foreground hover:opacity-90'
+                : 'bg-muted text-muted-foreground cursor-not-allowed'
+            }`}
+          >
+            {completandoDocs ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : puedeCompletarDocs ? (
+              <CheckCircle className="h-4 w-4" />
+            ) : null}
+            Documentos completos
+            {!completandoDocs && puedeCompletarDocs && <ArrowRight className="h-4 w-4" />}
+          </button>
+          {!puedeCompletarDocs && (
+            <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
+              {!docsBaseCompletos
+                ? 'Sube los 4 documentos base primero'
+                : !docsCondicionalesCompletos
+                ? 'Sube también ficha técnica y cert. emisiones'
+                : 'Completa los datos del vehículo (campos AI)'}
+            </p>
+          )}
+        </div>
       )}
     </div>
   )

@@ -301,6 +301,11 @@ export async function perderOportunidad(id: string, razon: string) {
 /**
  * Hard gate: ganar oportunidad. Si la empresa no tiene perfil fiscal completo,
  * se puede pasar los datos fiscales faltantes y se hace UPDATE atomico.
+ *
+ * Para oportunidades VE (custom_data.linea_negocio === 've'):
+ * - Se omite el gate fiscal (el RUT se carga durante la recolección de docs)
+ * - El proyecto se crea con custom_data.estado_ve según vehiculo_en_upme
+ * - Se auto-crea cotización flash si no existe ninguna
  */
 export async function ganarOportunidad(id: string, fiscalData?: {
   empresa_id: string
@@ -327,46 +332,50 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   const empresaId = opp.empresa_id
   if (!empresaId) return { success: false, error: 'Sin empresa asociada' }
 
-  // If fiscal data provided, update empresa first
-  if (fiscalData) {
-    const updates: Record<string, unknown> = {}
-    if (fiscalData.numero_documento) updates.numero_documento = fiscalData.numero_documento
-    if (fiscalData.tipo_documento) updates.tipo_documento = fiscalData.tipo_documento
-    if (fiscalData.tipo_persona) updates.tipo_persona = fiscalData.tipo_persona
-    if (fiscalData.regimen_tributario) updates.regimen_tributario = fiscalData.regimen_tributario
-    if (fiscalData.gran_contribuyente !== undefined) updates.gran_contribuyente = fiscalData.gran_contribuyente
-    if (fiscalData.agente_retenedor !== undefined) updates.agente_retenedor = fiscalData.agente_retenedor
-    if (fiscalData.autorretenedor !== undefined) updates.autorretenedor = fiscalData.autorretenedor
+  const oppCustomData = (opp.custom_data as Record<string, unknown>) ?? {}
+  const esVe = oppCustomData.linea_negocio === 've'
 
-    if (Object.keys(updates).length > 0) {
-      // Update empresa fields + recalculate estado_fiscal (D89)
-      const { data: currentEmpresa } = await supabase
-        .from('empresas')
-        .select('numero_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor')
-        .eq('id', empresaId)
-        .single()
+  if (!esVe) {
+    // Flujo estándar: gate fiscal obligatorio
+    // If fiscal data provided, update empresa first
+    if (fiscalData) {
+      const updates: Record<string, unknown> = {}
+      if (fiscalData.numero_documento) updates.numero_documento = fiscalData.numero_documento
+      if (fiscalData.tipo_documento) updates.tipo_documento = fiscalData.tipo_documento
+      if (fiscalData.tipo_persona) updates.tipo_persona = fiscalData.tipo_persona
+      if (fiscalData.regimen_tributario) updates.regimen_tributario = fiscalData.regimen_tributario
+      if (fiscalData.gran_contribuyente !== undefined) updates.gran_contribuyente = fiscalData.gran_contribuyente
+      if (fiscalData.agente_retenedor !== undefined) updates.agente_retenedor = fiscalData.agente_retenedor
+      if (fiscalData.autorretenedor !== undefined) updates.autorretenedor = fiscalData.autorretenedor
 
-      // Merge current + new to compute estado_fiscal
-      const merged = { ...currentEmpresa, ...updates }
-      const fields = ['numero_documento', 'tipo_persona', 'regimen_tributario', 'gran_contribuyente', 'agente_retenedor', 'autorretenedor'] as const
-      const filled = fields.filter(f => merged[f] != null).length
-      updates.estado_fiscal = filled === 0 ? 'pendiente' : filled === 6 ? 'verificado' : 'parcial'
+      if (Object.keys(updates).length > 0) {
+        const { data: currentEmpresa } = await supabase
+          .from('empresas')
+          .select('numero_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor')
+          .eq('id', empresaId)
+          .single()
 
-      const { error: updateError } = await supabase
-        .from('empresas')
-        .update(updates)
-        .eq('id', empresaId)
-      if (updateError) return { success: false, error: updateError.message }
+        const merged = { ...currentEmpresa, ...updates }
+        const fields = ['numero_documento', 'tipo_persona', 'regimen_tributario', 'gran_contribuyente', 'agente_retenedor', 'autorretenedor'] as const
+        const filled = fields.filter(f => merged[f] != null).length
+        updates.estado_fiscal = filled === 0 ? 'pendiente' : filled === 6 ? 'verificado' : 'parcial'
+
+        const { error: updateError } = await supabase
+          .from('empresas')
+          .update(updates)
+          .eq('id', empresaId)
+        if (updateError) return { success: false, error: updateError.message }
+      }
     }
-  }
 
-  // Check fiscal completeness via DB function
-  const { data: fiscalCheck } = await supabase.rpc('check_perfil_fiscal_completo', {
-    p_empresa_id: empresaId,
-  })
+    // Check fiscal completeness via DB function
+    const { data: fiscalCheck } = await supabase.rpc('check_perfil_fiscal_completo', {
+      p_empresa_id: empresaId,
+    })
 
-  if (!fiscalCheck) {
-    return { success: false, error: 'fiscal_incompleto', needsFiscal: true }
+    if (!fiscalCheck) {
+      return { success: false, error: 'fiscal_incompleto', needsFiscal: true }
+    }
   }
 
   // Get the workspace ID (we already have supabase from above)
@@ -442,13 +451,57 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     await logSystemChange(wsId, 'oportunidad', id, 'etapa', currentOpp?.etapa ?? null, 'ganada', null)
   }
 
+  // ── Lógica VE: calcular estado_ve inicial y auto-crear cotización si falta ──
+  let veCotizacionId: string | null = cotizacion?.id ?? null
+  let veCustomData: Record<string, unknown> | null = null
+
+  if (esVe) {
+    // Estado inicial depende de vehiculo_en_upme
+    const vehiculoEnUpme = oppCustomData.vehiculo_en_upme
+    const estadoVeInicial = vehiculoEnUpme === false ? 'por_inclusion' : 'por_radicar'
+
+    veCustomData = {
+      linea_negocio: 've',
+      estado_ve: estadoVeInicial,
+    }
+
+    // Auto-crear cotización flash si no existe ninguna
+    if (!veCotizacionId) {
+      // Obtener consecutivo via RPC
+      const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
+        p_workspace_id: wsId,
+      })
+      const consecutivo = (consecutivoRaw as string | null) ?? `COT-${new Date().getFullYear()}-0000`
+
+      const { data: cotVe, error: cotVeErr } = await supabase
+        .from('cotizaciones')
+        .insert({
+          workspace_id: wsId,
+          oportunidad_id: id,
+          consecutivo,
+          codigo: '',
+          modo: 'flash',
+          descripcion: 'Gestión de trámite VE/HEV/PHEV',
+          valor_total: opp.valor_estimado ?? 0,
+          estado: 'aceptada',
+        })
+        .select('id')
+        .single()
+
+      if (!cotVeErr && cotVe) {
+        veCotizacionId = cotVe.id
+        presupuestoTotal = opp.valor_estimado ?? 0
+      }
+    }
+  }
+
   // Create proyecto with full data
   const { data: proyecto, error: projError } = await supabase
     .from('proyectos')
     .insert({
       workspace_id: wsId,
       oportunidad_id: id,
-      cotizacion_id: cotizacion?.id ?? null,
+      cotizacion_id: veCotizacionId,
       empresa_id: empresaId,
       contacto_id: opp.contacto_id,
       responsable_comercial_id: opp.responsable_id,
@@ -471,7 +524,8 @@ export async function ganarOportunidad(id: string, fiscalData?: {
   }
 
   // Inherit custom_data via field mappings (oportunidad → proyecto)
-  const oppCustomData = (opp.custom_data as Record<string, unknown>) ?? {}
+  // Para VE, partir de veCustomData como base
+  const baseCustomData = veCustomData ?? {}
   if (Object.keys(oppCustomData).length > 0) {
     const { data: mappings } = await supabase
       .from('custom_field_mappings')
@@ -481,31 +535,38 @@ export async function ganarOportunidad(id: string, fiscalData?: {
       .eq('destino_entidad', 'proyecto')
       .eq('activo', true)
 
+    const proyCustomData: Record<string, unknown> = { ...baseCustomData }
     if (mappings && mappings.length > 0) {
-      const proyCustomData: Record<string, unknown> = {}
       for (const m of mappings) {
         const val = oppCustomData[m.origen_slug]
         if (val !== undefined && val !== null) {
           proyCustomData[m.destino_slug] = val
         }
       }
-      if (Object.keys(proyCustomData).length > 0) {
-        await supabase
-          .from('proyectos')
-          .update({ custom_data: proyCustomData as unknown as Record<string, never> })
-          .eq('id', proyecto.id)
-      }
     }
+    if (Object.keys(proyCustomData).length > 0) {
+      await supabase
+        .from('proyectos')
+        .update({ custom_data: proyCustomData as unknown as Record<string, never> })
+        .eq('id', proyecto.id)
+    }
+  } else if (Object.keys(baseCustomData).length > 0) {
+    // VE sin mappings: igual guardar el estado_ve
+    await supabase
+      .from('proyectos')
+      .update({ custom_data: baseCustomData as unknown as Record<string, never> })
+      .eq('id', proyecto.id)
   }
 
   // Create proyecto_rubros from cotización items (with full detail inheritance)
-  if (cotizacion) {
-    await syncRubrosCotizacion(supabase, proyecto.id, cotizacion.id, cotizacion.modo, presupuestoTotal)
+  if (veCotizacionId) {
+    await syncRubrosCotizacion(supabase, proyecto.id, veCotizacionId, esVe ? 'flash' : (cotizacion?.modo ?? null), presupuestoTotal)
   }
 
   revalidatePath('/pipeline')
   revalidatePath(`/pipeline/${id}`)
   revalidatePath('/proyectos')
+  revalidatePath('/negocios')
   return { success: true, proyectoId: proyecto.id }
 }
 

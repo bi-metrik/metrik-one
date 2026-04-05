@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen, Flag } from 'lucide-react'
 import type { NegocioItem } from './negocios-actions'
 
 function openFolder(url: string, e: React.MouseEvent) {
@@ -14,6 +14,8 @@ const PILL_COLORS: Record<string, string> = {
   green: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   blue: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   slate: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+  indigo: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
+  purple: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
 }
 
 const BAR_COLORS = (pct: number) =>
@@ -22,6 +24,16 @@ const BAR_COLORS = (pct: number) =>
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
+function calcVeBanderita(negocio: NegocioItem): boolean {
+  if (negocio.tipo !== 'proyecto' || !negocio.customData) return false
+  const cd = negocio.customData
+  return (
+    cd.estado_ve === 'por_radicar' &&
+    cd.viene_de_inclusion === true &&
+    !cd.numero_radicado_certificacion
+  )
+}
+
 export default function NegocioCard({ negocio }: { negocio: NegocioItem }) {
   const href = negocio.tipo === 'oportunidad'
     ? `/pipeline/${negocio.id}`
@@ -29,6 +41,7 @@ export default function NegocioCard({ negocio }: { negocio: NegocioItem }) {
 
   const pct = negocio.presupuestoConsumidoPct ?? null
   const pillClass = PILL_COLORS[negocio.colorStage] ?? PILL_COLORS.slate
+  const showVeBanderita = calcVeBanderita(negocio)
 
   return (
     <Link href={href} className="block rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-shadow">
@@ -39,6 +52,14 @@ export default function NegocioCard({ negocio }: { negocio: NegocioItem }) {
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${pillClass}`}>
               {negocio.etiquetaStage}
             </span>
+            {showVeBanderita && (
+              <span
+                title="Vehículo pendiente de radicación (incluido en UPME)"
+                className="inline-flex items-center text-orange-500"
+              >
+                <Flag className="h-3 w-3 fill-current" />
+              </span>
+            )}
           </div>
           <p className="font-semibold text-sm leading-tight truncate">{negocio.nombre}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{negocio.cliente}</p>

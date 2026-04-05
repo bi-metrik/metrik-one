@@ -548,6 +548,7 @@ export default function OportunidadDetail({
       {(oportunidad.custom_data as Record<string, unknown> | null)?.linea_negocio === 've' && (
         <VeDocumentosSection
           oportunidadId={oportunidad.id}
+          etapaActual={oportunidad.etapa}
           vehiculoEnUpme={veVehiculoEnUpme}
           documentosActuales={veDocumentos}
           camposVehiculo={veCamposVehiculo}

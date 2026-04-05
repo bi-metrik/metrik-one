@@ -23,6 +23,26 @@ export type NegocioItem = {
   diasSinActividad: number
   diasEnStage: number
   carpetaUrl: string | null
+  customData: Record<string, unknown> | null
+}
+
+// Estados operativos VE
+const VE_ESTADO_LABELS: Record<string, string> = {
+  por_inclusion: 'POR INCLUSION',
+  por_radicar: 'POR RADICAR',
+  por_certificar: 'POR CERTIFICAR',
+  certificado: 'CERTIFICADO',
+  por_cobrar: 'POR COBRAR',
+  cerrado: 'CERRADO',
+}
+
+const VE_ESTADO_COLOR: Record<string, string> = {
+  por_inclusion: 'indigo',
+  por_radicar: 'amber',
+  por_certificar: 'purple',
+  certificado: 'green',
+  por_cobrar: 'blue',
+  cerrado: 'slate',
 }
 
 export async function getNegocios(): Promise<{
@@ -56,11 +76,25 @@ export async function getNegocios(): Promise<{
     .order('updated_at', { ascending: false })
 
   // Fetch proyectos (todos menos cancelados — estados reales: en_ejecucion, pausado, entregado, cerrado)
+  // Hacemos join directo a proyectos para obtener custom_data (la vista no lo expone)
   const { data: proyectos } = await supabase
     .from('v_proyecto_financiero')
     .select('proyecto_id, nombre, estado, presupuesto_total, costo_acumulado, presupuesto_consumido_pct, empresa_nombre, contacto_nombre, codigo, oportunidad_id, oportunidad_codigo, responsable_nombre, ultima_actividad, updated_at, estado_changed_at, carpeta_url')
     .eq('workspace_id', workspaceId)
     .order('updated_at', { ascending: false })
+
+  // Obtener custom_data de proyectos VE (estado_ve)
+  const proyectoIds = (proyectos ?? []).map(p => p.proyecto_id).filter(Boolean) as string[]
+  let customDataMap: Record<string, Record<string, unknown>> = {}
+  if (proyectoIds.length > 0) {
+    const { data: proyectosExtra } = await supabase
+      .from('proyectos')
+      .select('id, custom_data')
+      .in('id', proyectoIds)
+    for (const p of (proyectosExtra ?? [])) {
+      if (p.custom_data) customDataMap[p.id] = p.custom_data as Record<string, unknown>
+    }
+  }
 
   const propuestas: NegocioItem[] = (opps ?? []).map(o => {
     const empresa = (o.empresas as { nombre: string } | null)?.nombre
@@ -87,6 +121,7 @@ export async function getNegocios(): Promise<{
       diasSinActividad,
       diasEnStage: calcDiasSinActividad((o.etapa_changed_at ?? o.updated_at) as string | null),
       carpetaUrl: o.carpeta_url ?? null,
+      customData: null,
     }
   })
 
@@ -96,8 +131,16 @@ export async function getNegocios(): Promise<{
 
   for (const p of (proyectos ?? [])) {
     const estado = p.estado ?? 'cerrado'
+    const cd = customDataMap[p.proyecto_id ?? ''] ?? null
+    const estadoVe = cd?.estado_ve as string | undefined
     const stage = stageProyecto(estado)
     const codigoBase = (p.oportunidad_codigo ?? p.codigo ?? '') as string
+
+    // Para proyectos VE, usar etiqueta y color del estado_ve
+    const esVe = !!estadoVe
+    const etiqueta = esVe ? (VE_ESTADO_LABELS[estadoVe] ?? estadoVe.toUpperCase()) : etiquetaProyecto(estado)
+    const color = esVe ? (VE_ESTADO_COLOR[estadoVe] ?? 'slate') : colorProyecto(estado)
+
     const item: NegocioItem = {
       id: p.proyecto_id ?? '',
       tipo: 'proyecto',
@@ -107,8 +150,8 @@ export async function getNegocios(): Promise<{
       cliente: (p.empresa_nombre ?? p.contacto_nombre) ?? 'Sin cliente',
       valor: p.presupuesto_total ?? 0,
       stage,
-      etiquetaStage: etiquetaProyecto(estado),
-      colorStage: colorProyecto(estado),
+      etiquetaStage: etiqueta,
+      colorStage: color,
       presupuestoConsumidoPct: p.presupuesto_consumido_pct ?? null,
       presupuestoTotal: p.presupuesto_total ?? null,
       costoAcumulado: p.costo_acumulado ?? null,
@@ -117,6 +160,7 @@ export async function getNegocios(): Promise<{
       diasSinActividad: calcDiasSinActividad((p.ultima_actividad ?? p.updated_at) as string | null),
       diasEnStage: calcDiasSinActividad((p.estado_changed_at ?? p.updated_at) as string | null),
       carpetaUrl: (p.carpeta_url as string | null) ?? null,
+      customData: cd,
     }
     if (stage === 'en-curso') enCurso.push(item)
     else if (stage === 'por-cobrar') porCobrar.push(item)
