@@ -1,111 +1,183 @@
 'use client'
 
-import { FileSpreadsheet, ExternalLink, Plus } from 'lucide-react'
-import Link from 'next/link'
+import { useState, useTransition } from 'react'
+import { FileSpreadsheet, ExternalLink, CheckCircle2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { marcarBloqueCompleto, actualizarBloqueData, actualizarPrecioAprobado } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
-
-interface Cotizacion {
-  id: string
-  consecutivo: string
-  estado: string
-  valor_total: number | null
-  created_at: string
-  oportunidad_id: string | null
-}
 
 interface BloqueCotizacionProps {
   negocioId: string
   negocioBloqueId: string
   instancia: NegocioBloque | null
   modo: 'editable' | 'visible'
-  cotizacion: Cotizacion | null
 }
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-const ESTADO_LABELS: Record<string, string> = {
-  borrador: 'Borrador',
-  enviada: 'Enviada',
-  aceptada: 'Aceptada',
-  rechazada: 'Rechazada',
-}
-
-const ESTADO_COLORS: Record<string, string> = {
-  borrador: 'bg-slate-100 text-slate-600',
-  enviada: 'bg-blue-100 text-blue-700',
-  aceptada: 'bg-green-100 text-green-700',
-  rechazada: 'bg-red-100 text-red-700',
-}
-
 export default function BloqueCotizacion({
   negocioId,
+  negocioBloqueId,
   instancia,
   modo,
-  cotizacion,
 }: BloqueCotizacionProps) {
-  const data = (instancia?.data ?? {}) as Record<string, string>
-  const cotizacionId = cotizacion?.id ?? data.cotizacion_id
+  const saved = (instancia?.data ?? {}) as {
+    url?: string
+    precio?: number
+    estado?: 'borrador' | 'enviada' | 'aceptada'
+    notas?: string
+  }
 
-  if (!cotizacion && !cotizacionId) {
-    if (modo === 'visible') {
-      return <p className="text-xs text-[#6B7280]">Sin cotización vinculada</p>
-    }
+  const [url, setUrl] = useState(saved.url ?? '')
+  const [precio, setPrecio] = useState(saved.precio ? String(saved.precio) : '')
+  const [estado, setEstado] = useState<'borrador' | 'enviada' | 'aceptada'>(saved.estado ?? 'borrador')
+  const [notas, setNotas] = useState(saved.notas ?? '')
+  const [isPending, startTransition] = useTransition()
+
+  const isAceptada = estado === 'aceptada'
+
+  function handleGuardar() {
+    startTransition(async () => {
+      const data = {
+        url: url.trim() || null,
+        precio: precio ? Number(precio) : null,
+        estado,
+        notas: notas.trim() || null,
+      }
+      let result
+      if (isAceptada && url.trim()) {
+        result = await marcarBloqueCompleto(negocioBloqueId, data)
+        // Actualizar precio_aprobado del negocio si tiene valor
+        if (data.precio) {
+          await actualizarPrecioAprobado(negocioId, data.precio)
+        }
+      } else {
+        result = await actualizarBloqueData(negocioBloqueId, data)
+      }
+      if (result.error) toast.error(result.error)
+      else toast.success('Cotización guardada')
+    })
+  }
+
+  const ESTADO_LABELS = { borrador: 'Borrador', enviada: 'Enviada al cliente', aceptada: 'Aceptada ✓' }
+  const ESTADO_COLORS = {
+    borrador: 'bg-slate-100 text-slate-600',
+    enviada: 'bg-blue-100 text-blue-700',
+    aceptada: 'bg-green-100 text-green-700',
+  }
+
+  if (modo === 'visible') {
     return (
-      <div className="flex flex-col items-center gap-3 py-4 text-center">
-        <FileSpreadsheet className="h-8 w-8 text-[#6B7280]/30" />
-        <p className="text-xs text-[#6B7280]">Sin cotización creada para este negocio</p>
-        <Link
-          href={`/negocios/${negocioId}/cotizacion/nueva`}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-[#10B981] px-3 py-2 text-xs font-medium text-white hover:bg-[#059669] transition-colors"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Crear cotización
-        </Link>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${ESTADO_COLORS[saved.estado ?? 'borrador']}`}>
+            {ESTADO_LABELS[saved.estado ?? 'borrador']}
+          </span>
+          {saved.precio && (
+            <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums">{fmt(saved.precio)}</span>
+          )}
+        </div>
+        {saved.url && (
+          <a href={saved.url} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] text-[#10B981] hover:underline">
+            <ExternalLink className="h-3 w-3" />
+            Ver cotización
+          </a>
+        )}
+        {saved.notas && <p className="text-[11px] text-[#6B7280]">{saved.notas}</p>}
       </div>
     )
   }
 
-  const cot = cotizacion
-  const estadoClass = ESTADO_COLORS[cot?.estado ?? ''] ?? 'bg-slate-100 text-slate-600'
-  const isComplete = cot?.estado === 'aceptada' || cot?.estado === 'enviada'
-
-  const resumenUrl = cot?.oportunidad_id
-    ? `/pipeline/${cot.oportunidad_id}`
-    : null
-
   return (
-    <div className="rounded-lg border border-[#E5E7EB] p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <FileSpreadsheet className="h-4 w-4 text-[#10B981] shrink-0" />
-          <div>
-            <p className="text-xs font-semibold text-[#1A1A1A]">{cot?.consecutivo ?? '—'}</p>
-            {cot?.valor_total && (
-              <p className="text-xs text-[#6B7280] tabular-nums">{fmt(cot.valor_total)}</p>
-            )}
-          </div>
+    <div className="space-y-3">
+      {/* Estado */}
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Estado</label>
+        <div className="flex gap-2">
+          {(['borrador', 'enviada', 'aceptada'] as const).map(s => (
+            <button
+              key={s}
+              onClick={() => setEstado(s)}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors ${
+                estado === s
+                  ? `${ESTADO_COLORS[s]} border-current`
+                  : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#10B981]'
+              }`}
+            >
+              {ESTADO_LABELS[s]}
+            </button>
+          ))}
         </div>
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${estadoClass}`}>
-          {ESTADO_LABELS[cot?.estado ?? ''] ?? cot?.estado ?? '—'}
-        </span>
       </div>
 
-      {isComplete && (
-        <div className="mt-1.5 flex items-center gap-1">
-          <div className="h-1.5 w-1.5 rounded-full bg-[#10B981]" />
-          <span className="text-[10px] text-[#10B981] font-medium">Gate cumplido</span>
+      {/* URL */}
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
+          Link de la cotización <span className="text-[#6B7280]/60">(Drive, Sheets, PDF...)</span>
+        </label>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="url"
+            placeholder="https://drive.google.com/..."
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            className="flex-1 rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+          />
+          {url && (
+            <a href={url} target="_blank" rel="noopener noreferrer"
+              className="rounded-lg border border-[#E5E7EB] p-1.5 text-[#6B7280] hover:text-[#10B981]">
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
         </div>
-      )}
+      </div>
 
-      {resumenUrl && (
-        <Link
-          href={resumenUrl}
-          className="mt-2 inline-flex items-center gap-1 text-[11px] text-[#10B981] hover:underline"
-        >
-          <ExternalLink className="h-3 w-3" />
-          Ver cotización completa
-        </Link>
+      {/* Precio */}
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Valor de la propuesta</label>
+        <input
+          type="number"
+          placeholder="0"
+          value={precio}
+          onChange={e => setPrecio(e.target.value)}
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+        />
+        {precio && <p className="mt-0.5 text-[10px] text-[#6B7280]">{fmt(Number(precio))}</p>}
+      </div>
+
+      {/* Notas */}
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Notas</label>
+        <textarea
+          value={notas}
+          onChange={e => setNotas(e.target.value)}
+          placeholder="Observaciones, condiciones, versión..."
+          rows={2}
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none resize-none focus:ring-2 focus:ring-[#10B981]/15"
+        />
+      </div>
+
+      <button
+        onClick={handleGuardar}
+        disabled={isPending}
+        className={`w-full rounded-lg py-2 text-xs font-semibold transition-colors disabled:opacity-40 ${
+          isAceptada && url
+            ? 'bg-[#10B981] text-white hover:bg-[#059669]'
+            : 'bg-[#1A1A1A] text-white hover:bg-[#333]'
+        }`}
+      >
+        {isPending ? 'Guardando...' : isAceptada && url ? (
+          <span className="inline-flex items-center justify-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Guardar y marcar aceptada
+          </span>
+        ) : 'Guardar'}
+      </button>
+
+      {isAceptada && !url && (
+        <p className="text-[11px] text-amber-600">Agrega el link para marcar como aceptada</p>
       )}
     </div>
   )

@@ -605,6 +605,9 @@ export async function marcarBloqueCompleto(
         await autoCrearCobros(bloque.negocio_id, valorAnticipo)
       }
     }
+
+    // Revalidar página del negocio
+    revalidatePath(`/negocios/${bloque.negocio_id}`)
   }
 
   return { error: null }
@@ -614,20 +617,27 @@ export async function marcarBloqueCompleto(
 
 export async function actualizarBloqueData(
   negocioBloqueId: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  negocioId?: string
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  const { error: updateError } = await db(supabase)
+  const { data: row, error: updateError } = await db(supabase)
     .from('negocio_bloques')
     .update({
       data,
       updated_at: new Date().toISOString(),
     })
     .eq('id', negocioBloqueId)
+    .select('negocio_id')
+    .single()
 
   if (updateError) return { error: (updateError as { message: string }).message }
+
+  const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
+  if (nid) revalidatePath(`/negocios/${nid}`)
+
   return { error: null }
 }
 
