@@ -63,7 +63,7 @@ export async function moveProyectoVe(
   // Leer estado actual para log y merge de custom_data
   const { data: proyecto } = await supabase
     .from('proyectos')
-    .select('custom_data, estado')
+    .select('custom_data, estado, oportunidad_id')
     .eq('id', proyectoId)
     .single()
 
@@ -71,6 +71,29 @@ export async function moveProyectoVe(
 
   const currentCustomData = (proyecto.custom_data as Record<string, unknown>) ?? {}
   const estadoVeAnterior = (currentCustomData.estado_ve as string) ?? null
+
+  // Gate: validar campos requeridos en la oportunidad vinculada antes de avanzar
+  if (proyecto.oportunidad_id && (nuevoEstadoVe === 'por_certificar' || nuevoEstadoVe === 'certificado')) {
+    const { data: opp } = await supabase
+      .from('oportunidades')
+      .select('custom_data')
+      .eq('id', proyecto.oportunidad_id)
+      .single()
+    const oppData = (opp?.custom_data as Record<string, unknown>) ?? {}
+
+    if (nuevoEstadoVe === 'por_certificar') {
+      const radicado = oppData.numero_radicado_certificacion
+      if (!radicado || String(radicado).trim() === '') {
+        return { success: false, error: 'Debes ingresar el Nro. Radicado de Certificación antes de continuar' }
+      }
+    }
+    if (nuevoEstadoVe === 'certificado') {
+      const certUrl = oppData.cert_upme_url
+      if (!certUrl || String(certUrl).trim() === '') {
+        return { success: false, error: 'Debes cargar el certificado UPME antes de continuar' }
+      }
+    }
+  }
 
   // Flags especiales al avanzar desde por_inclusion → por_radicar
   const extraCustomData: Record<string, unknown> = {}
@@ -96,7 +119,7 @@ export async function moveProyectoVe(
 
   if (dbError) return { success: false, error: dbError.message }
 
-  // Log en activity
+  // Log en activity (registrado en proyecto; ActivityLog unificado lo recoge via oportunidadId)
   await logSystemChange(
     workspaceId,
     'proyecto',
@@ -110,6 +133,9 @@ export async function moveProyectoVe(
   revalidatePath(`/proyectos/${proyectoId}`)
   revalidatePath('/proyectos')
   revalidatePath('/negocios')
+  if (proyecto.oportunidad_id) {
+    revalidatePath(`/pipeline/${proyecto.oportunidad_id}`)
+  }
 
   return { success: true }
 }

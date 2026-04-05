@@ -124,6 +124,26 @@ export default function OportunidadDetail({
     ? veEstadosAplicables[veCurrentIdx + 1]
     : null
 
+  // Campos custom VE: base siempre excluida + condicionales según estado_ve
+  const veExcludeSlugs: string[] = (() => {
+    const base = [
+      'link_cedula', 'link_factura', 'link_rut', 'link_soporte_pago_upme',
+      'link_ficha_tecnica', 'link_cert_emisiones',
+      'marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia',
+      'tipo_vehiculo', 'vehiculo_en_upme',
+      'nombre_propietario', 'numero_identificacion',
+      'regimen_tributario_cliente', 'tipo_persona_cliente',
+      'telefono_propietario', 'municipio_propietario', 'correo_propietario', 'direccion_propietario',
+      'numero_cus',
+    ]
+    // Ocultar campos operativos hasta que se alcance la etapa correspondiente
+    const idx = estadoVeActual ? VE_ESTADOS_ORDEN.indexOf(estadoVeActual) : -1
+    if (idx < VE_ESTADOS_ORDEN.indexOf('por_inclusion')) base.push('numero_radicado_inclusion')
+    if (idx < VE_ESTADOS_ORDEN.indexOf('por_radicar')) base.push('numero_radicado_certificacion')
+    if (idx < VE_ESTADOS_ORDEN.indexOf('por_certificar')) base.push('cert_upme_url')
+    return base
+  })()
+
   const handleAvanzarVe = () => {
     if (!veNextEstado || !proyectoVe) return
     startTransition(async () => {
@@ -714,16 +734,7 @@ export default function OportunidadDetail({
         initialCustomData={(oportunidad.custom_data as Record<string, unknown> | null) ?? {}}
         excludeSlugs={
           (oportunidad.custom_data as Record<string, unknown> | null)?.linea_negocio === 've'
-            ? [
-                'link_cedula', 'link_factura', 'link_rut', 'link_soporte_pago_upme',
-                'link_ficha_tecnica', 'link_cert_emisiones',
-                'marca_vehiculo', 'linea_vehiculo', 'modelo_ano', 'tecnologia',
-                'tipo_vehiculo', 'vehiculo_en_upme',
-                'nombre_propietario', 'numero_identificacion',
-                'regimen_tributario_cliente', 'tipo_persona_cliente',
-                'telefono_propietario', 'municipio_propietario', 'correo_propietario', 'direccion_propietario',
-                'numero_cus',
-              ]
+            ? veExcludeSlugs
             : undefined
         }
       />
@@ -742,7 +753,12 @@ export default function OportunidadDetail({
       {/* Actividad */}
       <div className="space-y-3 rounded-lg border p-4">
         <h2 className="text-sm font-semibold">Actividad</h2>
-        <ActivityLog entidadTipo="oportunidad" entidadId={oportunidad.id} staffList={staffList} />
+        <ActivityLog
+          entidadTipo="oportunidad"
+          entidadId={oportunidad.id}
+          staffList={staffList}
+          oportunidadId={modoOperativoVe && proyectoVe ? proyectoVe.id : undefined}
+        />
       </div>
 
       {/* Loss modal */}
