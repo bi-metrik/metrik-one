@@ -242,6 +242,24 @@ export async function getNegocioDetalle(id: string): Promise<{
       for (const inst of ((instancias ?? []) as Record<string, unknown>[])) {
         instanciasMap[inst.bloque_config_id as string] = inst as unknown as NegocioBloque
       }
+
+      // Auto-crear instancias faltantes (negocio creado antes de bloque_configs)
+      const faltantes = configIds.filter(cid => !instanciasMap[cid])
+      if (faltantes.length > 0) {
+        const nuevas = faltantes.map(cid => ({
+          negocio_id: id,
+          bloque_config_id: cid,
+          estado: 'pendiente',
+          data: null,
+        }))
+        const { data: creadas } = await db(supabase)
+          .from('negocio_bloques')
+          .insert(nuevas)
+          .select('id, negocio_id, bloque_config_id, estado, data')
+        for (const inst of ((creadas ?? []) as Record<string, unknown>[])) {
+          instanciasMap[inst.bloque_config_id as string] = inst as unknown as NegocioBloque
+        }
+      }
     }
 
     bloques = ((bloqueConfigs ?? []) as Record<string, unknown>[]).map(bc => ({
