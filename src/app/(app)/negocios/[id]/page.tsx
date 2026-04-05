@@ -18,9 +18,10 @@ export default async function NegocioDetailPage({ params }: Props) {
       bloques={data.bloques}
       etapasLinea={data.etapasLinea}
       profiles={data.profiles}
+      currentUserId={data.currentUserId}
       cobros={data.cobros}
-      cotizacion={data.cotizacion}
       resumenFinanciero={data.resumenFinanciero}
+      actividad={data.actividad}
     />
   )
 }
