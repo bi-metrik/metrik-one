@@ -788,3 +788,35 @@ export async function checkCotizacionExiste(oportunidadId: string): Promise<{ ti
 
   return { tieneCotizacion: !!data }
 }
+
+// ── Proyecto vinculado a una oportunidad ─────────────────────
+
+export interface ProyectoVinculado {
+  id: string
+  estado: string
+  custom_data: Record<string, unknown> | null
+  codigo: string | null
+  presupuesto_total: number | null
+}
+
+export async function getProyectoVinculado(oportunidadId: string): Promise<ProyectoVinculado | null> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return null
+
+  const { data } = await supabase
+    .from('proyectos')
+    .select('id, estado, custom_data, codigo, presupuesto_total')
+    .eq('oportunidad_id', oportunidadId)
+    .limit(1)
+    .maybeSingle()
+
+  if (!data) return null
+
+  return {
+    id: data.id,
+    estado: data.estado ?? '',
+    custom_data: (data.custom_data as Record<string, unknown> | null) ?? null,
+    codigo: data.codigo ?? null,
+    presupuesto_total: data.presupuesto_total ?? null,
+  }
+}

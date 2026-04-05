@@ -6,22 +6,39 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, User, ChevronRight, Flame, XCircle,
   Trophy, FileText, Plus, Clock, ShieldAlert, Copy, Send, Check, X,
-  FolderOpen,
+  FolderOpen, ChevronDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   moveOportunidad, perderOportunidad, ganarOportunidad, updateOportunidad,
 } from '../actions-v2'
+import { moveProyectoVe } from '@/lib/actions/ve-proyecto'
+import type { EstadoVe } from '@/lib/actions/ve-proyecto'
 import { duplicarCotizacion, enviarCotizacion, aceptarCotizacion, rechazarCotizacion } from './cotizaciones/actions-v2'
 import { ETAPA_CONFIG, ETAPAS_ACTIVAS, RAZONES_PERDIDA, ESTADO_COTIZACION_CONFIG } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { EtapaPipeline, EstadoCotizacion } from '@/lib/pipeline/constants'
-import type { WorkspaceStageWithProceso } from '../actions-v2'
+import type { WorkspaceStageWithProceso, ProyectoVinculado } from '../actions-v2'
 import ActivityLog from '@/components/activity-log'
 import CustomFieldsSection from '@/components/custom-fields-section'
 import FiscalGateForm from './fiscal-gate-form'
 import VeDocumentosSection from './ve-documentos-section'
 import type { VeDocumentoState, CamposVehiculo } from '@/lib/actions/ve-documentos'
+
+// ── Configuracion estados VE ──────────────────────────────────
+
+const VE_ESTADOS_ORDEN: EstadoVe[] = [
+  'por_inclusion', 'por_radicar', 'por_certificar', 'certificado', 'por_cobrar', 'cerrado',
+]
+
+const VE_ESTADO_CONFIG: Record<EstadoVe, { label: string; chipClass: string; dotClass: string }> = {
+  por_inclusion:  { label: 'Por inclusión',  chipClass: 'bg-indigo-100 text-indigo-700',  dotClass: 'bg-indigo-400' },
+  por_radicar:    { label: 'Por radicar',    chipClass: 'bg-amber-100 text-amber-700',    dotClass: 'bg-amber-400' },
+  por_certificar: { label: 'Por certificar', chipClass: 'bg-purple-100 text-purple-700',  dotClass: 'bg-purple-400' },
+  certificado:    { label: 'Certificado',    chipClass: 'bg-green-100 text-green-700',    dotClass: 'bg-green-400' },
+  por_cobrar:     { label: 'Por cobrar',     chipClass: 'bg-blue-100 text-blue-700',      dotClass: 'bg-blue-400' },
+  cerrado:        { label: 'Cerrado',        chipClass: 'bg-slate-100 text-slate-600',    dotClass: 'bg-slate-400' },
+}
 
 interface OportunidadRow {
   id: string
@@ -62,6 +79,7 @@ interface Props {
   veDocumentos?: VeDocumentoState[]
   veVehiculoEnUpme?: boolean | null
   veCamposVehiculo?: CamposVehiculo | null
+  proyectoVe?: ProyectoVinculado | null
 }
 
 export default function OportunidadDetail({
@@ -72,6 +90,7 @@ export default function OportunidadDetail({
   veDocumentos = [],
   veVehiculoEnUpme = null,
   veCamposVehiculo = null,
+  proyectoVe = null,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -81,6 +100,48 @@ export default function OportunidadDetail({
   const [carpetaUrl, setCarpetaUrl] = useState(oportunidad.carpeta_url ?? '')
   const [carpetaEditing, setCarpetaEditing] = useState(false)
   const [responsableId, setResponsableId] = useState(oportunidad.responsable_id ?? '')
+  const [resumenComercialAbierto, setResumenComercialAbierto] = useState(false)
+
+  // ── Modo operativo VE ──────────────────────────────────────
+  const modoOperativoVe = oportunidad.etapa === 'ganada' && proyectoVe != null
+  const estadoVeActual = modoOperativoVe
+    ? ((proyectoVe!.custom_data?.estado_ve as EstadoVe | undefined) ?? null)
+    : null
+
+  // Calcular estados VE aplicables (si vehiculo_en_upme = true, empezar desde por_radicar)
+  const veEstadosAplicables: EstadoVe[] = (() => {
+    if (!modoOperativoVe) return VE_ESTADOS_ORDEN
+    const customData = oportunidad.custom_data as Record<string, unknown> | null
+    const vehiculoEnUpme = customData?.vehiculo_en_upme
+    if (vehiculoEnUpme === true) {
+      return VE_ESTADOS_ORDEN.filter(e => e !== 'por_inclusion')
+    }
+    return VE_ESTADOS_ORDEN
+  })()
+
+  const veCurrentIdx = estadoVeActual ? veEstadosAplicables.indexOf(estadoVeActual) : -1
+  const veNextEstado = veCurrentIdx !== -1 && veCurrentIdx < veEstadosAplicables.length - 1
+    ? veEstadosAplicables[veCurrentIdx + 1]
+    : null
+
+  const handleAvanzarVe = () => {
+    if (!veNextEstado || !proyectoVe) return
+    startTransition(async () => {
+      const res = await moveProyectoVe(proyectoVe.id, veNextEstado)
+      if (res.success) {
+        toast.success(`Avanzado a ${VE_ESTADO_CONFIG[veNextEstado].label}`)
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error al avanzar')
+      }
+    })
+  }
+
+  // Valor total de cotizaciones para el resumen comercial
+  const valorTotalCotizaciones = cotizaciones.reduce((sum, c) => {
+    const descuento = Number(c.descuento_valor ?? 0)
+    return sum + (c.valor_total ?? 0) - descuento
+  }, 0)
 
   // Build dynamic stage list from workspace_stages, falling back to hardcoded constants
   const etapasActivas: string[] = stages.length > 0
@@ -175,7 +236,12 @@ export default function OportunidadDetail({
             {oportunidad.descripcion || 'Sin descripcion'}
           </h1>
           <div className="flex items-center gap-2 flex-wrap">
-            {etapaConfig && (
+            {/* En modo operativo VE: mostrar chip de estado_ve */}
+            {modoOperativoVe && estadoVeActual ? (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${VE_ESTADO_CONFIG[estadoVeActual].chipClass}`}>
+                {VE_ESTADO_CONFIG[estadoVeActual].label}
+              </span>
+            ) : etapaConfig && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${etapaConfig.chipClass}`}>
                 {etapaConfig.label} · {etapaConfig.probabilidad}%
               </span>
@@ -250,8 +316,8 @@ export default function OportunidadDetail({
         </div>
       )}
 
-      {/* Etapa progress bar */}
-      {!isTerminal && etapaConfig && (
+      {/* Progress bar — comercial (solo cuando NO es modo operativo VE) */}
+      {!isTerminal && !modoOperativoVe && etapaConfig && (
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-medium">{etapaConfig.label}</span>
@@ -280,8 +346,41 @@ export default function OportunidadDetail({
         </div>
       )}
 
-      {/* Action buttons */}
-      {!isTerminal && (
+      {/* Progress bar operativo VE */}
+      {modoOperativoVe && estadoVeActual && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-muted-foreground">Proceso VE</span>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${VE_ESTADO_CONFIG[estadoVeActual].chipClass}`}>
+              {VE_ESTADO_CONFIG[estadoVeActual].label}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {veEstadosAplicables.map((estado, idx) => {
+              const isPast = idx < veCurrentIdx
+              const isCurrent = idx === veCurrentIdx
+              const config = VE_ESTADO_CONFIG[estado]
+              return (
+                <div key={estado} className="flex items-center gap-1 flex-1">
+                  <div className="flex-1 flex flex-col items-center gap-1">
+                    <div className={`h-1.5 w-full rounded-full transition-all ${
+                      isPast ? 'bg-green-400' : isCurrent ? config.dotClass : 'bg-muted'
+                    }`} />
+                    <span className={`text-[8px] font-medium leading-tight text-center ${
+                      isCurrent ? 'text-foreground' : 'text-muted-foreground'
+                    }`}>
+                      {config.label}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Botones de accion — comerciales (solo cuando NO es modo operativo VE) */}
+      {!isTerminal && !modoOperativoVe && (
         <div className="flex gap-2">
           {nextEtapa && (
             <button
@@ -310,6 +409,18 @@ export default function OportunidadDetail({
             Perder
           </button>
         </div>
+      )}
+
+      {/* Boton Avanzar — modo operativo VE */}
+      {modoOperativoVe && veNextEstado && (
+        <button
+          onClick={handleAvanzarVe}
+          disabled={isPending}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          <ChevronRight className="h-4 w-4" />
+          Avanzar a {VE_ESTADO_CONFIG[veNextEstado].label}
+        </button>
       )}
 
       {/* Fiscal gate form */}
@@ -380,7 +491,58 @@ export default function OportunidadDetail({
         )}
       </div>
 
-      {/* Cotizaciones */}
+      {/* Resumen comercial (acordeón colapsado en modo operativo VE) */}
+      {modoOperativoVe ? (
+        <div className="rounded-lg border overflow-hidden">
+          <button
+            onClick={() => setResumenComercialAbierto(v => !v)}
+            className="w-full flex items-center justify-between p-4 text-left hover:bg-accent/50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold">Resumen comercial</span>
+              {proyectoVe?.presupuesto_total && (
+                <span className="text-sm font-semibold text-green-700">
+                  {formatCOP(proyectoVe.presupuesto_total)}
+                </span>
+              )}
+            </div>
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${resumenComercialAbierto ? 'rotate-180' : ''}`} />
+          </button>
+          {resumenComercialAbierto && (
+            <div className="border-t px-4 pb-4 pt-3 space-y-2">
+              {cotizaciones.length === 0 ? (
+                <p className="py-2 text-center text-xs text-muted-foreground">Sin cotizaciones</p>
+              ) : (
+                cotizaciones.map(c => {
+                  const estadoConfig = ESTADO_COTIZACION_CONFIG[c.estado as EstadoCotizacion]
+                  const descuento = Number(c.descuento_valor ?? 0)
+                  const valorNeto = (c.valor_total ?? 0) - descuento
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between rounded-md border p-2.5 text-xs cursor-pointer hover:bg-accent/50"
+                      onClick={() => router.push(`/pipeline/${oportunidad.id}/cotizacion/${c.id}`)}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                        <span className="font-medium truncate">{c.codigo || c.consecutivo || 'Sin codigo'}</span>
+                        {estadoConfig && (
+                          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${estadoConfig.chipClass}`}>
+                            {estadoConfig.label}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-semibold shrink-0 ml-2">{formatCOP(valorNeto)}</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+      /* Cotizaciones (modo comercial normal) */
       <div className="space-y-3 rounded-lg border p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">Cotizaciones ({cotizaciones.length})</h2>
@@ -543,6 +705,7 @@ export default function OportunidadDetail({
           </div>
         )}
       </div>
+      )}
 
       {/* Campos custom + Labels */}
       <CustomFieldsSection

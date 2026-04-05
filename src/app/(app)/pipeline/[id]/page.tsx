@@ -1,4 +1,4 @@
-import { getOportunidad, getWorkspaceStagesPipeline } from '../actions-v2'
+import { getOportunidad, getWorkspaceStagesPipeline, getProyectoVinculado } from '../actions-v2'
 import { notFound } from 'next/navigation'
 import OportunidadDetail from './oportunidad-detail'
 import { getCotizaciones } from './cotizaciones/actions-v2'
@@ -24,6 +24,11 @@ export default async function OportunidadDetailPage({ params }: { params: Promis
     ? await getVeDocumentos(id)
     : { docs: [], vehiculoEnUpme: null, camposVehiculo: null }
 
+  // Buscar proyecto vinculado si oportunidad está ganada
+  const proyectoVe = oportunidad.etapa === 'ganada'
+    ? await getProyectoVinculado(oportunidad.id)
+    : null
+
   return (
     <OportunidadDetail
       oportunidad={oportunidad}
@@ -33,6 +38,7 @@ export default async function OportunidadDetailPage({ params }: { params: Promis
       veDocumentos={veData.docs}
       veVehiculoEnUpme={veData.vehiculoEnUpme}
       veCamposVehiculo={veData.camposVehiculo}
+      proyectoVe={proyectoVe}
     />
   )
 }
