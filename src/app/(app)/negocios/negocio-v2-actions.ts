@@ -853,6 +853,52 @@ export async function confirmarPagoCobro(
   return { error: null }
 }
 
+// ── Actualizar precio aprobado del negocio ───────────────────────────────────
+
+export async function actualizarPrecioAprobado(
+  negocioId: string,
+  precio: number
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const { error: updateError } = await db(supabase)
+    .from('negocios')
+    .update({ precio_aprobado: precio, updated_at: new Date().toISOString() })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
+}
+
+// ── Agregar comentario al activity log del negocio ────────────────────────────
+
+export async function agregarComentarioNegocio(
+  negocioId: string,
+  contenido: string
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!staffId) return { error: 'Sin perfil de staff' }
+
+  const { error: insertError } = await supabase
+    .from('activity_log')
+    .insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'comentario',
+      autor_id: staffId,
+      contenido,
+    })
+
+  if (insertError) return { error: (insertError as { message: string }).message }
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
+}
+
 // ── Actualizar aprobación de bloque ──────────────────────────────────────────
 
 export async function actualizarAprobacion(
@@ -908,6 +954,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   etapasLinea: EtapaNegocio[]
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  currentUserId: string | null
   cobros: Array<{
     id: string
     concepto: string | null
@@ -917,19 +964,20 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     fecha: string | null
     notas: string | null
   }>
-  cotizacion: {
-    id: string
-    consecutivo: string
-    estado: string
-    valor_total: number | null
-    created_at: string
-    oportunidad_id: string | null
-  } | null
+  cotizacion: null
   resumenFinanciero: {
     totalCobrado: number
     porCobrar: number
     costosEjecutados: number
   }
+  actividad: Array<{
+    id: string
+    tipo: string
+    autor_id: string | null
+    contenido: string | null
+    created_at: string
+    autor_nombre: string | null
+  }>
 } | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -971,12 +1019,27 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
-  // Cargar profiles del workspace
-  const { data: profilesData } = await supabase
-    .from('profiles')
-    .select('id, full_name')
-    .eq('workspace_id', workspaceId)
-    .order('full_name', { ascending: true })
+  // Cargar profiles + staff del workspace + currentUserId
+  const [profilesRes, userRes, staffRes] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('workspace_id', workspaceId)
+      .order('full_name', { ascending: true }),
+    supabase.auth.getUser(),
+    supabase
+      .from('staff')
+      .select('id, full_name')
+      .eq('workspace_id', workspaceId),
+  ])
+  const profilesData = profilesRes.data
+  const currentUserId = userRes.data.user?.id ?? null
+
+  // staffMap: staff.id → nombre (activity_log.autor_id referencia staff.id)
+  const staffMap: Record<string, string> = {}
+  for (const s of ((staffRes.data ?? []) as { id: string; full_name: string }[])) {
+    staffMap[s.id] = s.full_name ?? s.id.slice(-6)
+  }
 
   // Cargar cobros del negocio (db() para evitar type errors en columnas nuevas)
   const { data: cobrosData } = await db(supabase)
@@ -986,21 +1049,28 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     .eq('negocio_id', id)
     .order('created_at', { ascending: true })
 
-  // Cargar cotizacion (buscar por negocio a través de oportunidad vinculada)
-  // Por ahora: buscar en data del bloque cotizacion
-  const cotizacionBloque = base.bloques.find(
-    b => b.bloque_definitions?.tipo === 'cotizacion'
-  )
-  const cotizacionId = (cotizacionBloque?.instancia?.data as Record<string, unknown>)?.cotizacion_id as string | undefined
-  let cotizacion = null
-  if (cotizacionId) {
-    const { data: cotData } = await supabase
-      .from('cotizaciones')
-      .select('id, consecutivo, estado, valor_total, created_at, oportunidad_id')
-      .eq('id', cotizacionId)
-      .single()
-    cotizacion = cotData
-  }
+  // Cotización ahora vive en negocio_bloques.data del bloque cotizacion (sin tabla separada)
+  const cotizacion = null
+
+  // Cargar actividad del negocio
+  const { data: actividadData } = await supabase
+    .from('activity_log')
+    .select('id, tipo, autor_id, contenido, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad_tipo', 'negocio')
+    .eq('entidad_id', id)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  const actividad = ((actividadData ?? []) as Record<string, unknown>[]).map(a => ({
+    id: a.id as string,
+    tipo: a.tipo as string,
+    autor_id: a.autor_id as string | null,
+    contenido: a.contenido as string | null,
+    created_at: a.created_at as string,
+    // autor_id referencia staff.id (no profiles.id)
+    autor_nombre: a.autor_id ? (staffMap[a.autor_id as string] ?? null) : null,
+  }))
 
   // Calcular resumen financiero
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1040,6 +1110,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       full_name: p.full_name,
       email: null as string | null,
     })),
+    currentUserId,
     cobros: ((cobrosData ?? []) as Record<string, unknown>[]).map(c => ({
       id: c.id as string,
       concepto: c.notas as string | null,
@@ -1050,18 +1121,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       fecha: c.fecha as string | null,
       notas: c.notas as string | null,
     })),
-    cotizacion: cotizacion as {
-      id: string
-      consecutivo: string
-      estado: string
-      valor_total: number | null
-      created_at: string
-      oportunidad_id: string | null
-    } | null,
+    cotizacion,
     resumenFinanciero: {
       totalCobrado,
       porCobrar,
-      costosEjecutados: 0, // Placeholder hasta migrar proyectos
+      costosEjecutados: 0,
     },
+    actividad,
   }
 }
