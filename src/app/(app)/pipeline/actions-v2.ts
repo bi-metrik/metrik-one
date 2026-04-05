@@ -199,6 +199,23 @@ export async function moveOportunidad(id: string, nuevaEtapa: string) {
     .eq('id', id)
     .single()
 
+  // ── Gate E2: contactado requiere al menos 1 entrada en activity_log ──
+  if (nuevaEtapa === 'contactado') {
+    const { count } = await supabase
+      .from('activity_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
+      .eq('entity_type', 'oportunidad')
+      .eq('entity_id', id)
+
+    if (!count || count === 0) {
+      return {
+        success: false,
+        error: 'Debes registrar al menos un comentario sobre el contacto con el cliente antes de avanzar.',
+      }
+    }
+  }
+
   // ── Evaluar gates (tenant_rules) ANTES de persistir el cambio ──
   // estado_nuevo y estado_anterior en el contexto para que las reglas
   // puedan filtrar por etapa destino específica (ej: solo bloquear "ganada").
