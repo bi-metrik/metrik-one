@@ -250,7 +250,7 @@ export async function getNegocioDetalle(id: string): Promise<{
           negocio_id: id,
           bloque_config_id: cid,
           estado: 'pendiente',
-          data: null,
+          data: {},
         }))
         const { data: creadas } = await db(supabase)
           .from('negocio_bloques')
@@ -376,7 +376,7 @@ export async function crearNegocio(input: {
         negocio_id: negocioData.id,
         bloque_config_id: bc.id as string,
         estado: 'pendiente',
-        data: null,
+        data: {},
       }))
 
       await db(supabase).from('negocio_bloques').insert(instancias)
@@ -445,7 +445,7 @@ export async function cambiarEtapaNegocio(
         negocio_id: negocioId,
         bloque_config_id: bc.id as string,
         estado: 'pendiente',
-        data: null,
+        data: {},
       }))
 
     if (nuevas.length > 0) {
