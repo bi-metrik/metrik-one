@@ -1,16 +1,18 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
-import { getNegocios } from './negocios-actions'
+import { getNegociosV2 } from './negocio-v2-actions'
 import NegociosClient from './negocios-client'
 
 export default async function NegociosPage() {
-  const data = await getNegocios()
+  const negocios = await getNegociosV2()
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold">Negocios</h1>
-          <p className="text-xs text-muted-foreground">Todas tus oportunidades y proyectos</p>
+          <p className="text-xs text-muted-foreground">
+            {negocios.length} negocio{negocios.length !== 1 ? 's' : ''} activo{negocios.length !== 1 ? 's' : ''}
+          </p>
         </div>
         <Link
           href="/negocios/nuevo"
@@ -20,13 +22,7 @@ export default async function NegociosPage() {
           Nuevo negocio
         </Link>
       </div>
-      <NegociosClient
-        propuestas={data.propuestas}
-        enCurso={data.enCurso}
-        porCobrar={data.porCobrar}
-        historial={data.historial}
-        totales={data.totales}
-      />
+      <NegociosClient negocios={negocios} />
     </div>
   )
 }
