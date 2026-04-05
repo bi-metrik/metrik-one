@@ -20,6 +20,7 @@ export default async function NegocioDetailPage({ params }: Props) {
       profiles={data.profiles}
       currentUserId={data.currentUserId}
       cobros={data.cobros}
+      cotizacionesNegocio={data.cotizacionesNegocio}
       resumenFinanciero={data.resumenFinanciero}
       actividad={data.actividad}
     />

@@ -70,9 +70,10 @@ interface Props {
   initialItems: ItemRow[]
   fiscalProfile?: FiscalProfile | null
   clientFiscal?: ClientFiscal | null
+  backUrl?: string
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -175,7 +176,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       const res = await duplicarCotizacion(cotizacion.id)
       if (res.success) {
         toast.success('Cotización duplicada')
-        router.push(`/pipeline/${oportunidadId}/cotizacion/${res.id}`)
+        router.push(backUrl ?? `/pipeline/${oportunidadId}/cotizacion/${res.id}`)
       } else {
         toast.error(res.error)
       }
@@ -272,7 +273,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {/* Header */}
       <div className="flex items-center gap-3">
         <button
-          onClick={() => router.back()}
+          onClick={() => backUrl ? router.push(backUrl) : router.back()}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />

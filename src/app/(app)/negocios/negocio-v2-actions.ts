@@ -945,6 +945,16 @@ export async function actualizarAprobacion(
 
 // ── Cargar datos completos para detalle con bloques ───────────────────────────
 
+export type CotizacionResumen = {
+  id: string
+  consecutivo: string | null
+  modo: string | null
+  estado: string | null
+  valor_total: number | null
+  descripcion: string | null
+  created_at: string | null
+}
+
 export async function getNegocioDetalleCompleto(id: string): Promise<{
   negocio: NegocioDetalle
   bloques: Array<BloqueConfig & {
@@ -975,6 +985,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     notas: string | null
   }>
   cotizacion: null
+  cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: {
     totalCobrado: number
     porCobrar: number
@@ -1062,6 +1073,22 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Cotización ahora vive en negocio_bloques.data del bloque cotizacion (sin tabla separada)
   const cotizacion = null
 
+  // Cargar cotizaciones del sistema de cotizaciones (tabla cotizaciones con negocio_id)
+  const cotizacionesRes = await supabase
+    .from('cotizaciones')
+    .select('id, consecutivo, modo, estado, valor_total, descripcion, created_at')
+    .eq('negocio_id' as never, id)
+    .order('created_at', { ascending: false })
+  const cotizacionesNegocio: CotizacionResumen[] = ((cotizacionesRes.data ?? []) as Record<string, unknown>[]).map(c => ({
+    id: c.id as string,
+    consecutivo: c.consecutivo as string | null,
+    modo: c.modo as string | null,
+    estado: c.estado as string | null,
+    valor_total: c.valor_total as number | null,
+    descripcion: c.descripcion as string | null,
+    created_at: c.created_at as string | null,
+  }))
+
   // Cargar actividad del negocio
   const { data: actividadData } = await supabase
     .from('activity_log')
@@ -1132,6 +1159,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       notas: c.notas as string | null,
     })),
     cotizacion,
+    cotizacionesNegocio,
     resumenFinanciero: {
       totalCobrado,
       porCobrar,

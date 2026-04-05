@@ -30,6 +30,7 @@ import BloqueChecklistSoporte from './bloques/BloqueChecklistSoporte'
 import BloqueDocumentos from './bloques/BloqueDocumentos'
 import type { DocumentoConfig } from './bloques/BloqueDocumentos'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
+import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
 import BloqueAprobacion from './bloques/BloqueAprobacion'
 import BloqueCronograma from './bloques/BloqueCronograma'
@@ -304,6 +305,7 @@ function BloqueRenderer({
   negocioId,
   profiles,
   cobros,
+  cotizacionesNegocio,
   resumenFinanciero,
 }: {
   bloque: BloqueExtendido
@@ -318,6 +320,7 @@ function BloqueRenderer({
     fecha: string | null
     notas: string | null
   }>
+  cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
@@ -414,9 +417,8 @@ function BloqueRenderer({
       return (
         <BloqueCotizacion
           negocioId={negocioId}
-          negocioBloqueId={instanciaId}
-          instancia={bloque.instancia}
           modo={modo}
+          cotizaciones={cotizacionesNegocio}
         />
       )
 
@@ -486,6 +488,7 @@ function BloqueCard({
   negocioId,
   profiles,
   cobros,
+  cotizacionesNegocio,
   resumenFinanciero,
 }: {
   bloque: BloqueExtendido
@@ -500,6 +503,7 @@ function BloqueCard({
     fecha: string | null
     notas: string | null
   }>
+  cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
 }) {
   const def = bloque.bloque_definitions
@@ -587,6 +591,7 @@ function BloqueCard({
               negocioId={negocioId}
               profiles={profiles}
               cobros={cobros}
+              cotizacionesNegocio={cotizacionesNegocio}
               resumenFinanciero={resumenFinanciero}
             />
           )}
@@ -712,6 +717,7 @@ interface Props {
     fecha: string | null
     notas: string | null
   }>
+  cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   actividad: Array<{
     id: string
@@ -732,6 +738,7 @@ export default function NegocioDetailClient({
   profiles,
   currentUserId,
   cobros,
+  cotizacionesNegocio,
   actividad,
   resumenFinanciero,
 }: Props) {
@@ -851,6 +858,7 @@ export default function NegocioDetailClient({
                   negocioId={negocio.id}
                   profiles={profiles}
                   cobros={cobros}
+                  cotizacionesNegocio={cotizacionesNegocio}
                   resumenFinanciero={resumenFinanciero}
                 />
               ))}
