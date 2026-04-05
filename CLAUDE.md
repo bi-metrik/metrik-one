@@ -35,7 +35,7 @@ SaaS self-service para independientes y micro-PYMEs colombianas. Linea [21] de M
 | Base de datos | Supabase PostgreSQL (ref: `yfjqscvvxetobiidnepa`) |
 | Auth | Supabase Auth (magic link + Google OAuth preparado) |
 | Storage | Supabase Storage (logos, soportes gastos) |
-| Edge Functions | Supabase (WhatsApp webhook) |
+| Edge Functions | Supabase (WhatsApp webhook, evaluar-reglas) |
 | GitHub | `bi-metrik/metrik-one` |
 
 ## Variables de entorno
@@ -206,6 +206,7 @@ metrik-one/
 - `horas` + `staff` — Registro de horas y equipo interno
 - `custom_fields` + `custom_field_mappings` — Campos custom por tenant + herencia entre entidades
 - `labels` + `entity_labels` — Etiquetas con colores, many-to-many con entidades
+- `tenant_rules` — Motor de reglas condicionales: gates, automatizaciones, notificaciones por tenant (post-MVP)
 - `activity_log` — Timeline de comentarios + cambios automaticos del sistema
 
 ### Vistas
@@ -287,24 +288,48 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-03-31
+**Sesion:** 2026-04-05 (sesion C — bloques + SOENA)
 **Branch:** main
+**Commit:** `5e32296`
 
-Que se hizo:
-- Rediseno completo de `/tableros` (commit `6457994`) — BI-grade dashboards con 3 tabs:
-  - **Sprint 1 (P0):** F1 flujo neto hero, F2 saldo+runway, F3 I vs E con breakeven ReferenceLine y egresos slate-500, F4 cartera con dias atraso. C1 recaudo+meta+dias, C2 pipeline con degradado verde, C3 AlertCard urgentes, C4 ProgressGauge conversion. O1 RadialBarChart semicircular, O2 alertas unificadas con emptyMessage positivo, O6 costo por proyecto con gauges
-  - **Sprint 2 (P1):** F5 posicion neta, F6 gastos anomalos condicional. C5 ritmo narrativo, C6 ROI canal condicional (>=10 ops). O3 solo count>0, O4 dos gauges, O5 rentabilidad cerrados
-  - **Sprint 3 (P2):** F7 impuestos, O7 productividad condicional (>1 staff), responsive padding
-- Fix `/negocios` card (commit `ac30123`) — codigo unificado (oportunidad), responsable y dias sin actividad
-- `npm run build` verificado — `Compiled successfully`, 35 paginas sin errores TypeScript
+Que se hizo (sesion C — bloques renderers + SOENA config):
+- 11 componentes de bloque creados en `negocios/[id]/bloques/`:
+  BloqueEquipo, BloqueDatos, BloqueChecklist, BloqueChecklistSoporte,
+  BloqueDocumentos, BloqueCotizacion, BloqueCobros, BloqueAprobacion,
+  BloqueCronograma, BloqueResumenFinanciero, BloqueEjecucion
+- negocio-detail-client.tsx: renderizado por tipo + gate modal con override owner
+- negocio-v2-actions.ts: 8 nuevas server actions + trigger auto-cobros
+- Migración 3: cobros.negocio_id (FK a negocios)
+- Migración 4: SOENA proceso VE — línea clarity + 7 etapas + bloque_configs
+- UNIQUE constraint bloque_configs relajado (incluye orden) para soportar
+  múltiples bloques del mismo tipo por etapa
+- config_extra agregado a etapas_negocio para routing condicional UPME
+- Build: 0 errores TypeScript, 41 rutas
+
+Que se hizo (sesion A — fixes VE):
+- Fix: campos VE condicionales por estado — `veExcludeSlugs` calculado dinamicamente con `VE_ESTADOS_ORDEN.indexOf()`. Campos de docs/vehiculo siempre ocultos. `numero_radicado_inclusion` solo desde por_inclusion, `numero_radicado_certificacion` solo desde por_radicar, `cert_upme_url` solo desde por_certificar
+- Fix: gate `por_certificar` no funcionaba — validacion directa en `moveProyectoVe` que lee `custom_data` de la oportunidad vinculada antes de persistir el cambio de estado
+- Fix: activity log unificado — `ActivityLog` recibe `oportunidadId={proyectoVe.id}` para mostrar entradas de ambas entidades (oportunidad + proyecto) en un solo timeline
+
+Que se hizo (sesion B — modulos financieros VE):
+- Feat: 4 modulos financieros configurables por workspace (`workspaces.proyecto_modules` JSONB)
+  - `flujo_caja`: presupuesto, costo acumulado, facturado, cobrado, cartera, por facturar, ganancia actual
+  - `costos_ejecutados`: (infraestructura lista, pendiente UI en /proyectos/[id])
+  - `detalle_ejecucion`: lista de cobros VE con chip tipo_cobro + estado_causacion
+  - `cotizacion_readonly`: (infraestructura lista, pendiente UI)
+- Feat: auto-cobro anticipo — al ganar oportunidad VE con `referencia_anticipo_epayco` + `valor_anticipo`, se crea cobro tipo `anticipo` con estado PENDIENTE
+- Feat: auto-cobro saldo — al llegar a `por_cobrar`, crea cobro tipo `saldo` = `presupuesto_total - sum(anticipos)`
+- Migration: `cobros.tipo_cobro` TEXT CHECK ('regular','anticipo','saldo'), `cobros.factura_id` nullable
+- Migration: `workspaces.proyecto_modules` JSONB con defaults all-false
+- SOENA: todos los modulos activados via REST API, `valor_anticipo` reubicado a orden 8 (junto a referencia_anticipo_epayco)
 
 **Commits de sesion:**
-- `ac30123` feat: negocios card — codigo unificado, responsable y dias sin actividad
-- `6457994` feat: rediseno completo tableros — BI-grade dashboards
+- `e57390e` fix: VE — campos condicionales, gate certificacion, activity log unificado
+- `5bd3f14` feat: modulos financieros VE — flujo de caja, cobros, auto-cobros anticipo/saldo
 
-## Estado actual (2026-03-31)
+## Estado actual (2026-04-05)
 
-- **Branch:** main (up to date con remote, sin cambios pendientes)
+- **Branch:** main
 - **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
 - **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
@@ -382,6 +407,12 @@ Que se hizo:
 - [x] Workflow engine: workspace_stages + stage_transition_rules + evaluate_stage_rules — completado 2026-03-26
 - [x] Commit residuales WA sprint: execute.ts + gasto-directo.ts — incluidos en 2ca4980
 - [x] Rediseno completo `/tableros` — Sprint 1+2+3 implementados, build limpio — completado 2026-03-31
+- [x] Merge PR #1 `feat/tenant-rules-motor` — mergeado 2026-04-01
+- [x] Aplicar migracion `tenant_rules` en produccion — aplicada 2026-04-01
+- [x] Deploy Edge Function `evaluar-reglas` — deployada 2026-04-01
+- [x] Configurar workspace SOENA — campos, modulos financieros y valor_anticipo aplicados 2026-04-05
+- [x] Bloques renderers completos (11 tipos) — sesion C 2026-04-05
+- [x] Configuración SOENA VE en DB — sesion C 2026-04-05
 - [ ] Verificar tableros en browser real (desktop + mobile viewport)
 - [ ] Verificar cards condicionales en ambiente real (F6, C6, O7, O2 emptyMessage)
 - [ ] Piloto workflow engine con primer cliente Clarity — configurar via `/configure-workflow [slug]`
@@ -433,3 +464,11 @@ Que se hizo:
 | 2026-03-26 | UI configuracion workflow solo interna — no visible al usuario ONE | Usuarios de ONE no deben ver ni configurar etapas. MeTRIK configura via /configure-workflow |
 | 2026-03-26 | Modelo AI-first: cuello de botella es diseno, no ejecucion | Validado con datos: Max ejecuta en 10-30min, discovery cliente toma 2-5h. Documentado en execution-model.md y agentes |
 | 2026-03-26 | Proceso discovery Clarity-ONE: 3 bloques → Brief → /configure-workflow → QA | Hana + Kaori. Brief de configuracion es requisito antes de ejecutar. Proceso [34] en metrik-docs |
+| 2026-04-01 | Gates son servicio Clarity — tenant_rules vacio por defecto | No hay gates sin que MeTRIK los configure. Cada cliente tiene reglas de su negocio que MeTRIK levanta en discovery |
+| 2026-04-01 | Motor de reglas condicionales: block_transition evalua ANTES de persistir cambio de estado | estado_nuevo en contexto status_change hace los gates etapa-especificos. HTTP 422 si gate activo |
+| 2026-04-01 | SOENA: proceso VE es primer cliente Clarity sobre ONE | Pipeline (stages A-B) + Proyectos (10 estados C-F). 11 etapas, 9 campos custom, gates documentales. Bizzagi sin API — trazabilidad en ONE |
+| 2026-04-01 | Visibilidad input carpeta Drive: usar dato servidor, no estado local | useState se inicializa una vez — si se usa para condicionar su propio input, el input desaparece al escribir. Siempre usar la prop del server component para controlar visibilidad de campos que persisten en DB |
+| 2026-04-05 | Modulos financieros configurables via workspaces.proyecto_modules JSONB | all-false por defecto. MeTRIK activa por workspace. SOENA: todos activos. Patron reutilizable para futuras features por tenant |
+| 2026-04-05 | Auto-cobros VE: anticipo al ganar + saldo al llegar a por_cobrar | `ganarOportunidad` crea anticipo si existe referencia_anticipo_epayco + valor_anticipo. `moveProyectoVe` crea saldo = presupuesto - sum(anticipos). Ambos con estado_causacion PENDIENTE |
+| 2026-04-05 | cobros.tipo_cobro: 'regular' (default) / 'anticipo' / 'saldo' | factura_id ahora nullable — anticipos y saldos VE se registran antes de emitir factura formal |
+| 2026-04-05 | TypeScript: as any para cobros.tipo_cobro hasta regenerar database.ts | Columnas nuevas no estan en los tipos generados. Usar as any con eslint-disable-next-line hasta correr supabase gen types |
