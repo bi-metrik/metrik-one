@@ -9,4 +9,4 @@ CREATE TABLE IF NOT EXISTS ve_procesamiento_log (
   costo_usd NUMERIC(10,6) DEFAULT NULL
 );
 
-CREATE INDEX idx_ve_log_workspace_mes ON ve_procesamiento_log(workspace_id, procesado_en);
+CREATE INDEX IF NOT EXISTS idx_ve_log_workspace_mes ON ve_procesamiento_log(workspace_id, procesado_en);
