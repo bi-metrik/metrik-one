@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Circle,
   LayoutGrid,
-  ChevronDown,
   MessageSquare,
   AlertTriangle,
   X,
@@ -210,7 +209,6 @@ function SelectorEtapa({
   etapasLinea: EtapaNegocio[]
   etapaActualId: string | null
 }) {
-  const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
     etapaId: string
@@ -219,18 +217,25 @@ function SelectorEtapa({
 
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
-  if (etapasLinea.length === 0) return null
+  // Solo la siguiente etapa en orden estricto
+  const siguienteEtapa = etapaActual
+    ? etapasLinea
+        .sort((a, b) => a.orden - b.orden)
+        .find(e => e.orden === etapaActual.orden + 1) ?? null
+    : null
 
-  function handleSelect(etapaId: string) {
-    setOpen(false)
+  if (!siguienteEtapa) return null
+
+  function handleAvanzar() {
+    if (!siguienteEtapa) return
     startTransition(async () => {
-      const result = await cambiarEtapaNegocioConGate(negocioId, etapaId)
+      const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id)
       if (result.error === 'gate_bloqueado') {
-        setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [] })
+        setGateModal({ etapaId: siguienteEtapa.id, bloques: result.bloquesPendientes ?? [] })
       } else if (result.error) {
         toast.error('Error al cambiar etapa: ' + result.error)
       } else {
-        toast.success('Etapa actualizada')
+        toast.success(`Avanzado a: ${siguienteEtapa.nombre}`)
       }
     })
   }
@@ -249,46 +254,20 @@ function SelectorEtapa({
 
   return (
     <>
-      <div className="relative">
-        <button
-          onClick={() => setOpen(!open)}
-          disabled={isPending}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-        >
-          {isPending ? (
-            <span className="text-muted-foreground">Cambiando...</span>
-          ) : (
-            <>
-              <span>{etapaActual?.nombre ?? 'Seleccionar etapa'}</span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </>
-          )}
-        </button>
-
-        {open && (
+      <button
+        onClick={handleAvanzar}
+        disabled={isPending}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+      >
+        {isPending ? (
+          <span className="text-muted-foreground">Cambiando...</span>
+        ) : (
           <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
-              {etapasLinea.map(etapa => {
-                const isActive = etapa.id === etapaActualId
-                return (
-                  <button
-                    key={etapa.id}
-                    onClick={() => handleSelect(etapa.id)}
-                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-accent ${
-                      isActive ? 'font-semibold text-primary' : 'text-foreground'
-                    }`}
-                  >
-                    <StageBadge stage={etapa.stage} />
-                    <span className="flex-1 truncate">{etapa.nombre}</span>
-                    {isActive && <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />}
-                  </button>
-                )
-              })}
-            </div>
+            <ChevronRight className="h-3 w-3 text-muted-foreground" />
+            <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
           </>
         )}
-      </div>
+      </button>
 
       {gateModal && (
         <ModalGateBloqueado

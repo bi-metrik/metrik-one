@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { CalendarDays, Plus, CheckCircle2, Circle } from 'lucide-react'
 import { toast } from 'sonner'
-import { marcarBloqueItem, marcarBloqueCompleto } from '../../negocio-v2-actions'
+import { marcarBloqueItem, marcarBloqueCompleto, agregarBloqueItem, actualizarBloqueItem } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 
 interface CronogramaItem {
@@ -82,10 +82,35 @@ export default function BloqueCronograma({
   }
 
   function saveEdit() {
-    setItems(prev => prev.map(i => i.id === editingId ? { ...i, ...editValues } : i))
+    const targetItem = items.find(i => i.id === editingId)
+    if (!targetItem) return
+    const updated = { ...targetItem, ...editValues }
+    setItems(prev => prev.map(i => i.id === editingId ? updated : i))
     setEditingId(null)
-    // En una implementación completa: persistir via server action
-    toast.success('Actividad actualizada')
+
+    startTransition(async () => {
+      if (updated.id.startsWith('_tmp_')) {
+        // Crear en DB
+        const result = await agregarBloqueItem(negocioBloqueId, updated.label, 'texto', items.length)
+        if (result.error) {
+          toast.error(result.error)
+        } else if (result.id) {
+          // Reemplazar _tmp_ con ID real
+          setItems(prev => prev.map(i => i.id === updated.id ? { ...i, id: result.id! } : i))
+          // Persistir fechas si existen
+          if (updated.fecha_inicio || updated.fecha_fin) {
+            await actualizarBloqueItem(result.id, { fecha_inicio: updated.fecha_inicio, fecha_fin: updated.fecha_fin })
+          }
+        }
+      } else {
+        // Actualizar existente
+        const fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null } = { label: updated.label }
+        if (updated.fecha_inicio !== undefined) fields.fecha_inicio = updated.fecha_inicio
+        if (updated.fecha_fin !== undefined) fields.fecha_fin = updated.fecha_fin
+        const result = await actualizarBloqueItem(updated.id, fields)
+        if (result.error) toast.error(result.error)
+      }
+    })
   }
 
   if (items.length === 0) {

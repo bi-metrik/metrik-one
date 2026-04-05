@@ -464,6 +464,31 @@ export async function cambiarEtapaNegocioConGate(
   const negocio = negocioRaw as { etapa_actual_id: string | null } | null
   if (!negocio) return { error: 'Negocio no encontrado' }
 
+  // Validar que la nueva etapa es la siguiente en orden estricto
+  if (negocio.etapa_actual_id) {
+    const [etapaActualRes, nuevaEtapaRes] = await Promise.all([
+      db(supabase)
+        .from('etapas_negocio')
+        .select('orden, linea_id')
+        .eq('id', negocio.etapa_actual_id)
+        .single(),
+      db(supabase)
+        .from('etapas_negocio')
+        .select('orden, linea_id')
+        .eq('id', nuevaEtapaId)
+        .single(),
+    ])
+
+    const etapaActualData = etapaActualRes.data as { orden: number; linea_id: string } | null
+    const nuevaEtapaData = nuevaEtapaRes.data as { orden: number; linea_id: string } | null
+
+    if (!etapaActualData || !nuevaEtapaData) return { error: 'Etapa no encontrada' }
+    if (etapaActualData.linea_id !== nuevaEtapaData.linea_id) return { error: 'Etapas de líneas distintas' }
+    if (nuevaEtapaData.orden !== etapaActualData.orden + 1) {
+      return { error: 'Solo puedes avanzar a la siguiente etapa en orden' }
+    }
+  }
+
   // Verificar gates si no hay motivo de override
   if (!motivoOverride && negocio.etapa_actual_id) {
     const { data: puedeAvanzar } = await db(supabase)
@@ -588,6 +613,79 @@ export async function actualizarBloqueData(
   return { error: null }
 }
 
+// ── Inicializar bloque_items desde templates ─────────────────────────────────
+// Llamar en primer render de BloqueChecklist cuando initialItems está vacío
+
+export async function inicializarBloqueItems(
+  negocioBloqueId: string,
+  templates: Array<{ label: string; tipo: string }>
+): Promise<{
+  items: Array<{ id: string; label: string; tipo: string; completado: boolean; completado_por: string | null; completado_at: string | null; link_url: string | null }>
+  error: string | null
+}> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { items: [], error: 'No autenticado' }
+
+  // Verificar si ya existen items
+  const { data: existentes } = await db(supabase)
+    .from('bloque_items')
+    .select('id')
+    .eq('negocio_bloque_id', negocioBloqueId)
+    .limit(1)
+
+  if (existentes && (existentes as unknown[]).length > 0) {
+    // Ya existen — devolver todos
+    const { data: allItems } = await db(supabase)
+      .from('bloque_items')
+      .select('id, label, tipo, completado, completado_por, completado_at, link_url')
+      .eq('negocio_bloque_id', negocioBloqueId)
+      .order('orden', { ascending: true })
+
+    return {
+      items: ((allItems ?? []) as Record<string, unknown>[]).map(i => ({
+        id: i.id as string,
+        label: i.label as string,
+        tipo: i.tipo as string,
+        completado: i.completado as boolean,
+        completado_por: i.completado_por as string | null,
+        completado_at: i.completado_at as string | null,
+        link_url: i.link_url as string | null,
+      })),
+      error: null,
+    }
+  }
+
+  // Crear items desde templates
+  const rows = templates.map((t, i) => ({
+    negocio_bloque_id: negocioBloqueId,
+    label: t.label,
+    tipo: t.tipo === 'checkbox' ? 'checkbox' : 'texto',
+    orden: i,
+    completado: false,
+    contenido: {},
+  }))
+
+  const { data: created, error: insertError } = await db(supabase)
+    .from('bloque_items')
+    .insert(rows)
+    .select('id, label, tipo, completado, completado_por, completado_at, link_url')
+
+  if (insertError) return { items: [], error: (insertError as { message: string }).message }
+
+  return {
+    items: ((created ?? []) as Record<string, unknown>[]).map(i => ({
+      id: i.id as string,
+      label: i.label as string,
+      tipo: i.tipo as string,
+      completado: i.completado as boolean,
+      completado_por: i.completado_por as string | null,
+      completado_at: i.completado_at as string | null,
+      link_url: i.link_url as string | null,
+    })),
+    error: null,
+  }
+}
+
 // ── Marcar ítem de checklist / cronograma ─────────────────────────────────────
 
 export async function marcarBloqueItem(
@@ -667,6 +765,45 @@ export async function autoCrearCobros(
   if (insertError) return { error: (insertError as { message: string }).message }
 
   revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
+}
+
+// ── Agregar un bloque_item (cronograma) ───────────────────────────────────────
+
+export async function agregarBloqueItem(
+  negocioBloqueId: string,
+  label: string,
+  tipo: string,
+  orden: number
+): Promise<{ id: string | null; error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { id: null, error: 'No autenticado' }
+
+  const { data, error: insertError } = await db(supabase)
+    .from('bloque_items')
+    .insert({ negocio_bloque_id: negocioBloqueId, label, tipo, orden, completado: false, contenido: {} })
+    .select('id')
+    .single()
+
+  if (insertError) return { id: null, error: (insertError as { message: string }).message }
+  return { id: (data as { id: string }).id, error: null }
+}
+
+// ── Actualizar datos de un bloque_item ────────────────────────────────────────
+
+export async function actualizarBloqueItem(
+  bloqueItemId: string,
+  fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; link_url?: string | null }
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  const { error: updateError } = await db(supabase)
+    .from('bloque_items')
+    .update(fields)
+    .eq('id', bloqueItemId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
   return { error: null }
 }
 

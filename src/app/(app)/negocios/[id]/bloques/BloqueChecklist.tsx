@@ -3,7 +3,7 @@
 import { useState, useTransition, useEffect } from 'react'
 import { CheckSquare, Square } from 'lucide-react'
 import { toast } from 'sonner'
-import { marcarBloqueItem, marcarBloqueCompleto } from '../../negocio-v2-actions'
+import { marcarBloqueItem, marcarBloqueCompleto, inicializarBloqueItems } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 
 interface ChecklistItemTemplate {
@@ -46,23 +46,24 @@ export default function BloqueChecklist({
   const [items, setItems] = useState<BloqueItem[]>(initialItems)
   const [linkValues, setLinkValues] = useState<Record<string, string>>({})
   const [isPending, startTransition] = useTransition()
+  const [initializing, setInitializing] = useState(false)
 
   useEffect(() => {
-    setItems(initialItems)
+    if (initialItems.length > 0) setItems(initialItems)
   }, [initialItems.length])
 
-  // Si no hay items y hay templates, los crea
+  // Inicializar items desde templates si no existen en DB
   useEffect(() => {
-    if (initialItems.length === 0 && itemTemplates.length > 0) {
-      // Los items se crean en el server action al primer render
-      // Aquí solo mostramos placeholders locales para UX
-      setItems(itemTemplates.map((t, i) => ({
-        id: `_tmp_${i}`,
-        label: t.label,
-        completado: false,
-        completado_por: null,
-        completado_at: null,
-      })))
+    if (initialItems.length === 0 && itemTemplates.length > 0 && negocioBloqueId) {
+      setInitializing(true)
+      inicializarBloqueItems(negocioBloqueId, itemTemplates).then(result => {
+        setInitializing(false)
+        if (result.error) {
+          toast.error('Error inicializando checklist: ' + result.error)
+        } else {
+          setItems(result.items)
+        }
+      })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -111,6 +112,10 @@ export default function BloqueChecklist({
         setItems(prev => prev.map(i => i.id === item.id ? { ...i, link_url: url } : i))
       }
     })
+  }
+
+  if (initializing) {
+    return <p className="text-xs text-[#6B7280]">Cargando checklist...</p>
   }
 
   if (items.length === 0) {
