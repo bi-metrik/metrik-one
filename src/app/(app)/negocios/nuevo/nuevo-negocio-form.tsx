@@ -524,7 +524,7 @@ export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] })
         {step < negocioStep ? (
           <button
             type="button"
-            onClick={() => setStep(s => s + (esPersonaNatural && s === 0 ? 2 : 1))}
+            onClick={() => setStep(s => s + 1)}
             disabled={!canAdvance()}
             className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
