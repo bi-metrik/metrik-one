@@ -260,6 +260,84 @@ export async function getNegocioDetalle(id: string): Promise<{
           instanciasMap[inst.bloque_config_id as string] = inst as unknown as NegocioBloque
         }
       }
+
+      // ── Herencia de data para bloques 'visible' con data vacía ───────────────
+      // Cuando un bloque visible no tiene data propia (es nuevo en esta etapa),
+      // heredar la data de la instancia más reciente del mismo bloque_definition_id
+      // en etapas anteriores del mismo negocio. Esto preserva datos como equipo
+      // entre etapas sin mutar las instancias de origen.
+      const bloqueConfigsMap = new Map(
+        ((bloqueConfigs ?? []) as Record<string, unknown>[]).map(bc => [
+          bc.id as string,
+          bc as Record<string, unknown>,
+        ])
+      )
+      const visiblesVacios = Object.entries(instanciasMap).filter(([configId, inst]) => {
+        const bc = bloqueConfigsMap.get(configId)
+        const isVisible = bc?.estado === 'visible'
+        const dataVacia = !inst.data || Object.keys(inst.data).length === 0
+        return isVisible && dataVacia
+      })
+
+      if (visiblesVacios.length > 0) {
+        // Recolectar bloque_definition_ids únicos que necesitan herencia
+        const defIdsNecesarios = [...new Set(
+          visiblesVacios.map(([configId]) => {
+            const bc = bloqueConfigsMap.get(configId)
+            return bc?.bloque_definition_id as string
+          }).filter(Boolean)
+        )]
+
+        if (defIdsNecesarios.length > 0) {
+          // Buscar todos los negocio_bloques del negocio que tengan data no vacía
+          // y cuyo bloque_config tenga uno de esos bloque_definition_id
+          const { data: historialRaw } = await db(supabase)
+            .from('negocio_bloques')
+            .select(`
+              id,
+              bloque_config_id,
+              data,
+              bloque_configs!inner(bloque_definition_id)
+            `)
+            .eq('negocio_id', id)
+            .not('data', 'is', null)
+
+          // Construir mapa: bloque_definition_id → data más reciente con contenido
+          const dataHeredadaPorDef: Record<string, Record<string, unknown>> = {}
+          for (const raw of ((historialRaw ?? []) as Record<string, unknown>[])) {
+            const defId = (raw.bloque_configs as Record<string, unknown> | null)
+              ?.bloque_definition_id as string | undefined
+            if (!defId || !defIdsNecesarios.includes(defId)) continue
+            const dataRaw = raw.data as Record<string, unknown> | null
+            if (!dataRaw || Object.keys(dataRaw).length === 0) continue
+            // Solo heredar si el configId origen no es de la etapa actual
+            // (evitar ciclos: no heredar de sí mismo)
+            const configIdOrigen = raw.bloque_config_id as string
+            if (configIds.includes(configIdOrigen)) {
+              // Este config pertenece a la etapa actual — no heredar de él
+              continue
+            }
+            // Guardar (el query no tiene orden; cualquier instancia previa con data sirve)
+            if (!dataHeredadaPorDef[defId]) {
+              dataHeredadaPorDef[defId] = dataRaw
+            }
+          }
+
+          // Aplicar herencia en memoria (no persistir — solo para el render)
+          for (const [configId] of visiblesVacios) {
+            const bc = bloqueConfigsMap.get(configId)
+            const defId = bc?.bloque_definition_id as string | undefined
+            if (!defId) continue
+            const dataHeredada = dataHeredadaPorDef[defId]
+            if (!dataHeredada) continue
+            instanciasMap[configId] = {
+              ...instanciasMap[configId],
+              data: dataHeredada,
+            }
+          }
+        }
+      }
+      // ── Fin herencia ──────────────────────────────────────────────────────────
     }
 
     bloques = ((bloqueConfigs ?? []) as Record<string, unknown>[]).map(bc => ({
