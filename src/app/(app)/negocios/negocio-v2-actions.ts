@@ -644,6 +644,9 @@ export async function cambiarEtapaNegocioConGate(
   const negocio = negocioRaw as { etapa_actual_id: string | null } | null
   if (!negocio) return { error: 'Negocio no encontrado' }
 
+  // resolvedEtapaId puede cambiar si routing auto-corrige el destino
+  let resolvedEtapaId = nuevaEtapaId
+
   // Validar que la nueva etapa es la siguiente en orden (o un salto permitido por routing)
   let etapaActualNombre: string | null = null
   let etapaActualConfigExtra: Record<string, unknown> = {}
@@ -669,19 +672,14 @@ export async function cambiarEtapaNegocioConGate(
     etapaActualConfigExtra = etapaActualData.config_extra ?? {}
     if (etapaActualData.linea_id !== nuevaEtapaData.linea_id) return { error: 'Etapas de líneas distintas' }
 
-    const ordenSiguiente = etapaActualData.orden + 1
-    if (nuevaEtapaData.orden !== ordenSiguiente) {
-      // Verificar si hay routing condicional que permita este salto
-      const routing = (etapaActualData.config_extra?.routing ?? null) as {
-        default_etapa_orden: number
-        conditional: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
-      } | null
+    // Evaluar routing condicional (si existe) ANTES de validar orden
+    const routing = (etapaActualData.config_extra?.routing ?? null) as {
+      default_etapa_orden: number
+      conditional: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
+    } | null
 
-      if (!routing) {
-        return { error: 'Solo puedes avanzar a la siguiente etapa en orden' }
-      }
-
-      // Evaluar condiciones leyendo datos del negocio (bloque tipo datos de etapa actual)
+    if (routing) {
+      // Leer datos del negocio para evaluar condiciones
       const { data: bloquesDatos } = await db(supabase)
         .from('negocio_bloques')
         .select(`
@@ -694,7 +692,6 @@ export async function cambiarEtapaNegocioConGate(
         .eq('negocio_id', negocioId)
         .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
 
-      // Consolidar todos los campos data de los bloques tipo 'datos' de la etapa actual
       const camposNegocio: Record<string, unknown> = {}
       for (const b of ((bloquesDatos ?? []) as Record<string, unknown>[])) {
         const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
@@ -703,7 +700,7 @@ export async function cambiarEtapaNegocioConGate(
         }
       }
 
-      // Evaluar condicionales en orden — primer match gana
+      // Evaluar condicionales — primer match gana
       let etapaOrdenDestino = routing.default_etapa_orden
       for (const rule of routing.conditional) {
         const { field, value } = rule.condition
@@ -713,7 +710,25 @@ export async function cambiarEtapaNegocioConGate(
         }
       }
 
+      // Auto-corregir destino si routing resuelve a una etapa diferente
       if (nuevaEtapaData.orden !== etapaOrdenDestino) {
+        const { data: etapaCorrecta } = await db(supabase)
+          .from('etapas_negocio')
+          .select('id, orden, linea_id')
+          .eq('linea_id', etapaActualData.linea_id)
+          .eq('orden', etapaOrdenDestino)
+          .single()
+
+        if (etapaCorrecta) {
+          resolvedEtapaId = (etapaCorrecta as { id: string }).id
+        } else {
+          return { error: 'Etapa destino de routing no encontrada' }
+        }
+      }
+    } else {
+      // Sin routing: solo avance secuencial
+      const ordenSiguiente = etapaActualData.orden + 1
+      if (nuevaEtapaData.orden !== ordenSiguiente) {
         return { error: 'Solo puedes avanzar a la siguiente etapa en orden' }
       }
     }
@@ -738,10 +753,6 @@ export async function cambiarEtapaNegocioConGate(
         .eq('etapa_id', negocio.etapa_actual_id)
         .eq('workspace_id', workspaceId)
         .eq('es_gate', true)
-
-      const configIds = ((bloquesPendientesRaw ?? []) as Record<string, unknown>[]).map(
-        (b: Record<string, unknown>) => b.id as string
-      )
 
       const bloquesPendientes = ((bloquesPendientesRaw ?? []) as Record<string, unknown>[]).map(
         (b: Record<string, unknown>) => ({
@@ -773,12 +784,12 @@ export async function cambiarEtapaNegocioConGate(
   const { data: nuevaEtapaInfoRaw } = await db(supabase)
     .from('etapas_negocio')
     .select('nombre')
-    .eq('id', nuevaEtapaId)
+    .eq('id', resolvedEtapaId)
     .single()
-  const nuevaEtapaNombre = (nuevaEtapaInfoRaw as { nombre: string } | null)?.nombre ?? nuevaEtapaId
+  const nuevaEtapaNombre = (nuevaEtapaInfoRaw as { nombre: string } | null)?.nombre ?? resolvedEtapaId
 
   // Cambiar etapa
-  const resultCambio = await cambiarEtapaNegocio(negocioId, nuevaEtapaId)
+  const resultCambio = await cambiarEtapaNegocio(negocioId, resolvedEtapaId)
   if (resultCambio.error) return resultCambio
 
   // Registrar en activity_log

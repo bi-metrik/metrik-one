@@ -50,16 +50,9 @@ const fmt = (v: number) =>
     maximumFractionDigits: 0,
   }).format(v)
 
-// Formatea negocios.codigo para display en UI
-// Almacenado: S12603  →  Display: S1 26 3
-// empresa_codigo = letras+dígitos hasta los últimos 2+N dígitos
 function formatNegocioCodigo(codigo: string | null): string {
-  if (!codigo) return ''
-  // Patrón: una o más letras + dígitos (empresa) + 2 dígitos (año) + dígitos (consecutivo)
-  const match = codigo.match(/^([A-Z]\d+)(\d{2})(\d+)$/)
-  if (!match) return codigo
-  const [, empresa, anio, consec] = match
-  return `${empresa} ${anio} ${parseInt(consec, 10)}`
+  if (!codigo) return codigo ?? ''
+  return codigo
 }
 
 // ── Editor inline de carpeta URL ──────────────────────────────────────────────
@@ -332,7 +325,7 @@ function SelectorEtapa({
 
   // Solo la siguiente etapa en orden estricto
   const siguienteEtapa = etapaActual
-    ? etapasLinea
+    ? [...etapasLinea]
         .sort((a, b) => a.orden - b.orden)
         .find(e => e.orden === etapaActual.orden + 1) ?? null
     : null

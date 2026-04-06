@@ -134,6 +134,9 @@ export default function BloqueDocumentos({
 
   const [processingSlots, setProcessingSlots] = useState<Set<string>>(new Set())
 
+  // Track URLs subidas en esta sesión para no perderlas en marcarBloqueCompleto
+  const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({})
+
   const [campos, setCampos] = useState<CamposExtraidos>(() => {
     const c: CamposExtraidos = {}
     const keys = Object.keys(CAMPOS_LABELS) as (keyof CamposExtraidos)[]
@@ -203,19 +206,15 @@ export default function BloqueDocumentos({
 
       setSlotStates(prev => ({ ...prev, [slug]: 'uploaded' }))
       setFileNames(prev => ({ ...prev, [slug]: file.name }))
+      setUploadedUrls(prev => ({ ...prev, [slug]: confirmRes.url ?? '' }))
 
       // 4. Auto-completar si todos los requeridos están subidos
       const newStates = { ...slotStates, [slug]: 'uploaded' as SlotState }
       const allRequired = documentos.filter(d => d.required).every(d => newStates[d.slug] === 'uploaded')
       if (allRequired) {
-        // Leer data actual y marcar completo
-        const docsActuales: Record<string, string> = {}
-        documentos.forEach(d => {
-          if (newStates[d.slug] === 'uploaded') {
-            docsActuales[d.slug] = savedDocs[d.slug] ?? confirmRes.url ?? ''
-          }
-        })
-        await marcarBloqueCompleto(negocioBloqueId, { ...saved, docs: { ...savedDocs, [slug]: confirmRes.url } })
+        // Combinar docs originales + subidos en esta sesión + el actual
+        const mergedDocs = { ...savedDocs, ...uploadedUrls, [slug]: confirmRes.url ?? '' }
+        await marcarBloqueCompleto(negocioBloqueId, { ...saved, docs: mergedDocs })
       }
 
       // 5. AI processing para slugs conocidos
