@@ -65,12 +65,13 @@ export async function deleteActivity(activityId: string) {
 /** Log a system change (called from other server actions) */
 export async function logSystemChange(
   workspaceId: string,
-  entidadTipo: 'oportunidad' | 'proyecto',
+  entidadTipo: 'oportunidad' | 'proyecto' | 'negocio',
   entidadId: string,
   campo: string,
   valorAnterior: string | null,
   valorNuevo: string | null,
   autorStaffId?: string | null,
+  opts?: { tipo?: string; contenido?: string },
 ) {
   const { supabase, error } = await getWorkspace()
   if (error) return
@@ -79,10 +80,11 @@ export async function logSystemChange(
     workspace_id: workspaceId,
     entidad_tipo: entidadTipo,
     entidad_id: entidadId,
-    tipo: 'cambio',
+    tipo: opts?.tipo ?? 'cambio',
     autor_id: autorStaffId || null,
     campo_modificado: campo,
     valor_anterior: valorAnterior,
     valor_nuevo: valorNuevo,
+    ...(opts?.contenido ? { contenido: opts.contenido } : {}),
   })
 }

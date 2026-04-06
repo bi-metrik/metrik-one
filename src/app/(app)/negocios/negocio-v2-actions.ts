@@ -818,7 +818,7 @@ export async function marcarBloqueCompleto(
   negocioBloqueId: string,
   data: Record<string, unknown>
 ): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   const { error: updateError } = await db(supabase)
@@ -841,8 +841,9 @@ export async function marcarBloqueCompleto(
       negocio_id,
       bloque_config_id,
       bloque_configs(
+        nombre,
         config_extra,
-        bloque_definitions(tipo)
+        bloque_definitions(tipo, nombre)
       )
     `)
     .eq('id', negocioBloqueId)
@@ -853,8 +854,9 @@ export async function marcarBloqueCompleto(
       negocio_id: string
       bloque_config_id: string
       bloque_configs: {
+        nombre: string | null
         config_extra: Record<string, unknown>
-        bloque_definitions: { tipo: string } | null
+        bloque_definitions: { tipo: string; nombre: string } | null
       } | null
     }
 
@@ -872,6 +874,22 @@ export async function marcarBloqueCompleto(
 
     // Revalidar página del negocio
     revalidatePath(`/negocios/${bloque.negocio_id}`)
+
+    // Registrar en activity_log
+    if (staffId && workspaceId) {
+      const bloqueNombre = bloque.bloque_configs?.nombre ?? bloque.bloque_configs?.bloque_definitions?.nombre ?? 'Bloque'
+      await supabase
+        .from('activity_log')
+        .insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: bloque.negocio_id,
+          tipo: 'cambio',
+          autor_id: staffId,
+          campo_modificado: 'bloque',
+          contenido: `Bloque "${bloqueNombre}" completado`,
+        })
+    }
   }
 
   return { error: null }
@@ -884,7 +902,7 @@ export async function actualizarBloqueData(
   data: Record<string, unknown>,
   negocioId?: string
 ): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   const { data: row, error: updateError } = await db(supabase)
@@ -901,6 +919,21 @@ export async function actualizarBloqueData(
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
   if (nid) revalidatePath(`/negocios/${nid}`)
+
+  // Registrar en activity_log
+  if (staffId && workspaceId && nid) {
+    await supabase
+      .from('activity_log')
+      .insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: nid,
+        tipo: 'cambio',
+        autor_id: staffId,
+        campo_modificado: 'bloque_datos',
+        contenido: 'Datos de bloque actualizados',
+      })
+  }
 
   return { error: null }
 }
@@ -985,7 +1018,7 @@ export async function marcarBloqueItem(
   completado: boolean,
   linkUrl?: string
 ): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   const payload: Record<string, unknown> = {
@@ -1000,6 +1033,40 @@ export async function marcarBloqueItem(
     .eq('id', bloqueItemId)
 
   if (updateError) return { error: (updateError as { message: string }).message }
+
+  // Registrar en activity_log
+  if (staffId && workspaceId) {
+    const { data: itemInfo } = await db(supabase)
+      .from('bloque_items')
+      .select('label, negocio_bloque_id')
+      .eq('id', bloqueItemId)
+      .single()
+
+    if (itemInfo) {
+      const item = itemInfo as { label: string; negocio_bloque_id: string }
+      const { data: bloqueInfo } = await db(supabase)
+        .from('negocio_bloques')
+        .select('negocio_id')
+        .eq('id', item.negocio_bloque_id)
+        .single()
+
+      const negocioId = (bloqueInfo as { negocio_id: string } | null)?.negocio_id
+      if (negocioId) {
+        await supabase
+          .from('activity_log')
+          .insert({
+            workspace_id: workspaceId,
+            entidad_tipo: 'negocio',
+            entidad_id: negocioId,
+            tipo: 'cambio',
+            autor_id: staffId,
+            campo_modificado: 'checklist_item',
+            contenido: completado ? `"${item.label}" marcado como completado` : `"${item.label}" desmarcado`,
+          })
+      }
+    }
+  }
+
   return { error: null }
 }
 
@@ -1106,8 +1173,16 @@ export async function confirmarPagoCobro(
   referencia?: string,
   valorParcial?: number
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Obtener datos del cobro antes de actualizar (para el log)
+  const { data: cobroAntes } = await db(supabase)
+    .from('cobros')
+    .select('notas, monto, negocio_id')
+    .eq('id', cobroId)
+    .eq('workspace_id', workspaceId)
+    .single()
 
   const payload: Record<string, unknown> = {
     estado_causacion: 'APROBADO',
@@ -1123,6 +1198,26 @@ export async function confirmarPagoCobro(
 
   if (updateError) return { error: (updateError as { message: string }).message }
 
+  // Registrar en activity_log
+  if (staffId && cobroAntes) {
+    const cobro = cobroAntes as { notas: string | null; monto: number; negocio_id: string | null }
+    const negocioId = cobro.negocio_id
+    if (negocioId) {
+      const montoFinal = valorParcial ?? cobro.monto
+      await supabase
+        .from('activity_log')
+        .insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'cambio',
+          autor_id: staffId,
+          campo_modificado: 'cobro_confirmado',
+          contenido: `Pago confirmado: ${cobro.notas ?? 'Cobro'} por $${montoFinal.toLocaleString('es-CO')}`,
+        })
+    }
+  }
+
   revalidatePath('/negocios')
   return { error: null }
 }
@@ -1133,8 +1228,18 @@ export async function actualizarPrecioAprobado(
   negocioId: string,
   precio: number
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Obtener precio anterior para el log
+  const { data: negocioAntes } = await db(supabase)
+    .from('negocios')
+    .select('precio_aprobado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  const precioAnterior = (negocioAntes as { precio_aprobado: number | null } | null)?.precio_aprobado
 
   const { error: updateError } = await db(supabase)
     .from('negocios')
@@ -1143,6 +1248,24 @@ export async function actualizarPrecioAprobado(
     .eq('workspace_id', workspaceId)
 
   if (updateError) return { error: (updateError as { message: string }).message }
+
+  // Registrar en activity_log
+  if (staffId) {
+    await supabase
+      .from('activity_log')
+      .insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio',
+        autor_id: staffId,
+        campo_modificado: 'precio_aprobado',
+        valor_anterior: precioAnterior != null ? String(precioAnterior) : null,
+        valor_nuevo: String(precio),
+        contenido: `Precio aprobado actualizado a $${precio.toLocaleString('es-CO')}`,
+      })
+  }
+
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
 }
@@ -1184,7 +1307,7 @@ export async function actualizarAprobacion(
     aprobado_at?: string
   }
 ): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   const isComplete = data.estado === 'aprobado'
@@ -1204,6 +1327,36 @@ export async function actualizarAprobacion(
     .eq('id', negocioBloqueId)
 
   if (updateError) return { error: (updateError as { message: string }).message }
+
+  // Registrar en activity_log
+  if (staffId && workspaceId) {
+    const { data: bloqueInfo } = await db(supabase)
+      .from('negocio_bloques')
+      .select('negocio_id')
+      .eq('id', negocioBloqueId)
+      .single()
+
+    const negocioId = (bloqueInfo as { negocio_id: string } | null)?.negocio_id
+    if (negocioId) {
+      const estadoLabel = data.estado ?? 'pendiente'
+      const contenido = data.comentario
+        ? `Aprobación: ${estadoLabel}. ${data.comentario}`
+        : `Aprobación: ${estadoLabel}`
+      await supabase
+        .from('activity_log')
+        .insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'cambio',
+          autor_id: staffId,
+          campo_modificado: 'aprobacion',
+          valor_nuevo: estadoLabel,
+          contenido,
+        })
+    }
+  }
+
   return { error: null }
 }
 
@@ -1444,10 +1597,20 @@ export async function actualizarCarpetaUrlNegocio(
   negocioId: string,
   carpetaUrl: string
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   const url = carpetaUrl.trim()
+
+  // Obtener valor anterior para comparar
+  const { data: negocioAntes } = await db(supabase)
+    .from('negocios')
+    .select('carpeta_url')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  const urlAnterior = (negocioAntes as { carpeta_url: string | null } | null)?.carpeta_url
 
   const { error: updErr } = await db(supabase)
     .from('negocios')
@@ -1456,6 +1619,23 @@ export async function actualizarCarpetaUrlNegocio(
     .eq('workspace_id', workspaceId)
 
   if (updErr) return { error: (updErr as { message: string }).message }
+
+  // Registrar en activity_log solo si cambió
+  if (staffId && (urlAnterior ?? '') !== (url || '')) {
+    await supabase
+      .from('activity_log')
+      .insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio',
+        autor_id: staffId,
+        campo_modificado: 'carpeta_url',
+        valor_anterior: urlAnterior ?? null,
+        valor_nuevo: url || null,
+        contenido: url ? 'Carpeta Drive actualizada' : 'Carpeta Drive eliminada',
+      })
+  }
 
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }

@@ -3,7 +3,8 @@
 import { useState, useEffect, useTransition, useRef } from 'react'
 import {
   MessageSquare, Send, Trash2, Link as LinkIcon, AtSign,
-  ArrowRight, X,
+  ArrowRight, X, CheckCircle2, XCircle, Shield, Banknote,
+  CheckSquare, FolderOpen,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity } from '@/app/(app)/activity-actions'
@@ -42,6 +43,20 @@ const CAMPO_LABELS: Record<string, string> = {
   avance_porcentaje: 'Avance',
   valor_estimado: 'Valor estimado',
   probabilidad: 'Probabilidad',
+  bloque: 'Bloque',
+  bloque_datos: 'Datos bloque',
+  aprobacion: 'Aprobacion',
+  checklist_item: 'Checklist',
+  precio_aprobado: 'Precio aprobado',
+  carpeta_url: 'Carpeta Drive',
+  cobro_confirmado: 'Cobro confirmado',
+}
+
+function formatCOP(value: string | null) {
+  if (!value) return '--'
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(num)
 }
 
 function formatFieldChange(campo: string, valorAnterior: string | null, valorNuevo: string | null) {
@@ -306,39 +321,174 @@ function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id
 // ── Change entry (system/automatic) ──
 
 function ChangeEntry({ entry }: { entry: ActivityEntry }) {
-  // Cambio de etapa: render especial con flecha y nombre destino
+  const autorName = entry.autor?.full_name
+  const timestamp = entry.created_at ? timeAgo(entry.created_at) : ''
+
+  // Cambio de etapa: flecha verde + nombre destino
   if (entry.tipo === 'cambio_etapa') {
     return (
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <ArrowRight className="h-3.5 w-3.5 text-primary/70 shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {entry.autor && (
-            <span className="font-medium text-foreground">{entry.autor.full_name}</span>
-          )}
-          <span>avanzó a</span>
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>avanzo a</span>
           <span className="font-medium text-foreground">{entry.valor_nuevo ?? entry.contenido}</span>
           {entry.contenido && (
             <span className="italic text-muted-foreground/60">({entry.contenido})</span>
           )}
-          <span className="text-[10px]">{entry.created_at ? timeAgo(entry.created_at) : ''}</span>
+          <span className="text-[10px]">{timestamp}</span>
         </div>
       </div>
     )
   }
 
-  const { label, from, to } = formatFieldChange(
-    entry.campo_modificado ?? '',
-    entry.valor_anterior,
-    entry.valor_nuevo,
-  )
+  // Cambio de estado: icono XCircle rojo si es cierre/perdido, ArrowRight si es otro
+  if (entry.tipo === 'cambio_estado') {
+    const isCierre = ['cerrado', 'cancelado', 'perdido'].includes((entry.valor_nuevo ?? '').toLowerCase())
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        {isCierre
+          ? <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+          : <ArrowRight className="h-3.5 w-3.5 text-primary/70 shrink-0" />
+        }
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>{isCierre ? 'cerro como' : 'cambio estado a'}</span>
+          <span className={`font-medium ${isCierre ? 'text-red-600' : 'text-foreground'}`}>
+            {entry.valor_nuevo ?? '--'}
+          </span>
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // tipo === 'cambio' — render segun campo_modificado
+  const campo = entry.campo_modificado ?? ''
+
+  // Bloque completado
+  if (campo === 'bloque') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>completo</span>
+          <span className="font-medium text-foreground">{entry.contenido ?? entry.valor_nuevo ?? 'bloque'}</span>
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Aprobacion de bloque
+  if (campo === 'aprobacion') {
+    const aprobado = (entry.valor_nuevo ?? '').toLowerCase() === 'aprobado'
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <Shield className={`h-3.5 w-3.5 shrink-0 ${aprobado ? 'text-primary' : 'text-red-500'}`} />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span className={aprobado ? 'text-primary' : 'text-red-500'}>
+            {aprobado ? 'aprobo' : 'rechazo'}
+          </span>
+          {entry.contenido && <span className="font-medium text-foreground">{entry.contenido}</span>}
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Precio aprobado — formato moneda
+  if (campo === 'precio_aprobado') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <Banknote className="h-3.5 w-3.5 text-primary shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>cambio precio</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="rounded bg-muted px-1 py-0.5 text-[10px]">{formatCOP(entry.valor_anterior)}</span>
+            <ArrowRight className="h-2.5 w-2.5" />
+            <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium">{formatCOP(entry.valor_nuevo)}</span>
+          </span>
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Cobro confirmado
+  if (campo === 'cobro_confirmado') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <Banknote className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>confirmo pago</span>
+          {entry.valor_nuevo && (
+            <span className="font-medium text-emerald-600">{formatCOP(entry.valor_nuevo)}</span>
+          )}
+          {entry.contenido && <span className="text-muted-foreground/70">({entry.contenido})</span>}
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Checklist item
+  if (campo === 'checklist_item') {
+    const checked = (entry.valor_nuevo ?? '').toLowerCase() === 'true' || entry.valor_nuevo === '1'
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <CheckSquare className={`h-3.5 w-3.5 shrink-0 ${checked ? 'text-primary' : 'text-muted-foreground/50'}`} />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>{checked ? 'completo' : 'desmarco'}</span>
+          <span className="font-medium text-foreground">{entry.contenido ?? 'item'}</span>
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Carpeta URL — solo indicar que se actualizo
+  if (campo === 'carpeta_url') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <FolderOpen className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>actualizo carpeta Drive</span>
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Bloque datos actualizados
+  if (campo === 'bloque_datos') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <span>actualizo datos de bloque</span>
+          {entry.contenido && <span className="font-medium text-foreground">{entry.contenido}</span>}
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Default: render generico campo anterior → nuevo
+  const { label, from, to } = formatFieldChange(campo, entry.valor_anterior, entry.valor_nuevo)
 
   return (
     <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
       <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30 shrink-0" />
       <div className="flex items-center gap-1 flex-wrap min-w-0">
-        {entry.autor && (
-          <span className="font-medium text-foreground">{entry.autor.full_name}</span>
-        )}
+        {autorName && <span className="font-medium text-foreground">{autorName}</span>}
         <span>cambio</span>
         <span className="font-medium text-foreground">{label}</span>
         <span className="inline-flex items-center gap-1">
@@ -346,7 +496,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
           <ArrowRight className="h-2.5 w-2.5" />
           <span className="rounded bg-muted px-1 py-0.5 text-[10px]">{to}</span>
         </span>
-        <span className="text-[10px]">{entry.created_at ? timeAgo(entry.created_at) : ''}</span>
+        <span className="text-[10px]">{timestamp}</span>
       </div>
     </div>
   )
