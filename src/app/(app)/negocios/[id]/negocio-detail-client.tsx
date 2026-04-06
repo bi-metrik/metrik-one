@@ -810,16 +810,24 @@ export default function NegocioDetailClient({
           />
 
           {negocio.contactos?.nombre && (
-            <span className="inline-flex items-center gap-1">
+            <Link
+              href={`/directorio/contacto/${negocio.contactos.id}`}
+              className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent transition-colors"
+            >
               <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[8px] font-bold uppercase">
                 {negocio.contactos.nombre.charAt(0)}
               </span>
               {negocio.contactos.nombre}
-            </span>
+            </Link>
           )}
 
           {negocio.empresas?.nombre && (
-            <span className="font-medium text-foreground/80">{negocio.empresas.nombre}</span>
+            <Link
+              href={`/directorio/empresa/${negocio.empresas.id}`}
+              className="font-medium text-foreground/80 rounded px-1 py-0.5 hover:bg-accent transition-colors"
+            >
+              {negocio.empresas.nombre}
+            </Link>
           )}
 
           {negocio.lineas_negocio?.nombre && (

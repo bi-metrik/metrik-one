@@ -74,8 +74,8 @@ export type NegocioDetalle = {
   // Joins — usando columnas reales de las tablas existentes (empresas.nombre, contactos.nombre)
   lineas_negocio: { nombre: string } | null
   etapas_negocio: { nombre: string; stage: string } | null
-  empresas: { nombre: string } | null
-  contactos: { nombre: string } | null
+  empresas: { id: string; nombre: string } | null
+  contactos: { id: string; nombre: string } | null
 }
 
 export type NegocioResumen = {
@@ -180,8 +180,8 @@ export async function getNegocioDetalle(id: string): Promise<{
       closed_at,
       lineas_negocio(nombre),
       etapas_negocio(nombre, stage),
-      empresas(nombre),
-      contactos(nombre)
+      empresas(id, nombre),
+      contactos(id, nombre)
     `)
     .eq('id', id)
     .eq('workspace_id', workspaceId)
