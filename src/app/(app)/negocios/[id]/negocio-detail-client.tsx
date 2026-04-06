@@ -661,8 +661,9 @@ export default function NegocioDetailClient({
   staffList,
 }: Props) {
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
+  const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
   const etapaActual = negocio.etapas_negocio
-  const idCorto = negocio.id.slice(-6).toUpperCase()
+  const idCorto = negocio.id.slice(0, 8).toUpperCase()
 
   const bloquesExtendidos = (bloques as BloqueExtendido[]).map(b => ({
     ...b,
@@ -671,28 +672,28 @@ export default function NegocioDetailClient({
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-4">
-      {/* ── BACK BUTTON ── */}
-      <div className="mb-3">
-        <Link
-          href="/negocios"
-          className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Negocios
-        </Link>
-      </div>
-
       {/* ── HEADER CONDENSADO ── */}
       <div className="mb-4 rounded-xl border border-border bg-card p-4 shadow-sm">
-        {/* Fila 1: Badge stage + ID + Nombre + Botón cambiar etapa */}
+        {/* Fila 0: Volver + ID */}
+        <div className="mb-2 flex items-center justify-between">
+          <Link
+            href="/negocios"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-3 w-3" />
+            Negocios
+          </Link>
+          <span className="text-[10px] font-mono text-muted-foreground/50 select-all">
+            {idCorto}
+          </span>
+        </div>
+
+        {/* Fila 1: Stage badge + Nombre + Botón cambiar etapa */}
         <div className="flex items-start gap-2">
-          <div className="flex items-center gap-2 shrink-0 mt-0.5">
+          <div className="shrink-0 mt-0.5">
             <StageBadge stage={negocio.stage_actual} />
-            <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-mono font-bold text-foreground">
-              #{idCorto}
-            </span>
           </div>
-          <h1 className="flex-1 min-w-0 text-sm font-bold leading-tight truncate">
+          <h1 className="flex-1 min-w-0 text-base font-semibold leading-tight">
             {negocio.nombre}
           </h1>
           <div className="shrink-0">
@@ -707,11 +708,8 @@ export default function NegocioDetailClient({
         {/* Fila 2: Precio + Drive + Contacto + Empresa */}
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {precio !== null && precio !== undefined && (
-            <span className="font-semibold text-foreground tabular-nums">
+            <span className={`tabular-nums ${estaAprobado ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground'}`}>
               {fmt(precio)}
-              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                {negocio.precio_aprobado ? 'aprobado' : 'estimado'}
-              </span>
             </span>
           )}
 
