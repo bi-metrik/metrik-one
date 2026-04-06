@@ -529,7 +529,7 @@ export async function crearNegocio(input: {
   if (primeraEtapa?.id) {
     const { data: bloqueConfigs } = await db(supabase)
       .from('bloque_configs')
-      .select('id')
+      .select('id, config_extra, bloque_definitions(tipo)')
       .eq('etapa_id', primeraEtapa.id)
       .eq('workspace_id', workspaceId)
 
@@ -542,11 +542,127 @@ export async function crearNegocio(input: {
       }))
 
       await db(supabase).from('negocio_bloques').insert(instancias)
+
+      // ── Auto-cotización: si algún bloque cotización tiene config auto_cotizacion ──
+      for (const bc of bloqueConfigs as Array<{
+        id: string
+        config_extra: Record<string, unknown> | null
+        bloque_definitions: { tipo: string } | null
+      }>) {
+        const tipoBd = bc.bloque_definitions?.tipo
+        const autoCot = (bc.config_extra?.auto_cotizacion ?? null) as {
+          servicio_nombre: string
+          usar_precio_estimado?: boolean
+        } | null
+
+        if (tipoBd === 'cotizacion' && autoCot) {
+          await crearCotizacionAutomatica(
+            supabase,
+            workspaceId,
+            negocioData.id,
+            autoCot.servicio_nombre,
+            autoCot.usar_precio_estimado ? (input.precio_estimado ?? 0) : 0
+          )
+        }
+      }
     }
   }
 
   revalidatePath('/negocios')
   return { negocio_id: negocioData.id, error: null }
+}
+
+// ── Auto-crear cotización al crear negocio ──────────────────────────────────
+// Se llama internamente desde crearNegocio() si el bloque cotización tiene
+// config_extra.auto_cotizacion configurado (ej: SOENA VE).
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function crearCotizacionAutomatica(
+  supabase: any,
+  workspaceId: string,
+  negocioId: string,
+  servicioNombre: string,
+  precioEstimado: number
+) {
+  // 1. Obtener consecutivo
+  const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
+    p_workspace_id: workspaceId,
+  })
+  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-${Date.now()}`
+
+  // 2. Crear cotización detallada en borrador
+  const { data: cotData, error: cotErr } = await supabase
+    .from('cotizaciones')
+    .insert({
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      consecutivo,
+      codigo: '',
+      modo: 'detallada',
+      valor_total: precioEstimado,
+      estado: 'borrador',
+    })
+    .select('id')
+    .single()
+
+  if (cotErr || !cotData) return
+
+  const cotizacionId = cotData.id
+
+  // 3. Buscar servicio por nombre en el workspace
+  const { data: servicio } = await supabase
+    .from('servicios')
+    .select('id, nombre, precio_estandar, rubros_template')
+    .eq('workspace_id', workspaceId)
+    .ilike('nombre', servicioNombre)
+    .eq('activo', true)
+    .limit(1)
+    .single()
+
+  if (!servicio) return
+
+  // 4. Crear item desde el servicio
+  const rubrosTemplate = servicio.rubros_template as Array<{
+    tipo: string; descripcion?: string; cantidad: number; unidad: string; valor_unitario: number
+  }> | null
+
+  const subtotal = rubrosTemplate && rubrosTemplate.length > 0
+    ? rubrosTemplate.reduce((sum: number, r: { cantidad: number; valor_unitario: number }) => sum + (r.cantidad * r.valor_unitario), 0)
+    : (servicio.precio_estandar ?? 0)
+
+  const { data: newItem } = await supabase
+    .from('items')
+    .insert({
+      cotizacion_id: cotizacionId,
+      nombre: servicio.nombre,
+      subtotal,
+      orden: 1,
+      servicio_origen_id: servicio.id,
+    })
+    .select('id')
+    .single()
+
+  // 5. Deep copy rubros del template
+  if (rubrosTemplate && rubrosTemplate.length > 0 && newItem) {
+    const rubrosToInsert = rubrosTemplate.map((r: { tipo: string; descripcion?: string; cantidad: number; unidad: string; valor_unitario: number }) => ({
+      item_id: newItem.id,
+      tipo: r.tipo,
+      descripcion: r.descripcion || null,
+      cantidad: r.cantidad,
+      unidad: r.unidad,
+      valor_unitario: r.valor_unitario,
+    }))
+    await supabase.from('rubros').insert(rubrosToInsert)
+  }
+
+  // 6. Si precio_estimado > 0, ya se puso como valor_total arriba.
+  //    Si es 0, usar precio_estandar del servicio.
+  if (precioEstimado === 0 && servicio.precio_estandar > 0) {
+    await supabase
+      .from('cotizaciones')
+      .update({ valor_total: servicio.precio_estandar })
+      .eq('id', cotizacionId)
+  }
 }
 
 // ── Cambiar etapa del negocio ─────────────────────────────────────────────────

@@ -148,6 +148,17 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
                   </div>
                 </Link>
 
+                {/* Botón Enviar — borradores: auto-aprueba (borrador → aceptada) */}
+                {modo === 'editable' && !hayAceptada && cot.estado === 'borrador' && (
+                  <button
+                    onClick={() => handleAprobar(cot.id)}
+                    disabled={isPending}
+                    className="shrink-0 rounded-lg border border-[#10B981] bg-[#10B981]/10 px-3 py-2 text-[10px] font-semibold text-[#10B981] hover:bg-[#10B981]/20 disabled:opacity-50 transition-colors"
+                  >
+                    Enviar
+                  </button>
+                )}
+
                 {/* Botones Aprobar / Rechazar — solo enviadas, solo si no hay aceptada, solo modo editable */}
                 {modo === 'editable' && !hayAceptada && cot.estado === 'enviada' && (
                   <div className="flex shrink-0 gap-1">
