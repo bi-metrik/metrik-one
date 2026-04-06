@@ -202,16 +202,19 @@ export default function BloqueDocumentos({
         return
       }
 
-      setSlotStates(prev => ({ ...prev, [slug]: 'uploaded' }))
       setFileNames(prev => ({ ...prev, [slug]: file.name }))
-      setUploadedUrls(prev => ({ ...prev, [slug]: confirmRes.url ?? '' }))
+      const currentUrl = confirmRes.url ?? ''
+      setUploadedUrls(prev => ({ ...prev, [slug]: currentUrl }))
 
       // 4. Auto-completar si todos los requeridos están subidos
-      const newStates = { ...slotStates, [slug]: 'uploaded' as SlotState }
-      const allRequired = documentos.filter(d => d.required).every(d => newStates[d.slug] === 'uploaded')
-      if (allRequired) {
-        // Combinar docs originales + subidos en esta sesión + el actual
-        const mergedDocs = { ...savedDocs, ...uploadedUrls, [slug]: confirmRes.url ?? '' }
+      let shouldComplete = false
+      setSlotStates(prev => {
+        const updated = { ...prev, [slug]: 'uploaded' as SlotState }
+        shouldComplete = documentos.filter(d => d.required).every(d => updated[d.slug] === 'uploaded')
+        return updated
+      })
+      if (shouldComplete) {
+        const mergedDocs = { ...savedDocs, ...uploadedUrls, [slug]: currentUrl }
         await marcarBloqueCompleto(negocioBloqueId, { ...saved, docs: mergedDocs })
       }
 

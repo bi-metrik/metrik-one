@@ -105,11 +105,19 @@ export default function BloqueChecklist({
 
   function handleLinkSave(item: BloqueItem) {
     const url = linkValues[item.id] ?? item.link_url ?? ''
+    if (!url.trim()) return
     startTransition(async () => {
-      const result = await marcarBloqueItem(item.id, item.completado, url)
+      // Auto-marcar como completado al guardar link (sin fricción)
+      const result = await marcarBloqueItem(item.id, true, url)
       if (result.error) toast.error(result.error)
       else {
-        setItems(prev => prev.map(i => i.id === item.id ? { ...i, link_url: url } : i))
+        const nextItems = items.map(i => i.id === item.id ? { ...i, link_url: url, completado: true, completado_at: new Date().toISOString() } : i)
+        setItems(nextItems)
+        // Verificar si ahora todos están completos
+        const nowAllComplete = nextItems.every(i => i.completado && i.link_url)
+        if (nowAllComplete && negocioBloqueId) {
+          await marcarBloqueCompleto(negocioBloqueId, { completado_via: 'checklist' })
+        }
       }
     })
   }
