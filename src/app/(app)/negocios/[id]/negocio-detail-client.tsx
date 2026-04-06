@@ -12,6 +12,7 @@ import {
   X,
   ArrowLeft,
   Pencil,
+  Building2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
@@ -20,7 +21,7 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio, cerrarNegocio } from '../negocio-v2-actions'
 import ActivityLog from '@/components/activity-log'
 
 // Bloques renderers
@@ -562,7 +563,8 @@ function BloqueRenderer({
       return <BloqueResumenFinanciero data={resumenFinanciero} />
 
     case 'ejecucion':
-      return <BloqueEjecucion negocioId={negocioId} hasProyecto={false} />
+      // Bloque no implementado en piloto — ocultar para no mostrar estado engañoso
+      return null
 
     default:
       return (
@@ -760,7 +762,6 @@ export default function NegocioDetailClient({
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
   const etapaActual = negocio.etapas_negocio
-  const idCorto = negocio.id.slice(0, 8).toUpperCase()
 
   const bloquesExtendidos = (bloques as BloqueExtendido[]).map(b => ({
     ...b,
@@ -769,10 +770,10 @@ export default function NegocioDetailClient({
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-4">
-      {/* ── HEADER CONDENSADO ── */}
-      <div className="mb-4 rounded-xl border border-border bg-card p-4 shadow-sm">
-        {/* Fila 0: Volver + ID */}
-        <div className="mb-2 flex items-center justify-between">
+      {/* ── HEADER NOOR 5 FILAS ── */}
+      <div className="space-y-2.5 mb-4">
+        {/* Fila 1 — nav */}
+        <div>
           <Link
             href="/negocios"
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -780,20 +781,19 @@ export default function NegocioDetailClient({
             <ArrowLeft className="h-3 w-3" />
             Negocios
           </Link>
-          <span className="text-[10px] font-mono text-muted-foreground/50 select-all">
-            {idCorto}
-          </span>
         </div>
 
-        {/* Fila 1: Stage badge + Nombre + Botón cambiar etapa */}
-        <div className="flex items-start gap-2">
-          <div className="shrink-0 mt-0.5">
-            <StageBadge stage={negocio.stage_actual} />
+        {/* Fila 2 — titulo + accion */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mb-0.5">
+              <StageBadge stage={negocio.stage_actual} />
+            </div>
+            <h1 className="text-lg font-bold leading-tight truncate">
+              {negocio.nombre}
+            </h1>
           </div>
-          <h1 className="flex-1 min-w-0 text-base font-semibold leading-tight">
-            {negocio.nombre}
-          </h1>
-          <div className="shrink-0">
+          <div className="shrink-0 mt-1">
             <SelectorEtapa
               negocioId={negocio.id}
               etapasLinea={etapasLinea}
@@ -802,48 +802,49 @@ export default function NegocioDetailClient({
           </div>
         </div>
 
-        {/* Fila 2: Precio + Drive + Contacto + Empresa */}
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {/* Fila 3 — empresa + contacto + precio */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+            {negocio.empresas?.nombre && (
+              <Link
+                href={`/directorio/empresa/${negocio.empresas.id}`}
+                className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent transition-colors"
+              >
+                <Building2 className="h-3 w-3 text-purple-400 shrink-0" />
+                <span className="truncate">{negocio.empresas.nombre}</span>
+              </Link>
+            )}
+            {negocio.empresas?.nombre && negocio.contactos?.nombre && (
+              <span className="text-muted-foreground/40">·</span>
+            )}
+            {negocio.contactos?.nombre && (
+              <Link
+                href={`/directorio/contacto/${negocio.contactos.id}`}
+                className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent transition-colors"
+              >
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[8px] font-bold uppercase">
+                  {negocio.contactos.nombre.charAt(0)}
+                </span>
+                <span className="truncate">{negocio.contactos.nombre}</span>
+              </Link>
+            )}
+          </div>
           {precio !== null && precio !== undefined && (
-            <span className={`tabular-nums ${estaAprobado ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground'}`}>
+            <span className={`shrink-0 tabular-nums text-base ${estaAprobado ? 'text-foreground font-bold' : 'text-muted-foreground font-semibold'}`}>
               {fmt(precio)}
-            </span>
-          )}
-
-          <CarpetaUrlEditor
-            negocioId={negocio.id}
-            initialUrl={negocio.carpeta_url}
-          />
-
-          {negocio.contactos?.nombre && (
-            <Link
-              href={`/directorio/contacto/${negocio.contactos.id}`}
-              className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent transition-colors"
-            >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[8px] font-bold uppercase">
-                {negocio.contactos.nombre.charAt(0)}
-              </span>
-              {negocio.contactos.nombre}
-            </Link>
-          )}
-
-          {negocio.empresas?.nombre && (
-            <Link
-              href={`/directorio/empresa/${negocio.empresas.id}`}
-              className="font-medium text-foreground/80 rounded px-1 py-0.5 hover:bg-accent transition-colors"
-            >
-              {negocio.empresas.nombre}
-            </Link>
-          )}
-
-          {negocio.lineas_negocio?.nombre && (
-            <span className="text-[10px] text-muted-foreground/60">
-              {negocio.lineas_negocio.nombre}
             </span>
           )}
         </div>
 
-        {/* Barra de progreso del stage */}
+        {/* Fila 4 — carpeta Drive */}
+        <div>
+          <CarpetaUrlEditor
+            negocioId={negocio.id}
+            initialUrl={negocio.carpeta_url}
+          />
+        </div>
+
+        {/* Fila 5 — progreso */}
         <BarraProgreso
           etapasLinea={etapasLinea}
           etapaActualId={negocio.etapa_actual_id}
