@@ -21,6 +21,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       etapasLinea={data.etapasLinea}
       profiles={data.profiles}
       currentUserId={data.currentUserId}
+      userRole={data.userRole}
       cobros={data.cobros}
       cotizacionesNegocio={data.cotizacionesNegocio}
       resumenFinanciero={data.resumenFinanciero}

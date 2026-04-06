@@ -512,6 +512,7 @@ function BloqueRenderer({
   cobros,
   cotizacionesNegocio,
   resumenFinanciero,
+  userRole,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -527,6 +528,7 @@ function BloqueRenderer({
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  userRole: string
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const modo = bloque.estado
@@ -538,6 +540,9 @@ function BloqueRenderer({
     email: p.email ?? undefined,
   }))
 
+  // Equipo: editable solo para owner/supervisor, visible para el resto
+  const canEditEquipo = ['owner', 'supervisor'].includes(userRole)
+
   switch (tipo) {
     case 'equipo':
       return (
@@ -545,7 +550,7 @@ function BloqueRenderer({
           negocioId={negocioId}
           negocioBloqueId={instanciaId}
           instancia={bloque.instancia}
-          modo={modo}
+          modo={canEditEquipo ? 'editable' : 'visible'}
           profiles={profilesTyped}
         />
       )
@@ -697,6 +702,7 @@ function BloqueCard({
   cobros,
   cotizacionesNegocio,
   resumenFinanciero,
+  userRole,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -712,6 +718,7 @@ function BloqueCard({
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  userRole: string
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -800,6 +807,7 @@ function BloqueCard({
               cobros={cobros}
               cotizacionesNegocio={cotizacionesNegocio}
               resumenFinanciero={resumenFinanciero}
+              userRole={userRole}
             />
           )}
         </div>
@@ -830,6 +838,7 @@ interface Props {
   etapasLinea: EtapaNegocio[]
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   currentUserId: string | null
+  userRole: string
   cobros: Array<{
     id: string
     concepto: string | null
@@ -861,6 +870,7 @@ export default function NegocioDetailClient({
   etapasLinea,
   profiles,
   currentUserId,
+  userRole,
   cobros,
   cotizacionesNegocio,
   actividad,
@@ -1010,6 +1020,7 @@ export default function NegocioDetailClient({
                   cobros={cobros}
                   cotizacionesNegocio={cotizacionesNegocio}
                   resumenFinanciero={resumenFinanciero}
+                  userRole={userRole}
                 />
               ))}
             </div>

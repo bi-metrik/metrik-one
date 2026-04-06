@@ -1392,6 +1392,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   etapasLinea: EtapaNegocio[]
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   currentUserId: string | null
+  userRole: string
   cobros: Array<{
     id: string
     concepto: string | null
@@ -1418,7 +1419,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   staffList: Array<{ id: string; full_name: string }>
 } | null> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
   // Cargar negocio base
@@ -1566,6 +1567,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       email: null as string | null,
     })),
     currentUserId,
+    userRole: role ?? 'read_only',
     cobros: ((cobrosData ?? []) as Record<string, unknown>[]).map(c => ({
       id: c.id as string,
       concepto: c.notas as string | null,
