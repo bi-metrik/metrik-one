@@ -611,11 +611,13 @@ export async function cambiarEtapaNegocioConGate(
   if (!negocio) return { error: 'Negocio no encontrado' }
 
   // Validar que la nueva etapa es la siguiente en orden (o un salto permitido por routing)
+  let etapaActualNombre: string | null = null
+  let etapaActualConfigExtra: Record<string, unknown> = {}
   if (negocio.etapa_actual_id) {
     const [etapaActualRes, nuevaEtapaRes] = await Promise.all([
       db(supabase)
         .from('etapas_negocio')
-        .select('orden, linea_id, config_extra')
+        .select('orden, linea_id, config_extra, nombre')
         .eq('id', negocio.etapa_actual_id)
         .single(),
       db(supabase)
@@ -625,10 +627,12 @@ export async function cambiarEtapaNegocioConGate(
         .single(),
     ])
 
-    const etapaActualData = etapaActualRes.data as { orden: number; linea_id: string; config_extra: Record<string, unknown> } | null
+    const etapaActualData = etapaActualRes.data as { orden: number; linea_id: string; config_extra: Record<string, unknown>; nombre: string } | null
     const nuevaEtapaData = nuevaEtapaRes.data as { orden: number; linea_id: string } | null
 
     if (!etapaActualData || !nuevaEtapaData) return { error: 'Etapa no encontrada' }
+    etapaActualNombre = etapaActualData.nombre ?? null
+    etapaActualConfigExtra = etapaActualData.config_extra ?? {}
     if (etapaActualData.linea_id !== nuevaEtapaData.linea_id) return { error: 'Etapas de líneas distintas' }
 
     const ordenSiguiente = etapaActualData.orden + 1
@@ -714,6 +718,21 @@ export async function cambiarEtapaNegocioConGate(
 
       return { error: 'gate_bloqueado', bloquesPendientes }
     }
+
+    // Gate custom: comentario_requerido — debe haber al menos un comentario en actividad
+    const etapaGates = (etapaActualConfigExtra.gates ?? []) as string[]
+    if (etapaGates.includes('comentario_requerido')) {
+      const { count } = await supabase
+        .from('activity_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+        .eq('entidad_tipo', 'negocio')
+        .eq('entidad_id', negocioId)
+        .eq('tipo', 'comentario')
+      if ((count ?? 0) === 0) {
+        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: 'Comentario en actividad', es_gate: true }] }
+      }
+    }
   }
 
   // Obtener nombre de la nueva etapa para el log
@@ -730,9 +749,6 @@ export async function cambiarEtapaNegocioConGate(
 
   // Registrar en activity_log
   if (staffId) {
-    const contenido = motivoOverride
-      ? `Etapa cambiada a: ${nuevaEtapaNombre} (override: ${motivoOverride})`
-      : `Etapa cambiada a: ${nuevaEtapaNombre}`
     await supabase
       .from('activity_log')
       .insert({
@@ -741,7 +757,10 @@ export async function cambiarEtapaNegocioConGate(
         entidad_id: negocioId,
         tipo: 'cambio_etapa',
         autor_id: staffId,
-        contenido,
+        campo_modificado: 'etapa',
+        valor_anterior: etapaActualNombre,
+        valor_nuevo: nuevaEtapaNombre,
+        contenido: motivoOverride ? `Override: ${motivoOverride}` : null,
       })
   }
 

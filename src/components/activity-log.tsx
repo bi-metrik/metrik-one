@@ -306,6 +306,26 @@ function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id
 // ── Change entry (system/automatic) ──
 
 function ChangeEntry({ entry }: { entry: ActivityEntry }) {
+  // Cambio de etapa: render especial con flecha y nombre destino
+  if (entry.tipo === 'cambio_etapa') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <ArrowRight className="h-3.5 w-3.5 text-primary/70 shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          {entry.autor && (
+            <span className="font-medium text-foreground">{entry.autor.full_name}</span>
+          )}
+          <span>avanzó a</span>
+          <span className="font-medium text-foreground">{entry.valor_nuevo ?? entry.contenido}</span>
+          {entry.contenido && (
+            <span className="italic text-muted-foreground/60">({entry.contenido})</span>
+          )}
+          <span className="text-[10px]">{entry.created_at ? timeAgo(entry.created_at) : ''}</span>
+        </div>
+      </div>
+    )
+  }
+
   const { label, from, to } = formatFieldChange(
     entry.campo_modificado ?? '',
     entry.valor_anterior,
