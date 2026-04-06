@@ -57,7 +57,8 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
   })
-  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-0000`
+  // Fallback con epoch para garantizar unicidad si el RPC falla
+  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-${Date.now()}`
 
   const { data, error: dbError } = await supabase
     .from('cotizaciones')

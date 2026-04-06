@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useState, useTransition, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import {
   ChevronRight,
@@ -735,6 +735,7 @@ interface Props {
     autor_nombre: string | null
   }>
   staffList: Array<{ id: string; full_name: string }>
+  errorMsg?: string
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -750,7 +751,12 @@ export default function NegocioDetailClient({
   actividad,
   resumenFinanciero,
   staffList,
+  errorMsg,
 }: Props) {
+  useEffect(() => {
+    if (errorMsg) toast.error(errorMsg)
+  }, [errorMsg])
+
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
   const etapaActual = negocio.etapas_negocio

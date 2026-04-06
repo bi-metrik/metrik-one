@@ -4,10 +4,12 @@ import NegocioDetailClient from './negocio-detail-client'
 
 interface Props {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ err?: string }>
 }
 
-export default async function NegocioDetailPage({ params }: Props) {
+export default async function NegocioDetailPage({ params, searchParams }: Props) {
   const { id } = await params
+  const { err } = await searchParams
   const data = await getNegocioDetalleCompleto(id)
 
   if (!data) notFound()
@@ -24,6 +26,7 @@ export default async function NegocioDetailPage({ params }: Props) {
       resumenFinanciero={data.resumenFinanciero}
       actividad={data.actividad}
       staffList={data.staffList}
+      errorMsg={err}
     />
   )
 }

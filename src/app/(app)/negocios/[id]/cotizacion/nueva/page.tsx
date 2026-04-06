@@ -9,7 +9,8 @@ export default async function NuevaCotizacionNegocioPage({
   const { id } = await params
   const res = await createCotizacionDetalladaNegocio(id)
   if (!res.success) {
-    redirect(`/negocios/${id}`)
+    // Pasar el error como param para que la página del negocio lo muestre
+    redirect(`/negocios/${id}?err=${encodeURIComponent(res.error ?? 'Error al crear cotización')}`)
   }
   redirect(`/negocios/${id}/cotizacion/${res.id}`)
 }
