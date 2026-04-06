@@ -288,40 +288,29 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-05 (sesion D — modulo negocios: fixes cotizacion + header)
+**Sesion:** 2026-04-06 (sesion E — modulo negocios: nuevo negocio stepper + bloque documentos + gates + IDs)
 **Branch:** main
-**Commit:** `249c051`
+**Commit:** `a5948d9`
 
-Que se hizo (sesion D):
-- Feat: BloqueCotizacion completo — crear detallada, aprobar, rechazar, PDF, duplicar, estado solo-lectura cuando hay aceptada
-- Feat: ActivityLog en negocios — menciones @staff, link URL, 280 chars, entidad_tipo='negocio' habilitado en activity_log
-- Feat: Header negocio rediseñado — boton volver, ID visible (UUID slice), precio gris=estimado/negro=aprobado
-- Feat: CarpetaUrlEditor — input inline editable en header para link Drive, guarda en Enter/blur
-- Feat: Links clickeables a perfil empresa y contacto en header (con IDs en join query)
-- Fix (migration 008): UNIQUE INDEX `idx_una_enviada_por_negocio` — permite N borradores, bloquea 2da enviada
-- Fix (migration 009): Trigger `trg_cotizacion_auto_codigo` para negocios — `WHERE oportunidad_id = NULL` siempre era FALSE, generaba SIN-C1 en todas → ahora usa consecutivo como codigo para cotizaciones sin oportunidad
-- Fix (migration 010): `fn_notif_mencion` soporta `entidad_tipo='negocio'` — antes el ELSE dejaba deep_link y entidad_nombre null
-- Fix: PDF `oportunidades!inner` → left join + cadena empresa (oportunidad → negocio → fallback) para cotizaciones sin oportunidad
-- Fix: `duplicarCotizacion` ahora copia `negocio_id` para que la copia aparezca en el bloque correcto
-- Fix: `aceptarCotizacionNegocio` actualiza `negocio_bloques.estado='completo'` al aprobar cotizacion
-- Fix: Null safety en `createCotizacionDetalladaNegocio` (data null sin dbError → TypeError)
-- Fix: Fallback `consecutivo` cambiado a epoch (COT-YYYY-{epoch}) para evitar colision UNIQUE si RPC falla
-- Fix: `nueva/page.tsx` redirige con `?err=` param en lugar de silenciar errores; NegocioDetailClient muestra toast.error
-- Fix: `actualizarCarpetaUrlNegocio` — server action con validacion workspace
-- Todas las migraciones 008-010 aplicadas en produccion (verificado con `supabase db push`)
+Que se hizo (sesion E):
+- Feat: Nuevo negocio — stepper 3 pasos (Contacto → Empresa → Negocio), empresa requerida, busqueda inline con creacion si no existe
+- Feat: BloqueDocumentos reescrito — upload real a Storage, AI por documento independiente (igual que flujo oportunidad VE), labels correctos: Factura/RUT/Cedula/Comprobante UPME
+- Feat: Gate "comentario_requerido" en etapa 1 SOENA — bloquea avance si no hay ningun comentario en actividad
+- Feat: Logs de cambio de etapa en ActivityLog — tipo 'cambio_etapa', render con flecha verde "avanzó a [Etapa]"
+- Fix: Titulo bloque documentos radicacion: "Documentos del vehículo" → "Documentos de radicación"
+- Fix: Documentos correctos SOENA (migration 003): factura, rut, cedula, soporte_upme
+- Fix: Stepper persona natural — botón Siguiente saltaba step 0→2, negocioStep=1, formulario no renderizaba
+- Fix: CHECK constraint activity_log.tipo — faltaba 'cambio_etapa', todos los logs de etapa fallaban silenciosamente
+- Fix: ID negocios persona natural — migration 004 crea generate_negocio_codigo_sin_empresa (usa primera letra del contacto)
+- ADVERTENCIA: el fix de persona natural (migration 004) es incorrecto conceptualmente — ver Pendientes CRITICO
 
-**Commits de sesion (sesion D):**
-- `3b75330` fix: cotización editable en etapas 1-2 SOENA + actividad staffId
-- `27287f3` fix: revalidatePath en actualizarBloqueData y marcarBloqueCompleto
-- `dd21110` fix: activity_log permite entidad_tipo='negocio'
-- `6884778` feat: integración completa sistema cotizaciones en módulo negocios
-- `ea089b3` feat: ActivityLog completo en negocios — menciones, link, 280 chars
-- `8cbc572` feat: negocio detail — bloques contraidos, botón volver, ID visible, cotización aprobable
-- `ce52f23` fix: cotizaciones de negocio — trigger, PDF, duplicar, rechazar, bloque completo
-- `e8c3114` fix: header negocio + notificaciones de mención
-- `8b9720b` fix: null safety + carpeta_url inline editor
-- `503d5b6` fix: links a perfil empresa y contacto en header
-- `249c051` fix: cotización borrador — fallback único + error visible en UI
+**Commits de sesion (sesion E):**
+- `486a6eb` fix: bloque documentos radicación — título y docs correctos SOENA
+- `39aa6e0` feat: nuevo negocio — stepper 3 pasos igual que flujo oportunidad
+- `bd87842` feat: bloque documentos — upload real + AI por documento
+- `74b2493` fix: persona natural — step navigation 0→1 en lugar de 0→2
+- `3f2053a` fix: código persona natural sin empresa (INCORRECTO — ver pendientes)
+- `a5948d9` feat: gate comentario etapa 1 + logs cambio de etapa en actividad
 
 ## Estado actual (2026-04-05)
 
@@ -332,7 +321,7 @@ Que se hizo (sesion D):
 - **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
 - **Workflow engine:** Activo en produccion. Tablas `workspace_stages` + `stage_transition_rules` con etapas de sistema seedeadas en todos los workspaces
 - **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
-- **Modulo negocios:** Operativo con bloques, cotizaciones, activity log. Pendiente: ID formato SOE-11, header refinado per Noor, auto-cotizacion al crear oportunidad, recorrer etapas SOENA de punta a punta
+- **Modulo negocios:** Operativo. Sesion E agrego stepper nuevo negocio, bloque documentos upload real, gate comentario, logs cambio etapa. Pendiente critico: fix persona natural (empresa_id=NULL en lugar de crear empresa), verificar gates en prod, recorrer SOENA punta a punta
 
 ## Features NO implementados (Roadmap)
 
@@ -414,6 +403,9 @@ Que se hizo (sesion D):
 - [x] ActivityLog en negocios — menciones, link, 280 chars — sesion D 2026-04-05
 - [x] Header negocio rediseñado — volver, ID, precio, carpeta editable, links empresa/contacto — sesion D 2026-04-05
 - [x] Migraciones 008-010 aplicadas en produccion — sesion D 2026-04-05
+- [ ] **CRITICO SESION F — FIX 1:** Persona natural debe crear empresa automaticamente. En `crearNegocio`, cuando `es_persona_natural=true`, insertar empresa con el nombre del contacto y asignar ese `empresa_id` al negocio. La regla de negocio es: persona natural = es su propia empresa. La migration 004 (`generate_negocio_codigo_sin_empresa`) es un parche incorrecto — queda como fallback para negocios existentes sin empresa pero no debe usarse para nuevos.
+- [ ] **CRITICO SESION F — FIX 2:** Verificar que gate "comentario_requerido" bloquea correctamente el avance de etapa 1→2 en SOENA. Probar en produccion con un negocio real.
+- [ ] **CRITICO SESION F — FIX 3:** Verificar que los logs de cambio de etapa aparecen en el ActivityLog del negocio (no en pipeline). La migration 005 arreglo el constraint pero no se verifico en produccion.
 - [ ] **CRITICO SOENA:** Recorrer todas las etapas VE de punta a punta y verificar que cada bloque funciona correctamente
 - [ ] **CRITICO SOENA:** Auto-cotizacion cuando se crea una oportunidad en SOENA (feature no implementado — debe crearse automaticamente al abrir negocio)
 - [ ] **PENDIENTE:** ID negocio formato SOE-11 — campo `negocios.codigo` generado por trigger, `empresas.alias_corto` configurable. Decision: Modelo A (auto de nombre empresa) con override manual. Ver debate Hana/Vera sesion D
@@ -483,3 +475,7 @@ Que se hizo (sesion D):
 | 2026-04-05 | ID negocio: primeras 3-4 letras del primer vocablo, no iniciales | Decision Hana/Vera: WMC→WOR, TTI→TEX, BRA→BLU. Modelo A (auto del nombre empresa) + override via empresas.alias_corto. Pendiente de implementar por Max |
 | 2026-04-05 | Header negocio: jerarquia 4 filas segun spec Noor | nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso. Pendiente de implementar. Spec: empresa y contacto juntos (misma relacion), precio prominente a la derecha |
 | 2026-04-05 | Modulo negocios opera en contexto degradado: priorizar sesion limpia | La sesion D acumulo muchos fixes encima. Proxima sesion debe empezar con brief quirurgico de los 2 criticos SOENA |
+| 2026-04-06 | Persona natural = empresa automatica en crearNegocio | Regla de negocio original: PN es su propia empresa. El fix migration 004 fue incorrecto (usa contacto como base del codigo). Correcto: crear empresa con nombre del contacto y asignar empresa_id |
+| 2026-04-06 | Sesion E ejecutada con Sonnet 4.6 — resultados degradados | Multiples errores de contexto y logica de negocio. Proximas sesiones de desarrollo complejo: usar Opus 4.6 |
+| 2026-04-06 | BloqueDocumentos: upload real reemplaza inputs de URL | Patron copiado de ve-documentos-section. Bucket ve-documentos, path workspace/negocios/negocioId/bloqueId/slug.ext |
+| 2026-04-06 | Gate comentario: config_extra.gates en etapas_negocio | Array de strings configurables por etapa. 'comentario_requerido' verifica activity_log antes de avanzar. Extensible para otros gates futuros |
