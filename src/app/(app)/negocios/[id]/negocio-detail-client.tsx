@@ -552,6 +552,7 @@ function BloqueRenderer({
           instancia={bloque.instancia}
           modo={canEditEquipo ? 'editable' : 'visible'}
           profiles={profilesTyped}
+          configExtra={configExtra}
         />
       )
 

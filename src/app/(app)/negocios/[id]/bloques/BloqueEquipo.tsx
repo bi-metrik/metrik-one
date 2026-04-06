@@ -18,6 +18,7 @@ interface BloqueEquipoProps {
   instancia: NegocioBloque | null
   modo: 'editable' | 'visible'
   profiles: Profile[]
+  configExtra?: Record<string, unknown>
 }
 
 function Avatar({ name }: { name: string | null }) {
@@ -29,10 +30,10 @@ function Avatar({ name }: { name: string | null }) {
   )
 }
 
-const ROLES: Array<{ key: 'comercial_id' | 'ejecucion_id' | 'financiero_id'; label: string }> = [
-  { key: 'comercial_id', label: 'Responsable comercial' },
-  { key: 'ejecucion_id', label: 'Responsable ejecución' },
-  { key: 'financiero_id', label: 'Responsable financiero' },
+const ALL_ROLES: Array<{ key: 'comercial_id' | 'ejecucion_id' | 'financiero_id'; label: string; rol: string }> = [
+  { key: 'comercial_id', label: 'Responsable comercial', rol: 'comercial' },
+  { key: 'ejecucion_id', label: 'Responsable ejecución', rol: 'ejecucion' },
+  { key: 'financiero_id', label: 'Responsable financiero', rol: 'financiero' },
 ]
 
 export default function BloqueEquipo({
@@ -40,7 +41,14 @@ export default function BloqueEquipo({
   instancia,
   modo,
   profiles,
+  configExtra,
 }: BloqueEquipoProps) {
+  // Si config_extra.rol está definido, solo mostrar ese responsable
+  const singleRol = (configExtra?.rol as string) ?? null
+  const roles = singleRol
+    ? ALL_ROLES.filter(r => r.rol === singleRol)
+    : ALL_ROLES
+
   const data = (instancia?.data ?? {}) as Record<string, string | null>
   const [values, setValues] = useState<Record<string, string>>({
     comercial_id: (data.comercial_id as string) ?? '',
@@ -63,9 +71,10 @@ export default function BloqueEquipo({
         ejecucion_id: next.ejecucion_id || null,
         financiero_id: next.financiero_id || null,
       }
-      // Completo si al menos 1 responsable asignado
-      const hasAny = Object.values(dataToSave).some(v => v !== null)
-      if (hasAny) {
+      // Completo si el responsable requerido está asignado
+      const relevantKeys = roles.map(r => r.key)
+      const hasRequired = relevantKeys.some(k => dataToSave[k] !== null)
+      if (hasRequired) {
         const result = await marcarBloqueCompleto(negocioBloqueId, dataToSave)
         if (result.error) toast.error(result.error)
       } else {
@@ -76,10 +85,10 @@ export default function BloqueEquipo({
   }
 
   if (modo === 'visible') {
-    const assigned = ROLES.filter(r => values[r.key])
+    const assigned = roles.filter(r => values[r.key])
     if (assigned.length === 0) {
       return (
-        <p className="text-xs text-[#6B7280]">Sin responsables asignados</p>
+        <p className="text-xs text-[#6B7280]">Sin responsable asignado</p>
       )
     }
     return (
@@ -89,7 +98,7 @@ export default function BloqueEquipo({
             <Avatar name={getProfileName(values[role.key])} />
             <div>
               <p className="text-xs font-medium text-[#1A1A1A]">{getProfileName(values[role.key]) ?? '—'}</p>
-              <p className="text-[10px] text-[#6B7280]">{role.label}</p>
+              {!singleRol && <p className="text-[10px] text-[#6B7280]">{role.label}</p>}
             </div>
           </div>
         ))}
@@ -99,11 +108,13 @@ export default function BloqueEquipo({
 
   return (
     <div className="space-y-3">
-      {ROLES.map(role => (
+      {roles.map(role => (
         <div key={role.key}>
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
-            {role.label}
-          </label>
+          {!singleRol && (
+            <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
+              {role.label}
+            </label>
+          )}
           <div className="flex items-center gap-2">
             {values[role.key] && <Avatar name={getProfileName(values[role.key])} />}
             <select

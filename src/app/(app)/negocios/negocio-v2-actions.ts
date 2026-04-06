@@ -696,14 +696,15 @@ export async function cambiarEtapaNegocio(
   if (updateError) return { error: (updateError as { message: string }).message }
 
   // Crear negocio_bloques para la nueva etapa si no existen
+  // Heredar estado completo de bloques del mismo tipo en etapas anteriores
   const { data: bloqueConfigs } = await db(supabase)
     .from('bloque_configs')
-    .select('id')
+    .select('id, bloque_definition_id')
     .eq('etapa_id', nuevaEtapaId)
     .eq('workspace_id', workspaceId)
 
   if (bloqueConfigs && (bloqueConfigs as Record<string, unknown>[]).length > 0) {
-    const configIds = (bloqueConfigs as Record<string, unknown>[]).map(b => b.id as string)
+    const configIds = (bloqueConfigs as Record<string, unknown>[]).map(b => (b as Record<string, unknown>).id as string)
 
     const instanciasExistentes = await db(supabase)
       .from('negocio_bloques')
@@ -717,14 +718,36 @@ export async function cambiarEtapaNegocio(
       )
     )
 
-    const nuevas = (bloqueConfigs as Record<string, unknown>[])
-      .filter(bc => !existingIds.has(bc.id as string))
-      .map(bc => ({
-        negocio_id: negocioId,
-        bloque_config_id: bc.id as string,
-        estado: 'pendiente',
-        data: {},
-      }))
+    // Obtener bloques completados de este negocio (de cualquier etapa) con su definition_id
+    const { data: completadosRaw } = await db(supabase)
+      .from('negocio_bloques')
+      .select('estado, data, completado_at, bloque_configs(bloque_definition_id)')
+      .eq('negocio_id', negocioId)
+      .eq('estado', 'completo')
+
+    const completadosPorDef = new Map<string, { data: Record<string, unknown>; completado_at: string | null }>()
+    for (const c of ((completadosRaw ?? []) as Record<string, unknown>[])) {
+      const defId = (c.bloque_configs as Record<string, unknown> | null)?.bloque_definition_id as string | null
+      if (defId) {
+        completadosPorDef.set(defId, {
+          data: (c.data ?? {}) as Record<string, unknown>,
+          completado_at: c.completado_at as string | null,
+        })
+      }
+    }
+
+    const nuevas = (bloqueConfigs as Array<{ id: string; bloque_definition_id: string }>)
+      .filter(bc => !existingIds.has(bc.id))
+      .map(bc => {
+        const prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
+        return {
+          negocio_id: negocioId,
+          bloque_config_id: bc.id,
+          estado: prevCompleto ? 'completo' : 'pendiente',
+          data: prevCompleto?.data ?? {},
+          completado_at: prevCompleto?.completado_at ?? null,
+        }
+      })
 
     if (nuevas.length > 0) {
       await db(supabase).from('negocio_bloques').insert(nuevas)
