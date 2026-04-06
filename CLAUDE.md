@@ -288,54 +288,51 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-05 (sesion C — bloques + SOENA)
+**Sesion:** 2026-04-05 (sesion D — modulo negocios: fixes cotizacion + header)
 **Branch:** main
-**Commit:** `5e32296`
+**Commit:** `249c051`
 
-Que se hizo (sesion C — bloques renderers + SOENA config):
-- 11 componentes de bloque creados en `negocios/[id]/bloques/`:
-  BloqueEquipo, BloqueDatos, BloqueChecklist, BloqueChecklistSoporte,
-  BloqueDocumentos, BloqueCotizacion, BloqueCobros, BloqueAprobacion,
-  BloqueCronograma, BloqueResumenFinanciero, BloqueEjecucion
-- negocio-detail-client.tsx: renderizado por tipo + gate modal con override owner
-- negocio-v2-actions.ts: 8 nuevas server actions + trigger auto-cobros
-- Migración 3: cobros.negocio_id (FK a negocios)
-- Migración 4: SOENA proceso VE — línea clarity + 7 etapas + bloque_configs
-- UNIQUE constraint bloque_configs relajado (incluye orden) para soportar
-  múltiples bloques del mismo tipo por etapa
-- config_extra agregado a etapas_negocio para routing condicional UPME
-- Build: 0 errores TypeScript, 41 rutas
+Que se hizo (sesion D):
+- Feat: BloqueCotizacion completo — crear detallada, aprobar, rechazar, PDF, duplicar, estado solo-lectura cuando hay aceptada
+- Feat: ActivityLog en negocios — menciones @staff, link URL, 280 chars, entidad_tipo='negocio' habilitado en activity_log
+- Feat: Header negocio rediseñado — boton volver, ID visible (UUID slice), precio gris=estimado/negro=aprobado
+- Feat: CarpetaUrlEditor — input inline editable en header para link Drive, guarda en Enter/blur
+- Feat: Links clickeables a perfil empresa y contacto en header (con IDs en join query)
+- Fix (migration 008): UNIQUE INDEX `idx_una_enviada_por_negocio` — permite N borradores, bloquea 2da enviada
+- Fix (migration 009): Trigger `trg_cotizacion_auto_codigo` para negocios — `WHERE oportunidad_id = NULL` siempre era FALSE, generaba SIN-C1 en todas → ahora usa consecutivo como codigo para cotizaciones sin oportunidad
+- Fix (migration 010): `fn_notif_mencion` soporta `entidad_tipo='negocio'` — antes el ELSE dejaba deep_link y entidad_nombre null
+- Fix: PDF `oportunidades!inner` → left join + cadena empresa (oportunidad → negocio → fallback) para cotizaciones sin oportunidad
+- Fix: `duplicarCotizacion` ahora copia `negocio_id` para que la copia aparezca en el bloque correcto
+- Fix: `aceptarCotizacionNegocio` actualiza `negocio_bloques.estado='completo'` al aprobar cotizacion
+- Fix: Null safety en `createCotizacionDetalladaNegocio` (data null sin dbError → TypeError)
+- Fix: Fallback `consecutivo` cambiado a epoch (COT-YYYY-{epoch}) para evitar colision UNIQUE si RPC falla
+- Fix: `nueva/page.tsx` redirige con `?err=` param en lugar de silenciar errores; NegocioDetailClient muestra toast.error
+- Fix: `actualizarCarpetaUrlNegocio` — server action con validacion workspace
+- Todas las migraciones 008-010 aplicadas en produccion (verificado con `supabase db push`)
 
-Que se hizo (sesion A — fixes VE):
-- Fix: campos VE condicionales por estado — `veExcludeSlugs` calculado dinamicamente con `VE_ESTADOS_ORDEN.indexOf()`. Campos de docs/vehiculo siempre ocultos. `numero_radicado_inclusion` solo desde por_inclusion, `numero_radicado_certificacion` solo desde por_radicar, `cert_upme_url` solo desde por_certificar
-- Fix: gate `por_certificar` no funcionaba — validacion directa en `moveProyectoVe` que lee `custom_data` de la oportunidad vinculada antes de persistir el cambio de estado
-- Fix: activity log unificado — `ActivityLog` recibe `oportunidadId={proyectoVe.id}` para mostrar entradas de ambas entidades (oportunidad + proyecto) en un solo timeline
-
-Que se hizo (sesion B — modulos financieros VE):
-- Feat: 4 modulos financieros configurables por workspace (`workspaces.proyecto_modules` JSONB)
-  - `flujo_caja`: presupuesto, costo acumulado, facturado, cobrado, cartera, por facturar, ganancia actual
-  - `costos_ejecutados`: (infraestructura lista, pendiente UI en /proyectos/[id])
-  - `detalle_ejecucion`: lista de cobros VE con chip tipo_cobro + estado_causacion
-  - `cotizacion_readonly`: (infraestructura lista, pendiente UI)
-- Feat: auto-cobro anticipo — al ganar oportunidad VE con `referencia_anticipo_epayco` + `valor_anticipo`, se crea cobro tipo `anticipo` con estado PENDIENTE
-- Feat: auto-cobro saldo — al llegar a `por_cobrar`, crea cobro tipo `saldo` = `presupuesto_total - sum(anticipos)`
-- Migration: `cobros.tipo_cobro` TEXT CHECK ('regular','anticipo','saldo'), `cobros.factura_id` nullable
-- Migration: `workspaces.proyecto_modules` JSONB con defaults all-false
-- SOENA: todos los modulos activados via REST API, `valor_anticipo` reubicado a orden 8 (junto a referencia_anticipo_epayco)
-
-**Commits de sesion:**
-- `e57390e` fix: VE — campos condicionales, gate certificacion, activity log unificado
-- `5bd3f14` feat: modulos financieros VE — flujo de caja, cobros, auto-cobros anticipo/saldo
+**Commits de sesion (sesion D):**
+- `3b75330` fix: cotización editable en etapas 1-2 SOENA + actividad staffId
+- `27287f3` fix: revalidatePath en actualizarBloqueData y marcarBloqueCompleto
+- `dd21110` fix: activity_log permite entidad_tipo='negocio'
+- `6884778` feat: integración completa sistema cotizaciones en módulo negocios
+- `ea089b3` feat: ActivityLog completo en negocios — menciones, link, 280 chars
+- `8cbc572` feat: negocio detail — bloques contraidos, botón volver, ID visible, cotización aprobable
+- `ce52f23` fix: cotizaciones de negocio — trigger, PDF, duplicar, rechazar, bloque completo
+- `e8c3114` fix: header negocio + notificaciones de mención
+- `8b9720b` fix: null safety + carpeta_url inline editor
+- `503d5b6` fix: links a perfil empresa y contacto en header
+- `249c051` fix: cotización borrador — fallback único + error visible en UI
 
 ## Estado actual (2026-04-05)
 
 - **Branch:** main
-- **Produccion:** Desplegado en Vercel, dominio metrikone.co activo
+- **Produccion:** Desplegado en Vercel, dominio metrikone.co activo — commit `249c051`
 - **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
 - **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
 - **Workflow engine:** Activo en produccion. Tablas `workspace_stages` + `stage_transition_rules` con etapas de sistema seedeadas en todos los workspaces
 - **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
+- **Modulo negocios:** Operativo con bloques, cotizaciones, activity log. Pendiente: ID formato SOE-11, header refinado per Noor, auto-cotizacion al crear oportunidad, recorrer etapas SOENA de punta a punta
 
 ## Features NO implementados (Roadmap)
 
@@ -413,6 +410,14 @@ Que se hizo (sesion B — modulos financieros VE):
 - [x] Configurar workspace SOENA — campos, modulos financieros y valor_anticipo aplicados 2026-04-05
 - [x] Bloques renderers completos (11 tipos) — sesion C 2026-04-05
 - [x] Configuración SOENA VE en DB — sesion C 2026-04-05
+- [x] BloqueCotizacion funcional con flujo completo (crear/aprobar/rechazar/PDF/duplicar) — sesion D 2026-04-05
+- [x] ActivityLog en negocios — menciones, link, 280 chars — sesion D 2026-04-05
+- [x] Header negocio rediseñado — volver, ID, precio, carpeta editable, links empresa/contacto — sesion D 2026-04-05
+- [x] Migraciones 008-010 aplicadas en produccion — sesion D 2026-04-05
+- [ ] **CRITICO SOENA:** Recorrer todas las etapas VE de punta a punta y verificar que cada bloque funciona correctamente
+- [ ] **CRITICO SOENA:** Auto-cotizacion cuando se crea una oportunidad en SOENA (feature no implementado — debe crearse automaticamente al abrir negocio)
+- [ ] **PENDIENTE:** ID negocio formato SOE-11 — campo `negocios.codigo` generado por trigger, `empresas.alias_corto` configurable. Decision: Modelo A (auto de nombre empresa) con override manual. Ver debate Hana/Vera sesion D
+- [ ] **PENDIENTE:** Header negocio refinado segun spec Noor (jerarquia 4 filas: nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso)
 - [ ] Verificar tableros en browser real (desktop + mobile viewport)
 - [ ] Verificar cards condicionales en ambiente real (F6, C6, O7, O2 emptyMessage)
 - [ ] Piloto workflow engine con primer cliente Clarity — configurar via `/configure-workflow [slug]`
@@ -472,3 +477,9 @@ Que se hizo (sesion B — modulos financieros VE):
 | 2026-04-05 | Auto-cobros VE: anticipo al ganar + saldo al llegar a por_cobrar | `ganarOportunidad` crea anticipo si existe referencia_anticipo_epayco + valor_anticipo. `moveProyectoVe` crea saldo = presupuesto - sum(anticipos). Ambos con estado_causacion PENDIENTE |
 | 2026-04-05 | cobros.tipo_cobro: 'regular' (default) / 'anticipo' / 'saldo' | factura_id ahora nullable — anticipos y saldos VE se registran antes de emitir factura formal |
 | 2026-04-05 | TypeScript: as any para cobros.tipo_cobro hasta regenerar database.ts | Columnas nuevas no estan en los tipos generados. Usar as any con eslint-disable-next-line hasta correr supabase gen types |
+| 2026-04-05 | Cotizaciones de negocio: codigo = consecutivo (no opp_codigo-CN) | El trigger trg_cotizacion_auto_codigo detecta oportunidad_id IS NULL y usa el consecutivo directamente como codigo. UNIQUE index en (workspace_id, codigo) sigue activo |
+| 2026-04-05 | Fallback consecutivo cotizacion: epoch no 0000 | Si get_next_cotizacion_consecutivo() falla, el fallback es COT-YYYY-{epoch} para garantizar unicidad. 0000 colisionaba en la segunda cotizacion del workspace |
+| 2026-04-05 | Error creacion cotizacion: param ?err= en URL, no silencio | nueva/page.tsx redirige con ?err=mensaje en lugar de silenciar. NegocioDetailClient muestra toast.error al montar. Permite diagnosticar sin logs de servidor |
+| 2026-04-05 | ID negocio: primeras 3-4 letras del primer vocablo, no iniciales | Decision Hana/Vera: WMC→WOR, TTI→TEX, BRA→BLU. Modelo A (auto del nombre empresa) + override via empresas.alias_corto. Pendiente de implementar por Max |
+| 2026-04-05 | Header negocio: jerarquia 4 filas segun spec Noor | nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso. Pendiente de implementar. Spec: empresa y contacto juntos (misma relacion), precio prominente a la derecha |
+| 2026-04-05 | Modulo negocios opera en contexto degradado: priorizar sesion limpia | La sesion D acumulo muchos fixes encima. Proxima sesion debe empezar con brief quirurgico de los 2 criticos SOENA |
