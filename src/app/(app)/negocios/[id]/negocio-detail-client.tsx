@@ -100,29 +100,29 @@ function CarpetaUrlEditor({
         onKeyDown={handleKeyDown}
         placeholder="https://drive.google.com/..."
         disabled={isPending}
-        className="h-5 w-40 rounded border border-border bg-background px-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
+        className="h-[30px] w-56 rounded-md border border-border bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
       />
     )
   }
 
   if (savedUrl) {
     return (
-      <span className="inline-flex items-center gap-1 group">
+      <span className="inline-flex items-center gap-1.5 group">
         <a
           href={savedUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5 hover:bg-amber-100 transition-colors"
         >
-          <FolderOpen className="h-3 w-3" />
-          Drive
+          <FolderOpen className="h-4 w-4 text-amber-500 shrink-0" />
+          <span className="text-xs font-medium text-amber-700">Carpeta Drive</span>
         </a>
         <button
           onClick={startEditing}
           className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-muted-foreground"
           title="Editar link de carpeta"
         >
-          <Pencil className="h-2.5 w-2.5" />
+          <Pencil className="h-3 w-3" />
         </button>
       </span>
     )
@@ -131,10 +131,10 @@ function CarpetaUrlEditor({
   return (
     <button
       onClick={startEditing}
-      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent transition-colors"
+      className="inline-flex items-center gap-1.5 border border-dashed border-muted-foreground/30 rounded-md px-2.5 py-1.5 hover:border-muted-foreground/50 hover:bg-accent transition-colors"
     >
-      <FolderOpen className="h-3 w-3" />
-      Carpeta
+      <FolderOpen className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+      <span className="text-xs text-muted-foreground/60">Agregar carpeta Drive</span>
     </button>
   )
 }
@@ -820,7 +820,7 @@ export default function NegocioDetailClient({
       {/* ── HEADER NOOR 5 FILAS ── */}
       <div className="space-y-2.5 mb-4">
         {/* Fila 1 — nav */}
-        <div>
+        <div className="flex items-center">
           <Link
             href="/negocios"
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -828,6 +828,9 @@ export default function NegocioDetailClient({
             <ArrowLeft className="h-3 w-3" />
             Negocios
           </Link>
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground/40 select-all">
+            #{negocio.id.slice(0, 8).toUpperCase()}
+          </span>
         </div>
 
         {/* Fila 2 — titulo + accion */}
