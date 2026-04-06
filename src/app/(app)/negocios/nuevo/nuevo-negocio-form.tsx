@@ -1,55 +1,155 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, User, FileText, Loader2, ChevronLeft } from 'lucide-react'
+import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import type { LineaNegocio } from '../negocio-v2-actions'
 import { crearNegocio } from '../negocio-v2-actions'
+import type { LineaNegocio } from '../negocio-v2-actions'
+import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
+import { SECTORES_EMPRESA } from '@/lib/pipeline/constants'
 
-interface Datos {
-  empresas: { id: string; nombre: string }[]
-  contactos: { id: string; nombre: string }[]
-  lineas: LineaNegocio[]
+type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
+type EmpresaResult = { id: string; nombre: string; sector: string | null }
+
+const STEPS = [
+  { label: 'Contacto', icon: User },
+  { label: 'Empresa', icon: Building2 },
+  { label: 'Negocio', icon: FileText },
+] as const
+
+function separarLineas(lineas: LineaNegocio[]) {
+  const clarity = lineas.filter(l => l.tipo === 'clarity')
+  return clarity.length > 0 ? clarity : lineas.filter(l => l.tipo === 'plantilla')
 }
 
-// Separar líneas globales (plantillas) de líneas Clarity del workspace
-function separarLineas(lineas: LineaNegocio[]): {
-  plantillas: LineaNegocio[]
-  clarity: LineaNegocio[]
-} {
-  return {
-    plantillas: lineas.filter(l => l.tipo === 'plantilla'),
-    clarity: lineas.filter(l => l.tipo === 'clarity'),
-  }
-}
-
-export default function NuevoNegocioForm({ datos }: { datos: Datos }) {
+export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [step, setStep] = useState(0)
 
-  // Campos del formulario
+  // Step 1 — Contacto
+  const [contactoId, setContactoId] = useState<string | null>(null)
+  const [contactoNombre, setContactoNombre] = useState('')
+  const [contactoTelefono, setContactoTelefono] = useState('')
+  const [contactoResults, setContactoResults] = useState<ContactoResult[]>([])
+  const [contactoSearching, setContactoSearching] = useState(false)
+  const [contactoFocused, setContactoFocused] = useState(false)
+  const contactoInputRef = useRef<HTMLInputElement>(null)
+  const [esPersonaNatural, setEsPersonaNatural] = useState(false)
+
+  // Step 2 — Empresa
+  const [empresaId, setEmpresaId] = useState<string | null>(null)
+  const [empresaNombre, setEmpresaNombre] = useState('')
+  const [empresaSector, setEmpresaSector] = useState('')
+  const [empresaResults, setEmpresaResults] = useState<EmpresaResult[]>([])
+  const [empresaSearching, setEmpresaSearching] = useState(false)
+  const [empresaFocused, setEmpresaFocused] = useState(false)
+  const empresaInputRef = useRef<HTMLInputElement>(null)
+
+  // Step 3 — Negocio
   const [nombre, setNombre] = useState('')
   const [lineaId, setLineaId] = useState('')
-  const [clienteTipo, setClienteTipo] = useState<'empresa' | 'contacto'>('empresa')
-  const [empresaId, setEmpresaId] = useState('')
-  const [contactoId, setContactoId] = useState('')
   const [precioEstimado, setPrecioEstimado] = useState('')
 
-  const { plantillas, clarity } = separarLineas(datos.lineas)
-  const tieneClarity = clarity.length > 0
-  const todasLineas = tieneClarity ? clarity : plantillas
+  const todasLineas = separarLineas(lineas)
+  const tieneUnaLinea = todasLineas.length === 1
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  // Si solo hay una línea, preseleccionarla
+  useEffect(() => {
+    if (tieneUnaLinea) setLineaId(todasLineas[0].id)
+  }, [tieneUnaLinea, todasLineas])
 
-    if (!nombre.trim()) {
-      toast.error('El nombre del negocio es requerido')
-      return
+  // Cuando persona natural, saltamos el paso de empresa
+  const totalSteps = esPersonaNatural ? 2 : 3
+  const negocioStep = esPersonaNatural ? 1 : 2
+
+  // ── Busqueda contactos ─────────────────────────────────────────────────────
+
+  const doSearchContactos = useCallback(async (query: string) => {
+    if (query.length < 2) { setContactoResults([]); return }
+    setContactoSearching(true)
+    try {
+      const r = await searchContactos(query)
+      setContactoResults(r as ContactoResult[])
+    } finally {
+      setContactoSearching(false)
     }
-    if (!lineaId) {
-      toast.error('Selecciona una línea de negocio')
-      return
+  }, [])
+
+  useEffect(() => {
+    if (contactoId || contactoNombre.length < 2) { setContactoResults([]); return }
+    const t = setTimeout(() => doSearchContactos(contactoNombre), 300)
+    return () => clearTimeout(t)
+  }, [contactoNombre, contactoId, doSearchContactos])
+
+  const selectContacto = (c: ContactoResult) => {
+    setContactoId(c.id)
+    setContactoNombre(c.nombre)
+    setContactoTelefono(c.telefono ?? '')
+    setContactoResults([])
+    setContactoFocused(false)
+  }
+
+  const clearContacto = () => {
+    setContactoId(null)
+    setContactoNombre('')
+    setContactoTelefono('')
+    setContactoResults([])
+    contactoInputRef.current?.focus()
+  }
+
+  // ── Busqueda empresas ──────────────────────────────────────────────────────
+
+  const doSearchEmpresas = useCallback(async (query: string) => {
+    if (query.length < 2) { setEmpresaResults([]); return }
+    setEmpresaSearching(true)
+    try {
+      const r = await searchEmpresas(query)
+      setEmpresaResults(r as EmpresaResult[])
+    } finally {
+      setEmpresaSearching(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (empresaId || empresaNombre.length < 2) { setEmpresaResults([]); return }
+    const t = setTimeout(() => doSearchEmpresas(empresaNombre), 300)
+    return () => clearTimeout(t)
+  }, [empresaNombre, empresaId, doSearchEmpresas])
+
+  const selectEmpresa = (e: EmpresaResult) => {
+    setEmpresaId(e.id)
+    setEmpresaNombre(e.nombre)
+    setEmpresaSector(e.sector ?? '')
+    setEmpresaResults([])
+    setEmpresaFocused(false)
+  }
+
+  const clearEmpresa = () => {
+    setEmpresaId(null)
+    setEmpresaNombre('')
+    setEmpresaSector('')
+    setEmpresaResults([])
+    empresaInputRef.current?.focus()
+  }
+
+  // ── Validacion por paso ────────────────────────────────────────────────────
+
+  const canAdvance = () => {
+    if (step === 0) return contactoNombre.trim().length > 0
+    if (step === 1 && !esPersonaNatural) return empresaNombre.trim().length > 0
+    if (step === negocioStep) return nombre.trim().length > 0 && !!lineaId
+    return false
+  }
+
+  // ── Submit ─────────────────────────────────────────────────────────────────
+
+  const handleSubmit = () => {
+    if (!nombre.trim()) { toast.error('El nombre es requerido'); return }
+    if (!lineaId) { toast.error('Selecciona una línea de negocio'); return }
+    if (!esPersonaNatural && !empresaNombre.trim()) {
+      toast.error('La empresa es requerida'); return
     }
 
     const precioNum = precioEstimado.trim()
@@ -60,8 +160,13 @@ export default function NuevoNegocioForm({ datos }: { datos: Datos }) {
       const result = await crearNegocio({
         nombre: nombre.trim(),
         linea_id: lineaId,
-        empresa_id: clienteTipo === 'empresa' && empresaId ? empresaId : undefined,
-        contacto_id: clienteTipo === 'contacto' && contactoId ? contactoId : undefined,
+        contacto_id: contactoId ?? undefined,
+        contacto_nombre: contactoId ? undefined : contactoNombre.trim(),
+        contacto_telefono: contactoId ? undefined : (contactoTelefono.trim() || undefined),
+        empresa_id: esPersonaNatural ? undefined : (empresaId ?? undefined),
+        empresa_nombre: (esPersonaNatural || empresaId) ? undefined : empresaNombre.trim(),
+        empresa_sector: (esPersonaNatural || empresaId) ? undefined : (empresaSector || undefined),
+        es_persona_natural: esPersonaNatural,
         precio_estimado: precioNum,
       })
 
@@ -74,187 +179,375 @@ export default function NuevoNegocioForm({ datos }: { datos: Datos }) {
     })
   }
 
+  const showContactoDropdown = contactoFocused && !contactoId && contactoNombre.length >= 2 &&
+    (contactoResults.length > 0 || contactoSearching)
+  const showEmpresaDropdown = empresaFocused && !empresaId && empresaNombre.length >= 2 &&
+    (empresaResults.length > 0 || empresaSearching)
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
-    <div className="mx-auto max-w-lg px-4 py-6">
+    <div className="mx-auto max-w-lg space-y-5 px-4 py-6">
+
       {/* Header */}
-      <div className="mb-6 flex items-center gap-3">
+      <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={() => router.back()}
-          className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ArrowLeft className="h-5 w-5" />
         </button>
         <div>
-          <h1 className="text-base font-bold">Nuevo negocio</h1>
-          <p className="text-xs text-muted-foreground">Completa los datos para crear el negocio</p>
+          <h1 className="text-lg font-bold">Nuevo negocio</h1>
+          <p className="text-xs text-muted-foreground">Paso {step + 1} de {totalSteps}</p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {/* 1. Nombre */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            <label className="text-sm font-semibold">Nombre del negocio</label>
-            <span className="text-[10px] text-red-500 font-medium">Requerido</span>
-          </div>
-          <input
-            type="text"
-            value={nombre}
-            onChange={e => setNombre(e.target.value)}
-            placeholder="Ej: Implementación CRM ACME S.A.S"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
-            autoFocus
-            maxLength={200}
-          />
-        </div>
+      {/* Step dots */}
+      <div className="flex items-center gap-2">
+        {STEPS.filter((_, i) => !(esPersonaNatural && i === 1)).map((s, idx) => {
+          const Icon = s.icon
+          const done = idx < step
+          const active = idx === step
+          return (
+            <div key={s.label} className="flex items-center gap-2 flex-1">
+              <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium shrink-0 ${
+                done ? 'bg-green-100 text-green-700' : active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}>
+                {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+              </div>
+              <span className={`text-xs font-medium ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
+                {s.label}
+              </span>
+              {idx < totalSteps - 1 && <div className="flex-1 h-px bg-border" />}
+            </div>
+          )
+        })}
+      </div>
 
-        {/* 2. Línea de negocio */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <label className="text-sm font-semibold">Línea de negocio</label>
-            <span className="text-[10px] text-red-500 font-medium">Requerido</span>
-          </div>
+      {/* Paso 1 — Contacto */}
+      {step === 0 && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <h2 className="text-sm font-semibold">¿Quién es el contacto?</h2>
 
-          {tieneClarity && (
-            <p className="mb-2 text-[11px] text-muted-foreground">
-              Líneas Clarity configuradas para tu workspace:
-            </p>
+          {contactoId ? (
+            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 dark:bg-green-900/20 px-3 py-2.5">
+              <User className="h-4 w-4 text-green-600 shrink-0" />
+              <span className="flex-1 text-sm font-medium text-green-800 dark:text-green-300">{contactoNombre}</span>
+              <button type="button" onClick={clearContacto} className="rounded-md p-0.5 text-green-600 hover:bg-green-100">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Nombre *</label>
+              <div className="relative">
+                <input
+                  ref={contactoInputRef}
+                  value={contactoNombre}
+                  onChange={e => { setContactoNombre(e.target.value); setContactoId(null) }}
+                  onFocus={() => setContactoFocused(true)}
+                  onBlur={() => setTimeout(() => setContactoFocused(false), 200)}
+                  placeholder="Buscar o escribir nombre..."
+                  autoFocus
+                  className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
+                {contactoSearching && (
+                  <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                )}
+              </div>
+              {showContactoDropdown && (
+                <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-md border bg-popover shadow-lg">
+                  {contactoSearching && contactoResults.length === 0 && (
+                    <div className="flex items-center gap-2 px-3 py-2.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Buscando...
+                    </div>
+                  )}
+                  {contactoResults.map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => selectContacto(c)}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-accent"
+                    >
+                      <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <span className="font-medium">{c.nombre}</span>
+                        {(c.telefono || c.email) && (
+                          <span className="ml-2 text-xs text-muted-foreground">{c.telefono ?? c.email}</span>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">Seleccionar</span>
+                    </button>
+                  ))}
+                  {!contactoSearching && contactoResults.length === 0 && contactoNombre.length >= 2 && (
+                    <div className="px-3 py-2.5 text-xs text-muted-foreground">
+                      No encontrado — se creará como nuevo contacto
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
-          <div className="space-y-2">
-            {todasLineas.map(linea => (
-              <label
-                key={linea.id}
-                className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
-                  lineaId === linea.id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-primary/40 hover:bg-accent/50'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="linea"
-                  value={linea.id}
-                  checked={lineaId === linea.id}
-                  onChange={() => setLineaId(linea.id)}
-                  className="accent-primary"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{linea.nombre}</p>
-                  <p className="text-[10px] text-muted-foreground capitalize">{linea.tipo}</p>
-                </div>
-              </label>
-            ))}
+          {!contactoId && contactoNombre.length >= 2 && !contactoSearching && contactoResults.length === 0 && !contactoFocused && (
+            <p className="text-xs text-amber-600">Se creará un nuevo contacto con este nombre</p>
+          )}
 
-            {todasLineas.length === 0 && (
-              <p className="py-4 text-center text-xs text-muted-foreground">
-                No hay líneas de negocio configuradas.
-                <br />
-                Contacta a MéTRIK para configurar tu proceso.
-              </p>
+          {/* Persona natural */}
+          {contactoNombre.trim().length >= 2 && (
+            <label className="flex items-center gap-3 rounded-md border bg-background px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors">
+              <input
+                type="checkbox"
+                checked={esPersonaNatural}
+                onChange={e => setEsPersonaNatural(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <div>
+                <span className="text-sm font-medium">Es persona natural</span>
+                <p className="text-[10px] text-muted-foreground">Independiente — la empresa es el mismo contacto</p>
+              </div>
+            </label>
+          )}
+
+          {/* Teléfono si es nuevo contacto */}
+          {!contactoId && contactoNombre.trim().length >= 2 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Teléfono</label>
+              <input
+                type="tel"
+                value={contactoTelefono}
+                onChange={e => setContactoTelefono(e.target.value)}
+                placeholder="+57 300 123 4567"
+                className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Paso 2 — Empresa (solo si no es persona natural) */}
+      {step === 1 && !esPersonaNatural && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <h2 className="text-sm font-semibold">¿Para qué empresa es?</h2>
+
+          {empresaId ? (
+            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 dark:bg-green-900/20 px-3 py-2.5">
+              <Building2 className="h-4 w-4 text-green-600 shrink-0" />
+              <span className="flex-1 text-sm font-medium text-green-800 dark:text-green-300">{empresaNombre}</span>
+              <button type="button" onClick={clearEmpresa} className="rounded-md p-0.5 text-green-600 hover:bg-green-100">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Nombre empresa *</label>
+              <div className="relative">
+                <input
+                  ref={empresaInputRef}
+                  value={empresaNombre}
+                  onChange={e => { setEmpresaNombre(e.target.value); setEmpresaId(null) }}
+                  onFocus={() => setEmpresaFocused(true)}
+                  onBlur={() => setTimeout(() => setEmpresaFocused(false), 200)}
+                  placeholder="Buscar o crear empresa..."
+                  autoFocus
+                  className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
+                {empresaSearching && (
+                  <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                )}
+              </div>
+              {showEmpresaDropdown && (
+                <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-md border bg-popover shadow-lg">
+                  {empresaSearching && empresaResults.length === 0 && (
+                    <div className="flex items-center gap-2 px-3 py-2.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Buscando...
+                    </div>
+                  )}
+                  {empresaResults.map(e => (
+                    <button
+                      key={e.id}
+                      type="button"
+                      onMouseDown={ev => ev.preventDefault()}
+                      onClick={() => selectEmpresa(e)}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-accent"
+                    >
+                      <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <span className="font-medium">{e.nombre}</span>
+                        {e.sector && <span className="ml-2 text-xs text-muted-foreground">{e.sector}</span>}
+                      </div>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">Seleccionar</span>
+                    </button>
+                  ))}
+                  {!empresaSearching && empresaResults.length === 0 && empresaNombre.length >= 2 && (
+                    <div className="px-3 py-2.5 text-xs text-muted-foreground">
+                      No encontrada — se creará como nueva empresa
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!empresaId && empresaNombre.length >= 2 && !empresaSearching && empresaResults.length === 0 && !empresaFocused && (
+            <p className="text-xs text-amber-600">Se creará una nueva empresa con este nombre</p>
+          )}
+
+          {/* Sector si es nueva empresa */}
+          {!empresaId && empresaNombre.trim().length >= 2 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Sector</label>
+              <select
+                value={empresaSector}
+                onChange={e => setEmpresaSector(e.target.value)}
+                className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              >
+                <option value="">Seleccionar...</option>
+                {SECTORES_EMPRESA.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Paso 3 — Negocio */}
+      {step === negocioStep && (
+        <div className="rounded-lg border p-4 space-y-4">
+          <h2 className="text-sm font-semibold">Datos del negocio</h2>
+
+          {/* Chips resumen */}
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs">
+              <User className="h-3 w-3 text-muted-foreground" />
+              <span className="font-medium">{contactoNombre}</span>
+            </div>
+            {!esPersonaNatural && empresaNombre && (
+              <div className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs">
+                <Building2 className="h-3 w-3 text-muted-foreground" />
+                <span className="font-medium">{empresaNombre}</span>
+              </div>
+            )}
+            {esPersonaNatural && (
+              <div className="flex items-center gap-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 px-2.5 py-1 text-xs">
+                <span className="font-medium text-purple-700 dark:text-purple-300">Persona natural</span>
+              </div>
             )}
           </div>
-        </div>
 
-        {/* 3. Cliente (empresa o contacto) */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="mb-3 text-sm font-semibold">Cliente</p>
-
-          {/* Toggle empresa / contacto */}
-          <div className="mb-3 flex rounded-lg border border-border bg-muted/30 p-1 gap-1">
-            <button
-              type="button"
-              onClick={() => setClienteTipo('empresa')}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                clienteTipo === 'empresa'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Building2 className="h-3.5 w-3.5" />
-              Empresa
-            </button>
-            <button
-              type="button"
-              onClick={() => setClienteTipo('contacto')}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                clienteTipo === 'contacto'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <User className="h-3.5 w-3.5" />
-              Contacto
-            </button>
-          </div>
-
-          {clienteTipo === 'empresa' ? (
-            <select
-              value={empresaId}
-              onChange={e => setEmpresaId(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
-            >
-              <option value="">Seleccionar empresa (opcional)</option>
-              {datos.empresas.map(e => (
-                <option key={e.id} value={e.id}>{e.nombre}</option>
-              ))}
-            </select>
-          ) : (
-            <select
-              value={contactoId}
-              onChange={e => setContactoId(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
-            >
-              <option value="">Seleccionar contacto (opcional)</option>
-              {datos.contactos.map(c => (
-                <option key={c.id} value={c.id}>{c.nombre}</option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        {/* 4. Precio estimado */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <label className="block text-sm font-semibold mb-3">
-            Precio estimado
-            <span className="ml-2 text-[10px] font-normal text-muted-foreground">Opcional</span>
-          </label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+          {/* Nombre */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Nombre del negocio *</label>
             <input
               type="text"
-              inputMode="numeric"
-              value={precioEstimado}
-              onChange={e => {
-                // Solo números
-                const raw = e.target.value.replace(/\D/g, '')
-                setPrecioEstimado(raw ? Number(raw).toLocaleString('es-CO') : '')
-              }}
-              placeholder="0"
-              className="w-full rounded-lg border border-border bg-background pl-7 pr-3 py-2 text-sm text-right tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+              value={nombre}
+              onChange={e => setNombre(e.target.value)}
+              placeholder="Ej: Certificación VE Honda Civic 2023"
+              autoFocus
+              maxLength={200}
+              className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             />
           </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">COP — sin IVA</p>
-        </div>
 
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={isPending || !nombre.trim() || !lineaId}
-          className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isPending ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Creando negocio...
-            </span>
-          ) : (
-            'Crear negocio'
+          {/* Línea de negocio */}
+          {todasLineas.length > 1 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Línea de negocio *</label>
+              <div className="space-y-1.5">
+                {todasLineas.map(linea => (
+                  <label
+                    key={linea.id}
+                    className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
+                      lineaId === linea.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-accent/50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="linea"
+                      value={linea.id}
+                      checked={lineaId === linea.id}
+                      onChange={() => setLineaId(linea.id)}
+                      className="accent-primary"
+                    />
+                    <span className="text-sm font-medium">{linea.nombre}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
-        </button>
-      </form>
+          {tieneUnaLinea && (
+            <p className="text-xs text-muted-foreground">
+              Línea: <span className="font-medium text-foreground">{todasLineas[0].nombre}</span>
+            </p>
+          )}
+          {todasLineas.length === 0 && (
+            <p className="text-xs text-amber-600">No hay líneas configuradas. Contacta a MéTRIK.</p>
+          )}
+
+          {/* Precio estimado */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Precio estimado <span className="text-muted-foreground/60">(opcional)</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={precioEstimado}
+                onChange={e => {
+                  const raw = e.target.value.replace(/\D/g, '')
+                  setPrecioEstimado(raw ? Number(raw).toLocaleString('es-CO') : '')
+                }}
+                placeholder="0"
+                className="w-full rounded-md border bg-background pl-7 pr-3 py-2.5 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">COP — sin IVA</p>
+          </div>
+        </div>
+      )}
+
+      {/* Navegación */}
+      <div className="flex gap-2">
+        {step > 0 && (
+          <button
+            type="button"
+            onClick={() => setStep(s => s - 1)}
+            className="flex-1 rounded-lg border py-2.5 text-sm font-medium hover:bg-accent transition-colors"
+          >
+            Anterior
+          </button>
+        )}
+        {step < negocioStep ? (
+          <button
+            type="button"
+            onClick={() => setStep(s => s + (esPersonaNatural && s === 0 ? 2 : 1))}
+            disabled={!canAdvance()}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            Siguiente <ArrowRight className="h-4 w-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canAdvance() || isPending}
+            className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {isPending ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Creando...
+              </span>
+            ) : (
+              'Crear negocio'
+            )}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

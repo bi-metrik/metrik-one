@@ -418,9 +418,45 @@ export async function crearNegocio(input: {
   empresa_id?: string
   contacto_id?: string
   precio_estimado?: number
+  // Creacion inline si no existe aun en DB
+  contacto_nombre?: string
+  contacto_telefono?: string
+  empresa_nombre?: string
+  empresa_sector?: string
+  es_persona_natural?: boolean
 }): Promise<{ negocio_id: string | null; error: string | null }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
+
+  // Crear contacto inline si no existe
+  let contactoId = input.contacto_id
+  if (!contactoId && input.contacto_nombre?.trim()) {
+    const { data: newContact } = await supabase
+      .from('contactos')
+      .insert({
+        workspace_id: workspaceId,
+        nombre: input.contacto_nombre.trim(),
+        telefono: input.contacto_telefono?.trim() || null,
+      })
+      .select('id')
+      .single()
+    contactoId = (newContact as { id: string } | null)?.id
+  }
+
+  // Crear empresa inline si no es persona natural y no existe
+  let empresaId = input.empresa_id
+  if (!input.es_persona_natural && !empresaId && input.empresa_nombre?.trim()) {
+    const { data: newEmpresa } = await db(supabase)
+      .from('empresas')
+      .insert({
+        workspace_id: workspaceId,
+        nombre: input.empresa_nombre.trim(),
+        sector: input.empresa_sector?.trim() || null,
+      })
+      .select('id')
+      .single()
+    empresaId = (newEmpresa as { id: string } | null)?.id
+  }
 
   // Obtener primera etapa de la línea seleccionada
   const { data: primeraEtapaRaw } = await db(supabase)
@@ -439,8 +475,8 @@ export async function crearNegocio(input: {
       workspace_id: workspaceId,
       nombre: input.nombre,
       linea_id: input.linea_id,
-      empresa_id: input.empresa_id ?? null,
-      contacto_id: input.contacto_id ?? null,
+      empresa_id: empresaId ?? null,
+      contacto_id: contactoId ?? null,
       precio_estimado: input.precio_estimado ?? null,
       etapa_actual_id: primeraEtapa?.id ?? null,
       stage_actual: primeraEtapa?.stage ?? null,
