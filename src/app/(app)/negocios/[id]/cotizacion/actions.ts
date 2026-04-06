@@ -94,35 +94,37 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
 
   if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
 
-  // Marcar cotización como aceptada
+  // Marcar cotización como aceptada (salto directo borrador→aceptada)
   const { error: updErr } = await supabase
     .from('cotizaciones')
-    .update({ estado: 'aceptada' } as never)
+    .update({ estado: 'aceptada', updated_at: new Date().toISOString() } as never)
     .eq('id', cotizacionId)
 
   if (updErr) return { success: false as const, error: updErr.message }
 
   // Actualizar precio_aprobado en negocio
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (supabase as any)
+  const { error: negErr } = await (supabase as any)
     .from('negocios')
     .update({ precio_aprobado: (cot as { valor_total: number | null }).valor_total })
     .eq('id', negocioId)
 
-  // Marcar el negocio_bloque de cotización como completo
+  if (negErr) return { success: false as const, error: negErr.message }
+
+  // Marcar TODOS los negocio_bloques de cotización como completo (todas las etapas)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: bloqueInstances } = await (supabase as any)
     .from('negocio_bloques')
     .select('id, bloque_configs!inner(bloque_definitions!inner(tipo))')
     .eq('negocio_id', negocioId)
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cotBloqueId = (bloqueInstances ?? []).find(
+  const cotBloqueIds = (bloqueInstances ?? [])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (b: any) => b.bloque_configs?.bloque_definitions?.tipo === 'cotizacion'
-  )?.id
+    .filter((b: any) => b.bloque_configs?.bloque_definitions?.tipo === 'cotizacion')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((b: any) => b.id as string)
 
-  if (cotBloqueId) {
+  if (cotBloqueIds.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (supabase as any)
       .from('negocio_bloques')
@@ -131,7 +133,7 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
         completado_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', cotBloqueId)
+      .in('id', cotBloqueIds)
   }
 
   revalidatePath(`/negocios/${negocioId}`)
