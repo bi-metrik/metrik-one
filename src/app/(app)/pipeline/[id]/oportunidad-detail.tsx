@@ -242,176 +242,220 @@ export default function OportunidadDetail({
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
+
+      {/* ── Header (5 filas) ─────────────────────────────────── */}
+      <div className="space-y-2.5">
+
+        {/* Fila 1: nav */}
         <button
           onClick={() => router.back()}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors -ml-0.5"
         >
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeft className="h-4 w-4" />
+          <span>Pipeline</span>
         </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="truncate text-lg font-bold">
-            <span className="font-medium text-amber-600">{oportunidad.codigo}·C</span>{' '}
-            {oportunidad.descripcion || 'Sin descripcion'}
-          </h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* En modo operativo VE: mostrar chip de estado_ve */}
-            {modoOperativoVe && estadoVeActual ? (
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${VE_ESTADO_CONFIG[estadoVeActual].chipClass}`}>
-                {VE_ESTADO_CONFIG[estadoVeActual].label}
+
+        {/* Fila 2: titulo + accion principal */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-xs font-semibold text-amber-600">{oportunidad.codigo}·C</span>
+              {modoOperativoVe && estadoVeActual ? (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${VE_ESTADO_CONFIG[estadoVeActual].chipClass}`}>
+                  {VE_ESTADO_CONFIG[estadoVeActual].label}
+                </span>
+              ) : etapaConfig ? (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${etapaConfig.chipClass}`}>
+                  {etapaConfig.label}
+                </span>
+              ) : null}
+            </div>
+            <h1 className="text-xl font-bold leading-tight">
+              {oportunidad.descripcion || 'Sin descripcion'}
+            </h1>
+          </div>
+          {/* CTA principal */}
+          {!isTerminal && !modoOperativoVe && nextEtapa && (
+            <button
+              onClick={handleAdvance}
+              disabled={isPending}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              <ChevronRight className="h-4 w-4" />
+              Avanzar
+            </button>
+          )}
+          {!isTerminal && !modoOperativoVe && !nextEtapa && (
+            <button
+              onClick={handleWin}
+              disabled={isPending}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              <Trophy className="h-4 w-4" />
+              Ganar
+            </button>
+          )}
+          {modoOperativoVe && veNextEstado && (
+            <button
+              onClick={handleAvanzarVe}
+              disabled={isPending}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              <ChevronRight className="h-4 w-4" />
+              Avanzar
+            </button>
+          )}
+        </div>
+
+        {/* Fila 3: empresa + contacto + precio */}
+        {(empresa || contacto || oportunidad.valor_estimado || proyectoVe?.presupuesto_total) && (
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+              {empresa && (
+                <Link
+                  href={`/directorio/empresa/${empresa.id}`}
+                  className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors min-w-0"
+                >
+                  <Building2 className="h-3.5 w-3.5 shrink-0 text-purple-400" />
+                  <span className="truncate">{empresa.nombre}</span>
+                </Link>
+              )}
+              {empresa && contacto && <span className="text-muted-foreground/40 select-none">·</span>}
+              {contacto && (
+                <Link
+                  href={`/directorio/contacto/${contacto.id}`}
+                  className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors min-w-0"
+                >
+                  <User className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                  <span className="truncate">{contacto.nombre}</span>
+                </Link>
+              )}
+            </div>
+            {(oportunidad.valor_estimado || proyectoVe?.presupuesto_total) && (
+              <span className={`text-base font-bold shrink-0 ${
+                proyectoVe?.presupuesto_total ? 'text-foreground' : 'text-muted-foreground'
+              }`}>
+                {formatCOP(proyectoVe?.presupuesto_total ?? oportunidad.valor_estimado!)}
               </span>
-            ) : etapaConfig && (
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${etapaConfig.chipClass}`}>
-                {etapaConfig.label} · {etapaConfig.probabilidad}%
-              </span>
-            )}
-            {oportunidad.valor_estimado && (
-              <span className="text-sm font-semibold">{formatCOP(oportunidad.valor_estimado)}</span>
             )}
           </div>
-        </div>
-        {/* Drive icon — visible y clicable cuando hay URL confirmada en servidor */}
-        {oportunidad.carpeta_url && !carpetaEditing && (
+        )}
+
+        {/* Fila 4: carpeta Drive */}
+        {oportunidad.carpeta_url && !carpetaEditing ? (
           <button
             onClick={() => window.open(oportunidad.carpeta_url!, '_blank')}
             onContextMenu={e => { e.preventDefault(); setCarpetaEditing(true) }}
             onDoubleClick={() => setCarpetaEditing(true)}
-            className="rounded-md p-1.5 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-amber-600 transition-colors"
             title="Abrir carpeta Drive (doble clic para editar)"
           >
-            <FolderOpen className="h-5 w-5" />
+            <FolderOpen className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+            <span>Carpeta Drive</span>
           </button>
-        )}
-      </div>
-
-      {/* Carpeta URL — visible si no hay URL en servidor, o si está editando */}
-      {(!oportunidad.carpeta_url || carpetaEditing) && (
-        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-          <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
-          <input
-            type="url"
-            value={carpetaUrl}
-            onChange={e => setCarpetaUrl(e.target.value)}
-            placeholder="https://drive.google.com/..."
-            className="flex-1 rounded-md border bg-background px-2 py-1 text-xs"
-            autoFocus
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
+        ) : (
+          <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5">
+            <FolderOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <input
+              type="url"
+              value={carpetaUrl}
+              onChange={e => setCarpetaUrl(e.target.value)}
+              placeholder="https://drive.google.com/..."
+              className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+              autoFocus
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  setCarpetaEditing(false)
+                  startTransition(async () => {
+                    const res = await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
+                    if (res?.success) { toast.success('Carpeta guardada'); router.refresh() }
+                    else { toast.error(res?.error ?? 'Error al guardar'); setCarpetaUrl(oportunidad.carpeta_url ?? '') }
+                  })
+                }
+                if (e.key === 'Escape') {
+                  setCarpetaEditing(false)
+                  setCarpetaUrl(oportunidad.carpeta_url ?? '')
+                }
+              }}
+            />
+            <button
+              onClick={() => {
                 setCarpetaEditing(false)
                 startTransition(async () => {
                   const res = await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
                   if (res?.success) { toast.success('Carpeta guardada'); router.refresh() }
                   else { toast.error(res?.error ?? 'Error al guardar'); setCarpetaUrl(oportunidad.carpeta_url ?? '') }
                 })
-              }
-              if (e.key === 'Escape') {
-                setCarpetaEditing(false)
-                setCarpetaUrl(oportunidad.carpeta_url ?? '')
-              }
-            }}
-          />
-          <button
-            onClick={() => {
-              setCarpetaEditing(false)
-              startTransition(async () => {
-                const res = await updateOportunidad(oportunidad.id, { carpeta_url: carpetaUrl.trim() || null })
-                if (res?.success) { toast.success('Carpeta guardada'); router.refresh() }
-                else { toast.error(res?.error ?? 'Error al guardar'); setCarpetaUrl(oportunidad.carpeta_url ?? '') }
-              })
-            }}
-            className="rounded-md p-1 text-green-600 hover:bg-green-50"
-          >
-            <Check className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => {
-              setCarpetaEditing(false)
-              setCarpetaUrl(oportunidad.carpeta_url ?? '')
-            }}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Progress bar — comercial (solo cuando NO es modo operativo VE) */}
-      {!isTerminal && !modoOperativoVe && etapaConfig && (
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium">{etapaConfig.label}</span>
-            <span className="text-xs font-semibold text-amber-600">{etapaConfig.probabilidad}%</span>
-          </div>
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-amber-500 transition-all"
-              style={{ width: `${etapaConfig.probabilidad}%` }}
-            />
-          </div>
-          <div className="mt-1.5 flex items-center gap-3">
-            <span className="text-[10px] text-muted-foreground">
-              {diasEnStage}d en esta etapa
-            </span>
-            {diasSinActividad >= 4 && (
-              <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
-                diasSinActividad >= 8
-                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-              }`}>
-                {diasSinActividad}d sin actividad
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Progress bar operativo VE */}
-      {modoOperativoVe && estadoVeActual && (
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-muted-foreground">Proceso VE</span>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${VE_ESTADO_CONFIG[estadoVeActual].chipClass}`}>
-              {VE_ESTADO_CONFIG[estadoVeActual].label}
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            {veEstadosAplicables.map((estado, idx) => {
-              const isPast = idx < veCurrentIdx
-              const isCurrent = idx === veCurrentIdx
-              const config = VE_ESTADO_CONFIG[estado]
-              return (
-                <div key={estado} className="flex items-center gap-1 flex-1">
-                  <div className="flex-1 flex flex-col items-center gap-1">
-                    <div className={`h-1.5 w-full rounded-full transition-all ${
-                      isPast ? 'bg-green-400' : isCurrent ? config.dotClass : 'bg-muted'
-                    }`} />
-                    <span className={`text-[8px] font-medium leading-tight text-center ${
-                      isCurrent ? 'text-foreground' : 'text-muted-foreground'
-                    }`}>
-                      {config.label}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Botones de accion — comerciales (solo cuando NO es modo operativo VE) */}
-      {!isTerminal && !modoOperativoVe && (
-        <div className="flex gap-2">
-          {nextEtapa && (
-            <button
-              onClick={handleAdvance}
-              disabled={isPending}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              }}
+              className="rounded p-0.5 text-green-600 hover:bg-green-50"
             >
-              <ChevronRight className="h-4 w-4" />
-              Avanzar a {getStageLabel(nextEtapa)}
+              <Check className="h-3 w-3" />
             </button>
-          )}
+            <button
+              onClick={() => { setCarpetaEditing(false); setCarpetaUrl(oportunidad.carpeta_url ?? '') }}
+              className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+
+        {/* Fila 5: progreso — comercial */}
+        {!isTerminal && !modoOperativoVe && etapaConfig && (
+          <div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full bg-amber-500 transition-all"
+                style={{ width: `${etapaConfig.probabilidad}%` }}
+              />
+            </div>
+            <div className="mt-1 flex items-center gap-3">
+              <span className="text-[10px] text-muted-foreground">{diasEnStage}d en esta etapa</span>
+              {diasSinActividad >= 4 && (
+                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                  diasSinActividad >= 8
+                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                }`}>
+                  {diasSinActividad}d sin actividad
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Fila 5: progreso — operativo VE */}
+        {modoOperativoVe && estadoVeActual && (
+          <div>
+            <div className="flex items-center gap-1">
+              {veEstadosAplicables.map((estado, idx) => {
+                const isPast = idx < veCurrentIdx
+                const isCurrent = idx === veCurrentIdx
+                const config = VE_ESTADO_CONFIG[estado]
+                return (
+                  <div key={estado} className="flex items-center gap-1 flex-1">
+                    <div className="flex-1 flex flex-col items-center gap-1">
+                      <div className={`h-1.5 w-full rounded-full transition-all ${
+                        isPast ? 'bg-green-400' : isCurrent ? config.dotClass : 'bg-muted'
+                      }`} />
+                      <span className={`text-[8px] font-medium leading-tight text-center ${
+                        isCurrent ? 'text-foreground' : 'text-muted-foreground'
+                      }`}>
+                        {config.label}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* Acciones secundarias — solo cuando hay nextEtapa activo (comercial) */}
+      {!isTerminal && !modoOperativoVe && nextEtapa && (
+        <div className="flex gap-2">
           <button
             onClick={handleWin}
             disabled={isPending}
@@ -430,16 +474,15 @@ export default function OportunidadDetail({
           </button>
         </div>
       )}
-
-      {/* Boton Avanzar — modo operativo VE */}
-      {modoOperativoVe && veNextEstado && (
+      {/* Perder — cuando Ganar es el CTA principal (última etapa) */}
+      {!isTerminal && !modoOperativoVe && !nextEtapa && (
         <button
-          onClick={handleAvanzarVe}
+          onClick={() => setShowLossModal(true)}
           disabled={isPending}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
         >
-          <ChevronRight className="h-4 w-4" />
-          Avanzar a {VE_ESTADO_CONFIG[veNextEstado].label}
+          <XCircle className="h-4 w-4" />
+          Perder
         </button>
       )}
 
@@ -482,34 +525,6 @@ export default function OportunidadDetail({
           </div>
         </div>
       )}
-
-      {/* Contacto + Empresa info */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {contacto && (
-          <Link
-            href={`/directorio/contacto/${contacto.id}`}
-            className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/50"
-          >
-            <User className="h-5 w-5 text-blue-500 shrink-0" />
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{contacto.nombre}</p>
-              <p className="text-xs text-muted-foreground truncate">{contacto.telefono || contacto.email || 'Contacto'}</p>
-            </div>
-          </Link>
-        )}
-        {empresa && (
-          <Link
-            href={`/directorio/empresa/${empresa.id}`}
-            className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/50"
-          >
-            <Building2 className="h-5 w-5 text-purple-500 shrink-0" />
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{empresa.nombre}</p>
-              <p className="text-xs text-muted-foreground truncate">{empresa.sector || 'Empresa'}</p>
-            </div>
-          </Link>
-        )}
-      </div>
 
       {/* Resumen comercial (acordeón colapsado en modo operativo VE) */}
       {modoOperativoVe ? (
