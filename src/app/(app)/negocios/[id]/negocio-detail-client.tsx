@@ -618,6 +618,7 @@ function BloqueRenderer({
       return (
         <BloqueDocumentos
           negocioBloqueId={instanciaId}
+          negocioId={negocioId}
           instancia={bloque.instancia}
           modo={modo}
           documentos={documentos}
