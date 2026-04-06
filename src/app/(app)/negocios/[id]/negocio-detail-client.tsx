@@ -309,6 +309,7 @@ function SelectorEtapa({
     bloques: Array<{ nombre: string; es_gate: boolean }>
   } | null>(null)
 
+  const [confirmCierre, setConfirmCierre] = useState(false)
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
   // Solo la siguiente etapa en orden estricto
@@ -317,8 +318,6 @@ function SelectorEtapa({
         .sort((a, b) => a.orden - b.orden)
         .find(e => e.orden === etapaActual.orden + 1) ?? null
     : null
-
-  if (!siguienteEtapa) return null
 
   function handleAvanzar() {
     if (!siguienteEtapa) return
@@ -344,6 +343,54 @@ function SelectorEtapa({
         toast.success('Etapa actualizada con override')
       }
     })
+  }
+
+  function handleCerrar() {
+    startTransition(async () => {
+      const result = await cerrarNegocio(negocioId)
+      if (result.error) {
+        toast.error('Error al cerrar negocio: ' + result.error)
+      } else {
+        toast.success('Negocio cerrado')
+        setConfirmCierre(false)
+      }
+    })
+  }
+
+  // Sin siguiente etapa: mostrar botón de cierre
+  if (!siguienteEtapa) {
+    return (
+      <>
+        {confirmCierre ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">¿Cerrar negocio?</span>
+            <button
+              onClick={handleCerrar}
+              disabled={isPending}
+              className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
+            >
+              {isPending ? 'Cerrando...' : 'Confirmar'}
+            </button>
+            <button
+              onClick={() => setConfirmCierre(false)}
+              disabled={isPending}
+              className="inline-flex items-center rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmCierre(true)}
+            disabled={isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+          >
+            <CheckCircle2 className="h-3 w-3 text-primary" />
+            Cerrar negocio
+          </button>
+        )}
+      </>
+    )
   }
 
   return (

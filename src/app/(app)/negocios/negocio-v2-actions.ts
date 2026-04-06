@@ -482,12 +482,12 @@ export async function cambiarEtapaNegocioConGate(
   const negocio = negocioRaw as { etapa_actual_id: string | null } | null
   if (!negocio) return { error: 'Negocio no encontrado' }
 
-  // Validar que la nueva etapa es la siguiente en orden estricto
+  // Validar que la nueva etapa es la siguiente en orden (o un salto permitido por routing)
   if (negocio.etapa_actual_id) {
     const [etapaActualRes, nuevaEtapaRes] = await Promise.all([
       db(supabase)
         .from('etapas_negocio')
-        .select('orden, linea_id')
+        .select('orden, linea_id, config_extra')
         .eq('id', negocio.etapa_actual_id)
         .single(),
       db(supabase)
@@ -497,13 +497,59 @@ export async function cambiarEtapaNegocioConGate(
         .single(),
     ])
 
-    const etapaActualData = etapaActualRes.data as { orden: number; linea_id: string } | null
+    const etapaActualData = etapaActualRes.data as { orden: number; linea_id: string; config_extra: Record<string, unknown> } | null
     const nuevaEtapaData = nuevaEtapaRes.data as { orden: number; linea_id: string } | null
 
     if (!etapaActualData || !nuevaEtapaData) return { error: 'Etapa no encontrada' }
     if (etapaActualData.linea_id !== nuevaEtapaData.linea_id) return { error: 'Etapas de líneas distintas' }
-    if (nuevaEtapaData.orden !== etapaActualData.orden + 1) {
-      return { error: 'Solo puedes avanzar a la siguiente etapa en orden' }
+
+    const ordenSiguiente = etapaActualData.orden + 1
+    if (nuevaEtapaData.orden !== ordenSiguiente) {
+      // Verificar si hay routing condicional que permita este salto
+      const routing = (etapaActualData.config_extra?.routing ?? null) as {
+        default_etapa_orden: number
+        conditional: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
+      } | null
+
+      if (!routing) {
+        return { error: 'Solo puedes avanzar a la siguiente etapa en orden' }
+      }
+
+      // Evaluar condiciones leyendo datos del negocio (bloque tipo datos de etapa actual)
+      const { data: bloquesDatos } = await db(supabase)
+        .from('negocio_bloques')
+        .select(`
+          data,
+          bloque_configs!inner(
+            etapa_id,
+            bloque_definitions!inner(tipo)
+          )
+        `)
+        .eq('negocio_id', negocioId)
+        .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
+
+      // Consolidar todos los campos data de los bloques tipo 'datos' de la etapa actual
+      const camposNegocio: Record<string, unknown> = {}
+      for (const b of ((bloquesDatos ?? []) as Record<string, unknown>[])) {
+        const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
+        if (tipo === 'datos' && b.data && typeof b.data === 'object') {
+          Object.assign(camposNegocio, b.data)
+        }
+      }
+
+      // Evaluar condicionales en orden — primer match gana
+      let etapaOrdenDestino = routing.default_etapa_orden
+      for (const rule of routing.conditional) {
+        const { field, value } = rule.condition
+        if (String(camposNegocio[field] ?? '') === String(value)) {
+          etapaOrdenDestino = rule.etapa_orden
+          break
+        }
+      }
+
+      if (nuevaEtapaData.orden !== etapaOrdenDestino) {
+        return { error: 'Solo puedes avanzar a la siguiente etapa en orden' }
+      }
     }
   }
 
@@ -1194,5 +1240,54 @@ export async function actualizarCarpetaUrlNegocio(
   if (updErr) return { error: (updErr as { message: string }).message }
 
   revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
+}
+
+// ── Cerrar negocio ────────────────────────────────────────────────────────────
+
+export async function cerrarNegocio(
+  negocioId: string
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Validar que el negocio pertenece a este workspace
+  const { data: negocioRaw } = await db(supabase)
+    .from('negocios')
+    .select('id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  if (!negocioRaw) return { error: 'Negocio no encontrado' }
+
+  const { error: updErr } = await db(supabase)
+    .from('negocios')
+    .update({
+      estado: 'cerrado',
+      closed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+
+  if (updErr) return { error: (updErr as { message: string }).message }
+
+  // Registrar en activity_log
+  if (staffId) {
+    await supabase
+      .from('activity_log')
+      .insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio_estado',
+        autor_id: staffId,
+        contenido: 'Negocio cerrado',
+      })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
   return { error: null }
 }
