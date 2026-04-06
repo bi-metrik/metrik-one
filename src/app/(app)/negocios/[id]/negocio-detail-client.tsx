@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import Link from 'next/link'
 import {
   ChevronRight,
@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   X,
   ArrowLeft,
+  Pencil,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
@@ -19,7 +20,7 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio } from '../negocio-v2-actions'
 import ActivityLog from '@/components/activity-log'
 
 // Bloques renderers
@@ -46,6 +47,96 @@ const fmt = (v: number) =>
     currency: 'COP',
     maximumFractionDigits: 0,
   }).format(v)
+
+// ── Editor inline de carpeta URL ──────────────────────────────────────────────
+
+function CarpetaUrlEditor({
+  negocioId,
+  initialUrl,
+}: {
+  negocioId: string
+  initialUrl: string | null
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(initialUrl ?? '')
+  const [savedUrl, setSavedUrl] = useState(initialUrl ?? '')
+  const [isPending, startTransition] = useTransition()
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function startEditing() {
+    setValue(savedUrl)
+    setEditing(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  function save() {
+    setEditing(false)
+    const trimmed = value.trim()
+    if (trimmed === savedUrl) return
+    startTransition(async () => {
+      const res = await actualizarCarpetaUrlNegocio(negocioId, trimmed)
+      if (res.error) {
+        toast.error('Error guardando carpeta: ' + res.error)
+        setValue(savedUrl)
+      } else {
+        setSavedUrl(trimmed)
+      }
+    })
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') save()
+    if (e.key === 'Escape') { setEditing(false); setValue(savedUrl) }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={handleKeyDown}
+        placeholder="https://drive.google.com/..."
+        disabled={isPending}
+        className="h-5 w-40 rounded border border-border bg-background px-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
+      />
+    )
+  }
+
+  if (savedUrl) {
+    return (
+      <span className="inline-flex items-center gap-1 group">
+        <a
+          href={savedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+        >
+          <FolderOpen className="h-3 w-3" />
+          Drive
+        </a>
+        <button
+          onClick={startEditing}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-muted-foreground"
+          title="Editar link de carpeta"
+        >
+          <Pencil className="h-2.5 w-2.5" />
+        </button>
+      </span>
+    )
+  }
+
+  return (
+    <button
+      onClick={startEditing}
+      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent transition-colors"
+    >
+      <FolderOpen className="h-3 w-3" />
+      Carpeta
+    </button>
+  )
+}
 
 // ── Stage badge ──────────────────────────────────────────────────────────────
 
@@ -713,17 +804,10 @@ export default function NegocioDetailClient({
             </span>
           )}
 
-          {negocio.carpeta_url && (
-            <a
-              href={negocio.carpeta_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            >
-              <FolderOpen className="h-3 w-3" />
-              Drive
-            </a>
-          )}
+          <CarpetaUrlEditor
+            negocioId={negocio.id}
+            initialUrl={negocio.carpeta_url}
+          />
 
           {negocio.contactos?.nombre && (
             <span className="inline-flex items-center gap-1">

@@ -1173,3 +1173,26 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     })),
   }
 }
+
+// ── Actualizar carpeta URL del negocio ────────────────────────────────────────
+
+export async function actualizarCarpetaUrlNegocio(
+  negocioId: string,
+  carpetaUrl: string
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const url = carpetaUrl.trim()
+
+  const { error: updErr } = await db(supabase)
+    .from('negocios')
+    .update({ carpeta_url: url || null })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+
+  if (updErr) return { error: (updErr as { message: string }).message }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
+}

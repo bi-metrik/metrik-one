@@ -74,6 +74,7 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
     .single()
 
   if (dbError) return { success: false as const, error: dbError.message }
+  if (!data) return { success: false as const, error: 'Error al crear cotización — intenta de nuevo' }
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const, id: (data as { id: string }).id }
