@@ -22,8 +22,9 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio, cerrarNegocio } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio } from '../negocio-v2-actions'
 import ActivityLog from '@/components/activity-log'
+import CierreNegocioDialog from './cierre-negocio-dialog'
 
 // Bloques renderers
 import BloqueEquipo from './bloques/BloqueEquipo'
@@ -305,21 +306,24 @@ function SelectorEtapa({
   etapasLinea,
   etapaActualId,
   negocioEstado,
+  stageActual,
+  resumenFinanciero,
+  precioAprobado,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
   etapaActualId: string | null
   negocioEstado: string | null
+  stageActual: string | null
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  precioAprobado: number | null
 }) {
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
     etapaId: string
     bloques: Array<{ nombre: string; es_gate: boolean }>
   } | null>(null)
-
-  // Estado del cierre: 'idle' | 'confirm' | 'motivo'
-  const [cierreStep, setCierreStep] = useState<'idle' | 'confirm' | 'motivo'>('idle')
-  const [motivoCierre, setMotivoCierre] = useState('')
+  const [showCierreDialog, setShowCierreDialog] = useState(false)
 
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
@@ -330,8 +334,9 @@ function SelectorEtapa({
         .find(e => e.orden === etapaActual.orden + 1) ?? null
     : null
 
-  // Si ya está cerrado, no mostrar nada
-  if (negocioEstado === 'cerrado') return null
+  // Si ya esta cerrado/perdido/cancelado/completado, no mostrar nada
+  const estadosCerrados = ['cerrado', 'perdido', 'cancelado', 'completado']
+  if (negocioEstado && estadosCerrados.includes(negocioEstado)) return null
 
   function handleAvanzar() {
     if (!siguienteEtapa) return
@@ -359,127 +364,85 @@ function SelectorEtapa({
     })
   }
 
-  function handleCerrar() {
-    startTransition(async () => {
-      const result = await cerrarNegocio(negocioId, motivoCierre.trim() || undefined)
-      if (result.error) {
-        toast.error('Error al cerrar negocio: ' + result.error)
-      } else {
-        toast.success('Negocio cerrado')
-        setCierreStep('idle')
-        setMotivoCierre('')
-      }
-    })
-  }
+  // Texto y estilo del boton de cierre segun stage
+  const cierreConfig = {
+    venta: { label: 'Perder', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+    ejecucion: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+    cobro: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
+  }[stageActual ?? 'venta'] ?? { label: 'Cerrar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' }
 
-  // Inline confirm/motivo de cierre
-  const cierreInline = cierreStep !== 'idle' ? (
-    <div className="flex items-start gap-1.5">
-      {cierreStep === 'confirm' && (
-        <>
-          <span className="text-xs text-muted-foreground pt-1.5">¿Cerrar negocio?</span>
-          <button
-            onClick={() => setCierreStep('motivo')}
-            disabled={isPending}
-            className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-red-600 disabled:opacity-60"
-          >
-            Continuar
-          </button>
-          <button
-            onClick={() => setCierreStep('idle')}
-            disabled={isPending}
-            className="inline-flex items-center rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-          >
-            Cancelar
-          </button>
-        </>
-      )}
-      {cierreStep === 'motivo' && (
-        <div className="flex flex-col gap-1.5 items-end">
-          <input
-            type="text"
-            value={motivoCierre}
-            onChange={e => setMotivoCierre(e.target.value)}
-            placeholder="Motivo de cierre (opcional)"
-            className="w-52 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs placeholder:text-muted-foreground/50 focus:border-red-400 focus:outline-none"
-          />
-          <div className="flex gap-1.5">
-            <button
-              onClick={handleCerrar}
-              disabled={isPending}
-              className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-red-600 disabled:opacity-60"
-            >
-              {isPending ? 'Cerrando...' : 'Confirmar cierre'}
-            </button>
-            <button
-              onClick={() => { setCierreStep('idle'); setMotivoCierre('') }}
-              disabled={isPending}
-              className="inline-flex items-center rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  ) : null
+  const CierreIcon = cierreConfig.icon
 
-  // Sin siguiente etapa (etapa final): botón principal es "Cerrar negocio"
+  // Sin siguiente etapa (etapa final del stage): boton principal es cierre
   if (!siguienteEtapa) {
     return (
       <>
-        {cierreInline ?? (
-          <button
-            onClick={() => setCierreStep('confirm')}
-            disabled={isPending}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-          >
-            <CheckCircle2 className="h-3 w-3 text-primary" />
-            Cerrar negocio
-          </button>
+        <button
+          onClick={() => setShowCierreDialog(true)}
+          disabled={isPending}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-60 ${cierreConfig.btnClass}`}
+        >
+          <CierreIcon className="h-3.5 w-3.5" />
+          {cierreConfig.label}
+        </button>
+
+        {showCierreDialog && (
+          <CierreNegocioDialog
+            negocioId={negocioId}
+            stage={stageActual ?? 'venta'}
+            resumenFinanciero={resumenFinanciero}
+            precioAprobado={precioAprobado}
+            onClose={() => setShowCierreDialog(false)}
+          />
         )}
       </>
     )
   }
 
-  // Con siguiente etapa: botón avanzar + botón secundario de cierre
+  // Con siguiente etapa: boton avanzar + boton secundario de cierre
   return (
     <>
-      {cierreInline ? (
-        cierreInline
-      ) : (
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleAvanzar}
-            disabled={isPending}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-          >
-            {isPending ? (
-              <span className="text-muted-foreground">Cambiando...</span>
-            ) : (
-              <>
-                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
-              </>
-            )}
-          </button>
-          <button
-            onClick={() => setCierreStep('confirm')}
-            disabled={isPending}
-            title="Cerrar negocio"
-            className="inline-flex items-center gap-1 border border-red-200 text-red-500 text-xs px-2 py-1.5 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40"
-          >
-            <XCircle className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Cerrar</span>
-          </button>
-        </div>
-      )}
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={handleAvanzar}
+          disabled={isPending}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+        >
+          {isPending ? (
+            <span className="text-muted-foreground">Cambiando...</span>
+          ) : (
+            <>
+              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+              <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
+            </>
+          )}
+        </button>
+        <button
+          onClick={() => setShowCierreDialog(true)}
+          disabled={isPending}
+          title={cierreConfig.label}
+          className={`inline-flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-40 ${cierreConfig.btnClass}`}
+        >
+          <CierreIcon className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">{cierreConfig.label}</span>
+        </button>
+      </div>
 
       {gateModal && (
         <ModalGateBloqueado
           bloques={gateModal.bloques}
           onClose={() => setGateModal(null)}
           onOverride={motivo => handleOverride(gateModal.etapaId, motivo)}
+        />
+      )}
+
+      {showCierreDialog && (
+        <CierreNegocioDialog
+          negocioId={negocioId}
+          stage={stageActual ?? 'venta'}
+          resumenFinanciero={resumenFinanciero}
+          precioAprobado={precioAprobado}
+          onClose={() => setShowCierreDialog(false)}
         />
       )}
     </>
@@ -947,6 +910,9 @@ export default function NegocioDetailClient({
               etapasLinea={etapasLinea}
               etapaActualId={negocio.etapa_actual_id}
               negocioEstado={negocio.estado}
+              stageActual={negocio.stage_actual}
+              resumenFinanciero={resumenFinanciero}
+              precioAprobado={negocio.precio_aprobado}
             />
           </div>
         </div>

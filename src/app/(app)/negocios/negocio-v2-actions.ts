@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -128,7 +129,7 @@ export async function getNegociosV2(): Promise<NegocioResumen[]> {
       contactos(nombre)
     `)
     .eq('workspace_id', workspaceId)
-    .eq('estado', 'activo')
+    .in('estado', ['activo', 'abierto'])
     .order('created_at', { ascending: false })
 
   if (!data) return []
@@ -514,7 +515,7 @@ export async function crearNegocio(input: {
       precio_estimado: input.precio_estimado ?? null,
       etapa_actual_id: primeraEtapa?.id ?? null,
       stage_actual: primeraEtapa?.stage ?? null,
-      estado: 'activo',
+      estado: 'abierto',
     })
     .select('id')
     .single()
@@ -1784,54 +1785,203 @@ export async function actualizarCarpetaUrlNegocio(
 
 // ── Cerrar negocio ────────────────────────────────────────────────────────────
 
-export async function cerrarNegocio(
+// ── Perder negocio (stage venta) ──────────────────────────────────────────────
+
+export async function perderNegocio(
   negocioId: string,
-  motivo?: string
+  razon: string,
+  notas?: string,
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  // Validar que el negocio pertenece a este workspace
-  const { data: negocioRaw } = await db(supabase)
+  // Validar que existe y esta en stage venta
+  const { data: negocio } = await db(supabase)
     .from('negocios')
-    .select('id')
+    .select('id, stage_actual, estado')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
 
-  if (!negocioRaw) return { error: 'Negocio no encontrado' }
+  if (!negocio) return { error: 'Negocio no encontrado' }
+  if (negocio.stage_actual !== 'venta') {
+    return { error: 'Solo se puede perder un negocio en etapa de venta' }
+  }
+  if (negocio.estado !== 'abierto' && negocio.estado !== 'activo') {
+    return { error: 'El negocio ya esta cerrado' }
+  }
 
   const { error: updErr } = await db(supabase)
     .from('negocios')
     .update({
-      estado: 'cerrado',
-      motivo_cierre: motivo ?? null,
+      estado: 'perdido',
+      razon_cierre: razon,
+      descripcion_cierre: notas ?? null,
       closed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     })
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
 
   if (updErr) return { error: (updErr as { message: string }).message }
 
-  // Registrar en activity_log
+  // Log en activity_log
+  const razonLabel = RAZONES_PERDIDA_NEGOCIO.find(r => r.value === razon)?.label ?? razon
   if (staffId) {
-    const contenido = motivo
-      ? `Negocio cerrado. Motivo: ${motivo}`
-      : 'Negocio cerrado'
-    await supabase
-      .from('activity_log')
-      .insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioId,
-        tipo: 'cambio_estado',
-        autor_id: staffId,
-        contenido,
-      })
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_estado',
+      autor_id: staffId,
+      contenido: `Negocio perdido. Motivo: ${razonLabel}`,
+      valor_nuevo: 'perdido',
+    })
   }
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
   return { error: null }
 }
+
+// ── Cancelar negocio (stage ejecucion) ────────────────────────────────────────
+
+export async function cancelarNegocio(
+  negocioId: string,
+  motivo: string,
+  descripcion: string,
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  if (!descripcion || descripcion.trim().length < 20) {
+    return { error: 'La descripcion debe tener al menos 20 caracteres' }
+  }
+
+  // Validar que existe y esta en stage ejecucion
+  const { data: negocio } = await db(supabase)
+    .from('negocios')
+    .select('id, stage_actual, estado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  if (!negocio) return { error: 'Negocio no encontrado' }
+  if (negocio.stage_actual !== 'ejecucion') {
+    return { error: 'Solo se puede cancelar un proyecto en etapa de ejecucion' }
+  }
+  if (negocio.estado !== 'abierto' && negocio.estado !== 'activo') {
+    return { error: 'El negocio ya esta cerrado' }
+  }
+
+  const { error: updErr } = await db(supabase)
+    .from('negocios')
+    .update({
+      estado: 'cancelado',
+      razon_cierre: motivo,
+      descripcion_cierre: descripcion.trim(),
+      closed_at: new Date().toISOString(),
+    })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+
+  if (updErr) return { error: (updErr as { message: string }).message }
+
+  const motivoLabel = MOTIVOS_CANCELACION.find(m => m.value === motivo)?.label ?? motivo
+  if (staffId) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_estado',
+      autor_id: staffId,
+      contenido: `Proyecto cancelado. Motivo: ${motivoLabel}`,
+      valor_nuevo: 'cancelado',
+    })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null }
+}
+
+// ── Completar negocio (stage cobro) ───────────────────────────────────────────
+
+export async function completarNegocio(
+  negocioId: string,
+  lecciones?: string,
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Validar que existe y esta en stage cobro
+  const { data: negocio } = await db(supabase)
+    .from('negocios')
+    .select('id, stage_actual, estado, precio_aprobado, precio_estimado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  if (!negocio) return { error: 'Negocio no encontrado' }
+  if (negocio.stage_actual !== 'cobro') {
+    return { error: 'Solo se puede completar un negocio en etapa de cobro' }
+  }
+  if (negocio.estado !== 'abierto' && negocio.estado !== 'activo') {
+    return { error: 'El negocio ya esta cerrado' }
+  }
+
+  // Calcular snapshot financiero: buscar cobros del negocio
+  const { data: cobrosData } = await db(supabase)
+    .from('cobros')
+    .select('monto, estado_causacion')
+    .eq('negocio_id', negocioId)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number; estado_causacion: string }>
+  const totalCobrado = cobros
+    .filter(c => c.estado_causacion === 'CAUSADO' || c.estado_causacion === 'APROBADO')
+    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  const pendiente = cobros
+    .filter(c => c.estado_causacion === 'PENDIENTE')
+    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
+
+  const snapshot = {
+    fecha_cierre: new Date().toISOString(),
+    precio_aprobado: precioAprobado,
+    total_cobrado: totalCobrado,
+    pendiente_cobro: pendiente,
+    margen: totalCobrado - 0, // sin costos ejecutados por ahora
+  }
+
+  const { error: updErr } = await db(supabase)
+    .from('negocios')
+    .update({
+      estado: 'completado',
+      lecciones_aprendidas: lecciones?.trim() || null,
+      cierre_snapshot: snapshot,
+      closed_at: new Date().toISOString(),
+    })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+
+  if (updErr) return { error: (updErr as { message: string }).message }
+
+  if (staffId) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_estado',
+      autor_id: staffId,
+      contenido: 'Proyecto completado',
+      valor_nuevo: 'completado',
+    })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null }
+}
+
+// Constantes de cierre movidas a src/lib/negocios/constants.ts para evitar
+// error "use server file can only export async functions"

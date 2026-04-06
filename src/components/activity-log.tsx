@@ -342,20 +342,38 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
     )
   }
 
-  // Cambio de estado: icono XCircle rojo si es cierre/perdido, ArrowRight si es otro
+  // Cambio de estado: icono diferenciado por tipo
   if (entry.tipo === 'cambio_estado') {
-    const isCierre = ['cerrado', 'cancelado', 'perdido'].includes((entry.valor_nuevo ?? '').toLowerCase())
+    const valorNuevo = (entry.valor_nuevo ?? '').toLowerCase()
+    const isCompletado = valorNuevo === 'completado'
+    const isCierre = ['cerrado', 'cancelado', 'perdido'].includes(valorNuevo)
+
+    let Icon = ArrowRight
+    let iconClass = 'text-primary/70'
+    let labelClass = 'text-foreground'
+    let verbo = 'cambio estado a'
+
+    if (isCompletado) {
+      Icon = CheckCircle2
+      iconClass = 'text-green-500'
+      labelClass = 'text-green-600'
+    } else if (isCierre) {
+      Icon = XCircle
+      iconClass = 'text-red-500'
+      labelClass = 'text-red-600'
+      verbo = 'cerro como'
+    }
+
+    // Use contenido as display text if available, else valor_nuevo
+    const displayText = entry.contenido || entry.valor_nuevo || '--'
+
     return (
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
-        {isCierre
-          ? <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
-          : <ArrowRight className="h-3.5 w-3.5 text-primary/70 shrink-0" />
-        }
+        <Icon className={`h-3.5 w-3.5 shrink-0 ${iconClass}`} />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
           {autorName && <span className="font-medium text-foreground">{autorName}</span>}
-          <span>{isCierre ? 'cerro como' : 'cambio estado a'}</span>
-          <span className={`font-medium ${isCierre ? 'text-red-600' : 'text-foreground'}`}>
-            {entry.valor_nuevo ?? '--'}
+          <span className={`font-medium ${labelClass}`}>
+            {displayText}
           </span>
           <span className="text-[10px]">{timestamp}</span>
         </div>
