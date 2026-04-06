@@ -6,6 +6,14 @@ import type { NegocioResumen } from './negocio-v2-actions'
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
+function formatCodigo(codigo: string | null): string {
+  if (!codigo) return ''
+  const match = codigo.match(/^([A-Z]\d+)(\d{2})(\d+)$/)
+  if (!match) return codigo
+  const [, empresa, anio, consec] = match
+  return `${empresa} ${anio} ${parseInt(consec, 10)}`
+}
+
 const STAGE_CLASSES: Record<string, string> = {
   venta:     'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   ejecucion: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
@@ -43,7 +51,12 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               </span>
             )}
           </div>
-          <p className="font-semibold text-sm leading-tight truncate">{negocio.nombre}</p>
+          <p className="font-semibold text-sm leading-tight">
+            {negocio.codigo && (
+              <span className="font-mono text-foreground shrink-0">{formatCodigo(negocio.codigo)}{' — '}</span>
+            )}
+            <span className="truncate">{negocio.nombre}</span>
+          </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
           </p>

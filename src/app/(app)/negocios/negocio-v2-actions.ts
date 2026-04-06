@@ -83,6 +83,7 @@ export type NegocioDetalle = {
 export type NegocioResumen = {
   id: string
   nombre: string
+  codigo: string | null
   precio_estimado: number | null
   precio_aprobado: number | null
   carpeta_url: string | null
@@ -114,6 +115,7 @@ export async function getNegociosV2(): Promise<NegocioResumen[]> {
     .select(`
       id,
       nombre,
+      codigo,
       precio_estimado,
       precio_aprobado,
       carpeta_url,
@@ -134,6 +136,7 @@ export async function getNegociosV2(): Promise<NegocioResumen[]> {
   return (data as Record<string, unknown>[]).map(row => ({
     id: row.id as string,
     nombre: row.nombre as string,
+    codigo: row.codigo as string | null,
     precio_estimado: row.precio_estimado as number | null,
     precio_aprobado: row.precio_aprobado as number | null,
     carpeta_url: row.carpeta_url as string | null,
