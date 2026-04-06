@@ -443,8 +443,42 @@ export async function crearNegocio(input: {
     contactoId = (newContact as { id: string } | null)?.id
   }
 
-  // Crear empresa inline si no es persona natural y no existe
+  // Persona natural: auto-crear empresa vinculada al contacto
   let empresaId = input.empresa_id
+  if (input.es_persona_natural && contactoId) {
+    // Buscar empresa ya vinculada a este contacto
+    const { data: existingEmpresa } = await supabase
+      .from('empresas')
+      .select('id')
+      .eq('contacto_id', contactoId)
+      .maybeSingle()
+
+    if (existingEmpresa) {
+      empresaId = existingEmpresa.id
+    } else {
+      // Obtener nombre del contacto para la empresa
+      let contactName = input.contacto_nombre?.trim() || 'Persona Natural'
+      if (!input.contacto_nombre && contactoId) {
+        const { data: c } = await supabase.from('contactos').select('nombre').eq('id', contactoId).single()
+        if (c) contactName = c.nombre
+      }
+      const { data: newEmpresa } = await supabase
+        .from('empresas')
+        .insert({
+          workspace_id: workspaceId,
+          nombre: contactName,
+          tipo_persona: 'natural',
+          contacto_id: contactoId,
+          tipo_documento: 'CC',
+          codigo: '',
+        })
+        .select('id')
+        .single()
+      if (newEmpresa) empresaId = newEmpresa.id
+    }
+  }
+
+  // Crear empresa inline si no es persona natural y no existe
   if (!input.es_persona_natural && !empresaId && input.empresa_nombre?.trim()) {
     const { data: newEmpresa } = await db(supabase)
       .from('empresas')
