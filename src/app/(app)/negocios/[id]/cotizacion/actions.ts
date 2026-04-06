@@ -78,3 +78,35 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const, id: (data as { id: string }).id }
 }
+
+export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false as const, error: 'No autenticado' }
+
+  // Obtener valor_total de la cotización
+  const { data: cot, error: cotErr } = await supabase
+    .from('cotizaciones')
+    .select('valor_total')
+    .eq('id', cotizacionId)
+    .single()
+
+  if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
+
+  // Marcar cotización como aceptada
+  const { error: updErr } = await supabase
+    .from('cotizaciones')
+    .update({ estado: 'aceptada' } as never)
+    .eq('id', cotizacionId)
+
+  if (updErr) return { success: false as const, error: updErr.message }
+
+  // Actualizar precio_aprobado en negocio
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (supabase as any)
+    .from('negocios')
+    .update({ precio_aprobado: (cot as { valor_total: number | null }).valor_total })
+    .eq('id', negocioId)
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { success: true as const }
+}

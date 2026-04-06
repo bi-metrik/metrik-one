@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   AlertTriangle,
   X,
+  ArrowLeft,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
@@ -512,7 +513,7 @@ function BloqueCard({
   const estado = instancia?.estado ?? 'pendiente'
   const isCompleto = estado === 'completo'
   const isGate = bloque.es_gate
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
 
   return (
     <div
@@ -670,13 +671,26 @@ export default function NegocioDetailClient({
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-4">
+      {/* ── BACK BUTTON ── */}
+      <div className="mb-3">
+        <Link
+          href="/negocios"
+          className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Negocios
+        </Link>
+      </div>
+
       {/* ── HEADER CONDENSADO ── */}
       <div className="mb-4 rounded-xl border border-border bg-card p-4 shadow-sm">
         {/* Fila 1: Badge stage + ID + Nombre + Botón cambiar etapa */}
         <div className="flex items-start gap-2">
           <div className="flex items-center gap-2 shrink-0 mt-0.5">
             <StageBadge stage={negocio.stage_actual} />
-            <span className="text-[10px] font-mono text-muted-foreground/60">{idCorto}</span>
+            <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-mono font-bold text-foreground">
+              #{idCorto}
+            </span>
           </div>
           <h1 className="flex-1 min-w-0 text-sm font-bold leading-tight truncate">
             {negocio.nombre}
@@ -793,15 +807,6 @@ export default function NegocioDetailClient({
         </div>
       </div>
 
-      {/* Breadcrumb de vuelta */}
-      <div className="mt-6">
-        <Link
-          href="/negocios"
-          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          ← Volver a Negocios
-        </Link>
-      </div>
     </div>
   )
 }

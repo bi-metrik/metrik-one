@@ -1,4 +1,5 @@
-import ModoSelectorNegocio from './modo-selector-negocio'
+import { redirect } from 'next/navigation'
+import { createCotizacionDetalladaNegocio } from '../actions'
 
 export default async function NuevaCotizacionNegocioPage({
   params,
@@ -6,5 +7,9 @@ export default async function NuevaCotizacionNegocioPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  return <ModoSelectorNegocio negocioId={id} />
+  const res = await createCotizacionDetalladaNegocio(id)
+  if (!res.success) {
+    redirect(`/negocios/${id}`)
+  }
+  redirect(`/negocios/${id}/cotizacion/${res.id}`)
 }
