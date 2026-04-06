@@ -311,10 +311,12 @@ function SelectorEtapa({
   negocioId,
   etapasLinea,
   etapaActualId,
+  negocioEstado,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
   etapaActualId: string | null
+  negocioEstado: string | null
 }) {
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
@@ -322,7 +324,10 @@ function SelectorEtapa({
     bloques: Array<{ nombre: string; es_gate: boolean }>
   } | null>(null)
 
-  const [confirmCierre, setConfirmCierre] = useState(false)
+  // Estado del cierre: 'idle' | 'confirm' | 'motivo'
+  const [cierreStep, setCierreStep] = useState<'idle' | 'confirm' | 'motivo'>('idle')
+  const [motivoCierre, setMotivoCierre] = useState('')
+
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
   // Solo la siguiente etapa en orden estricto
@@ -331,6 +336,9 @@ function SelectorEtapa({
         .sort((a, b) => a.orden - b.orden)
         .find(e => e.orden === etapaActual.orden + 1) ?? null
     : null
+
+  // Si ya está cerrado, no mostrar nada
+  if (negocioEstado === 'cerrado') return null
 
   function handleAvanzar() {
     if (!siguienteEtapa) return
@@ -360,41 +368,76 @@ function SelectorEtapa({
 
   function handleCerrar() {
     startTransition(async () => {
-      const result = await cerrarNegocio(negocioId)
+      const result = await cerrarNegocio(negocioId, motivoCierre.trim() || undefined)
       if (result.error) {
         toast.error('Error al cerrar negocio: ' + result.error)
       } else {
         toast.success('Negocio cerrado')
-        setConfirmCierre(false)
+        setCierreStep('idle')
+        setMotivoCierre('')
       }
     })
   }
 
-  // Sin siguiente etapa: mostrar botón de cierre
-  if (!siguienteEtapa) {
-    return (
-      <>
-        {confirmCierre ? (
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-muted-foreground">¿Cerrar negocio?</span>
+  // Inline confirm/motivo de cierre
+  const cierreInline = cierreStep !== 'idle' ? (
+    <div className="flex items-start gap-1.5">
+      {cierreStep === 'confirm' && (
+        <>
+          <span className="text-xs text-muted-foreground pt-1.5">¿Cerrar negocio?</span>
+          <button
+            onClick={() => setCierreStep('motivo')}
+            disabled={isPending}
+            className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-red-600 disabled:opacity-60"
+          >
+            Continuar
+          </button>
+          <button
+            onClick={() => setCierreStep('idle')}
+            disabled={isPending}
+            className="inline-flex items-center rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+          >
+            Cancelar
+          </button>
+        </>
+      )}
+      {cierreStep === 'motivo' && (
+        <div className="flex flex-col gap-1.5 items-end">
+          <input
+            type="text"
+            value={motivoCierre}
+            onChange={e => setMotivoCierre(e.target.value)}
+            placeholder="Motivo de cierre (opcional)"
+            className="w-52 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs placeholder:text-muted-foreground/50 focus:border-red-400 focus:outline-none"
+          />
+          <div className="flex gap-1.5">
             <button
               onClick={handleCerrar}
               disabled={isPending}
-              className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
+              className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-red-600 disabled:opacity-60"
             >
-              {isPending ? 'Cerrando...' : 'Confirmar'}
+              {isPending ? 'Cerrando...' : 'Confirmar cierre'}
             </button>
             <button
-              onClick={() => setConfirmCierre(false)}
+              onClick={() => { setCierreStep('idle'); setMotivoCierre('') }}
               disabled={isPending}
               className="inline-flex items-center rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
             >
               Cancelar
             </button>
           </div>
-        ) : (
+        </div>
+      )}
+    </div>
+  ) : null
+
+  // Sin siguiente etapa (etapa final): botón principal es "Cerrar negocio"
+  if (!siguienteEtapa) {
+    return (
+      <>
+        {cierreInline ?? (
           <button
-            onClick={() => setConfirmCierre(true)}
+            onClick={() => setCierreStep('confirm')}
             disabled={isPending}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
           >
@@ -406,22 +449,38 @@ function SelectorEtapa({
     )
   }
 
+  // Con siguiente etapa: botón avanzar + botón secundario de cierre
   return (
     <>
-      <button
-        onClick={handleAvanzar}
-        disabled={isPending}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-      >
-        {isPending ? (
-          <span className="text-muted-foreground">Cambiando...</span>
-        ) : (
-          <>
-            <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
-          </>
-        )}
-      </button>
+      {cierreInline ? (
+        cierreInline
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleAvanzar}
+            disabled={isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+          >
+            {isPending ? (
+              <span className="text-muted-foreground">Cambiando...</span>
+            ) : (
+              <>
+                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => setCierreStep('confirm')}
+            disabled={isPending}
+            title="Cerrar negocio"
+            className="inline-flex items-center gap-1 border border-red-200 text-red-500 text-xs px-2 py-1.5 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40"
+          >
+            <XCircle className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Cerrar</span>
+          </button>
+        </div>
+      )}
 
       {gateModal && (
         <ModalGateBloqueado
@@ -841,9 +900,6 @@ export default function NegocioDetailClient({
             <ArrowLeft className="h-3 w-3" />
             Negocios
           </Link>
-          <span className="ml-auto text-xs font-mono font-semibold text-muted-foreground select-all">
-            {negocio.codigo ? formatNegocioCodigo(negocio.codigo) : `#${negocio.id.slice(0, 8).toUpperCase()}`}
-          </span>
         </div>
 
         {/* Fila 2 — titulo + accion */}
@@ -852,8 +908,16 @@ export default function NegocioDetailClient({
             <div className="mb-0.5">
               <StageBadge stage={negocio.stage_actual} />
             </div>
-            <h1 className="text-lg font-bold leading-tight truncate">
-              {negocio.nombre}
+            <h1 className="flex items-baseline gap-1.5 text-lg font-bold leading-tight">
+              {negocio.codigo && (
+                <>
+                  <span className="shrink-0 font-mono text-foreground select-all">
+                    {formatNegocioCodigo(negocio.codigo)}
+                  </span>
+                  <span className="text-muted-foreground font-normal">—</span>
+                </>
+              )}
+              <span className="truncate">{negocio.nombre}</span>
             </h1>
           </div>
           <div className="shrink-0 mt-1">
@@ -861,6 +925,7 @@ export default function NegocioDetailClient({
               negocioId={negocio.id}
               etapasLinea={etapasLinea}
               etapaActualId={negocio.etapa_actual_id}
+              negocioEstado={negocio.estado}
             />
           </div>
         </div>
