@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock } from 'lucide-react'
 import { toast } from 'sonner'
-import { aceptarCotizacionNegocio } from '../cotizacion/actions'
+import { aceptarCotizacionNegocio, rechazarCotizacionNegocio } from '../cotizacion/actions'
 
 interface CotizacionResumen {
   id: string
@@ -76,6 +76,17 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
     })
   }
 
+  const handleRechazar = (cotizacionId: string) => {
+    startTransition(async () => {
+      const res = await rechazarCotizacionNegocio(cotizacionId, negocioId)
+      if (!res.success) {
+        toast.error(res.error)
+      } else {
+        toast.success('Cotización rechazada')
+      }
+    })
+  }
+
   const hayAceptada = !!aceptada || !!optimisticAceptadaId
 
   return (
@@ -137,15 +148,24 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
                   </div>
                 </Link>
 
-                {/* Botón Aprobar — solo enviadas, solo si no hay aceptada, solo modo editable */}
+                {/* Botones Aprobar / Rechazar — solo enviadas, solo si no hay aceptada, solo modo editable */}
                 {modo === 'editable' && !hayAceptada && cot.estado === 'enviada' && (
-                  <button
-                    onClick={() => handleAprobar(cot.id)}
-                    disabled={isPending}
-                    className="shrink-0 rounded-lg border border-green-200 bg-green-50 px-2.5 py-2 text-[10px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50 transition-colors"
-                  >
-                    Aprobar
-                  </button>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => handleAprobar(cot.id)}
+                      disabled={isPending}
+                      className="rounded-lg border border-green-200 bg-green-50 px-2.5 py-2 text-[10px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50 transition-colors"
+                    >
+                      Aprobar
+                    </button>
+                    <button
+                      onClick={() => handleRechazar(cot.id)}
+                      disabled={isPending}
+                      className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-[10px] font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors"
+                    >
+                      Rechazar
+                    </button>
+                  </div>
                 )}
               </div>
             )

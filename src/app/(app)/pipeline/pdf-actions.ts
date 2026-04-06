@@ -10,23 +10,60 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Get cotización
+  // Get cotización (left join — puede ser de oportunidad o de negocio)
   const { data: cot } = await supabase
     .from('cotizaciones')
-    .select('*, oportunidades!inner(empresa_id, contacto_id, descripcion)')
+    .select('*, oportunidades(empresa_id, contacto_id, descripcion)')
     .eq('id', cotizacionId)
     .single()
 
   if (!cot) return { success: false, error: 'Cotización no encontrada' }
 
-  // Get empresa
-  const { data: empresa } = await supabase
-    .from('empresas')
-    .select('nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
-    .eq('id', cot.oportunidades.empresa_id)
-    .single()
+  // Get empresa: primero por oportunidad, luego por negocio, luego fallback
+  let empresa: {
+    nombre: string | null
+    numero_documento: string | null
+    contacto_nombre: string | null
+    contacto_email: string | null
+    tipo_persona: string | null
+    regimen_tributario: string | null
+    gran_contribuyente: boolean | null
+    agente_retenedor: boolean | null
+  } | null = null
 
-  if (!empresa) return { success: false, error: 'Empresa no encontrada' }
+  const opp = cot.oportunidades as { empresa_id: string | null } | null
+  if (opp?.empresa_id) {
+    const { data: empData } = await supabase
+      .from('empresas')
+      .select('nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
+      .eq('id', opp.empresa_id)
+      .single()
+    empresa = empData
+  }
+
+  // Para cotizaciones de negocio, intentar obtener empresa del negocio
+  if (!empresa && (cot as any).negocio_id) {
+    const { data: negocio } = await (supabase as any)
+      .from('negocios')
+      .select('empresa_id, empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
+      .eq('id', (cot as any).negocio_id)
+      .single()
+    empresa = (negocio as any)?.empresas ?? null
+  }
+
+  // Fallback: empresa genérica para renderizar el PDF
+  if (!empresa) {
+    empresa = {
+      nombre: 'Cliente',
+      numero_documento: null,
+      contacto_nombre: null,
+      contacto_email: null,
+      tipo_persona: 'juridica',
+      regimen_tributario: 'responsable',
+      gran_contribuyente: false,
+      agente_retenedor: false,
+    }
+  }
 
   // Get workspace (vendor) info
   const { data: ws } = await supabase
@@ -92,7 +129,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       descuento_valor: cot.descuento_valor ?? 0,
     },
     empresa: {
-      nombre: empresa.nombre,
+      nombre: empresa.nombre ?? '',
       nit: empresa.numero_documento,
       contacto_nombre: empresa.contacto_nombre,
       contacto_email: empresa.contacto_email,

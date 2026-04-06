@@ -107,6 +107,46 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
     .update({ precio_aprobado: (cot as { valor_total: number | null }).valor_total })
     .eq('id', negocioId)
 
+  // Marcar el negocio_bloque de cotización como completo
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: bloqueInstances } = await (supabase as any)
+    .from('negocio_bloques')
+    .select('id, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .eq('negocio_id', negocioId)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cotBloqueId = (bloqueInstances ?? []).find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (b: any) => b.bloque_configs?.bloque_definitions?.tipo === 'cotizacion'
+  )?.id
+
+  if (cotBloqueId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any)
+      .from('negocio_bloques')
+      .update({
+        estado: 'completo',
+        completado_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', cotBloqueId)
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { success: true as const }
+}
+
+export async function rechazarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false as const, error: 'No autenticado' }
+
+  const { error: updErr } = await supabase
+    .from('cotizaciones')
+    .update({ estado: 'rechazada' } as never)
+    .eq('id', cotizacionId)
+
+  if (updErr) return { success: false as const, error: updErr.message }
+
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
 }
