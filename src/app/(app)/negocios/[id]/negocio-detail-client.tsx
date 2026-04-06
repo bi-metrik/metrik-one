@@ -578,6 +578,7 @@ function BloqueRenderer({
         completado_at: i.completado_at,
         link_url: i.link_url,
       }))
+      const withSupport = (configExtra.withSupport as boolean) ?? false
       return (
         <BloqueChecklist
           negocioId={negocioId}
@@ -586,6 +587,7 @@ function BloqueRenderer({
           modo={modo}
           itemTemplates={itemTemplates}
           initialItems={items}
+          withSupport={withSupport}
         />
       )
     }

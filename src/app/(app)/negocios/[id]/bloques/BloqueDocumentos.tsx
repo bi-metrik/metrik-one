@@ -73,8 +73,6 @@ function CamposForm({
   }
 
   const keys = Object.keys(CAMPOS_LABELS) as (keyof CamposExtraidos)[]
-  const visibles = keys.filter(k => campos[k] !== undefined)
-  if (visibles.length === 0) return null
 
   return (
     <div className="border-t pt-3 space-y-3">
@@ -82,7 +80,7 @@ function CamposForm({
         Datos extraídos
       </p>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {visibles.map(key => (
+        {keys.map(key => (
           <div key={key}>
             <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
               {CAMPOS_LABELS[key]}
