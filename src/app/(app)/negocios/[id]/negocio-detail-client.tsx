@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   AlertTriangle,
   X,
+  XCircle,
   ArrowLeft,
   Pencil,
   Building2,
@@ -48,6 +49,18 @@ const fmt = (v: number) =>
     currency: 'COP',
     maximumFractionDigits: 0,
   }).format(v)
+
+// Formatea negocios.codigo para display en UI
+// Almacenado: S12603  →  Display: S1 26 3
+// empresa_codigo = letras+dígitos hasta los últimos 2+N dígitos
+function formatNegocioCodigo(codigo: string | null): string {
+  if (!codigo) return ''
+  // Patrón: una o más letras + dígitos (empresa) + 2 dígitos (año) + dígitos (consecutivo)
+  const match = codigo.match(/^([A-Z]\d+)(\d{2})(\d+)$/)
+  if (!match) return codigo
+  const [, empresa, anio, consec] = match
+  return `${empresa} ${anio} ${parseInt(consec, 10)}`
+}
 
 // ── Editor inline de carpeta URL ──────────────────────────────────────────────
 
@@ -680,7 +693,7 @@ function BloqueCard({
 
         <div className="flex-1 min-w-0">
           <p className={`text-sm font-medium leading-tight ${isCompleto && !isVisualization ? 'text-muted-foreground' : 'text-foreground'}`}>
-            {def?.nombre ?? 'Bloque'}
+            {bloque.nombre ?? def?.nombre ?? 'Bloque'}
           </p>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {def?.tipo && (
@@ -828,8 +841,8 @@ export default function NegocioDetailClient({
             <ArrowLeft className="h-3 w-3" />
             Negocios
           </Link>
-          <span className="ml-auto text-[10px] font-mono text-muted-foreground/40 select-all">
-            #{negocio.id.slice(0, 8).toUpperCase()}
+          <span className="ml-auto text-xs font-mono font-semibold text-muted-foreground select-all">
+            {negocio.codigo ? formatNegocioCodigo(negocio.codigo) : `#${negocio.id.slice(0, 8).toUpperCase()}`}
           </span>
         </div>
 
@@ -945,12 +958,17 @@ export default function NegocioDetailClient({
         </div>
 
         {/* ── Activity log ── */}
-        <div className="rounded-xl border border-border bg-card p-4">
-          <ActivityLog
-            entidadTipo="negocio"
-            entidadId={negocio.id}
-            staffList={staffList}
-          />
+        <div className="rounded-xl border border-border bg-card">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-sm font-semibold text-foreground">Actividad</h3>
+          </div>
+          <div className="p-4">
+            <ActivityLog
+              entidadTipo="negocio"
+              entidadId={negocio.id}
+              staffList={staffList}
+            />
+          </div>
         </div>
       </div>
 

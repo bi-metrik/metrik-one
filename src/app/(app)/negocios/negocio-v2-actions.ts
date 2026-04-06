@@ -40,6 +40,7 @@ export type BloqueConfig = {
   estado: 'editable' | 'visible'
   orden: number
   es_gate: boolean
+  nombre: string | null
   bloque_definitions: BloqueDefinition | null
 }
 
@@ -58,6 +59,7 @@ export type NegocioDetalle = {
   empresa_id: string | null
   contacto_id: string | null
   nombre: string
+  codigo: string | null
   precio_estimado: number | null
   precio_aprobado: number | null
   carpeta_url: string | null
@@ -165,6 +167,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       empresa_id,
       contacto_id,
       nombre,
+      codigo,
       precio_estimado,
       precio_aprobado,
       carpeta_url,
@@ -222,6 +225,7 @@ export async function getNegocioDetalle(id: string): Promise<{
         estado,
         orden,
         es_gate,
+        nombre,
         bloque_definitions(id, tipo, nombre, is_visualization, can_be_gate)
       `)
       .eq('etapa_id', negocioTyped.etapa_actual_id)
@@ -296,14 +300,15 @@ export async function getNegocioDetalle(id: string): Promise<{
             .select(`
               id,
               bloque_config_id,
+              estado,
               data,
               bloque_configs!inner(bloque_definition_id)
             `)
             .eq('negocio_id', id)
             .not('data', 'is', null)
 
-          // Construir mapa: bloque_definition_id → data más reciente con contenido
-          const dataHeredadaPorDef: Record<string, Record<string, unknown>> = {}
+          // Construir mapa: bloque_definition_id → { data, estado } más reciente con contenido
+          const heredadaPorDef: Record<string, { data: Record<string, unknown>; estado: string }> = {}
           for (const raw of ((historialRaw ?? []) as Record<string, unknown>[])) {
             const defId = (raw.bloque_configs as Record<string, unknown> | null)
               ?.bloque_definition_id as string | undefined
@@ -318,8 +323,11 @@ export async function getNegocioDetalle(id: string): Promise<{
               continue
             }
             // Guardar (el query no tiene orden; cualquier instancia previa con data sirve)
-            if (!dataHeredadaPorDef[defId]) {
-              dataHeredadaPorDef[defId] = dataRaw
+            if (!heredadaPorDef[defId]) {
+              heredadaPorDef[defId] = {
+                data: dataRaw,
+                estado: raw.estado as string,
+              }
             }
           }
 
@@ -328,11 +336,13 @@ export async function getNegocioDetalle(id: string): Promise<{
             const bc = bloqueConfigsMap.get(configId)
             const defId = bc?.bloque_definition_id as string | undefined
             if (!defId) continue
-            const dataHeredada = dataHeredadaPorDef[defId]
-            if (!dataHeredada) continue
+            const heredada = heredadaPorDef[defId]
+            if (!heredada) continue
             instanciasMap[configId] = {
               ...instanciasMap[configId],
-              data: dataHeredada,
+              data: heredada.data,
+              // Propagar estado completo solo en memoria — el gate sigue leyendo de DB
+              ...(heredada.estado === 'completo' ? { estado: 'completo' as const } : {}),
             }
           }
         }
@@ -348,6 +358,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       estado: bc.estado as 'editable' | 'visible',
       orden: bc.orden as number,
       es_gate: bc.es_gate as boolean,
+      nombre: (bc.nombre as string | null) ?? null,
       bloque_definitions: bc.bloque_definitions as BloqueDefinition | null,
       instancia: instanciasMap[bc.id as string] ?? null,
     }))
@@ -546,7 +557,7 @@ export async function cambiarEtapaNegocioConGate(
   error: string | null
   bloquesPendientes?: Array<{ nombre: string; es_gate: boolean }>
 }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   // Obtener etapa actual del negocio
@@ -666,9 +677,35 @@ export async function cambiarEtapaNegocioConGate(
     }
   }
 
-  // Si hay override: log del motivo en activity (simplificado por ahora)
-  // En producción completa: insertar en activity_log con el motivo
+  // Obtener nombre de la nueva etapa para el log
+  const { data: nuevaEtapaInfoRaw } = await db(supabase)
+    .from('etapas_negocio')
+    .select('nombre')
+    .eq('id', nuevaEtapaId)
+    .single()
+  const nuevaEtapaNombre = (nuevaEtapaInfoRaw as { nombre: string } | null)?.nombre ?? nuevaEtapaId
+
+  // Cambiar etapa
   const resultCambio = await cambiarEtapaNegocio(negocioId, nuevaEtapaId)
+  if (resultCambio.error) return resultCambio
+
+  // Registrar en activity_log
+  if (staffId) {
+    const contenido = motivoOverride
+      ? `Etapa cambiada a: ${nuevaEtapaNombre} (override: ${motivoOverride})`
+      : `Etapa cambiada a: ${nuevaEtapaNombre}`
+    await supabase
+      .from('activity_log')
+      .insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio_etapa',
+        autor_id: staffId,
+        contenido,
+      })
+  }
+
   return resultCambio
 }
 
@@ -1324,7 +1361,8 @@ export async function actualizarCarpetaUrlNegocio(
 // ── Cerrar negocio ────────────────────────────────────────────────────────────
 
 export async function cerrarNegocio(
-  negocioId: string
+  negocioId: string,
+  motivo?: string
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
@@ -1343,6 +1381,7 @@ export async function cerrarNegocio(
     .from('negocios')
     .update({
       estado: 'cerrado',
+      motivo_cierre: motivo ?? null,
       closed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -1353,6 +1392,9 @@ export async function cerrarNegocio(
 
   // Registrar en activity_log
   if (staffId) {
+    const contenido = motivo
+      ? `Negocio cerrado. Motivo: ${motivo}`
+      : 'Negocio cerrado'
     await supabase
       .from('activity_log')
       .insert({
@@ -1361,7 +1403,7 @@ export async function cerrarNegocio(
         entidad_id: negocioId,
         tipo: 'cambio_estado',
         autor_id: staffId,
-        contenido: 'Negocio cerrado',
+        contenido,
       })
   }
 
