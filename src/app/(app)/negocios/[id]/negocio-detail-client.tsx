@@ -889,10 +889,24 @@ export default function NegocioDetailClient({
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
   const etapaActual = negocio.etapas_negocio
 
-  const bloquesExtendidos = (bloques as BloqueExtendido[]).map(b => ({
+  // Evaluar condiciones: filtrar bloques cuya condition no se cumpla
+  const allBloques = (bloques as BloqueExtendido[]).map(b => ({
     ...b,
     _currentUserId: currentUserId,
   }))
+
+  // Recopilar datos de todos los bloques de esta etapa para evaluar condiciones
+  const datosEtapa: Record<string, unknown> = {}
+  for (const b of allBloques) {
+    const d = b.instancia?.data as Record<string, unknown> | null
+    if (d) Object.assign(datosEtapa, d)
+  }
+
+  const bloquesExtendidos = allBloques.filter(b => {
+    const cond = b.config_extra?.condition as { field: string; value: string } | undefined
+    if (!cond) return true
+    return String(datosEtapa[cond.field] ?? '') === cond.value
+  })
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-4">
