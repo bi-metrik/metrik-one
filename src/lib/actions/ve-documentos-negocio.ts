@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
+import { parseRut } from '@/lib/rut/parse-rut'
 
 const BUCKET = 've-documentos'
 
@@ -11,10 +12,14 @@ const BUCKET = 've-documentos'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any { return client }
 
-// Slugs que tienen extraccion AI (cedula → propietario, tarjeta_propiedad → vehiculo)
-const SLUGS_CON_AI = ['cedula', 'tarjeta_propiedad']
+// Slugs que disparan procesamiento AI
+// - factura, cedula, soporte_upme → parseVeDocuments
+// - rut → parseRut
+const SLUGS_CON_AI = ['factura', 'cedula', 'soporte_upme', 'rut']
 
+// Todos los campos extraibles de los 4 documentos de radicación
 export interface CamposExtraidos {
+  // Del vehículo (factura + cedula)
   nombre_propietario?: string
   numero_identificacion?: string
   marca?: string
@@ -22,6 +27,14 @@ export interface CamposExtraidos {
   modelo?: string
   tecnologia?: string
   tipo?: string
+  numero_cus?: string
+  // Datos fiscales del cliente (RUT)
+  regimen_tributario_cliente?: string
+  tipo_persona_cliente?: string
+  telefono_propietario?: string
+  municipio_propietario?: string
+  correo_propietario?: string
+  direccion_propietario?: string
 }
 
 // ── 1. Generar URL firmada de upload ──────────────────────────────────────────
@@ -85,7 +98,7 @@ export async function confirmarUploadDocumentoNegocio(
   return { success: true, url }
 }
 
-// ── 3. Procesar documento con IA (cédula → propietario, tarjeta → vehículo) ──
+// ── 3. Procesar documento con IA ──────────────────────────────────────────────
 
 function mimeTypeFromUrl(url: string): string {
   const p = url.split('?')[0].toLowerCase()
@@ -133,31 +146,64 @@ export async function procesarDocumentoNegocio(
     return { success: false, error: `Error descargando: ${String(err).slice(0, 80)}` }
   }
 
-  // tarjeta_propiedad usa el parser de ficha_tecnica (doc vehicular)
-  const parserSlug = slug === 'tarjeta_propiedad' ? 'ficha_tecnica' : slug
-
-  const { data: veData, error: parseError } = await parseVeDocuments(
-    [{ buffer, mimeType, slug: parserSlug }],
-    apiKey,
-  )
-
-  if (parseError || !veData) {
-    return { success: false, error: parseError ?? 'Error procesando documento' }
-  }
-
   const campos: CamposExtraidos = {}
-  const apply = (key: keyof CamposExtraidos, field: { value: string | null; confidence: number }) => {
-    if (field.value && field.confidence >= 0.6) campos[key] = field.value
+
+  // ── RUT: parser especializado ─────────────────────────────────────────────
+  if (slug === 'rut') {
+    const { data: rutData, error: parseError } = await parseRut(buffer, mimeType, apiKey)
+    if (parseError || !rutData) {
+      return { success: false, error: parseError ?? 'Error procesando RUT' }
+    }
+
+    const applyStr = (
+      key: keyof CamposExtraidos,
+      field: { value: string | null; confidence: number },
+    ) => {
+      if (field.value && field.confidence >= 0.6) campos[key] = field.value
+    }
+
+    // razon_social → nombre_propietario
+    applyStr('nombre_propietario', rutData.razon_social)
+    // nit → numero_identificacion (si no hay ya valor de cédula)
+    if (rutData.nit.value && rutData.nit.confidence >= 0.6 && !currentData.numero_identificacion) {
+      campos.numero_identificacion = rutData.nit.value
+    }
+    applyStr('regimen_tributario_cliente', rutData.regimen_tributario)
+    applyStr('tipo_persona_cliente', rutData.tipo_persona)
+    applyStr('telefono_propietario', rutData.telefono)
+    applyStr('municipio_propietario', rutData.municipio)
+    applyStr('correo_propietario', rutData.email_fiscal)
+    applyStr('direccion_propietario', rutData.direccion_fiscal)
   }
 
-  apply('nombre_propietario', veData.nombre_propietario)
-  apply('numero_identificacion', veData.numero_identificacion)
-  apply('marca', veData.marca_vehiculo)
-  apply('linea', veData.linea_vehiculo)
-  apply('modelo', veData.modelo_ano)
-  apply('tecnologia', veData.tecnologia)
-  apply('tipo', veData.tipo_vehiculo)
+  // ── Factura, cédula, soporte UPME: parser vehicular ───────────────────────
+  else {
+    const { data: veData, error: parseError } = await parseVeDocuments(
+      [{ buffer, mimeType, slug }],
+      apiKey,
+    )
+    if (parseError || !veData) {
+      return { success: false, error: parseError ?? 'Error procesando documento' }
+    }
 
+    const apply = (
+      key: keyof CamposExtraidos,
+      field: { value: string | null; confidence: number },
+    ) => {
+      if (field.value && field.confidence >= 0.6) campos[key] = field.value
+    }
+
+    apply('nombre_propietario', veData.nombre_propietario)
+    apply('numero_identificacion', veData.numero_identificacion)
+    apply('marca', veData.marca_vehiculo)
+    apply('linea', veData.linea_vehiculo)
+    apply('modelo', veData.modelo_ano)
+    apply('tecnologia', veData.tecnologia)
+    apply('tipo', veData.tipo_vehiculo)
+    apply('numero_cus', veData.numero_cus)
+  }
+
+  // ── Persistir campos en bloque data ──────────────────────────────────────
   if (Object.keys(campos).length > 0) {
     const { data: fresh } = await db(supabase)
       .from('negocio_bloques')

@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { CheckCircle2, Circle, Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { marcarBloqueCompleto, actualizarBloqueData } from '../../negocio-v2-actions'
+import { marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import {
   getUploadUrlDocumentoNegocio,
@@ -39,16 +39,17 @@ const CAMPOS_LABELS: Record<keyof CamposExtraidos, string> = {
   modelo: 'Modelo (año)',
   tecnologia: 'Tecnología',
   tipo: 'Tipo vehículo',
+  numero_cus: 'Número CUS (UPME)',
+  regimen_tributario_cliente: 'Régimen tributario',
+  tipo_persona_cliente: 'Tipo persona',
+  telefono_propietario: 'Teléfono',
+  municipio_propietario: 'Municipio',
+  correo_propietario: 'Correo',
+  direccion_propietario: 'Dirección fiscal',
 }
 
-// Campos críticos que deben estar llenos para marcar completo
-const CAMPOS_CRITICOS: (keyof CamposExtraidos)[] = [
-  'nombre_propietario',
-  'numero_identificacion',
-]
-
-// Slugs que disparan procesamiento AI
-const SLUGS_CON_AI = ['cedula', 'tarjeta_propiedad']
+// Slugs que disparan procesamiento AI (los 4 documentos de radicación)
+const SLUGS_CON_AI = ['factura', 'cedula', 'soporte_upme', 'rut']
 
 // ── Formulario de campos extraídos ────────────────────────────────────────────
 
