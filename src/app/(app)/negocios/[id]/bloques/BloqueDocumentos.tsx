@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { CheckCircle2, Circle, Download } from 'lucide-react'
@@ -135,6 +135,11 @@ export default function BloqueDocumentos({
   // Track URLs subidas en esta sesión para no perderlas en marcarBloqueCompleto
   const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({})
 
+  // Ref para tracking confiable de slugs subidos (evita timing issues de setState)
+  const uploadedSlugsRef = useRef<Set<string>>(new Set(
+    documentos.filter(d => savedDocs[d.slug]).map(d => d.slug)
+  ))
+
   const [campos, setCampos] = useState<CamposExtraidos>(() => {
     const c: CamposExtraidos = {}
     const keys = Object.keys(CAMPOS_LABELS) as (keyof CamposExtraidos)[]
@@ -207,16 +212,19 @@ export default function BloqueDocumentos({
       setUploadedUrls(prev => ({ ...prev, [slug]: currentUrl }))
 
       // 4. Auto-completar si todos los requeridos están subidos
-      let shouldComplete = false
-      setSlotStates(prev => {
-        const updated = { ...prev, [slug]: 'uploaded' as SlotState }
-        shouldComplete = documentos.filter(d => d.required).every(d => updated[d.slug] === 'uploaded')
-        return updated
-      })
-      if (shouldComplete) {
-        const mergedDocs = { ...savedDocs, ...uploadedUrls, [slug]: currentUrl }
-        const res = await marcarBloqueCompleto(negocioBloqueId, { ...saved, docs: mergedDocs })
-        if (!res.error) router.refresh()
+      // Usar ref (síncrono) en vez de setState callback (puede ser batched en React 18)
+      uploadedSlugsRef.current.add(slug)
+      setSlotStates(prev => ({ ...prev, [slug]: 'uploaded' as SlotState }))
+
+      const shouldComplete = documentos
+        .filter(d => d.required)
+        .every(d => uploadedSlugsRef.current.has(d.slug))
+
+      if (shouldComplete && instancia?.estado !== 'completo') {
+        // No pasar docs del cliente — el servidor ya tiene todos via confirmarUploadDocumentoNegocio
+        const res = await marcarBloqueCompleto(negocioBloqueId, {})
+        if (res.error) toast.error(res.error)
+        else router.refresh()
       }
 
       // 5. AI processing para slugs conocidos
