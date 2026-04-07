@@ -697,15 +697,16 @@ export async function cambiarEtapaNegocio(
   if (updateError) return { error: (updateError as { message: string }).message }
 
   // Crear negocio_bloques para la nueva etapa si no existen
-  // Heredar estado completo de bloques del mismo tipo en etapas anteriores
+  // Solo heredar estado/data para bloques VISIBLE (editable siempre empieza pendiente)
   const { data: bloqueConfigs } = await db(supabase)
     .from('bloque_configs')
-    .select('id, bloque_definition_id')
+    .select('id, bloque_definition_id, estado')
     .eq('etapa_id', nuevaEtapaId)
     .eq('workspace_id', workspaceId)
 
   if (bloqueConfigs && (bloqueConfigs as Record<string, unknown>[]).length > 0) {
-    const configIds = (bloqueConfigs as Record<string, unknown>[]).map(b => (b as Record<string, unknown>).id as string)
+    const typedConfigs = bloqueConfigs as Array<{ id: string; bloque_definition_id: string; estado: string }>
+    const configIds = typedConfigs.map(b => b.id)
 
     const instanciasExistentes = await db(supabase)
       .from('negocio_bloques')
@@ -719,28 +720,31 @@ export async function cambiarEtapaNegocio(
       )
     )
 
-    // Obtener bloques completados de este negocio (de cualquier etapa) con su definition_id
+    // Obtener bloques completados de este negocio (de cualquier etapa) con su definition_id + bloque_items
     const { data: completadosRaw } = await db(supabase)
       .from('negocio_bloques')
-      .select('estado, data, completado_at, bloque_configs(bloque_definition_id)')
+      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id)')
       .eq('negocio_id', negocioId)
       .eq('estado', 'completo')
 
-    const completadosPorDef = new Map<string, { data: Record<string, unknown>; completado_at: string | null }>()
+    const completadosPorDef = new Map<string, { id: string; data: Record<string, unknown>; completado_at: string | null }>()
     for (const c of ((completadosRaw ?? []) as Record<string, unknown>[])) {
       const defId = (c.bloque_configs as Record<string, unknown> | null)?.bloque_definition_id as string | null
       if (defId) {
         completadosPorDef.set(defId, {
+          id: c.id as string,
           data: (c.data ?? {}) as Record<string, unknown>,
           completado_at: c.completado_at as string | null,
         })
       }
     }
 
-    const nuevas = (bloqueConfigs as Array<{ id: string; bloque_definition_id: string }>)
+    const nuevas = typedConfigs
       .filter(bc => !existingIds.has(bc.id))
       .map(bc => {
-        const prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
+        // Solo heredar para bloques VISIBLE — editables empiezan en blanco
+        const isVisible = bc.estado === 'visible'
+        const prevCompleto = isVisible ? completadosPorDef.get(bc.bloque_definition_id) : undefined
         return {
           negocio_id: negocioId,
           bloque_config_id: bc.id,
@@ -751,7 +755,34 @@ export async function cambiarEtapaNegocio(
       })
 
     if (nuevas.length > 0) {
-      await db(supabase).from('negocio_bloques').insert(nuevas)
+      const { data: insertadas } = await db(supabase)
+        .from('negocio_bloques')
+        .insert(nuevas)
+        .select('id, bloque_config_id')
+
+      // Copiar bloque_items para bloques visibles que heredaron de un bloque previo
+      if (insertadas) {
+        for (const inst of (insertadas as Array<{ id: string; bloque_config_id: string }>)) {
+          const bc = typedConfigs.find(c => c.id === inst.bloque_config_id)
+          if (!bc || bc.estado !== 'visible') continue
+          const prev = completadosPorDef.get(bc.bloque_definition_id)
+          if (!prev) continue
+
+          // Copiar items del bloque fuente al nuevo bloque visible
+          const { data: sourceItems } = await db(supabase)
+            .from('bloque_items')
+            .select('orden, label, tipo, contenido, completado, completado_por, completado_at, link_url, imagen_data')
+            .eq('negocio_bloque_id', prev.id)
+
+          if (sourceItems && (sourceItems as unknown[]).length > 0) {
+            const copiedItems = (sourceItems as Record<string, unknown>[]).map(item => ({
+              ...item,
+              negocio_bloque_id: inst.id,
+            }))
+            await db(supabase).from('bloque_items').insert(copiedItems)
+          }
+        }
+      }
     }
   }
 
