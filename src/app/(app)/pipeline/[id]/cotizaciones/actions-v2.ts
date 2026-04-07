@@ -358,14 +358,66 @@ export async function enviarCotizacion(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
-  // Get cotización to find oportunidad_id
-  const { data: cot } = await supabase
+  // Get cotización to find oportunidad_id y negocio_id
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: cot } = await (supabase as any)
     .from('cotizaciones')
-    .select('oportunidad_id')
+    .select('oportunidad_id, negocio_id, valor_total')
     .eq('id', id)
     .single()
 
   if (!cot) return { success: false, error: 'Cotización no encontrada' }
+
+  // ── Cotización de NEGOCIO: enviar = aceptar directamente ──
+  if (cot.negocio_id) {
+    const { error: updErr } = await supabase
+      .from('cotizaciones')
+      .update({
+        estado: 'aceptada',
+        fecha_envio: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq('id', id)
+
+    if (updErr) return { success: false, error: updErr.message }
+
+    // Actualizar precio_aprobado en negocio
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any)
+      .from('negocios')
+      .update({ precio_aprobado: cot.valor_total })
+      .eq('id', cot.negocio_id)
+
+    // Marcar todos los negocio_bloques de cotización como completo
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: bloqueInstances } = await (supabase as any)
+      .from('negocio_bloques')
+      .select('id, bloque_configs!inner(bloque_definitions!inner(tipo))')
+      .eq('negocio_id', cot.negocio_id)
+
+    const cotBloqueIds = (bloqueInstances ?? [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((b: any) => b.bloque_configs?.bloque_definitions?.tipo === 'cotizacion')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((b: any) => b.id as string)
+
+    if (cotBloqueIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from('negocio_bloques')
+        .update({
+          estado: 'completo',
+          completado_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', cotBloqueIds)
+    }
+
+    revalidatePath(`/negocios/${cot.negocio_id}`)
+    return { success: true }
+  }
+
+  // ── Cotización de OPORTUNIDAD: flujo normal borrador→enviada ──
 
   // Check if there's already an "enviada" cotización for this oportunidad
   const { data: existente } = await supabase

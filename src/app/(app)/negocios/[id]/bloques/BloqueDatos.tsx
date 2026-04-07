@@ -12,6 +12,7 @@ export interface DatosField {
   tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'select' | 'imagen_clipboard'
   required: boolean
   options?: string[]
+  opciones?: Array<{ value: string; label: string }>
 }
 
 interface BloqueDatosProps {
@@ -108,7 +109,11 @@ export default function BloqueDatos({
               ) : f.tipo === 'numero' && v ? (
                 <span className="text-xs text-[#1A1A1A] tabular-nums">{fmt(Number(v))}</span>
               ) : (
-                <span className="text-xs text-[#1A1A1A]">{(v as string) ?? '—'}</span>
+                <span className="text-xs text-[#1A1A1A]">{
+                f.tipo === 'select' && f.opciones
+                  ? f.opciones.find(o => o.value === v)?.label ?? (v as string) ?? '—'
+                  : (v as string) ?? '—'
+              }</span>
               )}
             </div>
           )
@@ -170,7 +175,7 @@ export default function BloqueDatos({
             </label>
           )}
 
-          {f.tipo === 'select' && f.options && (
+          {f.tipo === 'select' && (f.options || f.opciones) && (
             <select
               value={(values[f.slug] as string) ?? ''}
               onChange={e => handleChange(f.slug, e.target.value)}
@@ -178,9 +183,14 @@ export default function BloqueDatos({
               className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
             >
               <option value="">— Seleccionar —</option>
-              {f.options.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
+              {f.opciones
+                ? f.opciones.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))
+                : f.options?.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))
+              }
             </select>
           )}
 
