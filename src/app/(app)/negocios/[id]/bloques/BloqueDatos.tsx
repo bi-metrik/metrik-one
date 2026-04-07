@@ -20,6 +20,8 @@ interface BloqueDatosProps {
   instancia: NegocioBloque | null
   modo: 'editable' | 'visible'
   fields: DatosField[]
+  requireConfirm?: boolean
+  confirmLabel?: string
   onComplete?: () => void
 }
 
@@ -31,6 +33,8 @@ export default function BloqueDatos({
   instancia,
   modo,
   fields,
+  requireConfirm,
+  confirmLabel,
   onComplete,
 }: BloqueDatosProps) {
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
@@ -59,7 +63,7 @@ export default function BloqueDatos({
       startTransition(async () => {
         const complete = isComplete(newVals)
         let result
-        if (complete) {
+        if (complete && !requireConfirm) {
           result = await marcarBloqueCompleto(negocioBloqueId, newVals)
           if (!result.error && onComplete) onComplete()
         } else {
@@ -68,6 +72,18 @@ export default function BloqueDatos({
         if (result.error) toast.error(result.error)
       })
     }, 800)
+  }
+
+  function handleConfirm() {
+    startTransition(async () => {
+      const result = await marcarBloqueCompleto(negocioBloqueId, values)
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        toast.success(confirmLabel ? `${confirmLabel} registrado` : 'Datos confirmados')
+        if (onComplete) onComplete()
+      }
+    })
   }
 
   function handleChange(slug: string, value: unknown) {
@@ -216,7 +232,22 @@ export default function BloqueDatos({
           )}
         </div>
       ))}
-      {isPending && (
+      {/* Botón de confirmación cuando require_confirm está activo */}
+      {requireConfirm && instancia?.estado !== 'completo' && (
+        <button
+          onClick={handleConfirm}
+          disabled={isPending || !isComplete(values)}
+          className="w-full rounded-lg bg-[#10B981] py-2 text-xs font-semibold text-white hover:bg-[#059669] disabled:opacity-40 transition-colors"
+        >
+          {isPending ? 'Confirmando...' : confirmLabel ?? 'Confirmar datos'}
+        </button>
+      )}
+      {requireConfirm && instancia?.estado === 'completo' && (
+        <p className="text-[11px] text-[#10B981] font-medium flex items-center gap-1">
+          <span>Confirmado</span>
+        </p>
+      )}
+      {isPending && !requireConfirm && (
         <p className="text-[10px] text-[#6B7280]">Guardando...</p>
       )}
     </div>

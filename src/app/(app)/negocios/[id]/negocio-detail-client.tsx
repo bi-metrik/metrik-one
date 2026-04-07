@@ -542,6 +542,8 @@ function BloqueRenderer({
           instancia={bloque.instancia}
           modo={modo}
           fields={fields}
+          requireConfirm={!!configExtra.require_confirm}
+          confirmLabel={configExtra.confirm_label as string | undefined}
         />
       )
     }
