@@ -1301,8 +1301,6 @@ export async function autoCrearCobros(
     estado_causacion: 'PENDIENTE',
     fecha: new Date().toISOString().split('T')[0],
     external_ref: referenciaEpayco ?? null,
-    factura_id: null,
-    proyecto_id: null,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1348,8 +1346,6 @@ export async function autoCrearCobrosMulti(
       estado_causacion: 'PENDIENTE',
       fecha: new Date().toISOString().split('T')[0],
       external_ref: p.referencia_epayco,
-      factura_id: null,
-      proyecto_id: null,
     }))
 
   if (nuevos.length > 0) {
