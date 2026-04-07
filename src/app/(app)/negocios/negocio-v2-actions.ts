@@ -1295,7 +1295,7 @@ export async function autoCrearCobros(
   const cobro = {
     workspace_id: workspaceId,
     negocio_id: negocioId,
-    concepto: 'Anticipo',
+    notas: 'Anticipo',
     monto: valorAnticipo,
     tipo_cobro: 'anticipo',
     estado_causacion: 'PENDIENTE',
@@ -1342,7 +1342,7 @@ export async function autoCrearCobrosMulti(
     .map(p => ({
       workspace_id: workspaceId,
       negocio_id: negocioId,
-      concepto: 'Pago',
+      notas: 'Pago',
       monto: p.valor_pago,
       tipo_cobro: 'pago',
       estado_causacion: 'PENDIENTE',
