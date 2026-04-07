@@ -961,13 +961,14 @@ export async function marcarBloqueCompleto(
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  // Leer datos actuales del servidor y hacer merge (evita sobreescribir campos AI)
+  // Leer datos actuales + negocio_id del servidor y hacer merge (evita sobreescribir campos AI)
   const { data: currentBloque } = await db(supabase)
     .from('negocio_bloques')
-    .select('data')
+    .select('data, negocio_id')
     .eq('id', negocioBloqueId)
     .single()
 
+  const negocioId = (currentBloque as Record<string, unknown> | null)?.negocio_id as string | null
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
   const mergedData = { ...currentData, ...data }
 
@@ -983,8 +984,12 @@ export async function marcarBloqueCompleto(
 
   if (updateError) return { error: (updateError as { message: string }).message }
 
+  // Siempre revalidar la página del negocio después de marcar completo
+  if (negocioId) {
+    revalidatePath(`/negocios/${negocioId}`)
+  }
+
   // ── Trigger auto-cobros si el bloque tiene esa configuración ─────────
-  // Buscar el bloque_config y su config_extra para detectar el trigger
   const { data: bloqueRaw } = await db(supabase)
     .from('negocio_bloques')
     .select(`
@@ -1021,9 +1026,6 @@ export async function marcarBloqueCompleto(
         await autoCrearCobros(bloque.negocio_id, valorAnticipo)
       }
     }
-
-    // Revalidar página del negocio
-    revalidatePath(`/negocios/${bloque.negocio_id}`)
 
     // Registrar en activity_log
     if (staffId && workspaceId) {
