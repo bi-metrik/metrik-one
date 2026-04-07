@@ -961,11 +961,21 @@ export async function marcarBloqueCompleto(
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
+  // Leer datos actuales del servidor y hacer merge (evita sobreescribir campos AI)
+  const { data: currentBloque } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data')
+    .eq('id', negocioBloqueId)
+    .single()
+
+  const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
+  const mergedData = { ...currentData, ...data }
+
   const { error: updateError } = await db(supabase)
     .from('negocio_bloques')
     .update({
       estado: 'completo',
-      data,
+      data: mergedData,
       completado_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

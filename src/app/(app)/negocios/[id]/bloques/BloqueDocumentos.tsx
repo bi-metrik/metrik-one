@@ -31,7 +31,7 @@ interface BloqueDocumentosProps {
 }
 
 // Campos con label para mostrar en el formulario
-const CAMPOS_LABELS: Record<keyof CamposExtraidos, string> = {
+const CAMPOS_LABELS: Partial<Record<keyof CamposExtraidos, string>> = {
   nombre_propietario: 'Nombre propietario',
   numero_identificacion: 'N° identificación',
   marca: 'Marca',
@@ -40,8 +40,6 @@ const CAMPOS_LABELS: Record<keyof CamposExtraidos, string> = {
   tecnologia: 'Tecnología',
   tipo: 'Tipo vehículo',
   numero_cus: 'Número CUS (UPME)',
-  regimen_tributario_cliente: 'Régimen tributario',
-  tipo_persona_cliente: 'Tipo persona',
   telefono_propietario: 'Teléfono',
   municipio_propietario: 'Municipio',
   correo_propietario: 'Correo',
