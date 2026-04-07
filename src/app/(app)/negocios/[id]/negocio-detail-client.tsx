@@ -37,6 +37,8 @@ import type { DocumentoConfig } from './bloques/BloqueDocumentos'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
+import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
+import type { MultiPagoField } from './bloques/BloqueDatosMultiPago'
 import BloqueAprobacion from './bloques/BloqueAprobacion'
 import BloqueCronograma from './bloques/BloqueCronograma'
 import BloqueResumenFinanciero from './bloques/BloqueResumenFinanciero'
@@ -475,6 +477,7 @@ function BloqueRenderer({
   cobros,
   cotizacionesNegocio,
   resumenFinanciero,
+  precioTotal,
   userRole,
 }: {
   bloque: BloqueExtendido
@@ -488,9 +491,11 @@ function BloqueRenderer({
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null
+    external_ref: string | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  precioTotal: number
   userRole: string
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
@@ -521,6 +526,16 @@ function BloqueRenderer({
 
     case 'datos': {
       const fields = (configExtra.fields ?? []) as DatosField[]
+      if (configExtra.es_multi_pago) {
+        return (
+          <BloqueDatosMultiPago
+            negocioBloqueId={instanciaId}
+            instancia={bloque.instancia}
+            modo={modo}
+            fields={fields as MultiPagoField[]}
+          />
+        )
+      }
       return (
         <BloqueDatos
           negocioBloqueId={instanciaId}
@@ -604,6 +619,8 @@ function BloqueRenderer({
         <BloqueCobros
           negocioId={negocioId}
           cobros={cobros}
+          modo={modo}
+          precioTotal={precioTotal}
         />
       )
 
@@ -668,6 +685,7 @@ function BloqueCard({
   cobros,
   cotizacionesNegocio,
   resumenFinanciero,
+  precioTotal,
   userRole,
 }: {
   bloque: BloqueExtendido
@@ -681,9 +699,11 @@ function BloqueCard({
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null
+    external_ref: string | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  precioTotal: number
   userRole: string
 }) {
   const def = bloque.bloque_definitions
@@ -773,6 +793,7 @@ function BloqueCard({
               cobros={cobros}
               cotizacionesNegocio={cotizacionesNegocio}
               resumenFinanciero={resumenFinanciero}
+              precioTotal={precioTotal}
               userRole={userRole}
             />
           )}
@@ -813,6 +834,7 @@ interface Props {
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null
+    external_ref: string | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
@@ -1003,6 +1025,7 @@ export default function NegocioDetailClient({
                   cobros={cobros}
                   cotizacionesNegocio={cotizacionesNegocio}
                   resumenFinanciero={resumenFinanciero}
+                  precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
                   userRole={userRole}
                 />
               ))}

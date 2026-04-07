@@ -1052,9 +1052,18 @@ export async function marcarBloqueCompleto(
 
     const autoCobros = triggers.find(t => t.action === 'auto_cobros')
     if (tipo === 'datos' && autoCobros) {
-      const valorAnticipo = data.valor_anticipo as number | undefined
+      const valorAnticipo = mergedData.valor_anticipo as number | undefined
+      const referenciaEpayco = mergedData.referencia_anticipo as string | undefined
       if (valorAnticipo) {
-        await autoCrearCobros(bloque.negocio_id, valorAnticipo)
+        await autoCrearCobros(bloque.negocio_id, valorAnticipo, referenciaEpayco)
+      }
+    }
+
+    const autoCobrosMulti = triggers.find(t => t.action === 'auto_cobros_multi')
+    if (tipo === 'datos' && autoCobrosMulti) {
+      const pagos = (mergedData.pagos ?? []) as Array<{ referencia_epayco: string; valor_pago: number }>
+      if (pagos.length > 0) {
+        await autoCrearCobrosMulti(bloque.negocio_id, pagos)
       }
     }
 
@@ -1253,58 +1262,101 @@ export async function marcarBloqueItem(
   return { error: null }
 }
 
-// ── Auto-crear cobros (anticipo + saldo) ──────────────────────────────────────
+// ── Auto-crear cobro anticipo (solo 1, idempotente) ─────────────────────────
 
 export async function autoCrearCobros(
   negocioId: string,
-  valorAnticipo: number
+  valorAnticipo: number,
+  referenciaEpayco?: string
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  // Obtener precio del negocio
-  const { data: negocioRaw } = await db(supabase)
-    .from('negocios')
-    .select('precio_aprobado, precio_estimado')
-    .eq('id', negocioId)
+  // Idempotencia: verificar si ya existe un cobro anticipo para este negocio
+  const { data: existente } = await db(supabase)
+    .from('cobros')
+    .select('id')
     .eq('workspace_id', workspaceId)
-    .single()
+    .eq('negocio_id', negocioId)
+    .eq('tipo_cobro', 'anticipo')
+    .limit(1)
 
-  const negocio = negocioRaw as { precio_aprobado: number | null; precio_estimado: number | null } | null
-  if (!negocio) return { error: 'Negocio no encontrado' }
-
-  const precioTotal = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
-  const saldo = precioTotal - valorAnticipo
-
-  const cobros = [
-    {
-      workspace_id: workspaceId,
-      negocio_id: negocioId,
-      concepto: 'Anticipo',
+  if (existente && (existente as unknown[]).length > 0) {
+    // Ya existe anticipo — actualizar monto y referencia
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('cobros').update({
       monto: valorAnticipo,
-      tipo_cobro: 'anticipo',
-      estado_causacion: 'PENDIENTE',
-      fecha: new Date().toISOString().split('T')[0],
-      // Required by schema but irrelevant here; migration will make them nullable
-      factura_id: null,
-      proyecto_id: null,
-    },
-    {
-      workspace_id: workspaceId,
-      negocio_id: negocioId,
-      concepto: 'Saldo',
-      monto: saldo,
-      tipo_cobro: 'saldo',
-      estado_causacion: 'PENDIENTE',
-      fecha: new Date().toISOString().split('T')[0],
-      factura_id: null,
-      proyecto_id: null,
-    },
-  ]
+      external_ref: referenciaEpayco ?? null,
+    }).eq('id', (existente as Record<string, unknown>[])[0].id)
+    revalidatePath(`/negocios/${negocioId}`)
+    return { error: null }
+  }
+
+  const cobro = {
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    concepto: 'Anticipo',
+    monto: valorAnticipo,
+    tipo_cobro: 'anticipo',
+    estado_causacion: 'PENDIENTE',
+    fecha: new Date().toISOString().split('T')[0],
+    external_ref: referenciaEpayco ?? null,
+    factura_id: null,
+    proyecto_id: null,
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: insertError } = await (supabase as any).from('cobros').insert(cobros)
+  const { error: insertError } = await (supabase as any).from('cobros').insert(cobro)
   if (insertError) return { error: (insertError as { message: string }).message }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
+}
+
+// ── Auto-crear cobros multi-pago (etapa 7, idempotente por external_ref) ─────
+
+export async function autoCrearCobrosMulti(
+  negocioId: string,
+  pagos: Array<{ referencia_epayco: string; valor_pago: number }>
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  if (!pagos.length) return { error: null }
+
+  // Verificar cuales refs ya existen para idempotencia
+  const refs = pagos.map(p => p.referencia_epayco)
+  const { data: existentes } = await db(supabase)
+    .from('cobros')
+    .select('external_ref')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+    .in('external_ref', refs)
+
+  const existingRefs = new Set(
+    ((existentes ?? []) as Record<string, unknown>[]).map(e => e.external_ref as string)
+  )
+
+  const nuevos = pagos
+    .filter(p => !existingRefs.has(p.referencia_epayco))
+    .map(p => ({
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      concepto: 'Pago',
+      monto: p.valor_pago,
+      tipo_cobro: 'pago',
+      estado_causacion: 'PENDIENTE',
+      fecha: new Date().toISOString().split('T')[0],
+      external_ref: p.referencia_epayco,
+      factura_id: null,
+      proyecto_id: null,
+    }))
+
+  if (nuevos.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: insertError } = await (supabase as any).from('cobros').insert(nuevos)
+    if (insertError) return { error: (insertError as { message: string }).message }
+  }
 
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
@@ -1584,6 +1636,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null
+    external_ref: string | null
   }>
   cotizacion: null
   cotizacionesNegocio: CotizacionResumen[]
@@ -1667,7 +1720,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Cargar cobros del negocio (db() para evitar type errors en columnas nuevas)
   const { data: cobrosData } = await db(supabase)
     .from('cobros')
-    .select('id, notas, monto, estado_causacion, tipo_cobro, fecha')
+    .select('id, notas, monto, estado_causacion, tipo_cobro, fecha, external_ref')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', id)
     .order('created_at', { ascending: true })
@@ -1760,6 +1813,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       tipo_cobro: (c as any).tipo_cobro as string | null,
       fecha: c.fecha as string | null,
       notas: c.notas as string | null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      external_ref: (c as any).external_ref as string | null,
     })),
     cotizacion,
     cotizacionesNegocio,
