@@ -28,7 +28,7 @@ export default async function AppLayout({
     redirect('/onboarding')
   }
 
-  const [workspaceResult, fiscalResult] = await Promise.all([
+  const [workspaceResult, fiscalResult, modulesResult] = await Promise.all([
     supabase
       .from('workspaces')
       .select('name, slug, color_primario, color_secundario, logo_url')
@@ -39,12 +39,20 @@ export default async function AppLayout({
       .select('is_complete, is_estimated, nudge_count')
       .eq('workspace_id', profile.workspace_id)
       .single(),
+    // modules column added in migration 20260409300001 — not in generated types yet
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from('workspaces') as any)
+      .select('modules')
+      .eq('id', profile.workspace_id)
+      .single() as Promise<{ data: { modules: Record<string, boolean> | null } | null; error: unknown }>,
   ])
 
   const workspace = workspaceResult.data
   if (!workspace) {
     redirect('/onboarding')
   }
+
+  const workspaceModules = (modulesResult.data?.modules as Record<string, boolean> | null) ?? { business: true }
 
   const fiscal = fiscalResult.data
 
@@ -61,6 +69,7 @@ export default async function AppLayout({
         colorSecundario: workspace.color_secundario ?? undefined,
         logoUrl: workspace.logo_url ?? undefined,
       }}
+      modules={workspaceModules}
       notificationBell={<NotificationBell userId={user.id} />}
     >
       {/* D235/D236: Fiscal nudge — shows when profile incomplete, max 3 nudges. Not for contador. */}

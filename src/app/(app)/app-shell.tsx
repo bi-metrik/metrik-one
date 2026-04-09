@@ -16,6 +16,8 @@ import {
   Activity,
   UserCheck,
   MoreHorizontal,
+  ShieldAlert,
+  Grid3X3,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -27,6 +29,12 @@ interface BrandingProps {
   logoUrl?: string
 }
 
+interface WorkspaceModules {
+  business?: boolean
+  compliance?: boolean
+  [key: string]: boolean | undefined
+}
+
 interface AppShellProps {
   children: React.ReactNode
   fullName: string
@@ -36,23 +44,36 @@ interface AppShellProps {
   displayRole?: string | null
   isAdminWorkspace?: boolean
   branding?: BrandingProps
+  modules?: WorkspaceModules
   notificationBell?: React.ReactNode
 }
 
-// Sidebar adaptativo por rol
-const ALL_NAV_ITEMS = [
+// ── Navigation items by module group ──
+
+// Business module (solo si modules.business)
+const BUSINESS_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
-  { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
   { href: '/negocios', label: 'Negocios', icon: Store, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+]
+
+// D246: Contabilidad — parte del módulo business
+const CONTABILIDAD_NAV_ITEMS = [
+  { href: '/causacion', label: 'Causación', icon: BookOpen, roles: ['owner', 'admin', 'contador'] },
+]
+
+// Compliance module (solo si modules.compliance)
+const COMPLIANCE_NAV_ITEMS = [
+  { href: '/riesgos', label: 'Riesgos', icon: ShieldAlert, roles: ['owner', 'admin', 'supervisor'] },
+  { href: '/matriz', label: 'Matriz', icon: Grid3X3, roles: ['owner', 'admin', 'supervisor'] },
+]
+
+// Compartidos (siempre visibles)
+const SHARED_NAV_ITEMS = [
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'supervisor'] },
-]
-
-// D246: Sección contable separada — visible para owner/admin/contador
-const CONTABILIDAD_NAV_ITEMS = [
-  { href: '/causacion', label: 'Causacion', icon: BookOpen, roles: ['owner', 'admin', 'contador'] },
+  { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
 ]
 
 // Admin section — solo owner
@@ -60,7 +81,8 @@ const ADMIN_NAV_ITEMS = [
   { href: '/admin/mibolsillo', label: 'Mi Bolsillo', icon: Activity, roles: ['owner'] },
 ]
 
-// Mobile: 4 primary tabs per role, rest goes to "Más" panel
+// Mobile: 4 primary tabs per role, rest goes to "Mas" panel
+// Compliance items will be in secondary (overflow) by default
 const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
   owner: ['/numeros', '/negocios', '/movimientos', '/tableros'],
   admin: ['/numeros', '/negocios', '/movimientos', '/tableros'],
@@ -70,12 +92,8 @@ const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
   read_only: ['/numeros', '/movimientos', '/tableros'],
 }
 
-function getNavItemsForRole(role: string) {
-  return ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
-}
-
-function getContabilidadItemsForRole(role: string) {
-  return CONTABILIDAD_NAV_ITEMS.filter(item => item.roles.includes(role))
+function filterByRole(items: typeof BUSINESS_NAV_ITEMS, role: string) {
+  return items.filter(item => item.roles.includes(role))
 }
 
 function getAdminItemsForRole(role: string) {
@@ -111,6 +129,7 @@ export default function AppShell({
   displayRole,
   isAdminWorkspace,
   branding,
+  modules,
   notificationBell,
 }: AppShellProps) {
   const pathname = usePathname()
@@ -130,12 +149,15 @@ export default function AppShell({
     .join('')
     .toUpperCase()
 
-  const navItems = getNavItemsForRole(role)
-  const contabilidadItems = getContabilidadItemsForRole(role)
+  const mod = modules ?? { business: true }
+  const businessItems = mod.business ? filterByRole(BUSINESS_NAV_ITEMS, role) : []
+  const contabilidadItems = mod.business ? filterByRole(CONTABILIDAD_NAV_ITEMS, role) : []
+  const complianceItems = mod.compliance ? filterByRole(COMPLIANCE_NAV_ITEMS, role) : []
+  const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...navItems, ...contabilidadItems]
+  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedItems]
   const primaryHrefs = MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator
   const mobilePrimary = allMobileItems.filter(item => primaryHrefs.includes(item.href))
   const mobileSecondary = allMobileItems.filter(item => !primaryHrefs.includes(item.href))
@@ -209,70 +231,142 @@ export default function AppShell({
           </button>
         </div>
 
-        {/* Navigation — contador sees empty navItems, only contabilidad section below */}
-        <nav className="flex-1 space-y-0.5 px-2 py-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
-            const Icon = item.icon
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={!sidebarExpanded ? item.label : undefined}
-                className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
-                  sidebarExpanded ? '' : 'justify-center'
-                } ${
-                  isActive
-                    ? 'shadow-sm'
-                    : 'hover:opacity-90'
-                }`}
-                style={{
-                  backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
-                  color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
-                }}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                {sidebarExpanded && <span>{item.label}</span>}
-              </Link>
-            )
-          })}
-        </nav>
+        {/* Navigation grouped by module */}
+        <nav className="flex-1 space-y-0 px-2 py-1 overflow-y-auto">
+          {/* Business module */}
+          {businessItems.length > 0 && (
+            <div className="space-y-0.5">
+              {businessItems.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={!sidebarExpanded ? item.label : undefined}
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${
+                      isActive
+                        ? 'shadow-sm'
+                        : 'hover:opacity-90'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>{item.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
 
-        {/* D246: Contabilidad section — separated from main nav */}
-        {contabilidadItems.length > 0 && (
-          <div className="px-2 pb-1 pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
-            {sidebarExpanded && (
-              <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
-                Contabilidad
-              </p>
-            )}
-            {contabilidadItems.map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
-              const Icon = item.icon
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={!sidebarExpanded ? item.label : undefined}
-                  className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
-                    sidebarExpanded ? '' : 'justify-center'
-                  } ${
-                    isActive
-                      ? 'shadow-sm'
-                      : 'hover:opacity-90'
-                  }`}
-                  style={{
-                    backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
-                    color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
-                  }}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {sidebarExpanded && <span>{item.label}</span>}
-                </Link>
-              )
-            })}
-          </div>
-        )}
+          {/* D246: Contabilidad — parte del modulo business */}
+          {contabilidadItems.length > 0 && (
+            <div className="pt-1" style={{ borderTop: businessItems.length > 0 ? '1px solid var(--sidebar-border)' : 'none' }}>
+              {sidebarExpanded && (
+                <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
+                  Contabilidad
+                </p>
+              )}
+              {contabilidadItems.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={!sidebarExpanded ? item.label : undefined}
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${
+                      isActive
+                        ? 'shadow-sm'
+                        : 'hover:opacity-90'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>{item.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Compliance module */}
+          {complianceItems.length > 0 && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
+              {sidebarExpanded && (
+                <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
+                  Cumplimiento
+                </p>
+              )}
+              {complianceItems.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={!sidebarExpanded ? item.label : undefined}
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${
+                      isActive
+                        ? 'shadow-sm'
+                        : 'hover:opacity-90'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>{item.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Compartidos — siempre visibles */}
+          {sharedItems.length > 0 && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
+              {sharedItems.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={!sidebarExpanded ? item.label : undefined}
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${
+                      isActive
+                        ? 'shadow-sm'
+                        : 'hover:opacity-90'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>{item.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </nav>
 
         {/* Admin section — solo owner */}
         {adminItems.length > 0 && (
