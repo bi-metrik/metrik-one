@@ -89,6 +89,14 @@ export default async function MiNegocioPage() {
       .eq('workspace_id', workspaceId),
   ])
 
+  // modules column (migration 20260409300001) — not in generated types yet
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: modulesData } = await (supabase.from('workspaces') as any)
+    .select('modules')
+    .eq('id', workspaceId)
+    .single() as { data: { modules: Record<string, boolean> | null } | null }
+  const workspaceModules = (modulesData?.modules as Record<string, boolean> | null) ?? { business: true }
+
   const { lineas: lineasDisponibles, lineaActivaId } = await getLineasDisponibles()
 
   const workspace = workspaceResult.data
@@ -145,6 +153,7 @@ export default async function MiNegocioPage() {
   return (
     <MiNegocioClient
       workspace={workspace}
+      modules={workspaceModules}
       fiscalProfile={fiscalProfile}
       staffMembers={staffMembers}
       monthlyTargets={monthlyTargets}

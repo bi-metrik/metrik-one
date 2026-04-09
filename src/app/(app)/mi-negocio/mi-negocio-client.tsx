@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, X, CreditCard, Workflow } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, X, CreditCard, Workflow, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
@@ -20,6 +20,7 @@ import GastosFijosSection from './gastos-fijos-section'
 import EquipoSection from './equipo-section'
 import PlanSection from './plan-section'
 import FlujoSection from './flujo-section'
+import ReglasValidacionSection from './reglas-validacion-section'
 
 // ── Types ──────────────────────────────────────────
 
@@ -27,6 +28,7 @@ type FixedExpenseWithCategory = FixedExpense & { categoryName: string | null }
 
 interface MiNegocioClientProps {
   workspace: any
+  modules?: Record<string, boolean>
   fiscalProfile: FiscalProfile | null
   staffMembers: Staff[]
   monthlyTargets: MonthlyTarget[]
@@ -61,23 +63,26 @@ interface SectionDef {
   maxScore: number
   scoreKey: keyof MiNegocioClientProps['sectionScores']
   roles: string[]
+  modules?: string[] // Si definido, solo visible cuando alguno de estos módulos está activo. Vacío = siempre visible.
 }
 
 const SECTIONS: SectionDef[] = [
-  { key: 'mi-plan', label: 'Mi plan', icon: CreditCard, maxScore: 1, scoreKey: 'fiscal', roles: ['owner'] },
-  { key: 'mi-flujo', label: 'Mi flujo', icon: Workflow, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
-  { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
+  { key: 'mi-plan', label: 'Mi plan', icon: CreditCard, maxScore: 1, scoreKey: 'fiscal', roles: ['owner'], modules: ['business'] },
+  { key: 'mi-flujo', label: 'Mi flujo', icon: Workflow, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['business'] },
+  { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
-  { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'] },
-  { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'] },
+  { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'], modules: ['business'] },
+  { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
-  { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'] },
+  { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'], modules: ['business'] },
+  { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
 ]
 
 // ── Component ──────────────────────────────────────
 
 export default function MiNegocioClient({
   workspace,
+  modules,
   fiscalProfile,
   staffMembers,
   monthlyTargets,
@@ -137,6 +142,8 @@ export default function MiNegocioClient({
       }
       case 'metas-mensuales':
         return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
+      case 'reglas-validacion':
+        return 'Listas cautelares'
       default:
         return ''
     }
@@ -172,6 +179,8 @@ export default function MiNegocioClient({
       }
       case 'metas-mensuales':
         return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
+      case 'reglas-validacion':
+        return 'Configurar'
       default:
         return ''
     }
@@ -183,7 +192,15 @@ export default function MiNegocioClient({
 
   const totalFixed = fixedExpenses.filter(f => f.is_active).reduce((s, f) => s + f.monthly_amount, 0)
 
-  const visibleSections = SECTIONS.filter(s => s.roles.includes(currentUserRole))
+  const mod = modules ?? { business: true }
+  const visibleSections = SECTIONS.filter(s => {
+    if (!s.roles.includes(currentUserRole)) return false
+    // Si la sección define módulos requeridos, al menos uno debe estar activo
+    if (s.modules && s.modules.length > 0) {
+      return s.modules.some(m => mod[m])
+    }
+    return true // Sin módulos definidos = siempre visible
+  })
   const activeSectionDef = SECTIONS.find(s => s.key === activeSection)
 
   return (
@@ -434,6 +451,9 @@ function renderSection(
           <MargenContribucionSection configFinanciera={props.configFinanciera} />
         </div>
       )
+
+    case 'reglas-validacion':
+      return <ReglasValidacionSection workspaceId={props.workspace?.id} />
 
     default:
       return <p className="text-sm text-muted-foreground">Seccion no encontrada</p>
