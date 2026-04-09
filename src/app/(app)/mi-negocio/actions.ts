@@ -253,3 +253,46 @@ export async function updateEquipoDeclarado(size: number) {
   revalidatePath('/mi-negocio')
   return { success: true }
 }
+
+// ── Flujo de Negocios ─────────────────────────────────
+
+export async function getLineasDisponibles() {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { lineas: [], lineaActivaId: null }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- lineas_negocio not in generated types yet
+  const [lineasRes, wsRes] = await Promise.all([
+    (supabase as any)
+      .from('lineas_negocio')
+      .select('id, nombre, descripcion, tipo')
+      .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+      .order('tipo', { ascending: false }) // clarity first, then plantilla
+      .order('nombre'),
+    supabase
+      .from('workspaces')
+      .select('linea_activa_id')
+      .eq('id', workspaceId)
+      .single(),
+  ])
+
+  return {
+    lineas: (lineasRes.data ?? []) as { id: string; nombre: string; descripcion: string | null; tipo: string }[],
+    lineaActivaId: (wsRes.data as any)?.linea_activa_id as string | null,
+  }
+}
+
+export async function updateLineaActiva(lineaId: string) {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- linea_activa_id not in generated types yet
+  const { error: dbError } = await supabase
+    .from('workspaces')
+    .update({ linea_activa_id: lineaId } as any)
+    .eq('id', workspaceId)
+
+  if (dbError) return { success: false, error: dbError.message }
+
+  revalidatePath('/mi-negocio')
+  return { success: true }
+}

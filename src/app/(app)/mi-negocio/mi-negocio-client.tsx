@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, X, CreditCard } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, X, CreditCard, Workflow } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
@@ -19,6 +19,7 @@ import MarcaSection from './marca-section'
 import GastosFijosSection from './gastos-fijos-section'
 import EquipoSection from './equipo-section'
 import PlanSection from './plan-section'
+import FlujoSection from './flujo-section'
 
 // ── Types ──────────────────────────────────────────
 
@@ -39,6 +40,8 @@ interface MiNegocioClientProps {
   licenseUsed: number
   licenseMax: number
   workspaceFeatures: WorkspaceFeature[]
+  lineasDisponibles: { id: string; nombre: string; descripcion: string | null; tipo: string }[]
+  lineaActivaId: string | null
   sectionScores: {
     fiscal: number
     marca: number
@@ -62,6 +65,7 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { key: 'mi-plan', label: 'Mi plan', icon: CreditCard, maxScore: 1, scoreKey: 'fiscal', roles: ['owner'] },
+  { key: 'mi-flujo', label: 'Mi flujo', icon: Workflow, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
   { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'] },
   { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
   { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'] },
@@ -87,6 +91,8 @@ export default function MiNegocioClient({
   licenseUsed,
   licenseMax,
   workspaceFeatures,
+  lineasDisponibles = [],
+  lineaActivaId = null,
   sectionScores,
 }: MiNegocioClientProps) {
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -104,6 +110,10 @@ export default function MiNegocioClient({
     switch (key) {
       case 'mi-plan':
         return `${licenseUsed}/${licenseMax} licencias`
+      case 'mi-flujo': {
+        const activa = lineasDisponibles.find(l => l.id === lineaActivaId)
+        return activa ? activa.nombre : 'Sin configurar'
+      }
       case 'perfil-fiscal':
         return fiscalProfile?.is_complete ? 'Completo' : 'Pendiente'
       case 'mi-marca':
@@ -136,6 +146,8 @@ export default function MiNegocioClient({
     switch (key) {
       case 'mi-plan':
         return 'Activo'
+      case 'mi-flujo':
+        return lineaActivaId ? 'Configurado' : 'Pendiente'
       case 'perfil-fiscal':
         return fiscalProfile?.is_complete
           ? 'Completo'
@@ -249,6 +261,7 @@ export default function MiNegocioClient({
                     workspace, fiscalProfile, staffMembers, monthlyTargets,
                     fixedExpenses, categories, servicios, staffNomina, configFinanciera,
                     totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
+                    lineasDisponibles, lineaActivaId,
                     onClose: () => setActiveSection(null),
                   })}
                 </div>
@@ -313,6 +326,7 @@ export default function MiNegocioClient({
                 workspace, fiscalProfile, staffMembers, monthlyTargets,
                 fixedExpenses, categories, servicios, staffNomina, configFinanciera,
                 totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
+                lineasDisponibles, lineaActivaId,
                 onClose: () => setActiveSection(null),
               })}
             </div>
@@ -346,6 +360,8 @@ function renderSection(
     licenseUsed: number
     licenseMax: number
     workspaceFeatures: WorkspaceFeature[]
+    lineasDisponibles: { id: string; nombre: string; descripcion: string | null; tipo: string }[]
+    lineaActivaId: string | null
     onClose: () => void
   },
 ) {
@@ -356,6 +372,14 @@ function renderSection(
           workspaceFeatures={props.workspaceFeatures}
           licenseUsed={props.licenseUsed}
           licenseMax={props.licenseMax}
+        />
+      )
+
+    case 'mi-flujo':
+      return (
+        <FlujoSection
+          lineas={props.lineasDisponibles}
+          lineaActivaId={props.lineaActivaId}
         />
       )
 

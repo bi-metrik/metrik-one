@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { crearNegocio } from '../negocio-v2-actions'
-import type { LineaNegocio } from '../negocio-v2-actions'
 import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
 import { SECTORES_EMPRESA } from '@/lib/pipeline/constants'
 
@@ -18,12 +17,7 @@ const STEPS = [
   { label: 'Negocio', icon: FileText },
 ] as const
 
-function separarLineas(lineas: LineaNegocio[]) {
-  const clarity = lineas.filter(l => l.tipo === 'clarity')
-  return clarity.length > 0 ? clarity : lineas.filter(l => l.tipo === 'plantilla')
-}
-
-export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] }) {
+export default function NuevoNegocioForm() {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [step, setStep] = useState(0)
@@ -49,16 +43,7 @@ export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] })
 
   // Step 3 — Negocio
   const [nombre, setNombre] = useState('')
-  const [lineaId, setLineaId] = useState('')
   const [precioEstimado, setPrecioEstimado] = useState('')
-
-  const todasLineas = separarLineas(lineas)
-  const tieneUnaLinea = todasLineas.length === 1
-
-  // Si solo hay una línea, preseleccionarla
-  useEffect(() => {
-    if (tieneUnaLinea) setLineaId(todasLineas[0].id)
-  }, [tieneUnaLinea, todasLineas])
 
   // Cuando persona natural, saltamos el paso de empresa
   const totalSteps = esPersonaNatural ? 2 : 3
@@ -139,7 +124,7 @@ export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] })
   const canAdvance = () => {
     if (step === 0) return contactoNombre.trim().length > 0
     if (step === 1 && !esPersonaNatural) return empresaNombre.trim().length > 0
-    if (step === negocioStep) return nombre.trim().length > 0 && !!lineaId
+    if (step === negocioStep) return nombre.trim().length > 0
     return false
   }
 
@@ -147,7 +132,6 @@ export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] })
 
   const handleSubmit = () => {
     if (!nombre.trim()) { toast.error('El nombre es requerido'); return }
-    if (!lineaId) { toast.error('Selecciona una línea de negocio'); return }
     if (!esPersonaNatural && !empresaNombre.trim()) {
       toast.error('La empresa es requerida'); return
     }
@@ -159,7 +143,6 @@ export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] })
     startTransition(async () => {
       const result = await crearNegocio({
         nombre: nombre.trim(),
-        linea_id: lineaId,
         contacto_id: contactoId ?? undefined,
         contacto_nombre: contactoId ? undefined : contactoNombre.trim(),
         contacto_telefono: contactoId ? undefined : (contactoTelefono.trim() || undefined),
@@ -450,41 +433,6 @@ export default function NuevoNegocioForm({ lineas }: { lineas: LineaNegocio[] })
               className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             />
           </div>
-
-          {/* Línea de negocio */}
-          {todasLineas.length > 1 && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Línea de negocio *</label>
-              <div className="space-y-1.5">
-                {todasLineas.map(linea => (
-                  <label
-                    key={linea.id}
-                    className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
-                      lineaId === linea.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-accent/50'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="linea"
-                      value={linea.id}
-                      checked={lineaId === linea.id}
-                      onChange={() => setLineaId(linea.id)}
-                      className="accent-primary"
-                    />
-                    <span className="text-sm font-medium">{linea.nombre}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-          {tieneUnaLinea && (
-            <p className="text-xs text-muted-foreground">
-              Línea: <span className="font-medium text-foreground">{todasLineas[0].nombre}</span>
-            </p>
-          )}
-          {todasLineas.length === 0 && (
-            <p className="text-xs text-amber-600">No hay líneas configuradas. Contacta a MéTRIK.</p>
-          )}
 
           {/* Precio estimado */}
           <div>

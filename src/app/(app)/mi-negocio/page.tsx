@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import MiNegocioClient from './mi-negocio-client'
+import { getLineasDisponibles } from './actions'
 
 export default async function MiNegocioPage() {
   const supabase = await createClient()
@@ -88,6 +89,8 @@ export default async function MiNegocioPage() {
       .eq('workspace_id', workspaceId),
   ])
 
+  const { lineas: lineasDisponibles, lineaActivaId } = await getLineasDisponibles()
+
   const workspace = workspaceResult.data
   const fiscalProfile = fiscalResult.data
   const staffMembers = staffResult.data || []
@@ -155,6 +158,8 @@ export default async function MiNegocioPage() {
       licenseUsed={licenseUsed}
       licenseMax={licenseMax}
       workspaceFeatures={workspaceFeatures}
+      lineasDisponibles={lineasDisponibles}
+      lineaActivaId={lineaActivaId}
       sectionScores={{
         fiscal: fiscalScore,
         marca: marcaScore,

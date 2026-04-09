@@ -514,7 +514,7 @@ function BloqueRenderer({
   userRole: string
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
-  const modo = bloque.estado === 'completo' ? 'visible' : 'editable'
+  const modo = (bloque.estado as string) === 'completo' ? 'visible' : 'editable'
   const instanciaId = bloque.instancia?.id ?? ''
   const configExtra = bloque.config_extra
   const profilesTyped = profiles.map(p => ({
