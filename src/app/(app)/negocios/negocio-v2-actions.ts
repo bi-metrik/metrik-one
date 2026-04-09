@@ -97,6 +97,8 @@ export type NegocioResumen = {
   etapa_stage: string | null
   empresa_nombre: string | null
   contacto_nombre: string | null
+  // Ejecucion
+  costos_ejecutados: number
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -134,22 +136,54 @@ export async function getNegociosV2(): Promise<NegocioResumen[]> {
 
   if (!data) return []
 
-  return (data as Record<string, unknown>[]).map(row => ({
-    id: row.id as string,
-    nombre: row.nombre as string,
-    codigo: row.codigo as string | null,
-    precio_estimado: row.precio_estimado as number | null,
-    precio_aprobado: row.precio_aprobado as number | null,
-    carpeta_url: row.carpeta_url as string | null,
-    stage_actual: row.stage_actual as 'venta' | 'ejecucion' | 'cobro' | null,
-    estado: row.estado as string | null,
-    created_at: row.created_at as string | null,
-    linea_nombre: (row.lineas_negocio as { nombre: string } | null)?.nombre ?? null,
-    etapa_nombre: (row.etapas_negocio as { nombre: string; stage: string } | null)?.nombre ?? null,
-    etapa_stage: (row.etapas_negocio as { nombre: string; stage: string } | null)?.stage ?? null,
-    empresa_nombre: (row.empresas as { nombre: string } | null)?.nombre ?? null,
-    contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
-  }))
+  // Batch: gastos por negocio
+  const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
+  const [gastosRes, horasRes, staffRes] = await Promise.all([
+    db(supabase).from('gastos').select('negocio_id, monto').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
+    db(supabase).from('horas').select('negocio_id, horas, staff_id').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
+    supabase.from('staff').select('id, salary').eq('workspace_id', workspaceId),
+  ])
+
+  // Staff salary map for hour cost calculation
+  const staffSalaryMap: Record<string, number> = {}
+  for (const s of ((staffRes.data ?? []) as Array<{ id: string; salary: number | null }>)) {
+    staffSalaryMap[s.id] = s.salary ?? 0
+  }
+
+  // Sum gastos per negocio
+  const gastosPorNeg: Record<string, number> = {}
+  for (const g of ((gastosRes.data ?? []) as Array<{ negocio_id: string; monto: number }>)) {
+    gastosPorNeg[g.negocio_id] = (gastosPorNeg[g.negocio_id] ?? 0) + (g.monto ?? 0)
+  }
+
+  // Sum horas cost per negocio
+  const horasCostoPorNeg: Record<string, number> = {}
+  for (const h of ((horasRes.data ?? []) as Array<{ negocio_id: string; horas: number; staff_id: string | null }>)) {
+    const salary = h.staff_id ? (staffSalaryMap[h.staff_id] ?? 0) : 0
+    const tarifa = salary > 0 ? salary / 160 : 0
+    horasCostoPorNeg[h.negocio_id] = (horasCostoPorNeg[h.negocio_id] ?? 0) + ((h.horas ?? 0) * tarifa)
+  }
+
+  return (data as Record<string, unknown>[]).map(row => {
+    const id = row.id as string
+    return {
+      id,
+      nombre: row.nombre as string,
+      codigo: row.codigo as string | null,
+      precio_estimado: row.precio_estimado as number | null,
+      precio_aprobado: row.precio_aprobado as number | null,
+      carpeta_url: row.carpeta_url as string | null,
+      stage_actual: row.stage_actual as 'venta' | 'ejecucion' | 'cobro' | null,
+      estado: row.estado as string | null,
+      created_at: row.created_at as string | null,
+      linea_nombre: (row.lineas_negocio as { nombre: string } | null)?.nombre ?? null,
+      etapa_nombre: (row.etapas_negocio as { nombre: string; stage: string } | null)?.nombre ?? null,
+      etapa_stage: (row.etapas_negocio as { nombre: string; stage: string } | null)?.stage ?? null,
+      empresa_nombre: (row.empresas as { nombre: string } | null)?.nombre ?? null,
+      contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
+      costos_ejecutados: Math.round((gastosPorNeg[id] ?? 0) + (horasCostoPorNeg[id] ?? 0)),
+    }
+  })
 }
 
 // ── Stages activos del workspace ─────────────────────────────────────────────

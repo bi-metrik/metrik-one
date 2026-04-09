@@ -6,12 +6,11 @@ import type { NegocioResumen } from './negocio-v2-actions'
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-function formatCodigo(codigo: string | null): string {
-  if (!codigo) return ''
-  const match = codigo.match(/^([A-Z]\d+)(\d{2})(\d+)$/)
-  if (!match) return codigo
-  const [, empresa, anio, consec] = match
-  return `${empresa} ${anio} ${parseInt(consec, 10)}`
+const fmtShort = (v: number) => {
+  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(1)}B`
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(0)}M`
+  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
+  return fmt(v)
 }
 
 const STAGE_CLASSES: Record<string, string> = {
@@ -35,6 +34,11 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
   const pillClass = STAGE_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-slate-100 text-slate-600'
   const stageLabel = STAGE_LABELS[negocio.stage_actual ?? ''] ?? negocio.stage_actual?.toUpperCase()
 
+  // Barra de ejecución: solo en stages ejecucion/cobro y con presupuesto
+  const showEjecucion = negocio.stage_actual !== 'venta' && precio && precio > 0
+  const pctEjecutado = showEjecucion ? Math.round((negocio.costos_ejecutados / precio) * 100) : 0
+  const barColor = pctEjecutado > 90 ? 'bg-red-500' : pctEjecutado > 70 ? 'bg-amber-500' : 'bg-[#10B981]'
+
   return (
     <Link href={`/negocios/${negocio.id}`} className="block rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between gap-2">
@@ -53,16 +57,13 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
           </div>
           <p className="font-semibold text-sm leading-tight">
             {negocio.codigo && (
-              <span className="font-mono text-foreground shrink-0">{formatCodigo(negocio.codigo)}{' — '}</span>
+              <span className="font-mono text-foreground shrink-0">{negocio.codigo}{' — '}</span>
             )}
             <span className="truncate">{negocio.nombre}</span>
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
           </p>
-          {negocio.linea_nombre && (
-            <p className="text-[10px] text-muted-foreground/60 mt-0.5">{negocio.linea_nombre}</p>
-          )}
         </div>
         <div className="text-right shrink-0 flex flex-col items-end gap-1">
           <div className="flex items-center gap-1.5">
@@ -85,6 +86,26 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
           )}
         </div>
       </div>
+
+      {/* Barra de ejecución vs presupuesto */}
+      {showEjecucion && (
+        <div className="mt-2.5">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-muted-foreground">
+              {fmtShort(negocio.costos_ejecutados)} ejecutado
+            </span>
+            <span className={`text-[10px] font-semibold tabular-nums ${pctEjecutado > 90 ? 'text-red-600' : pctEjecutado > 70 ? 'text-amber-600' : 'text-[#10B981]'}`}>
+              {pctEjecutado}%
+            </span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#E5E7EB]">
+            <div
+              className={`h-full rounded-full transition-all ${barColor}`}
+              style={{ width: `${Math.min(pctEjecutado, 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
     </Link>
   )
 }
