@@ -288,54 +288,42 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-07/08 (sesion G — cobros automaticos + fixes bloques VE)
+**Sesion:** 2026-04-09 (sesion H — BloqueHistorial + fix numeros + limpieza workspace)
 **Branch:** main
-**Commit:** `5677f6e`
+**Commit:** `ceb0a2e`
 
-Que se hizo (sesion G):
-- Feat: Cobros automaticos desde bloques datos — `autoCrearCobros` (anticipo etapa 2) + `autoCrearCobrosMulti` (multi-pago etapa 7)
-- Feat: BloqueCobros visible solo lectura durante todo el ciclo (etapas 2-7), saldo = precio_total - sum(cobros) calculado dinamicamente
-- Feat: BloqueDatosMultiPago (nuevo componente) — filas dinamicas referencia_epayco + valor_pago, cada referencia crea un cobro independiente
-- Feat: Boton "Confirmar anticipo" — patron require_confirm en BloqueDatos, no auto-save para datos financieros
-- Fix: cobros INSERT usaba columna `concepto` inexistente — corregido a `notas`
-- Fix: cobros.proyecto_id DROP NOT NULL — negocios VE no tienen proyecto asociado
-- Fix: BloqueDocumentos auto-complete — bug React 18 setState batching, ahora usa useRef para tracking sincrono de slugs subidos
-- Fix: Ghost gate datos vacio bloqueaba avance en etapa documentacion
-- Fix: Herencia bloques editables + docs visibles en etapas 4-5
-- Fix: Bloque datos fantasma sin campos eliminado de etapa 3
-- Fix: 11 bloques anticipo stuck como completo reseteados a pendiente en produccion (preservando data)
-- Fix: Bloque documentos negocio efc05a21 marcado completo manualmente (4/4 docs subidos)
+Que se hizo:
+- Feat: BloqueHistorial — nuevo bloque visualizacion con tabs (gastos, horas, cobros) por negocio. Componente, migration, renderer, data prop end-to-end
+- Fix: BloqueEjecucion limpiado — removido "ultimas horas registradas" (ahora en historial), preservado gastos por categoria (lo mas importante)
+- Fix: KPI "En venta" en /numeros — 3 queries filtraban `estado='activo'` pero valor real es `'abierto'`. Corregido
+- Fix: Renombrado "Pipeline" → "En venta" en UI numeros (eliminar anglicismo)
+- Fix: campo `descripcion` (no `titulo`) en historial + CATEGORIA_LABELS alineadas con DB CHECK constraint
+- Fix: Datos demo coherentes — gastos solo en etapas de ejecucion, no en venta
+- Ops: Workspace `metrik` limpiado completamente via migracion SQL — queda en blanco para demo fresca
+- Docs: Sistema de codigos empresa/negocio documentado en CLAUDE.md
 
-**Commits de sesion (sesion G):**
-- `f86f3c3` fix: quitar checklist UPME viejo + campos fiscales + merge server-side
-- `5cc131e` fix: bloque documentos no mostraba estado completo
-- `350069b` fix: ghost gate datos vacío bloqueaba avance en etapa documentación
-- `d22f65f` fix: herencia bloques editables + docs visibles en etapas 4-5
-- `e8d2e8e` feat: cobros automáticos desde bloques — anticipo + multi-pago ePayco
-- `1bcbdcc` fix: eliminar bloque datos fantasma sin campos en etapa 3
-- `dc80269` fix: cobros insert usaba columna 'concepto' inexistente — es 'notas'
-- `8684d91` feat: botón confirmar anticipo — sin auto-complete para datos financieros
-- `1653ed3` fix: cobros.proyecto_id NOT NULL impedía crear cobros de negocios
-- `5677f6e` fix: BloqueDocumentos auto-complete — React setState timing bug
+**Commits de sesion (sesion H):**
+- `6a9fe55` feat: BloqueHistorial — lista completa de gastos, horas y cobros del negocio
+- `77e9779` fix: campo descripcion en historial + categorías DB + datos demo coherentes
+- `ceb0a2e` fix: KPI 'En venta' — corregir filtro estado abierto y renombrar label
 
-**Migraciones aplicadas en produccion (sesion G):**
-- `20260407000011` docs_visibles_etapas_4_5_fix_herencia
-- `20260407000012` cobros_visibles_multi_pago + tipo_cobro CHECK incluye 'pago'
-- `20260407000013` eliminar_bloque_datos_fantasma_etapa3
-- `20260407000014` datos_anticipo_require_confirm
-- `20260407000015` cobros_proyecto_id_nullable
+**Migraciones aplicadas en produccion (sesion H):**
+- `20260409100001` bloque_historial (definicion + bloque_configs + negocio_bloques backfill)
+- `20260409200001` limpiar_workspace_metrik (borrado total datos workspace metrik)
 
-## Estado actual (2026-04-08)
+## Estado actual (2026-04-09)
 
 - **Branch:** main
-- **Produccion:** Desplegado en Vercel, dominio metrikone.co activo — commit `5677f6e`
-- **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt
+- **Produccion:** Desplegado en Vercel, dominio metrikone.co activo — commit `ceb0a2e`
+- **Workspace metrik:** LIMPIO — sin datos, listo para demo fresca. Configuracion (etapas, bloques, staff, profiles) preservada
+- **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt. Proxima sesion: mejorar flujo WhatsApp
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
 - **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
 - **Workflow engine:** Activo en produccion. Tablas `workspace_stages` + `stage_transition_rules` con etapas de sistema seedeadas en todos los workspaces
 - **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
-- **Modulo negocios:** Operativo. Cobros automaticos funcionando (anticipo etapa 2 + multi-pago etapa 7). BloqueCobros visible todo el ciclo. BloqueDocumentos auto-complete arreglado. Pendiente critico: fix persona natural (empresa_id=NULL), verificar gates y logs en prod, recorrer SOENA punta a punta
+- **Modulo negocios:** Operativo. 12 tipos de bloques (incluye historial). Cobros automaticos funcionando (anticipo etapa 2 + multi-pago etapa 7). BloqueCobros visible todo el ciclo. BloqueHistorial con tabs gastos/horas/cobros. Pendiente critico: fix persona natural (empresa_id=NULL), verificar gates y logs en prod, recorrer SOENA punta a punta
 - **Sistema cobros VE:** `autoCrearCobros` (anticipo, idempotente por negocio_id+tipo_cobro), `autoCrearCobrosMulti` (multi-pago, idempotente por external_ref). Cobros entran como PENDIENTE con checkbox validacion. Saldo calculado dinamicamente (precio - sum cobros). cobros.proyecto_id nullable para VE
+- **Gotcha negocios.estado:** Valores reales son `'abierto'` y `'completado'`, NO `'activo'`. Verificado y corregido en /numeros
 
 ## Features NO implementados (Roadmap)
 
@@ -449,6 +437,10 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [x] Boton confirmar anticipo (require_confirm pattern) — sesion G 2026-04-07
 - [x] BloqueDocumentos auto-complete fix (React setState timing) — sesion G 2026-04-08
 - [x] Migraciones 011-015 aplicadas en produccion — sesion G 2026-04-07
+- [x] BloqueHistorial (visualizacion gastos/horas/cobros con tabs) — sesion H 2026-04-09
+- [x] KPI numeros: filtro estado 'abierto' + renombrar Pipeline → En venta — sesion H 2026-04-09
+- [x] Limpieza completa workspace metrik para demo — sesion H 2026-04-09
+- [ ] **PROXIMO:** Mejorar flujo WhatsApp (proxima sesion dedicada)
 - [ ] **CRITICO:** Persona natural debe crear empresa automaticamente. En `crearNegocio`, cuando `es_persona_natural=true`, insertar empresa con el nombre del contacto y asignar ese `empresa_id` al negocio. La regla de negocio es: persona natural = es su propia empresa. La migration 004 (`generate_negocio_codigo_sin_empresa`) es un parche incorrecto — queda como fallback para negocios existentes sin empresa pero no debe usarse para nuevos.
 - [ ] **CRITICO:** Verificar que gate "comentario_requerido" bloquea correctamente el avance de etapa 1→2 en SOENA. Probar en produccion con un negocio real.
 - [ ] **CRITICO:** Verificar que los logs de cambio de etapa aparecen en el ActivityLog del negocio (no en pipeline). La migration 005 arreglo el constraint pero no se verifico en produccion.
@@ -532,3 +524,6 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-07 | cobros.proyecto_id nullable — VE negocios no tienen proyecto | ALTER TABLE cobros ALTER COLUMN proyecto_id DROP NOT NULL. Cobros de negocios solo tienen negocio_id |
 | 2026-04-07 | tipo_cobro CHECK: regular, anticipo, saldo, pago | CHECK constraint actualizado. 'pago' para multi-pago etapa 7 |
 | 2026-04-08 | BloqueDocumentos: useRef para auto-complete, no setState | React 18 setState batching puede diferir updater callbacks. useRef.current.add(slug) es sincrono y confiable para checks de completitud |
+| 2026-04-09 | negocios.estado valores reales: 'abierto' / 'completado' (no 'activo') | Bug encontrado en /numeros: 3 queries filtraban 'activo'. Corregido a 'abierto' |
+| 2026-04-09 | BloqueHistorial: visualizacion pura en etapas ejecucion y cobro | is_visualization=true, tabs gastos/horas/cobros, sin edicion. BloqueEjecucion conserva solo KPIs + gastos por categoria |
+| 2026-04-09 | Eliminar anglicismos en UI: "Pipeline" → "En venta" | Directiva de Mauricio: no usar anglicismos en la interfaz de ONE |

@@ -28,3 +28,37 @@ Historial acumulativo de decisiones tecnicas y de negocio.
 | 2026-03-24 | Contador (6° rol): solo causacion, ilimitado gratis | Puede causar (PUC+CC), no puede aprobar. Solo ve /causacion. No consume licencia del plan |
 | 2026-03-24 | profiles.area afecta routing notificaciones, no permisos | N1 busca supervisor area=comercial o null. N7 busca supervisor area=operaciones o null. Fallback a owner si no hay |
 | 2026-03-24 | CRON_SECRET en Vercel con printf (no echo) | echo agrega trailing newline. Vercel rechaza CRON_SECRET con whitespace. Usar printf para env vars en CLI |
+| 2026-03-25 | Panel notificaciones movil: fixed inset-0 (full-screen) | El dropdown absolute right-0 se corria a la izquierda en movil. Full-screen con overlay es el patron correcto |
+| 2026-03-25 | Deducible toggle: permiso canToggleDeducible en roles.ts | Solo owner/admin/contador pueden cambiar deducibilidad. Validacion en server action antes de UPDATE |
+| 2026-03-25 | WhatsApp HMAC: fallar hard en prod si falta APP_SECRET | Sin validacion cualquiera puede inyectar mensajes. DENO_DEPLOYMENT_ID como proxy de produccion |
+| 2026-03-25 | Titulo de gasto: buildGastoTitle() no mensaje_original | Formato: concepto NLP (si <=40 chars) o "[categoria] — $monto". mensaje_original va a campo notas |
+| 2026-03-25 | 6 roles reales en WhatsApp bot | operator/supervisor: mismos permisos que collaborator anterior. contador: solo consultas. read_only: consultas basicas |
+| 2026-03-25 | MVP declarado completo | Todos los pendientes del roadmap MVP cerrados. Proximos pasos: go-to-market + features post-MVP |
+| 2026-03-25 | Go-to-market: referidos primero (CAC $3-5K), Meta Ads segundo (CAC $15-38K) | Consenso Mateo+Sami. /promotores ya existe en producto. Meta con gate semanal de CAC |
+| 2026-03-25 | Alianza contadores como canal multiplicador | 60K contadores en Colombia. Referral fee post-conversion. Landing metrikone.co/programa-contadores |
+| 2026-03-26 | Workflow engine: etapas minimas sistema + custom entre ellas | Opcion 2 aprobada — sin duplicidad de estados. etapas_sistema protegidas (es_sistema=true), custom insertables entre ellas |
+| 2026-03-26 | UI configuracion workflow solo interna — no visible al usuario ONE | Usuarios de ONE no deben ver ni configurar etapas. MeTRIK configura via /configure-workflow |
+| 2026-03-26 | Modelo AI-first: cuello de botella es diseno, no ejecucion | Validado con datos: Max ejecuta en 10-30min, discovery cliente toma 2-5h. Documentado en execution-model.md y agentes |
+| 2026-03-26 | Proceso discovery Clarity-ONE: 3 bloques → Brief → /configure-workflow → QA | Hana + Kaori. Brief de configuracion es requisito antes de ejecutar. Proceso [34] en metrik-docs |
+| 2026-04-01 | Gates son servicio Clarity — tenant_rules vacio por defecto | No hay gates sin que MeTRIK los configure. Cada cliente tiene reglas de su negocio que MeTRIK levanta en discovery |
+| 2026-04-01 | Motor de reglas condicionales: block_transition evalua ANTES de persistir cambio de estado | estado_nuevo en contexto status_change hace los gates etapa-especificos. HTTP 422 si gate activo |
+| 2026-04-01 | SOENA: proceso VE es primer cliente Clarity sobre ONE | Pipeline (stages A-B) + Proyectos (10 estados C-F). 11 etapas, 9 campos custom, gates documentales |
+| 2026-04-01 | Visibilidad input carpeta Drive: usar dato servidor, no estado local | useState se inicializa una vez — condicionar con prop del server component para campos que persisten en DB |
+| 2026-04-05 | Modulos financieros configurables via workspaces.proyecto_modules JSONB | all-false por defecto. MeTRIK activa por workspace. SOENA: todos activos |
+| 2026-04-05 | Auto-cobros VE: anticipo al ganar + saldo al llegar a por_cobrar | ganarOportunidad crea anticipo. moveProyectoVe crea saldo = presupuesto - sum(anticipos). Ambos PENDIENTE |
+| 2026-04-05 | cobros.tipo_cobro: regular/anticipo/saldo | factura_id ahora nullable. Anticipos y saldos VE se registran antes de emitir factura formal |
+| 2026-04-05 | Cotizaciones de negocio: codigo = consecutivo directo | Trigger trg_cotizacion_auto_codigo detecta oportunidad_id IS NULL y usa consecutivo directamente |
+| 2026-04-05 | ID negocio: primeras 3-4 letras del primer vocablo, no iniciales | Decision Hana/Vera. Modelo A (auto de nombre empresa) + override via empresas.alias_corto |
+| 2026-04-06 | Persona natural = empresa automatica en crearNegocio | PN es su propia empresa. Crear empresa con nombre del contacto y asignar empresa_id |
+| 2026-04-06 | Sesion E ejecutada con Sonnet 4.6 — resultados degradados | Proximas sesiones de desarrollo complejo: usar Opus 4.6 |
+| 2026-04-06 | BloqueDocumentos: upload real reemplaza inputs de URL | Bucket ve-documentos, path workspace/negocios/negocioId/bloqueId/slug.ext |
+| 2026-04-06 | Gate comentario: config_extra.gates en etapas_negocio | Array de strings configurables por etapa. Extensible para otros gates futuros |
+| 2026-04-07 | Cobros automaticos desde bloques datos, nunca manuales | Anticipo (etapa 2) y multi-pago (etapa 7) crean cobros via triggers en config_extra |
+| 2026-04-07 | Saldo = precio_total - sum(cobros), nunca pre-creado | Calculo dinamico en BloqueCobros. Evita inconsistencias por edicion de cobros |
+| 2026-04-07 | require_confirm pattern para bloques financieros | BloqueDatos con config_extra.require_confirm=true no auto-completa. Boton explicito para confirmar |
+| 2026-04-07 | cobros.proyecto_id nullable — VE negocios no tienen proyecto | ALTER TABLE cobros ALTER COLUMN proyecto_id DROP NOT NULL |
+| 2026-04-07 | tipo_cobro CHECK: regular, anticipo, saldo, pago | 'pago' para multi-pago etapa 7 |
+| 2026-04-08 | BloqueDocumentos: useRef para auto-complete, no setState | React 18 setState batching puede diferir updater callbacks. useRef es sincrono y confiable |
+| 2026-04-09 | negocios.estado valores reales: 'abierto' / 'completado' (no 'activo') | Bug en /numeros: 3 queries filtraban 'activo'. Corregido a 'abierto' |
+| 2026-04-09 | BloqueHistorial: visualizacion pura en etapas ejecucion y cobro | is_visualization=true, tabs gastos/horas/cobros, sin edicion |
+| 2026-04-09 | Eliminar anglicismos en UI: "Pipeline" → "En venta" | Directiva: no usar anglicismos en la interfaz de ONE |
