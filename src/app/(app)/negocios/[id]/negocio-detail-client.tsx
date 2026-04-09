@@ -44,6 +44,16 @@ import BloqueCronograma from './bloques/BloqueCronograma'
 import BloqueResumenFinanciero from './bloques/BloqueResumenFinanciero'
 import BloqueEjecucion from './bloques/BloqueEjecucion'
 
+// ── Tipos auxiliares ──────────────────────────────────────────────────────────
+
+interface EjecucionData {
+  totalGastos: number
+  totalHoras: number
+  costoHoras: number
+  gastosPorCategoria: Array<{ categoria: string; total: number }>
+  horasRecientes: Array<{ descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
+}
+
 // ── Helpers de formato ───────────────────────────────────────────────────────
 
 const fmt = (v: number) =>
@@ -477,6 +487,7 @@ function BloqueRenderer({
   cobros,
   cotizacionesNegocio,
   resumenFinanciero,
+  ejecucionData,
   precioTotal,
   userRole,
 }: {
@@ -495,6 +506,7 @@ function BloqueRenderer({
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  ejecucionData: EjecucionData
   precioTotal: number
   userRole: string
 }) {
@@ -666,8 +678,7 @@ function BloqueRenderer({
       return <BloqueResumenFinanciero data={resumenFinanciero} />
 
     case 'ejecucion':
-      // Bloque no implementado en piloto — ocultar para no mostrar estado engañoso
-      return null
+      return <BloqueEjecucion negocioId={negocioId} data={ejecucionData} />
 
     default:
       return (
@@ -687,6 +698,7 @@ function BloqueCard({
   cobros,
   cotizacionesNegocio,
   resumenFinanciero,
+  ejecucionData,
   precioTotal,
   userRole,
 }: {
@@ -705,6 +717,7 @@ function BloqueCard({
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  ejecucionData: EjecucionData
   precioTotal: number
   userRole: string
 }) {
@@ -795,6 +808,7 @@ function BloqueCard({
               cobros={cobros}
               cotizacionesNegocio={cotizacionesNegocio}
               resumenFinanciero={resumenFinanciero}
+              ejecucionData={ejecucionData}
               precioTotal={precioTotal}
               userRole={userRole}
             />
@@ -840,6 +854,7 @@ interface Props {
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  ejecucionData: EjecucionData
   actividad: Array<{
     id: string
     tipo: string
@@ -865,6 +880,7 @@ export default function NegocioDetailClient({
   cotizacionesNegocio,
   actividad,
   resumenFinanciero,
+  ejecucionData,
   staffList,
   errorMsg,
 }: Props) {
@@ -1027,6 +1043,7 @@ export default function NegocioDetailClient({
                   cobros={cobros}
                   cotizacionesNegocio={cotizacionesNegocio}
                   resumenFinanciero={resumenFinanciero}
+                  ejecucionData={ejecucionData}
                   precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
                   userRole={userRole}
                 />

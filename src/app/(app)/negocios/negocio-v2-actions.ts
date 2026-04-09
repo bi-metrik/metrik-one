@@ -1672,6 +1672,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     porCobrar: number
     costosEjecutados: number
   }
+  ejecucionData: {
+    totalGastos: number
+    totalHoras: number
+    costoHoras: number
+    gastosPorCategoria: Array<{ categoria: string; total: number }>
+    horasRecientes: Array<{ descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
+  }
   actividad: Array<{
     id: string
     tipo: string
@@ -1732,7 +1739,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     supabase.auth.getUser(),
     supabase
       .from('staff')
-      .select('id, full_name')
+      .select('id, full_name, salary')
       .eq('workspace_id', workspaceId),
   ])
   const profilesData = profilesRes.data
@@ -1751,6 +1758,24 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', id)
     .order('created_at', { ascending: true })
+
+  // Cargar gastos del negocio para costosEjecutados
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: gastosData } = await db(supabase)
+    .from('gastos')
+    .select('id, monto, categoria, fecha')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', id)
+    .order('fecha', { ascending: false })
+
+  // Cargar horas del negocio
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: horasData } = await db(supabase)
+    .from('horas')
+    .select('id, horas, descripcion, fecha, staff_id')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', id)
+    .order('fecha', { ascending: false })
 
   // Cotización ahora vive en negocio_bloques.data del bloque cotizacion (sin tabla separada)
   const cotizacion = null
@@ -1848,8 +1873,64 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     resumenFinanciero: {
       totalCobrado,
       porCobrar,
-      costosEjecutados: 0,
+      costosEjecutados: (() => {
+        const gastos = ((gastosData ?? []) as Array<{ monto: number }>)
+        const totalGastos = gastos.reduce((s, g) => s + (g.monto ?? 0), 0)
+        // Costo horas = horas * tarifa del staff (simplificado: usar salary/160)
+        const staffData = (staffRes.data ?? []) as Array<{ id: string; salary?: number }>
+        const staffSalaryMap: Record<string, number> = {}
+        for (const s of staffData) staffSalaryMap[s.id] = (s as Record<string, unknown>).salary as number ?? 0
+        const horas = ((horasData ?? []) as Array<{ horas: number; staff_id: string | null }>)
+        const costoHoras = horas.reduce((s, h) => {
+          const salary = h.staff_id ? (staffSalaryMap[h.staff_id] ?? 0) : 0
+          const tarifa = salary > 0 ? salary / 160 : 0
+          return s + ((h.horas ?? 0) * tarifa)
+        }, 0)
+        return Math.round(totalGastos + costoHoras)
+      })(),
     },
+    ejecucionData: (() => {
+      const gastos = ((gastosData ?? []) as Array<{ monto: number; categoria: string; fecha: string }>)
+      const totalGastos = gastos.reduce((s, g) => s + (g.monto ?? 0), 0)
+      // Agrupar gastos por categoría
+      const catMap: Record<string, number> = {}
+      for (const g of gastos) {
+        const cat = g.categoria ?? 'otros'
+        catMap[cat] = (catMap[cat] ?? 0) + (g.monto ?? 0)
+      }
+      const gastosPorCategoria = Object.entries(catMap)
+        .map(([categoria, total]) => ({ categoria, total }))
+        .sort((a, b) => b.total - a.total)
+
+      const staffDataArr = (staffRes.data ?? []) as Array<{ id: string; full_name: string; salary?: number }>
+      const staffNameMap: Record<string, string> = {}
+      const staffSalaryMap2: Record<string, number> = {}
+      for (const s of staffDataArr) {
+        staffNameMap[s.id] = s.full_name
+        staffSalaryMap2[s.id] = (s as Record<string, unknown>).salary as number ?? 0
+      }
+
+      const horas = ((horasData ?? []) as Array<{ horas: number; descripcion: string | null; fecha: string; staff_id: string | null }>)
+      const totalHoras = horas.reduce((s, h) => s + (h.horas ?? 0), 0)
+      const costoHoras = horas.reduce((s, h) => {
+        const salary = h.staff_id ? (staffSalaryMap2[h.staff_id] ?? 0) : 0
+        const tarifa = salary > 0 ? salary / 160 : 0
+        return s + ((h.horas ?? 0) * tarifa)
+      }, 0)
+
+      return {
+        totalGastos,
+        totalHoras: Math.round(totalHoras * 100) / 100,
+        costoHoras: Math.round(costoHoras),
+        gastosPorCategoria,
+        horasRecientes: horas.slice(0, 5).map(h => ({
+          descripcion: h.descripcion,
+          horas: h.horas,
+          fecha: h.fecha,
+          staff_nombre: h.staff_id ? (staffNameMap[h.staff_id] ?? null) : null,
+        })),
+      }
+    })(),
     actividad,
     staffList: ((staffRes.data ?? []) as { id: string; full_name: string }[]).map(s => ({
       id: s.id,
