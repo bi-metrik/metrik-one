@@ -1035,17 +1035,7 @@ export default function NegocioDetailClient({
             )}
           </div>
 
-          {bloquesExtendidos.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-8 text-center">
-              <p className="text-sm text-muted-foreground">
-                Sin bloques configurados para esta etapa
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground/60">
-                MéTRIK configura los bloques vía{' '}
-                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">/configure-gates</code>
-              </p>
-            </div>
-          ) : (
+          {bloquesExtendidos.length > 0 && (
             <div className="space-y-2">
               {bloquesExtendidos.map(bloque => (
                 <BloqueCard
