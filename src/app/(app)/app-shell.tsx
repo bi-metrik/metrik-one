@@ -55,6 +55,7 @@ const BUSINESS_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/negocios', label: 'Negocios', icon: Store, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
 // D246: Contabilidad — parte del módulo business
@@ -70,7 +71,6 @@ const COMPLIANCE_NAV_ITEMS = [
 
 // Compartidos (siempre visibles)
 const SHARED_NAV_ITEMS = [
-  { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
