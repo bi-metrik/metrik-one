@@ -43,6 +43,8 @@ import BloqueAprobacion from './bloques/BloqueAprobacion'
 import BloqueCronograma from './bloques/BloqueCronograma'
 import BloqueResumenFinanciero from './bloques/BloqueResumenFinanciero'
 import BloqueEjecucion from './bloques/BloqueEjecucion'
+import BloqueHistorial from './bloques/BloqueHistorial'
+import type { HistorialData } from './bloques/BloqueHistorial'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -51,7 +53,6 @@ interface EjecucionData {
   totalHoras: number
   costoHoras: number
   gastosPorCategoria: Array<{ categoria: string; total: number }>
-  horasRecientes: Array<{ descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
 }
 
 // ── Helpers de formato ───────────────────────────────────────────────────────
@@ -488,6 +489,7 @@ function BloqueRenderer({
   cotizacionesNegocio,
   resumenFinanciero,
   ejecucionData,
+  historialData,
   precioTotal,
   userRole,
 }: {
@@ -507,6 +509,7 @@ function BloqueRenderer({
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   ejecucionData: EjecucionData
+  historialData: HistorialData
   precioTotal: number
   userRole: string
 }) {
@@ -680,6 +683,9 @@ function BloqueRenderer({
     case 'ejecucion':
       return <BloqueEjecucion negocioId={negocioId} data={ejecucionData} />
 
+    case 'historial':
+      return <BloqueHistorial data={historialData} />
+
     default:
       return (
         <p className="text-xs text-[#6B7280] italic">
@@ -699,6 +705,7 @@ function BloqueCard({
   cotizacionesNegocio,
   resumenFinanciero,
   ejecucionData,
+  historialData,
   precioTotal,
   userRole,
 }: {
@@ -718,6 +725,7 @@ function BloqueCard({
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   ejecucionData: EjecucionData
+  historialData: HistorialData
   precioTotal: number
   userRole: string
 }) {
@@ -809,6 +817,7 @@ function BloqueCard({
               cotizacionesNegocio={cotizacionesNegocio}
               resumenFinanciero={resumenFinanciero}
               ejecucionData={ejecucionData}
+              historialData={historialData}
               precioTotal={precioTotal}
               userRole={userRole}
             />
@@ -855,6 +864,7 @@ interface Props {
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   ejecucionData: EjecucionData
+  historialData: HistorialData
   actividad: Array<{
     id: string
     tipo: string
@@ -881,6 +891,7 @@ export default function NegocioDetailClient({
   actividad,
   resumenFinanciero,
   ejecucionData,
+  historialData,
   staffList,
   errorMsg,
 }: Props) {
@@ -1044,6 +1055,7 @@ export default function NegocioDetailClient({
                   cotizacionesNegocio={cotizacionesNegocio}
                   resumenFinanciero={resumenFinanciero}
                   ejecucionData={ejecucionData}
+                  historialData={historialData}
                   precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
                   userRole={userRole}
                 />

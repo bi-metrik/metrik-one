@@ -1711,7 +1711,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     totalHoras: number
     costoHoras: number
     gastosPorCategoria: Array<{ categoria: string; total: number }>
-    horasRecientes: Array<{ descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
+  }
+  historialData: {
+    gastos: Array<{ id: string; titulo: string | null; monto: number; categoria: string; fecha: string }>
+    horas: Array<{ id: string; descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
+    cobros: Array<{ id: string; notas: string | null; monto: number; fecha: string | null; estado_causacion: string; tipo_cobro: string | null }>
   }
   actividad: Array<{
     id: string
@@ -1793,11 +1797,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     .eq('negocio_id', id)
     .order('created_at', { ascending: true })
 
-  // Cargar gastos del negocio para costosEjecutados
+  // Cargar gastos del negocio para costosEjecutados + historial
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: gastosData } = await db(supabase)
     .from('gastos')
-    .select('id, monto, categoria, fecha')
+    .select('id, titulo, monto, categoria, fecha')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', id)
     .order('fecha', { ascending: false })
@@ -1957,14 +1961,33 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         totalHoras: Math.round(totalHoras * 100) / 100,
         costoHoras: Math.round(costoHoras),
         gastosPorCategoria,
-        horasRecientes: horas.slice(0, 5).map(h => ({
-          descripcion: h.descripcion,
-          horas: h.horas,
-          fecha: h.fecha,
-          staff_nombre: h.staff_id ? (staffNameMap[h.staff_id] ?? null) : null,
-        })),
       }
     })(),
+    historialData: {
+      gastos: ((gastosData ?? []) as Array<{ id: string; titulo: string | null; monto: number; categoria: string; fecha: string }>).map(g => ({
+        id: g.id,
+        titulo: g.titulo ?? null,
+        monto: g.monto ?? 0,
+        categoria: g.categoria ?? 'otros',
+        fecha: g.fecha ?? '',
+      })),
+      horas: ((horasData ?? []) as Array<{ id: string; horas: number; descripcion: string | null; fecha: string; staff_id: string | null }>).map(h => ({
+        id: h.id,
+        descripcion: h.descripcion,
+        horas: h.horas ?? 0,
+        fecha: h.fecha ?? '',
+        staff_nombre: h.staff_id ? (staffMap[h.staff_id] ?? null) : null,
+      })),
+      cobros: ((cobrosData ?? []) as Record<string, unknown>[]).map(c => ({
+        id: c.id as string,
+        notas: c.notas as string | null,
+        monto: c.monto as number,
+        fecha: c.fecha as string | null,
+        estado_causacion: c.estado_causacion as string,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tipo_cobro: (c as any).tipo_cobro as string | null,
+      })),
+    },
     actividad,
     staffList: ((staffRes.data ?? []) as { id: string; full_name: string }[]).map(s => ({
       id: s.id,

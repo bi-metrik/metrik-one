@@ -19,7 +19,6 @@ interface EjecucionData {
   totalHoras: number
   costoHoras: number
   gastosPorCategoria: Array<{ categoria: string; total: number }>
-  horasRecientes: Array<{ descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
 }
 
 interface BloqueEjecucionProps {
@@ -97,25 +96,6 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
                 </div>
               )
             })}
-          </div>
-        </div>
-      )}
-
-      {/* Últimas horas */}
-      {data.horasRecientes.length > 0 && (
-        <div>
-          <p className="text-[10px] font-medium text-[#6B7280] mb-1.5">Últimas horas registradas</p>
-          <div className="space-y-1">
-            {data.horasRecientes.map((h, i) => (
-              <div key={i} className="flex items-center justify-between text-[10px]">
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span className="text-[#6B7280]/60">{h.fecha}</span>
-                  {h.staff_nombre && <span className="font-medium text-[#1A1A1A] truncate">{h.staff_nombre}</span>}
-                  {h.descripcion && <span className="text-[#6B7280] truncate">{h.descripcion}</span>}
-                </div>
-                <span className="font-medium text-blue-600 tabular-nums ml-2">{h.horas}h</span>
-              </div>
-            ))}
           </div>
         </div>
       )}

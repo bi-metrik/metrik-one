@@ -288,40 +288,54 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-06 (sesion E — modulo negocios: nuevo negocio stepper + bloque documentos + gates + IDs)
+**Sesion:** 2026-04-07/08 (sesion G — cobros automaticos + fixes bloques VE)
 **Branch:** main
-**Commit:** `a5948d9`
+**Commit:** `5677f6e`
 
-Que se hizo (sesion E):
-- Feat: Nuevo negocio — stepper 3 pasos (Contacto → Empresa → Negocio), empresa requerida, busqueda inline con creacion si no existe
-- Feat: BloqueDocumentos reescrito — upload real a Storage, AI por documento independiente (igual que flujo oportunidad VE), labels correctos: Factura/RUT/Cedula/Comprobante UPME
-- Feat: Gate "comentario_requerido" en etapa 1 SOENA — bloquea avance si no hay ningun comentario en actividad
-- Feat: Logs de cambio de etapa en ActivityLog — tipo 'cambio_etapa', render con flecha verde "avanzó a [Etapa]"
-- Fix: Titulo bloque documentos radicacion: "Documentos del vehículo" → "Documentos de radicación"
-- Fix: Documentos correctos SOENA (migration 003): factura, rut, cedula, soporte_upme
-- Fix: Stepper persona natural — botón Siguiente saltaba step 0→2, negocioStep=1, formulario no renderizaba
-- Fix: CHECK constraint activity_log.tipo — faltaba 'cambio_etapa', todos los logs de etapa fallaban silenciosamente
-- Fix: ID negocios persona natural — migration 004 crea generate_negocio_codigo_sin_empresa (usa primera letra del contacto)
-- ADVERTENCIA: el fix de persona natural (migration 004) es incorrecto conceptualmente — ver Pendientes CRITICO
+Que se hizo (sesion G):
+- Feat: Cobros automaticos desde bloques datos — `autoCrearCobros` (anticipo etapa 2) + `autoCrearCobrosMulti` (multi-pago etapa 7)
+- Feat: BloqueCobros visible solo lectura durante todo el ciclo (etapas 2-7), saldo = precio_total - sum(cobros) calculado dinamicamente
+- Feat: BloqueDatosMultiPago (nuevo componente) — filas dinamicas referencia_epayco + valor_pago, cada referencia crea un cobro independiente
+- Feat: Boton "Confirmar anticipo" — patron require_confirm en BloqueDatos, no auto-save para datos financieros
+- Fix: cobros INSERT usaba columna `concepto` inexistente — corregido a `notas`
+- Fix: cobros.proyecto_id DROP NOT NULL — negocios VE no tienen proyecto asociado
+- Fix: BloqueDocumentos auto-complete — bug React 18 setState batching, ahora usa useRef para tracking sincrono de slugs subidos
+- Fix: Ghost gate datos vacio bloqueaba avance en etapa documentacion
+- Fix: Herencia bloques editables + docs visibles en etapas 4-5
+- Fix: Bloque datos fantasma sin campos eliminado de etapa 3
+- Fix: 11 bloques anticipo stuck como completo reseteados a pendiente en produccion (preservando data)
+- Fix: Bloque documentos negocio efc05a21 marcado completo manualmente (4/4 docs subidos)
 
-**Commits de sesion (sesion E):**
-- `486a6eb` fix: bloque documentos radicación — título y docs correctos SOENA
-- `39aa6e0` feat: nuevo negocio — stepper 3 pasos igual que flujo oportunidad
-- `bd87842` feat: bloque documentos — upload real + AI por documento
-- `74b2493` fix: persona natural — step navigation 0→1 en lugar de 0→2
-- `3f2053a` fix: código persona natural sin empresa (INCORRECTO — ver pendientes)
-- `a5948d9` feat: gate comentario etapa 1 + logs cambio de etapa en actividad
+**Commits de sesion (sesion G):**
+- `f86f3c3` fix: quitar checklist UPME viejo + campos fiscales + merge server-side
+- `5cc131e` fix: bloque documentos no mostraba estado completo
+- `350069b` fix: ghost gate datos vacío bloqueaba avance en etapa documentación
+- `d22f65f` fix: herencia bloques editables + docs visibles en etapas 4-5
+- `e8d2e8e` feat: cobros automáticos desde bloques — anticipo + multi-pago ePayco
+- `1bcbdcc` fix: eliminar bloque datos fantasma sin campos en etapa 3
+- `dc80269` fix: cobros insert usaba columna 'concepto' inexistente — es 'notas'
+- `8684d91` feat: botón confirmar anticipo — sin auto-complete para datos financieros
+- `1653ed3` fix: cobros.proyecto_id NOT NULL impedía crear cobros de negocios
+- `5677f6e` fix: BloqueDocumentos auto-complete — React setState timing bug
 
-## Estado actual (2026-04-05)
+**Migraciones aplicadas en produccion (sesion G):**
+- `20260407000011` docs_visibles_etapas_4_5_fix_herencia
+- `20260407000012` cobros_visibles_multi_pago + tipo_cobro CHECK incluye 'pago'
+- `20260407000013` eliminar_bloque_datos_fantasma_etapa3
+- `20260407000014` datos_anticipo_require_confirm
+- `20260407000015` cobros_proyecto_id_nullable
+
+## Estado actual (2026-04-08)
 
 - **Branch:** main
-- **Produccion:** Desplegado en Vercel, dominio metrikone.co activo — commit `249c051`
+- **Produccion:** Desplegado en Vercel, dominio metrikone.co activo — commit `5677f6e`
 - **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
 - **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
 - **Workflow engine:** Activo en produccion. Tablas `workspace_stages` + `stage_transition_rules` con etapas de sistema seedeadas en todos los workspaces
 - **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
-- **Modulo negocios:** Operativo. Sesion E agrego stepper nuevo negocio, bloque documentos upload real, gate comentario, logs cambio etapa. Pendiente critico: fix persona natural (empresa_id=NULL en lugar de crear empresa), verificar gates en prod, recorrer SOENA punta a punta
+- **Modulo negocios:** Operativo. Cobros automaticos funcionando (anticipo etapa 2 + multi-pago etapa 7). BloqueCobros visible todo el ciclo. BloqueDocumentos auto-complete arreglado. Pendiente critico: fix persona natural (empresa_id=NULL), verificar gates y logs en prod, recorrer SOENA punta a punta
+- **Sistema cobros VE:** `autoCrearCobros` (anticipo, idempotente por negocio_id+tipo_cobro), `autoCrearCobrosMulti` (multi-pago, idempotente por external_ref). Cobros entran como PENDIENTE con checkbox validacion. Saldo calculado dinamicamente (precio - sum cobros). cobros.proyecto_id nullable para VE
 
 ## Features NO implementados (Roadmap)
 
@@ -343,6 +357,33 @@ Que se hizo (sesion E):
 | Subscriptions/Billing (Stripe) | Baja | No iniciado |
 | Reconciliacion bancaria | Baja | Schema listo |
 | Dark mode completo | Baja | Parcial — login/registro/lockup completados, otros pendientes |
+
+## Sistema de codigos (empresas + negocios)
+
+Formato estandar para IDs visibles al usuario. Generados automaticamente por triggers de PostgreSQL.
+
+### Empresa: `{letra}{consecutivo}`
+- Primera letra del nombre (uppercase) + consecutivo por letra dentro del workspace
+- Ejemplos: `S1` (SOENA), `R1` (Roble), `M1` (Mirador), `T1` (TechVerde)
+- Generado por trigger `empresa_auto_codigo` → funcion `generate_empresa_codigo()`
+- Si multiples empresas empiezan con la misma letra: `C1`, `C2`, `C3`
+- **Regla clave:** Al elegir nombre de empresa, preferir la primera letra mas distintiva/reconocible. Ejemplo: "Conjunto Residencial El Roble" → empresa.nombre = "El Roble" para que el codigo sea `R1`, NO `C1`
+- Unique index: `(workspace_id, codigo)`
+
+### Negocio: `{empresa_codigo} {YY} {consecutivo}` (con espacios)
+- Ejemplo: `S1 26 3` = empresa S1 + ano 2026 + 3er negocio de esa empresa en el ano
+- Generado por trigger `negocio_auto_codigo` → funcion `generate_negocio_codigo()`
+- **Se almacena CON espacios en la columna `negocios.codigo`** — no hay transformacion en UI
+- Para persona natural sin empresa: usa primera letra del nombre del contacto (`P 26 1`)
+- Unique index: `(workspace_id, codigo)`
+
+### Reglas criticas
+- **NUNCA generar codigos manualmente en app code** — los triggers de DB los asignan en INSERT
+- **NUNCA usar formatCodigo() o regex de display** — los codigos ya vienen con espacios desde DB
+- Al seedear datos de demo, respetar el formato `{codigo_empresa} {YY} {N}` con espacios
+- Si un codigo de empresa no es suficientemente distintivo (ej: dos empresas con C1, C2), renombrar la empresa para usar una letra diferente
+- Funciones SQL: `generate_empresa_codigo()`, `generate_negocio_codigo()`, `generate_negocio_codigo_sin_empresa()`
+- Migraciones de referencia: `20260406000001` (sistema base) + `20260407000001` (formato con espacios)
 
 ## Gotchas y convenciones
 
@@ -403,12 +444,18 @@ Que se hizo (sesion E):
 - [x] ActivityLog en negocios — menciones, link, 280 chars — sesion D 2026-04-05
 - [x] Header negocio rediseñado — volver, ID, precio, carpeta editable, links empresa/contacto — sesion D 2026-04-05
 - [x] Migraciones 008-010 aplicadas en produccion — sesion D 2026-04-05
-- [ ] **CRITICO SESION F — FIX 1:** Persona natural debe crear empresa automaticamente. En `crearNegocio`, cuando `es_persona_natural=true`, insertar empresa con el nombre del contacto y asignar ese `empresa_id` al negocio. La regla de negocio es: persona natural = es su propia empresa. La migration 004 (`generate_negocio_codigo_sin_empresa`) es un parche incorrecto — queda como fallback para negocios existentes sin empresa pero no debe usarse para nuevos.
-- [ ] **CRITICO SESION F — FIX 2:** Verificar que gate "comentario_requerido" bloquea correctamente el avance de etapa 1→2 en SOENA. Probar en produccion con un negocio real.
-- [ ] **CRITICO SESION F — FIX 3:** Verificar que los logs de cambio de etapa aparecen en el ActivityLog del negocio (no en pipeline). La migration 005 arreglo el constraint pero no se verifico en produccion.
+- [x] Cobros automaticos desde bloques datos — anticipo + multi-pago ePayco — sesion G 2026-04-07
+- [x] BloqueCobros visible todo el ciclo como solo lectura — sesion G 2026-04-07
+- [x] Boton confirmar anticipo (require_confirm pattern) — sesion G 2026-04-07
+- [x] BloqueDocumentos auto-complete fix (React setState timing) — sesion G 2026-04-08
+- [x] Migraciones 011-015 aplicadas en produccion — sesion G 2026-04-07
+- [ ] **CRITICO:** Persona natural debe crear empresa automaticamente. En `crearNegocio`, cuando `es_persona_natural=true`, insertar empresa con el nombre del contacto y asignar ese `empresa_id` al negocio. La regla de negocio es: persona natural = es su propia empresa. La migration 004 (`generate_negocio_codigo_sin_empresa`) es un parche incorrecto — queda como fallback para negocios existentes sin empresa pero no debe usarse para nuevos.
+- [ ] **CRITICO:** Verificar que gate "comentario_requerido" bloquea correctamente el avance de etapa 1→2 en SOENA. Probar en produccion con un negocio real.
+- [ ] **CRITICO:** Verificar que los logs de cambio de etapa aparecen en el ActivityLog del negocio (no en pipeline). La migration 005 arreglo el constraint pero no se verifico en produccion.
 - [ ] **CRITICO SOENA:** Recorrer todas las etapas VE de punta a punta y verificar que cada bloque funciona correctamente
 - [ ] **CRITICO SOENA:** Auto-cotizacion cuando se crea una oportunidad en SOENA (feature no implementado — debe crearse automaticamente al abrir negocio)
-- [ ] **PENDIENTE:** ID negocio formato SOE-11 — campo `negocios.codigo` generado por trigger, `empresas.alias_corto` configurable. Decision: Modelo A (auto de nombre empresa) con override manual. Ver debate Hana/Vera sesion D
+- [ ] **PENDIENTE:** Regenerar `database.ts` types tras migraciones 011-015 y quitar `as any` casts de cobros
+- [x] ID negocio formato `S1 26 3` — triggers auto-generan codigos, documentado en seccion "Sistema de codigos" — completado 2026-04-09
 - [ ] **PENDIENTE:** Header negocio refinado segun spec Noor (jerarquia 4 filas: nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso)
 - [ ] Verificar tableros en browser real (desktop + mobile viewport)
 - [ ] Verificar cards condicionales en ambiente real (F6, C6, O7, O2 emptyMessage)
@@ -472,10 +519,16 @@ Que se hizo (sesion E):
 | 2026-04-05 | Cotizaciones de negocio: codigo = consecutivo (no opp_codigo-CN) | El trigger trg_cotizacion_auto_codigo detecta oportunidad_id IS NULL y usa el consecutivo directamente como codigo. UNIQUE index en (workspace_id, codigo) sigue activo |
 | 2026-04-05 | Fallback consecutivo cotizacion: epoch no 0000 | Si get_next_cotizacion_consecutivo() falla, el fallback es COT-YYYY-{epoch} para garantizar unicidad. 0000 colisionaba en la segunda cotizacion del workspace |
 | 2026-04-05 | Error creacion cotizacion: param ?err= en URL, no silencio | nueva/page.tsx redirige con ?err=mensaje en lugar de silenciar. NegocioDetailClient muestra toast.error al montar. Permite diagnosticar sin logs de servidor |
-| 2026-04-05 | ID negocio: primeras 3-4 letras del primer vocablo, no iniciales | Decision Hana/Vera: WMC→WOR, TTI→TEX, BRA→BLU. Modelo A (auto del nombre empresa) + override via empresas.alias_corto. Pendiente de implementar por Max |
+| 2026-04-05 | ID negocio: `{empresa_codigo} {YY} {consecutivo}` con espacios | Formato final aprobado: S1 26 3. Triggers DB auto-generan. Empresa codigo = primera letra + consecutivo. Elegir nombre empresa con letra distintiva |
 | 2026-04-05 | Header negocio: jerarquia 4 filas segun spec Noor | nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso. Pendiente de implementar. Spec: empresa y contacto juntos (misma relacion), precio prominente a la derecha |
 | 2026-04-05 | Modulo negocios opera en contexto degradado: priorizar sesion limpia | La sesion D acumulo muchos fixes encima. Proxima sesion debe empezar con brief quirurgico de los 2 criticos SOENA |
 | 2026-04-06 | Persona natural = empresa automatica en crearNegocio | Regla de negocio original: PN es su propia empresa. El fix migration 004 fue incorrecto (usa contacto como base del codigo). Correcto: crear empresa con nombre del contacto y asignar empresa_id |
 | 2026-04-06 | Sesion E ejecutada con Sonnet 4.6 — resultados degradados | Multiples errores de contexto y logica de negocio. Proximas sesiones de desarrollo complejo: usar Opus 4.6 |
 | 2026-04-06 | BloqueDocumentos: upload real reemplaza inputs de URL | Patron copiado de ve-documentos-section. Bucket ve-documentos, path workspace/negocios/negocioId/bloqueId/slug.ext |
 | 2026-04-06 | Gate comentario: config_extra.gates en etapas_negocio | Array de strings configurables por etapa. 'comentario_requerido' verifica activity_log antes de avanzar. Extensible para otros gates futuros |
+| 2026-04-07 | Cobros automaticos desde bloques datos, nunca manuales | Anticipo (etapa 2) y multi-pago (etapa 7) crean cobros via triggers en config_extra. Cada cobro entra PENDIENTE con checkbox validacion |
+| 2026-04-07 | Saldo = precio_total - sum(cobros), nunca pre-creado | No existe cobro tipo 'saldo' pre-insertado. El saldo es un calculo dinamico en BloqueCobros. Evita inconsistencias por edicion de cobros |
+| 2026-04-07 | require_confirm pattern para bloques financieros | BloqueDatos con config_extra.require_confirm=true no auto-completa. Muestra boton explicito para confirmar. Aplicado en anticipo SOENA |
+| 2026-04-07 | cobros.proyecto_id nullable — VE negocios no tienen proyecto | ALTER TABLE cobros ALTER COLUMN proyecto_id DROP NOT NULL. Cobros de negocios solo tienen negocio_id |
+| 2026-04-07 | tipo_cobro CHECK: regular, anticipo, saldo, pago | CHECK constraint actualizado. 'pago' para multi-pago etapa 7 |
+| 2026-04-08 | BloqueDocumentos: useRef para auto-complete, no setState | React 18 setState batching puede diferir updater callbacks. useRef.current.add(slug) es sincrono y confiable para checks de completitud |
