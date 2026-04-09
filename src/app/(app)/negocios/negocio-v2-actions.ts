@@ -152,6 +152,24 @@ export async function getNegociosV2(): Promise<NegocioResumen[]> {
   }))
 }
 
+// ── Stages activos del workspace ─────────────────────────────────────────────
+
+export async function getWorkspaceStagesActivos(): Promise<string[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return ['venta', 'ejecucion', 'cobro']
+
+  const { data } = await db(supabase)
+    .from('workspaces')
+    .select('stages_activos')
+    .eq('id', workspaceId)
+    .single()
+
+  const stages = (data as { stages_activos: string[] } | null)?.stages_activos
+  return stages && Array.isArray(stages) && stages.length > 0
+    ? stages
+    : ['venta', 'ejecucion', 'cobro']
+}
+
 // ── Detalle de un negocio ─────────────────────────────────────────────────────
 
 export async function getNegocioDetalle(id: string): Promise<{
@@ -415,7 +433,7 @@ export async function getDatosNuevoNegocio(): Promise<{
 
 export async function crearNegocio(input: {
   nombre: string
-  linea_id: string
+  linea_id?: string
   empresa_id?: string
   contacto_id?: string
   precio_estimado?: number
@@ -428,6 +446,17 @@ export async function crearNegocio(input: {
 }): Promise<{ negocio_id: string | null; error: string | null }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
+
+  // Get workspace config: stages_activos + linea_activa_id
+  const { data: wsConfig } = await db(supabase)
+    .from('workspaces')
+    .select('stages_activos, linea_activa_id')
+    .eq('id', workspaceId)
+    .single()
+
+  // Use linea_activa_id if no linea provided
+  const lineaId = input.linea_id ?? (wsConfig as { stages_activos: string[]; linea_activa_id: string | null } | null)?.linea_activa_id
+  if (!lineaId) return { negocio_id: null, error: 'No hay línea de negocio configurada' }
 
   // Crear contacto inline si no existe
   let contactoId = input.contacto_id
@@ -493,11 +522,13 @@ export async function crearNegocio(input: {
     empresaId = (newEmpresa as { id: string } | null)?.id
   }
 
-  // Obtener primera etapa de la línea seleccionada
+  // Obtener primera etapa filtrada por stages activos del workspace
+  const stagesActivos = (wsConfig as { stages_activos: string[] } | null)?.stages_activos ?? ['venta', 'ejecucion', 'cobro']
   const { data: primeraEtapaRaw } = await db(supabase)
     .from('etapas_negocio')
     .select('id, stage')
-    .eq('linea_id', input.linea_id)
+    .eq('linea_id', lineaId)
+    .in('stage', stagesActivos)
     .order('orden', { ascending: true })
     .limit(1)
     .single()
@@ -509,7 +540,7 @@ export async function crearNegocio(input: {
     .insert({
       workspace_id: workspaceId,
       nombre: input.nombre,
-      linea_id: input.linea_id,
+      linea_id: lineaId,
       empresa_id: empresaId ?? null,
       contacto_id: contactoId ?? null,
       precio_estimado: input.precio_estimado ?? null,

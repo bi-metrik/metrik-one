@@ -13,7 +13,14 @@ interface OnboardingData {
 interface OnboardingResult {
   success: boolean
   slug?: string
+  workspaceId?: string
   error?: string
+}
+
+// Helper: cast Supabase client to untyped for tables not in database.ts
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function db(supabase: unknown): any {
+  return supabase
 }
 
 export async function completeOnboarding(data: OnboardingData): Promise<OnboardingResult> {
@@ -78,9 +85,88 @@ export async function completeOnboarding(data: OnboardingData): Promise<Onboardi
       return { success: false, error: `Error creando tu perfil: ${profileError.message}` }
     }
 
-    return { success: true, slug: workspace.slug }
+    return { success: true, slug: workspace.slug, workspaceId: workspace.id }
   } catch (err) {
     console.error('Onboarding error:', err)
     return { success: false, error: 'Error inesperado. Intenta de nuevo.' }
+  }
+}
+
+// ── Plantillas disponibles para onboarding ──────────────────────────────────
+
+export interface PlantillaOption {
+  id: string
+  nombre: string
+  descripcion: string | null
+  label: string
+}
+
+export async function getPlantillas(): Promise<PlantillaOption[]> {
+  const serviceClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  )
+
+  const { data } = await db(serviceClient)
+    .from('lineas_negocio')
+    .select('id, nombre, descripcion')
+    .eq('tipo', 'plantilla')
+    .is('workspace_id', null)
+    .order('nombre', { ascending: true })
+
+  if (!data) return []
+
+  // Map plantilla names to user-facing labels
+  const labelMap: Record<string, string> = {
+    'Soy profesional': 'Vendo conocimiento',
+    'Ejecuto proyectos': 'Entrego proyectos',
+    'Atiendo clientes': 'Atiendo clientes',
+  }
+
+  return (data as Array<{ id: string; nombre: string; descripcion: string | null }>).map(l => ({
+    id: l.id,
+    nombre: l.nombre,
+    descripcion: l.descripcion,
+    label: labelMap[l.nombre] ?? l.nombre,
+  }))
+}
+
+// ── Aplicar plantilla al workspace ──────────────────────────────────────────
+
+export async function applyPlantilla(workspaceId: string, lineaId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const serviceClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    )
+
+    // 1. Call the SQL function to create bloque_configs
+    const { error: rpcError } = await db(serviceClient).rpc('apply_plantilla_to_workspace', {
+      p_workspace_id: workspaceId,
+      p_linea_id: lineaId,
+    })
+
+    if (rpcError) {
+      console.error('apply_plantilla error:', JSON.stringify(rpcError))
+      return { success: false, error: rpcError.message }
+    }
+
+    // 2. Set linea_activa_id on the workspace
+    const { error: updateError } = await db(serviceClient)
+      .from('workspaces')
+      .update({ linea_activa_id: lineaId })
+      .eq('id', workspaceId)
+
+    if (updateError) {
+      console.error('update linea_activa error:', JSON.stringify(updateError))
+      return { success: false, error: updateError.message }
+    }
+
+    return { success: true }
+  } catch (err) {
+    console.error('applyPlantilla error:', err)
+    return { success: false, error: 'Error inesperado.' }
   }
 }

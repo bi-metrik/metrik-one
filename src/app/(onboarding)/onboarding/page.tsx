@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2 } from 'lucide-react'
-import { completeOnboarding } from './actions'
+import { Loader2, Briefcase, HardHat, HeartHandshake } from 'lucide-react'
+import { completeOnboarding, getPlantillas, applyPlantilla } from './actions'
+import type { PlantillaOption } from './actions'
 
 const PROFESSIONS = [
   { value: 'arquitecto', label: 'Arquitectura' },
@@ -24,6 +25,13 @@ const YEARS_OPTIONS = [
   { value: 15, label: 'Más de 10 años' },
 ]
 
+// Icon mapping for plantilla cards
+const PLANTILLA_ICONS: Record<string, typeof Briefcase> = {
+  'Soy profesional': Briefcase,
+  'Ejecuto proyectos': HardHat,
+  'Atiendo clientes': HeartHandshake,
+}
+
 export default function OnboardingPage() {
   const router = useRouter()
   const [step, setStep] = useState(1)
@@ -36,7 +44,20 @@ export default function OnboardingPage() {
   const [profession, setProfession] = useState('')
   const [yearsIndependent, setYearsIndependent] = useState<number | null>(null)
 
-  const totalSteps = 3
+  // Step 4: plantilla selection
+  const [plantillas, setPlantillas] = useState<PlantillaOption[]>([])
+  const [selectedPlantilla, setSelectedPlantilla] = useState<string | null>(null)
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const [slug, setSlug] = useState<string | null>(null)
+
+  const totalSteps = 4
+
+  // Load plantillas when entering step 4
+  useEffect(() => {
+    if (step === 4 && plantillas.length === 0) {
+      getPlantillas().then(setPlantillas)
+    }
+  }, [step, plantillas.length])
 
   const handleNext = () => {
     if (step === 1 && !fullName.trim()) {
@@ -53,10 +74,13 @@ export default function OnboardingPage() {
 
   const handleBack = () => {
     setError('')
+    // Don't go back past step 4 once workspace is created
+    if (step === 4) return
     setStep(step - 1)
   }
 
-  const handleComplete = async () => {
+  // Step 3 → create workspace + profile, then move to step 4
+  const handleCreateWorkspace = async () => {
     if (!profession) {
       setError('Selecciona tu profesión')
       return
@@ -69,7 +93,6 @@ export default function OnboardingPage() {
     setLoading(true)
     setError('')
 
-    // Server action — uses service role to bypass RLS
     const result = await completeOnboarding({
       fullName: fullName.trim(),
       businessName: businessName.trim(),
@@ -83,8 +106,34 @@ export default function OnboardingPage() {
       return
     }
 
+    setWorkspaceId(result.workspaceId!)
+    setSlug(result.slug!)
+    setLoading(false)
+    setStep(4)
+  }
+
+  // Step 4 → apply plantilla and redirect
+  const handleFinish = async () => {
+    if (!selectedPlantilla) {
+      setError('Elige cómo trabajas para personalizar tu espacio')
+      return
+    }
+    if (!workspaceId || !slug) {
+      setError('Error inesperado. Recarga la página.')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    const result = await applyPlantilla(workspaceId, selectedPlantilla)
+    if (!result.success) {
+      setError(result.error || 'Error aplicando la configuración.')
+      setLoading(false)
+      return
+    }
+
     // Redirect to story mode on the tenant subdomain
-    const slug = result.slug!
     const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
     const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 
@@ -223,6 +272,52 @@ export default function OnboardingPage() {
         </div>
       )}
 
+      {/* Step 4: Plantilla selection */}
+      {step === 4 && (
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold">¿Cómo trabajas?</h1>
+            <p className="text-muted-foreground">
+              Elegimos las etapas y herramientas que mejor se adaptan a tu forma de trabajar.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {plantillas.map((p) => {
+              const Icon = PLANTILLA_ICONS[p.nombre] ?? Briefcase
+              const selected = selectedPlantilla === p.id
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedPlantilla(p.id)}
+                  className={`flex w-full items-start gap-4 rounded-xl border-2 p-4 text-left transition-colors ${
+                    selected
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/40 hover:bg-accent/50'
+                  }`}
+                >
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                    selected ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-semibold ${selected ? 'text-primary' : 'text-foreground'}`}>
+                      {p.label}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{p.nombre}</p>
+                    {p.descripcion && (
+                      <p className="text-xs text-muted-foreground/80 mt-1 line-clamp-2">{p.descripcion}</p>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Error message */}
       {error && (
         <p className="text-sm text-destructive">{error}</p>
@@ -230,7 +325,7 @@ export default function OnboardingPage() {
 
       {/* Navigation */}
       <div className="flex gap-3">
-        {step > 1 && (
+        {step > 1 && step < 4 && (
           <button
             type="button"
             onClick={handleBack}
@@ -240,7 +335,7 @@ export default function OnboardingPage() {
           </button>
         )}
 
-        {step < totalSteps ? (
+        {step < 3 ? (
           <button
             type="button"
             onClick={handleNext}
@@ -248,10 +343,10 @@ export default function OnboardingPage() {
           >
             Continuar
           </button>
-        ) : (
+        ) : step === 3 ? (
           <button
             type="button"
-            onClick={handleComplete}
+            onClick={handleCreateWorkspace}
             disabled={loading}
             className="flex h-12 flex-1 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
@@ -259,6 +354,22 @@ export default function OnboardingPage() {
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Creando tu espacio...
+              </>
+            ) : (
+              'Continuar'
+            )}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleFinish}
+            disabled={loading}
+            className="flex h-12 flex-1 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Configurando...
               </>
             ) : (
               'Comenzar'

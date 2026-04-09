@@ -1,10 +1,13 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
-import { getNegociosV2 } from './negocio-v2-actions'
+import { getNegociosV2, getWorkspaceStagesActivos } from './negocio-v2-actions'
 import NegociosClient from './negocios-client'
 
 export default async function NegociosPage() {
-  const negocios = await getNegociosV2()
+  const [negocios, stagesActivos] = await Promise.all([
+    getNegociosV2(),
+    getWorkspaceStagesActivos(),
+  ])
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
@@ -22,7 +25,7 @@ export default async function NegociosPage() {
           Nuevo negocio
         </Link>
       </div>
-      <NegociosClient negocios={negocios} />
+      <NegociosClient negocios={negocios} stagesActivos={stagesActivos} />
     </div>
   )
 }
