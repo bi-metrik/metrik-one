@@ -168,7 +168,14 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       return sendTextMessage(message.phone, `${body}\n\n${numbered}\n\nResponde con el número.`);
     },
     sendButtons: (body: string, btns: Array<{ id: string; title: string }>) => sendButtons(message.phone, body, btns),
-    updateSession: (state, context) => updateSession(supabase, session.id, state, context),
+    updateSession: async (state, context) => {
+      await updateSession(supabase, session.id, state, context);
+      // Sync in-memory session so subsequent reads see updated data
+      (session as any).state = state;
+      if (context) {
+        (session as any).context = { ...(session as any).context, ...context };
+      }
+    },
   };
 
   // 9. Route to handler
@@ -250,7 +257,13 @@ async function handleSessionResponse(
       return sendTextMessage(message.phone, `${body}\n\n${numbered}\n\nResponde con el número.`);
     },
     sendButtons: (body: string, btns: Array<{ id: string; title: string }>) => sendButtons(message.phone, body, btns),
-    updateSession: (state, context) => updateSession(supabase, (session as any).id, state, context),
+    updateSession: async (state, context) => {
+      await updateSession(supabase, (session as any).id, state, context);
+      (session as any).state = state;
+      if (context) {
+        (session as any).context = { ...(session as any).context, ...context };
+      }
+    },
   };
 
   const pendingAction = (session as any).context?.pending_action;
