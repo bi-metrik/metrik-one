@@ -1713,7 +1713,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     gastosPorCategoria: Array<{ categoria: string; total: number }>
   }
   historialData: {
-    gastos: Array<{ id: string; titulo: string | null; monto: number; categoria: string; fecha: string }>
+    gastos: Array<{ id: string; descripcion: string | null; monto: number; categoria: string; fecha: string }>
     horas: Array<{ id: string; descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
     cobros: Array<{ id: string; notas: string | null; monto: number; fecha: string | null; estado_causacion: string; tipo_cobro: string | null }>
   }
@@ -1801,7 +1801,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: gastosData } = await db(supabase)
     .from('gastos')
-    .select('id, titulo, monto, categoria, fecha')
+    .select('id, descripcion, monto, categoria, fecha')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', id)
     .order('fecha', { ascending: false })
@@ -1964,9 +1964,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       }
     })(),
     historialData: {
-      gastos: ((gastosData ?? []) as Array<{ id: string; titulo: string | null; monto: number; categoria: string; fecha: string }>).map(g => ({
+      gastos: ((gastosData ?? []) as Array<{ id: string; descripcion: string | null; monto: number; categoria: string; fecha: string }>).map(g => ({
         id: g.id,
-        titulo: g.titulo ?? null,
+        descripcion: g.descripcion ?? null,
         monto: g.monto ?? 0,
         categoria: g.categoria ?? 'otros',
         fecha: g.fecha ?? '',

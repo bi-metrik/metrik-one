@@ -6,19 +6,19 @@ import { Receipt, Clock, Banknote, History } from 'lucide-react'
 const CATEGORIA_LABELS: Record<string, string> = {
   materiales: 'Materiales',
   transporte: 'Transporte',
-  servicios_profesionales: 'Servicios profesionales',
-  viaticos: 'Viáticos',
-  software: 'Software',
-  impuestos_seguros: 'Impuestos/Seguros',
-  mano_de_obra: 'Mano de obra',
   alimentacion: 'Alimentación',
+  servicios_profesionales: 'Servicios profesionales',
+  software: 'Software',
+  arriendo: 'Arriendo',
+  marketing: 'Marketing',
+  capacitacion: 'Capacitación',
   otros: 'Otros',
 }
 
 export interface HistorialData {
   gastos: Array<{
     id: string
-    titulo: string | null
+    descripcion: string | null
     monto: number
     categoria: string
     fecha: string
@@ -110,7 +110,7 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
                 <span className="text-[10px] text-[#6B7280] bg-[#F3F4F6] rounded px-1.5 py-0.5 shrink-0">
                   {CATEGORIA_LABELS[g.categoria] ?? g.categoria}
                 </span>
-                {g.titulo && <span className="text-[#1A1A1A] truncate">{g.titulo}</span>}
+                {g.descripcion && <span className="text-[#1A1A1A] truncate">{g.descripcion}</span>}
               </div>
               <span className="text-red-600 font-medium tabular-nums ml-2 shrink-0">{fmt(g.monto)}</span>
             </div>
