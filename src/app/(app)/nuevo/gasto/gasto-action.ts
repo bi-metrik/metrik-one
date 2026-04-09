@@ -44,7 +44,9 @@ export async function createGasto(input: {
   categoria: string
   fecha: string
   descripcion?: string
-  proyecto_id?: string | null  // UUID, 'empresa', or null
+  destino_id?: string | null  // UUID or 'empresa'
+  destino_tipo?: 'negocio' | 'proyecto' | 'empresa'
+  proyecto_id?: string | null  // legacy compat
   rubro_id?: string | null
   estado_pago?: 'pagado' | 'pendiente'
   soporte_url?: string | null
@@ -54,19 +56,38 @@ export async function createGasto(input: {
 
   if (!input.monto || input.monto <= 0) return { success: false, error: 'Monto invalido' }
 
-  // Determine tipo and real proyecto_id
+  // Determine tipo, proyecto_id, negocio_id
   let tipo: string = 'operativo'
   let proyectoId: string | null = null
+  let negocioId: string | null = null
 
-  if (input.proyecto_id === 'empresa') {
+  const destinoId = input.destino_id ?? input.proyecto_id
+  const destinoTipo = input.destino_tipo ?? (input.proyecto_id ? 'proyecto' : undefined)
+
+  if (destinoId === 'empresa' || !destinoId) {
     tipo = 'empresa'
-    proyectoId = null
-  } else if (input.proyecto_id) {
-    // Validate project is en_ejecucion
+  } else if (destinoTipo === 'negocio') {
+    // Validate negocio is activo
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: negocio } = await (supabase as any)
+      .from('negocios')
+      .select('estado')
+      .eq('id', destinoId)
+      .single()
+
+    if (!negocio) return { success: false, error: 'Negocio no encontrado' }
+    if ((negocio as any).estado !== 'activo') {
+      return { success: false, error: 'Solo se pueden registrar gastos en negocios activos' }
+    }
+
+    tipo = 'directo'
+    negocioId = destinoId
+  } else {
+    // Legacy: proyecto
     const { data: proyecto } = await supabase
       .from('proyectos')
       .select('estado')
-      .eq('id', input.proyecto_id)
+      .eq('id', destinoId)
       .single()
 
     if (!proyecto) return { success: false, error: 'Proyecto no encontrado' }
@@ -75,53 +96,82 @@ export async function createGasto(input: {
     }
 
     tipo = 'directo'
-    proyectoId = input.proyecto_id
+    proyectoId = destinoId
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const insertData: Record<string, any> = {
+    workspace_id: workspaceId,
+    fecha: input.fecha || new Date().toISOString().split('T')[0],
+    monto: input.monto,
+    categoria: input.categoria || 'otros',
+    descripcion: input.descripcion?.trim() || null,
+    deducible: false,
+    proyecto_id: proyectoId,
+    rubro_id: (proyectoId && input.rubro_id) ? input.rubro_id : null,
+    tipo,
+    estado_pago: input.estado_pago ?? 'pagado',
+    soporte_url: input.soporte_url ?? null,
+    canal_registro: 'app',
+    created_by: userId,
+  }
+  if (negocioId) insertData.negocio_id = negocioId
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: dbError } = await supabase
     .from('gastos')
-    .insert({
-      workspace_id: workspaceId,
-      fecha: input.fecha || new Date().toISOString().split('T')[0],
-      monto: input.monto,
-      categoria: input.categoria || 'otros',
-      descripcion: input.descripcion?.trim() || null,
-      deducible: false,
-      proyecto_id: proyectoId,
-      rubro_id: (proyectoId && input.rubro_id) ? input.rubro_id : null,
-      tipo,
-      estado_pago: input.estado_pago ?? 'pagado',
-      soporte_url: input.soporte_url ?? null,
-      canal_registro: 'app',
-      created_by: userId,
-    })
+    .insert(insertData as any)
 
   if (dbError) return { success: false, error: dbError.message }
 
   revalidatePath('/numeros')
   if (proyectoId) revalidatePath(`/proyectos/${proyectoId}`)
+  if (negocioId) revalidatePath(`/negocios/${negocioId}`)
   return { success: true }
 }
 
-// ── Get active projects for gasto selector ───────────────────
+// ── Get active negocios + projects for gasto selector ────────
 
-export async function getProyectosParaGasto() {
+export async function getDestinosParaGasto() {
   const { supabase, workspaceId, error } = await getWorkspace()
-  if (error || !workspaceId) return []
+  if (error || !workspaceId) return { negocios: [] as { id: string; nombre: string; codigo: string }[], proyectos: [] as { id: string; nombre: string; tipo: string; codigo: string }[] }
 
-  const { data } = await supabase
-    .from('proyectos')
-    .select('id, nombre, tipo, codigo')
-    .eq('workspace_id', workspaceId)
-    .eq('estado', 'en_ejecucion')
-    .order('nombre')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [negociosRes, proyectosRes] = await Promise.all([
+    (supabase as any)
+      .from('negocios')
+      .select('id, nombre, codigo')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'activo')
+      .order('nombre'),
+    supabase
+      .from('proyectos')
+      .select('id, nombre, tipo, codigo')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'en_ejecucion')
+      .order('nombre'),
+  ])
 
-  return (data ?? []).map(p => ({
-    id: p.id,
-    nombre: p.nombre ?? 'Sin nombre',
-    tipo: p.tipo ?? 'cliente',
-    codigo: p.codigo ?? '',
-  }))
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    negocios: (negociosRes.data ?? []).map((n: any) => ({
+      id: n.id,
+      nombre: n.nombre ?? 'Sin nombre',
+      codigo: n.codigo ?? '',
+    })),
+    proyectos: (proyectosRes.data ?? []).map(p => ({
+      id: p.id,
+      nombre: p.nombre ?? 'Sin nombre',
+      tipo: p.tipo ?? 'cliente',
+      codigo: p.codigo ?? '',
+    })),
+  }
+}
+
+/** @deprecated Use getDestinosParaGasto instead */
+export async function getProyectosParaGasto() {
+  const result = await getDestinosParaGasto()
+  return result.proyectos
 }
 
 // ── Get rubros for a specific project ────────────────────────

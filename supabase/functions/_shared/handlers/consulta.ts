@@ -5,7 +5,7 @@
 import type { HandlerContext } from '../types.ts';
 import { PIPELINE_STAGE_LABELS, STREAK_MILESTONES } from '../types.ts';
 import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, currentMonthName, currentYear, formatProject } from '../wa-format.ts';
-import { findProjects, findContacts } from '../wa-lookup.ts';
+import { findProjects, findContacts, findActiveDestinos, findDestinos } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
 
 export async function handleConsulta(ctx: HandlerContext): Promise<void> {
@@ -31,36 +31,46 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
   const { entity_hint } = parsed.fields;
 
   if (!entity_hint) {
-    // List active projects
-    const { data: projects } = await supabase
-      .from('v_proyecto_financiero')
-      .select('*')
-      .eq('workspace_id', user.workspace_id)
-      .eq('estado', 'en_ejecucion')
-      .order('updated_at', { ascending: false })
-      .limit(5);
+    // List active negocios + projects
+    const destinos = await findActiveDestinos(supabase, user.workspace_id);
 
-    if (!projects || projects.length === 0) {
-      await ctx.sendMessage('No tienes proyectos activos.');
+    if (destinos.all.length === 0) {
+      await ctx.sendMessage('No tienes negocios ni proyectos activos.');
       return;
     }
 
-    const list = projects.map((p: any, i: number) =>
-      `${i + 1}️⃣ ${formatProject(p)} — ${formatPct(Number(p.avance_porcentaje))} avance`
-    ).join('\n');
+    const list = destinos.all.slice(0, 5).map((d: any, i: number) => {
+      const label = formatProject(d);
+      const avance = d.avance_porcentaje ? ` — ${formatPct(Number(d.avance_porcentaje))} avance` : '';
+      return `${i + 1}️⃣ ${label}${avance}`;
+    }).join('\n');
 
-    await ctx.sendMessage(`📁 Tus proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
+    await ctx.sendMessage(`📁 Tus negocios/proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
     return;
   }
 
-  const projects = await findProjects(supabase, user.workspace_id, entity_hint);
+  // Search both negocios and projects
+  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
 
-  if (projects.length === 0) {
-    await ctx.sendMessage(`❌ No encontré proyecto con "${entity_hint}".`);
+  if (destinos.all.length === 0) {
+    await ctx.sendMessage(`❌ No encontré negocio o proyecto con "${entity_hint}".`);
     return;
   }
 
-  const p = projects[0];
+  const d = destinos.all[0];
+
+  if (d._tipo === 'negocio') {
+    // Negocio — show basic info
+    const precio = Number(d.precio_aprobado || d.precio_estimado || 0);
+    let msg = `📁 ${bold(formatProject(d))}`;
+    msg += `\n📊 Etapa: ${d.stage_actual || 'venta'}`;
+    if (precio > 0) msg += `\n💰 Precio: ${formatCOP(precio)}`;
+    await ctx.sendMessage(msg);
+    return;
+  }
+
+  // Project — full financial view
+  const p = d;
   const horasPct = Number(p.horas_estimadas) > 0
     ? (Number(p.horas_reales) / Number(p.horas_estimadas)) * 100
     : 0;

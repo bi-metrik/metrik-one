@@ -5,7 +5,7 @@
 import type { HandlerContext } from '../../types.ts';
 import { AMBIGUOUS_CATEGORIES, CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP, bold } from '../../wa-format.ts';
-import { findActiveProjects, matchCategory, findMatchingBorrador } from '../../wa-lookup.ts';
+import { findActiveDestinos, matchCategory, findMatchingBorrador } from '../../wa-lookup.ts';
 
 export async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
@@ -23,11 +23,11 @@ export async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
     (categoria && AMBIGUOUS_CATEGORIES.includes(categoria)) ||
     parsed.confidence < 0.75
   ) {
-    // Check if there are active projects first
-    const activeProjects = await findActiveProjects(supabase, user.workspace_id);
-    if (activeProjects.length > 0) {
+    // Check if there are active negocios/projects first
+    const destinos = await findActiveDestinos(supabase, user.workspace_id);
+    if (destinos.all.length > 0) {
       await ctx.sendMessage(
-        `💰 ${formatCOP(amount)} en ${concept || 'gasto'}.\n\n¿Este gasto es de...?\n1️⃣ 📁 Un proyecto\n2️⃣ 🏢 Mi empresa\n\nResponde con el número.`
+        `💰 ${formatCOP(amount)} en ${concept || 'gasto'}.\n\n¿Este gasto es de...?\n1️⃣ 📁 Un negocio/proyecto\n2️⃣ 🏢 Mi empresa\n\nResponde con el número.`
       );
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_OPERATIVO', pending_action: 'W02',
@@ -35,13 +35,13 @@ export async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
         parsed_fields: parsed.fields,
         disambiguation: undefined,
         options: [
-          { id: 'proyecto', label: '📁 Un proyecto' },
+          { id: 'proyecto', label: '📁 Un negocio/proyecto' },
           { id: 'empresa', label: '🏢 Mi empresa' },
         ],
       });
       return;
     }
-    // No active projects — skip disambiguation, go straight to empresa
+    // No active negocios/projects — skip disambiguation, go straight to empresa
   }
 
   // Proceed as empresa expense

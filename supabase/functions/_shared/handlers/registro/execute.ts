@@ -47,9 +47,9 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
   const c = session.context;
   const titulo = buildGastoTitle(c.parsed_fields?.concept, c.categoria || 'otros', c.amount!);
 
-  const { data: gasto, error } = await supabase.from('gastos').insert({
+  // Build insert data — support both negocio_id and proyecto_id
+  const insertData: Record<string, unknown> = {
     workspace_id: user.workspace_id,
-    proyecto_id: c.proyecto_id,
     monto: c.amount,
     categoria: c.categoria || 'otros',
     descripcion: titulo,
@@ -59,22 +59,35 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     created_by_wa_name: user.name,
     soporte_pendiente: true,
     created_by: user.user_id ?? null,
-  }).select().single();
+  };
+
+  if (c.negocio_id) {
+    insertData.negocio_id = c.negocio_id;
+  } else if (c.proyecto_id) {
+    insertData.proyecto_id = c.proyecto_id;
+  }
+
+  const { data: gasto, error } = await supabase.from('gastos').insert(insertData).select().single();
 
   if (error) throw error;
 
-  // Fetch updated project info
-  const { data: project } = await supabase
-    .from('v_proyecto_financiero')
-    .select('*')
-    .eq('proyecto_id', c.proyecto_id)
-    .single();
-
+  // Fetch updated info — try project view first (has financial data), else just confirm
   let msg: string;
-  if (project) {
-    msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(formatProject(project))}.\n📊 Presupuesto: ${formatCOP(Number(project.costo_acumulado))} / ${formatCOP(Number(project.presupuesto_total))} (${formatPct(Number(project.presupuesto_consumido_pct))})`;
+  if (c.proyecto_id) {
+    const { data: project } = await supabase
+      .from('v_proyecto_financiero')
+      .select('*')
+      .eq('proyecto_id', c.proyecto_id)
+      .single();
+
+    if (project) {
+      msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(formatProject(project))}.\n📊 Presupuesto: ${formatCOP(Number(project.costo_acumulado))} / ${formatCOP(Number(project.presupuesto_total))} (${formatPct(Number(project.presupuesto_consumido_pct))})`;
+    } else {
+      msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
+    }
   } else {
-    msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
+    // Negocio — no v_proyecto_financiero, just confirm
+    msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'negocio')}.`;
   }
 
   await ctx.sendMessage(msg);

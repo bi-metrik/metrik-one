@@ -5,7 +5,7 @@
 import type { HandlerContext } from '../../types.ts';
 import { CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP, formatPct, bold, formatElapsed, formatProject } from '../../wa-format.ts';
-import { findActiveProjects, findMatchingBorrador } from '../../wa-lookup.ts';
+import { findActiveProjects, findActiveDestinos, findMatchingBorrador } from '../../wa-lookup.ts';
 import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
 import { handleGastoDirecto, showGastoDirectoConfirmation, showBorradorMatch } from './gasto-directo.ts';
@@ -192,19 +192,38 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
   }
 
   if (selected.id === 'otro_proyecto') {
-    // Show all active projects
-    const allActive = await findActiveProjects(supabase, user.workspace_id);
-    const newOptions = allActive.slice(0, 5).map((p: any) => ({
-      id: p.proyecto_id,
-      label: formatProject(p),
+    // Show all active destinos
+    const allActive = await findActiveDestinos(supabase, user.workspace_id);
+    const newOptions = allActive.all.slice(0, 5).map((d: any) => ({
+      id: d.proyecto_id || d.id,
+      label: formatProject(d),
+      _tipo: d._tipo,
     }));
-    newOptions.push({ id: 'operativo', label: '🏢 Gasto de empresa' });
-    await ctx.sendOptions('Tus proyectos:', newOptions.map((o) => o.label));
+    newOptions.push({ id: 'operativo', label: '🏢 Gasto de empresa', _tipo: 'empresa' as any });
+    await ctx.sendOptions('Tus negocios/proyectos:', newOptions.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', { options: newOptions });
     return;
   }
 
-  // Selected a specific project — fetch details + check borrador
+  // Selected a specific destino — try negocio first, then project
+  const { data: negocio } = await supabase
+    .from('negocios')
+    .select('id, nombre, codigo, estado')
+    .eq('id', selected.id)
+    .eq('estado', 'activo')
+    .single();
+
+  if (negocio) {
+    const entity = { ...negocio, proyecto_id: negocio.id, codigo: negocio.codigo ?? '' };
+    const borrador = await findMatchingBorrador(supabase, user.workspace_id, context.parsed_fields?.concept || '', context.categoria || 'otros', context.amount!);
+    if (borrador) {
+      await showBorradorMatch(ctx, borrador, entity, context.amount!, context.categoria || 'otros');
+      return;
+    }
+    await showGastoDirectoConfirmation(ctx, entity, context.amount!, context.categoria || 'otros', context.parsed_fields?.concept, 'negocio');
+    return;
+  }
+
   const { data: project } = await supabase
     .from('v_proyecto_financiero')
     .select('*')
@@ -212,7 +231,7 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
     .single();
 
   if (!project) {
-    await ctx.sendMessage('❌ No encontré ese proyecto. Intenta de nuevo.');
+    await ctx.sendMessage('❌ No encontré ese negocio/proyecto. Intenta de nuevo.');
     await completeSession(supabase, session.id);
     return;
   }
@@ -274,17 +293,29 @@ async function handleW03Selection(ctx: HandlerContext, selected: { id: string; l
   const hours = context.parsed_fields?.hours || 0;
 
   if (selected.id === 'otro_proyecto') {
-    const allActive = await findActiveProjects(supabase, user.workspace_id);
-    const newOptions = allActive.slice(0, 5).map((p: any) => ({
-      id: p.proyecto_id,
-      label: bold(p.nombre),
+    const allActive = await findActiveDestinos(supabase, user.workspace_id);
+    const newOptions = allActive.all.slice(0, 5).map((d: any) => ({
+      id: d.proyecto_id || d.id,
+      label: bold(d.nombre),
     }));
-    await ctx.sendOptions('¿Para cuál proyecto?', newOptions.map((o) => o.label));
+    await ctx.sendOptions('¿Para cuál?', newOptions.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', { options: newOptions });
     return;
   }
 
-  // Fetch project details
+  // Try negocio first, then project
+  const { data: negocio } = await supabase
+    .from('negocios')
+    .select('id, nombre, codigo, estado')
+    .eq('id', selected.id)
+    .eq('estado', 'activo')
+    .single();
+
+  if (negocio) {
+    await showHorasConfirmation(ctx, { ...negocio, proyecto_id: negocio.id, codigo: negocio.codigo ?? '' }, hours, false);
+    return;
+  }
+
   const { data: project } = await supabase
     .from('v_proyecto_financiero')
     .select('*')
@@ -294,7 +325,7 @@ async function handleW03Selection(ctx: HandlerContext, selected: { id: string; l
   if (project) {
     await showHorasConfirmation(ctx, project, hours, false);
   } else {
-    await ctx.sendMessage('❌ No encontré ese proyecto. Intenta de nuevo.');
+    await ctx.sendMessage('❌ No encontré ese negocio/proyecto. Intenta de nuevo.');
     await completeSession(supabase, session.id);
   }
 }
@@ -349,12 +380,12 @@ async function handleW03TSelection(ctx: HandlerContext, selected: { id: string; 
   }
 
   if (selected.id === 'otro_proyecto') {
-    const allActive = await findActiveProjects(supabase, user.workspace_id);
-    const newOptions = allActive.slice(0, 5).map((p: any) => ({
-      id: p.proyecto_id,
-      label: p.nombre,
+    const allActive = await findActiveDestinos(supabase, user.workspace_id);
+    const newOptions = allActive.all.slice(0, 5).map((d: any) => ({
+      id: d.proyecto_id || d.id,
+      label: d.nombre,
     }));
-    await ctx.sendOptions('⏱️ ¿En cuál proyecto?', newOptions.map((o) => o.label));
+    await ctx.sendOptions('⏱️ ¿En cuál?', newOptions.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', { options: newOptions });
     return;
   }
@@ -399,19 +430,19 @@ async function handleW04Selection(ctx: HandlerContext, selected: { id: string; l
   const { session, supabase, user } = ctx;
   const context = session.context;
 
-  // Phase 1: Project selection (no proyecto_id yet)
+  // Phase 1: Destino selection (no proyecto_id yet)
   if (!context.proyecto_id) {
     if (selected.id === 'otro_proyecto') {
-      const allActive = await findActiveProjects(supabase, user.workspace_id);
-      const newOptions = allActive.slice(0, 5).map((p: any) => ({
-        id: p.proyecto_id,
-        label: bold(p.nombre),
+      const allActive = await findActiveDestinos(supabase, user.workspace_id);
+      const newOptions = allActive.all.slice(0, 5).map((d: any) => ({
+        id: d.proyecto_id || d.id,
+        label: bold(d.nombre),
       }));
-      await ctx.sendOptions('¿De cuál proyecto?', newOptions.map((o) => o.label));
+      await ctx.sendOptions('¿De cuál?', newOptions.map((o) => o.label));
       await ctx.updateSession('awaiting_selection', { options: newOptions });
       return;
     }
-    // User picked a project — proceed to invoice lookup
+    // User picked a destino — proceed to invoice lookup
     await proceedCobroWithProject(ctx, selected.id, selected.label.replace(/\*/g, ''));
     return;
   }

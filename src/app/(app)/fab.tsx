@@ -94,7 +94,10 @@ export default function FAB({ role }: FABProps) {
   const router = useRouter()
   const pathname = usePathname()
   const projectContextMatch = pathname.match(/^\/proyectos\/([a-f0-9-]{36})/)
+  const negocioContextMatch = pathname.match(/^\/negocios\/([a-f0-9-]{36})/)
   const contextProyectoId = projectContextMatch?.[1] ?? null
+  const contextNegocioId = negocioContextMatch?.[1] ?? null
+  const contextEntityId = contextNegocioId ?? contextProyectoId
 
   // Timer state
   const [timer, setTimer] = useState<TimerLocal>(DEFAULT_TIMER)
@@ -107,7 +110,7 @@ export default function FAB({ role }: FABProps) {
   const visibleActions = FAB_ACTIONS.filter(a =>
     a.roles.includes(role) &&
     (a.feature === undefined || FEATURES[a.feature]) &&
-    (!a.contextOnly || contextProyectoId !== null)
+    (!a.contextOnly || contextEntityId !== null)
   )
 
   // ── Hydrate timer from server ──────────────────────
@@ -182,12 +185,17 @@ export default function FAB({ role }: FABProps) {
     } else if (action.action === 'factura' && contextProyectoId) {
       router.push(`/proyectos/${contextProyectoId}?action=factura`)
     } else if (action.href) {
-      const href = contextProyectoId && action.contextAware
-        ? `${action.href}?proyecto=${contextProyectoId}`
-        : action.href
+      let href = action.href
+      if (action.contextAware) {
+        if (contextNegocioId) {
+          href = `${action.href}?negocio=${contextNegocioId}`
+        } else if (contextProyectoId) {
+          href = `${action.href}?proyecto=${contextProyectoId}`
+        }
+      }
       router.push(href)
     }
-  }, [router, contextProyectoId])
+  }, [router, contextProyectoId, contextNegocioId])
 
   const handleOpenTimer = () => {
     setOpen(false)
@@ -196,7 +204,7 @@ export default function FAB({ role }: FABProps) {
 
   const handleStartTimer = () => {
     if (!timer.proyectoId) {
-      toast.error('Selecciona un proyecto primero')
+      toast.error('Selecciona un negocio o proyecto primero')
       return
     }
     startTransition(async () => {
@@ -268,7 +276,7 @@ export default function FAB({ role }: FABProps) {
             }}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
           >
-            <option value="">Seleccionar proyecto...</option>
+            <option value="">Seleccionar...</option>
             {projects.map(p => (
               <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>
             ))}

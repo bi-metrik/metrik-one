@@ -4,7 +4,7 @@
 
 import type { HandlerContext } from '../../types.ts';
 import { formatPct, bold, formatElapsed, formatProject, formatCOP } from '../../wa-format.ts';
-import { findProjects, findProjectByCode, findActiveProjects } from '../../wa-lookup.ts';
+import { findProjects, findProjectByCode, findActiveProjects, findActiveDestinos, findDestinos, findNegocioByCode } from '../../wa-lookup.ts';
 import { completeSession } from '../../wa-session.ts';
 
 export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
@@ -99,26 +99,26 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // No active timer — find project
+  // No active timer — find destino (negocios + projects)
   if (!entity_hint) {
-    const projects = await findActiveProjects(supabase, user.workspace_id);
-    if (projects.length === 0) {
-      await ctx.sendMessage('❌ No tienes proyectos activos para iniciar timer.');
+    const destinos = await findActiveDestinos(supabase, user.workspace_id);
+    if (destinos.all.length === 0) {
+      await ctx.sendMessage('❌ No tienes negocios ni proyectos activos para iniciar timer.');
       await completeSession(supabase, ctx.session.id);
       return;
     }
 
-    if (projects.length === 1) {
-      // Auto-assign only project
-      await startTimer(ctx, projects[0].proyecto_id, projects[0].nombre);
+    if (destinos.all.length === 1) {
+      const d = destinos.all[0];
+      await startTimer(ctx, d.proyecto_id || d.id, d.nombre);
       return;
     }
 
-    const options = projects.slice(0, 5).map((p: any) => ({
-      id: p.proyecto_id,
-      label: formatProject(p),
+    const options = destinos.all.slice(0, 5).map((d: any) => ({
+      id: d.proyecto_id || d.id,
+      label: formatProject(d),
     }));
-    await ctx.sendOptions('⏱️ ¿En cuál proyecto?', options.map((o) => o.label));
+    await ctx.sendOptions('⏱️ ¿En cuál?', options.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', {
       intent: 'TIMER_INICIAR', pending_action: 'W03T',
       options,
@@ -126,28 +126,28 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Find project by entity_hint
-  const projects = await findProjects(supabase, user.workspace_id, entity_hint);
+  // Find destino by entity_hint
+  const matchedDestinos = await findDestinos(supabase, user.workspace_id, entity_hint);
 
-  if (projects.length === 1) {
-    // Single match — start timer directly
-    await startTimer(ctx, projects[0].id, formatProject(projects[0]));
+  if (matchedDestinos.all.length === 1) {
+    const d = matchedDestinos.all[0];
+    await startTimer(ctx, d.proyecto_id || d.id, formatProject(d));
     return;
   }
 
-  if (projects.length === 0) {
-    const allActive = await findActiveProjects(supabase, user.workspace_id);
-    if (allActive.length === 0) {
-      await ctx.sendMessage(`❌ No encontré "${entity_hint}" y no tienes proyectos activos.`);
+  if (matchedDestinos.all.length === 0) {
+    const allActive = await findActiveDestinos(supabase, user.workspace_id);
+    if (allActive.all.length === 0) {
+      await ctx.sendMessage(`❌ No encontré "${entity_hint}" y no tienes negocios/proyectos activos.`);
       await completeSession(supabase, ctx.session.id);
       return;
     }
-    const options = allActive.slice(0, 5).map((p: any) => ({
-      id: p.proyecto_id,
-      label: formatProject(p),
+    const options = allActive.all.slice(0, 5).map((d: any) => ({
+      id: d.proyecto_id || d.id,
+      label: formatProject(d),
     }));
     await ctx.sendOptions(
-      `❌ No encontré "${entity_hint}". Tus proyectos:`,
+      `❌ No encontré "${entity_hint}". Tus negocios/proyectos:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -158,11 +158,11 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
   }
 
   // Multiple matches
-  const timerOptions = projects.slice(0, 5).map((p: any) => ({
-    id: p.id,
-    label: formatProject(p),
+  const timerOptions = matchedDestinos.all.slice(0, 5).map((d: any) => ({
+    id: d.proyecto_id || d.id,
+    label: formatProject(d),
   }));
-  await ctx.sendOptions('⏱️ ¿En cuál proyecto?', timerOptions.map((o) => o.label));
+  await ctx.sendOptions('⏱️ ¿En cuál?', timerOptions.map((o) => o.label));
   await ctx.updateSession('awaiting_selection', {
     intent: 'TIMER_INICIAR', pending_action: 'W03T',
     options: timerOptions,

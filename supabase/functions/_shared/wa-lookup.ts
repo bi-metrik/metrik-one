@@ -53,6 +53,107 @@ export async function findActiveProjects(supabase: SupabaseClient, workspaceId: 
   return data ?? [];
 }
 
+// ── NEGOCIOS ──────────────────────────────────────────────────
+
+/** Find all active negocios for a workspace */
+export async function findActiveNegocios(supabase: SupabaseClient, workspaceId: string) {
+  const { data } = await supabase
+    .from('negocios')
+    .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual, updated_at')
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'activo')
+    .order('updated_at', { ascending: false });
+  return (data ?? []).map((n: any) => ({
+    ...n,
+    // Alias fields so formatProject() works seamlessly
+    proyecto_id: n.id,
+    codigo: n.codigo ?? '',
+  }));
+}
+
+/** Find a single active negocio by its code (e.g., "WOR 001") */
+export async function findNegocioByCode(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  code: string,
+) {
+  const codeStr = String(code).toUpperCase();
+  const { data, error } = await supabase
+    .from('negocios')
+    .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'activo')
+    .ilike('codigo', `%${codeStr}%`)
+    .limit(1)
+    .single();
+  if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findNegocioByCode error:', error);
+  if (!data) return null;
+  return { ...data, proyecto_id: data.id, codigo: data.codigo ?? '' };
+}
+
+/** Find active negocios matching hint by fuzzy name match */
+export async function findNegocios(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  hint: string,
+  limit = 5,
+) {
+  // Simple ILIKE search (pg_trgm may not be enabled on negocios yet)
+  const { data, error } = await supabase
+    .from('negocios')
+    .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'activo')
+    .ilike('nombre', `%${hint}%`)
+    .limit(limit);
+  if (error) console.error('[wa-lookup] findNegocios error:', error);
+  return (data ?? []).map((n: any) => ({
+    ...n,
+    proyecto_id: n.id,
+    codigo: n.codigo ?? '',
+  }));
+}
+
+/**
+ * Unified: find active destinos (negocios first, then projects).
+ * Returns both types with a `_tipo` field to distinguish them.
+ */
+export async function findActiveDestinos(supabase: SupabaseClient, workspaceId: string) {
+  const [negocios, projects] = await Promise.all([
+    findActiveNegocios(supabase, workspaceId),
+    findActiveProjects(supabase, workspaceId),
+  ]);
+  return {
+    negocios,
+    projects,
+    all: [
+      ...negocios.map((n: any) => ({ ...n, _tipo: 'negocio' as const })),
+      ...projects.map((p: any) => ({ ...p, _tipo: 'proyecto' as const })),
+    ],
+  };
+}
+
+/** Unified: find destinos matching hint (negocios + projects) */
+export async function findDestinos(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  hint: string,
+  limit = 5,
+) {
+  const [negocios, projects] = await Promise.all([
+    findNegocios(supabase, workspaceId, hint, limit),
+    findProjects(supabase, workspaceId, hint, limit),
+  ]);
+  return {
+    negocios,
+    projects,
+    all: [
+      ...negocios.map((n: any) => ({ ...n, _tipo: 'negocio' as const })),
+      ...projects.map((p: any) => ({ ...p, _tipo: 'proyecto' as const })),
+    ],
+  };
+}
+
 /** Find contacts matching hint */
 export async function findContacts(
   supabase: SupabaseClient,

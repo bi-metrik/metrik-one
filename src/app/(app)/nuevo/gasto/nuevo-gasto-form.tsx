@@ -12,8 +12,8 @@ const CATEGORIAS_EMPRESA = CATEGORIAS_GASTO.filter(c =>
   ['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
 )
 
-// Categorías proyecto: todas excepto las exclusivas de empresa
-const CATEGORIAS_PROYECTO = CATEGORIAS_GASTO.filter(c =>
+// Categorías proyecto/negocio: todas excepto las exclusivas de empresa
+const CATEGORIAS_DESTINO = CATEGORIAS_GASTO.filter(c =>
   !['arriendo', 'marketing', 'capacitacion', 'otros'].includes(c.value)
 )
 
@@ -28,19 +28,28 @@ const CAT_TO_RUBRO_TIPOS: Record<string, string[]> = {
 }
 
 interface Props {
-  proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
+  destinos: {
+    negocios: { id: string; nombre: string; codigo: string }[]
+    proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
+  }
+  defaultNegocioId?: string
   defaultProyectoId?: string
 }
 
-export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) {
+export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProyectoId }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
+  // Determine default selection
+  const getDefaultDestino = () => {
+    if (defaultNegocioId && destinos.negocios.some(n => n.id === defaultNegocioId)) return `negocio:${defaultNegocioId}`
+    if (defaultProyectoId && destinos.proyectos.some(p => p.id === defaultProyectoId)) return `proyecto:${defaultProyectoId}`
+    return 'empresa'
+  }
+
   // Form state
   const [monto, setMonto] = useState('')
-  // Si viene proyecto por query param y existe en la lista, pre-seleccionarlo
-  const validDefault = defaultProyectoId && proyectos.some(p => p.id === defaultProyectoId) ? defaultProyectoId : 'empresa'
-  const [proyectoId, setProyectoId] = useState<string>(validDefault)
+  const [destinoKey, setDestinoKey] = useState<string>(getDefaultDestino())
   const [rubroId, setRubroId] = useState('')
   const [categoria, setCategoria] = useState('arriendo')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
@@ -54,31 +63,33 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
   // Rubros for selected project
   const [rubros, setRubros] = useState<{ id: string; nombre: string; tipo: string | null }[]>([])
 
-  const isEmpresa = proyectoId === 'empresa'
-  const isProyecto = proyectoId !== 'empresa'
+  const isEmpresa = destinoKey === 'empresa'
+  const isNegocio = destinoKey.startsWith('negocio:')
+  const isProyecto = destinoKey.startsWith('proyecto:')
+  const destinoId = isNegocio ? destinoKey.slice(8) : isProyecto ? destinoKey.slice(9) : null
 
-  const categoriasVisibles = isEmpresa ? CATEGORIAS_EMPRESA : CATEGORIAS_PROYECTO
+  const categoriasVisibles = isEmpresa ? CATEGORIAS_EMPRESA : CATEGORIAS_DESTINO
 
-  // Fetch rubros al cambiar proyecto
+  // Fetch rubros al cambiar proyecto (solo para proyectos, negocios no tienen rubros propios)
   useEffect(() => {
-    if (isProyecto) {
-      getRubrosProyecto(proyectoId).then(data => {
+    if (isProyecto && destinoId) {
+      getRubrosProyecto(destinoId).then(data => {
         setRubros(data)
       })
     } else {
       setRubros([])
       setRubroId('')
     }
-  }, [proyectoId, isProyecto])
+  }, [destinoKey, isProyecto, destinoId])
 
-  // Reset categoría al cambiar entre empresa/proyecto
+  // Reset categoría al cambiar entre empresa/destino
   useEffect(() => {
     if (!categoriasVisibles.some(c => c.value === categoria)) {
       setCategoria(categoriasVisibles[0]?.value ?? 'otros')
     }
   }, [isEmpresa, categoriasVisibles, categoria])
 
-  // Auto-asignar rubro según categoría seleccionada (transparente para el usuario)
+  // Auto-asignar rubro según categoría seleccionada
   useEffect(() => {
     if (!isProyecto || rubros.length === 0) { setRubroId(''); return }
     const tiposCompatibles = CAT_TO_RUBRO_TIPOS[categoria] ?? []
@@ -168,7 +179,8 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
         categoria,
         fecha,
         descripcion: descripcion.trim() || undefined,
-        proyecto_id: proyectoId || null,
+        destino_id: destinoId || 'empresa',
+        destino_tipo: isNegocio ? 'negocio' : isProyecto ? 'proyecto' : 'empresa',
         rubro_id: rubroId || null,
         estado_pago: yaPagado ? 'pagado' : 'pendiente',
         soporte_url: soporteUrl,
@@ -181,6 +193,9 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
       }
     })
   }
+
+  const hasNegocios = destinos.negocios.length > 0
+  const hasProyectos = destinos.proyectos.length > 0
 
   return (
     <div className="mx-auto max-w-lg space-y-6 px-4 py-6">
@@ -213,19 +228,28 @@ export default function NuevoGastoForm({ proyectos, defaultProyectoId }: Props) 
           </div>
         </div>
 
-        {/* Proyecto / Empresa selector */}
+        {/* Destino selector: negocios + proyectos + empresa */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Proyecto</label>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Destino</label>
           <select
-            value={proyectoId}
-            onChange={e => setProyectoId(e.target.value)}
+            value={destinoKey}
+            onChange={e => setDestinoKey(e.target.value)}
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
           >
             <option value="empresa">Gasto de mi empresa</option>
-            {proyectos.length > 0 && (
+            {hasNegocios && (
+              <optgroup label="Negocios activos">
+                {destinos.negocios.map(n => (
+                  <option key={n.id} value={`negocio:${n.id}`}>
+                    {n.codigo ? `${n.codigo} — ${n.nombre}` : n.nombre}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {hasProyectos && (
               <optgroup label="Proyectos activos">
-                {proyectos.map(p => (
-                  <option key={p.id} value={p.id}>
+                {destinos.proyectos.map(p => (
+                  <option key={p.id} value={`proyecto:${p.id}`}>
                     {p.codigo} — {p.nombre}{p.tipo === 'interno' ? ' · Interno' : ''}
                   </option>
                 ))}

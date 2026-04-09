@@ -4,7 +4,7 @@
 
 import type { HandlerContext } from '../../types.ts';
 import { formatCOP, formatPct, bold, formatProject } from '../../wa-format.ts';
-import { findProjects, findProjectByCode, findActiveProjects } from '../../wa-lookup.ts';
+import { findProjects, findProjectByCode, findActiveProjects, findActiveDestinos, findDestinos, findNegocioByCode } from '../../wa-lookup.ts';
 
 export async function handleHoras(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
@@ -19,39 +19,44 @@ export async function handleHoras(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Fast path: project_code → exact match by código
+  // Fast path: project_code → exact match (try negocio first, then project)
   if (project_code) {
+    const negocio = await findNegocioByCode(supabase, user.workspace_id, project_code);
+    if (negocio) {
+      await showHorasConfirmation(ctx, negocio, hours, false);
+      return;
+    }
     const project = await findProjectByCode(supabase, user.workspace_id, project_code);
     if (project) {
       await showHorasConfirmation(ctx, project, hours, false);
       return;
     }
-    await ctx.sendMessage(`⚠️ No encontré proyecto activo con código P-${project_code}.`);
+    await ctx.sendMessage(`⚠️ No encontré negocio o proyecto activo con código ${project_code}.`);
   }
 
-  const activeProjects = await findActiveProjects(supabase, user.workspace_id);
+  const destinos = await findActiveDestinos(supabase, user.workspace_id);
 
-  if (activeProjects.length === 0) {
-    await ctx.sendMessage('❌ No tienes proyectos activos para registrar horas.');
+  if (destinos.all.length === 0) {
+    await ctx.sendMessage('❌ No tienes negocios ni proyectos activos para registrar horas.');
     return;
   }
 
-  // D88: If only 1 active project and no entity_hint, auto-assign
-  if (activeProjects.length === 1 && !entity_hint) {
-    const p = activeProjects[0];
-    await showHorasConfirmation(ctx, p, hours, true);
+  // If only 1 active destino and no entity_hint, auto-assign
+  if (destinos.all.length === 1 && !entity_hint) {
+    const d = destinos.all[0];
+    await showHorasConfirmation(ctx, d, hours, true);
     return;
   }
 
   if (!entity_hint) {
-    // Multiple projects, no hint
-    const options = activeProjects.slice(0, 5).map((p: any) => ({
-      id: p.proyecto_id,
-      label: formatProject(p),
+    // Multiple destinos, no hint
+    const options = destinos.all.slice(0, 5).map((d: any) => ({
+      id: d.proyecto_id || d.id,
+      label: formatProject(d),
     }));
 
     await ctx.sendOptions(
-      `⏱️ ${hours}h. ¿Para cuál proyecto?`,
+      `⏱️ ${hours}h. ¿Para cuál?`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -61,23 +66,22 @@ export async function handleHoras(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Find matching project
-  const projects = await findProjects(supabase, user.workspace_id, entity_hint);
+  // Find matching destinos
+  const matchedDestinos = await findDestinos(supabase, user.workspace_id, entity_hint);
 
-  if (projects.length === 1) {
-    // Single fuzzy match — go direct to confirmation
-    const p = projects[0];
-    await showHorasConfirmation(ctx, p, hours, false);
+  if (matchedDestinos.all.length === 1) {
+    const d = matchedDestinos.all[0];
+    await showHorasConfirmation(ctx, d, hours, false);
     return;
   }
 
-  if (projects.length === 0) {
-    const options = activeProjects.slice(0, 5).map((p: any) => ({
-      id: p.proyecto_id || p.id,
-      label: formatProject(p),
+  if (matchedDestinos.all.length === 0) {
+    const options = destinos.all.slice(0, 5).map((d: any) => ({
+      id: d.proyecto_id || d.id,
+      label: formatProject(d),
     }));
     await ctx.sendOptions(
-      `❌ No encontré "${entity_hint}". Tus proyectos:`,
+      `❌ No encontré "${entity_hint}". Tus negocios/proyectos:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -88,11 +92,11 @@ export async function handleHoras(ctx: HandlerContext): Promise<void> {
   }
 
   // Multiple matches
-  const options = projects.slice(0, 5).map((p: any) => ({
-    id: p.id, label: formatProject(p),
+  const options = matchedDestinos.all.slice(0, 5).map((d: any) => ({
+    id: d.proyecto_id || d.id, label: formatProject(d),
   }));
   await ctx.sendOptions(
-    `⏱️ ${hours}h. ¿Cuál proyecto?`,
+    `⏱️ ${hours}h. ¿Cuál?`,
     options.map((o) => o.label),
   );
   await ctx.updateSession('awaiting_selection', {

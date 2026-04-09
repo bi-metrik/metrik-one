@@ -4,7 +4,7 @@
 
 import type { HandlerContext } from '../../types.ts';
 import { formatCOP, bold, formatProject } from '../../wa-format.ts';
-import { findProjects, findProjectByCode, findActiveProjects } from '../../wa-lookup.ts';
+import { findProjects, findProjectByCode, findActiveProjects, findActiveDestinos, findDestinos, findNegocioByCode } from '../../wa-lookup.ts';
 
 export async function handleCobro(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
@@ -15,8 +15,17 @@ export async function handleCobro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Fast path: project_code → exact match by código
+  // Fast path: code → exact match (try negocio first, then project)
   if (project_code) {
+    const negocio = await findNegocioByCode(supabase, user.workspace_id, project_code);
+    if (negocio) {
+      await ctx.updateSession('awaiting_selection', {
+        intent: 'COBRO', pending_action: 'W04',
+        amount, parsed_fields: parsed.fields,
+      });
+      await proceedCobroWithProject(ctx, negocio.id, negocio.nombre);
+      return;
+    }
     const project = await findProjectByCode(supabase, user.workspace_id, project_code);
     if (project) {
       await ctx.updateSession('awaiting_selection', {
@@ -26,11 +35,11 @@ export async function handleCobro(ctx: HandlerContext): Promise<void> {
       await proceedCobroWithProject(ctx, project.proyecto_id, project.nombre);
       return;
     }
-    await ctx.sendMessage(`⚠️ No encontré proyecto activo con código P-${project_code}.`);
+    await ctx.sendMessage(`⚠️ No encontré negocio o proyecto activo con código ${project_code}.`);
   }
 
   if (!entity_hint) {
-    await ctx.sendMessage('¿De cuál proyecto o cliente recibiste el pago?');
+    await ctx.sendMessage('¿De cuál negocio o cliente recibiste el pago?');
     await ctx.updateSession('collecting', {
       intent: 'COBRO', pending_action: 'W04',
       amount, parsed_fields: parsed.fields,
@@ -38,10 +47,10 @@ export async function handleCobro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  const projects = await findProjects(supabase, user.workspace_id, entity_hint);
+  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
 
-  if (projects.length === 0) {
-    await ctx.sendMessage(`❌ No encontré proyecto activo con "${entity_hint}". ¿Puedes escribir el nombre del proyecto o cliente?`);
+  if (destinos.all.length === 0) {
+    await ctx.sendMessage(`❌ No encontré "${entity_hint}". ¿Puedes escribir el nombre del negocio o cliente?`);
     await ctx.updateSession('collecting', {
       intent: 'COBRO', pending_action: 'W04',
       amount, parsed_fields: parsed.fields,
@@ -49,23 +58,22 @@ export async function handleCobro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  if (projects.length === 1) {
-    // Single match — go direct to invoice lookup
-    const p = projects[0];
+  if (destinos.all.length === 1) {
+    const d = destinos.all[0];
     await ctx.updateSession('awaiting_selection', {
       intent: 'COBRO', pending_action: 'W04',
       amount, parsed_fields: parsed.fields,
     });
-    await proceedCobroWithProject(ctx, p.id, formatProject(p));
+    await proceedCobroWithProject(ctx, d.proyecto_id || d.id, formatProject(d));
     return;
   }
 
   // Multiple matches
-  const cobroOptions = projects.slice(0, 5).map((p: any) => ({
-    id: p.id, label: formatProject(p),
+  const cobroOptions = destinos.all.slice(0, 5).map((d: any) => ({
+    id: d.proyecto_id || d.id, label: formatProject(d),
   }));
   await ctx.sendOptions(
-    `💰 Cobro de ${formatCOP(amount)}. ¿Cuál proyecto?`,
+    `💰 Cobro de ${formatCOP(amount)}. ¿Cuál?`,
     cobroOptions.map((o) => o.label),
   );
   await ctx.updateSession('awaiting_selection', {
