@@ -20,12 +20,18 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
       .single();
 
     if (!existingTimer) {
+      // Try negocio first, then project
+      const negocio = await findNegocioByCode(supabase, user.workspace_id, project_code);
+      if (negocio) {
+        await startTimer(ctx, negocio.id, negocio.nombre);
+        return;
+      }
       const project = await findProjectByCode(supabase, user.workspace_id, project_code);
       if (project) {
         await startTimer(ctx, project.proyecto_id, project.nombre);
         return;
       }
-      await ctx.sendMessage(`⚠️ No encontré proyecto activo con código P-${project_code}.`);
+      await ctx.sendMessage(`⚠️ No encontré negocio o proyecto activo con código ${project_code}.`);
       // Fall through to normal flow
     }
     // If timer exists, fall through to normal flow which handles the switch logic
@@ -34,17 +40,20 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
   // Check if there's already an active timer
   const { data: existing } = await supabase
     .from('timer_activo')
-    .select('id, proyecto_id, inicio, descripcion')
+    .select('id, proyecto_id, negocio_id, inicio, descripcion')
     .eq('workspace_id', user.workspace_id)
     .single();
 
   if (existing) {
-    // Fetch project name for active timer
-    const { data: proj } = await supabase
-      .from('proyectos')
-      .select('nombre')
-      .eq('id', existing.proyecto_id)
-      .single();
+    // Fetch name for active timer (proyecto or negocio)
+    let currentName = '?';
+    if (existing.proyecto_id) {
+      const { data: proj } = await supabase.from('proyectos').select('nombre').eq('id', existing.proyecto_id).single();
+      currentName = proj?.nombre ?? '?';
+    } else if (existing.negocio_id) {
+      const { data: neg } = await supabase.from('negocios').select('nombre').eq('id', existing.negocio_id).single();
+      currentName = neg?.nombre ?? '?';
+    }
 
     const elapsed = formatElapsed(existing.inicio);
 
@@ -56,10 +65,10 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
       if (filteredProjects.length === 1) {
         const newProj = filteredProjects[0];
         await ctx.sendOptions(
-          `⏱️ Ya tienes timer en ${bold(proj?.nombre || '?')} (${elapsed.label}). ¿Cambiar a ${bold(newProj.nombre)}?`,
+          `⏱️ Ya tienes timer en ${bold(currentName)} (${elapsed.label}). ¿Cambiar a ${bold(newProj.nombre)}?`,
           [
-            `Parar ${proj?.nombre} e iniciar ${newProj.nombre}`,
-            `Seguir con ${proj?.nombre}`,
+            `Parar ${currentName} e iniciar ${newProj.nombre}`,
+            `Seguir con ${currentName}`,
           ],
         );
         await ctx.updateSession('awaiting_selection', {
@@ -68,7 +77,7 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
           parsed_fields: { entity_hint },
           options: [
             { id: 'switch', label: `Parar e iniciar ${newProj.nombre}` },
-            { id: 'keep', label: `Seguir con ${proj?.nombre}` },
+            { id: 'keep', label: `Seguir con ${currentName}` },
           ],
         });
         return;
@@ -79,9 +88,9 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
         const switchOptions = filteredProjects.slice(0, 4).map((p: any) => ({
           id: p.id, label: p.nombre,
         }));
-        switchOptions.push({ id: 'keep', label: `Seguir con ${proj?.nombre}` });
+        switchOptions.push({ id: 'keep', label: `Seguir con ${currentName}` });
         await ctx.sendOptions(
-          `⏱️ Ya tienes timer en ${bold(proj?.nombre || '?')} (${elapsed.label}). ¿Cambiar a cuál?`,
+          `⏱️ Ya tienes timer en ${bold(currentName)} (${elapsed.label}). ¿Cambiar a cuál?`,
           switchOptions.map((o) => o.label),
         );
         await ctx.updateSession('awaiting_selection', {
@@ -94,7 +103,7 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
     }
 
     // Same project or no entity_hint — just inform
-    await ctx.sendMessage(`⏱️ Ya tienes timer activo en ${bold(proj?.nombre || '?')} (${elapsed.label}).\n\nEscribe *parar* cuando termines.`);
+    await ctx.sendMessage(`⏱️ Ya tienes timer activo en ${bold(currentName)} (${elapsed.label}).\n\nEscribe *parar* cuando termines.`);
     await completeSession(supabase, ctx.session.id);
     return;
   }
@@ -169,20 +178,34 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
   });
 }
 
-export async function startTimer(ctx: HandlerContext, proyectoId: string, proyectoNombre: string): Promise<void> {
+export async function startTimer(ctx: HandlerContext, destinoId: string, destinoNombre: string): Promise<void> {
   const { supabase, user } = ctx;
 
-  const { error } = await supabase.from('timer_activo').insert({
+  // Check if it's a negocio or proyecto
+  const { data: negocio } = await supabase
+    .from('negocios')
+    .select('id')
+    .eq('id', destinoId)
+    .maybeSingle();
+
+  const insertData: { workspace_id: string; inicio: string; proyecto_id?: string; negocio_id?: string } = {
     workspace_id: user.workspace_id,
-    proyecto_id: proyectoId,
     inicio: new Date().toISOString(),
-  });
+  };
+
+  if (negocio) {
+    insertData.negocio_id = destinoId;
+  } else {
+    insertData.proyecto_id = destinoId;
+  }
+
+  const { error } = await supabase.from('timer_activo').insert(insertData);
 
   if (error) {
     console.error('[timer] Start error:', error);
     await ctx.sendMessage('❌ Error al iniciar timer. Intenta de nuevo.');
   } else {
-    await ctx.sendMessage(`⏱️ Timer iniciado en ${bold(proyectoNombre)}.\n\nCuando termines escribe *parar*.`);
+    await ctx.sendMessage(`⏱️ Timer iniciado en ${bold(destinoNombre)}.\n\nCuando termines escribe *parar*.`);
   }
 
   await completeSession(supabase, ctx.session.id);
@@ -194,7 +217,7 @@ export async function handleTimerParar(ctx: HandlerContext): Promise<void> {
   // Find active timer
   const { data: timer } = await supabase
     .from('timer_activo')
-    .select('id, proyecto_id, inicio')
+    .select('id, proyecto_id, negocio_id, inicio')
     .eq('workspace_id', user.workspace_id)
     .single();
 
@@ -217,9 +240,13 @@ export async function handleTimerParar(ctx: HandlerContext): Promise<void> {
 
   // Insert into horas
   const now = new Date();
-  const { error } = await supabase.from('horas').insert({
+  const horasInsert: {
+    workspace_id: string; fecha: string; horas: number;
+    inicio: string; fin: string; timer_activo: boolean;
+    canal_registro: string; created_by_wa_name: string;
+    proyecto_id?: string; negocio_id?: string;
+  } = {
     workspace_id: user.workspace_id,
-    proyecto_id: timer.proyecto_id,
     fecha: now.toISOString().slice(0, 10),
     horas: elapsed.hours,
     inicio: timer.inicio,
@@ -227,7 +254,11 @@ export async function handleTimerParar(ctx: HandlerContext): Promise<void> {
     timer_activo: true,
     canal_registro: 'whatsapp',
     created_by_wa_name: user.name,
-  });
+  };
+  if (timer.proyecto_id) horasInsert.proyecto_id = timer.proyecto_id;
+  if (timer.negocio_id) horasInsert.negocio_id = timer.negocio_id;
+
+  const { error } = await supabase.from('horas').insert(horasInsert);
 
   if (error) {
     console.error('[timer] Save horas error:', error);
@@ -239,20 +270,25 @@ export async function handleTimerParar(ctx: HandlerContext): Promise<void> {
   // Delete timer
   await supabase.from('timer_activo').delete().eq('id', timer.id);
 
-  // Fetch updated project metrics
-  const { data: project } = await supabase
-    .from('v_proyecto_financiero')
-    .select('*')
-    .eq('proyecto_id', timer.proyecto_id)
-    .single();
+  // Fetch updated metrics — only for proyectos (negocios don't have v_proyecto_financiero)
+  if (timer.proyecto_id) {
+    const { data: project } = await supabase
+      .from('v_proyecto_financiero')
+      .select('*')
+      .eq('proyecto_id', timer.proyecto_id)
+      .single();
 
-  if (project) {
-    const horasPct = Number(project.horas_estimadas) > 0
-      ? (Number(project.horas_reales) / Number(project.horas_estimadas)) * 100
-      : 0;
-    const msg = `✅ ${elapsed.label} registradas en ${bold(project.nombre)}.\n\n📁 ${bold(project.nombre)}\n├ Horas: ${Number(project.horas_reales)} / ${Number(project.horas_estimadas)}h (${formatPct(horasPct)})\n├ Presupuesto usado: ${formatPct(Number(project.presupuesto_consumido_pct))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
-    await ctx.sendMessage(msg);
+    if (project) {
+      const horasPct = Number(project.horas_estimadas) > 0
+        ? (Number(project.horas_reales) / Number(project.horas_estimadas)) * 100
+        : 0;
+      const msg = `✅ ${elapsed.label} registradas en ${bold(project.nombre)}.\n\n📁 ${bold(project.nombre)}\n├ Horas: ${Number(project.horas_reales)} / ${Number(project.horas_estimadas)}h (${formatPct(horasPct)})\n├ Presupuesto usado: ${formatPct(Number(project.presupuesto_consumido_pct))}\n└ Cartera: ${formatCOP(Number(project.cartera))}`;
+      await ctx.sendMessage(msg);
+    } else {
+      await ctx.sendMessage(`✅ ${elapsed.label} registradas.`);
+    }
   } else {
+    // For negocios, just confirm
     await ctx.sendMessage(`✅ ${elapsed.label} registradas.`);
   }
 
@@ -264,7 +300,7 @@ export async function handleTimerEstado(ctx: HandlerContext): Promise<void> {
 
   const { data: timer } = await supabase
     .from('timer_activo')
-    .select('id, proyecto_id, inicio')
+    .select('id, proyecto_id, negocio_id, inicio')
     .eq('workspace_id', user.workspace_id)
     .single();
 
@@ -274,13 +310,16 @@ export async function handleTimerEstado(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  const { data: proj } = await supabase
-    .from('proyectos')
-    .select('nombre')
-    .eq('id', timer.proyecto_id)
-    .single();
+  let nombre = '?';
+  if (timer.proyecto_id) {
+    const { data: proj } = await supabase.from('proyectos').select('nombre').eq('id', timer.proyecto_id).single();
+    nombre = proj?.nombre ?? '?';
+  } else if (timer.negocio_id) {
+    const { data: neg } = await supabase.from('negocios').select('nombre').eq('id', timer.negocio_id).single();
+    nombre = neg?.nombre ?? '?';
+  }
 
   const elapsed = formatElapsed(timer.inicio);
-  await ctx.sendMessage(`⏱️ Llevas ${bold(elapsed.label)} en ${bold(proj?.nombre || '?')}.\n\nEscribe *parar* para registrar.`);
+  await ctx.sendMessage(`⏱️ Llevas ${bold(elapsed.label)} en ${bold(nombre)}.\n\nEscribe *parar* para registrar.`);
   await completeSession(supabase, ctx.session.id);
 }

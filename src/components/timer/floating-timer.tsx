@@ -12,14 +12,14 @@ const STORAGE_KEY = 'metrik-timer-v2'
 
 interface LocalState {
   isRunning: boolean
-  proyectoId: string
+  proyectoId: string | null
   proyectoNombre: string
   inicio: string | null
 }
 
 const DEFAULT_STATE: LocalState = {
   isRunning: false,
-  proyectoId: '',
+  proyectoId: null,
   proyectoNombre: '',
   inicio: null,
 }
@@ -181,12 +181,12 @@ export default function FloatingTimer() {
           <div>
             <label className="text-xs text-muted-foreground">Proyecto</label>
             <select
-              value={state.proyectoId}
+              value={state.proyectoId ?? ''}
               onChange={e => {
                 const proj = projects.find(p => p.id === e.target.value)
                 setState(prev => ({
                   ...prev,
-                  proyectoId: e.target.value,
+                  proyectoId: e.target.value || null,
                   proyectoNombre: proj?.name || '',
                 }))
               }}

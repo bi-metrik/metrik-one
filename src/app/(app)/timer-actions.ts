@@ -7,7 +7,8 @@ import { revalidatePath } from 'next/cache'
 
 export interface ActiveTimer {
   id: string
-  proyecto_id: string
+  proyecto_id: string | null
+  negocio_id: string | null
   proyecto_nombre: string
   inicio: string
   descripcion: string | null
@@ -15,19 +16,40 @@ export interface ActiveTimer {
 
 // ── Start Timer ───────────────────────────────────────────
 
-export async function startTimer(proyectoId: string, descripcion?: string) {
+export async function startTimer(
+  destinoId: string,
+  destinoTipo: 'negocio' | 'proyecto' = 'proyecto',
+  descripcion?: string,
+) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Validate project is in execution
-  const { data: proyecto } = await supabase
-    .from('proyectos')
-    .select('id, nombre, estado')
-    .eq('id', proyectoId)
-    .single()
+  let destinoNombre = 'Sin nombre'
 
-  if (!proyecto) return { success: false, error: 'Proyecto no encontrado' }
-  if (proyecto.estado !== 'en_ejecucion') return { success: false, error: 'El proyecto no esta en ejecucion' }
+  if (destinoTipo === 'negocio') {
+    // Validate negocio is active — negocios not in database.ts types yet
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: negocio } = await (supabase as any)
+      .from('negocios')
+      .select('id, nombre, estado')
+      .eq('id', destinoId)
+      .single()
+
+    if (!negocio) return { success: false, error: 'Negocio no encontrado' }
+    if (negocio.estado !== 'activo') return { success: false, error: 'El negocio no esta activo' }
+    destinoNombre = negocio.nombre ?? 'Sin nombre'
+  } else {
+    // Validate project is in execution
+    const { data: proyecto } = await supabase
+      .from('proyectos')
+      .select('id, nombre, estado')
+      .eq('id', destinoId)
+      .single()
+
+    if (!proyecto) return { success: false, error: 'Proyecto no encontrado' }
+    if (proyecto.estado !== 'en_ejecucion') return { success: false, error: 'El proyecto no esta en ejecucion' }
+    destinoNombre = proyecto.nombre ?? 'Sin nombre'
+  }
 
   // Stop any existing timer first (delete old, but don't create horas — they lose that time)
   await supabase
@@ -36,26 +58,33 @@ export async function startTimer(proyectoId: string, descripcion?: string) {
     .eq('workspace_id', workspaceId)
 
   // Insert new timer
-  const { data: timer, error: insertError } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const insertPayload: Record<string, any> = {
+    workspace_id: workspaceId,
+    inicio: new Date().toISOString(),
+    descripcion: descripcion?.trim() || null,
+    proyecto_id: destinoTipo === 'proyecto' ? destinoId : null,
+    negocio_id: destinoTipo === 'negocio' ? destinoId : null,
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: timer, error: insertError } = await (supabase as any)
     .from('timer_activo')
-    .insert({
-      workspace_id: workspaceId,
-      proyecto_id: proyectoId,
-      inicio: new Date().toISOString(),
-      descripcion: descripcion?.trim() || null,
-    })
-    .select('id, proyecto_id, inicio, descripcion')
+    .insert(insertPayload)
+    .select('id, proyecto_id, negocio_id, inicio, descripcion')
     .single()
 
   if (insertError) return { success: false, error: insertError.message }
 
   revalidatePath('/proyectos')
+  revalidatePath('/negocios')
   return {
     success: true,
     timer: {
       id: timer.id,
-      proyecto_id: timer.proyecto_id,
-      proyecto_nombre: proyecto.nombre ?? 'Sin nombre',
+      proyecto_id: timer.proyecto_id ?? null,
+      negocio_id: timer.negocio_id ?? null,
+      proyecto_nombre: destinoNombre,
       inicio: timer.inicio,
       descripcion: timer.descripcion,
     } as ActiveTimer,
@@ -68,10 +97,11 @@ export async function stopTimer() {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Get active timer
-  const { data: timer } = await supabase
+  // Get active timer (including negocio_id)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: timer } = await (supabase as any)
     .from('timer_activo')
-    .select('id, proyecto_id, inicio, descripcion')
+    .select('id, proyecto_id, negocio_id, inicio, descripcion')
     .eq('workspace_id', workspaceId)
     .single()
 
@@ -91,6 +121,7 @@ export async function stopTimer() {
       .eq('id', timer.id)
 
     revalidatePath('/proyectos')
+    if (timer.negocio_id) revalidatePath('/negocios')
     return { success: true, horasRegistradas: 0, descartado: true }
   }
 
@@ -104,21 +135,26 @@ export async function stopTimer() {
     .limit(1)
     .single()
 
-  // Insert horas record
-  const { error: horasError } = await supabase
+  // Insert horas record with negocio_id and/or proyecto_id
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const horasPayload: Record<string, any> = {
+    workspace_id: workspaceId,
+    proyecto_id: timer.proyecto_id ?? null,
+    negocio_id: timer.negocio_id ?? null,
+    fecha: new Date().toISOString().split('T')[0],
+    horas: elapsedHours,
+    descripcion: timer.descripcion || null,
+    inicio: timer.inicio,
+    fin: fin.toISOString(),
+    timer_activo: true,
+    canal_registro: 'app',
+    staff_id: principalStaff?.id ?? null,
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: horasError } = await (supabase as any)
     .from('horas')
-    .insert({
-      workspace_id: workspaceId,
-      proyecto_id: timer.proyecto_id,
-      fecha: new Date().toISOString().split('T')[0],
-      horas: elapsedHours,
-      descripcion: timer.descripcion || null,
-      inicio: timer.inicio,
-      fin: fin.toISOString(),
-      timer_activo: true,
-      canal_registro: 'app',
-      staff_id: principalStaff?.id ?? null,
-    })
+    .insert(horasPayload)
 
   if (horasError) return { success: false, error: horasError.message }
 
@@ -129,6 +165,7 @@ export async function stopTimer() {
     .eq('id', timer.id)
 
   revalidatePath('/proyectos')
+  if (timer.negocio_id) revalidatePath('/negocios')
   return { success: true, horasRegistradas: elapsedHours }
 }
 
@@ -138,36 +175,78 @@ export async function getActiveTimer(): Promise<ActiveTimer | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
-  const { data } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
     .from('timer_activo')
-    .select('id, proyecto_id, inicio, descripcion, proyectos(nombre)')
+    .select('id, proyecto_id, negocio_id, inicio, descripcion')
     .eq('workspace_id', workspaceId)
     .single()
 
   if (!data) return null
 
+  // Resolve name: try proyecto first, then negocio
+  let nombre = 'Sin nombre'
+
+  if (data.proyecto_id) {
+    const { data: proyecto } = await supabase
+      .from('proyectos')
+      .select('nombre')
+      .eq('id', data.proyecto_id)
+      .single()
+    nombre = proyecto?.nombre ?? 'Sin nombre'
+  } else if (data.negocio_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: negocio } = await (supabase as any)
+      .from('negocios')
+      .select('nombre')
+      .eq('id', data.negocio_id)
+      .single()
+    nombre = negocio?.nombre ?? 'Sin nombre'
+  }
+
   return {
     id: data.id,
-    proyecto_id: data.proyecto_id,
-    proyecto_nombre: (data.proyectos as unknown as { nombre: string })?.nombre ?? 'Sin nombre',
+    proyecto_id: data.proyecto_id ?? null,
+    negocio_id: data.negocio_id ?? null,
+    proyecto_nombre: nombre,
     inicio: data.inicio,
     descripcion: data.descripcion,
   }
 }
 
-// ── Get Active Projects (for timer selector) ──────────────
-// Timer requires proyecto_id FK — negocios no son compatibles con timer aún
+// ── Get Destinos for Timer (negocios + proyectos) ─────────
 
-export async function getProyectosActivos() {
+export async function getDestinosParaTimer() {
   const { supabase, workspaceId, error } = await getWorkspace()
-  if (error || !workspaceId) return []
+  if (error || !workspaceId) return { negocios: [], proyectos: [] }
 
-  const { data } = await supabase
-    .from('proyectos')
-    .select('id, nombre, codigo')
-    .eq('workspace_id', workspaceId)
-    .eq('estado', 'en_ejecucion')
-    .order('codigo')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [negociosRes, proyectosRes] = await Promise.all([
+    (supabase as any)
+      .from('negocios')
+      .select('id, nombre, codigo')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'activo')
+      .order('nombre'),
+    supabase
+      .from('proyectos')
+      .select('id, nombre, codigo')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'en_ejecucion')
+      .order('codigo'),
+  ])
 
-  return (data ?? []).map(p => ({ id: p.id, name: p.nombre ?? 'Sin nombre', code: p.codigo ?? '' }))
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    negocios: (negociosRes.data ?? []).map((n: any) => ({ id: n.id, name: n.nombre ?? 'Sin nombre', code: n.codigo ?? '' })),
+    proyectos: (proyectosRes.data ?? []).map(p => ({ id: p.id, name: p.nombre ?? 'Sin nombre', code: p.codigo ?? '' })),
+  }
+}
+
+// ── Deprecated: backwards compat wrapper ──────────────────
+
+/** @deprecated Use getDestinosParaTimer() instead */
+export async function getProyectosActivos() {
+  const destinos = await getDestinosParaTimer()
+  return destinos.proyectos
 }

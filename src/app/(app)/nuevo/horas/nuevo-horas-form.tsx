@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
-import { addHoras } from './horas-action'
+import { addHorasDestino } from './horas-action'
 
 const VINCULO_LABEL: Record<string, string> = {
   empleado: 'Empleado',
@@ -13,21 +13,31 @@ const VINCULO_LABEL: Record<string, string> = {
 }
 
 interface Props {
-  proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
+  destinos: {
+    negocios: { id: string; nombre: string; codigo: string }[]
+    proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
+  }
   staff: { id: string; full_name: string; tipo_vinculo: string | null; es_principal: boolean | null }[]
   defaultProyectoId?: string
+  defaultNegocioId?: string
 }
 
-export default function NuevoHorasForm({ proyectos, staff, defaultProyectoId }: Props) {
+export default function NuevoHorasForm({ destinos, staff, defaultProyectoId, defaultNegocioId }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  // Pre-select project if defaultProyectoId exists in list
-  const validDefault = defaultProyectoId && proyectos.some(p => p.id === defaultProyectoId)
-    ? defaultProyectoId
-    : ''
+  // Compute default destinoKey from search params
+  function getDefaultDestino(): string {
+    if (defaultNegocioId && destinos.negocios.some(n => n.id === defaultNegocioId)) {
+      return `negocio:${defaultNegocioId}`
+    }
+    if (defaultProyectoId && destinos.proyectos.some(p => p.id === defaultProyectoId)) {
+      return `proyecto:${defaultProyectoId}`
+    }
+    return ''
+  }
 
-  const [proyectoId, setProyectoId] = useState<string>(validDefault)
+  const [destinoKey, setDestinoKey] = useState<string>(getDefaultDestino())
   const [staffId, setStaffId] = useState<string>(
     staff.find(s => s.es_principal)?.id ?? staff[0]?.id ?? ''
   )
@@ -35,9 +45,18 @@ export default function NuevoHorasForm({ proyectos, staff, defaultProyectoId }: 
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [descripcion, setDescripcion] = useState('')
 
+  // Parse destinoKey
+  const isNegocio = destinoKey.startsWith('negocio:')
+  const isProyecto = destinoKey.startsWith('proyecto:')
+  const destinoId = isNegocio ? destinoKey.slice(8) : isProyecto ? destinoKey.slice(9) : null
+  const destinoTipo: 'negocio' | 'proyecto' | null = isNegocio ? 'negocio' : isProyecto ? 'proyecto' : null
+
+  const hasNegocios = destinos.negocios.length > 0
+  const hasProyectos = destinos.proyectos.length > 0
+
   const handleSubmit = () => {
-    if (!proyectoId) {
-      toast.error('Selecciona un proyecto')
+    if (!destinoId || !destinoTipo) {
+      toast.error('Selecciona un destino')
       return
     }
     const horasNum = parseFloat(horas)
@@ -46,7 +65,7 @@ export default function NuevoHorasForm({ proyectos, staff, defaultProyectoId }: 
       return
     }
     startTransition(async () => {
-      const res = await addHoras(proyectoId, {
+      const res = await addHorasDestino(destinoId, destinoTipo, {
         fecha,
         horas: horasNum,
         descripcion: descripcion.trim() || undefined,
@@ -77,19 +96,28 @@ export default function NuevoHorasForm({ proyectos, staff, defaultProyectoId }: 
       </div>
 
       <div className="space-y-4 rounded-lg border p-4">
-        {/* Proyecto */}
+        {/* Destino */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Proyecto *</label>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Destino *</label>
           <select
-            value={proyectoId}
-            onChange={e => setProyectoId(e.target.value)}
+            value={destinoKey}
+            onChange={e => setDestinoKey(e.target.value)}
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
           >
-            <option value="">Seleccionar proyecto...</option>
-            {proyectos.length > 0 && (
+            <option value="">Seleccionar...</option>
+            {hasNegocios && (
+              <optgroup label="Negocios activos">
+                {destinos.negocios.map(n => (
+                  <option key={n.id} value={`negocio:${n.id}`}>
+                    {n.codigo ? `${n.codigo} — ${n.nombre}` : n.nombre}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {hasProyectos && (
               <optgroup label="Proyectos activos">
-                {proyectos.map(p => (
-                  <option key={p.id} value={p.id}>
+                {destinos.proyectos.map(p => (
+                  <option key={p.id} value={`proyecto:${p.id}`}>
                     {p.codigo} — {p.nombre}{p.tipo === 'interno' ? ' · Interno' : ''}
                   </option>
                 ))}
@@ -164,7 +192,7 @@ export default function NuevoHorasForm({ proyectos, staff, defaultProyectoId }: 
 
         <button
           onClick={handleSubmit}
-          disabled={isPending || !proyectoId || !horas}
+          disabled={isPending || !destinoKey || !horas}
           className="w-full rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {isPending ? 'Registrando...' : 'Registrar horas'}

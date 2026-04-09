@@ -74,14 +74,14 @@ const STORAGE_KEY = 'metrik-timer-v2'
 
 interface TimerLocal {
   isRunning: boolean
-  proyectoId: string
+  proyectoId: string | null
   proyectoNombre: string
   inicio: string | null
 }
 
 const DEFAULT_TIMER: TimerLocal = {
   isRunning: false,
-  proyectoId: '',
+  proyectoId: null,
   proyectoNombre: '',
   inicio: null,
 }
@@ -203,12 +203,13 @@ export default function FAB({ role }: FABProps) {
   }
 
   const handleStartTimer = () => {
-    if (!timer.proyectoId) {
+    const destinoId = timer.proyectoId
+    if (!destinoId) {
       toast.error('Selecciona un negocio o proyecto primero')
       return
     }
     startTransition(async () => {
-      const res = await startTimer(timer.proyectoId)
+      const res = await startTimer(destinoId)
       if (res.success && res.timer) {
         const s: TimerLocal = {
           isRunning: true,
@@ -269,10 +270,10 @@ export default function FAB({ role }: FABProps) {
           </div>
 
           <select
-            value={timer.proyectoId}
+            value={timer.proyectoId ?? ''}
             onChange={e => {
               const proj = projects.find(p => p.id === e.target.value)
-              setTimer(prev => ({ ...prev, proyectoId: e.target.value, proyectoNombre: proj?.name || '' }))
+              setTimer(prev => ({ ...prev, proyectoId: e.target.value || null, proyectoNombre: proj?.name || '' }))
             }}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
           >

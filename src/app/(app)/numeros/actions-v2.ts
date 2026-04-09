@@ -149,6 +149,7 @@ export async function getNumeros(mesRef?: string) {
     // Semáforo indicators
     empresasRes,
     oportunidadesRes,
+    negociosVentaRes,
     horasRecientesRes,
     gastosFijosBorradoresRes,
     // D129: Nómina desde staff
@@ -161,7 +162,9 @@ export async function getNumeros(mesRef?: string) {
     cxpRes,
     // KPIs negocio
     pipelineActivoRes,
+    negociosPipelineRes,
     valorContratadoRes,
+    negociosContratadosRes,
   ] = await Promise.all([
     // Latest bank balance (order by created_at — fecha can be NULL in old records)
     supabase
@@ -187,10 +190,11 @@ export async function getNumeros(mesRef?: string) {
       .gte('fecha', prevStart)
       .lt('fecha', prevEnd),
 
-    // Gastos del mes (include proyecto_id for COH-5, categoria/soporte for D141/D142)
-    supabase
+    // Gastos del mes (include proyecto_id/negocio_id for COH-5, categoria/soporte for D141/D142)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
       .from('gastos')
-      .select('monto, proyecto_id, categoria, soporte_url')
+      .select('monto, proyecto_id, negocio_id, categoria, soporte_url')
       .eq('workspace_id', workspaceId)
       .gte('fecha', mesStart)
       .lt('fecha', mesEnd),
@@ -280,6 +284,15 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .in('etapa', ['contacto_inicial', 'propuesta', 'negociacion']),
 
+    // Semáforo: negocios activos en venta (recent activity)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('id, updated_at')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'activo')
+      .eq('stage_actual', 'venta'),
+
     // Semáforo: horas registradas recientes
     supabase
       .from('horas')
@@ -331,12 +344,30 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .not('etapa', 'in', '(ganada,perdida)'),
 
+    // KPI: Pipeline activo — negocios en etapa venta
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('precio_estimado')
+      .eq('workspace_id', workspaceId)
+      .eq('stage_actual', 'venta')
+      .eq('estado', 'activo'),
+
     // KPI: Valor contratado — proyectos en ejecución
     supabase
       .from('proyectos')
       .select('presupuesto_total')
       .eq('workspace_id', workspaceId)
       .eq('estado', 'en_ejecucion'),
+
+    // KPI: Valor contratado — negocios en ejecución/cobro
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('precio_aprobado')
+      .eq('workspace_id', workspaceId)
+      .in('stage_actual', ['ejecucion', 'cobro'])
+      .eq('estado', 'activo'),
   ])
 
   // ── Calculate values ─────────────────────────────
@@ -352,19 +383,20 @@ export async function getNumeros(mesRef?: string) {
   const ingresosMesAnterior = recaudoMesAnterior
 
   // Gastos
-  const gastosData = gastosRes.data ?? []
-  const gastosMes = gastosData.reduce((s, g) => s + Number(g.monto), 0)
-  const gastosProyectosMes = gastosData.filter(g => g.proyecto_id).reduce((s, g) => s + Number(g.monto), 0)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gastosData: any[] = gastosRes.data ?? []
+  const gastosMes = gastosData.reduce((s: number, g: { monto: number }) => s + Number(g.monto), 0)
+  const gastosProyectosMes = gastosData.filter((g: { proyecto_id?: string; negocio_id?: string }) => g.proyecto_id || g.negocio_id).reduce((s: number, g: { monto: number }) => s + Number(g.monto), 0)
   const gastosMesAnterior = (gastosPrevRes.data ?? []).reduce((s, g) => s + Number(g.monto), 0)
 
   // D141: Deducibles from variable gastos (categorías deducibles + soporte)
   const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
   const gastosDeduciblesMes = gastosData
-    .filter(g => CATEGORIAS_DEDUCIBLES.includes(g.categoria) && g.soporte_url)
-    .reduce((s, g) => s + Number(g.monto), 0)
+    .filter((g: { categoria: string; soporte_url: string | null }) => CATEGORIAS_DEDUCIBLES.includes(g.categoria) && g.soporte_url)
+    .reduce((s: number, g: { monto: number }) => s + Number(g.monto), 0)
   const gastosSinSoporteMes = gastosData
-    .filter(g => CATEGORIAS_DEDUCIBLES.includes(g.categoria) && !g.soporte_url)
-    .reduce((s, g) => s + Number(g.monto), 0)
+    .filter((g: { categoria: string; soporte_url: string | null }) => CATEGORIAS_DEDUCIBLES.includes(g.categoria) && !g.soporte_url)
+    .reduce((s: number, g: { monto: number }) => s + Number(g.monto), 0)
 
   // D141: Régimen fiscal
   const regimenFiscal = (fiscalProfileRes.data?.tax_regime as 'ordinario' | 'simple' | null) ?? null
@@ -374,9 +406,15 @@ export async function getNumeros(mesRef?: string) {
   const cxpTotal = cxpData.reduce((s, g) => s + Number(g.monto), 0)
   const cxpCount = cxpData.length
 
-  // KPIs negocio
-  const pipelineActivo = (pipelineActivoRes.data ?? []).reduce((s, o) => s + Number(o.valor_estimado ?? 0), 0)
-  const valorContratado = (valorContratadoRes.data ?? []).reduce((s, p) => s + Number(p.presupuesto_total ?? 0), 0)
+  // KPIs negocio (oportunidades + negocios)
+  const pipelineActivo =
+    (pipelineActivoRes.data ?? []).reduce((s, o) => s + Number(o.valor_estimado ?? 0), 0) +
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (negociosPipelineRes.data ?? []).reduce((s: number, n: any) => s + Number(n.precio_estimado ?? 0), 0)
+  const valorContratado =
+    (valorContratadoRes.data ?? []).reduce((s, p) => s + Number(p.presupuesto_total ?? 0), 0) +
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (negociosContratadosRes.data ?? []).reduce((s: number, n: any) => s + Number(n.precio_aprobado ?? 0), 0)
 
   // Gastos avg (3 months)
   const gastos3m = gastos3mRes.data ?? []
@@ -571,7 +609,7 @@ export async function getNumeros(mesRef?: string) {
     metaVentas,
     empresas: empresasRes.data ?? [],
     diasDesdeUltimoSaldo: diasDesdeUltimo,
-    oportunidades: oportunidadesRes.data ?? [],
+    oportunidades: [...(oportunidadesRes.data ?? []), ...(negociosVentaRes.data ?? [])],
     gastosFijosBorradores: gastosFijosBorradoresRes.data ?? [],
     horasRecientes: (horasRecientesRes.data?.length ?? 0) > 0,
     diferencia,
