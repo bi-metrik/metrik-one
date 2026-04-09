@@ -290,7 +290,7 @@ export async function getNumeros(mesRef?: string) {
       .from('negocios')
       .select('id, updated_at')
       .eq('workspace_id', workspaceId)
-      .eq('estado', 'activo')
+      .eq('estado', 'abierto')
       .eq('stage_actual', 'venta'),
 
     // Semáforo: horas registradas recientes
@@ -344,14 +344,14 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .not('etapa', 'in', '(ganada,perdida)'),
 
-    // KPI: Pipeline activo — negocios en etapa venta
+    // KPI: En venta — negocios en etapa venta
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('negocios')
       .select('precio_estimado')
       .eq('workspace_id', workspaceId)
       .eq('stage_actual', 'venta')
-      .eq('estado', 'activo'),
+      .eq('estado', 'abierto'),
 
     // KPI: Valor contratado — proyectos en ejecución
     supabase
@@ -367,7 +367,7 @@ export async function getNumeros(mesRef?: string) {
       .select('precio_aprobado')
       .eq('workspace_id', workspaceId)
       .in('stage_actual', ['ejecucion', 'cobro'])
-      .eq('estado', 'activo'),
+      .eq('estado', 'abierto'),
   ])
 
   // ── Calculate values ─────────────────────────────
