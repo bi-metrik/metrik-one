@@ -4,6 +4,11 @@
 -- ============================================================
 
 -- 1. Actualizar apply_plantilla_to_workspace para incluir nuevos bloques en venta
+-- Logica por etapa:
+--   Venta orden 1 (Contacto/Solicitud): solo equipo
+--   Venta orden 2 (Propuesta): cotizacion (gate) + cronograma + equipo
+--   Venta orden 3 (Contrato, solo Ejecuto proyectos): aprobacion (gate) + equipo
+--   Atiendo clientes (1 sola etapa venta): cotizacion + cronograma + equipo (sin gates)
 CREATE OR REPLACE FUNCTION apply_plantilla_to_workspace(
   p_workspace_id UUID,
   p_linea_id     UUID
@@ -13,8 +18,8 @@ DECLARE
   v_bloque RECORD;
   v_orden INTEGER;
   v_linea_nombre TEXT;
+  v_es_gate BOOLEAN;
 BEGIN
-  -- Obtener nombre de la linea para logica condicional
   SELECT nombre INTO v_linea_nombre FROM lineas_negocio WHERE id = p_linea_id;
 
   FOR v_etapa IN
@@ -25,19 +30,40 @@ BEGIN
       SELECT bd.id, bd.default_estado, bd.tipo
       FROM bloque_definitions bd
       WHERE (
-        -- Venta: equipo + cotizacion + cronograma (todas las plantillas)
-        (v_etapa.stage = 'venta' AND bd.tipo IN ('equipo', 'cotizacion', 'cronograma'))
-        -- Venta + "Contrato" en "Ejecuto proyectos": agregar aprobacion
-        OR (v_etapa.stage = 'venta' AND v_etapa.nombre = 'Contrato' AND v_linea_nombre = 'Ejecuto proyectos' AND bd.tipo = 'aprobacion')
+        -- Venta etapa 1 (Contacto/Solicitud): solo equipo
+        (v_etapa.stage = 'venta' AND v_etapa.orden = 1 AND bd.tipo = 'equipo')
+        -- Venta etapa 2 (Propuesta): cotizacion + cronograma + equipo
+        OR (v_etapa.stage = 'venta' AND v_etapa.orden = 2 AND bd.tipo IN ('cotizacion', 'cronograma', 'equipo'))
+        -- Venta etapa 3 (Contrato, solo Ejecuto proyectos): aprobacion + equipo
+        OR (v_etapa.stage = 'venta' AND v_etapa.orden = 3 AND v_linea_nombre = 'Ejecuto proyectos' AND bd.tipo IN ('aprobacion', 'equipo'))
+        -- Atiendo clientes: solo 1 etapa de venta, agregar cotizacion + cronograma + equipo sin gate
+        OR (v_etapa.stage = 'venta' AND v_linea_nombre = 'Atiendo clientes' AND bd.tipo IN ('cotizacion', 'cronograma', 'equipo'))
         -- Ejecucion
         OR (v_etapa.stage = 'ejecucion' AND bd.tipo IN ('equipo', 'datos', 'checklist', 'cobros', 'resumen_financiero', 'ejecucion', 'historial'))
         -- Cobro
         OR (v_etapa.stage = 'cobro' AND bd.tipo IN ('cobros', 'resumen_financiero', 'ejecucion', 'historial'))
       )
-      ORDER BY bd.tipo
+      ORDER BY
+        CASE bd.tipo
+          WHEN 'cotizacion' THEN 0
+          WHEN 'aprobacion' THEN 0
+          WHEN 'cronograma' THEN 1
+          WHEN 'equipo' THEN 2
+          ELSE 3
+        END,
+        bd.tipo
     LOOP
+      -- Determinar es_gate
+      v_es_gate := false;
+      IF v_etapa.stage = 'venta' AND v_etapa.orden = 2 AND v_bloque.tipo = 'cotizacion' THEN
+        v_es_gate := true;
+      END IF;
+      IF v_etapa.stage = 'venta' AND v_etapa.orden = 3 AND v_bloque.tipo = 'aprobacion' THEN
+        v_es_gate := true;
+      END IF;
+
       INSERT INTO bloque_configs (etapa_id, workspace_id, bloque_definition_id, estado, orden, es_gate)
-      VALUES (v_etapa.id, p_workspace_id, v_bloque.id, v_bloque.default_estado, v_orden, false)
+      VALUES (v_etapa.id, p_workspace_id, v_bloque.id, v_bloque.default_estado, v_orden, v_es_gate)
       ON CONFLICT (etapa_id, workspace_id, bloque_definition_id, orden) DO NOTHING;
       v_orden := v_orden + 1;
     END LOOP;
@@ -46,6 +72,8 @@ END;
 $$;
 
 -- 2. Agregar bloques a etapas de venta de workspaces existentes
+-- Nota: Este DO block opera sobre workspaces que YA tenian bloque_configs.
+-- Workspaces sin configs (como metrik tras limpieza) requieren re-aplicar apply_plantilla_to_workspace.
 DO $$
 DECLARE
   v_bd_cotizacion UUID;
