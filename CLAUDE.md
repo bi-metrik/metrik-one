@@ -324,6 +324,7 @@ Que se hizo:
 - **Modulo negocios:** Operativo. 12 tipos de bloques (incluye historial). Cobros automaticos funcionando (anticipo etapa 2 + multi-pago etapa 7). BloqueCobros visible todo el ciclo. BloqueHistorial con tabs gastos/horas/cobros. Pendiente critico: fix persona natural (empresa_id=NULL), verificar gates y logs en prod, recorrer SOENA punta a punta
 - **Sistema cobros VE:** `autoCrearCobros` (anticipo, idempotente por negocio_id+tipo_cobro), `autoCrearCobrosMulti` (multi-pago, idempotente por external_ref). Cobros entran como PENDIENTE con checkbox validacion. Saldo calculado dinamicamente (precio - sum cobros). cobros.proyecto_id nullable para VE
 - **Gotcha negocios.estado:** Valores reales son `'abierto'` y `'completado'`, NO `'activo'`. Verificado y corregido en /numeros
+- **CRITICO — Modulo negocios reemplaza pipeline y proyectos:** El modulo de negocios (`/negocios`) es el flujo principal de ONE nativo. Los modulos `/pipeline` (oportunidades) y `/proyectos` son legacy y NO deben recibir nuevas conexiones. Todo lo que antes apuntaba a pipeline/proyectos debe redirigirse a negocios: FAB, WhatsApp bot, registro de gastos, KPIs, navegacion. Las tablas `oportunidades` y `proyectos` siguen existiendo en DB pero el flujo nativo opera exclusivamente sobre `negocios`
 
 ## Features NO implementados (Roadmap)
 
@@ -527,3 +528,4 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-09 | negocios.estado valores reales: 'abierto' / 'completado' (no 'activo') | Bug encontrado en /numeros: 3 queries filtraban 'activo'. Corregido a 'abierto' |
 | 2026-04-09 | BloqueHistorial: visualizacion pura en etapas ejecucion y cobro | is_visualization=true, tabs gastos/horas/cobros, sin edicion. BloqueEjecucion conserva solo KPIs + gastos por categoria |
 | 2026-04-09 | Eliminar anglicismos en UI: "Pipeline" → "En venta" | Directiva de Mauricio: no usar anglicismos en la interfaz de ONE |
+| 2026-04-09 | Modulo negocios reemplaza pipeline y proyectos | /pipeline y /proyectos son legacy. Todo nuevo desarrollo, conexion, FAB, WhatsApp, KPIs debe apuntar a /negocios. Las tablas oportunidades/proyectos siguen en DB pero el flujo nativo opera sobre negocios |

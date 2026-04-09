@@ -62,3 +62,4 @@ Historial acumulativo de decisiones tecnicas y de negocio.
 | 2026-04-09 | negocios.estado valores reales: 'abierto' / 'completado' (no 'activo') | Bug en /numeros: 3 queries filtraban 'activo'. Corregido a 'abierto' |
 | 2026-04-09 | BloqueHistorial: visualizacion pura en etapas ejecucion y cobro | is_visualization=true, tabs gastos/horas/cobros, sin edicion |
 | 2026-04-09 | Eliminar anglicismos en UI: "Pipeline" → "En venta" | Directiva: no usar anglicismos en la interfaz de ONE |
+| 2026-04-09 | Modulo negocios reemplaza pipeline y proyectos | /pipeline y /proyectos son legacy. Todo nuevo desarrollo apunta a /negocios. FAB, WhatsApp, KPIs, navegacion — todo a negocios |
