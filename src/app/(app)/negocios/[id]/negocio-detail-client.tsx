@@ -53,6 +53,8 @@ interface EjecucionData {
   totalHoras: number
   costoHoras: number
   gastosPorCategoria: Array<{ categoria: string; total: number }>
+  presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number }>
+  precioAprobado?: number
 }
 
 // ── Helpers de formato ───────────────────────────────────────────────────────
@@ -328,7 +330,7 @@ function SelectorEtapa({
   etapaActualId: string | null
   negocioEstado: string | null
   stageActual: string | null
-  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   precioAprobado: number | null
 }) {
   const [isPending, startTransition] = useTransition()
@@ -507,7 +509,7 @@ function BloqueRenderer({
     external_ref: string | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
-  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   ejecucionData: EjecucionData
   historialData: HistorialData
   precioTotal: number
@@ -723,7 +725,7 @@ function BloqueCard({
     external_ref: string | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
-  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   ejecucionData: EjecucionData
   historialData: HistorialData
   precioTotal: number
@@ -862,7 +864,7 @@ interface Props {
     external_ref: string | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
-  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   ejecucionData: EjecucionData
   historialData: HistorialData
   actividad: Array<{

@@ -1705,12 +1705,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     totalCobrado: number
     porCobrar: number
     costosEjecutados: number
+    precioAprobado?: number
   }
   ejecucionData: {
     totalGastos: number
     totalHoras: number
     costoHoras: number
     gastosPorCategoria: Array<{ categoria: string; total: number }>
+    presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number }>
+    precioAprobado?: number
   }
   historialData: {
     gastos: Array<{ id: string; descripcion: string | null; monto: number; categoria: string; fecha: string }>
@@ -1834,6 +1837,48 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     created_at: c.created_at as string | null,
   }))
 
+  // Buscar cotización aceptada y sus rubros para presupuesto
+  const cotizacionAceptada = cotizacionesNegocio.find(c => c.estado === 'aceptada')
+  let presupuestoPorRubro: { tipo: string; nombre: string; total: number }[] = []
+  let precioAprobado: number | undefined = undefined
+
+  if (cotizacionAceptada) {
+    precioAprobado = cotizacionAceptada.valor_total ?? undefined
+    // Cargar items con rubros de la cotizacion aceptada
+    const { data: itemsConRubros } = await supabase
+      .from('items')
+      .select('nombre, subtotal, rubros(tipo, valor_total)')
+      .eq('cotizacion_id', cotizacionAceptada.id)
+      .order('orden')
+
+    if (itemsConRubros && itemsConRubros.length > 0) {
+      // Agrupar rubros por tipo y sumar valores
+      const rubroMap: Record<string, { nombre: string; total: number }> = {}
+      for (const item of itemsConRubros) {
+        const rubros = (item.rubros ?? []) as Array<{ tipo: string; valor_total: number | null }>
+        if (rubros.length > 0) {
+          for (const r of rubros) {
+            const tipo = r.tipo ?? 'otro'
+            if (!rubroMap[tipo]) rubroMap[tipo] = { nombre: tipo, total: 0 }
+            rubroMap[tipo].total += r.valor_total ?? 0
+          }
+        } else {
+          // Item sin rubros detallados: usar subtotal como "otro"
+          const tipo = 'otro'
+          if (!rubroMap[tipo]) rubroMap[tipo] = { nombre: tipo, total: 0 }
+          rubroMap[tipo].total += item.subtotal ?? 0
+        }
+      }
+      presupuestoPorRubro = Object.entries(rubroMap)
+        .map(([tipo, data]) => ({ tipo, nombre: data.nombre, total: data.total }))
+        .filter(r => r.total > 0)
+        .sort((a, b) => b.total - a.total)
+    } else if (cotizacionAceptada.valor_total && cotizacionAceptada.valor_total > 0) {
+      // Cotización rápida sin items: un solo rubro genérico
+      presupuestoPorRubro = [{ tipo: 'total', nombre: 'Total cotizado', total: cotizacionAceptada.valor_total }]
+    }
+  }
+
   // Cargar actividad del negocio
   const { data: actividadData } = await supabase
     .from('activity_log')
@@ -1911,6 +1956,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     resumenFinanciero: {
       totalCobrado,
       porCobrar,
+      precioAprobado,
       costosEjecutados: (() => {
         const gastos = ((gastosData ?? []) as Array<{ monto: number }>)
         const totalGastos = gastos.reduce((s, g) => s + (g.monto ?? 0), 0)
@@ -1961,6 +2007,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         totalHoras: Math.round(totalHoras * 100) / 100,
         costoHoras: Math.round(costoHoras),
         gastosPorCategoria,
+        presupuestoPorRubro: presupuestoPorRubro.length > 0 ? presupuestoPorRubro : undefined,
+        precioAprobado,
       }
     })(),
     historialData: {

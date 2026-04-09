@@ -1,11 +1,12 @@
 'use client'
 
-import { BarChart3 } from 'lucide-react'
+import { BarChart3, FileCheck } from 'lucide-react'
 
 interface ResumenFinancieroData {
   totalCobrado: number
   porCobrar: number
   costosEjecutados: number
+  precioAprobado?: number
 }
 
 interface BloqueResumenFinancieroProps {
@@ -21,7 +22,17 @@ export default function BloqueResumenFinanciero({ data }: BloqueResumenFinancier
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${data.precioAprobado ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        {/* Precio aprobado (cotización) — si existe */}
+        {data.precioAprobado != null && data.precioAprobado > 0 && (
+          <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-2.5">
+            <div className="flex items-center gap-1 mb-0.5">
+              <FileCheck className="h-3 w-3 text-indigo-500" />
+              <p className="text-[10px] font-medium text-indigo-600">Cotizado</p>
+            </div>
+            <p className="text-sm font-bold text-indigo-700 tabular-nums">{fmt(data.precioAprobado)}</p>
+          </div>
+        )}
         <div className="rounded-lg bg-green-50 border border-green-100 p-2.5">
           <p className="text-[10px] font-medium text-green-600">Total cobrado</p>
           <p className="text-sm font-bold text-green-700 tabular-nums">{fmt(data.totalCobrado)}</p>
