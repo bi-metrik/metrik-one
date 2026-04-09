@@ -210,7 +210,7 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
     .from('negocios')
     .select('id, nombre, codigo, estado')
     .eq('id', selected.id)
-    .eq('estado', 'activo')
+    .eq('estado', 'abierto')
     .single();
 
   if (negocio) {
@@ -308,7 +308,7 @@ async function handleW03Selection(ctx: HandlerContext, selected: { id: string; l
     .from('negocios')
     .select('id, nombre, codigo, estado')
     .eq('id', selected.id)
-    .eq('estado', 'activo')
+    .eq('estado', 'abierto')
     .single();
 
   if (negocio) {

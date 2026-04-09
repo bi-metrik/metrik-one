@@ -113,7 +113,21 @@ export async function updateCotizacion(id: string, updates: Record<string, unkno
 
   if (dbError) return { success: false, error: dbError.message }
 
-  revalidatePath('/pipeline')
+  // Revalidar path correcto según el origen de la cotización
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: cot } = await (supabase as any)
+    .from('cotizaciones')
+    .select('oportunidad_id, negocio_id')
+    .eq('id', id)
+    .single()
+
+  if (cot?.negocio_id) {
+    revalidatePath(`/negocios/${cot.negocio_id}`)
+  } else if (cot?.oportunidad_id) {
+    revalidatePath(`/pipeline/${cot.oportunidad_id}`)
+  } else {
+    revalidatePath('/pipeline')
+  }
   return { success: true }
 }
 

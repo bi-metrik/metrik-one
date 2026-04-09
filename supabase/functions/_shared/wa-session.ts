@@ -4,7 +4,7 @@
 
 import type { BotSession, SessionContext, SessionState, SupabaseClient } from './types.ts';
 
-const SESSION_TTL_MINUTES = 5;
+const SESSION_TTL_MINUTES = 15;
 
 /** Get active session or create new one */
 export async function getOrCreateSession(

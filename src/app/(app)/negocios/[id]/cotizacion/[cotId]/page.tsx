@@ -17,10 +17,33 @@ export default async function CotizacionNegocioPage({
 
   if (!cotizacion) notFound()
 
-  // Para cotizaciones de negocios sin oportunidad vinculada, clientFiscal es null
-  // Si en el futuro se vincula empresa al negocio, se puede extender aquí
-  const empresa = (cotizacion as Record<string, unknown>)?.oportunidades as Record<string, unknown> | null
-  const empresaData = empresa?.empresas as Record<string, unknown> | null
+  // Intentar obtener datos fiscales del cliente
+  // 1. Desde la oportunidad vinculada (flujo pipeline)
+  const opp = (cotizacion as Record<string, unknown>)?.oportunidades as Record<string, unknown> | null
+  let empresaData = opp?.empresas as Record<string, unknown> | null
+
+  // 2. Si no hay oportunidad, buscar empresa desde el negocio
+  if (!empresaData) {
+    const { supabase: sb } = await (await import('@/lib/actions/get-workspace')).getWorkspace()
+    if (sb) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: negocio } = await (sb as any)
+        .from('negocios')
+        .select('empresa_id')
+        .eq('id', id)
+        .single()
+
+      if (negocio?.empresa_id) {
+        const { data: emp } = await sb
+          .from('empresas')
+          .select('id, nombre, numero_documento, tipo_documento, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, autorretenedor')
+          .eq('id', negocio.empresa_id)
+          .single()
+        empresaData = emp as Record<string, unknown> | null
+      }
+    }
+  }
+
   const clientFiscal = empresaData
     ? {
         person_type: (empresaData.tipo_persona ?? null) as string | null,

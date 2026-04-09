@@ -61,7 +61,7 @@ export async function findActiveNegocios(supabase: SupabaseClient, workspaceId: 
     .from('negocios')
     .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual, updated_at')
     .eq('workspace_id', workspaceId)
-    .eq('estado', 'activo')
+    .eq('estado', 'abierto')
     .order('updated_at', { ascending: false });
   return (data ?? []).map((n: any) => ({
     ...n,
@@ -71,23 +71,44 @@ export async function findActiveNegocios(supabase: SupabaseClient, workspaceId: 
   }));
 }
 
-/** Find a single active negocio by its code (e.g., "WOR 001") */
+/** Find a single active negocio by its code (e.g., "R1 26 1") */
 export async function findNegocioByCode(
   supabase: SupabaseClient,
   workspaceId: string,
   code: string,
 ) {
-  const codeStr = String(code).toUpperCase();
+  const codeStr = String(code).toUpperCase().trim();
+  // Try exact match first
   const { data, error } = await supabase
     .from('negocios')
     .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
     .eq('workspace_id', workspaceId)
-    .eq('estado', 'activo')
+    .eq('estado', 'abierto')
     .ilike('codigo', `%${codeStr}%`)
     .limit(1)
     .single();
-  if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findNegocioByCode error:', error);
-  if (!data) return null;
+
+  if (!data) {
+    // Try matching without spaces (user might write "R1261" for "R1 26 1")
+    const codeNoSpaces = codeStr.replace(/\s+/g, '');
+    const { data: fuzzy } = await supabase
+      .from('negocios')
+      .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'abierto')
+      .limit(20);
+
+    const match = (fuzzy ?? []).find((n: any) =>
+      (n.codigo ?? '').replace(/\s+/g, '').toUpperCase() === codeNoSpaces
+    );
+
+    if (!match) {
+      if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findNegocioByCode error:', error);
+      return null;
+    }
+    return { ...match, proyecto_id: match.id, codigo: match.codigo ?? '' };
+  }
+
   return { ...data, proyecto_id: data.id, codigo: data.codigo ?? '' };
 }
 
@@ -103,7 +124,7 @@ export async function findNegocios(
     .from('negocios')
     .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
     .eq('workspace_id', workspaceId)
-    .eq('estado', 'activo')
+    .eq('estado', 'abierto')
     .ilike('nombre', `%${hint}%`)
     .limit(limit);
   if (error) console.error('[wa-lookup] findNegocios error:', error);

@@ -201,11 +201,11 @@ BEGIN
   -- 11. NEGOCIOS (5 — all in ejecucion stage)
   -- ══════════════════════════════════════════════════════════
   INSERT INTO negocios (id, workspace_id, linea_id, empresa_id, contacto_id, nombre, codigo, precio_aprobado, stage_actual, etapa_actual_id, estado, created_at) VALUES
-    (v_neg1_id, v_ws_id, v_linea_id, v_emp1_id, v_con1_id, 'Remodelación lobby',         'ROB-01', 85000000,  'ejecucion', v_etapa_planeacion, 'activo', '2026-02-01T10:00:00Z'),
-    (v_neg2_id, v_ws_id, v_linea_id, v_emp1_id, v_con1_id, 'Parqueadero cubierto',       'ROB-02', 120000000, 'ejecucion', v_etapa_ejecucion,  'activo', '2026-01-15T10:00:00Z'),
-    (v_neg3_id, v_ws_id, v_linea_id, v_emp2_id, v_con2_id, 'Ampliación zona comidas',    'CCN-01', 95000000,  'ejecucion', v_etapa_ejecucion,  'activo', '2026-01-20T10:00:00Z'),
-    (v_neg4_id, v_ws_id, v_linea_id, v_emp3_id, v_con3_id, 'Terraza piso 12',            'MIR-01', 68000000,  'ejecucion', v_etapa_ejecucion,  'activo', '2026-02-10T10:00:00Z'),
-    (v_neg5_id, v_ws_id, v_linea_id, v_emp2_id, v_con2_id, 'Fachada sur',                'CCN-02', 45000000,  'ejecucion', v_etapa_entrega,    'activo', '2025-11-01T10:00:00Z')
+    (v_neg1_id, v_ws_id, v_linea_id, v_emp1_id, v_con1_id, 'Remodelación lobby',         'ROB-01', 85000000,  'ejecucion', v_etapa_planeacion, 'abierto', '2026-02-01T10:00:00Z'),
+    (v_neg2_id, v_ws_id, v_linea_id, v_emp1_id, v_con1_id, 'Parqueadero cubierto',       'ROB-02', 120000000, 'ejecucion', v_etapa_ejecucion,  'abierto', '2026-01-15T10:00:00Z'),
+    (v_neg3_id, v_ws_id, v_linea_id, v_emp2_id, v_con2_id, 'Ampliación zona comidas',    'CCN-01', 95000000,  'ejecucion', v_etapa_ejecucion,  'abierto', '2026-01-20T10:00:00Z'),
+    (v_neg4_id, v_ws_id, v_linea_id, v_emp3_id, v_con3_id, 'Terraza piso 12',            'MIR-01', 68000000,  'ejecucion', v_etapa_ejecucion,  'abierto', '2026-02-10T10:00:00Z'),
+    (v_neg5_id, v_ws_id, v_linea_id, v_emp2_id, v_con2_id, 'Fachada sur',                'CCN-02', 45000000,  'ejecucion', v_etapa_entrega,    'abierto', '2025-11-01T10:00:00Z')
   ON CONFLICT (id) DO NOTHING;
 
   -- ══════════════════════════════════════════════════════════

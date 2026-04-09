@@ -33,7 +33,7 @@ CAMPOS GASTOS (obligatorios amount, concept, category_hint):
 - concept: título corto 2-5 palabras, sin montos ni verbos
 - category_hint: materiales|transporte|alimentacion|servicios_profesionales|software|arriendo|marketing|capacitacion|otros
 - entity_hint: nombre persona/empresa mencionada
-- project_code: código "KAE-2","FAB-1","P-12" tal cual (prioridad sobre entity_hint)
+- project_code: código "KAE-2","FAB-1","P-12","R1 26 1","R1261" tal cual (prioridad sobre entity_hint)
 
 CAMPOS OPP_NUEVA:
 - entity_hint: nombre del prospecto/empresa
@@ -185,6 +185,14 @@ function extractProjectRef(text: string): { entity_hint?: string; project_code?:
   // "al 12" / "del 12" / "en el 12" (short numeric reference after preposition)
   m = text.match(/(?:al|del|en\s+el)\s+(\d{1,4})\b/);
   if (m) return { project_code: `P-${m[1].padStart(3, '0')}` };
+
+  // Priority 0.5: Negocio code with spaces — "R1 26 1", "S1 26 3", "M1 26 1"
+  m = text.match(/\b([A-Z]\d+)\s+(\d{2})\s+(\d+)\b/);
+  if (m) return { project_code: `${m[1]} ${m[2]} ${m[3]}` };
+
+  // Priority 0.6: Negocio code compact — "R1261" → "R1 26 1"
+  m = text.match(/\b([A-Z]\d)(\d{2})(\d+)\b/);
+  if (m) return { project_code: `${m[1]} ${m[2]} ${m[3]}` };
 
   // Priority 2: Entity hint (fuzzy name) — existing logic
   // "para (lo de|el proyecto) X"
