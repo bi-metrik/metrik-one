@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { getRiesgos } from '@/lib/actions/riesgos'
 import { ShieldAlert, Plus } from 'lucide-react'
 import type { Riesgo } from '@/lib/actions/riesgos'
+import RiesgosExcelActions from './riesgos-excel-actions'
 
 const NIVEL_COLORS: Record<string, string> = {
   BAJO: 'bg-green-100 text-green-800',
@@ -100,13 +101,16 @@ export default async function RiesgosPage({ searchParams }: Props) {
             <p className="text-sm text-[#6B7280]">{riesgos.length} riesgo{riesgos.length !== 1 ? 's' : ''} registrado{riesgos.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
-        <Link
-          href="/riesgos/nuevo"
-          className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669]"
-        >
-          <Plus className="h-4 w-4" />
-          Nuevo riesgo
-        </Link>
+        <div className="flex items-center gap-2">
+          <RiesgosExcelActions />
+          <Link
+            href="/riesgos/nuevo"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669]"
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo riesgo
+          </Link>
+        </div>
       </div>
 
       {/* Summary badges */}
