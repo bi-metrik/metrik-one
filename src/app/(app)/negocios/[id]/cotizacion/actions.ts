@@ -77,7 +77,8 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   if (dbError) return { success: false as const, error: dbError.message }
   if (!data) return { success: false as const, error: 'Error al crear cotización — intenta de nuevo' }
 
-  revalidatePath(`/negocios/${negocioId}`)
+  // No revalidatePath aquí — esta función se llama desde server component render (nueva/page.tsx)
+  // y Next.js 16 prohíbe revalidatePath durante render. El redirect posterior carga datos frescos.
   return { success: true as const, id: (data as { id: string }).id }
 }
 
