@@ -1,6 +1,7 @@
 import { getCotizacion, getCotizacionItems } from '@/app/(app)/pipeline/[id]/cotizaciones/actions-v2'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
-import { notFound } from 'next/navigation'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { notFound, redirect } from 'next/navigation'
 import CotizacionEditor from '@/app/(app)/pipeline/[id]/cotizacion/[cotId]/cotizacion-editor'
 
 export default async function CotizacionNegocioPage({
@@ -9,23 +10,25 @@ export default async function CotizacionNegocioPage({
   params: Promise<{ id: string; cotId: string }>
 }) {
   const { id, cotId } = await params
+
+  // getFiscalProfile tiene getWorkspace() interno que THROWS — catch para no crashear
   const [cotizacion, items, fiscalResult] = await Promise.all([
     getCotizacion(cotId),
     getCotizacionItems(cotId),
-    getFiscalProfile(),
+    getFiscalProfile().catch(() => ({ success: false as const, data: null })),
   ])
 
   if (!cotizacion) notFound()
 
-  // Intentar obtener datos fiscales del cliente
+  // Obtener datos fiscales del cliente
   // 1. Desde la oportunidad vinculada (flujo pipeline)
   const opp = (cotizacion as Record<string, unknown>)?.oportunidades as Record<string, unknown> | null
   let empresaData = opp?.empresas as Record<string, unknown> | null
 
   // 2. Si no hay oportunidad, buscar empresa desde el negocio
   if (!empresaData) {
-    const { supabase: sb } = await (await import('@/lib/actions/get-workspace')).getWorkspace()
-    if (sb) {
+    try {
+      const { supabase: sb } = await getWorkspace()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: negocio } = await (sb as any)
         .from('negocios')
@@ -41,6 +44,8 @@ export default async function CotizacionNegocioPage({
           .single()
         empresaData = emp as Record<string, unknown> | null
       }
+    } catch {
+      // Datos fiscales del cliente no son críticos para el editor
     }
   }
 
@@ -55,7 +60,6 @@ export default async function CotizacionNegocioPage({
 
   const fiscalProfile = fiscalResult.success ? fiscalResult.data ?? null : null
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (
     <CotizacionEditor
       oportunidadId={id}

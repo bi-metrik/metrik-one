@@ -7,9 +7,16 @@ export default async function NuevaCotizacionNegocioPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const res = await createCotizacionDetalladaNegocio(id)
+
+  let res: { success: boolean; id?: string; error?: string }
+  try {
+    res = await createCotizacionDetalladaNegocio(id)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error inesperado'
+    redirect(`/negocios/${id}?err=${encodeURIComponent(msg)}`)
+  }
+
   if (!res.success) {
-    // Pasar el error como param para que la página del negocio lo muestre
     redirect(`/negocios/${id}?err=${encodeURIComponent(res.error ?? 'Error al crear cotización')}`)
   }
   redirect(`/negocios/${id}/cotizacion/${res.id}`)
