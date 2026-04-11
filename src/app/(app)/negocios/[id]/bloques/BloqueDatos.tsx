@@ -13,6 +13,7 @@ export interface DatosField {
   required: boolean
   options?: string[]
   opciones?: Array<{ value: string; label: string }>
+  default?: unknown
 }
 
 interface BloqueDatosProps {
@@ -41,7 +42,8 @@ export default function BloqueDatos({
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const init: Record<string, unknown> = {}
     fields.forEach(f => {
-      init[f.slug] = saved[f.slug] ?? (f.tipo === 'toggle' ? false : '')
+      const fallback = f.default !== undefined ? f.default : (f.tipo === 'toggle' ? false : '')
+      init[f.slug] = saved[f.slug] ?? fallback
     })
     return init
   })

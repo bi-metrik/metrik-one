@@ -912,9 +912,25 @@ export async function cambiarEtapaNegocioConGate(
     const routing = (etapaActualData.config_extra?.routing ?? null) as {
       default_etapa_orden: number
       conditional: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
+      // Opcional: leer los campos desde una etapa distinta a la actual.
+      // Util cuando el flag decisorio se configura en una etapa anterior
+      // (ej: flag de devolucion IVA en etapa 2, evaluado al salir de la 6).
+      source_etapa_orden?: number
     } | null
 
     if (routing) {
+      // Resolver qué etapa usar como fuente de datos para las condiciones
+      let sourceEtapaId: string = negocio.etapa_actual_id
+      if (typeof routing.source_etapa_orden === 'number') {
+        const { data: sourceEtapa } = await db(supabase)
+          .from('etapas_negocio')
+          .select('id')
+          .eq('linea_id', etapaActualData.linea_id)
+          .eq('orden', routing.source_etapa_orden)
+          .single()
+        if (sourceEtapa) sourceEtapaId = (sourceEtapa as { id: string }).id
+      }
+
       // Leer datos del negocio para evaluar condiciones
       const { data: bloquesDatos } = await db(supabase)
         .from('negocio_bloques')
@@ -926,7 +942,7 @@ export async function cambiarEtapaNegocioConGate(
           )
         `)
         .eq('negocio_id', negocioId)
-        .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
+        .eq('bloque_configs.etapa_id', sourceEtapaId)
 
       const camposNegocio: Record<string, unknown> = {}
       for (const b of ((bloquesDatos ?? []) as Record<string, unknown>[])) {
