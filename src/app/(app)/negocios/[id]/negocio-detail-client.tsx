@@ -546,6 +546,9 @@ function BloqueRenderer({
       case 'cronograma':
         return SUPERVISOR_UP.includes(userRole) ? 'editable' : 'visible'
       case 'cotizacion':
+        // ONE nativo: todos editan. No crear borradores post-aprobación es regla de estado, no de rol.
+        // Clarity puede agregar gate de aprobación por supervisor/owner.
+        return 'editable'
       case 'aprobacion':
       case 'cobros':
       case 'documento':
