@@ -191,11 +191,13 @@ export async function getNumeros(mesRef?: string) {
       .lt('fecha', prevEnd),
 
     // Gastos del mes (include proyecto_id/negocio_id for COH-5, categoria/soporte for D141/D142)
+    // Excluir RECHAZADO — PENDIENTE cuenta (usuarios sin causación), APROBADO/CAUSADO también
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('gastos')
       .select('monto, proyecto_id, negocio_id, categoria, soporte_url')
       .eq('workspace_id', workspaceId)
+      .neq('estado_causacion', 'RECHAZADO')
       .gte('fecha', mesStart)
       .lt('fecha', mesEnd),
 
@@ -204,6 +206,7 @@ export async function getNumeros(mesRef?: string) {
       .from('gastos')
       .select('monto')
       .eq('workspace_id', workspaceId)
+      .neq('estado_causacion', 'RECHAZADO')
       .gte('fecha', prevStart)
       .lt('fecha', prevEnd),
 
@@ -212,6 +215,7 @@ export async function getNumeros(mesRef?: string) {
       .from('gastos')
       .select('monto, fecha')
       .eq('workspace_id', workspaceId)
+      .neq('estado_causacion', 'RECHAZADO')
       .gte('fecha', tresMesesAtras)
       .lt('fecha', mesEnd),
 
@@ -331,11 +335,13 @@ export async function getNumeros(mesRef?: string) {
       .maybeSingle(),
 
     // D119: Cuentas por pagar (all pending gastos, not month-scoped)
+    // Excluir RECHAZADO — un gasto rechazado no es obligación de pago
     supabase
       .from('gastos')
       .select('monto')
       .eq('workspace_id', workspaceId)
-      .eq('estado_pago', 'pendiente'),
+      .eq('estado_pago', 'pendiente')
+      .neq('estado_causacion', 'RECHAZADO'),
 
     // KPI: Pipeline activo — oportunidades no ganadas/perdidas
     supabase
@@ -442,6 +448,7 @@ export async function getNumeros(mesRef?: string) {
       .select('monto')
       .eq('workspace_id', workspaceId)
       .eq('estado_pago', 'pagado')  // D119: only paid gastos affect cash
+      .neq('estado_causacion', 'RECHAZADO')
       .gt('fecha', lastDateStr)
 
     const cobrosPostSaldo = (cobrosDesde.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
