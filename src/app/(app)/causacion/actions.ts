@@ -6,6 +6,11 @@ import { getRolePermissions } from '@/lib/roles'
 
 // ── Types ────────────────────────────────────────────────
 
+export type Retencion = {
+  tipo: 'iva' | 'reteiva' | 'retefuente' | 'reteica'
+  valor: number
+}
+
 export type ItemCausacion = {
   id: string
   tipo: 'ingreso' | 'egreso'
@@ -25,6 +30,10 @@ export type ItemCausacion = {
   fecha_causacion: string | null
   // Deducibilidad fiscal (solo gastos)
   deducible: boolean | null
+  // Retenciones fiscales detalladas
+  retenciones: Retencion[]
+  tercero_nit: string | null
+  tercero_razon_social: string | null
 }
 
 function getInitials(name: string | null): string | null {
@@ -54,13 +63,12 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
   {
     let query = supabase
       .from('gastos')
-      .select('id, fecha, monto, descripcion, mensaje_original, categoria, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, deducible')
+      .select('id, fecha, monto, descripcion, mensaje_original, categoria, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, deducible, retenciones, tercero_nit, tercero_razon_social')
       .eq('workspace_id', workspaceId)
 
     if (tab === 'aprobados') {
       query = query.eq('estado_causacion', 'APROBADO')
     } else {
-      // Causados this month (by fecha_causacion)
       query = query
         .eq('estado_causacion', 'CAUSADO')
         .gte('fecha_causacion', `${startDate}T00:00:00`)
@@ -83,7 +91,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         descripcion: g.descripcion || g.categoria || 'Gasto',
         categoria: g.categoria,
         proyecto: proy?.nombre ?? null,
-        created_by_name: profile?.full_name ?? g.created_by_wa_name ?? null,
+        created_by_name: profile?.full_name ?? (g as any).created_by_wa_name ?? null,
         fecha_aprobacion: g.fecha_aprobacion ?? null,
         cuenta_contable: g.cuenta_contable ?? null,
         centro_costo: g.centro_costo ?? null,
@@ -91,6 +99,9 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         retencion_aplicada: g.retencion_aplicada ? Number(g.retencion_aplicada) : null,
         fecha_causacion: g.fecha_causacion ?? null,
         deducible: g.deducible ?? null,
+        retenciones: ((g as any).retenciones as Retencion[]) ?? [],
+        tercero_nit: (g as any).tercero_nit ?? null,
+        tercero_razon_social: (g as any).tercero_razon_social ?? null,
       })
     }
   }
@@ -99,7 +110,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
   {
     let query = supabase
       .from('cobros')
-      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion')
+      .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, retenciones, tercero_nit, tercero_razon_social, negocio_id, negocios(empresa_id, empresas(numero_documento, razon_social))')
       .eq('workspace_id', workspaceId)
 
     if (tab === 'aprobados') {
@@ -118,6 +129,8 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
     for (const c of cobros ?? []) {
       const proy = c.proyectos as { nombre: string } | null
       const profile = c.created_by_profile as { full_name: string } | null
+      const negocio = (c as any).negocios as { empresa_id: string; empresas: { numero_documento: string | null; razon_social: string | null } | null } | null
+      const empresa = negocio?.empresas ?? null
       items.push({
         id: c.id,
         tipo: 'ingreso',
@@ -134,7 +147,10 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         notas_causacion: c.notas_causacion ?? null,
         retencion_aplicada: c.retencion_aplicada ? Number(c.retencion_aplicada) : null,
         fecha_causacion: c.fecha_causacion ?? null,
-        deducible: null, // cobros no tienen deducibilidad fiscal
+        deducible: null,
+        retenciones: ((c as any).retenciones as Retencion[]) ?? [],
+        tercero_nit: (c as any).tercero_nit ?? empresa?.numero_documento ?? null,
+        tercero_razon_social: (c as any).tercero_razon_social ?? empresa?.razon_social ?? null,
       })
     }
   }
@@ -186,10 +202,13 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
 export async function causarMovimiento(input: {
   tabla: 'gastos' | 'cobros'
   registroId: string
-  cuenta_contable: string
-  centro_costo: string
+  cuenta_contable?: string
+  centro_costo?: string
   notas_causacion?: string
   retencion_aplicada?: number
+  retenciones?: Retencion[]
+  tercero_nit?: string
+  tercero_razon_social?: string
 }) {
   const { supabase, workspaceId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
@@ -197,11 +216,7 @@ export async function causarMovimiento(input: {
   const perms = getRolePermissions(role ?? 'read_only')
   if (!perms.canCausar) return { success: false, error: 'Sin permisos para causar' }
 
-  if (!input.cuenta_contable.trim()) return { success: false, error: 'Cuenta contable es obligatoria' }
-  if (!input.centro_costo.trim()) return { success: false, error: 'Centro de costo es obligatorio' }
-
   // Validate record belongs to workspace and is APROBADO
-  // Use separate queries per table to keep TypeScript happy with Supabase types
   let estadoCausacion: string | null = null
   let registroMonto: number | null = null
 
@@ -233,15 +248,18 @@ export async function causarMovimiento(input: {
     estado_causacion: 'CAUSADO' as const,
     causado_por: userId,
     fecha_causacion: new Date().toISOString(),
-    cuenta_contable: input.cuenta_contable.trim(),
-    centro_costo: input.centro_costo.trim(),
+    cuenta_contable: input.cuenta_contable?.trim() || null,
+    centro_costo: input.centro_costo?.trim() || null,
     notas_causacion: input.notas_causacion?.trim() || null,
     retencion_aplicada: input.retencion_aplicada ?? null,
+    retenciones: input.retenciones ?? [],
+    tercero_nit: input.tercero_nit?.trim() || null,
+    tercero_razon_social: input.tercero_razon_social?.trim() || null,
   }
 
   const { error: updateError } = input.tabla === 'gastos'
-    ? await supabase.from('gastos').update(updatePayload).eq('id', input.registroId)
-    : await supabase.from('cobros').update(updatePayload).eq('id', input.registroId)
+    ? await supabase.from('gastos').update(updatePayload as any).eq('id', input.registroId)
+    : await supabase.from('cobros').update(updatePayload as any).eq('id', input.registroId)
 
   if (updateError) return { success: false, error: updateError.message }
 
@@ -254,10 +272,13 @@ export async function causarMovimiento(input: {
     estado_anterior: 'APROBADO',
     estado_nuevo: 'CAUSADO',
     datos: {
-      cuenta_contable: input.cuenta_contable.trim(),
-      centro_costo: input.centro_costo.trim(),
+      cuenta_contable: input.cuenta_contable?.trim() || null,
+      centro_costo: input.centro_costo?.trim() || null,
       notas_causacion: input.notas_causacion?.trim() || null,
       retencion_aplicada: input.retencion_aplicada ?? null,
+      retenciones: input.retenciones ?? [],
+      tercero_nit: input.tercero_nit?.trim() || null,
+      tercero_razon_social: input.tercero_razon_social?.trim() || null,
       monto: registroMonto,
     },
     realizado_por: userId,
