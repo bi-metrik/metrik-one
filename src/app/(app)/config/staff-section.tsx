@@ -25,7 +25,7 @@ const ROL_OPTIONS = [
   { value: 'administrador', label: 'Administrador', desc: 'Maneja finanzas, contabilidad y equipo. Acceso total excepto config fiscal.' },
   { value: 'supervisor', label: 'Supervisor', desc: 'Ve todo el trabajo. Asigna responsables, crea oportunidades y cotizaciones.' },
   { value: 'ejecutor', label: 'Ejecutor', desc: 'Trabaja en oportunidades y proyectos asignados. Registra gastos y horas.' },
-  { value: 'campo', label: 'Campo', desc: 'Solo reporta via WhatsApp. Registra gastos y horas en proyectos activos.' },
+  // campo (→ read_only): pausado en ONE nativo — se activa por workspace via Clarity
 ]
 
 // Display labels for all roles (including dueno which is not in the form dropdown)
@@ -34,7 +34,6 @@ const ROL_DISPLAY: Record<string, string> = {
   administrador: 'Administrador',
   supervisor: 'Supervisor',
   ejecutor: 'Ejecutor',
-  campo: 'Campo',
 }
 
 // Color classes per role — Ren's palette

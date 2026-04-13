@@ -247,11 +247,7 @@ export const ROLE_UI_CONFIG = [
     description: 'Realiza el trabajo: ventas, operaciones o campo.',
   },
   // contador: pausado en ONE nativo. Se activa via Clarity con modules.causacion.
-  {
-    value: 'read_only',
-    label: 'Solo lectura',
-    description: 'Ve reportes, no puede modificar.',
-  },
+  // read_only: pausado en ONE nativo. Se activa por workspace via Clarity.
 ] as const
 
 export const AREA_UI_CONFIG = [

@@ -89,7 +89,7 @@ const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
   admin: ['/numeros', '/negocios', '/movimientos', '/tableros'],
   supervisor: ['/numeros', '/negocios', '/movimientos', '/directorio'],
   operator: ['/negocios', '/directorio'],
-  read_only: ['/numeros', '/movimientos', '/tableros'],
+  // read_only: pausado en ONE nativo — se activa por workspace via Clarity
 }
 
 function filterByRole(items: typeof BUSINESS_NAV_ITEMS, role: string) {
@@ -105,7 +105,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   supervisor: 'Supervisor',
   operator: 'Ejecutor',
-  read_only: 'Lectura',
+  // read_only: pausado en ONE nativo
 }
 
 /** Parse hex color to relative luminance (0=black, 1=white) */

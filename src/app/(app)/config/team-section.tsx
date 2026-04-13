@@ -12,7 +12,7 @@ import {
 } from './team-actions'
 import type { RoleKey } from '@/lib/roles'
 
-type InviteRole = 'admin' | 'operator' | 'read_only'
+type InviteRole = 'admin' | 'operator'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ interface TeamSectionProps {
 const ROLE_OPTIONS: { value: InviteRole; label: string; icon: React.ElementType; description: string }[] = [
   { value: 'admin', label: 'Admin', icon: Shield, description: 'Todo excepto config fiscal e invitar' },
   { value: 'operator', label: 'Operador', icon: Wrench, description: 'Proyectos asignados + gastos + horas' },
-  { value: 'read_only', label: 'Lectura', icon: Eye, description: 'Números (solo lectura) + exportar CSV' },
+  // read_only: pausado en ONE nativo — se activa por workspace via Clarity
 ]
 
 const ROLE_ICONS: Record<string, React.ElementType> = {
@@ -259,7 +259,6 @@ export default function TeamSection({ currentUserRole }: TeamSectionProps) {
                   >
                     <option value="admin">Admin</option>
                     <option value="operator">Operador</option>
-                    <option value="read_only">Lectura</option>
                   </select>
                   <button
                     onClick={() => handleRemove(member.id, member.full_name)}
