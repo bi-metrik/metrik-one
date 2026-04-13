@@ -40,7 +40,7 @@ const CONTADOR_ONLY_ROLE = 'contador'
 async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string): Promise<string> {
   if (role === CONTADOR_ONLY_ROLE) return '/causacion'
   if (role && !ROLES_WITH_NUMBERS.includes(role)) {
-    return '/pipeline'
+    return '/negocios'
   }
   const { count } = await supabase
     .from('config_metas')
@@ -180,7 +180,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected app routes — redirect to login if not authenticated
-  const protectedPaths = ['/numeros', '/pipeline', '/proyectos', '/directorio', '/nuevo', '/gastos', '/config', '/mi-negocio', '/story-mode']
+  const protectedPaths = ['/numeros', '/negocios', '/pipeline', '/proyectos', '/directorio', '/nuevo', '/gastos', '/config', '/mi-negocio', '/story-mode', '/tableros', '/causacion', '/equipo', '/movimientos']
   if (protectedPaths.some(p => pathname.startsWith(p)) && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', pathname)

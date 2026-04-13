@@ -177,7 +177,7 @@ export async function createEmpresa(formData: FormData) {
     .insert({
       workspace_id: workspaceId,
       nombre: nombre.trim(),
-      codigo: '',
+      codigo: '', // trigger auto-genera
       sector: (formData.get('sector') as string) || null,
       numero_documento: (formData.get('numero_documento') as string)?.trim() || null,
       tipo_documento: (formData.get('tipo_documento') as string) || null,
@@ -328,6 +328,36 @@ export async function getProyectosPorEmpresa(empresaId: string) {
     .from('proyectos')
     .select('id, nombre, estado, presupuesto_total, avance_porcentaje, created_at')
     .eq('empresa_id', empresaId)
+    .order('created_at', { ascending: false })
+
+  return data ?? []
+}
+
+// ── Negocios por empresa/contacto (para vistas 360) ────────
+
+export async function getNegociosPorEmpresa(empresaId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
+    .from('negocios')
+    .select('id, nombre, codigo, estado, stage_actual, precio_estimado, created_at, contactos(nombre)')
+    .eq('empresa_id', empresaId)
+    .order('created_at', { ascending: false })
+
+  return data ?? []
+}
+
+export async function getNegociosPorContacto(contactoId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
+    .from('negocios')
+    .select('id, nombre, codigo, estado, stage_actual, precio_estimado, created_at, empresas(nombre)')
+    .eq('contacto_id', contactoId)
     .order('created_at', { ascending: false })
 
   return data ?? []

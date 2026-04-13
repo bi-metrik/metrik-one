@@ -32,13 +32,32 @@ interface ProyectoRow {
   created_at: string | null
 }
 
+interface NegocioRow {
+  id: string
+  nombre: string | null
+  codigo: string | null
+  estado: string | null
+  stage_actual: string | null
+  precio_estimado: number | null
+  created_at: string | null
+  contactos: { nombre: string } | null
+}
+
+const STAGE_CHIP: Record<string, { label: string; class: string }> = {
+  venta: { label: 'Venta', class: 'bg-blue-50 text-blue-700' },
+  ejecucion: { label: 'Ejecución', class: 'bg-orange-50 text-orange-700' },
+  cobro: { label: 'Cobro', class: 'bg-green-50 text-green-700' },
+  cierre: { label: 'Cierre', class: 'bg-slate-100 text-slate-700' },
+}
+
 interface Props {
   empresa: Empresa
   oportunidades: OportunidadRow[]
   proyectos: ProyectoRow[]
+  negocios: NegocioRow[]
 }
 
-export default function Empresa360({ empresa, oportunidades, proyectos }: Props) {
+export default function Empresa360({ empresa, oportunidades, proyectos, negocios }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -275,7 +294,44 @@ export default function Empresa360({ empresa, oportunidades, proyectos }: Props)
         </div>
       </div>
 
-      {/* Oportunidades */}
+      {/* Negocios */}
+      <div className="space-y-3 rounded-lg border p-4">
+        <h2 className="text-sm font-semibold">Negocios ({negocios.length})</h2>
+        {negocios.length === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">Sin negocios</p>
+        ) : (
+          <div className="space-y-2">
+            {negocios.map(n => {
+              const chip = STAGE_CHIP[n.stage_actual ?? '']
+              return (
+                <Link
+                  key={n.id}
+                  href={`/negocios/${n.id}`}
+                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent/50"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Flame className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                      <span className="text-xs text-muted-foreground font-medium">{n.codigo}</span>
+                      <span className="truncate text-sm font-medium">{n.nombre || 'Sin nombre'}</span>
+                    </div>
+                    {n.contactos && (
+                      <p className="ml-5.5 text-xs text-muted-foreground">{(n.contactos as { nombre: string }).nombre}</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {n.precio_estimado != null && <span className="text-xs font-medium">{formatCOP(n.precio_estimado)}</span>}
+                    {chip && <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.class}`}>{chip.label}</span>}
+                    {n.estado === 'completado' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">Cerrado</span>}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Oportunidades (legacy) */}
       <div className="space-y-3 rounded-lg border p-4">
         <h2 className="text-sm font-semibold">Oportunidades ({oportunidades.length})</h2>
         {oportunidades.length === 0 ? (

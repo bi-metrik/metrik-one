@@ -4,8 +4,9 @@ import { getNegociosV2, getWorkspaceStagesActivos } from './negocio-v2-actions'
 import NegociosClient from './negocios-client'
 
 export default async function NegociosPage() {
-  const [negocios, stagesActivos] = await Promise.all([
-    getNegociosV2(),
+  const [abiertos, cerrados, stagesActivos] = await Promise.all([
+    getNegociosV2('abierto'),
+    getNegociosV2('completado'),
     getWorkspaceStagesActivos(),
   ])
   return (
@@ -14,7 +15,8 @@ export default async function NegociosPage() {
         <div>
           <h1 className="text-lg font-bold">Negocios</h1>
           <p className="text-xs text-muted-foreground">
-            {negocios.length} negocio{negocios.length !== 1 ? 's' : ''} activo{negocios.length !== 1 ? 's' : ''}
+            {abiertos.length} abierto{abiertos.length !== 1 ? 's' : ''}
+            {cerrados.length > 0 && ` · ${cerrados.length} cerrado${cerrados.length !== 1 ? 's' : ''}`}
           </p>
         </div>
         <Link
@@ -25,7 +27,7 @@ export default async function NegociosPage() {
           Nuevo negocio
         </Link>
       </div>
-      <NegociosClient negocios={negocios} stagesActivos={stagesActivos} />
+      <NegociosClient negocios={abiertos} cerrados={cerrados} stagesActivos={stagesActivos} />
     </div>
   )
 }

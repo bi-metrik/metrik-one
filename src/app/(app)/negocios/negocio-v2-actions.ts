@@ -109,11 +109,11 @@ function db(supabase: unknown): any {
 
 // ── Listar negocios del workspace ─────────────────────────────────────────────
 
-export async function getNegociosV2(): Promise<NegocioResumen[]> {
+export async function getNegociosV2(estado: 'abierto' | 'completado' | 'todos' = 'abierto'): Promise<NegocioResumen[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
-  const { data } = await db(supabase)
+  let query = db(supabase)
     .from('negocios')
     .select(`
       id,
@@ -131,8 +131,13 @@ export async function getNegociosV2(): Promise<NegocioResumen[]> {
       contactos(nombre)
     `)
     .eq('workspace_id', workspaceId)
-    .eq('estado', 'abierto')
     .order('created_at', { ascending: false })
+
+  if (estado !== 'todos') {
+    query = query.eq('estado', estado)
+  }
+
+  const { data } = await query
 
   if (!data) return []
 
@@ -534,7 +539,7 @@ export async function crearNegocio(input: {
           tipo_persona: 'natural',
           contacto_id: contactoId,
           tipo_documento: 'CC',
-          codigo: '',
+          codigo: '', // trigger auto-genera
         })
         .select('id')
         .single()

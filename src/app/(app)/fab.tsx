@@ -49,9 +49,9 @@ const FAB_ACTIONS: FABAction[] = [
     contextAware: true,
   },
   {
-    label: 'Nueva oportunidad',
+    label: 'Nuevo negocio',
     icon: Flame,
-    href: '/nuevo/oportunidad',
+    href: '/negocios/nuevo',
     roles: ['owner', 'admin', 'supervisor', 'operator'],
   },
   {
