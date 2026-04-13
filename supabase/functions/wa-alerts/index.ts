@@ -10,7 +10,7 @@ import { checkOutboundAlertLimit, logMessage } from '../_shared/wa-rate-limit.ts
 import {
   formatCOP, formatCOPShort, bold, formatDate, daysSince, formatAgo,
 } from '../_shared/wa-format.ts';
-import { PIPELINE_STAGE_LABELS, STREAK_MILESTONES } from '../_shared/types.ts';
+import { STREAK_MILESTONES } from '../_shared/types.ts';
 
 Deno.serve(async (req) => {
   // This function is triggered by Supabase pg_cron or external cron
@@ -95,12 +95,18 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
     // Send one message per overdue invoice (max 3 per run)
     for (const inv of invoices.slice(0, 3)) {
       const dias = Number(inv.dias_antiguedad);
-      // Get project name
-      const { data: proj } = await supabase.from('proyectos').select('nombre').eq('id', inv.proyecto_id).single();
-      const proyNombre = proj?.nombre || 'Proyecto';
+      // Get negocio name (fallback to proyecto for legacy rows)
+      let refNombre = 'Negocio';
+      const { data: neg } = await supabase.from('negocios').select('nombre').eq('id', inv.proyecto_id).maybeSingle();
+      if (neg?.nombre) {
+        refNombre = neg.nombre;
+      } else {
+        const { data: proj } = await supabase.from('proyectos').select('nombre').eq('id', inv.proyecto_id).maybeSingle();
+        if (proj?.nombre) refNombre = proj.nombre;
+      }
 
       let msg = `⚠️ Factura vencida:\n`;
-      msg += `📄 ${inv.numero_factura || 'S/N'} — ${bold(proyNombre)}\n`;
+      msg += `📄 ${inv.numero_factura || 'S/N'} — ${bold(refNombre)}\n`;
       msg += `💰 Saldo: ${formatCOP(Number(inv.saldo_pendiente))} · ${dias}d`;
 
       await sendTextMessage(phone, msg);
@@ -197,48 +203,53 @@ async function buildWeeklySummary(
     bancoLine = '🏦 Banco: Sin datos. Escríbeme tu saldo para empezar';
   }
 
-  // --- Active projects ---
-  const { data: projects } = await supabase
-    .from('v_proyecto_financiero')
-    .select('*')
+  // --- Negocios en ejecución ---
+  const { data: enEjecucion } = await supabase
+    .from('negocios')
+    .select('id, nombre, precio_aprobado, precio_estimado, updated_at')
     .eq('workspace_id', workspaceId)
-    .eq('estado', 'en_ejecucion')
+    .eq('estado', 'abierto')
+    .eq('stage_actual', 'ejecucion')
     .order('updated_at', { ascending: false })
     .limit(5);
 
   let projectLines = '';
-  if (projects && projects.length > 0) {
-    const lines = projects.map((p: any, i: number) => {
-      const pct = p.presupuesto_consumido_pct ? `${Math.round(p.presupuesto_consumido_pct)}% avance` : '';
-      const prefix = i === projects.length - 1 ? '└' : '├';
-      return `${prefix} ${bold(p.nombre)} — ${pct}`;
+  if (enEjecucion && enEjecucion.length > 0) {
+    const lines = enEjecucion.map((n: any, i: number) => {
+      const precio = Number(n.precio_aprobado || n.precio_estimado || 0);
+      const prefix = i === enEjecucion.length - 1 ? '└' : '├';
+      return `${prefix} ${bold(n.nombre)}${precio > 0 ? ` — ${formatCOPShort(precio)}` : ''}`;
     });
-    projectLines = `📂 Proyectos activos: ${projects.length}\n${lines.join('\n')}`;
+    projectLines = `📂 En ejecución: ${enEjecucion.length}\n${lines.join('\n')}`;
   } else {
-    projectLines = '📂 Sin proyectos activos';
+    projectLines = '📂 Sin negocios en ejecución';
   }
 
-  // --- Pipeline ---
-  const { data: opps } = await supabase
-    .from('oportunidades')
-    .select('etapa, valor_estimado, descripcion, updated_at')
+  // --- Negocios en venta ---
+  const { data: enVenta } = await supabase
+    .from('negocios')
+    .select('id, nombre, precio_estimado, precio_aprobado, updated_at')
     .eq('workspace_id', workspaceId)
-    .not('etapa', 'in', '("ganada","perdida")');
+    .eq('estado', 'abierto')
+    .eq('stage_actual', 'venta');
 
   let pipelineLine = '';
   let staleLine = '';
-  if (opps && opps.length > 0) {
-    const totalPipeline = opps.reduce((s: number, o: any) => s + Number(o.valor_estimado || 0), 0);
-    pipelineLine = `📋 Pipeline: ${opps.length} oportunidades (${formatCOPShort(totalPipeline)})`;
+  if (enVenta && enVenta.length > 0) {
+    const totalVenta = enVenta.reduce(
+      (s: number, n: any) => s + Number(n.precio_aprobado || n.precio_estimado || 0),
+      0,
+    );
+    pipelineLine = `📋 En venta: ${enVenta.length} negocio${enVenta.length > 1 ? 's' : ''} (${formatCOPShort(totalVenta)})`;
 
-    // Check stale opps (>10 days without activity)
-    const staleOpps = opps.filter((o: any) => daysSince(o.updated_at) > 10);
-    if (staleOpps.length > 0) {
-      const stale = staleOpps[0];
-      staleLine = `⚠️ ${bold(stale.descripcion)} sin actividad ${formatAgo(daysSince(stale.updated_at))}`;
+    // Check stale negocios (>10 days without activity)
+    const staleNeg = enVenta.filter((n: any) => daysSince(n.updated_at) > 10);
+    if (staleNeg.length > 0) {
+      const s = staleNeg[0];
+      staleLine = `⚠️ ${bold(s.nombre)} sin actividad ${formatAgo(daysSince(s.updated_at))}`;
     }
   } else {
-    pipelineLine = '📋 Pipeline: sin oportunidades activas';
+    pipelineLine = '📋 En venta: sin negocios activos';
   }
 
   // --- Cartera ---
@@ -429,7 +440,7 @@ async function runStreakEvaluation(supabase: ReturnType<typeof getServiceClient>
 // ============================================================
 
 async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
-  console.log('[wa-alerts] Running Stale Opps Alert');
+  console.log('[wa-alerts] Running Stale Negocios Alert');
 
   const { data: workspaces } = await supabase
     .from('workspaces')
@@ -441,32 +452,33 @@ async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>):
   const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
 
   for (const ws of workspaces) {
-    const { data: staleOpps } = await supabase
-      .from('oportunidades')
-      .select('descripcion, etapa, valor_estimado, updated_at, contactos!inner(nombre)')
+    const { data: staleNeg } = await supabase
+      .from('negocios')
+      .select('nombre, codigo, precio_estimado, precio_aprobado, updated_at, contactos!left(nombre)')
       .eq('workspace_id', ws.id)
-      .not('etapa', 'in', '(ganada,perdida)')
+      .eq('estado', 'abierto')
+      .eq('stage_actual', 'venta')
       .lt('updated_at', tenDaysAgo)
       .order('updated_at', { ascending: true })
       .limit(3);
 
-    if (!staleOpps || staleOpps.length === 0) continue;
+    if (!staleNeg || staleNeg.length === 0) continue;
 
     const phone = await getOwnerPhone(supabase, ws.id);
     if (!phone) continue;
     if (!(await checkOutboundAlertLimit(supabase, phone))) continue;
 
-    let msg = `⚠️ Oportunidades sin movimiento:\n`;
-    for (const opp of staleOpps) {
-      const dias = daysSince(opp.updated_at);
-      const contacto = (opp.contactos as any)?.nombre || '';
-      msg += `\n• ${bold(opp.descripcion)} — ${dias}d sin actividad`;
+    let msg = `⚠️ Negocios en venta sin movimiento:\n`;
+    for (const n of staleNeg) {
+      const dias = daysSince(n.updated_at);
+      const contacto = (n.contactos as any)?.nombre || '';
+      msg += `\n• ${bold(n.nombre)} — ${dias}d sin actividad`;
       if (contacto) msg += ` (${contacto})`;
     }
     msg += `\n\nEscríbeme "llamé a [nombre]" o "reunión con [nombre]" para actualizar.`;
 
     await sendTextMessage(phone, msg);
-    await logMessage(supabase, phone, 'outbound', ws.id, 'stale_opps', `${staleOpps.length} opps estancadas`);
+    await logMessage(supabase, phone, 'outbound', ws.id, 'stale_opps', `${staleNeg.length} negocios estancados`);
   }
 }
 

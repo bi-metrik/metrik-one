@@ -1,12 +1,28 @@
 // ============================================================
-// Handler: Acción — W22 (Opp Ganada), W23 (Opp Perdida), W24 (Ayuda)
+// Handler: Acción — operaciones sobre negocios
+// OPP_NUEVA  → INSERT negocios (stage_actual='venta', estado='abierto')
+// OPP_GANADA → UPDATE negocios SET stage_actual='ejecucion'
+// OPP_PERDIDA→ UPDATE negocios SET estado='perdido', razon_cierre
+// OPP_AVANZAR→ registra actividad en activity_log (no hay sub-stages)
+// ACTIVIDAD  → inserta en activity_log con entidad_tipo='negocio'
+// AYUDA      → texto de ayuda en lenguaje "negocios"
+// UNCLEAR    → smart suggestions
 // ============================================================
 
 import type { HandlerContext } from '../types.ts';
-import { PIPELINE_STAGE_LABELS, PIPELINE_STAGES } from '../types.ts';
-import { formatCOP, formatCOPShort, bold, daysSince } from '../wa-format.ts';
-import { findOpportunities, findContacts } from '../wa-lookup.ts';
+import { formatCOP, bold } from '../wa-format.ts';
+import { findNegocios, findNegocioByCode, findContacts } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
+
+const STAGE_LABELS: Record<string, string> = {
+  venta: 'En venta',
+  ejecucion: 'En ejecución',
+  cobro: 'En cobro',
+  cierre: 'Cerrado',
+};
+
+// Stage progression for OPP_AVANZAR (macro stages of a negocio)
+const STAGE_ORDER = ['venta', 'ejecucion', 'cobro', 'cierre'] as const;
 
 export async function handleAccion(ctx: HandlerContext): Promise<void> {
   const { parsed, session } = ctx;
@@ -29,113 +45,120 @@ export async function handleAccion(ctx: HandlerContext): Promise<void> {
 }
 
 // ============================================================
-// W22 — Oportunidad Ganada (D94 — Hard Gate Fiscal)
+// Helper: resolver negocio (por código o por hint)
+// ============================================================
+
+async function resolveNegocio(ctx: HandlerContext, hint?: string, code?: string | number) {
+  const { user, supabase } = ctx;
+  if (code) {
+    const n = await findNegocioByCode(supabase, user.workspace_id, String(code));
+    if (n) return { negocio: n, source: 'code' as const };
+  }
+  if (hint) {
+    const negocios = await findNegocios(supabase, user.workspace_id, hint);
+    if (negocios.length > 0) return { negocio: negocios[0], source: 'hint' as const };
+  }
+  return { negocio: null, source: null };
+}
+
+// ============================================================
+// OPP_GANADA — negocio pasa de venta → ejecución
 // ============================================================
 
 async function handleOppGanada(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { entity_hint } = parsed.fields;
+  const { entity_hint, project_code } = parsed.fields;
 
-  if (!entity_hint) {
-    await ctx.sendMessage('¿Cuál oportunidad se ganó? Escríbeme el nombre del prospecto.');
+  if (!entity_hint && !project_code) {
+    await ctx.sendMessage('¿Cuál negocio se ganó? Dime el nombre del cliente o el código del negocio.');
     await ctx.updateSession('collecting', {
       intent: 'OPP_GANADA', pending_action: 'W22',
     });
     return;
   }
 
-  const opps = await findOpportunities(supabase, user.workspace_id, entity_hint);
+  const { negocio } = await resolveNegocio(ctx, entity_hint, project_code);
 
-  if (opps.length === 0) {
-    await ctx.sendMessage(`❌ No encontré oportunidad activa con "${entity_hint}". Verifica el nombre o revisa el pipeline en la app.`);
+  if (!negocio) {
+    const ref = project_code || entity_hint;
+    await ctx.sendMessage(`No encontré ningún negocio activo con "${ref}".`);
     await completeSession(supabase, ctx.session.id);
     return;
   }
 
-  const opp = opps[0];
-
-  // Hard gate fiscal check (D94)
-  const { data: empresa } = await supabase
-    .from('empresas')
-    .select('id, nombre, nit, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
-    .eq('id', (await supabase.from('oportunidades').select('empresa_id').eq('id', opp.id).single()).data?.empresa_id)
-    .single();
-
-  const fiscalComplete = empresa &&
-    empresa.nit && empresa.tipo_persona && empresa.regimen_tributario &&
-    empresa.gran_contribuyente !== null && empresa.agente_retenedor !== null;
-
-  if (!fiscalComplete) {
-    const appUrl = Deno.env.get('APP_BASE_URL') || 'https://metrikone.co';
-    const msg = `🎉 ¡Bien! Voy a mover ${bold(opp.descripcion)} a Ganada.\n\n⚠️ Para cerrar esta oportunidad necesito los datos fiscales de ${bold(opp.empresa_nombre || opp.contacto_nombre)}.\n\nComplétalo en la app: ${appUrl}/pipeline/${opp.id}`;
-    await ctx.sendMessage(msg);
+  if (negocio.stage_actual !== 'venta') {
+    await ctx.sendMessage(`ℹ️ ${bold(negocio.nombre)} ya está en ${STAGE_LABELS[negocio.stage_actual] || negocio.stage_actual}. No hay nada que ganar.`);
     await completeSession(supabase, ctx.session.id);
     return;
   }
 
-  // Confirm
-  const msg = `🎯 Voy a mover a Ganada:\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n👤 ${opp.contacto_nombre} — ${opp.empresa_nombre}\n\nSe creará un proyecto automáticamente.`;
+  const precio = Number(negocio.precio_aprobado || negocio.precio_estimado || 0);
+  const precioLine = precio > 0 ? `\n💰 Valor: ${formatCOP(precio)}` : '';
+
+  const msg = `🎯 Voy a pasar a ejecución:\n\n📋 ${bold(negocio.nombre)}${precioLine}`;
   await ctx.sendButtons(msg, [
     { id: 'btn_confirm', title: '✅ Confirmar' },
     { id: 'btn_cancel', title: '❌ Cancelar' },
   ]);
   await ctx.updateSession('confirming', {
     intent: 'OPP_GANADA', pending_action: 'W22',
-    oportunidad_id: opp.id,
-    parsed_fields: parsed.fields,
+    proyecto_id: negocio.id,
+    proyecto_nombre: negocio.nombre,
   });
 }
 
 // ============================================================
-// W23 — Oportunidad Perdida
+// OPP_PERDIDA — negocio pasa a estado='perdido'
 // ============================================================
 
 async function handleOppPerdida(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { entity_hint } = parsed.fields;
+  const { entity_hint, project_code } = parsed.fields;
 
-  if (!entity_hint) {
-    await ctx.sendMessage('¿Cuál oportunidad se perdió? Escríbeme el nombre del prospecto.');
+  if (!entity_hint && !project_code) {
+    await ctx.sendMessage('¿Cuál negocio se perdió? Dime el nombre del cliente o el código del negocio.');
     await ctx.updateSession('collecting', {
       intent: 'OPP_PERDIDA', pending_action: 'W23',
     });
     return;
   }
 
-  const opps = await findOpportunities(supabase, user.workspace_id, entity_hint);
+  const { negocio } = await resolveNegocio(ctx, entity_hint, project_code);
 
-  if (opps.length === 0) {
-    await ctx.sendMessage(`❌ No encontré oportunidad activa con "${entity_hint}".`);
+  if (!negocio) {
+    const ref = project_code || entity_hint;
+    await ctx.sendMessage(`No encontré ningún negocio activo con "${ref}".`);
     await completeSession(supabase, ctx.session.id);
     return;
   }
 
-  const opp = opps[0];
-  const msg = `📋 Voy a marcar ${bold(opp.descripcion)} como perdida.\n\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n👤 ${opp.contacto_nombre}\n\n¿Cuál fue la razón?`;
+  const precio = Number(negocio.precio_aprobado || negocio.precio_estimado || 0);
+  const precioLine = precio > 0 ? `\n💰 Valor: ${formatCOP(precio)}` : '';
+  const msg = `📋 Voy a marcar ${bold(negocio.nombre)} como perdido.${precioLine}\n\n¿Cuál fue la razón?`;
   await ctx.sendMessage(msg);
   await ctx.updateSession('awaiting_reason', {
     intent: 'OPP_PERDIDA', pending_action: 'W23',
-    oportunidad_id: opp.id,
-    parsed_fields: parsed.fields,
+    proyecto_id: negocio.id,
+    proyecto_nombre: negocio.nombre,
   });
 }
 
 // ============================================================
-// W24 — Ayuda (§11)
+// AYUDA
 // ============================================================
 
 async function handleAyuda(ctx: HandlerContext): Promise<void> {
   const msg = `👋 Soy tu asistente MéTRIK ONE. Escríbeme con naturalidad:
 
-⏱️ *Timer:* "Iniciar en [proyecto]" · "Parar" · "¿Cuánto llevo?"
+⏱️ *Timer:* "Iniciar en [negocio]" · "Parar" · "¿Cuánto llevo?"
 
 💰 *Registrar:* "Gasté 180K en materiales para Pérez" · "Me pagaron 3M de Torres" · "Mi saldo es 5M"
 
 📋 *Consultar:* "¿Cómo va Pérez?" · "Mis números" · "¿Quién me debe?"
 
-🎯 *Pipeline:* "Nueva oportunidad con García" · "Mandé propuesta a López" · "García aceptó"
+🎯 *Negocios:* "Nuevo negocio con García" · "García aceptó" · "Se cayó lo de López"
 
-📝 *Actividad:* "Llamé a Pérez" · "Reunión con Torres" · "Nota para proyecto: texto"
+📝 *Actividad:* "Llamé a Pérez" · "Reunión con Torres" · "Nota para R1 26 1: texto"
 
 No necesitas comandos exactos.`;
 
@@ -144,15 +167,15 @@ No necesitas comandos exactos.`;
 }
 
 // ============================================================
-// W25 — Nueva Oportunidad
+// OPP_NUEVA — crea negocio en stage='venta', estado='abierto'
 // ============================================================
 
 async function handleOppNueva(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { entity_hint, amount, note } = parsed.fields;
+  const { entity_hint, amount } = parsed.fields;
 
   if (!entity_hint) {
-    await ctx.sendMessage('¿Cómo se llama el prospecto o empresa?');
+    await ctx.sendMessage('¿Cómo se llama el cliente o la empresa del negocio?');
     await ctx.updateSession('collecting', {
       intent: 'OPP_NUEVA', pending_action: 'W25',
       parsed_fields: parsed.fields,
@@ -160,38 +183,29 @@ async function handleOppNueva(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Check if contact exists
+  // Buscar contacto existente
   const contacts = await findContacts(supabase, user.workspace_id, entity_hint);
   let contactId: string | null = null;
-  let empresaId: string | null = null;
   let contactName = entity_hint;
+  let empresaId: string | null = null;
 
   if (contacts.length > 0) {
     contactId = contacts[0].id;
     contactName = contacts[0].nombre;
-    // Try to find linked empresa via oportunidades or proyectos
-    const { data: existingOpp } = await supabase
-      .from('oportunidades')
+
+    // Si el contacto tiene un negocio previo, reutilizar la empresa
+    const { data: prev } = await supabase
+      .from('negocios')
       .select('empresa_id')
       .eq('contacto_id', contactId)
       .eq('workspace_id', user.workspace_id)
+      .not('empresa_id', 'is', null)
       .limit(1)
-      .single();
-    empresaId = existingOpp?.empresa_id || null;
-
-    if (!empresaId) {
-      const { data: proj } = await supabase
-        .from('proyectos')
-        .select('empresa_id')
-        .eq('contacto_id', contactId)
-        .eq('workspace_id', user.workspace_id)
-        .limit(1)
-        .single();
-      empresaId = proj?.empresa_id || null;
-    }
+      .maybeSingle();
+    empresaId = prev?.empresa_id || null;
   }
 
-  // If no contact, create one automatically
+  // Crear contacto si no existe
   if (!contactId) {
     const { data: newContact, error: cErr } = await supabase.from('contactos').insert({
       workspace_id: user.workspace_id,
@@ -207,11 +221,11 @@ async function handleOppNueva(ctx: HandlerContext): Promise<void> {
     contactName = newContact.nombre;
   }
 
-  // If no empresa, create one automatically
+  // Crear empresa si no existe (persona natural = su propia empresa)
   if (!empresaId) {
     const { data: newEmpresa, error: eErr } = await supabase.from('empresas').insert({
       workspace_id: user.workspace_id,
-      nombre: entity_hint,
+      nombre: contactName,
     }).select().single();
     if (eErr || !newEmpresa) {
       console.error('[accion] OPP_NUEVA empresa create error:', eErr);
@@ -222,43 +236,47 @@ async function handleOppNueva(ctx: HandlerContext): Promise<void> {
     empresaId = newEmpresa.id;
   }
 
-  // Create opportunity
-  const { data: opp, error } = await supabase.from('oportunidades').insert({
+  // Crear negocio — el trigger DB asigna código automático ({empresa} {YY} {N})
+  const { data: negocio, error } = await supabase.from('negocios').insert({
     workspace_id: user.workspace_id,
-    descripcion: `Oportunidad ${contactName}`,
+    nombre: `Negocio ${contactName}`,
     contacto_id: contactId,
     empresa_id: empresaId,
-    etapa: 'lead_nuevo',
-    valor_estimado: amount || 0,
-    probabilidad: 10,
+    stage_actual: 'venta',
+    estado: 'abierto',
+    precio_estimado: amount || 0,
   }).select().single();
 
-  if (error) {
-    console.error('[accion] OPP_NUEVA error:', error);
-    await ctx.sendMessage('❌ No pude crear la oportunidad. Intenta desde la app.');
+  if (error || !negocio) {
+    console.error('[accion] OPP_NUEVA insert error:', error);
+    await ctx.sendMessage('❌ No pude crear el negocio. Intenta desde la app.');
     await completeSession(supabase, ctx.session.id);
     return;
   }
 
-  let msg = `🎯 Oportunidad creada: ${bold(opp.descripcion)}\n\n├ Etapa: Lead nuevo`;
-  if (amount) msg += `\n├ Valor: ${formatCOP(amount)}`;
-  msg += `\n└ Contacto: ${contactName}`;
-  msg += `\n\n💡 Completa datos fiscales en la app para poder cotizar.`;
+  let msg = `🎯 Negocio creado: ${bold(negocio.nombre)}`;
+  if (negocio.codigo) msg += ` (${negocio.codigo})`;
+  msg += `\n├ Etapa: En venta`;
+  if (amount) msg += `\n├ Valor estimado: ${formatCOP(amount)}`;
+  msg += `\n└ Cliente: ${contactName}`;
 
   await ctx.sendMessage(msg);
   await completeSession(supabase, ctx.session.id);
 }
 
 // ============================================================
-// W26 — Avanzar Oportunidad (mover etapa)
+// OPP_AVANZAR — registra actividad de avance (sin mover etapa)
+// En el modelo de negocios, las etapas macro (venta/ejecución/cobro/cierre)
+// se mueven por gates, no por comandos de WhatsApp.
+// OPP_AVANZAR queda como registro de avance comercial dentro de venta.
 // ============================================================
 
 async function handleOppAvanzar(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { entity_hint, stage_hint } = parsed.fields;
+  const { entity_hint, project_code, stage_hint } = parsed.fields;
 
-  if (!entity_hint) {
-    await ctx.sendMessage('¿Cuál oportunidad quieres avanzar?');
+  if (!entity_hint && !project_code) {
+    await ctx.sendMessage('¿De cuál negocio quieres registrar el avance?');
     await ctx.updateSession('collecting', {
       intent: 'OPP_AVANZAR', pending_action: 'W26',
       parsed_fields: parsed.fields,
@@ -266,53 +284,63 @@ async function handleOppAvanzar(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  const opps = await findOpportunities(supabase, user.workspace_id, entity_hint);
-  if (opps.length === 0) {
-    await ctx.sendMessage(`❌ No encontré oportunidad activa con "${entity_hint}".`);
+  const { negocio } = await resolveNegocio(ctx, entity_hint, project_code);
+  if (!negocio) {
+    const ref = project_code || entity_hint;
+    await ctx.sendMessage(`No encontré ningún negocio activo con "${ref}".`);
     await completeSession(supabase, ctx.session.id);
     return;
   }
 
-  const opp = opps[0];
-  const currentIdx = PIPELINE_STAGES.indexOf(opp.etapa as typeof PIPELINE_STAGES[number]);
-
-  // Determine target stage
-  let targetStage = stage_hint;
-  if (!targetStage) {
-    // Auto-advance to next stage
-    if (currentIdx >= 0 && currentIdx < PIPELINE_STAGES.length - 2) {
-      targetStage = PIPELINE_STAGES[currentIdx + 1];
-    } else {
-      targetStage = opp.etapa;
-    }
+  // Registrar como actividad en activity_log
+  let autorId: string | null = null;
+  if (user.user_id) {
+    const { data: staff } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('workspace_id', user.workspace_id)
+      .eq('profile_id', user.user_id)
+      .single();
+    autorId = staff?.id || null;
   }
 
-  // Validate stage
-  if (!PIPELINE_STAGE_LABELS[targetStage!]) {
-    await ctx.sendMessage(`❌ Etapa "${targetStage}" no válida.`);
-    await completeSession(supabase, ctx.session.id);
-    return;
-  }
+  const stageMsg: Record<string, string> = {
+    contacto_inicial: 'Primer contacto',
+    discovery_hecha: 'Discovery hecho',
+    propuesta_enviada: 'Propuesta enviada',
+    negociacion: 'En negociación',
+  };
+  const avanceLabel = stageMsg[stage_hint || ''] || 'Avance comercial';
+  const raw = parsed.fields.mensaje_original || ctx.message.text;
+  const contenido = `🎯 ${avanceLabel}: ${raw}`.slice(0, 280);
 
-  // Update
-  await supabase.from('oportunidades')
-    .update({ etapa: targetStage })
-    .eq('id', opp.id);
+  await supabase.from('activity_log').insert({
+    workspace_id: user.workspace_id,
+    entidad_tipo: 'negocio',
+    entidad_id: negocio.id,
+    tipo: 'comentario',
+    contenido,
+    autor_id: autorId,
+  });
 
-  const msg = `📋 ${bold(opp.descripcion)} movida a ${bold(PIPELINE_STAGE_LABELS[targetStage!])}\n\n├ Anterior: ${PIPELINE_STAGE_LABELS[opp.etapa] || opp.etapa}\n├ Valor: ${formatCOP(Number(opp.valor_estimado))}\n└ ${opp.contacto_nombre}`;
+  await supabase.from('negocios')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', negocio.id);
+
+  const msg = `✅ ${avanceLabel} registrado en ${bold(negocio.nombre)}`;
   await ctx.sendMessage(msg);
   await completeSession(supabase, ctx.session.id);
 }
 
 // ============================================================
-// W27 — Registrar Actividad Comercial
+// ACTIVIDAD — log de llamada/reunión/visita/correo
 // ============================================================
 
 async function handleActividad(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { entity_hint, activity_text } = parsed.fields;
+  const { entity_hint, project_code, activity_text } = parsed.fields;
 
-  if (!entity_hint && !activity_text) {
+  if (!entity_hint && !activity_text && !project_code) {
     await ctx.sendMessage('¿Con quién fue la actividad? Ejemplo: "Llamé a Pérez para seguimiento"');
     await ctx.updateSession('collecting', {
       intent: 'ACTIVIDAD', pending_action: 'W27',
@@ -321,38 +349,43 @@ async function handleActividad(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Try to find related opportunity or contact
-  let oppId: string | null = null;
-  let refName = entity_hint || 'Sin contacto';
+  // Intentar encontrar un negocio asociado (código primero, luego nombre, luego contacto)
+  let negocioId: string | null = null;
+  let refName = entity_hint || 'Sin cliente';
 
-  if (entity_hint) {
-    const opps = await findOpportunities(supabase, user.workspace_id, entity_hint);
-    if (opps.length > 0) {
-      oppId = opps[0].id;
-      refName = opps[0].descripcion;
+  if (project_code) {
+    const n = await findNegocioByCode(supabase, user.workspace_id, String(project_code));
+    if (n) { negocioId = n.id; refName = n.nombre; }
+  }
+
+  if (!negocioId && entity_hint) {
+    const negocios = await findNegocios(supabase, user.workspace_id, entity_hint);
+    if (negocios.length > 0) {
+      negocioId = negocios[0].id;
+      refName = negocios[0].nombre;
     } else {
-      // Try contacts → find their opp
+      // Buscar por contacto → negocio activo del contacto
       const contacts = await findContacts(supabase, user.workspace_id, entity_hint);
       if (contacts.length > 0) {
         refName = contacts[0].nombre;
-        // Check if contact has active opportunity
-        const { data: contactOpp } = await supabase
-          .from('oportunidades')
-          .select('id, descripcion')
+        const { data: contactNeg } = await supabase
+          .from('negocios')
+          .select('id, nombre')
           .eq('contacto_id', contacts[0].id)
           .eq('workspace_id', user.workspace_id)
-          .not('etapa', 'in', '(ganada,perdida)')
+          .eq('estado', 'abierto')
+          .order('updated_at', { ascending: false })
           .limit(1)
-          .single();
-        if (contactOpp) {
-          oppId = contactOpp.id;
-          refName = contactOpp.descripcion;
+          .maybeSingle();
+        if (contactNeg) {
+          negocioId = contactNeg.id;
+          refName = contactNeg.nombre;
         }
       }
     }
   }
 
-  // Determine activity type label
+  // Clasificar tipo de actividad
   const text = (activity_text || parsed.fields.mensaje_original || '').toLowerCase();
   let tipoLabel = '📝 Actividad';
   if (/llam[eé]|llamada|telef/i.test(text)) tipoLabel = '📞 Llamada';
@@ -361,10 +394,9 @@ async function handleActividad(ctx: HandlerContext): Promise<void> {
   else if (/visit[eé]|visita|fu[ií]\s+a/i.test(text)) tipoLabel = '🚗 Visita';
   else if (/whatsapp|mensaje|chat/i.test(text)) tipoLabel = '💬 Mensaje';
 
-  const contenido = (activity_text || parsed.fields.mensaje_original || 'Actividad comercial').slice(0, 280);
+  const contenido = `${tipoLabel} ${(activity_text || parsed.fields.mensaje_original || 'Actividad comercial').slice(0, 260)}`;
 
-  // If we found an opportunity, log as activity_log comment on it
-  if (oppId) {
+  if (negocioId) {
     // Find staff record for this user
     let autorId: string | null = null;
     if (user.user_id) {
@@ -379,10 +411,10 @@ async function handleActividad(ctx: HandlerContext): Promise<void> {
 
     const { error } = await supabase.from('activity_log').insert({
       workspace_id: user.workspace_id,
-      entidad_tipo: 'oportunidad',
-      entidad_id: oppId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
       tipo: 'comentario',
-      contenido: `${tipoLabel} ${contenido}`,
+      contenido: contenido.slice(0, 280),
       autor_id: autorId,
     });
 
@@ -393,23 +425,22 @@ async function handleActividad(ctx: HandlerContext): Promise<void> {
       return;
     }
 
-    // Refresh opportunity updated_at so pipeline shows recent activity
-    await supabase.from('oportunidades')
+    await supabase.from('negocios')
       .update({ updated_at: new Date().toISOString() })
-      .eq('id', oppId);
+      .eq('id', negocioId);
 
-    const msg = `✅ ${tipoLabel} registrada en ${bold(refName)}\n\n${contenido}`;
-    await ctx.sendMessage(msg);
+    await ctx.sendMessage(`✅ ${tipoLabel} registrada en ${bold(refName)}`);
   } else {
-    // No opportunity found — just confirm the note
-    await ctx.sendMessage(`✅ ${tipoLabel}: ${contenido}\n\n💡 No encontré oportunidad para "${entity_hint}". Créala con: "Nueva oportunidad con ${entity_hint}"`);
+    // Sin negocio asociado — solo eco al usuario
+    const sugRef = entity_hint || 'el cliente';
+    await ctx.sendMessage(`✅ ${tipoLabel} registrada.\n\n💡 No encontré negocio asociado a "${sugRef}". Créalo con: "Nuevo negocio con ${sugRef}"`);
   }
 
   await completeSession(supabase, ctx.session.id);
 }
 
 // ============================================================
-// UNCLEAR — Smart AI Suggestions (D96 v2)
+// UNCLEAR — Smart AI Suggestions
 // ============================================================
 
 async function handleUnclear(ctx: HandlerContext): Promise<void> {
@@ -425,22 +456,23 @@ async function handleUnclear(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Use AI-suggested actions if available, otherwise fallback
-  const suggestions = parsed.fields.suggested_actions;
-  if (suggestions && suggestions.length > 0) {
-    // Build buttons from AI suggestions (max 3)
-    const buttons = suggestions.slice(0, 3).map((s: string, i: number) => ({
+  // Use AI-suggested actions only if they fit WhatsApp's 20-char button limit.
+  const rawSuggestions = parsed.fields.suggested_actions || [];
+  const shortSuggestions = rawSuggestions.filter((s: string) => s && s.length <= 20).slice(0, 3);
+
+  if (shortSuggestions.length >= 2) {
+    const buttons = shortSuggestions.map((s: string, i: number) => ({
       id: `btn_suggest_${i}`,
-      title: s.slice(0, 20),
+      title: s,
     }));
     await ctx.sendButtons(
-      `No estoy seguro de entender. ¿Quisiste decir algo como...?`,
+      `No entendí. ¿Qué quieres hacer?`,
       buttons,
     );
     await ctx.updateSession('awaiting_selection', {
       intent: 'UNCLEAR', pending_action: 'W24',
       unclear_count: unclearCount,
-      options: suggestions.map((s: string, i: number) => ({
+      options: shortSuggestions.map((s: string, i: number) => ({
         id: `suggest_${i}`,
         label: s,
       })),
@@ -448,7 +480,7 @@ async function handleUnclear(ctx: HandlerContext): Promise<void> {
   } else {
     // Fallback: generic suggestions with buttons
     await ctx.sendButtons(
-      `No estoy seguro de entender. ¿Qué quieres hacer?`,
+      `No entendí. ¿Qué quieres hacer?`,
       [
         { id: 'btn_suggest_0', title: 'Registrar algo' },
         { id: 'btn_suggest_1', title: 'Consultar algo' },
@@ -472,7 +504,7 @@ async function handleUnclear(ctx: HandlerContext): Promise<void> {
 // ============================================================
 
 async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
-  const { session, message, supabase, user } = ctx;
+  const { session, message, supabase } = ctx;
   const context = session.context;
   const text = message.text.trim().toLowerCase();
 
@@ -490,7 +522,7 @@ async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
         { id: 'btn_confirm', title: '✅ Confirmar' },
         { id: 'btn_cancel', title: '❌ Cancelar' },
       ]);
-      return; // Don't complete session
+      return;
     }
     await completeSession(supabase, session.id);
     return;
@@ -508,7 +540,6 @@ async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
     const options = context.options || [];
     const btnId = message.interactive_reply;
 
-    // Match button ID or number
     let selected: typeof options[0] | undefined;
     if (btnId) {
       const idx = btnId.match(/btn_suggest_(\d)/)?.[1];
@@ -522,23 +553,36 @@ async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
     }
 
     if (!selected) {
-      // User typed something new — treat as a fresh message, complete this session
       await completeSession(supabase, session.id);
       return;
     }
 
-    // Route based on selection
     if (selected.id === 'registro') {
-      await ctx.sendMessage('Escríbeme qué quieres registrar. Ejemplo:\n• "Gasté 180 mil en transporte para Pérez"\n• "Trabajé 4 horas en lo de María"\n• "Me pagaron 3 millones de Torres"');
+      await ctx.sendMessage('Dime qué quieres registrar. Por ejemplo:\n• "Gasté 180 mil en transporte para Pérez"\n• "Trabajé 4 horas en lo de María"\n• "Me pagaron 3 millones de Torres"');
     } else if (selected.id === 'consulta') {
-      await ctx.sendMessage('Escríbeme qué quieres consultar. Ejemplo:\n• "¿Cómo va lo de Pérez?"\n• "¿Cómo estoy este mes?"\n• "¿Quién me debe?"');
+      await ctx.sendMessage('Dime qué quieres consultar. Por ejemplo:\n• "¿Cómo va lo de Pérez?"\n• "¿Cómo estoy este mes?"\n• "¿Quién me debe?"');
     } else if (selected.id === 'ayuda') {
       await completeSession(supabase, session.id);
       await handleAyuda(ctx);
       return;
     } else {
-      // AI-suggested action — guide the user
-      await ctx.sendMessage(`Escríbeme con más detalle. Por ejemplo si quieres "${selected.label}", escríbelo de forma natural.`);
+      // AI-suggested action — route by keyword in the short label
+      const label = (selected.label || '').toLowerCase();
+      if (/gast|pag|compr/.test(label)) {
+        await ctx.sendMessage('Dime el gasto. Ejemplo: "Gasté 180 mil en transporte para Pérez"');
+      } else if (/hora|trabaj/.test(label)) {
+        await ctx.sendMessage('Dime las horas. Ejemplo: "Trabajé 4 horas en lo de María"');
+      } else if (/cobro|pagaron|ingreso/.test(label)) {
+        await ctx.sendMessage('Dime el cobro. Ejemplo: "Me pagaron 3 millones de Torres"');
+      } else if (/cartera|debe/.test(label)) {
+        await ctx.sendMessage('Escribe "cartera" para ver lo pendiente por cobrar.');
+      } else if (/n[uú]meros|mes|resumen/.test(label)) {
+        await ctx.sendMessage('Escribe "mis números" para ver el resumen del mes.');
+      } else if (/negocio|estado|venta/.test(label)) {
+        await ctx.sendMessage('Escribe "cómo va [nombre del negocio]" o el código (ej. R1 26 1).');
+      } else {
+        await ctx.sendMessage('Escríbeme con más detalle lo que necesitas.');
+      }
     }
     await completeSession(supabase, session.id);
     return;
@@ -570,57 +614,78 @@ async function handleResumeAccion(ctx: HandlerContext): Promise<void> {
 // ============================================================
 
 async function executeW22(ctx: HandlerContext): Promise<void> {
-  const { supabase, user, session } = ctx;
-  const oppId = session.context.oportunidad_id;
+  const { supabase, session } = ctx;
+  const negocioId = session.context.proyecto_id;
+  const nombre = session.context.proyecto_nombre || 'el negocio';
 
-  // Update opportunity stage
-  await supabase.from('oportunidades')
-    .update({ etapa: 'ganada' })
-    .eq('id', oppId);
+  if (!negocioId) {
+    await ctx.sendMessage('❌ Perdí la referencia al negocio. Intenta de nuevo.');
+    return;
+  }
 
-  // Get opp details to create project
-  const { data: opp } = await supabase.from('oportunidades')
-    .select('*, contactos!inner(nombre), empresas!inner(nombre)')
-    .eq('id', oppId)
+  // Mover a ejecución
+  const { error } = await supabase.from('negocios')
+    .update({ stage_actual: 'ejecucion' })
+    .eq('id', negocioId);
+
+  if (error) {
+    console.error('[accion] W22 update error:', error);
+    await ctx.sendMessage('❌ No pude actualizar el negocio. Intenta desde la app.');
+    return;
+  }
+
+  // Obtener info para confirmación
+  const { data: negocio } = await supabase
+    .from('negocios')
+    .select('nombre, codigo, precio_aprobado, precio_estimado')
+    .eq('id', negocioId)
     .single();
 
-  if (opp) {
-    // Create project automatically
-    const { error } = await supabase.from('proyectos').insert({
-      workspace_id: user.workspace_id,
-      oportunidad_id: opp.id,
-      empresa_id: opp.empresa_id,
-      contacto_id: opp.contacto_id,
-      nombre: opp.descripcion,
-      presupuesto_total: opp.valor_estimado || 0,
-      canal_creacion: 'whatsapp',
-    });
+  const precio = negocio ? Number(negocio.precio_aprobado || negocio.precio_estimado || 0) : 0;
+  const precioLine = precio > 0 ? `\n💰 Valor: ${formatCOP(precio)}` : '';
 
-    if (error) console.error('[accion] Create project error:', error);
-
-    const msg = `🎉 ¡Oportunidad ganada!\n\n📋 ${bold(opp.descripcion)}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n📁 Proyecto creado automáticamente\n\nSiguiente paso: Registra la primera factura en la app.`;
-    await ctx.sendMessage(msg);
-  }
+  const msg = `🎉 ¡Negocio ganado!\n\n📋 ${bold(negocio?.nombre || nombre)}${precioLine}\n📊 Etapa: En ejecución\n\nYa puedes registrar horas, gastos y cobros.`;
+  await ctx.sendMessage(msg);
 }
 
 async function executeW23(ctx: HandlerContext, reason: string): Promise<void> {
-  const { supabase, session } = ctx;
-  const oppId = session.context.oportunidad_id;
+  const { supabase, session, user } = ctx;
+  const negocioId = session.context.proyecto_id;
+  const nombre = session.context.proyecto_nombre || 'el negocio';
 
-  await supabase.from('oportunidades')
-    .update({ etapa: 'perdida', razon_perdida: reason })
-    .eq('id', oppId);
+  if (!negocioId) {
+    await ctx.sendMessage('❌ Perdí la referencia al negocio. Intenta de nuevo.');
+    return;
+  }
 
-  // Get pipeline summary
-  const { data: pipeline } = await supabase
-    .from('oportunidades')
-    .select('valor_estimado')
-    .eq('workspace_id', ctx.user.workspace_id)
-    .not('etapa', 'in', '(ganada,perdida)');
+  const { error } = await supabase.from('negocios')
+    .update({
+      estado: 'perdido',
+      razon_cierre: reason.slice(0, 500),
+      closed_at: new Date().toISOString(),
+    })
+    .eq('id', negocioId);
 
-  const activeCount = pipeline?.length || 0;
-  const totalValue = (pipeline || []).reduce((sum: number, o: any) => sum + Number(o.valor_estimado || 0), 0);
+  if (error) {
+    console.error('[accion] W23 update error:', error);
+    await ctx.sendMessage('❌ No pude actualizar el negocio. Intenta desde la app.');
+    return;
+  }
 
-  const msg = `📋 Oportunidad marcada como perdida.\n\n📝 Razón: "${reason}"\n\nPipeline actualizado: ${activeCount} oportunidades activas (${formatCOP(totalValue)})`;
+  // Resumen de negocios en venta para contextualizar
+  const { data: enVenta } = await supabase
+    .from('negocios')
+    .select('precio_estimado, precio_aprobado')
+    .eq('workspace_id', user.workspace_id)
+    .eq('estado', 'abierto')
+    .eq('stage_actual', 'venta');
+
+  const activeCount = enVenta?.length || 0;
+  const totalValue = (enVenta || []).reduce(
+    (sum: number, n: any) => sum + Number(n.precio_aprobado || n.precio_estimado || 0),
+    0,
+  );
+
+  const msg = `📋 ${bold(nombre)} marcado como perdido.\n\n📝 Razón: "${reason}"\n\nEn venta: ${activeCount} negocios (${formatCOP(totalValue)})`;
   await ctx.sendMessage(msg);
 }

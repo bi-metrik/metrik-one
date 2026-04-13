@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import * as XLSX from 'xlsx'
@@ -39,8 +40,9 @@ export async function getRiesgos(filters?: {
   estado?: string
   factor_riesgo?: string
 }) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return []
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return []
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (supabase as any)
@@ -82,8 +84,9 @@ export async function getRiesgos(filters?: {
 // ── Get single riesgo ──────────────────────────────────────
 
 export async function getRiesgo(id: string) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, role, error } = await getWorkspace()
   if (error) return null
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return null
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (supabase as any)
@@ -103,8 +106,11 @@ export async function getRiesgo(id: string) {
 // ── Create riesgo ──────────────────────────────────────────
 
 export async function crearRiesgo(formData: FormData) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!getRolePermissions(role ?? 'read_only').canEditRiesgos) {
+    return { success: false, error: 'No tienes permisos para crear riesgos' }
+  }
 
   const categoria = formData.get('categoria') as string
   const descripcion = (formData.get('descripcion') as string)?.trim()
@@ -148,8 +154,11 @@ export async function crearRiesgo(formData: FormData) {
 // ── Update riesgo ──────────────────────────────────────────
 
 export async function actualizarRiesgo(id: string, formData: FormData) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, role, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+  if (!getRolePermissions(role ?? 'read_only').canEditRiesgos) {
+    return { success: false, error: 'No tienes permisos para editar riesgos' }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updates: Record<string, any> = {}
@@ -191,8 +200,11 @@ export async function actualizarRiesgo(id: string, formData: FormData) {
 // ── Delete riesgo ──────────────────────────────────────────
 
 export async function eliminarRiesgo(id: string) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, role, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+  if (!getRolePermissions(role ?? 'read_only').canDeleteRiesgos) {
+    return { success: false, error: 'No tienes permisos para eliminar riesgos' }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: dbError } = await (supabase as any)
@@ -210,8 +222,9 @@ export async function eliminarRiesgo(id: string) {
 // ── Get riesgos_controles for a riesgo ─────────────────────
 
 export async function getControlesRiesgo(riesgoId: string) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, role, error } = await getWorkspace()
   if (error) return []
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return []
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (supabase as any)
@@ -291,6 +304,12 @@ const FUENTE_DB_TO_DISPLAY: Record<string, string> = {
 // ── Excel: Generar plantilla ────────────────────────────────
 
 export async function generarPlantillaRiesgos(): Promise<{ data: string; filename: string }> {
+  const { role, error } = await getWorkspace()
+  if (error) throw new Error('No autenticado')
+  if (!getRolePermissions(role ?? 'read_only').canExportRiesgos) {
+    throw new Error('No tienes permisos para descargar la plantilla')
+  }
+
   const wb = XLSX.utils.book_new()
 
   // -- Hoja "Riesgos" con headers + 2 filas de ejemplo --
@@ -442,8 +461,11 @@ export async function importarRiesgosExcel(base64: string): Promise<{
   imported: number
   errors: { fila: number; error: string }[]
 }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, imported: 0, errors: [{ fila: 0, error: 'No autenticado' }] }
+  if (!getRolePermissions(role ?? 'read_only').canImportRiesgos) {
+    return { success: false, imported: 0, errors: [{ fila: 0, error: 'No tienes permisos para importar riesgos' }] }
+  }
 
   let wb: XLSX.WorkBook
   try {
@@ -582,9 +604,12 @@ export async function importarRiesgosExcel(base64: string): Promise<{
 // ── Excel: Exportar riesgos existentes ──────────────────────
 
 export async function exportarRiesgosExcel(): Promise<{ data: string; filename: string }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) {
     throw new Error('No autenticado')
+  }
+  if (!getRolePermissions(role ?? 'read_only').canExportRiesgos) {
+    throw new Error('No tienes permisos para exportar riesgos')
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

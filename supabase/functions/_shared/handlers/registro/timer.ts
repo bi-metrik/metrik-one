@@ -31,7 +31,7 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
         await startTimer(ctx, project.proyecto_id, project.nombre);
         return;
       }
-      await ctx.sendMessage(`⚠️ No encontré negocio o proyecto activo con código ${project_code}.`);
+      await ctx.sendMessage(`⚠️ No encontré ningún negocio activo con código ${project_code}.`);
       // Fall through to normal flow
     }
     // If timer exists, fall through to normal flow which handles the switch logic
@@ -112,7 +112,7 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
   if (!entity_hint) {
     const destinos = await findActiveDestinos(supabase, user.workspace_id);
     if (destinos.all.length === 0) {
-      await ctx.sendMessage('❌ No tienes negocios ni proyectos activos para iniciar timer.');
+      await ctx.sendMessage('❌ No tienes negocios activos para iniciar timer.');
       await completeSession(supabase, ctx.session.id);
       return;
     }
@@ -147,7 +147,7 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
   if (matchedDestinos.all.length === 0) {
     const allActive = await findActiveDestinos(supabase, user.workspace_id);
     if (allActive.all.length === 0) {
-      await ctx.sendMessage(`❌ No encontré "${entity_hint}" y no tienes negocios/proyectos activos.`);
+      await ctx.sendMessage(`❌ No encontré "${entity_hint}" y no tienes negocios activos.`);
       await completeSession(supabase, ctx.session.id);
       return;
     }
@@ -156,7 +156,7 @@ export async function handleTimerIniciar(ctx: HandlerContext): Promise<void> {
       label: formatProject(d),
     }));
     await ctx.sendOptions(
-      `❌ No encontré "${entity_hint}". Tus negocios/proyectos:`,
+      `❌ No encontré "${entity_hint}". Tus negocios:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -222,7 +222,7 @@ export async function handleTimerParar(ctx: HandlerContext): Promise<void> {
     .single();
 
   if (!timer) {
-    await ctx.sendMessage("⏱️ No tienes timer activo.\n\nEscribe *iniciar en [proyecto]* para empezar.");
+    await ctx.sendMessage("⏱️ No tienes timer activo.\n\nEscribe *iniciar en [negocio]* para empezar.");
     await completeSession(supabase, ctx.session.id);
     return;
   }
@@ -305,7 +305,7 @@ export async function handleTimerEstado(ctx: HandlerContext): Promise<void> {
     .single();
 
   if (!timer) {
-    await ctx.sendMessage("⏱️ No tienes timer activo.\n\nEscribe *iniciar en [proyecto]* para empezar.");
+    await ctx.sendMessage("⏱️ No tienes timer activo.\n\nEscribe *iniciar en [negocio]* para empezar.");
     await completeSession(supabase, ctx.session.id);
     return;
   }

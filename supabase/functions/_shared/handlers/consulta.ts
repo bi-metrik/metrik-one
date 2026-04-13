@@ -3,17 +3,17 @@
 // ============================================================
 
 import type { HandlerContext } from '../types.ts';
-import { PIPELINE_STAGE_LABELS, STREAK_MILESTONES } from '../types.ts';
+import { STREAK_MILESTONES } from '../types.ts';
 import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, currentMonthName, currentYear, formatProject } from '../wa-format.ts';
-import { findProjects, findContacts, findActiveDestinos, findDestinos } from '../wa-lookup.ts';
-import { completeSession } from '../wa-session.ts';
+import { findContacts, findActiveDestinos, findDestinos, findNegocioByCode, findProjectByCode } from '../wa-lookup.ts';
+import { completeSession, saveLastContext } from '../wa-session.ts';
 
 export async function handleConsulta(ctx: HandlerContext): Promise<void> {
   const { parsed } = ctx;
 
   switch (parsed.intent) {
     case 'ESTADO_PROYECTO': await handleEstadoProyecto(ctx); break;
-    case 'ESTADO_PIPELINE': await handleEstadoPipeline(ctx); break;
+    case 'ESTADO_NEGOCIOS': await handleEstadoNegocios(ctx); break;
     case 'MIS_NUMEROS': await handleMisNumeros(ctx); break;
     case 'CARTERA': await handleCartera(ctx); break;
     case 'INFO_CONTACTO': await handleInfoContacto(ctx); break;
@@ -26,41 +26,9 @@ export async function handleConsulta(ctx: HandlerContext): Promise<void> {
 // W14 — Estado de Proyecto (§10)
 // ============================================================
 
-async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
-  const { parsed, user, supabase } = ctx;
-  const { entity_hint } = parsed.fields;
-
-  if (!entity_hint) {
-    // List active negocios + projects
-    const destinos = await findActiveDestinos(supabase, user.workspace_id);
-
-    if (destinos.all.length === 0) {
-      await ctx.sendMessage('No tienes negocios ni proyectos activos.');
-      return;
-    }
-
-    const list = destinos.all.slice(0, 5).map((d: any, i: number) => {
-      const label = formatProject(d);
-      const avance = d.avance_porcentaje ? ` — ${formatPct(Number(d.avance_porcentaje))} avance` : '';
-      return `${i + 1}️⃣ ${label}${avance}`;
-    }).join('\n');
-
-    await ctx.sendMessage(`📁 Tus negocios/proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
-    return;
-  }
-
-  // Search both negocios and projects
-  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
-
-  if (destinos.all.length === 0) {
-    await ctx.sendMessage(`❌ No encontré negocio o proyecto con "${entity_hint}".`);
-    return;
-  }
-
-  const d = destinos.all[0];
-
+/** Render a single destino (negocio o proyecto) — shared by code-path and hint-path */
+async function renderDestino(ctx: HandlerContext, d: any): Promise<void> {
   if (d._tipo === 'negocio') {
-    // Negocio — show basic info
     const precio = Number(d.precio_aprobado || d.precio_estimado || 0);
     let msg = `📁 ${bold(formatProject(d))}`;
     msg += `\n📊 Etapa: ${d.stage_actual || 'venta'}`;
@@ -85,7 +53,7 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
   }
 
   // Warning if hours ahead of progress
-  const { data: proyecto } = await supabase.from('proyectos').select('avance_porcentaje').eq('id', p.id).single();
+  const { data: proyecto } = await ctx.supabase.from('proyectos').select('avance_porcentaje').eq('id', p.id).single();
   const avance = proyecto?.avance_porcentaje || 0;
 
   if (horasPct > avance + 20 && avance > 0) {
@@ -95,57 +63,190 @@ async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
   await ctx.sendMessage(msg);
 }
 
-// ============================================================
-// W15 — Estado Pipeline (§10)
-// ============================================================
+async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
+  const { parsed, user, supabase } = ctx;
+  const { entity_hint, project_code } = parsed.fields;
 
-async function handleEstadoPipeline(ctx: HandlerContext): Promise<void> {
-  const { user, supabase } = ctx;
-
-  const { data: opps } = await supabase
-    .from('oportunidades')
-    .select('etapa, valor_estimado, probabilidad, descripcion, updated_at')
-    .eq('workspace_id', user.workspace_id)
-    .not('etapa', 'in', '(ganada,perdida)')
-    .order('updated_at', { ascending: false });
-
-  if (!opps || opps.length === 0) {
-    await ctx.sendMessage('📊 Tu pipeline está vacío. ¿Quieres agregar una oportunidad desde la app?');
+  // 1. Fast path: resolve by exact code (negocio first, then project)
+  if (project_code) {
+    const negocio = await findNegocioByCode(supabase, user.workspace_id, String(project_code));
+    if (negocio) {
+      await renderDestino(ctx, { ...negocio, _tipo: 'negocio' });
+      return;
+    }
+    const project = await findProjectByCode(supabase, user.workspace_id, project_code);
+    if (project) {
+      await renderDestino(ctx, { ...project, _tipo: 'proyecto' });
+      return;
+    }
+    // Code not found — tell the user clearly instead of falling into the list
+    await ctx.sendMessage(`No encontré ningún negocio o proyecto con código *${project_code}*.`);
     return;
   }
 
-  // Group by stage
-  const stages: Record<string, { count: number; value: number }> = {};
-  let totalValue = 0;
-  let weightedValue = 0;
+  if (!entity_hint) {
+    // List active negocios + projects
+    const destinos = await findActiveDestinos(supabase, user.workspace_id);
 
-  for (const o of opps) {
-    if (!stages[o.etapa]) stages[o.etapa] = { count: 0, value: 0 };
-    stages[o.etapa].count++;
-    stages[o.etapa].value += Number(o.valor_estimado || 0);
-    totalValue += Number(o.valor_estimado || 0);
-    weightedValue += Number(o.valor_estimado || 0) * (Number(o.probabilidad) / 100);
+    if (destinos.all.length === 0) {
+      await ctx.sendMessage('No tienes negocios ni proyectos activos.');
+      return;
+    }
+
+    const list = destinos.all.slice(0, 5).map((d: any, i: number) => {
+      const label = formatProject(d);
+      const avance = d.avance_porcentaje ? ` — ${formatPct(Number(d.avance_porcentaje))} avance` : '';
+      return `${i + 1}️⃣ ${label}${avance}`;
+    }).join('\n');
+
+    await ctx.sendMessage(`Tus negocios y proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
+    return;
   }
 
-  let msg = `📊 Pipeline: ${opps.length} oportunidades\n`;
-  const stageOrder = ['lead_nuevo', 'contacto_inicial', 'discovery_hecha', 'propuesta_enviada', 'negociacion'];
+  // Search both negocios and projects
+  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
 
-  for (const stage of stageOrder) {
-    const s = stages[stage];
-    if (s) {
-      msg += `\n${PIPELINE_STAGE_LABELS[stage]}: ${s.count} · ${formatCOPShort(s.value)}`;
+  if (destinos.all.length === 0) {
+    await ctx.sendMessage(`No encontré negocio ni proyecto con "${entity_hint}".`);
+    return;
+  }
+
+  await renderDestino(ctx, destinos.all[0]);
+}
+
+// ============================================================
+// W15 — Estado de Negocios (filtrable por stage_actual)
+// Sin stage_filter o 'all' → muestra todos los abiertos agrupados por etapa
+// Con stage_filter → muestra solo la etapa pedida
+// ============================================================
+
+const STAGE_LABELS_PLURAL: Record<string, string> = {
+  venta: 'En venta',
+  ejecucion: 'En ejecución',
+  cobro: 'En cobro',
+  cierre: 'En cierre',
+};
+
+const STAGE_EMPTY_MSG: Record<string, string> = {
+  venta: '📊 No tienes negocios en venta. Escríbeme: "nuevo negocio con [cliente]"',
+  ejecucion: '📊 No tienes negocios en ejecución.',
+  cobro: '📊 No tienes negocios en cobro.',
+  cierre: '📊 No tienes negocios en cierre.',
+  all: '📊 No tienes negocios activos. Escríbeme: "nuevo negocio con [cliente]"',
+};
+
+async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
+  const { user, supabase, parsed } = ctx;
+  const stageFilter = parsed.fields.stage_filter || 'all';
+
+  let query = supabase
+    .from('negocios')
+    .select('id, nombre, codigo, precio_estimado, precio_aprobado, stage_actual, updated_at')
+    .eq('workspace_id', user.workspace_id)
+    .eq('estado', 'abierto')
+    .order('updated_at', { ascending: false });
+
+  if (stageFilter !== 'all') {
+    query = query.eq('stage_actual', stageFilter);
+  }
+
+  const { data: negocios } = await query;
+
+  if (!negocios || negocios.length === 0) {
+    await ctx.sendMessage(STAGE_EMPTY_MSG[stageFilter] || STAGE_EMPTY_MSG.all);
+    return;
+  }
+
+  // Map to LastContextItem format (preserve original order)
+  const allItems = negocios.map((n: any) => ({
+    id: n.id,
+    nombre: n.nombre,
+    codigo: n.codigo,
+    precio: Number(n.precio_aprobado || n.precio_estimado || 0),
+    stage: n.stage_actual,
+  }));
+
+  // Single-stage view
+  if (stageFilter !== 'all') {
+    const totalValue = allItems.reduce((s: number, n: any) => s + n.precio, 0);
+    const label = STAGE_LABELS_PLURAL[stageFilter] || stageFilter;
+    const shownCount = Math.min(5, allItems.length);
+    let msg = `📊 ${label}: ${allItems.length} negocio${allItems.length > 1 ? 's' : ''}`;
+    msg += `\n💰 Total: ${formatCOPShort(totalValue)}\n`;
+    for (const n of allItems.slice(0, shownCount)) {
+      const cod = n.codigo ? ` (${n.codigo})` : '';
+      msg += `\n• ${bold(n.nombre)}${cod} — ${formatCOPShort(n.precio)}`;
+    }
+    if (allItems.length > shownCount) {
+      msg += `\n… y ${allItems.length - shownCount} más. Escribe *los otros* para verlos.`;
+    }
+    // Stale warning only for venta
+    if (stageFilter === 'venta') {
+      const stale = negocios.filter((n: any) => daysSince(n.updated_at) > 10);
+      if (stale.length > 0) {
+        const s = stale[0];
+        msg += `\n\n⚠️ ${bold(s.nombre)} sin movimiento ${daysSince(s.updated_at)}d`;
+      }
+    }
+    await ctx.sendMessage(msg);
+    await saveLastContext(supabase, ctx.session.id, {
+      type: 'negocios_list',
+      items: allItems,
+      shown: shownCount,
+      total: allItems.length,
+      query_meta: { stage_filter: stageFilter },
+    });
+    return;
+  }
+
+  // Grouped view (stage_filter === 'all')
+  // Maintain insertion order per stage for accurate "shown" tracking
+  const orderedItems: any[] = [];
+  const groups: Record<string, any[]> = { venta: [], ejecucion: [], cobro: [], cierre: [] };
+  for (const stage of ['venta', 'ejecucion', 'cobro', 'cierre'] as const) {
+    const stageItems = allItems.filter((n: any) => (n.stage || 'venta') === stage);
+    groups[stage] = stageItems;
+  }
+
+  const totalValue = allItems.reduce((s: number, n: any) => s + n.precio, 0);
+
+  let msg = `📊 ${allItems.length} negocio${allItems.length > 1 ? 's' : ''} activo${allItems.length > 1 ? 's' : ''}`;
+  msg += `\n💰 Total: ${formatCOPShort(totalValue)}\n`;
+
+  let shownCount = 0;
+  for (const stage of ['venta', 'ejecucion', 'cobro', 'cierre'] as const) {
+    const items = groups[stage];
+    if (!items || items.length === 0) continue;
+    const label = STAGE_LABELS_PLURAL[stage];
+    msg += `\n*${label}* (${items.length}):`;
+    const perStageShown = Math.min(3, items.length);
+    for (const n of items.slice(0, perStageShown)) {
+      const cod = n.codigo ? ` (${n.codigo})` : '';
+      msg += `\n  • ${n.nombre}${cod} — ${formatCOPShort(n.precio)}`;
+      orderedItems.push(n);
+      shownCount++;
+    }
+    if (items.length > perStageShown) {
+      msg += `\n  … y ${items.length - perStageShown} más`;
+    }
+    // Remaining items go to the tail of orderedItems so followup can show them
+    for (const n of items.slice(perStageShown)) {
+      orderedItems.push(n);
     }
   }
 
-  msg += `\n\n💰 Total: ${formatCOPShort(totalValue)} · Pond: ${formatCOPShort(weightedValue)}`;
-
-  // Stale opportunities (>10 days without activity)
-  const stale = opps.filter((o: any) => daysSince(o.updated_at) > 10);
-  if (stale.length > 0) {
-    msg += `\n⚠️ ${bold(stale[0].descripcion)} sin mov. ${daysSince(stale[0].updated_at)}d`;
+  if (shownCount < allItems.length) {
+    msg += `\n\nEscribe *los otros* para ver los ${allItems.length - shownCount} restantes.`;
   }
 
   await ctx.sendMessage(msg);
+  await saveLastContext(supabase, ctx.session.id, {
+    type: 'negocios_list',
+    items: orderedItems,
+    shown: shownCount,
+    total: allItems.length,
+    query_meta: { stage_filter: 'all' },
+  });
 }
 
 // ============================================================

@@ -1,144 +1,105 @@
 // ============================================================
-// Handler: Novedad — W09 (Nota Oportunidad), W11 (Nota Proyecto)
-// D95: Texto libre — Gemini solo extrae entity_hint
+// Handler: Novedad — Notas sobre Negocios
+// NOTA_NEGOCIO escribe en activity_log del negocio.
 // ============================================================
 
 import type { HandlerContext } from '../types.ts';
-import { PIPELINE_STAGE_LABELS } from '../types.ts';
-import { formatCOP, bold, daysSince } from '../wa-format.ts';
-import { findProjects, findOpportunities } from '../wa-lookup.ts';
+import { formatCOP, bold } from '../wa-format.ts';
+import { findNegocios, findNegocioByCode } from '../wa-lookup.ts';
 import { completeSession } from '../wa-session.ts';
 
+const STAGE_LABELS: Record<string, string> = {
+  venta: 'En venta',
+  ejecucion: 'En ejecución',
+  cobro: 'En cobro',
+  cierre: 'Cerrado',
+};
+
 export async function handleNovedad(ctx: HandlerContext): Promise<void> {
-  const { parsed, session } = ctx;
+  const { session } = ctx;
 
   if (session.state !== 'started') {
     await handleResumeNovedad(ctx);
     return;
   }
 
-  switch (parsed.intent) {
-    case 'NOTA_OPORTUNIDAD': await handleNotaOportunidad(ctx); break;
-    case 'NOTA_PROYECTO': await handleNotaProyecto(ctx); break;
-  }
+  // Both intents route to the same unified handler
+  await handleNotaNegocio(ctx);
 }
 
 // ============================================================
-// W09 — Nota sobre Oportunidad
+// Nota sobre Negocio (unificado)
 // ============================================================
 
-async function handleNotaOportunidad(ctx: HandlerContext): Promise<void> {
+async function handleNotaNegocio(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { entity_hint, note } = parsed.fields;
+  const { entity_hint, note, project_code } = parsed.fields;
   const noteText = note || ctx.message.text;
 
+  // 1. Fast path: negocio code
+  if (project_code) {
+    const n = await findNegocioByCode(supabase, user.workspace_id, String(project_code));
+    if (n) {
+      await confirmNote(ctx, n, noteText);
+      return;
+    }
+    await ctx.sendMessage(`No encontré ningún negocio con código *${project_code}*.`);
+    await completeSession(supabase, ctx.session.id);
+    return;
+  }
+
   if (!entity_hint) {
-    await ctx.sendMessage('¿Sobre cuál oportunidad es la nota?');
+    await ctx.sendMessage('¿Sobre cuál negocio es la nota? Dime el nombre del cliente o el código del negocio.');
     await ctx.updateSession('collecting', {
-      intent: 'NOTA_OPORTUNIDAD', pending_action: 'W09',
+      intent: 'NOTA_NEGOCIO', pending_action: 'W09',
       parsed_fields: { note: noteText },
     });
     return;
   }
 
-  const opps = await findOpportunities(supabase, user.workspace_id, entity_hint);
+  const negocios = await findNegocios(supabase, user.workspace_id, entity_hint);
 
-  if (opps.length === 0) {
-    await ctx.sendMessage(`❌ No encontré oportunidad activa con "${entity_hint}".`);
+  if (negocios.length === 0) {
+    await ctx.sendMessage(`No encontré ningún negocio con "${entity_hint}".`);
     await completeSession(supabase, ctx.session.id);
     return;
   }
 
-  if (opps.length === 1) {
-    const opp = opps[0];
-    const stageLabel = PIPELINE_STAGE_LABELS[opp.etapa] || opp.etapa;
-    const diasSinActividad = daysSince(opp.updated_at);
-
-    const msg = `📝 Voy a agregar esta nota a ${bold(opp.descripcion)} (${stageLabel}):\n\n"${noteText}"`;
-    await ctx.sendButtons(msg, [
-      { id: 'btn_confirm', title: '✅ Confirmar' },
-      { id: 'btn_cancel', title: '❌ Cancelar' },
-    ]);
-    await ctx.updateSession('confirming', {
-      intent: 'NOTA_OPORTUNIDAD', pending_action: 'W09',
-      oportunidad_id: opp.id,
-      parsed_fields: { ...parsed.fields, note: noteText },
-    });
+  if (negocios.length === 1) {
+    await confirmNote(ctx, negocios[0], noteText);
     return;
   }
 
-  // Multiple matches
-  const options = opps.slice(0, 5).map((o: any) => ({
-    id: o.id,
-    label: `${bold(o.descripcion)} — ${PIPELINE_STAGE_LABELS[o.etapa] || o.etapa}`,
+  // Multiple matches — present options
+  const options = negocios.slice(0, 5).map((n: any) => ({
+    id: n.id,
+    label: `${n.nombre} (${n.codigo || 'sin código'})`,
   }));
 
   await ctx.sendOptions(
-    `📝 Nota: "${noteText}"\n\n¿Para cuál oportunidad?`,
+    `📝 Nota: "${noteText}"\n\n¿A cuál negocio?`,
     options.map((o) => o.label),
   );
   await ctx.updateSession('awaiting_selection', {
-    intent: 'NOTA_OPORTUNIDAD', pending_action: 'W09',
+    intent: 'NOTA_NEGOCIO', pending_action: 'W09',
     parsed_fields: { ...parsed.fields, note: noteText },
     options,
   });
 }
 
-// ============================================================
-// W11 — Nota sobre Proyecto
-// ============================================================
-
-async function handleNotaProyecto(ctx: HandlerContext): Promise<void> {
-  const { parsed, user, supabase } = ctx;
-  const { entity_hint, note } = parsed.fields;
-  const noteText = note || ctx.message.text;
-
-  if (!entity_hint) {
-    await ctx.sendMessage('¿Sobre cuál proyecto es la nota?');
-    await ctx.updateSession('collecting', {
-      intent: 'NOTA_PROYECTO', pending_action: 'W11',
-      parsed_fields: { note: noteText },
-    });
-    return;
-  }
-
-  const projects = await findProjects(supabase, user.workspace_id, entity_hint);
-
-  if (projects.length === 0) {
-    await ctx.sendMessage(`❌ No encontré proyecto activo con "${entity_hint}".`);
-    await completeSession(supabase, ctx.session.id);
-    return;
-  }
-
-  if (projects.length === 1) {
-    const p = projects[0];
-    const msg = `📝 Voy a agregar nota a ${bold(p.nombre)}:\n\n"${noteText}"`;
-    await ctx.sendButtons(msg, [
-      { id: 'btn_confirm', title: '✅ Confirmar' },
-      { id: 'btn_cancel', title: '❌ Cancelar' },
-    ]);
-    await ctx.updateSession('confirming', {
-      intent: 'NOTA_PROYECTO', pending_action: 'W11',
-      proyecto_id: p.id, proyecto_nombre: p.nombre,
-      parsed_fields: { ...parsed.fields, note: noteText },
-    });
-    return;
-  }
-
-  // Multiple matches
-  const options = projects.slice(0, 5).map((p: any) => ({
-    id: p.id,
-    label: bold(p.nombre),
-  }));
-
-  await ctx.sendOptions(
-    `📝 Nota: "${noteText}"\n\n¿Para cuál proyecto?`,
-    options.map((o) => o.label),
-  );
-  await ctx.updateSession('awaiting_selection', {
-    intent: 'NOTA_PROYECTO', pending_action: 'W11',
-    parsed_fields: { ...parsed.fields, note: noteText },
-    options,
+async function confirmNote(ctx: HandlerContext, negocio: any, noteText: string): Promise<void> {
+  const stageLabel = STAGE_LABELS[negocio.stage_actual] || negocio.stage_actual || '';
+  const suffix = stageLabel ? ` · ${stageLabel}` : '';
+  const msg = `📝 Voy a agregar esta nota a ${bold(negocio.nombre)}${suffix}:\n\n"${noteText}"`;
+  await ctx.sendButtons(msg, [
+    { id: 'btn_confirm', title: '✅ Confirmar' },
+    { id: 'btn_cancel', title: '❌ Cancelar' },
+  ]);
+  await ctx.updateSession('confirming', {
+    intent: 'NOTA_NEGOCIO', pending_action: 'W09',
+    proyecto_id: negocio.id,           // reuse session slot as negocio_id
+    proyecto_nombre: negocio.nombre,
+    parsed_fields: { note: noteText },
   });
 }
 
@@ -147,7 +108,7 @@ async function handleNotaProyecto(ctx: HandlerContext): Promise<void> {
 // ============================================================
 
 async function handleResumeNovedad(ctx: HandlerContext): Promise<void> {
-  const { session, message, supabase, user } = ctx;
+  const { session, message, supabase } = ctx;
   const context = session.context;
   const text = message.text.trim().toLowerCase();
 
@@ -155,8 +116,7 @@ async function handleResumeNovedad(ctx: HandlerContext): Promise<void> {
   if (session.state === 'confirming') {
     const btnId = message.interactive_reply;
     if (btnId === 'btn_confirm' || ['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
-      if (context.pending_action === 'W09') await executeW09(ctx);
-      else if (context.pending_action === 'W11') await executeW11(ctx);
+      await executeNotaNegocio(ctx);
     } else if (btnId === 'btn_cancel' || ['no', 'cancelar', 'cancel', '❌'].includes(text)) {
       await ctx.sendMessage('❌ Cancelado.');
     } else {
@@ -181,20 +141,14 @@ async function handleResumeNovedad(ctx: HandlerContext): Promise<void> {
     }
 
     const selected = options[selection - 1];
-
-    if (context.pending_action === 'W09') {
-      await ctx.updateSession('confirming', { oportunidad_id: selected.id });
-      await ctx.sendButtons(`📝 Agregar nota a ${selected.label}.`, [
-        { id: 'btn_confirm', title: '✅ Confirmar' },
-        { id: 'btn_cancel', title: '❌ Cancelar' },
-      ]);
-    } else if (context.pending_action === 'W11') {
-      await ctx.updateSession('confirming', { proyecto_id: selected.id, proyecto_nombre: selected.label });
-      await ctx.sendButtons(`📝 Agregar nota a ${selected.label}.`, [
-        { id: 'btn_confirm', title: '✅ Confirmar' },
-        { id: 'btn_cancel', title: '❌ Cancelar' },
-      ]);
-    }
+    await ctx.updateSession('confirming', {
+      proyecto_id: selected.id,
+      proyecto_nombre: selected.label,
+    });
+    await ctx.sendButtons(`📝 Agregar nota a ${bold(selected.label)}.`, [
+      { id: 'btn_confirm', title: '✅ Confirmar' },
+      { id: 'btn_cancel', title: '❌ Cancelar' },
+    ]);
     return;
   }
 
@@ -208,72 +162,72 @@ async function handleResumeNovedad(ctx: HandlerContext): Promise<void> {
       },
     };
     await completeSession(supabase, session.id);
-    if (context.pending_action === 'W09') await handleNotaOportunidad(newCtx);
-    else if (context.pending_action === 'W11') await handleNotaProyecto(newCtx);
+    await handleNotaNegocio(newCtx);
   }
 }
 
 // ============================================================
-// Execute
+// Execute — escribe en activity_log del negocio
 // ============================================================
 
-async function executeW09(ctx: HandlerContext): Promise<void> {
+async function executeNotaNegocio(ctx: HandlerContext): Promise<void> {
   const { supabase, user, session } = ctx;
   const c = session.context;
-  const noteText = c.parsed_fields?.note || ctx.message.text;
+  const noteText = (c.parsed_fields?.note || ctx.message.text).slice(0, 280);
+  const negocioId = c.proyecto_id;
 
-  const { error } = await supabase.from('oportunidad_notas').insert({
+  if (!negocioId) {
+    await ctx.sendMessage('❌ Perdí la referencia al negocio. Intenta de nuevo.');
+    return;
+  }
+
+  // Find staff id for the author
+  let autorId: string | null = null;
+  if (user.user_id) {
+    const { data: staff } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('workspace_id', user.workspace_id)
+      .eq('profile_id', user.user_id)
+      .single();
+    autorId = staff?.id || null;
+  }
+
+  const { error } = await supabase.from('activity_log').insert({
     workspace_id: user.workspace_id,
-    oportunidad_id: c.oportunidad_id,
+    entidad_tipo: 'negocio',
+    entidad_id: negocioId,
+    tipo: 'comentario',
     contenido: noteText,
-    canal_registro: 'whatsapp',
+    autor_id: autorId,
   });
 
   if (error) {
-    console.error('[novedad] W09 error:', error);
+    console.error('[novedad] activity_log insert error:', error);
     await ctx.sendMessage('❌ Error al guardar la nota. Intenta de nuevo.');
     return;
   }
 
-  // Also update ultima_accion on oportunidad
-  await supabase.from('oportunidades').update({
-    ultima_accion: noteText.slice(0, 100),
-    ultima_accion_fecha: new Date().toISOString(),
-  }).eq('id', c.oportunidad_id);
+  // Refresh updated_at so listings show recent activity
+  await supabase.from('negocios')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', negocioId);
 
-  // Get opp info for response
-  const { data: opp } = await supabase
-    .from('oportunidades')
-    .select('descripcion, etapa, valor_estimado')
-    .eq('id', c.oportunidad_id)
+  // Get negocio info for confirmation
+  const { data: negocio } = await supabase
+    .from('negocios')
+    .select('nombre, codigo, stage_actual, precio_estimado, precio_aprobado')
+    .eq('id', negocioId)
     .single();
 
-  if (opp) {
-    const stageLabel = PIPELINE_STAGE_LABELS[opp.etapa] || opp.etapa;
-    const msg = `✅ Nota agregada a ${bold(opp.descripcion)}.\n\n📋 Estado: ${stageLabel}\n💰 Valor: ${formatCOP(Number(opp.valor_estimado))}\n\nÚltima nota: "${noteText}"`;
+  if (negocio) {
+    const stageLabel = STAGE_LABELS[negocio.stage_actual] || negocio.stage_actual;
+    const precio = Number(negocio.precio_aprobado || negocio.precio_estimado || 0);
+    let msg = `✅ Nota agregada a ${bold(negocio.nombre)}.\n\n📋 Estado: ${stageLabel}`;
+    if (precio > 0) msg += `\n💰 Valor: ${formatCOP(precio)}`;
+    msg += `\n\nÚltima nota: "${noteText}"`;
     await ctx.sendMessage(msg);
   } else {
-    await ctx.sendMessage('✅ Nota guardada.');
+    await ctx.sendMessage(`✅ Nota guardada: "${noteText}"`);
   }
-}
-
-async function executeW11(ctx: HandlerContext): Promise<void> {
-  const { supabase, user, session } = ctx;
-  const c = session.context;
-  const noteText = c.parsed_fields?.note || ctx.message.text;
-
-  const { error } = await supabase.from('proyecto_notas').insert({
-    workspace_id: user.workspace_id,
-    proyecto_id: c.proyecto_id,
-    contenido: noteText,
-    canal_registro: 'whatsapp',
-  });
-
-  if (error) {
-    console.error('[novedad] W11 error:', error);
-    await ctx.sendMessage('❌ Error al guardar la nota. Intenta de nuevo.');
-    return;
-  }
-
-  await ctx.sendMessage(`✅ Nota agregada a ${bold(c.proyecto_nombre || 'proyecto')}.\n\nÚltima nota: "${noteText}"`);
 }

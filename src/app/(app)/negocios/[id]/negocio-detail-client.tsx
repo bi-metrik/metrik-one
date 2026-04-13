@@ -34,6 +34,7 @@ import BloqueChecklist from './bloques/BloqueChecklist'
 import BloqueChecklistSoporte from './bloques/BloqueChecklistSoporte'
 import BloqueDocumentos from './bloques/BloqueDocumentos'
 import type { DocumentoConfig } from './bloques/BloqueDocumentos'
+import BloqueDocumento from './bloques/BloqueDocumento'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
@@ -623,6 +624,22 @@ function BloqueRenderer({
         />
       )
     }
+
+    case 'documento':
+      return (
+        <BloqueDocumento
+          negocioBloqueId={instanciaId}
+          negocioId={negocioId}
+          instancia={bloque.instancia}
+          modo={modo}
+          configExtra={configExtra as {
+            label: string
+            tipos_permitidos?: string[]
+            max_size_mb?: number
+            campos_extraccion?: import('@/lib/ai/extract-fields').CampoExtraccion[]
+          }}
+        />
+      )
 
     case 'cotizacion':
       return (

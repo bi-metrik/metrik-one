@@ -35,7 +35,7 @@ export async function handleCobro(ctx: HandlerContext): Promise<void> {
       await proceedCobroWithProject(ctx, project.proyecto_id, project.nombre);
       return;
     }
-    await ctx.sendMessage(`⚠️ No encontré negocio o proyecto activo con código ${project_code}.`);
+    await ctx.sendMessage(`⚠️ No encontré ningún negocio activo con código ${project_code}.`);
   }
 
   if (!entity_hint) {
@@ -111,7 +111,7 @@ export async function proceedCobroWithProject(ctx: HandlerContext, projectId: st
     const f = facturas[0];
     const saldo = Number(f.saldo_pendiente);
     const isFullPayment = Math.abs(saldo - amount) < 100;
-    const msg = `💰 Cobro recibido:\n\n📁 Proyecto: ${bold(projectName)}\n📄 Factura: ${f.numero_factura || '#' + f.factura_id.slice(0, 4)} — Saldo: ${formatCOP(saldo)}\n💵 Cobro: ${formatCOP(amount)} ${isFullPayment ? '✅ Pago completo' : ''}`;
+    const msg = `💰 Cobro recibido:\n\n📁 Negocio: ${bold(projectName)}\n📄 Factura: ${f.numero_factura || '#' + f.factura_id.slice(0, 4)} — Saldo: ${formatCOP(saldo)}\n💵 Cobro: ${formatCOP(amount)} ${isFullPayment ? '✅ Pago completo' : ''}`;
     await ctx.sendButtons(msg, [
       { id: 'btn_confirm', title: '✅ Confirmar' },
       { id: 'btn_cancel', title: '❌ Cancelar' },

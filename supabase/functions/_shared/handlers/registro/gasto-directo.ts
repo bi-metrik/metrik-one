@@ -4,6 +4,7 @@
 
 import type { HandlerContext } from '../../types.ts';
 import { CATEGORIA_LABELS } from '../../types.ts';
+import { CONFIDENCE_THRESHOLD } from '../../wa-parse.ts';
 import { formatCOP, formatPct, bold, formatProject } from '../../wa-format.ts';
 import { findDestinos, findActiveDestinos, findProjectByCode, findNegocioByCode, matchCategory, findMatchingBorrador } from '../../wa-lookup.ts';
 import { executeRegistro } from './execute.ts';
@@ -21,7 +22,8 @@ export async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
   const categoria = category_hint || matchCategory(concept || '') || 'otros';
   console.log(`[registro] W01 category_hint=${category_hint}, concept=${concept}, matchCategory=${matchCategory(concept || '')}, final=${categoria}`);
 
-  const isHighConfidence = parsed.confidence >= 0.8;
+  // Unified threshold (Sprint 1, Yuto) — same cutoff used by parser
+  const isHighConfidence = parsed.confidence >= CONFIDENCE_THRESHOLD;
 
   // Fast path: project_code → exact match by código (try negocio first, then project)
   if (project_code) {
@@ -51,14 +53,14 @@ export async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
       return;
     }
     // Code not found — fall through to entity_hint or show all
-    await ctx.sendMessage(`⚠️ No encontré negocio o proyecto activo con código ${project_code}.`);
+    await ctx.sendMessage(`⚠️ No encontré ningún negocio activo con código ${project_code}.`);
   }
 
   if (!entity_hint) {
     // No hint — show list of active negocios + projects
     const destinos = await findActiveDestinos(supabase, user.workspace_id);
     if (destinos.all.length === 0) {
-      await ctx.sendMessage('No tienes negocios ni proyectos activos. ¿Lo registro como gasto de empresa?');
+      await ctx.sendMessage('No tienes negocios activos. ¿Lo registro como gasto de empresa?');
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_DIRECTO',
         pending_action: 'W01',
@@ -115,7 +117,7 @@ export async function handleGastoDirecto(ctx: HandlerContext): Promise<void> {
     options.push({ id: 'operativo', label: '🏢 Gasto de empresa', _tipo: 'empresa' as any });
 
     await ctx.sendOptions(
-      `❌ No encontré "${entity_hint}". Tus negocios/proyectos:`,
+      `❌ No encontré "${entity_hint}". Tus negocios:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {

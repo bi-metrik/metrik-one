@@ -39,6 +39,15 @@ export async function checkOutboundAlertLimit(
   return (count ?? 0) < OUTBOUND_ALERT_LIMIT;
 }
 
+export interface LogTelemetry {
+  parser_source?: 'fast_path' | 'gemini' | 'regex';
+  gemini_model?: string;
+  gemini_input_tokens?: number;
+  gemini_output_tokens?: number;
+  gemini_latency_ms?: number;
+  confidence?: number;
+}
+
 /** Log a message for rate limiting and debugging */
 export async function logMessage(
   supabase: SupabaseClient,
@@ -47,6 +56,7 @@ export async function logMessage(
   workspaceId?: string,
   intent?: string,
   messagePreview?: string,
+  telemetry?: LogTelemetry,
 ): Promise<void> {
   await supabase.from('wa_message_log').insert({
     workspace_id: workspaceId,
@@ -54,5 +64,11 @@ export async function logMessage(
     direction,
     intent,
     message_preview: messagePreview?.slice(0, 100),
+    parser_source: telemetry?.parser_source,
+    gemini_model: telemetry?.gemini_model,
+    gemini_input_tokens: telemetry?.gemini_input_tokens,
+    gemini_output_tokens: telemetry?.gemini_output_tokens,
+    gemini_latency_ms: telemetry?.gemini_latency_ms,
+    confidence: telemetry?.confidence,
   });
 }

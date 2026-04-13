@@ -86,9 +86,11 @@ interface Props {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controles: any[]
   equipo: { id: string; full_name: string; role: string | null }[]
+  canEdit: boolean
+  canDelete: boolean
 }
 
-export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
+export default function RiesgoDetail({ riesgo, controles, equipo, canEdit, canDelete }: Props) {
   const [isPending, startTransition] = useTransition()
   const [prob, setProb] = useState(riesgo.probabilidad)
   const [imp, setImp] = useState(riesgo.impacto)
@@ -153,20 +155,29 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleSave}
-            disabled={isPending}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669] disabled:opacity-50"
-          >
-            <Save className="h-4 w-4" />
-            {isPending ? 'Guardando...' : 'Guardar'}
-          </button>
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {canEdit && (
+            <button
+              onClick={handleSave}
+              disabled={isPending}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669] disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {isPending ? 'Guardando...' : 'Guardar'}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+          {!canEdit && (
+            <span className="inline-flex items-center gap-1 rounded-lg border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-xs font-medium text-[#6B7280]">
+              Solo lectura
+            </span>
+          )}
         </div>
       </div>
 
@@ -209,7 +220,8 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
             <select
               value={estado}
               onChange={e => setEstado(e.target.value)}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)]"
+              disabled={!canEdit}
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               {ESTADOS.map(e => (
                 <option key={e.value} value={e.value}>{e.label}</option>
@@ -223,7 +235,8 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
             <select
               value={responsableId}
               onChange={e => setResponsableId(e.target.value)}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)]"
+              disabled={!canEdit}
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               <option value="">Sin asignar</option>
               {equipo.map(m => (
@@ -238,7 +251,8 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
             <select
               value={prob}
               onChange={e => setProb(parseInt(e.target.value))}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)]"
+              disabled={!canEdit}
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               {[1, 2, 3, 4, 5].map(v => (
                 <option key={v} value={v}>{v} — {PROB_LABELS[v]}</option>
@@ -252,7 +266,8 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
             <select
               value={imp}
               onChange={e => setImp(parseInt(e.target.value))}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)]"
+              disabled={!canEdit}
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               {[1, 2, 3, 4, 5].map(v => (
                 <option key={v} value={v}>{v} — {IMPACTO_LABELS[v]}</option>
@@ -266,7 +281,8 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
             <select
               value={factorRiesgo}
               onChange={e => setFactorRiesgo(e.target.value)}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)]"
+              disabled={!canEdit}
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               {FACTORES.map(f => (
                 <option key={f.value} value={f.value}>{f.label}</option>
@@ -280,7 +296,8 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
             <select
               value={fuente}
               onChange={e => setFuente(e.target.value)}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)]"
+              disabled={!canEdit}
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               {FUENTES.map(f => (
                 <option key={f.value} value={f.value}>{f.label}</option>
@@ -305,8 +322,9 @@ export default function RiesgoDetail({ riesgo, controles, equipo }: Props) {
             value={notas}
             onChange={e => setNotas(e.target.value)}
             rows={3}
+            disabled={!canEdit}
             placeholder="Observaciones adicionales..."
-            className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm placeholder:text-[#6B7280] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)]"
+            className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm placeholder:text-[#6B7280] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
           />
         </div>
       </div>

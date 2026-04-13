@@ -83,7 +83,7 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     if (project) {
       msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(formatProject(project))}.\n📊 Presupuesto: ${formatCOP(Number(project.costo_acumulado))} / ${formatCOP(Number(project.presupuesto_total))} (${formatPct(Number(project.presupuesto_consumido_pct))})`;
     } else {
-      msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'proyecto')}.`;
+      msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'negocio')}.`;
     }
   } else {
     // Negocio — no v_proyecto_financiero, just confirm

@@ -15,10 +15,9 @@ export type Intent =
   | 'COBRO'
   | 'CONTACTO_NUEVO'
   | 'SALDO_BANCARIO'
-  | 'NOTA_OPORTUNIDAD'
-  | 'NOTA_PROYECTO'
+  | 'NOTA_NEGOCIO'
   | 'ESTADO_PROYECTO'
-  | 'ESTADO_PIPELINE'
+  | 'ESTADO_NEGOCIOS'
   | 'MIS_NUMEROS'
   | 'CARTERA'
   | 'INFO_CONTACTO'
@@ -28,6 +27,7 @@ export type Intent =
   | 'OPP_AVANZAR'
   | 'ACTIVIDAD'
   | 'AYUDA'
+  | 'FOLLOWUP'
   | 'UNCLEAR';
 
 export interface ParsedFields {
@@ -47,6 +47,7 @@ export interface ParsedFields {
   activity_text?: string;      // Activity description for ACTIVIDAD
   suggested_actions?: string[]; // AI-suggested actions for smart UNCLEAR
   saldo_teorico?: number;      // Theoretical balance (injected by handler)
+  stage_filter?: 'venta' | 'ejecucion' | 'cobro' | 'cierre' | 'all'; // For ESTADO_NEGOCIOS queries
 }
 
 export interface ParseResult {
@@ -97,6 +98,33 @@ export interface SessionContext {
   activity_text?: string;
   // Timeout tracking: ISO timestamp when awaiting_selection started
   awaiting_since?: string;
+  // Conversational memory (loaded from last completed session of same phone)
+  last_context?: LastContext;
+}
+
+// --- Conversational Last Context (follow-up memory) ---
+
+export interface LastContextItem {
+  id?: string;
+  nombre: string;
+  codigo?: string | null;
+  precio?: number;
+  stage?: string;
+  extra?: Record<string, unknown>;
+}
+
+export type LastContextType =
+  | 'negocios_list'      // result of ESTADO_NEGOCIOS
+  | 'contactos_list'     // result of INFO_CONTACTO multi-match
+  | 'cartera_list';      // result of CARTERA
+
+export interface LastContext {
+  type: LastContextType;
+  items: LastContextItem[];
+  shown: number;           // how many items were displayed to user
+  total: number;           // total items in the query result
+  query_meta?: Record<string, unknown>; // stage_filter, etc.
+  created_at: string;      // ISO timestamp — used for TTL
 }
 
 export interface BotSession {
@@ -201,10 +229,11 @@ export const OPERATOR_ALLOWED_INTENTS: Intent[] = [
   'TIMER_INICIAR',
   'TIMER_PARAR',
   'TIMER_ESTADO',
-  'NOTA_PROYECTO',
+  'NOTA_NEGOCIO',
   'ESTADO_PROYECTO',
   'ACTIVIDAD',
   'AYUDA',
+  'FOLLOWUP',
 ];
 
 export const CONTADOR_ALLOWED_INTENTS: Intent[] = [
@@ -212,8 +241,9 @@ export const CONTADOR_ALLOWED_INTENTS: Intent[] = [
   'CARTERA',
   'INFO_CONTACTO',
   'ESTADO_PROYECTO',
-  'ESTADO_PIPELINE',
+  'ESTADO_NEGOCIOS',
   'AYUDA',
+  'FOLLOWUP',
 ];
 
 export const READ_ONLY_ALLOWED_INTENTS: Intent[] = [
@@ -221,6 +251,7 @@ export const READ_ONLY_ALLOWED_INTENTS: Intent[] = [
   'CARTERA',
   'ESTADO_PROYECTO',
   'AYUDA',
+  'FOLLOWUP',
 ];
 
 // Legacy alias kept for backward-compat with existing imports

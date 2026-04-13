@@ -141,8 +141,15 @@ metrik-one/
 │   ├── types/
 │   │   └── database.ts           # Types auto-generados Supabase + 26 aliases (~3785 lineas)
 │   └── middleware.ts             # Subdomain routing + auth guard
+├── workspaces/                     # Contexto por workspace (Clarity)
+│   ├── soena/
+│   │   ├── CONTEXT.md              # Estado, config, pendientes, decisiones SOENA
+│   │   ├── decisions.md            # Historial acumulativo decisiones
+│   │   └── migrations/             # SQL workspace-especifico
+│   └── metrik/
+│       └── CONTEXT.md              # Workspace demo interno
 ├── supabase/
-│   ├── migrations/               # ~27 archivos SQL (desde 20260218)
+│   ├── migrations/               # Migraciones genericas del producto
 │   └── functions/                # Edge functions (WhatsApp webhook)
 └── docs/
     ├── FEATURES.md               # Features por modulo con estado
@@ -288,43 +295,41 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-09 (sesion H — BloqueHistorial + fix numeros + limpieza workspace)
-**Branch:** main
-**Commit:** `ceb0a2e`
+**Sesion:** 2026-04-12 (sesiones WA bot — FOLLOWUP + context injection + anaphora)
+**Branch:** main (uncommitted — 34 archivos modificados)
 
 Que se hizo:
-- Feat: BloqueHistorial — nuevo bloque visualizacion con tabs (gastos, horas, cobros) por negocio. Componente, migration, renderer, data prop end-to-end
-- Fix: BloqueEjecucion limpiado — removido "ultimas horas registradas" (ahora en historial), preservado gastos por categoria (lo mas importante)
-- Fix: KPI "En venta" en /numeros — 3 queries filtraban `estado='activo'` pero valor real es `'abierto'`. Corregido
-- Fix: Renombrado "Pipeline" → "En venta" en UI numeros (eliminar anglicismo)
-- Fix: campo `descripcion` (no `titulo`) en historial + CATEGORIA_LABELS alineadas con DB CHECK constraint
-- Fix: Datos demo coherentes — gastos solo en etapas de ejecucion, no en venta
-- Ops: Workspace `metrik` limpiado completamente via migracion SQL — queda en blanco para demo fresca
-- Docs: Sistema de codigos empresa/negocio documentado en CLAUDE.md
+- Feat: Intent FOLLOWUP — fast-path regex para "los otros", "ver más", "cuéntame más", "el resto" + handler `followup.ts` que lee `last_context.items.slice(shown)` para mostrar items restantes
+- Feat: ESTADO_PIPELINE → ESTADO_NEGOCIOS rename con `stage_filter` (venta/ejecucion/cobro/cierre/all) — queries dinámicos por stage
+- Feat: Sistema `last_context` persistente — `saveLastContext()` en handlers, `getRecentLastContext()` en sesión nueva (TTL 5 min), preload automático en `getOrCreateSession()`
+- Feat: Inyección de contexto en Gemini `system_instruction` — `hasAnaphoricSignal()` detecta pronombres/ordinales, `buildContextHint()` genera hint con few-shot examples adaptativos al contexto real
+- Fix: Regex `hasAnaphoricSignal` unicode-aware — `\b` en JS no detecta acentos (ej: "ahí"), reemplazado por patrones con lookarounds manuales
+- Feat: Framework wa-stress — `scripts/wa-stress/` con runner Node.js, golden set 99 casos, edge function `wa-parse-test` para tests aislados del parser
+- Ops: Edge functions `wa-webhook` + `wa-parse-test` desplegadas en producción
+- Golden set: 98/99 (99%) — único fallo pre-existente (timer-03 "empezar a trabajar en mirador" → ACTIVIDAD)
 
-**Commits de sesion (sesion H):**
-- `6a9fe55` feat: BloqueHistorial — lista completa de gastos, horas y cobros del negocio
-- `77e9779` fix: campo descripcion en historial + categorías DB + datos demo coherentes
-- `ceb0a2e` fix: KPI 'En venta' — corregir filtro estado abierto y renombrar label
+**Archivos nuevos:**
+- `supabase/functions/_shared/handlers/followup.ts` — handler FOLLOWUP
+- `supabase/functions/wa-parse-test/index.ts` — endpoint testing parser (acepta `last_context` para tests anafóricos)
+- `scripts/wa-stress/runner.mjs` + `corpus/golden.jsonl` — framework de regresión
 
-**Migraciones aplicadas en produccion (sesion H):**
-- `20260409100001` bloque_historial (definicion + bloque_configs + negocio_bloques backfill)
-- `20260409200001` limpiar_workspace_metrik (borrado total datos workspace metrik)
+**Hallazgo pendiente:** `/negocios` page no muestra cerrados — `getNegociosV2` filtra `.in('estado', ['activo','abierto'])`. Propuesta: agregar pill "Cerrados" con filtro server-side
 
-## Estado actual (2026-04-09)
+## Estado actual (2026-04-12)
 
-- **Branch:** main
-- **Produccion:** Desplegado en Vercel, dominio metrikone.co activo — commit `ceb0a2e`
-- **Workspace metrik:** LIMPIO — sin datos, listo para demo fresca. Configuracion (etapas, bloques, staff, profiles) preservada
-- **WhatsApp bot:** Edge function `wa-webhook` deployada con --no-verify-jwt. Proxima sesion: mejorar flujo WhatsApp
-- **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales en Supabase
-- **CRON_SECRET:** Configurado en Vercel. Secret en `.credentials.md`
-- **Workflow engine:** Activo en produccion. Tablas `workspace_stages` + `stage_transition_rules` con etapas de sistema seedeadas en todos los workspaces
+- **Branch:** main (34 archivos uncommitted — incluye cambios WA bot + AFI compliance + SOENA de varias sesiones)
+- **Produccion Vercel:** commit `ceb0a2e` (web app). Edge functions desplegadas por separado con cambios mas recientes
+- **WhatsApp bot:** Edge functions `wa-webhook` + `wa-parse-test` desplegadas con todos los cambios WA. Parser: Gemini 2.5 Flash-Lite + fast-path regex + defense layer. Nuevos: FOLLOWUP intent, ESTADO_NEGOCIOS con stage_filter, last_context con anáfora, golden set 98/99
+- **WhatsApp bot — arquitectura parser:** fast-path regex → Gemini NLP (con inyección condicional de contexto) → regex fallback. Anáfora: `hasAnaphoricSignal()` (unicode-aware) + `buildContextHint()` (few-shot adaptativos). Costo: ~200 tokens extra solo en ~2-5% de mensajes
+- **WhatsApp bot — test framework:** `scripts/wa-stress/` con runner Node.js + golden set 99 casos. `wa-parse-test` edge function acepta `last_context` para tests anafóricos. Token: `WA_STRESS_TOKEN` en `.credentials.md`
+- **Workspace metrik:** LIMPIO — sin datos, listo para demo fresca
+- **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales
+- **Workflow engine:** Activo en produccion
 - **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
-- **Modulo negocios:** Operativo. 12 tipos de bloques (incluye historial). Cobros automaticos funcionando (anticipo etapa 2 + multi-pago etapa 7). BloqueCobros visible todo el ciclo. BloqueHistorial con tabs gastos/horas/cobros. Pendiente critico: fix persona natural (empresa_id=NULL), verificar gates y logs en prod, recorrer SOENA punta a punta
-- **Sistema cobros VE:** `autoCrearCobros` (anticipo, idempotente por negocio_id+tipo_cobro), `autoCrearCobrosMulti` (multi-pago, idempotente por external_ref). Cobros entran como PENDIENTE con checkbox validacion. Saldo calculado dinamicamente (precio - sum cobros). cobros.proyecto_id nullable para VE
-- **Gotcha negocios.estado:** Valores reales son `'abierto'` y `'completado'`, NO `'activo'`. Verificado y corregido en /numeros
-- **CRITICO — Modulo negocios reemplaza pipeline y proyectos:** El modulo de negocios (`/negocios`) es el flujo principal de ONE nativo. Los modulos `/pipeline` (oportunidades) y `/proyectos` son legacy y NO deben recibir nuevas conexiones. Todo lo que antes apuntaba a pipeline/proyectos debe redirigirse a negocios: FAB, WhatsApp bot, registro de gastos, KPIs, navegacion. Las tablas `oportunidades` y `proyectos` siguen existiendo en DB pero el flujo nativo opera exclusivamente sobre `negocios`
+- **Modulo negocios:** Operativo. 12 tipos de bloques. Pendiente critico: fix persona natural (empresa_id=NULL)
+- **Gotcha negocios.estado:** Valores reales son `'abierto'` y `'completado'`, NO `'activo'`
+- **Gotcha /negocios cerrados:** La page filtra `.in('estado', ['activo','abierto'])` — negocios completados NO se muestran. Pendiente agregar pill o filtro
+- **CRITICO — Modulo negocios reemplaza pipeline y proyectos:** `/negocios` es el flujo principal. `/pipeline` y `/proyectos` son legacy. Todo apunta a negocios: FAB, WhatsApp, gastos, KPIs, navegacion
 
 ## Features NO implementados (Roadmap)
 
@@ -441,13 +446,13 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [x] BloqueHistorial (visualizacion gastos/horas/cobros con tabs) — sesion H 2026-04-09
 - [x] KPI numeros: filtro estado 'abierto' + renombrar Pipeline → En venta — sesion H 2026-04-09
 - [x] Limpieza completa workspace metrik para demo — sesion H 2026-04-09
-- [ ] **PROXIMO:** Mejorar flujo WhatsApp (proxima sesion dedicada)
-- [ ] **CRITICO:** Persona natural debe crear empresa automaticamente. En `crearNegocio`, cuando `es_persona_natural=true`, insertar empresa con el nombre del contacto y asignar ese `empresa_id` al negocio. La regla de negocio es: persona natural = es su propia empresa. La migration 004 (`generate_negocio_codigo_sin_empresa`) es un parche incorrecto — queda como fallback para negocios existentes sin empresa pero no debe usarse para nuevos.
-- [ ] **CRITICO:** Verificar que gate "comentario_requerido" bloquea correctamente el avance de etapa 1→2 en SOENA. Probar en produccion con un negocio real.
-- [ ] **CRITICO:** Verificar que los logs de cambio de etapa aparecen en el ActivityLog del negocio (no en pipeline). La migration 005 arreglo el constraint pero no se verifico en produccion.
-- [ ] **CRITICO SOENA:** Recorrer todas las etapas VE de punta a punta y verificar que cada bloque funciona correctamente
-- [ ] **CRITICO SOENA:** Auto-cotizacion cuando se crea una oportunidad en SOENA (feature no implementado — debe crearse automaticamente al abrir negocio)
+- [x] Mejorar flujo WhatsApp: FOLLOWUP, ESTADO_NEGOCIOS, last_context, anáfora — completado 2026-04-12
+- [ ] **CRITICO:** Persona natural debe crear empresa automaticamente en `crearNegocio` (ver workspaces/soena/CONTEXT.md para detalle)
+- [ ] **SOENA:** Pendientes criticos en `workspaces/soena/CONTEXT.md` — incluye bloque `devolucion_dian` + storage + generacion docs
+- [ ] **INTEGRAR (sesión SOENA 2026-04-12):** Commit `c51d246` agrega 2 features genéricos al producto que deben validarse: (1) `source_etapa_orden` en routing eval de `cambiarEtapaNegocioConGate` — permite leer campos de bloques datos de una etapa distinta a la actual, backward compatible (si no se pasa, lee etapa actual como antes); (2) `DatosField.default` en `BloqueDatos.tsx` — permite inicializar toggles con valor distinto de false. Ambos ya están en producción via SOENA. Revisar y documentar como features de producto si se validan correctos
 - [ ] **PENDIENTE:** Regenerar `database.ts` types tras migraciones 011-015 y quitar `as any` casts de cobros
+- [ ] **PENDIENTE:** /negocios no muestra cerrados — agregar pill "Cerrados" con filtro server-side en getNegociosV2
+- [ ] **PENDIENTE:** Commitear 34 archivos uncommitted (WA bot + AFI compliance + SOENA) — split por tema
 - [x] ID negocio formato `S1 26 3` — triggers auto-generan codigos, documentado en seccion "Sistema de codigos" — completado 2026-04-09
 - [ ] **PENDIENTE:** Header negocio refinado segun spec Noor (jerarquia 4 filas: nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso)
 - [ ] Verificar tableros en browser real (desktop + mobile viewport)
@@ -529,3 +534,12 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-09 | BloqueHistorial: visualizacion pura en etapas ejecucion y cobro | is_visualization=true, tabs gastos/horas/cobros, sin edicion. BloqueEjecucion conserva solo KPIs + gastos por categoria |
 | 2026-04-09 | Eliminar anglicismos en UI: "Pipeline" → "En venta" | Directiva de Mauricio: no usar anglicismos en la interfaz de ONE |
 | 2026-04-09 | Modulo negocios reemplaza pipeline y proyectos | /pipeline y /proyectos son legacy. Todo nuevo desarrollo, conexion, FAB, WhatsApp, KPIs debe apuntar a /negocios. Las tablas oportunidades/proyectos siguen en DB pero el flujo nativo opera sobre negocios |
+| 2026-04-09 | workspace_modules JSONB: arquitectura modular por workspace | Reemplaza concepto de workspace_type fijo. Permite activar combinaciones: business, compliance, tableros por tab. Default: {"business": true}. Clarity-only (no onboarding) |
+| 2026-04-09 | Módulo business: Números, Negocios, Movimientos, Causación | Módulos exclusivos del paquete business. Sidebar condicional por modules.business |
+| 2026-04-09 | Módulo compliance: Matriz de Riesgo, Validaciones | Listas vinculantes van en Config (no módulo propio). Sidebar condicional por modules.compliance |
+| 2026-04-09 | Compartidos siempre visibles: Equipo, Directorio, Mi Negocio, Tableros | Independientes de módulos activos. Directorio es puente natural entre business y compliance |
+| 2026-04-09 | Tableros: tabs activables por workspace (financiero, comercial, operativo, cumplimiento) | Tab "Cumplimiento" reemplaza concepto "Dashboard SARLAFT". Clarity configura qué tabs se activan por workspace |
+| 2026-04-12 | Anáfora se resuelve en parser (Gemini), no en handler | Gemini recibe hint con items del contexto previo + few-shot examples adaptativos. Solo se inyecta cuando hasAnaphoricSignal dispara (~2-5% de mensajes) — ahorra tokens |
+| 2026-04-12 | FOLLOWUP detectado por fast-path regex, no pasa por Gemini | Patrones como "los otros", "ver más", "el resto" no necesitan NLP. Fast-path ahorra ~700 tokens por mensaje FOLLOWUP |
+| 2026-04-12 | last_context TTL 5 minutos, preload en sesión nueva | Si pasan más de 5 min sin interacción, la sesión siguiente no carga el contexto anterior. Evita resoluciones falsas de anáfora |
+| 2026-04-12 | hasAnaphoricSignal usa patrones manuales, no \\b de JS | \\b en JS regex no reconoce caracteres acentuados (í, á) como word boundaries. Fix: lookarounds con \\s y puntuación explícita |

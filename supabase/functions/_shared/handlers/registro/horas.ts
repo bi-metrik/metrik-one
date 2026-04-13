@@ -31,13 +31,13 @@ export async function handleHoras(ctx: HandlerContext): Promise<void> {
       await showHorasConfirmation(ctx, project, hours, false);
       return;
     }
-    await ctx.sendMessage(`⚠️ No encontré negocio o proyecto activo con código ${project_code}.`);
+    await ctx.sendMessage(`⚠️ No encontré ningún negocio activo con código ${project_code}.`);
   }
 
   const destinos = await findActiveDestinos(supabase, user.workspace_id);
 
   if (destinos.all.length === 0) {
-    await ctx.sendMessage('❌ No tienes negocios ni proyectos activos para registrar horas.');
+    await ctx.sendMessage('❌ No tienes negocios activos para registrar horas.');
     return;
   }
 
@@ -81,7 +81,7 @@ export async function handleHoras(ctx: HandlerContext): Promise<void> {
       label: formatProject(d),
     }));
     await ctx.sendOptions(
-      `❌ No encontré "${entity_hint}". Tus negocios/proyectos:`,
+      `❌ No encontré "${entity_hint}". Tus negocios:`,
       options.map((o) => o.label),
     );
     await ctx.updateSession('awaiting_selection', {
@@ -114,7 +114,7 @@ export async function showHorasConfirmation(ctx: HandlerContext, project: any, h
 
   let msg = '';
   if (isAutoAssign) {
-    msg = `⏱️ ${hours}h para ${bold(formatProject(project))} (tu único proyecto activo).`;
+    msg = `⏱️ ${hours}h para ${bold(formatProject(project))} (tu único negocio activo).`;
   } else {
     msg = `📁 ${bold(formatProject(project))}\n🕐 ${hours}h (hoy)`;
   }

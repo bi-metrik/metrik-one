@@ -1,113 +1,413 @@
 // ============================================================
-// Gemini 2.5 Flash — NLP Parser (Spec §2, D92)
-// Single master prompt for all 16 intents
+// Gemini — NLP Parser (Spec §2, D92)
+// Single master prompt for all 24 intents
+// Sprint 3 (Yuto): compact prompt ~260 tokens + responseSchema + fast-path
 // ============================================================
 
-import type { ParseResult } from './types.ts';
+import type { ParseResult, Intent, LastContext } from './types.ts';
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+// Sprint 2 (Yuto): default to Flash-Lite — 3x cheaper input, 6.25x cheaper output.
+// Sprint 3 (Yuto): A/B canary via GEMINI_PARSE_MODEL_ALT + GEMINI_PARSE_MODEL_ALT_PCT.
+// Override baseline with GEMINI_PARSE_MODEL for instant rollback.
+const GEMINI_MODEL = Deno.env.get('GEMINI_PARSE_MODEL') || 'gemini-2.5-flash-lite';
+const GEMINI_MODEL_ALT = Deno.env.get('GEMINI_PARSE_MODEL_ALT') || '';
+const GEMINI_MODEL_ALT_PCT = parseInt(Deno.env.get('GEMINI_PARSE_MODEL_ALT_PCT') || '0', 10);
 
-const SYSTEM_PROMPT = `Parser de MéTRIK ONE. Recibe mensaje de WhatsApp en español colombiano y devuelve JSON.
+// Unified confidence threshold across the whole bot
+export const CONFIDENCE_THRESHOLD = 0.7;
 
-RESPONDE SOLO JSON. Sin texto adicional. Sin markdown.
+// Compact master prompt — all 24 intents, schema-enforced via responseSchema.
+// Lenguaje oficial: "negocio" (unidad de trabajo). Etapas: venta→ejecución→cobro→cierre.
+const SYSTEM_PROMPT = `Parser WA colombiano → JSON (schema).
 
-INTENCIONES (21):
-GASTO_DIRECTO: gasto con proyecto/cliente ("Gasté X en Y para Z")
-GASTO_OPERATIVO: gasto empresa sin proyecto ("Pagué arriendo")
-HORAS: registro tiempo ("Trabajé X horas en Y")
-TIMER_INICIAR/TIMER_PARAR/TIMER_ESTADO: cronómetro
-COBRO: pago recibido ("Me pagaron X de Y")
-CONTACTO_NUEVO: crear contacto
-SALDO_BANCARIO: reporte saldo banco (NO cobro, NO gasto)
-NOTA_OPORTUNIDAD/NOTA_PROYECTO: notas
-ESTADO_PROYECTO/ESTADO_PIPELINE/MIS_NUMEROS/CARTERA/INFO_CONTACTO: consultas
-OPP_GANADA/OPP_PERDIDA: resultado oportunidad
-OPP_NUEVA: crear nueva oportunidad ("tengo un prospecto", "nueva oportunidad con X", "me contactó Y")
-OPP_AVANZAR: mover oportunidad de etapa ("mandé la propuesta a X", "hice discovery con Y", "ya contacté a Z")
-ACTIVIDAD: registrar actividad comercial ("llamé a X", "reunión con Y", "envié correo a Z")
-AYUDA: saludo o help
-UNCLEAR: no determinable
+Negocio = unidad de trabajo, atraviesa venta→ejecución→cobro→cierre.
 
-CAMPOS GASTOS (obligatorios amount, concept, category_hint):
-- amount: número sin puntos ni $
-- concept: título corto 2-5 palabras, sin montos ni verbos
-- category_hint: materiales|transporte|alimentacion|servicios_profesionales|software|arriendo|marketing|capacitacion|otros
-- entity_hint: nombre persona/empresa mencionada
-- project_code: código "KAE-2","FAB-1","P-12","R1 26 1","R1261" tal cual (prioridad sobre entity_hint)
+INTENTS:
+Registro: GASTO_DIRECTO, GASTO_OPERATIVO, EDITAR_GASTO, HORAS, TIMER_INICIAR, TIMER_PARAR, TIMER_ESTADO, COBRO, CONTACTO_NUEVO, SALDO_BANCARIO
+Negocio: OPP_NUEVA, OPP_AVANZAR, OPP_GANADA, OPP_PERDIDA, ACTIVIDAD, NOTA_NEGOCIO
+Consulta: ESTADO_PROYECTO, ESTADO_NEGOCIOS, MIS_NUMEROS, CARTERA, INFO_CONTACTO
+Otros: AYUDA, UNCLEAR
 
-CAMPOS OPP_NUEVA:
-- entity_hint: nombre del prospecto/empresa
-- amount: valor estimado si lo menciona
-- note: contexto adicional
-
-CAMPOS OPP_AVANZAR:
-- entity_hint: nombre oportunidad/prospecto
-- stage_hint: etapa destino (contacto_inicial|discovery_hecha|propuesta_enviada|negociacion)
-
-CAMPOS ACTIVIDAD:
-- entity_hint: nombre del contacto/empresa
-- activity_text: descripción breve de la actividad ("llamada de seguimiento", "reunión discovery", "envío de propuesta")
-
-CATEGORÍAS:
-materiales = compras físicas: insumos, herramientas, ferretería, cables, pintura, cemento, repuestos
-transporte = movilidad: taxi, uber, gasolina, peaje, montacarga, grúa, flete
-alimentacion = comida laboral: almuerzo, tinto, restaurante
-servicios_profesionales = pagos a personas: soldador, contador, abogado, diseñador, freelancer
-software = digital: licencias, suscripciones, hosting, apps
-arriendo = fijo oficina: arriendo, luz, agua, gas, internet (casi siempre GASTO_OPERATIVO)
-marketing = promoción: pauta, publicidad, ads (casi siempre GASTO_OPERATIVO)
-capacitacion = formación: cursos, libros (casi siempre GASTO_OPERATIVO)
-otros = solo si nada aplica
+CAMPOS:
+- amount: entero en COP. "1 palo"=1000000, "2 palos"=2000000, "medio palo"=500000, "500 lucas"=500000, "180 mil"=180000
+- concept: 2-5 palabras, sin verbos ni montos
+- project_code: código literal ("R1 26 1" o "KAE-2") — prioridad sobre entity_hint
+- entity_hint: cliente/empresa del negocio
+- stage_hint: contacto_inicial|discovery_hecha|propuesta_enviada|negociacion
+- stage_filter: venta|ejecucion|cobro|cierre|all (para ESTADO_NEGOCIOS)
+- activity_text, note, hours
 
 REGLAS:
-- Menciona proyecto/código/cliente → GASTO_DIRECTO
-- arriendo/marketing/capacitacion sin proyecto → GASTO_OPERATIVO
-- Ambiguo sin proyecto → GASTO_OPERATIVO
-- "X palos/barras" = X×1000000, "X lucas" = X×1000, "medio palo" = 500000
-- "me consignaron/giraron" = COBRO
-- "llamé/reunión/correo/visité" + persona = ACTIVIDAD
-- "mandé propuesta/hice discovery/contacté" + prospecto = OPP_AVANZAR
-- "nuevo prospecto/me contactó/oportunidad nueva" = OPP_NUEVA
-- Si confidence < 0.7, intent=UNCLEAR y agrega "suggested_actions": array de 2-3 intenciones probables en español natural (ej: ["Registrar un gasto", "Consultar proyecto"])
+1. Menciona negocio/código/cliente → GASTO_DIRECTO. Arriendo/luz/agua/internet/celular/nómina sin negocio → GASTO_OPERATIVO
+2. "me pagaron/consignaron/giraron/transfirieron/recibí el pago" → COBRO
+3. "mi saldo/tengo X en banco/en la cuenta" → SALDO_BANCARIO
+4. "llamé/reunión/visité/envié correo" + persona → ACTIVIDAD
+5. "mandé propuesta/hice discovery/ya contacté" → OPP_AVANZAR
+6. "nuevo negocio/prospecto/me contactó" → OPP_NUEVA
+7. "aceptó/ganamos/firmó" → OPP_GANADA; "se cayó/perdimos/no se dio" → OPP_PERDIDA
+8. "nota para/sobre el negocio X" → NOTA_NEGOCIO
+9. ESTADO_NEGOCIOS: "qué negocios activos/abiertos/tengo" → stage_filter=all; "en venta/pipeline/horno" → venta; "en ejecución/haciendo" → ejecucion; "en cobro/por cobrar" → cobro; "cerrados/terminados" → cierre
+10. confidence<0.7 → UNCLEAR + suggested_actions: 2-3 labels ≤20 chars`;
 
-FORMATO: {"intent":"...","confidence":0.9,"fields":{...}}`;
+// Response schema for Gemini structured output (JSON Schema subset)
+const INTENT_ENUM: Intent[] = [
+  'GASTO_DIRECTO', 'GASTO_OPERATIVO', 'EDITAR_GASTO', 'HORAS',
+  'TIMER_INICIAR', 'TIMER_PARAR', 'TIMER_ESTADO',
+  'COBRO', 'CONTACTO_NUEVO', 'SALDO_BANCARIO',
+  'NOTA_NEGOCIO',
+  'ESTADO_PROYECTO', 'ESTADO_NEGOCIOS', 'MIS_NUMEROS', 'CARTERA', 'INFO_CONTACTO',
+  'OPP_GANADA', 'OPP_PERDIDA', 'OPP_NUEVA', 'OPP_AVANZAR', 'ACTIVIDAD',
+  'AYUDA', 'FOLLOWUP', 'UNCLEAR',
+];
+
+const RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    intent: { type: 'string', enum: INTENT_ENUM },
+    confidence: { type: 'number' },
+    fields: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number' },
+        concept: { type: 'string' },
+        category_hint: { type: 'string' },
+        entity_hint: { type: 'string' },
+        project_code: { type: 'string' },
+        hours: { type: 'number' },
+        stage_hint: { type: 'string' },
+        stage_filter: { type: 'string' },
+        activity_text: { type: 'string' },
+        note: { type: 'string' },
+        suggested_actions: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
+  required: ['intent', 'confidence', 'fields'],
+};
 
 // Track last Gemini failure reason for debugging
 let _lastGeminiFail = '';
 
-export async function parseMessage(userMessage: string): Promise<ParseResult> {
-  // Try Gemini first, fall back to regex if unavailable
-  const geminiResult = await tryGemini(userMessage);
-  if (geminiResult) return geminiResult;
+// Sprint 3 (Yuto): telemetry captured on every parseMessage call.
+// Consumed by wa-webhook to persist into wa_message_log.
+export interface ParseTelemetry {
+  parser_source: 'fast_path' | 'gemini' | 'regex';
+  gemini_model?: string;
+  gemini_input_tokens?: number;
+  gemini_output_tokens?: number;
+  gemini_latency_ms?: number;
+  confidence: number;
+}
 
-  // Fallback: regex-based parser for common patterns
+let _lastTelemetry: ParseTelemetry = { parser_source: 'regex', confidence: 0 };
+
+export function getLastParseTelemetry(): ParseTelemetry {
+  return _lastTelemetry;
+}
+
+/** Stable hash → 0-99 bucket for A/B canary routing. */
+function hashBucket(key: string): number {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) {
+    h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h) % 100;
+}
+
+/** Choose Gemini model based on canary config. Phone is optional bucket key. */
+function pickGeminiModel(bucketKey?: string): string {
+  if (!GEMINI_MODEL_ALT || GEMINI_MODEL_ALT_PCT <= 0) return GEMINI_MODEL;
+  if (!bucketKey) return GEMINI_MODEL;
+  return hashBucket(bucketKey) < GEMINI_MODEL_ALT_PCT ? GEMINI_MODEL_ALT : GEMINI_MODEL;
+}
+
+export async function parseMessage(
+  userMessage: string,
+  bucketKey?: string,
+  lastContext?: LastContext | null,
+): Promise<ParseResult> {
+  // 1. Fast path: deterministic patterns that skip LLM entirely (saves ~50% of calls)
+  const fast = fastPathParse(userMessage);
+  if (fast) {
+    console.log(`[wa-parse] Fast-path hit: ${fast.intent} (${fast.confidence})`);
+    _lastTelemetry = { parser_source: 'fast_path', confidence: fast.confidence };
+    return enrichFields(fast, userMessage);
+  }
+
+  // 2. Gemini NLP parser (with optional conversational context hint)
+  const model = pickGeminiModel(bucketKey);
+  const geminiResult = await tryGemini(userMessage, model, lastContext);
+  if (geminiResult) return enrichFields(geminiResult, userMessage);
+
+  // 3. Fallback: regex parser for common patterns when LLM fails
   console.log('[wa-parse] Using regex fallback, reason:', _lastGeminiFail);
-  return regexParse(userMessage);
+  const regexResult = regexParse(userMessage);
+  _lastTelemetry = { parser_source: 'regex', confidence: regexResult.confidence };
+  return enrichFields(regexResult, userMessage);
+}
+
+/**
+ * Detect anaphoric signals in user text (pronouns, ordinals, "el mismo", etc.)
+ * Only when these appear AND there is a recent last_context do we inject the
+ * context hint into Gemini's system prompt. Keeps token cost low.
+ */
+function hasAnaphoricSignal(text: string): boolean {
+  // Normalize: lowercase + pad with spaces so we can use (^| ) / ( |$) boundaries
+  // instead of \b (which breaks on accented chars like "ahí" in default JS regex).
+  const padded = ` ${text.toLowerCase()} `;
+  const patterns = [
+    // Demonstrative pronouns
+    /(^|[\s,.;:!?¿¡])(ese|esa|eso|esos|esas|aquel|aquella|aquellos|aquellas)([\s,.;:!?¿¡]|$)/,
+    // Locative adverbs (accented — no \b)
+    /(^|[\s,.;:!?¿¡])(ah[ií]|all[ií]|all[aá]|aca|acá)([\s,.;:!?¿¡]|$)/,
+    // Same / self
+    /(el|la|los|las)\s+mism[oa]s?/,
+    // Ordinals (masculine + feminine)
+    /(el|la)\s+(primer[oa]?|segund[oa]|tercer[oa]?|cuart[oa]|quint[oa]|sext[oa]|[uú]ltim[oa])/,
+    // "el que" / "la que"
+    /(el|la|los|las)\s+que(\s|$)/,
+    // "en/de/para/a + ese/esa/aquel..."
+    /(en|de|para|a|con)\s+(ese|esa|eso|esos|esas|aquel|aquella)/,
+    // Context-specific: "ese negocio/proyecto/cliente/gasto"
+    /(ese|esa|ese\s+mismo)\s+(negocio|proyecto|cliente|gasto|contacto)/,
+  ];
+  return patterns.some((re) => re.test(padded));
+}
+
+/** Build a compact context hint for Gemini — directive rules + few-shot examples. */
+function buildContextHint(lastContext: LastContext): string {
+  const items = lastContext.items.slice(0, 5);
+  const list = items.map((n, i) => {
+    const cod = n.codigo ? ` [${n.codigo}]` : '';
+    return `  ${i + 1}. ${n.nombre}${cod}`;
+  }).join('\n');
+
+  // Pick a representative code from the context to anchor few-shot examples.
+  const firstCode = items[0]?.codigo || '';
+  const secondCode = items[1]?.codigo || firstCode;
+
+  // Few-shot examples adapt to the context type so the model sees a concrete mapping.
+  const examples = lastContext.type === 'negocios_list'
+    ? `EJEMPLOS (con este contexto):
+- "gasté 50 mil en el primero" → intent=GASTO_DIRECTO, amount=50000, project_code="${firstCode}"
+- "cómo va el segundo" → intent=ESTADO_PROYECTO, project_code="${secondCode}"
+- "cómo va ese negocio" (sin más info) → intent=ESTADO_PROYECTO, project_code="${firstCode}"
+- "pagué 200 mil ahí" → intent=GASTO_DIRECTO, amount=200000, project_code="${firstCode}"
+- "el último cuánto vale" → intent=ESTADO_PROYECTO, project_code=<código del último item>
+- "los otros" → intent=FOLLOWUP`
+    : `EJEMPLO: si el usuario dice "el primero" o "ese", usa el item #1 de la lista arriba.`;
+
+  return `
+
+CONTEXTO PREVIO DE LA CONVERSACIÓN (${lastContext.type}, hace <5 min):
+${list}
+
+REGLAS DE RESOLUCIÓN DE ANÁFORA (obligatorio):
+1. Si el mensaje contiene "el primero/segundo/tercero/último/ese/esa/ahí/allí/ese negocio/el mismo", DEBES reemplazar la referencia con el project_code del item correspondiente de la lista.
+2. Ordinales → índice 1-based (el primero=item 1, el segundo=item 2, el último=último item).
+3. "ese/esa/ahí/allí" sin ordinal → si solo hay 1 item usa ese; si hay varios usa el item 1 (el más reciente/prominente).
+4. Si la pregunta es sobre el estado o avance de UN negocio específico (ej: "cómo va el segundo"), el intent es ESTADO_PROYECTO y DEBES devolver project_code.
+5. Si el mensaje registra un gasto usando anáfora (ej: "gasté X en el primero"), el intent es GASTO_DIRECTO y DEBES devolver project_code además de amount.
+
+${examples}`;
+}
+
+/**
+ * Defense layer chain: inject project_code, amount fallback, and category_hint
+ * from the raw message when the parser missed them. Deterministic, cheap, keeps
+ * Gemini tokens low.
+ */
+function enrichFields(result: ParseResult, rawMessage: string): ParseResult {
+  let enriched = injectProjectCode(result, rawMessage);
+  enriched = injectAmount(enriched, rawMessage);
+  enriched = injectCategoryHint(enriched, rawMessage);
+  return enriched;
+}
+
+/** Fill amount from raw text if parser returned none (handles "1 palo", "medio palo", "500 lucas", etc.) */
+function injectAmount(result: ParseResult, rawMessage: string): ParseResult {
+  if (result.fields.amount !== undefined && result.fields.amount !== null) return result;
+  const amount = parseAmount(rawMessage);
+  if (amount == null) return result;
+  return { ...result, fields: { ...result.fields, amount } };
+}
+
+/** Keyword → category mapping. Only fires on registro intents when category_hint is missing. */
+const CATEGORY_KEYWORDS: Array<[RegExp, string]> = [
+  [/\b(gasolina|combustible|transporte|taxi|uber|didi|bus|pasaje|peaje|parquead)/i, 'transporte'],
+  [/\b(almuerzo|cena|desayuno|tintos?|domicilios?|comida|alimentaci[oó]n|restaurante|mercado)/i, 'alimentacion'],
+  [/\b(cemento|materiales?|herramientas?|insumos?|ferreter[ií]a|pintura|madera|arena|ladrillos?)/i, 'materiales'],
+  [/\b(software|licencias?|suscripci[oó]n|saas|hosting|dominio|cloud)/i, 'software'],
+  [/\barriendo\b/i, 'arriendo'],
+  [/\b(internet|celular|luz|agua|servicios|n[oó]mina|tel[eé]fono)\b/i, 'servicios_profesionales'],
+  [/\b(honorarios|arquitecto|abogado|contador|consultor[ií]a|asesor[ií]a)\b/i, 'servicios_profesionales'],
+  [/\b(marketing|publicidad|ads|anuncios?|campa[ñn]a)\b/i, 'marketing'],
+  [/\b(capacitaci[oó]n|curso|entrenamiento|taller|formaci[oó]n)\b/i, 'capacitacion'],
+  [/\b(papeler[ií]a|[uú]tiles|oficina)\b/i, 'otros'],
+];
+
+const REGISTRO_INTENTS_WITH_CATEGORY = new Set(['GASTO_DIRECTO', 'GASTO_OPERATIVO', 'EDITAR_GASTO']);
+
+/** Infer category_hint from keywords in raw text when the parser left it empty. */
+function injectCategoryHint(result: ParseResult, rawMessage: string): ParseResult {
+  if (result.fields.category_hint) return result;
+  if (!REGISTRO_INTENTS_WITH_CATEGORY.has(result.intent)) return result;
+  for (const [re, cat] of CATEGORY_KEYWORDS) {
+    if (re.test(rawMessage)) {
+      return { ...result, fields: { ...result.fields, category_hint: cat } };
+    }
+  }
+  return result;
+}
+
+/**
+ * Defense layer: detect project/negocio codes in the raw message and inject
+ * them into fields.project_code even if Gemini/regex missed them. Handles:
+ *   - "R1 26 1" / "s1 26 3" (spaced)
+ *   - "R1261" / "s1261" (compact)
+ *   - "KAE-2", "FAB-1", "P-12" (legacy project codes)
+ * Case-insensitive. Normalizes to uppercase.
+ */
+function injectProjectCode(result: ParseResult, rawMessage: string): ParseResult {
+  if (result.fields.project_code) return result; // already set
+  const msg = rawMessage;
+
+  // Legacy alphanumeric: KAE-2, FAB-1, INT-3
+  let m = msg.match(/\b([A-Za-z]{2,4}-\d{1,3})\b/);
+  if (m) {
+    return { ...result, fields: { ...result.fields, project_code: m[1].toUpperCase() } };
+  }
+
+  // Legacy numeric project: P-12, P12, #12, proyecto 12
+  m = msg.match(/(?:\bP-?|#)(\d{1,4})\b/i) || msg.match(/\b(?:proyecto|proy)\s+(\d{1,4})\b/i);
+  if (m) {
+    return { ...result, fields: { ...result.fields, project_code: `P-${m[1].padStart(3, '0')}` } };
+  }
+
+  // Negocio spaced: "R1 26 1", "S1 26 3"
+  m = msg.match(/\b([A-Za-z]\d+)\s+(\d{2})\s+(\d+)\b/);
+  if (m) {
+    return { ...result, fields: { ...result.fields, project_code: `${m[1].toUpperCase()} ${m[2]} ${m[3]}` } };
+  }
+
+  // Negocio compact: "R1261" → "R1 26 1"
+  m = msg.match(/\b([A-Za-z]\d)(\d{2})(\d+)\b/);
+  if (m) {
+    return { ...result, fields: { ...result.fields, project_code: `${m[1].toUpperCase()} ${m[2]} ${m[3]}` } };
+  }
+
+  return result;
+}
+
+// ============================================================
+// Fast Path — deterministic intents without LLM
+// Only patterns with very high signal. Conservative by design.
+// ============================================================
+
+function fastPathParse(text: string): ParseResult | null {
+  const lower = text.toLowerCase().trim();
+
+  // FOLLOWUP — anaphoric continuations of a previous query
+  // Only matches short, clearly-referential phrases. The handler validates
+  // that there is fresh last_context before acting.
+  if (/^(y?\s*)?(cu[aá]les?\s+son\s+(los|las)\s+(otros?|otras?|dem[aá]s|restantes?)(\s+\d+)?|(los|las)\s+(otros?|otras?|dem[aá]s|restantes?)|(y\s+)?(los|las)\s+\d+\s+m[aá]s|qu[eé]\s+m[aá]s|ver\s+m[aá]s|mostrar\s+m[aá]s|m[aá]s\s+detalles?|dime\s+m[aá]s|cu[eé]ntame\s+m[aá]s|el\s+resto|todos|t[oó]dalas|muestra(me)?\s+(el|los|las)\s+resto)\??\.?\s*$/i.test(lower)) {
+    return { intent: 'FOLLOWUP', confidence: 0.95, fields: {} };
+  }
+
+  // Pure greetings / help (no amount, no entity)
+  if (/^(hola|hey|help|ayuda|menu|menú|\?|qué\s+puedo|que\s+puedo|buenos?\s+d[ií]as?|buenas?\s*(tardes|noches)?)\.?\s*$/i.test(lower)) {
+    return { intent: 'AYUDA', confidence: 0.95, fields: {} };
+  }
+
+  // Farewells / thanks / small talk — route to AYUDA to break UNCLEAR loops
+  if (/^(chao|chau|adi[oó]s|bye|nos\s+vemos|hasta\s+luego|gracias|thanks|ok|vale|nada|nada\s+m[aá]s)\.?\s*$/i.test(lower)) {
+    return { intent: 'AYUDA', confidence: 0.95, fields: {} };
+  }
+
+  // MIS_NUMEROS — common phrases
+  if (/^(c[oó]mo\s+(estoy|vamos?|voy)|mis\s+n[uú]meros|resumen\s+(del\s+)?mes|dame\s+el\s+resumen)\.?\s*$/i.test(lower)) {
+    return { intent: 'MIS_NUMEROS', confidence: 0.92, fields: {} };
+  }
+
+  // CARTERA
+  if (/^(qui[eé]n\s+me\s+debe|cartera|cuentas?\s+por\s+cobrar|me\s+deben)\.?\s*$/i.test(lower)) {
+    return { intent: 'CARTERA', confidence: 0.92, fields: {} };
+  }
+
+  // ESTADO_NEGOCIOS — stage-aware queries
+  // "qué negocios tengo/hay" → all active
+  if (/^(qu[eé]\s+negocios?\s+(tengo|hay|activos?|abiertos?)|negocios?\s+activos?|mis\s+negocios?)\??\.?\s*$/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.92, fields: { stage_filter: 'all' } };
+  }
+  // "en venta", "pipeline", "qué tengo en el horno", "oportunidades"
+  if (/^(qu[eé]\s+tengo\s+en\s+el\s+horno|pipeline|oportunidades|prospectos?|mis\s+oportunidades|negocios?\s+en\s+venta|en\s+venta)\??\.?\s*$/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.90, fields: { stage_filter: 'venta' } };
+  }
+  // "en ejecución"
+  if (/^(y?\s*(qu[eé]\s+)?negocios?\s+en\s+ejecuci[oó]n|en\s+ejecuci[oó]n|qu[eé]\s+estoy\s+haciendo|qu[eé]\s+proyectos?\s+tengo)\??\.?\s*$/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.90, fields: { stage_filter: 'ejecucion' } };
+  }
+  // "en cobro"
+  if (/^(y?\s*(qu[eé]\s+)?negocios?\s+en\s+cobro|en\s+cobro|por\s+cobrar)\??\.?\s*$/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.90, fields: { stage_filter: 'cobro' } };
+  }
+  // "cerrados"
+  if (/^(y?\s*(qu[eé]\s+)?negocios?\s+(cerrados?|terminados?|en\s+cierre)|cerrados?|terminados?)\??\.?\s*$/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.90, fields: { stage_filter: 'cierre' } };
+  }
+
+  // TIMER_PARAR — only very explicit, no gasto verbs
+  if (/^(parar|par[oó]|detener|termin[eé]|listo|acab[eé]|ya\s+acab[eé])\.?\s*$/i.test(lower)) {
+    return { intent: 'TIMER_PARAR', confidence: 0.92, fields: {} };
+  }
+
+  // TIMER_ESTADO
+  if (/^(cu[aá]nto\s+llevo|cu[aá]nto\s+tiempo|timer|cron[oó]metro)\??\.?\s*$/i.test(lower)) {
+    return { intent: 'TIMER_ESTADO', confidence: 0.92, fields: {} };
+  }
+
+  return null;
 }
 
 // ============================================================
 // Gemini NLP Parser
 // ============================================================
 
-async function tryGemini(userMessage: string): Promise<ParseResult | null> {
+async function tryGemini(
+  userMessage: string,
+  model: string,
+  lastContext?: LastContext | null,
+): Promise<ParseResult | null> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) { _lastGeminiFail = 'no_api_key'; return null; }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const t0 = Date.now();
+
+  // Inject conversational context only if there's a recent last_context AND
+  // the message contains an anaphoric signal. Otherwise skip to save tokens.
+  const shouldInjectContext = lastContext && lastContext.items.length > 0 && hasAnaphoricSignal(userMessage);
+  const systemPrompt = shouldInjectContext
+    ? SYSTEM_PROMPT + buildContextHint(lastContext!)
+    : SYSTEM_PROMPT;
+  if (shouldInjectContext) {
+    console.log(`[wa-parse] Context hint injected (${lastContext!.items.length} items, type=${lastContext!.type})`);
+  }
 
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [
           { role: 'user', parts: [{ text: userMessage }] },
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 512,
           responseMimeType: 'application/json',
+          responseSchema: RESPONSE_SCHEMA,
         },
       }),
     });
@@ -120,6 +420,7 @@ async function tryGemini(userMessage: string): Promise<ParseResult | null> {
     }
 
     const data = await res.json();
+    const latencyMs = Date.now() - t0;
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {
       _lastGeminiFail = `no_text: finish=${data.candidates?.[0]?.finishReason || 'unknown'}`;
@@ -128,7 +429,18 @@ async function tryGemini(userMessage: string): Promise<ParseResult | null> {
 
     const parsed: ParseResult = JSON.parse(text);
     _lastGeminiFail = '';
-    if (parsed.confidence < 0.6) {
+
+    // Capture telemetry even on low confidence
+    _lastTelemetry = {
+      parser_source: 'gemini',
+      gemini_model: model,
+      gemini_input_tokens: data.usageMetadata?.promptTokenCount,
+      gemini_output_tokens: data.usageMetadata?.candidatesTokenCount,
+      gemini_latency_ms: latencyMs,
+      confidence: parsed.confidence,
+    };
+
+    if (parsed.confidence < CONFIDENCE_THRESHOLD) {
       return {
         ...parsed,
         intent: 'UNCLEAR',
@@ -229,9 +541,21 @@ function regexParse(text: string): ParseResult {
     return { intent: 'CARTERA', confidence: 0.90, fields: {} };
   }
 
-  // ESTADO_PIPELINE
-  if (/qu[eé]\s+tengo\s+en\s+el\s+horno|pipeline|oportunidades|prospectos?/i.test(lower)) {
-    return { intent: 'ESTADO_PIPELINE', confidence: 0.85, fields: {} };
+  // ESTADO_NEGOCIOS — regex fallback with stage_filter inference
+  if (/negocios?\s+en\s+ejecuci[oó]n|en\s+ejecuci[oó]n/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.85, fields: { stage_filter: 'ejecucion' } };
+  }
+  if (/negocios?\s+en\s+cobro|por\s+cobrar/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.85, fields: { stage_filter: 'cobro' } };
+  }
+  if (/negocios?\s+(cerrados?|terminados?|en\s+cierre)/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.85, fields: { stage_filter: 'cierre' } };
+  }
+  if (/qu[eé]\s+tengo\s+en\s+el\s+horno|pipeline|oportunidades|prospectos?|negocios?\s+en\s+venta/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.85, fields: { stage_filter: 'venta' } };
+  }
+  if (/qu[eé]\s+negocios?|negocios?\s+activos?|mis\s+negocios?/i.test(lower)) {
+    return { intent: 'ESTADO_NEGOCIOS', confidence: 0.85, fields: { stage_filter: 'all' } };
   }
 
   // SALDO_BANCARIO — "mi saldo es X", "tengo X en el banco"
@@ -340,10 +664,10 @@ function regexParse(text: string): ParseResult {
     return { intent: 'ACTIVIDAD', confidence: 0.80, fields: { entity_hint: projectRef.entity_hint, activity_text: actMatch?.[1]?.trim() || text } };
   }
 
-  // NOTA_OPORTUNIDAD / NOTA_PROYECTO
+  // NOTA_NEGOCIO
   if (/nota\s+(para|de|sobre)/i.test(lower)) {
     const noteMatch = text.match(/nota\s+(?:para|de|sobre)\s+\S+[:\s]+(.+)/i);
-    return { intent: 'NOTA_PROYECTO', confidence: 0.80, fields: { ...projectRef, note: noteMatch?.[1] } };
+    return { intent: 'NOTA_NEGOCIO', confidence: 0.80, fields: { ...projectRef, note: noteMatch?.[1] } };
   }
 
   // CONTACTO_NUEVO — "nuevo contacto", "anota"

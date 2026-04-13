@@ -30,7 +30,7 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
       await ctx.updateSession('awaiting_selection', {});
       const options = context.options || [];
       await ctx.sendOptions(
-        'Perfecto, continuemos. ¿Cuál proyecto?',
+        'Perfecto, continuemos. ¿Cuál negocio?',
         options.map((o: any) => o.label),
       );
     } else {
@@ -200,7 +200,7 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
       _tipo: d._tipo,
     }));
     newOptions.push({ id: 'operativo', label: '🏢 Gasto de empresa', _tipo: 'empresa' as any });
-    await ctx.sendOptions('Tus negocios/proyectos:', newOptions.map((o) => o.label));
+    await ctx.sendOptions('Tus negocios:', newOptions.map((o) => o.label));
     await ctx.updateSession('awaiting_selection', { options: newOptions });
     return;
   }
@@ -231,7 +231,7 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
     .single();
 
   if (!project) {
-    await ctx.sendMessage('❌ No encontré ese negocio/proyecto. Intenta de nuevo.');
+    await ctx.sendMessage('❌ No encontré ese negocio. Intenta de nuevo.');
     await completeSession(supabase, session.id);
     return;
   }
@@ -325,7 +325,7 @@ async function handleW03Selection(ctx: HandlerContext, selected: { id: string; l
   if (project) {
     await showHorasConfirmation(ctx, project, hours, false);
   } else {
-    await ctx.sendMessage('❌ No encontré ese negocio/proyecto. Intenta de nuevo.');
+    await ctx.sendMessage('❌ No encontré ese negocio. Intenta de nuevo.');
     await completeSession(supabase, session.id);
   }
 }

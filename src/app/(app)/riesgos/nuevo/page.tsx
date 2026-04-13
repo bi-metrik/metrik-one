@@ -1,9 +1,17 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { crearRiesgo } from '@/lib/actions/riesgos'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import NuevoRiesgoForm from './nuevo-riesgo-form'
 
-export default function NuevoRiesgoPage() {
+export default async function NuevoRiesgoPage() {
+  const { role } = await getWorkspace()
+  if (!getRolePermissions(role ?? 'read_only').canEditRiesgos) {
+    redirect('/riesgos')
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       {/* Header */}

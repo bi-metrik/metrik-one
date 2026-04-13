@@ -21,13 +21,14 @@ function getHeaders(): Record<string, string> {
 /** Send a text message, auto-splitting if > 500 chars */
 export async function sendTextMessage(phone: string, text: string): Promise<void> {
   const chunks = splitMessage(text);
-  for (let i = 0; i < chunks.length; i++) {
-    if (i > 0) await delay(1000); // 1s delay between chunks (D100)
+  for (const chunk of chunks) {
+    // No artificial delay — Meta keeps ordering within a single phone_number_id.
+    // Removing the 1s sleep shaves ~2-3s off multi-chunk flows (Sprint 1, Yuto).
     await postMessage(phone, {
       messaging_product: 'whatsapp',
       to: phone,
       type: 'text',
-      text: { body: chunks[i] },
+      text: { body: chunk },
     });
   }
 }
@@ -88,8 +89,4 @@ async function postMessage(phone: string, payload: Record<string, unknown>): Pro
     const err = await res.text();
     console.error(`[wa-respond] Failed to send to ${phone}: ${res.status} ${err}`);
   }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

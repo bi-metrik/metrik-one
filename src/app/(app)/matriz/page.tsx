@@ -1,5 +1,8 @@
 import { getRiesgos } from '@/lib/actions/riesgos'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import { Grid3X3 } from 'lucide-react'
+import { redirect } from 'next/navigation'
 import MatrizClient from './matriz-client'
 
 interface Props {
@@ -13,6 +16,9 @@ export default async function MatrizPage({ searchParams }: Props) {
   const params = await searchParams
   const categoria = params.categoria ?? 'todos'
   const celda = params.celda ?? null
+
+  const { role } = await getWorkspace()
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) redirect('/')
 
   const riesgos = await getRiesgos({
     categoria: categoria,

@@ -27,7 +27,7 @@ export async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
     const destinos = await findActiveDestinos(supabase, user.workspace_id);
     if (destinos.all.length > 0) {
       await ctx.sendMessage(
-        `💰 ${formatCOP(amount)} en ${concept || 'gasto'}.\n\n¿Este gasto es de...?\n1️⃣ 📁 Un negocio/proyecto\n2️⃣ 🏢 Mi empresa\n\nResponde con el número.`
+        `💰 ${formatCOP(amount)} en ${concept || 'gasto'}.\n\n¿Este gasto es de...?\n1️⃣ 📁 Un negocio\n2️⃣ 🏢 Mi empresa\n\nResponde con el número.`
       );
       await ctx.updateSession('awaiting_selection', {
         intent: 'GASTO_OPERATIVO', pending_action: 'W02',
@@ -35,7 +35,7 @@ export async function handleGastoOperativo(ctx: HandlerContext): Promise<void> {
         parsed_fields: parsed.fields,
         disambiguation: undefined,
         options: [
-          { id: 'proyecto', label: '📁 Un negocio/proyecto' },
+          { id: 'proyecto', label: '📁 Un negocio' },
           { id: 'empresa', label: '🏢 Mi empresa' },
         ],
       });

@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { getRiesgos } from '@/lib/actions/riesgos'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import { ShieldAlert, Plus } from 'lucide-react'
+import { redirect } from 'next/navigation'
 import type { Riesgo } from '@/lib/actions/riesgos'
 import RiesgosExcelActions from './riesgos-excel-actions'
 
@@ -60,6 +63,11 @@ export default async function RiesgosPage({ searchParams }: Props) {
   const estado = params.estado ?? 'todos'
   const factor = params.factor ?? 'todos'
 
+  // Role-based permissions (compliance module)
+  const { role } = await getWorkspace()
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canViewRiesgos) redirect('/')
+
   const riesgos = await getRiesgos({
     categoria: categoria,
     nivel_riesgo: nivel,
@@ -102,14 +110,19 @@ export default async function RiesgosPage({ searchParams }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <RiesgosExcelActions />
-          <Link
-            href="/riesgos/nuevo"
-            className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669]"
-          >
-            <Plus className="h-4 w-4" />
-            Nuevo riesgo
-          </Link>
+          <RiesgosExcelActions
+            canImport={perms.canImportRiesgos}
+            canExport={perms.canExportRiesgos}
+          />
+          {perms.canEditRiesgos && (
+            <Link
+              href="/riesgos/nuevo"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669]"
+            >
+              <Plus className="h-4 w-4" />
+              Nuevo riesgo
+            </Link>
+          )}
         </div>
       </div>
 

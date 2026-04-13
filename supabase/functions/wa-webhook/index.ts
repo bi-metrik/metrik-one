@@ -4,7 +4,7 @@
 // ============================================================
 
 import { getServiceClient } from '../_shared/supabase-client.ts';
-import { parseMessage } from '../_shared/wa-parse.ts';
+import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage, sendButtons } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
@@ -13,6 +13,7 @@ import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleAccion } from '../_shared/handlers/accion.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleNovedad } from '../_shared/handlers/novedad.ts';
+import { handleFollowup } from '../_shared/handlers/followup.ts';
 import type { HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -76,14 +77,14 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   const user = await identifyUser(supabase, message.phone);
   if (!user) {
     await sendTextMessage(message.phone,
-      '❌ No encuentro tu número en ningún workspace de MéTRIK ONE.\n\nSi eres nuevo, regístrate en metrikone.co\nSi ya tienes cuenta, pídele a tu admin que agregue este número en Configuración → Equipo.');
+      'Hola, no reconozco este número todavía.\n\nSi aún no tienes cuenta, puedes crearla en metrikone.co. Si ya usas MéTRIK ONE, pídele a tu admin que registre este número en Configuración → Equipo.');
     return;
   }
 
   // 2. Check subscription (WhatsApp only for Pro+)
   if (!['active_pro_plus', 'trial'].includes(user.subscription_status)) {
     await sendTextMessage(message.phone,
-      '⚠️ WhatsApp Bot solo está disponible en el plan Pro+. Actualiza tu plan en la app.');
+      'El bot de WhatsApp está disponible en el plan Pro+. Puedes activarlo desde la app cuando quieras.');
     return;
   }
 
@@ -91,7 +92,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   const allowed = await checkInboundLimit(supabase, message.phone);
   if (!allowed) {
     await sendTextMessage(message.phone,
-      '⚠️ Has enviado muchos mensajes. Espera unos minutos o usa la app.');
+      'Vas muy rápido, dame un momento. Espera unos minutos y volvemos.');
     return;
   }
 
@@ -100,30 +101,46 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     const result = await transcribeAudio(message.audio_id);
     if (!result.text) {
       if (result.error) console.error(`[wa-webhook] Audio transcription failed: ${result.error}`);
-      await sendTextMessage(message.phone, '🎙️ No pude entender el audio. ¿Puedes escribirlo?');
+      await sendTextMessage(message.phone, 'No alcancé a entender el audio. ¿Lo puedes escribir?');
       return;
     }
     message.text = result.text;
     // Echo so user can verify what was understood
-    await sendTextMessage(message.phone, `🎙️ _${result.text}_`);
+    await sendTextMessage(message.phone, `_${result.text}_`);
     console.log(`[wa-webhook] Audio transcribed: "${result.text.slice(0, 100)}"`);
   }
-
-  // Log inbound message
-  await logMessage(supabase, message.phone, 'inbound', user.workspace_id, undefined, message.text);
 
   // 4. Get or create session
   const session = await getOrCreateSession(supabase, message.phone, user.workspace_id);
 
   // 5. Check if user is responding to a multi-step flow
   if (isAwaitingResponse(session)) {
+    // Log inbound (no parser telemetry — session response skips parseMessage)
+    await logMessage(supabase, message.phone, 'inbound', user.workspace_id, undefined, message.text);
     await handleSessionResponse(supabase, user, message, session);
     return;
   }
 
-  // 6. Parse message with Gemini
-  const parsed = await parseMessage(message.text);
-  console.log(`[wa-webhook] Intent: ${parsed.intent} (${parsed.confidence}) for ${message.phone}`);
+  // 6. Parse message with Gemini (phone as bucket key for A/B canary)
+  //    Inject last_context so Gemini can resolve anaphora ("ese", "el primero", "ahí")
+  const parsed = await parseMessage(
+    message.text,
+    message.phone,
+    session.context?.last_context,
+  );
+  const parseTelemetry = getLastParseTelemetry();
+  console.log(`[wa-webhook] Intent: ${parsed.intent} (${parsed.confidence}) via ${parseTelemetry.parser_source}${parseTelemetry.gemini_model ? ` [${parseTelemetry.gemini_model}]` : ''} for ${message.phone}`);
+
+  // Log inbound with full parser telemetry
+  await logMessage(
+    supabase,
+    message.phone,
+    'inbound',
+    user.workspace_id,
+    parsed.intent,
+    message.text,
+    parseTelemetry,
+  );
 
   // 7. Check role-based permissions (D99)
   // owner + admin have full access — no restriction
@@ -138,16 +155,16 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     // Special message for operator/supervisor trying manual HORAS
     if (parsed.intent === 'HORAS' && ['operator', 'supervisor'].includes(user.role)) {
       await sendTextMessage(message.phone,
-        '⏱️ Las horas se registran con el timer.\n\nEscribe *iniciar en [proyecto]* para empezar y *parar* cuando termines.');
+        'Las horas se registran con el cronómetro. Escribe *iniciar en [negocio]* para arrancar y *parar* cuando termines.');
     } else if (user.role === 'contador') {
       await sendTextMessage(message.phone,
-        '❌ Tu rol solo permite consultar información. Para registrar gastos, contacta al administrador.');
+        'Tu rol es de consulta. Para registrar movimientos pídele apoyo a tu admin.');
     } else if (user.role === 'read_only') {
       await sendTextMessage(message.phone,
-        '❌ Tu rol es de solo lectura. Contacta al administrador si necesitas hacer cambios.');
+        'Tu rol es de solo lectura. Avísale a tu admin si necesitas hacer cambios.');
     } else {
       await sendTextMessage(message.phone,
-        '❌ No tienes permiso para esta acción. Solo puedes registrar gastos, iniciar timer y notas de tus proyectos.');
+        'Con tu rol solo puedes registrar gastos, usar el cronómetro y dejar notas de tus negocios.');
     }
     return;
   }
@@ -217,7 +234,7 @@ async function routeToHandler(ctx: HandlerContext): Promise<void> {
 
     // Consulta
     case 'ESTADO_PROYECTO':
-    case 'ESTADO_PIPELINE':
+    case 'ESTADO_NEGOCIOS':
     case 'MIS_NUMEROS':
     case 'CARTERA':
     case 'INFO_CONTACTO':
@@ -225,9 +242,13 @@ async function routeToHandler(ctx: HandlerContext): Promise<void> {
       break;
 
     // Novedad
-    case 'NOTA_OPORTUNIDAD':
-    case 'NOTA_PROYECTO':
+    case 'NOTA_NEGOCIO':
       await handleNovedad(ctx);
+      break;
+
+    // Followup — anáforas y continuaciones
+    case 'FOLLOWUP':
+      await handleFollowup(ctx);
       break;
 
     default:
@@ -279,7 +300,7 @@ async function handleSessionResponse(
     await handleNovedad(ctx);
   } else {
     // Unknown state — ask user to start over
-    await sendTextMessage(message.phone, 'Parece que algo se perdió. Escríbeme de nuevo qué necesitas.');
+    await sendTextMessage(message.phone, 'Perdí el hilo. Cuéntame de nuevo qué necesitas.');
     await updateSession(supabase, (session as any).id, 'completed');
   }
 }

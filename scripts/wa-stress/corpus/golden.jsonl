@@ -1,0 +1,99 @@
+{"id":"gasto-01","text":"gasté 45000 en almuerzo para R1 26 1","intent":"GASTO_DIRECTO","expect":{"amount":45000,"project_code":"R1 26 1"}}
+{"id":"gasto-02","text":"pagué 180 mil en materiales del proyecto S1 26 3","intent":"GASTO_DIRECTO","expect":{"amount":180000,"project_code":"S1 26 3","category_hint":"materiales"}}
+{"id":"gasto-03","text":"180K en cemento para el proyecto de roble","intent":"GASTO_DIRECTO","expect":{"amount":180000}}
+{"id":"gasto-04","text":"compré 2 palos de herramientas para KAE-2","intent":"GASTO_DIRECTO","expect":{"amount":2000000,"project_code":"KAE-2"}}
+{"id":"gasto-05","text":"acabo de pagar 500 lucas de transporte al 12","intent":"GASTO_DIRECTO","expect":{"amount":500000,"category_hint":"transporte"}}
+{"id":"gasto-06","text":"medio palo en software para lo de mirador","intent":"GASTO_DIRECTO","expect":{"amount":500000,"category_hint":"software"}}
+{"id":"gasto-07","text":"20000 en tintos para el negocio R1 26 1","intent":"GASTO_DIRECTO","expect":{"amount":20000,"project_code":"R1 26 1"}}
+{"id":"gasto-08","text":"compre 75000 en gasolina para la visita a S1 26 3","intent":"GASTO_DIRECTO","expect":{"amount":75000,"project_code":"S1 26 3","category_hint":"transporte"}}
+{"id":"gasto-09","text":"me gasté 320000 en el hospedaje del equipo en el M1 26 2","intent":"GASTO_DIRECTO","expect":{"amount":320000,"project_code":"M1 26 2"}}
+{"id":"gasto-10","text":"850k en honorarios del arquitecto para R1 26 1","intent":"GASTO_DIRECTO","expect":{"amount":850000,"project_code":"R1 26 1"}}
+{"id":"gasto-11","text":"120000 en útiles de oficina para el proyecto de altavista","intent":"GASTO_DIRECTO","expect":{"amount":120000}}
+{"id":"gasto-12","text":"pagué 65 mil por el almuerzo del equipo de R1261","intent":"GASTO_DIRECTO","expect":{"amount":65000,"project_code":"R1 26 1"}}
+{"id":"gasto-13","text":"250000 en papelería para lo de mirador","intent":"GASTO_DIRECTO","expect":{"amount":250000}}
+{"id":"gasto-14","text":"invertí 1 palo en capacitación del equipo del 12","intent":"GASTO_DIRECTO","expect":{"amount":1000000}}
+{"id":"gasto-15","text":"gaste 45mil en domicilios","intent":"GASTO_DIRECTO","expect":{"amount":45000}}
+{"id":"oper-01","text":"pagué el arriendo 2.500.000","intent":"GASTO_OPERATIVO","expect":{"amount":2500000,"category_hint":"arriendo"}}
+{"id":"oper-02","text":"gasté 180 mil en internet este mes","intent":"GASTO_OPERATIVO","expect":{"amount":180000}}
+{"id":"oper-03","text":"80K de luz","intent":"GASTO_OPERATIVO","expect":{"amount":80000}}
+{"id":"oper-04","text":"pagué 120000 del agua","intent":"GASTO_OPERATIVO","expect":{"amount":120000}}
+{"id":"oper-05","text":"nómina del mes 8 palos","intent":"GASTO_OPERATIVO","expect":{"amount":8000000}}
+{"id":"oper-06","text":"350 mil en servicios de oficina","intent":"GASTO_OPERATIVO","expect":{"amount":350000}}
+{"id":"oper-07","text":"acabo de pagar el celular 95000","intent":"GASTO_OPERATIVO","expect":{"amount":95000}}
+{"id":"oper-08","text":"2 palos de nomina","intent":"GASTO_OPERATIVO","expect":{"amount":2000000}}
+{"id":"cobro-01","text":"me pagaron 3 palos del negocio de roble","intent":"COBRO","expect":{"amount":3000000}}
+{"id":"cobro-02","text":"me consignaron 1.200.000 de S1 26 3","intent":"COBRO","expect":{"amount":1200000,"project_code":"S1 26 3"}}
+{"id":"cobro-03","text":"me giraron 450 mil del proyecto de altavista","intent":"COBRO","expect":{"amount":450000}}
+{"id":"cobro-04","text":"me transfirieron 2500000 por el anticipo de R1 26 1","intent":"COBRO","expect":{"amount":2500000,"project_code":"R1 26 1"}}
+{"id":"cobro-05","text":"recibí el pago de mirador 1 palo","intent":"COBRO","expect":{"amount":1000000}}
+{"id":"cobro-06","text":"acaba de entrar un pago de 5 palos de KAE-2","intent":"COBRO","expect":{"amount":5000000,"project_code":"KAE-2"}}
+{"id":"saldo-01","text":"mi saldo es 15 palos","intent":"SALDO_BANCARIO","expect":{"amount":15000000}}
+{"id":"saldo-02","text":"tengo 8500000 en el banco","intent":"SALDO_BANCARIO","expect":{"amount":8500000}}
+{"id":"saldo-03","text":"en la cuenta tengo 3 palos","intent":"SALDO_BANCARIO","expect":{"amount":3000000}}
+{"id":"horas-01","text":"trabajé 4 horas en R1 26 1","intent":"HORAS","expect":{"hours":4,"project_code":"R1 26 1"}}
+{"id":"horas-02","text":"le metí 2.5 horas al proyecto de roble","intent":"HORAS","expect":{"hours":2.5}}
+{"id":"horas-03","text":"dediqué 6 horas hoy a S1 26 3","intent":"HORAS","expect":{"hours":6,"project_code":"S1 26 3"}}
+{"id":"timer-01","text":"iniciar timer en R1 26 1","intent":"TIMER_INICIAR","expect":{"project_code":"R1 26 1"}}
+{"id":"timer-02","text":"arrancar cronómetro","intent":"TIMER_INICIAR","expect":{}}
+{"id":"timer-03","text":"empezar a trabajar en mirador","intent":"TIMER_INICIAR","expect":{}}
+{"id":"timer-04","text":"parar","intent":"TIMER_PARAR","expect":{}}
+{"id":"timer-05","text":"terminé","intent":"TIMER_PARAR","expect":{}}
+{"id":"timer-06","text":"listo","intent":"TIMER_PARAR","expect":{}}
+{"id":"timer-07","text":"cuánto llevo","intent":"TIMER_ESTADO","expect":{}}
+{"id":"timer-08","text":"timer","intent":"TIMER_ESTADO","expect":{}}
+{"id":"opp-01","text":"nuevo negocio con carlos de altavista","intent":"OPP_NUEVA","expect":{}}
+{"id":"opp-02","text":"me contactó un prospecto nuevo, julián de la textilera","intent":"OPP_NUEVA","expect":{}}
+{"id":"opp-03","text":"nueva oportunidad con la constructora del norte","intent":"OPP_NUEVA","expect":{}}
+{"id":"opp-04","text":"mandé la propuesta a roble","intent":"OPP_AVANZAR","expect":{"stage_hint":"propuesta_enviada"}}
+{"id":"opp-05","text":"hice discovery con mirador ayer","intent":"OPP_AVANZAR","expect":{"stage_hint":"discovery_hecha"}}
+{"id":"opp-06","text":"ya contacté al cliente de altavista","intent":"OPP_AVANZAR","expect":{}}
+{"id":"opp-07","text":"ganamos el de roble, firmaron","intent":"OPP_GANADA","expect":{}}
+{"id":"opp-08","text":"aceptó la propuesta el cliente de mirador","intent":"OPP_GANADA","expect":{}}
+{"id":"opp-09","text":"cerramos el negocio con altavista","intent":"OPP_GANADA","expect":{}}
+{"id":"opp-10","text":"se cayó el de la textilera","intent":"OPP_PERDIDA","expect":{}}
+{"id":"opp-11","text":"perdimos el negocio con roble","intent":"OPP_PERDIDA","expect":{}}
+{"id":"opp-12","text":"no se dio lo de mirador","intent":"OPP_PERDIDA","expect":{}}
+{"id":"act-01","text":"llamé a carlos de altavista","intent":"ACTIVIDAD","expect":{}}
+{"id":"act-02","text":"reunión con el cliente de roble hoy","intent":"ACTIVIDAD","expect":{}}
+{"id":"act-03","text":"visité la obra de S1 26 3","intent":"ACTIVIDAD","expect":{}}
+{"id":"act-04","text":"envié correo al cliente de mirador","intent":"ACTIVIDAD","expect":{}}
+{"id":"cons-01","text":"cómo estoy","intent":"MIS_NUMEROS","expect":{}}
+{"id":"cons-02","text":"mis números","intent":"MIS_NUMEROS","expect":{}}
+{"id":"cons-03","text":"resumen del mes","intent":"MIS_NUMEROS","expect":{}}
+{"id":"cons-04","text":"quién me debe","intent":"CARTERA","expect":{}}
+{"id":"cons-05","text":"cartera","intent":"CARTERA","expect":{}}
+{"id":"cons-06","text":"cuentas por cobrar","intent":"CARTERA","expect":{}}
+{"id":"cons-07","text":"qué tengo en el horno","intent":"ESTADO_NEGOCIOS","expect":{"stage_filter":"venta"}}
+{"id":"cons-08","text":"pipeline","intent":"ESTADO_NEGOCIOS","expect":{"stage_filter":"venta"}}
+{"id":"cons-09","text":"mis oportunidades","intent":"ESTADO_NEGOCIOS","expect":{"stage_filter":"venta"}}
+{"id":"cons-14","text":"qué negocios están activos","intent":"ESTADO_NEGOCIOS","expect":{"stage_filter":"all"}}
+{"id":"cons-15","text":"negocios en ejecución","intent":"ESTADO_NEGOCIOS","expect":{"stage_filter":"ejecucion"}}
+{"id":"cons-16","text":"negocios en cobro","intent":"ESTADO_NEGOCIOS","expect":{"stage_filter":"cobro"}}
+{"id":"cons-17","text":"mis negocios","intent":"ESTADO_NEGOCIOS","expect":{"stage_filter":"all"}}
+{"id":"cons-10","text":"cómo va el negocio R1 26 1","intent":"ESTADO_PROYECTO","expect":{"project_code":"R1 26 1"}}
+{"id":"cons-11","text":"estado del proyecto de roble","intent":"ESTADO_PROYECTO","expect":{}}
+{"id":"cons-12","text":"teléfono de carlos","intent":"INFO_CONTACTO","expect":{}}
+{"id":"cons-13","text":"datos de la textilera","intent":"INFO_CONTACTO","expect":{}}
+{"id":"contacto-01","text":"nuevo contacto, pedro ramírez 3001234567","intent":"CONTACTO_NUEVO","expect":{}}
+{"id":"contacto-02","text":"anotar contacto: maria pérez 3109876543","intent":"CONTACTO_NUEVO","expect":{}}
+{"id":"nota-01","text":"nota para el negocio de roble: el cliente quiere verde","intent":"NOTA_NEGOCIO","expect":{}}
+{"id":"nota-02","text":"nota sobre mirador: pendiente revisar planos","intent":"NOTA_NEGOCIO","expect":{}}
+{"id":"ayuda-01","text":"hola","intent":"AYUDA","expect":{}}
+{"id":"ayuda-02","text":"ayuda","intent":"AYUDA","expect":{}}
+{"id":"ayuda-03","text":"qué puedes hacer","intent":"AYUDA","expect":{}}
+{"id":"ayuda-04","text":"menú","intent":"AYUDA","expect":{}}
+{"id":"ayuda-05","text":"?","intent":"AYUDA","expect":{}}
+{"id":"ayuda-06","text":"gracias","intent":"AYUDA","expect":{}}
+{"id":"ayuda-07","text":"chao","intent":"AYUDA","expect":{}}
+{"id":"edge-01","text":"asdkfj random texto sin sentido","intent":"UNCLEAR","expect":{}}
+{"id":"edge-02","text":"qué onda parcero","intent":"UNCLEAR","expect":{}}
+{"id":"follow-01","text":"cuáles son los otros 2","intent":"FOLLOWUP","expect":{}}
+{"id":"follow-02","text":"los otros","intent":"FOLLOWUP","expect":{}}
+{"id":"follow-03","text":"y los demás","intent":"FOLLOWUP","expect":{}}
+{"id":"follow-04","text":"el resto","intent":"FOLLOWUP","expect":{}}
+{"id":"follow-05","text":"ver más","intent":"FOLLOWUP","expect":{}}
+{"id":"follow-06","text":"qué más","intent":"FOLLOWUP","expect":{}}
+{"id":"follow-07","text":"cuéntame más","intent":"FOLLOWUP","expect":{}}
+{"id":"ana-01","text":"gasté 50 mil en el primero","intent":"GASTO_DIRECTO","expect":{"amount":50000,"project_code":"R1 26 1"},"last_context":{"type":"negocios_list","items":[{"nombre":"Casa Roble","codigo":"R1 26 1"},{"nombre":"Torre Mirador","codigo":"M1 26 2"},{"nombre":"Edificio Altavista","codigo":"S1 26 3"}],"shown":3,"total":3,"created_at":"2026-04-10T16:00:00Z"}}
+{"id":"ana-02","text":"cómo va el segundo","intent":"ESTADO_PROYECTO","expect":{"project_code":"M1 26 2"},"last_context":{"type":"negocios_list","items":[{"nombre":"Casa Roble","codigo":"R1 26 1"},{"nombre":"Torre Mirador","codigo":"M1 26 2"},{"nombre":"Edificio Altavista","codigo":"S1 26 3"}],"shown":3,"total":3,"created_at":"2026-04-10T16:00:00Z"}}
+{"id":"ana-03","text":"pagué 200 mil ahí","intent":"GASTO_DIRECTO","expect":{"amount":200000,"project_code":"KAE-2"},"last_context":{"type":"negocios_list","items":[{"nombre":"Proyecto KAE","codigo":"KAE-2"}],"shown":1,"total":1,"created_at":"2026-04-10T16:00:00Z"}}

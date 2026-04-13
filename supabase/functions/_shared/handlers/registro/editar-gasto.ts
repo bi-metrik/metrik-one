@@ -12,7 +12,7 @@ import { completeSession } from '../../wa-session.ts';
 const EDITAR_CAMPO_OPTIONS = [
   { id: 'monto', label: '💵 Monto' },
   { id: 'categoria', label: '🏷️ Categoría' },
-  { id: 'proyecto', label: '📁 Proyecto' },
+  { id: 'negocio', label: '📁 Negocio' },
   { id: 'cancelar', label: '❌ Cancelar' },
 ];
 
@@ -36,7 +36,7 @@ export async function handleEditarGasto(ctx: HandlerContext): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   const { data: gastos, error } = await supabase
     .from('gastos')
-    .select('id, descripcion, monto, categoria, proyecto_id, proyectos(nombre)')
+    .select('id, descripcion, monto, categoria, proyecto_id, negocio_id, proyectos(nombre), negocios(nombre)')
     .eq('workspace_id', user.workspace_id)
     .gte('fecha', today)
     .order('created_at', { ascending: false })
@@ -49,10 +49,11 @@ export async function handleEditarGasto(ctx: HandlerContext): Promise<void> {
 
   const options = gastos.map((g: any) => {
     const cat = CATEGORIA_LABELS[g.categoria] || g.categoria;
-    const proj = g.proyectos?.nombre ? ` (${g.proyectos.nombre})` : '';
+    const destinoNombre = g.negocios?.nombre || g.proyectos?.nombre || '';
+    const destino = destinoNombre ? ` (${destinoNombre})` : '';
     return {
       id: g.id,
-      label: `${g.descripcion || cat} — ${formatCOP(Number(g.monto))}${proj}`,
+      label: `${g.descripcion || cat} — ${formatCOP(Number(g.monto))}${destino}`,
     };
   });
 
@@ -133,7 +134,7 @@ async function handleResumeEditarGasto(ctx: HandlerContext): Promise<void> {
     const prompts: Record<string, string> = {
       monto: '💵 ¿Cuál es el nuevo monto? (ej: 250000 o 250K)',
       categoria: `🏷️ ¿Cuál categoría?\n${Object.entries(CATEGORIA_LABELS).map(([k, v], i) => `${i + 1}. ${v}`).join('\n')}`,
-      proyecto: '📁 Escribe el nombre del proyecto al que pertenece este gasto.',
+      negocio: '📁 Escribe el nombre del negocio al que pertenece este gasto.',
     };
 
     await ctx.sendMessage(prompts[selected.id] || '¿Cuál es el nuevo valor?');
@@ -192,23 +193,25 @@ async function applyEdit(ctx: HandlerContext, rawInput: string): Promise<void> {
     }
     updateData.categoria = categoria;
     confirmMsg = `🏷️ Categoría actualizada a ${CATEGORIA_LABELS[categoria]}`;
-  } else if (campo_editar === 'proyecto') {
-    // Find project by name in this workspace
-    const { data: proyectos } = await supabase
-      .from('proyectos')
+  } else if (campo_editar === 'negocio') {
+    // Find negocio by name in this workspace
+    const { data: negocios } = await supabase
+      .from('negocios')
       .select('id, nombre')
       .eq('workspace_id', user.workspace_id)
+      .eq('estado', 'abierto')
       .ilike('nombre', `%${rawInput}%`)
       .limit(3);
 
-    if (!proyectos || proyectos.length === 0) {
-      await ctx.sendMessage(`❌ No encontré proyecto con "${rawInput}". Verifica el nombre.`);
+    if (!negocios || negocios.length === 0) {
+      await ctx.sendMessage(`❌ No encontré negocio con "${rawInput}". Verifica el nombre.`);
       return;
     }
 
-    const proyecto = proyectos[0];
-    updateData.proyecto_id = proyecto.id;
-    confirmMsg = `📁 Proyecto actualizado a ${bold(proyecto.nombre)}`;
+    const negocio = negocios[0];
+    updateData.negocio_id = negocio.id;
+    updateData.proyecto_id = null;
+    confirmMsg = `📁 Negocio actualizado a ${bold(negocio.nombre)}`;
   }
 
   if (Object.keys(updateData).length === 0) {

@@ -44,7 +44,12 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
-export default function RiesgosExcelActions() {
+interface Props {
+  canImport: boolean
+  canExport: boolean
+}
+
+export default function RiesgosExcelActions({ canImport, canExport }: Props) {
   const [loadingPlantilla, setLoadingPlantilla] = useState(false)
   const [loadingImport, setLoadingImport] = useState(false)
   const [loadingExport, setLoadingExport] = useState(false)
@@ -127,40 +132,48 @@ export default function RiesgosExcelActions() {
 
   return (
     <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".xlsx,.xls"
-        className="hidden"
-        onChange={handleFileSelected}
-      />
-      <button
-        onClick={handleDescargarPlantilla}
-        disabled={loadingPlantilla}
-        className={btnClass}
-        title="Descargar plantilla Excel"
-      >
-        <Download className="h-4 w-4" />
-        <span className="hidden sm:inline">{loadingPlantilla ? 'Generando...' : 'Plantilla'}</span>
-      </button>
-      <button
-        onClick={handleImportarClick}
-        disabled={loadingImport}
-        className={btnClass}
-        title="Importar riesgos desde Excel"
-      >
-        <Upload className="h-4 w-4" />
-        <span className="hidden sm:inline">{loadingImport ? 'Importando...' : 'Importar'}</span>
-      </button>
-      <button
-        onClick={handleExportar}
-        disabled={loadingExport}
-        className={btnClass}
-        title="Exportar riesgos a Excel"
-      >
-        <FileSpreadsheet className="h-4 w-4" />
-        <span className="hidden sm:inline">{loadingExport ? 'Exportando...' : 'Exportar'}</span>
-      </button>
+      {canImport && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={handleFileSelected}
+        />
+      )}
+      {canExport && (
+        <button
+          onClick={handleDescargarPlantilla}
+          disabled={loadingPlantilla}
+          className={btnClass}
+          title="Descargar plantilla Excel"
+        >
+          <Download className="h-4 w-4" />
+          <span className="hidden sm:inline">{loadingPlantilla ? 'Generando...' : 'Plantilla'}</span>
+        </button>
+      )}
+      {canImport && (
+        <button
+          onClick={handleImportarClick}
+          disabled={loadingImport}
+          className={btnClass}
+          title="Importar riesgos desde Excel"
+        >
+          <Upload className="h-4 w-4" />
+          <span className="hidden sm:inline">{loadingImport ? 'Importando...' : 'Importar'}</span>
+        </button>
+      )}
+      {canExport && (
+        <button
+          onClick={handleExportar}
+          disabled={loadingExport}
+          className={btnClass}
+          title="Exportar riesgos a Excel"
+        >
+          <FileSpreadsheet className="h-4 w-4" />
+          <span className="hidden sm:inline">{loadingExport ? 'Exportando...' : 'Exportar'}</span>
+        </button>
+      )}
     </>
   )
 }

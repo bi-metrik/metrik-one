@@ -1,10 +1,12 @@
 // ============================================================
-// Audio Transcription — Download from Meta + Gemini 2.0 Flash
+// Audio Transcription — Download from Meta + Gemini (Flash-Lite default)
 // ============================================================
 
 import { getMediaUrl, downloadMediaBinary } from './wa-media.ts';
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+// Sprint 2 (Yuto): default to Flash-Lite (3.3x cheaper audio input, still multimodal).
+// Override with GEMINI_AUDIO_MODEL env var for instant rollback to flash.
+const GEMINI_MODEL = Deno.env.get('GEMINI_AUDIO_MODEL') || 'gemini-2.5-flash-lite';
 
 // WhatsApp sends audio/ogg; codecs=opus — normalize to base mime
 function normalizeAudioMimeType(raw: string): string {
@@ -106,7 +108,7 @@ async function geminiTranscribe(
         {
           parts: [
             {
-              text: 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano hablando sobre su negocio (gastos, horas, cobros, proyectos, clientes). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.',
+              text: 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano registrando movimientos de sus negocios (gastos, horas, cobros, clientes, etapas de venta y ejecución). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.',
             },
             {
               inline_data: { mime_type: mimeType, data: base64Audio },
