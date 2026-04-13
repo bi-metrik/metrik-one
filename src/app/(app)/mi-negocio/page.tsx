@@ -99,6 +99,14 @@ export default async function MiNegocioPage() {
 
   const { lineas: lineasDisponibles, lineaActivaId } = await getLineasDisponibles()
 
+  // Workspace tipo: nativo (default) vs clarity
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: tipoData } = await (supabase.from('workspaces') as any)
+    .select('tipo')
+    .eq('id', workspaceId)
+    .single() as { data: { tipo: string } | null }
+  const workspaceTipo = (tipoData?.tipo ?? 'nativo') as 'nativo' | 'clarity'
+
   const workspace = workspaceResult.data
   const fiscalProfile = fiscalResult.data
   const staffMembers = staffResult.data || []
@@ -153,6 +161,7 @@ export default async function MiNegocioPage() {
   return (
     <MiNegocioClient
       workspace={workspace}
+      workspaceTipo={workspaceTipo}
       modules={workspaceModules}
       fiscalProfile={fiscalProfile}
       staffMembers={staffMembers}

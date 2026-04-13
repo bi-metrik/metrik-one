@@ -10,6 +10,7 @@ import { SECTORES_EMPRESA } from '@/lib/pipeline/constants'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }
+type LineaClarity = { id: string; nombre: string; descripcion: string | null }
 
 const STEPS = [
   { label: 'Contacto', icon: User },
@@ -17,7 +18,13 @@ const STEPS = [
   { label: 'Negocio', icon: FileText },
 ] as const
 
-export default function NuevoNegocioForm() {
+export default function NuevoNegocioForm({
+  workspaceTipo = 'nativo',
+  lineasClarity = [],
+}: {
+  workspaceTipo?: 'nativo' | 'clarity'
+  lineasClarity?: LineaClarity[]
+}) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [step, setStep] = useState(0)
@@ -44,6 +51,11 @@ export default function NuevoNegocioForm() {
   // Step 3 — Negocio
   const [nombre, setNombre] = useState('')
   const [precioEstimado, setPrecioEstimado] = useState('')
+
+  // Clarity: selector de línea/flujo (auto-select si solo 1)
+  const [lineaId, setLineaId] = useState<string | null>(
+    workspaceTipo === 'clarity' && lineasClarity.length === 1 ? lineasClarity[0].id : null
+  )
 
   // Cuando persona natural, saltamos el paso de empresa
   const totalSteps = esPersonaNatural ? 2 : 3
@@ -124,7 +136,12 @@ export default function NuevoNegocioForm() {
   const canAdvance = () => {
     if (step === 0) return contactoNombre.trim().length > 0
     if (step === 1 && !esPersonaNatural) return empresaNombre.trim().length > 0
-    if (step === negocioStep) return nombre.trim().length > 0
+    if (step === negocioStep) {
+      if (!nombre.trim()) return false
+      // Clarity con múltiples líneas: debe seleccionar flujo
+      if (workspaceTipo === 'clarity' && lineasClarity.length > 1 && !lineaId) return false
+      return true
+    }
     return false
   }
 
@@ -143,6 +160,7 @@ export default function NuevoNegocioForm() {
     startTransition(async () => {
       const result = await crearNegocio({
         nombre: nombre.trim(),
+        linea_id: workspaceTipo === 'clarity' ? (lineaId ?? undefined) : undefined,
         contacto_id: contactoId ?? undefined,
         contacto_nombre: contactoId ? undefined : contactoNombre.trim(),
         contacto_telefono: contactoId ? undefined : (contactoTelefono.trim() || undefined),
@@ -419,6 +437,28 @@ export default function NuevoNegocioForm() {
               </div>
             )}
           </div>
+
+          {/* Selector de flujo — solo Clarity con múltiples líneas */}
+          {workspaceTipo === 'clarity' && lineasClarity.length > 1 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Flujo *</label>
+              <select
+                value={lineaId ?? ''}
+                onChange={e => setLineaId(e.target.value || null)}
+                className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              >
+                <option value="">Seleccionar flujo...</option>
+                {lineasClarity.map(l => (
+                  <option key={l.id} value={l.id}>{l.nombre}</option>
+                ))}
+              </select>
+              {lineaId && lineasClarity.find(l => l.id === lineaId)?.descripcion && (
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  {lineasClarity.find(l => l.id === lineaId)?.descripcion}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Nombre */}
           <div>

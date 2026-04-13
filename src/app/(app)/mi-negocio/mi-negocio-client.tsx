@@ -42,6 +42,7 @@ interface MiNegocioClientProps {
   licenseUsed: number
   licenseMax: number
   workspaceFeatures: WorkspaceFeature[]
+  workspaceTipo: 'nativo' | 'clarity'
   lineasDisponibles: { id: string; nombre: string; descripcion: string | null; tipo: string }[]
   lineaActivaId: string | null
   sectionScores: {
@@ -64,11 +65,12 @@ interface SectionDef {
   scoreKey: keyof MiNegocioClientProps['sectionScores']
   roles: string[]
   modules?: string[] // Si definido, solo visible cuando alguno de estos módulos está activo. Vacío = siempre visible.
+  wsTipo?: 'nativo' | 'clarity' // Si definido, solo visible para ese tipo de workspace
 }
 
 const SECTIONS: SectionDef[] = [
   { key: 'mi-plan', label: 'Mi plan', icon: CreditCard, maxScore: 1, scoreKey: 'fiscal', roles: ['owner'], modules: ['business'] },
-  { key: 'mi-flujo', label: 'Mi flujo', icon: Workflow, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['business'] },
+  { key: 'mi-flujo', label: 'Mi flujo', icon: Workflow, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['business'], wsTipo: 'nativo' },
   { key: 'perfil-fiscal', label: 'Mi perfil fiscal', icon: Briefcase, maxScore: 3, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'mi-marca', label: 'Mi marca', icon: Palette, maxScore: 1, scoreKey: 'marca', roles: ['owner', 'admin'] },
   { key: 'mis-servicios', label: 'Mis servicios', icon: Package, maxScore: 2, scoreKey: 'servicios', roles: ['owner', 'admin', 'supervisor'], modules: ['business'] },
@@ -195,6 +197,8 @@ export default function MiNegocioClient({
   const mod = modules ?? { business: true }
   const visibleSections = SECTIONS.filter(s => {
     if (!s.roles.includes(currentUserRole)) return false
+    // Filtro por tipo de workspace (nativo vs clarity)
+    if (s.wsTipo && s.wsTipo !== props.workspaceTipo) return false
     // Si la sección define módulos requeridos, al menos uno debe estar activo
     if (s.modules && s.modules.length > 0) {
       return s.modules.some(m => mod[m])
