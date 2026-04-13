@@ -89,7 +89,6 @@ const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
   admin: ['/numeros', '/negocios', '/movimientos', '/tableros'],
   supervisor: ['/numeros', '/negocios', '/movimientos', '/directorio'],
   operator: ['/negocios', '/directorio'],
-  contador: ['/causacion'],
   read_only: ['/numeros', '/movimientos', '/tableros'],
 }
 
@@ -106,7 +105,6 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   supervisor: 'Supervisor',
   operator: 'Ejecutor',
-  contador: 'Contador',
   read_only: 'Lectura',
 }
 

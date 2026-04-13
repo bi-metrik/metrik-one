@@ -246,11 +246,7 @@ export const ROLE_UI_CONFIG = [
     label: 'Ejecutor',
     description: 'Realiza el trabajo: ventas, operaciones o campo.',
   },
-  {
-    value: 'contador',
-    label: 'Contador',
-    description: 'Solo acceso al modulo de causacion contable.',
-  },
+  // contador: pausado en ONE nativo. Se activa via Clarity con modules.causacion.
   {
     value: 'read_only',
     label: 'Solo lectura',

@@ -25,7 +25,6 @@ const ROL_OPTIONS = [
   { value: 'administrador', label: 'Administrador', desc: 'Maneja finanzas, contabilidad y equipo. Acceso total excepto config fiscal.' },
   { value: 'supervisor', label: 'Supervisor', desc: 'Ve todo el trabajo. Asigna responsables, crea oportunidades y cotizaciones.' },
   { value: 'ejecutor', label: 'Ejecutor', desc: 'Trabaja en oportunidades y proyectos asignados. Registra gastos y horas.' },
-  { value: 'contador', label: 'Contador', desc: 'Solo acceso al modulo de causacion contable. Ilimitado, no afecta el plan.' },
   { value: 'campo', label: 'Campo', desc: 'Solo reporta via WhatsApp. Registra gastos y horas en proyectos activos.' },
 ]
 
@@ -35,7 +34,6 @@ const ROL_DISPLAY: Record<string, string> = {
   administrador: 'Administrador',
   supervisor: 'Supervisor',
   ejecutor: 'Ejecutor',
-  contador: 'Contador',
   campo: 'Campo',
 }
 
@@ -270,12 +268,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
               <p className="mt-0.5 text-[10px] text-muted-foreground">
                 {ROL_OPTIONS.find(r => r.value === form.rol_plataforma)?.desc}
               </p>
-              {/* Nota de billing para contador */}
-              {form.rol_plataforma === 'contador' && (
-                <p className="mt-1 text-[10px] font-medium text-emerald-600">
-                  Los usuarios Contador son ilimitados y no afectan tu plan.
-                </p>
-              )}
+              {/* Nota de billing para contador — pausado en ONE nativo, se activa via Clarity */}
             </div>
             {/* Area — solo visible para supervisor (afecta routing N1/N7) */}
             {form.rol_plataforma === 'supervisor' ? (

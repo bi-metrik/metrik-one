@@ -275,15 +275,13 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
         </button>
       </div>
 
-      {/* Info banner — solo para owner/admin, no para el contador que ya tiene acceso */}
-      {role !== 'contador' && (
-        <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-800 dark:bg-blue-950/30">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-          <p className="text-[11px] text-blue-800 dark:text-blue-300 leading-relaxed">
-            Aqui puedes causar los movimientos aprobados asignando cuenta PUC y centro de costo. Tu contador tambien puede acceder directamente a este modulo.
-          </p>
-        </div>
-      )}
+      {/* Info banner */}
+      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-800 dark:bg-blue-950/30">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+        <p className="text-[11px] text-blue-800 dark:text-blue-300 leading-relaxed">
+          Aqui puedes causar los movimientos aprobados asignando cuenta PUC y centro de costo.
+        </p>
+      </div>
 
       {/* Items list */}
       {items.length === 0 ? (
