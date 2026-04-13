@@ -36,7 +36,7 @@ export async function startTimer(
       .single()
 
     if (!negocio) return { success: false, error: 'Negocio no encontrado' }
-    if (negocio.estado !== 'activo') return { success: false, error: 'El negocio no esta activo' }
+    if (negocio.estado === 'completado') return { success: false, error: 'El negocio está completado' }
     destinoNombre = negocio.nombre ?? 'Sin nombre'
   } else {
     // Validate project is in execution
@@ -226,7 +226,7 @@ export async function getDestinosParaTimer() {
       .from('negocios')
       .select('id, nombre, codigo')
       .eq('workspace_id', workspaceId)
-      .eq('estado', 'activo')
+      .eq('estado', 'abierto')
       .order('nombre'),
     supabase
       .from('proyectos')

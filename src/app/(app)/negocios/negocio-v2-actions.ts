@@ -131,7 +131,7 @@ export async function getNegociosV2(): Promise<NegocioResumen[]> {
       contactos(nombre)
     `)
     .eq('workspace_id', workspaceId)
-    .in('estado', ['activo', 'abierto'])
+    .eq('estado', 'abierto')
     .order('created_at', { ascending: false })
 
   if (!data) return []
@@ -2134,7 +2134,7 @@ export async function perderNegocio(
   if (negocio.stage_actual !== 'venta') {
     return { error: 'Solo se puede perder un negocio en etapa de venta' }
   }
-  if (negocio.estado !== 'abierto' && negocio.estado !== 'activo') {
+  if (negocio.estado !== 'abierto') {
     return { error: 'El negocio ya esta cerrado' }
   }
 
@@ -2196,7 +2196,7 @@ export async function cancelarNegocio(
   if (negocio.stage_actual !== 'ejecucion') {
     return { error: 'Solo se puede cancelar un proyecto en etapa de ejecucion' }
   }
-  if (negocio.estado !== 'abierto' && negocio.estado !== 'activo') {
+  if (negocio.estado !== 'abierto') {
     return { error: 'El negocio ya esta cerrado' }
   }
 
@@ -2252,7 +2252,7 @@ export async function completarNegocio(
   if (negocio.stage_actual !== 'cobro') {
     return { error: 'Solo se puede completar un negocio en etapa de cobro' }
   }
-  if (negocio.estado !== 'abierto' && negocio.estado !== 'activo') {
+  if (negocio.estado !== 'abierto') {
     return { error: 'El negocio ya esta cerrado' }
   }
 

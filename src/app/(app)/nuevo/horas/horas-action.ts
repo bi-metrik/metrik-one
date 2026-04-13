@@ -19,7 +19,7 @@ export async function getDestinosParaHoras() {
       .from('negocios')
       .select('id, nombre, codigo')
       .eq('workspace_id', workspaceId)
-      .eq('estado', 'activo')
+      .eq('estado', 'abierto')
       .order('nombre'),
     supabase
       .from('proyectos')
@@ -82,8 +82,8 @@ export async function addHorasDestino(
     .single()
 
   if (!negocio) return { success: false, error: 'Negocio no encontrado' }
-  if (negocio.estado !== 'activo') {
-    return { success: false, error: 'Solo se pueden registrar horas en negocios activos' }
+  if (negocio.estado === 'completado') {
+    return { success: false, error: 'No se pueden registrar horas en negocios completados' }
   }
 
   // If no staff_id provided, default to principal staff

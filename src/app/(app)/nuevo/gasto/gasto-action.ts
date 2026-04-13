@@ -76,8 +76,8 @@ export async function createGasto(input: {
       .single()
 
     if (!negocio) return { success: false, error: 'Negocio no encontrado' }
-    if ((negocio as any).estado !== 'activo') {
-      return { success: false, error: 'Solo se pueden registrar gastos en negocios activos' }
+    if ((negocio as any).estado === 'completado') {
+      return { success: false, error: 'No se pueden registrar gastos en negocios completados' }
     }
 
     tipo = 'directo'
@@ -142,7 +142,7 @@ export async function getDestinosParaGasto() {
       .from('negocios')
       .select('id, nombre, codigo')
       .eq('workspace_id', workspaceId)
-      .eq('estado', 'activo')
+      .eq('estado', 'abierto')
       .order('nombre'),
     supabase
       .from('proyectos')
