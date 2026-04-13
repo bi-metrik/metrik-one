@@ -337,8 +337,8 @@ function EmptyOnboarding() {
         />
         <OnboardingStep
           step={4}
-          label="Crea tu primera oportunidad o proyecto"
-          href="/pipeline"
+          label="Crea tu primer negocio"
+          href="/negocios/nuevo"
         />
       </div>
 

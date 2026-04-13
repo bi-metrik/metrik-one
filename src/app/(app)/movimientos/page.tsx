@@ -21,7 +21,7 @@ export default async function MovimientosPage({ searchParams }: Props) {
 
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role || '')
-  if (!perms.canViewNumbers) redirect('/pipeline')
+  if (!perms.canViewNumbers) redirect('/negocios')
 
   const [{ movimientos, totales, regimenFiscal }, { proyectos, miembros }] = await Promise.all([
     getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago, estadoCausacion, createdBy }),

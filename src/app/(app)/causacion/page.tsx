@@ -11,7 +11,7 @@ interface Props {
 export default async function CausacionPage({ searchParams }: Props) {
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role || '')
-  if (!perms.canViewCausacion) redirect('/pipeline')
+  if (!perms.canViewCausacion) redirect('/negocios')
 
   const params = await searchParams
   const tab = (params.tab as 'aprobados' | 'causados') ?? 'aprobados'

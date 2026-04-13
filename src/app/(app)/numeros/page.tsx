@@ -8,7 +8,7 @@ export default async function NumerosPage() {
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role || '')
   if (!perms.canViewNumbers) {
-    redirect('/pipeline')
+    redirect('/negocios')
   }
 
   const data = await getNumeros()

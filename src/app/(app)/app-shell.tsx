@@ -58,15 +58,16 @@ const BUSINESS_NAV_ITEMS = [
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
-// D246: Contabilidad — parte del módulo business
+// D246: Contabilidad — solo si workspace tiene modules.causacion (Clarity)
 const CONTABILIDAD_NAV_ITEMS = [
   { href: '/causacion', label: 'Causación', icon: BookOpen, roles: ['owner', 'admin', 'contador'] },
 ]
 
 // Compliance module (solo si modules.compliance)
+// read_only = auditor: ve riesgos y matriz pero no puede editar
 const COMPLIANCE_NAV_ITEMS = [
-  { href: '/riesgos', label: 'Riesgos', icon: ShieldAlert, roles: ['owner', 'admin', 'supervisor'] },
-  { href: '/matriz', label: 'Matriz', icon: Grid3X3, roles: ['owner', 'admin', 'supervisor'] },
+  { href: '/riesgos', label: 'Riesgos', icon: ShieldAlert, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  { href: '/matriz', label: 'Matriz', icon: Grid3X3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
 ]
 
 // Compartidos (siempre visibles)
@@ -151,7 +152,7 @@ export default function AppShell({
 
   const mod = modules ?? { business: true }
   const businessItems = mod.business ? filterByRole(BUSINESS_NAV_ITEMS, role) : []
-  const contabilidadItems = mod.business ? filterByRole(CONTABILIDAD_NAV_ITEMS, role) : []
+  const contabilidadItems = mod.causacion ? filterByRole(CONTABILIDAD_NAV_ITEMS, role) : []
   const complianceItems = mod.compliance ? filterByRole(COMPLIANCE_NAV_ITEMS, role) : []
   const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []

@@ -8,7 +8,7 @@ export default async function TablerosPage() {
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role || '')
   if (!perms.canViewNumbers) {
-    redirect('/pipeline')
+    redirect('/negocios')
   }
 
   // Parallel fetch all 3 tabs

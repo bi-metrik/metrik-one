@@ -1153,9 +1153,19 @@ export async function marcarBloqueCompleto(
       }
     }
 
-    // Registrar en activity_log
+    // Registrar en activity_log con detalle de campos que cambiaron
     if (staffId && workspaceId) {
       const bloqueNombre = bloque.bloque_configs?.nombre ?? bloque.bloque_configs?.bloque_definitions?.nombre ?? 'Bloque'
+      // Diff: detectar qué campos cambiaron respecto a los datos anteriores
+      const changedFields: string[] = []
+      for (const key of Object.keys(data)) {
+        if (JSON.stringify(currentData[key]) !== JSON.stringify(data[key])) {
+          changedFields.push(key)
+        }
+      }
+      const detalle = changedFields.length > 0
+        ? `Bloque "${bloqueNombre}" completado (${changedFields.join(', ')})`
+        : `Bloque "${bloqueNombre}" completado`
       await supabase
         .from('activity_log')
         .insert({
@@ -1164,8 +1174,8 @@ export async function marcarBloqueCompleto(
           entidad_id: bloque.negocio_id,
           tipo: 'cambio',
           autor_id: staffId,
-          campo_modificado: 'bloque',
-          contenido: `Bloque "${bloqueNombre}" completado`,
+          campo_modificado: 'bloque_datos',
+          contenido: detalle,
         })
     }
   }
@@ -1198,20 +1208,8 @@ export async function actualizarBloqueData(
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
   if (nid) revalidatePath(`/negocios/${nid}`)
 
-  // Registrar en activity_log
-  if (staffId && workspaceId && nid) {
-    await supabase
-      .from('activity_log')
-      .insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: nid,
-        tipo: 'cambio',
-        autor_id: staffId,
-        campo_modificado: 'bloque_datos',
-        contenido: 'Datos de bloque actualizados',
-      })
-  }
+  // No registrar en activity_log aquí — auto-save cada 800ms genera ruido.
+  // Los cambios se registran al completar bloque (marcarBloqueCompleto).
 
   return { error: null }
 }
