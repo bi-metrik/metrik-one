@@ -517,7 +517,6 @@ function BloqueRenderer({
   userRole: string
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
-  const modo = (bloque.estado as string) === 'completo' ? 'visible' : 'editable'
   const instanciaId = bloque.instancia?.id ?? ''
   const configExtra = bloque.config_extra
   const profilesTyped = profiles.map(p => ({
@@ -526,8 +525,41 @@ function BloqueRenderer({
     email: p.email ?? undefined,
   }))
 
-  // Equipo: editable solo para owner/supervisor, visible para el resto
-  const canEditEquipo = ['owner', 'supervisor'].includes(userRole)
+  // ── Permisos de rol por tipo de bloque ─────────────────────────────────────
+  // Tier 1 (operativo): todos los roles activos editan
+  // Tier 2 (supervisor+): owner, admin, supervisor editan — operator solo ve
+  // Tier 3 (gerencial): solo owner, admin editan — resto solo ve
+  // Visualización: siempre solo lectura
+  const GERENCIAL = ['owner', 'admin']
+  const SUPERVISOR_UP = ['owner', 'admin', 'supervisor']
+
+  function getBloqueMode(): 'editable' | 'visible' {
+    if ((bloque.estado as string) === 'completo') return 'visible'
+    switch (tipo) {
+      case 'datos':
+        return (configExtra.es_multi_pago && !GERENCIAL.includes(userRole)) ? 'visible' : 'editable'
+      case 'documentos':
+      case 'checklist':
+      case 'checklist_soporte':
+        return 'editable'
+      case 'equipo':
+      case 'cronograma':
+        return SUPERVISOR_UP.includes(userRole) ? 'editable' : 'visible'
+      case 'cotizacion':
+      case 'aprobacion':
+      case 'cobros':
+      case 'documento':
+        return GERENCIAL.includes(userRole) ? 'editable' : 'visible'
+      case 'resumen_financiero':
+      case 'ejecucion':
+      case 'historial':
+        return 'visible'
+      default:
+        return 'editable'
+    }
+  }
+
+  const modo = getBloqueMode()
 
   switch (tipo) {
     case 'equipo':
@@ -536,7 +568,7 @@ function BloqueRenderer({
           negocioId={negocioId}
           negocioBloqueId={instanciaId}
           instancia={bloque.instancia}
-          modo={canEditEquipo ? 'editable' : 'visible'}
+          modo={modo}
           profiles={profilesTyped}
           configExtra={configExtra}
         />
