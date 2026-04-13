@@ -94,8 +94,11 @@ BEGIN
       SELECT bd.id, bd.default_estado
       FROM bloque_definitions bd
       WHERE (
+        -- Venta: equipo + cotización
         (v_etapa.stage = 'venta'      AND bd.tipo IN ('equipo', 'cotizacion'))
-        OR (v_etapa.stage = 'ejecucion' AND bd.tipo IN ('equipo', 'datos', 'checklist', 'cobros', 'resumen_financiero', 'ejecucion'))
+        -- Ejecución: equipo + cobros + resumen + ejecución (sin datos/checklist/documentos — requieren config_extra)
+        OR (v_etapa.stage = 'ejecucion' AND bd.tipo IN ('equipo', 'cobros', 'resumen_financiero', 'ejecucion'))
+        -- Cobro: cobros + resumen + ejecución
         OR (v_etapa.stage = 'cobro'    AND bd.tipo IN ('cobros', 'resumen_financiero', 'ejecucion'))
       )
       ORDER BY bd.tipo
