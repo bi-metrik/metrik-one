@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
+import { createDriveFolder } from '@/lib/google-drive'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -595,6 +596,48 @@ export async function crearNegocio(input: {
   }
 
   const negocioData = negocio as { id: string }
+
+  // ── Auto-crear carpeta en Google Drive si la línea tiene drive_folder_id ──
+  try {
+    const { data: lineaDrive } = await db(supabase)
+      .from('lineas_negocio')
+      .select('drive_folder_id')
+      .eq('id', lineaId)
+      .single()
+
+    const driveFolderId = (lineaDrive as { drive_folder_id: string | null } | null)?.drive_folder_id
+
+    if (driveFolderId) {
+      // Obtener codigo auto-generado + nombre del cliente
+      const { data: negocioCreado } = await db(supabase)
+        .from('negocios')
+        .select('codigo, empresas(nombre), contactos(nombre)')
+        .eq('id', negocioData.id)
+        .single()
+
+      const neg = negocioCreado as {
+        codigo: string | null
+        empresas: { nombre: string } | null
+        contactos: { nombre: string } | null
+      } | null
+
+      const codigo = neg?.codigo ?? negocioData.id.slice(0, 8)
+      const clienteNombre = neg?.empresas?.nombre ?? neg?.contactos?.nombre ?? input.nombre
+      const folderName = `${codigo} - ${clienteNombre}`
+
+      const folderId = await createDriveFolder(folderName, driveFolderId)
+      const folderUrl = `https://drive.google.com/drive/folders/${folderId}`
+
+      // Guardar link en el negocio
+      await db(supabase)
+        .from('negocios')
+        .update({ carpeta_url: folderUrl })
+        .eq('id', negocioData.id)
+    }
+  } catch (driveErr) {
+    // No bloquear la creación del negocio si Drive falla
+    console.error('[crearNegocio] Error creando carpeta Drive:', driveErr)
+  }
 
   // Crear negocio_bloques para cada bloque_config de la primera etapa
   if (primeraEtapa?.id) {
@@ -1467,7 +1510,7 @@ export async function agregarBloqueItem(
 
 export async function actualizarBloqueItem(
   bloqueItemId: string,
-  fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; link_url?: string | null }
+  fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; link_url?: string | null; responsable_id?: string | null }
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
@@ -1478,6 +1521,73 @@ export async function actualizarBloqueItem(
     .eq('id', bloqueItemId)
 
   if (updateError) return { error: (updateError as { message: string }).message }
+  return { error: null }
+}
+
+// ── Eliminar un bloque_item ──────────────────────────────────────────────────
+
+export async function eliminarBloqueItem(
+  bloqueItemId: string
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  const { error: delError } = await db(supabase)
+    .from('bloque_items')
+    .delete()
+    .eq('id', bloqueItemId)
+
+  if (delError) return { error: (delError as { message: string }).message }
+  return { error: null }
+}
+
+// ── Re-evaluar completitud de bloque cronograma ─────────────────────────────
+
+export async function reevaluarBloqueCronograma(
+  negocioBloqueId: string,
+  requireAllDates: boolean
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  // Leer items actuales
+  const { data: itemsData } = await db(supabase)
+    .from('bloque_items')
+    .select('id, fecha_inicio, fecha_fin')
+    .eq('negocio_bloque_id', negocioBloqueId)
+
+  const items = (itemsData ?? []) as { id: string; fecha_inicio: string | null; fecha_fin: string | null }[]
+
+  let shouldBeComplete = false
+  if (items.length > 0) {
+    if (requireAllDates) {
+      shouldBeComplete = items.every(i => i.fecha_inicio && i.fecha_fin)
+    } else {
+      shouldBeComplete = true // al menos 1 item existe
+    }
+  }
+
+  // Leer estado actual del bloque
+  const { data: bloque } = await db(supabase)
+    .from('negocio_bloques')
+    .select('estado')
+    .eq('id', negocioBloqueId)
+    .single()
+
+  const estadoActual = (bloque as { estado: string } | null)?.estado
+
+  if (shouldBeComplete && estadoActual !== 'completo') {
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'completo', completado_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', negocioBloqueId)
+  } else if (!shouldBeComplete && estadoActual === 'completo') {
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'pendiente', completado_at: null, updated_at: new Date().toISOString() })
+      .eq('id', negocioBloqueId)
+  }
+
   return { error: null }
 }
 
@@ -1777,7 +1887,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   if (negocioBloqueIds.length > 0) {
     const { data: itemsData } = await db(supabase)
       .from('bloque_items')
-      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin')
+      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, responsable_id')
       .in('negocio_bloque_id', negocioBloqueIds)
       .order('orden', { ascending: true })
     if (itemsData) {
