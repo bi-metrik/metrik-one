@@ -113,20 +113,15 @@ export default function BloqueCronograma({
 
     startTransition(async () => {
       if (updated.id.startsWith('_tmp_')) {
-        const result = await agregarBloqueItem(negocioBloqueId, updated.label, 'texto', items.length)
+        const extra: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null } = {}
+        if (updated.fecha_inicio) extra.fecha_inicio = updated.fecha_inicio
+        if (updated.fecha_fin) extra.fecha_fin = updated.fecha_fin
+        if (updated.responsable_id) extra.responsable_id = updated.responsable_id
+        const result = await agregarBloqueItem(negocioBloqueId, updated.label, 'texto', items.length, extra)
         if (result.error) {
           toast.error(result.error)
         } else if (result.id) {
           setItems(prev => prev.map(i => i.id === updated.id ? { ...i, id: result.id! } : i))
-          // Persistir fechas y responsable
-          const fields: Record<string, unknown> = {}
-          if (updated.fecha_inicio) fields.fecha_inicio = updated.fecha_inicio
-          if (updated.fecha_fin) fields.fecha_fin = updated.fecha_fin
-          if (updated.responsable_id) fields.responsable_id = updated.responsable_id
-          if (Object.keys(fields).length > 0) {
-            await actualizarBloqueItem(result.id, fields as Parameters<typeof actualizarBloqueItem>[1])
-          }
-          // Re-evaluar completitud
           evalCompletitud(items)
         }
       } else {
