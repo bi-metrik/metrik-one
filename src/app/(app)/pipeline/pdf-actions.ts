@@ -35,7 +35,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   if (opp?.empresa_id) {
     const { data: empData } = await supabase
       .from('empresas')
-      .select('nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor')
+      .select('nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento')
       .eq('id', opp.empresa_id)
       .single()
     empresa = empData
@@ -45,7 +45,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   if (!empresa && (cot as any).negocio_id) {
     const { data: negocio } = await (supabase as any)
       .from('negocios')
-      .select('empresa_id, empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor)')
+      .select('empresa_id, empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
       .eq('id', (cot as any).negocio_id)
       .single()
     empresa = (negocio as any)?.empresas ?? null
@@ -75,7 +75,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // Get vendor fiscal profile
   const { data: vendorFiscal } = await supabase
     .from('fiscal_profiles')
-    .select('person_type, tax_regime, self_withholder, ica_rate, ica_city, nit')
+    .select('person_type, tax_regime, self_withholder, ica_rate, ica_city, nit, razon_social, telefono, email_fiscal, direccion_fiscal, municipio, departamento')
     .eq('workspace_id', workspaceId)
     .single()
 
@@ -135,12 +135,20 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       nit: empresa.numero_documento,
       contacto_nombre: empresa.contacto_nombre,
       contacto_email: empresa.contacto_email,
+      telefono: (empresa as any).telefono ?? null,
+      direccion: (empresa as any).direccion_fiscal ?? null,
+      ciudad: [(empresa as any).municipio, (empresa as any).departamento].filter(Boolean).join(', ') || null,
     },
     vendedor: {
       nombre: ws?.name ?? 'Mi Empresa',
+      razon_social: (vendorFiscal as any)?.razon_social ?? null,
       nit: vendorFiscal?.nit ?? null,
       logo_url: ws?.logo_url ?? null,
       color_primario: ws?.color_primario ?? '#10B981',
+      telefono: (vendorFiscal as any)?.telefono ?? null,
+      email: (vendorFiscal as any)?.email_fiscal ?? null,
+      direccion: (vendorFiscal as any)?.direccion_fiscal ?? null,
+      ciudad: [(vendorFiscal as any)?.municipio, (vendorFiscal as any)?.departamento].filter(Boolean).join(', ') || null,
     },
     items: items.map((i: { nombre: string; descripcion: string | null; precio_venta: number; descuento_porcentaje: number }) => ({
       nombre: i.nombre ?? '',
