@@ -553,21 +553,28 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       <div className="grid grid-cols-3 gap-2">
                         <div>
                           <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio venta</label>
-                          <CalcInput
-                            placeholder="Valor"
-                            value={itemPrecio ? itemPrecio.toString() : ''}
-                            onChange={v => {/* controlled by onApply */}}
-                            onApply={v => {
-                              const val = Number(v) || 0
-                              startTransition(async () => {
-                                await updateItem(item.id, { precio_venta: val })
-                                await recalcularTotales(cotizacion.id)
-                                router.refresh()
-                              })
-                            }}
-                            prefix="$"
-                            formatted
-                          />
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Valor"
+                              defaultValue={itemPrecio ? itemPrecio.toLocaleString('es-CO') : ''}
+                              onBlur={e => {
+                                const raw = e.target.value.replace(/[^0-9]/g, '')
+                                const val = Number(raw) || 0
+                                if (val === itemPrecio) return
+                                e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                startTransition(async () => {
+                                  await updateItem(item.id, { precio_venta: val })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                              className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm"
+                            />
+                          </div>
                         </div>
                         <div>
                           <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descuento %</label>
