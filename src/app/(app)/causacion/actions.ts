@@ -61,7 +61,8 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
 
   // ── Gastos ──────────────────────────────────────────
   {
-    let query = supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query = (supabase as any)
       .from('gastos')
       .select('id, fecha, monto, descripcion, mensaje_original, categoria, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, deducible, retenciones, tercero_nit, tercero_razon_social')
       .eq('workspace_id', workspaceId)
@@ -108,7 +109,8 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
 
   // ── Cobros ──────────────────────────────────────────
   {
-    let query = supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query = (supabase as any)
       .from('cobros')
       .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, retenciones, tercero_nit, tercero_razon_social, negocio_id, negocios(empresa_id, empresas(numero_documento, razon_social))')
       .eq('workspace_id', workspaceId)

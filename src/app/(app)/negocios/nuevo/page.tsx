@@ -25,7 +25,8 @@ export default async function NuevoNegocioPage() {
   // Para Clarity: cargar líneas del workspace para selector
   let lineas: { id: string; nombre: string; descripcion: string | null }[] = []
   if (workspaceTipo === 'clarity') {
-    const { data } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (supabase as any)
       .from('lineas_negocio')
       .select('id, nombre, descripcion')
       .eq('workspace_id', profile.workspace_id)

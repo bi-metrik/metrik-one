@@ -101,6 +101,7 @@ export default function MiNegocioClient({
   lineasDisponibles = [],
   lineaActivaId = null,
   sectionScores,
+  workspaceTipo,
 }: MiNegocioClientProps) {
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const [showCelebration, setShowCelebration] = useState(false)
@@ -198,7 +199,7 @@ export default function MiNegocioClient({
   const visibleSections = SECTIONS.filter(s => {
     if (!s.roles.includes(currentUserRole)) return false
     // Filtro por tipo de workspace (nativo vs clarity)
-    if (s.wsTipo && s.wsTipo !== props.workspaceTipo) return false
+    if (s.wsTipo && s.wsTipo !== workspaceTipo) return false
     // Si la sección define módulos requeridos, al menos uno debe estar activo
     if (s.modules && s.modules.length > 0) {
       return s.modules.some(m => mod[m])
