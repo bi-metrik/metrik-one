@@ -79,12 +79,14 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     .eq('workspace_id', workspaceId)
     .single()
 
-  // Get items + rubros for detailed cotizaciones
+  // Get items for detailed cotizaciones (precio_venta for client PDF, no internal rubros)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let items: any[] = []
   if (cot.modo === 'detallada') {
-    const { data: itemsData } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: itemsData } = await (supabase as any)
       .from('items')
-      .select('nombre, subtotal, rubros(tipo, descripcion, cantidad, unidad, valor_unitario, valor_total)')
+      .select('nombre, descripcion, precio_venta, descuento_porcentaje')
       .eq('cotizacion_id', cotizacionId)
       .order('orden')
     items = itemsData ?? []
@@ -140,10 +142,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       logo_url: ws?.logo_url ?? null,
       color_primario: ws?.color_primario ?? '#10B981',
     },
-    items: items.map(i => ({
-      nombre: i.nombre,
-      subtotal: i.subtotal,
-      rubros: i.rubros ?? [],
+    items: items.map((i: { nombre: string; descripcion: string | null; precio_venta: number; descuento_porcentaje: number }) => ({
+      nombre: i.nombre ?? '',
+      descripcion: i.descripcion ?? null,
+      precio_venta: Number(i.precio_venta) || 0,
+      descuento_porcentaje: Number(i.descuento_porcentaje) || 0,
     })),
     fiscal,
   })

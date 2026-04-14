@@ -4,14 +4,14 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, Send, Copy, Save, Plus, Trash2, Percent, FileDown,
+  ArrowLeft, Send, Copy, Save, Plus, Trash2, Pencil, Percent, FileDown,
   ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
-  addRubro, deleteRubro, recalcularTotales,
+  addRubro, updateRubro, deleteRubro, recalcularTotales,
   addItemFromServicio,
 } from '../../cotizaciones/actions-v2'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
@@ -38,6 +38,9 @@ interface ItemRow {
   nombre: string | null
   subtotal: number | null
   orden: number | null
+  precio_venta?: number | null
+  descuento_porcentaje?: number | null
+  descripcion?: string | null
   rubros: RubroRow[]
 }
 
@@ -125,8 +128,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
-  // New rubro
+  // New / edit rubro
   const [addingRubroFor, setAddingRubroFor] = useState<string | null>(null)
+  const [editingRubroId, setEditingRubroId] = useState<string | null>(null)
   const [newRubro, setNewRubro] = useState({
     tipo: 'mo_propia',
     descripcion: '',
@@ -244,6 +248,39 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       if (res.success) {
         await recalcularTotales(cotizacion.id)
         setAddingRubroFor(null)
+        setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: '1', unidad: 'horas', valor_unitario: '' })
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  const startEditRubro = (r: RubroRow, itemId: string) => {
+    setEditingRubroId(r.id)
+    setAddingRubroFor(itemId)
+    setNewRubro({
+      tipo: r.tipo ?? 'mo_propia',
+      descripcion: r.descripcion ?? '',
+      cantidad: r.cantidad?.toString() ?? '1',
+      unidad: r.unidad ?? 'horas',
+      valor_unitario: r.valor_unitario?.toString() ?? '',
+    })
+  }
+
+  const handleUpdateRubro = (rubroId: string) => {
+    startTransition(async () => {
+      const res = await updateRubro(rubroId, {
+        tipo: newRubro.tipo,
+        descripcion: newRubro.descripcion?.trim() || null,
+        cantidad: Number(newRubro.cantidad),
+        unidad: newRubro.unidad,
+        valor_unitario: Number(newRubro.valor_unitario),
+      })
+      if (res.success) {
+        await recalcularTotales(cotizacion.id)
+        setAddingRubroFor(null)
+        setEditingRubroId(null)
         setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: '1', unidad: 'horas', valor_unitario: '' })
         router.refresh()
       } else {
@@ -470,18 +507,33 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {!isFlash && (
         <div className="space-y-3">
           {/* Items */}
-          {initialItems.map(item => (
+          {initialItems.map(item => {
+            const itemPrecio = Number(item.precio_venta) || 0
+            const itemDescPct = Number(item.descuento_porcentaje) || 0
+            const itemNeto = Math.round(itemPrecio * (1 - itemDescPct / 100))
+
+            return (
             <div key={item.id} className="rounded-lg border">
               <div
                 className="flex cursor-pointer items-center justify-between px-4 py-3"
                 onClick={() => toggleItem(item.id)}
               >
-                <div className="flex items-center gap-2">
-                  {expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  <span className="text-sm font-medium">{item.nombre || 'Item sin nombre'}</span>
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium truncate block">{item.nombre || 'Item sin nombre'}</span>
+                    {item.descripcion && (
+                      <span className="text-[10px] text-muted-foreground truncate block">{item.descripcion}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium">{formatCOP(item.subtotal ?? 0)}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="text-right">
+                    <span className="text-xs font-medium">{formatCOP(itemPrecio)}</span>
+                    {itemDescPct > 0 && (
+                      <span className="block text-[10px] text-red-500">-{itemDescPct}% = {formatCOP(itemNeto)}</span>
+                    )}
+                  </div>
                   {editable && (
                     <button
                       onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
@@ -495,18 +547,83 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
               {expandedItems.has(item.id) && (
                 <div className="border-t px-4 pb-3 pt-2">
-                  {/* Rubros table */}
+                  {/* Item sale fields */}
+                  {editable && (
+                    <div className="mb-3 space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio venta</label>
+                          <CalcInput
+                            placeholder="Valor"
+                            value={itemPrecio ? itemPrecio.toString() : ''}
+                            onChange={v => {/* controlled by onApply */}}
+                            onApply={v => {
+                              const val = Number(v) || 0
+                              startTransition(async () => {
+                                await updateItem(item.id, { precio_venta: val })
+                                await recalcularTotales(cotizacion.id)
+                                router.refresh()
+                              })
+                            }}
+                            prefix="$"
+                            formatted
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descuento %</label>
+                          <input
+                            type="number"
+                            defaultValue={itemDescPct || ''}
+                            placeholder="0"
+                            min="0"
+                            max="100"
+                            className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                            onBlur={e => {
+                              const pct = Math.min(100, Math.max(0, Number(e.target.value) || 0))
+                              startTransition(async () => {
+                                await updateItem(item.id, { descuento_porcentaje: pct })
+                                await recalcularTotales(cotizacion.id)
+                                router.refresh()
+                              })
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-end pb-0.5">
+                          {itemPrecio > 0 && (item.subtotal ?? 0) > 0 && (
+                            <span className="text-[10px] text-green-600">
+                              Margen: {((itemPrecio - (item.subtotal ?? 0)) / itemPrecio * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descripción (visible al cliente)</label>
+                        <input
+                          defaultValue={item.descripcion ?? ''}
+                          placeholder="Describe qué incluye este item..."
+                          className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                          onBlur={e => {
+                            startTransition(async () => {
+                              await updateItem(item.id, { descripcion: e.target.value })
+                            })
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {/* Rubros table (internal costs) */}
                   {(item.rubros ?? []).length > 0 && (
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b text-left text-muted-foreground">
                             <th className="pb-1 pr-2">Tipo</th>
+                            <th className="pb-1 pr-2">Descripción</th>
                             <th className="pb-1 pr-2">Cant.</th>
                             <th className="pb-1 pr-2">Unit.</th>
                             <th className="pb-1 pr-2 text-right">Vr. Unit.</th>
                             <th className="pb-1 text-right">Total</th>
-                            {editable && <th className="pb-1 w-6" />}
+                            {editable && <th className="pb-1 w-12" />}
                           </tr>
                         </thead>
                         <tbody>
@@ -515,18 +632,29 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                               <td className="py-1.5 pr-2">
                                 {TIPOS_RUBRO.find(t => t.value === r.tipo)?.label ?? r.tipo}
                               </td>
+                              <td className="py-1.5 pr-2 text-muted-foreground max-w-[120px] truncate">
+                                {r.descripcion || '—'}
+                              </td>
                               <td className="py-1.5 pr-2">{r.cantidad}</td>
                               <td className="py-1.5 pr-2">{r.unidad}</td>
                               <td className="py-1.5 pr-2 text-right">{formatCOP(r.valor_unitario ?? 0)}</td>
                               <td className="py-1.5 text-right font-medium">{formatCOP(r.valor_total ?? 0)}</td>
                               {editable && (
                                 <td className="py-1.5">
-                                  <button
-                                    onClick={() => handleDeleteRubro(r.id)}
-                                    className="rounded p-0.5 text-red-500 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </button>
+                                  <div className="flex gap-0.5">
+                                    <button
+                                      onClick={() => startEditRubro(r, item.id)}
+                                      className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteRubro(r.id)}
+                                      className="rounded p-0.5 text-red-500 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </div>
                                 </td>
                               )}
                             </tr>
@@ -536,7 +664,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     </div>
                   )}
 
-                  {/* Add rubro */}
+                  {/* Add / Edit rubro */}
                   {editable && addingRubroFor === item.id ? (
                     <div className="mt-2 space-y-2 rounded-md bg-muted/30 p-2">
                       <div className="grid grid-cols-2 gap-2">
@@ -552,6 +680,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             <option key={t.value} value={t.value}>{t.label}</option>
                           ))}
                         </select>
+                        <input
+                          placeholder="Descripción"
+                          value={newRubro.descripcion}
+                          onChange={e => setNewRubro(p => ({ ...p, descripcion: e.target.value }))}
+                          className="rounded border bg-background px-2 py-1.5 text-xs"
+                        />
                         <input
                           type="number"
                           placeholder="Cantidad"
@@ -573,23 +707,33 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => setAddingRubroFor(null)}
+                          onClick={() => { setAddingRubroFor(null); setEditingRubroId(null); setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: '1', unidad: 'horas', valor_unitario: '' }) }}
                           className="rounded border px-2 py-1 text-xs hover:bg-accent"
                         >
                           Cancelar
                         </button>
-                        <button
-                          onClick={() => handleAddRubro(item.id)}
-                          disabled={isPending || !Number(newRubro.valor_unitario)}
-                          className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
-                        >
-                          Agregar rubro
-                        </button>
+                        {editingRubroId ? (
+                          <button
+                            onClick={() => handleUpdateRubro(editingRubroId)}
+                            disabled={isPending || !Number(newRubro.valor_unitario)}
+                            className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                          >
+                            Guardar cambios
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleAddRubro(item.id)}
+                            disabled={isPending || !Number(newRubro.valor_unitario)}
+                            className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                          >
+                            Agregar rubro
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : editable ? (
                     <button
-                      onClick={() => setAddingRubroFor(item.id)}
+                      onClick={() => { setEditingRubroId(null); setAddingRubroFor(item.id) }}
                       className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                     >
                       <Plus className="h-3 w-3" />
@@ -599,7 +743,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </div>
               )}
             </div>
-          ))}
+          )})}
 
           {/* Add item actions */}
           {editable && (

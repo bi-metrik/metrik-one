@@ -133,7 +133,7 @@ export async function updateCotizacion(id: string, updates: Record<string, unkno
 
 // ── Items CRUD ────────────────────────────────
 
-export async function addItem(cotizacionId: string, nombre: string) {
+export async function addItem(cotizacionId: string, nombre: string, precioVenta?: number, descripcion?: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
@@ -154,22 +154,30 @@ export async function addItem(cotizacionId: string, nombre: string) {
       nombre: nombre.trim(),
       subtotal: 0,
       orden: nextOrden,
-    })
+      ...(precioVenta != null ? { precio_venta: precioVenta } : {}),
+      ...(descripcion ? { descripcion: descripcion.trim() } : {}),
+    } as never)
     .select('id')
     .single()
 
   if (dbError) return { success: false, error: dbError.message }
 
-  return { success: true, id: data.id }
+  return { success: true, id: (data as { id: string }).id }
 }
 
-export async function updateItem(id: string, nombre: string) {
+export async function updateItem(id: string, updates: { nombre?: string; precio_venta?: number; descuento_porcentaje?: number; descripcion?: string | null }) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
+  const patch: Record<string, unknown> = {}
+  if (updates.nombre !== undefined) patch.nombre = updates.nombre.trim()
+  if (updates.precio_venta !== undefined) patch.precio_venta = updates.precio_venta
+  if (updates.descuento_porcentaje !== undefined) patch.descuento_porcentaje = updates.descuento_porcentaje
+  if (updates.descripcion !== undefined) patch.descripcion = updates.descripcion?.trim() || null
+
   const { error: dbError } = await supabase
     .from('items')
-    .update({ nombre: nombre.trim() })
+    .update(patch as never)
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
@@ -265,6 +273,8 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
     ? rubrosTemplate.reduce((sum, r) => sum + (r.cantidad * r.valor_unitario), 0)
     : (servicio.precio_estandar ?? 0)
 
+  const precioVenta = servicio.precio_estandar ?? subtotal
+
   // Create item (store servicio_origen_id so deleteItem can reverse the valor_total change)
   const { data: newItem, error: itemError } = await supabase
     .from('items')
@@ -274,7 +284,8 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
       subtotal,
       orden: nextOrden,
       servicio_origen_id: servicioId,
-    })
+      precio_venta: precioVenta,
+    } as never)
     .select('id')
     .single()
 
@@ -293,8 +304,7 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
     await supabase.from('rubros').insert(rubrosToInsert)
   }
 
-  // Add the service's sale price (precio_estandar) to the cotización valor_total
-  const precioVenta = servicio.precio_estandar ?? subtotal
+  // Add the service's sale price to the cotización valor_total
   if (precioVenta > 0) {
     const { data: cot } = await supabase
       .from('cotizaciones')
@@ -382,69 +392,21 @@ export async function enviarCotizacion(id: string) {
 
   if (!cot) return { success: false, error: 'Cotización no encontrada' }
 
-  // ── Cotización de NEGOCIO: enviar = aceptar directamente ──
-  if (cot.negocio_id) {
-    const { error: updErr } = await supabase
-      .from('cotizaciones')
-      .update({
-        estado: 'aceptada',
-        fecha_envio: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as never)
-      .eq('id', id)
+  // Check if there's already an "enviada" cotización for this negocio/oportunidad
+  const parentField = cot.negocio_id ? 'negocio_id' : 'oportunidad_id'
+  const parentId = cot.negocio_id ?? cot.oportunidad_id
 
-    if (updErr) return { success: false, error: updErr.message }
-
-    // Actualizar precio_aprobado en negocio
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any)
-      .from('negocios')
-      .update({ precio_aprobado: cot.valor_total })
-      .eq('id', cot.negocio_id)
-
-    // Marcar todos los negocio_bloques de cotización como completo
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: bloqueInstances } = await (supabase as any)
-      .from('negocio_bloques')
-      .select('id, bloque_configs!inner(bloque_definitions!inner(tipo))')
-      .eq('negocio_id', cot.negocio_id)
-
-    const cotBloqueIds = (bloqueInstances ?? [])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .filter((b: any) => b.bloque_configs?.bloque_definitions?.tipo === 'cotizacion')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((b: any) => b.id as string)
-
-    if (cotBloqueIds.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase as any)
-        .from('negocio_bloques')
-        .update({
-          estado: 'completo',
-          completado_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .in('id', cotBloqueIds)
-    }
-
-    revalidatePath(`/negocios/${cot.negocio_id}`)
-    return { success: true }
-  }
-
-  // ── Cotización de OPORTUNIDAD: flujo normal borrador→enviada ──
-
-  // Check if there's already an "enviada" cotización for this oportunidad
   const { data: existente } = await supabase
     .from('cotizaciones')
     .select('consecutivo')
-    .eq('oportunidad_id', cot.oportunidad_id)
+    .eq(parentField as never, parentId)
     .eq('estado', 'enviada')
     .maybeSingle()
 
   if (existente) {
     return {
       success: false,
-      error: `Ya existe una cotización enviada (${existente.consecutivo ?? 'sin consecutivo'}). Primero acepta o rechaza esa cotización antes de enviar otra.`,
+      error: `Ya hay una cotización enviada. Apruébala o recházala antes de enviar otra.`,
     }
   }
 
@@ -454,13 +416,17 @@ export async function enviarCotizacion(id: string) {
       estado: 'enviada',
       fecha_envio: new Date().toISOString(),
       fecha_validez: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-    })
+    } as never)
     .eq('id', id)
     .eq('estado', 'borrador')
 
   if (dbError) return { success: false, error: dbError.message }
 
-  revalidatePath('/pipeline')
+  if (cot.negocio_id) {
+    revalidatePath(`/negocios/${cot.negocio_id}`)
+  } else {
+    revalidatePath('/pipeline')
+  }
   return { success: true }
 }
 
@@ -559,20 +525,25 @@ export async function duplicarCotizacion(id: string) {
 
   // If detallada, duplicate items + rubros
   if (original.modo === 'detallada' && newCot) {
-    const { data: items } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: items } = await (supabase as any)
       .from('items')
-      .select('nombre, subtotal, orden, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
+      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
       .eq('cotizacion_id', id)
       .order('orden')
 
     for (const item of items ?? []) {
-      const { data: newItem } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: newItem } = await (supabase as any)
         .from('items')
         .insert({
           cotizacion_id: newCot.id,
           nombre: item.nombre,
+          descripcion: item.descripcion ?? null,
           subtotal: item.subtotal,
           orden: item.orden,
+          precio_venta: item.precio_venta ?? 0,
+          descuento_porcentaje: item.descuento_porcentaje ?? 0,
         })
         .select('id')
         .single()
@@ -605,23 +576,32 @@ export async function recalcularTotales(cotizacionId: string) {
   if (error) return { success: false, error: 'No autenticado' }
 
   // Get all items with rubros
-  const { data: items } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: items } = await (supabase as any)
     .from('items')
-    .select('id, rubros(valor_total)')
+    .select('id, precio_venta, descuento_porcentaje, rubros(valor_total)')
     .eq('cotizacion_id', cotizacionId)
 
   let totalCosto = 0
+  let totalVenta = 0
   for (const item of items ?? []) {
     const subtotal = ((item.rubros as { valor_total: number }[]) ?? []).reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0)
-    await supabase.from('items').update({ subtotal }).eq('id', item.id)
+    await supabase.from('items').update({ subtotal } as never).eq('id', item.id)
     totalCosto += subtotal
+
+    const pv = Number(item.precio_venta) || 0
+    const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
+    totalVenta += pv * (1 - dp / 100)
   }
 
-  // Update cotizacion costo_total
+  // Update cotizacion costo_total + valor_total (from items' precio_venta)
+  const updates: Record<string, unknown> = { costo_total: totalCosto }
+  if (totalVenta > 0) updates.valor_total = Math.round(totalVenta)
+
   await supabase
     .from('cotizaciones')
-    .update({ costo_total: totalCosto })
+    .update(updates as never)
     .eq('id', cotizacionId)
 
-  return { success: true, costoTotal: totalCosto }
+  return { success: true, costoTotal: totalCosto, valorVenta: Math.round(totalVenta) }
 }

@@ -82,20 +82,61 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   return { success: true as const, id: (data as { id: string }).id }
 }
 
-export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false as const, error: 'No autenticado' }
 
-  // Obtener valor_total de la cotización
+  // Verificar que la cotización está en borrador
   const { data: cot, error: cotErr } = await supabase
     .from('cotizaciones')
-    .select('valor_total')
+    .select('estado')
     .eq('id', cotizacionId)
     .single()
 
   if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
+  if ((cot as { estado: string }).estado !== 'borrador') {
+    return { success: false as const, error: 'Solo se pueden enviar cotizaciones en borrador' }
+  }
 
-  // Marcar cotización como aceptada (salto directo borrador→aceptada)
+  // Solo 1 cotización enviada a la vez por negocio
+  const { count } = await supabase
+    .from('cotizaciones')
+    .select('id', { count: 'exact', head: true })
+    .eq('negocio_id' as never, negocioId)
+    .eq('estado', 'enviada')
+
+  if ((count ?? 0) > 0) {
+    return { success: false as const, error: 'Ya hay una cotización enviada. Apruébala o recházala antes de enviar otra' }
+  }
+
+  const { error: updErr } = await supabase
+    .from('cotizaciones')
+    .update({ estado: 'enviada', updated_at: new Date().toISOString() } as never)
+    .eq('id', cotizacionId)
+
+  if (updErr) return { success: false as const, error: updErr.message }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { success: true as const }
+}
+
+export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false as const, error: 'No autenticado' }
+
+  // Obtener valor_total y estado de la cotización
+  const { data: cot, error: cotErr } = await supabase
+    .from('cotizaciones')
+    .select('valor_total, estado')
+    .eq('id', cotizacionId)
+    .single()
+
+  if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
+  if ((cot as { estado: string }).estado !== 'enviada') {
+    return { success: false as const, error: 'Solo se pueden aprobar cotizaciones enviadas' }
+  }
+
+  // Marcar cotización como aceptada (enviada → aceptada)
   const { error: updErr } = await supabase
     .from('cotizaciones')
     .update({ estado: 'aceptada', updated_at: new Date().toISOString() } as never)
@@ -154,4 +195,44 @@ export async function rechazarCotizacionNegocio(cotizacionId: string, negocioId:
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
+}
+
+export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  // Leer cotización original
+  const { data: original, error: origErr } = await supabase
+    .from('cotizaciones')
+    .select('modo, descripcion, valor_total')
+    .eq('id', cotizacionId)
+    .single()
+
+  if (origErr || !original) return { success: false as const, error: 'Cotización no encontrada' }
+
+  // Nuevo consecutivo
+  const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
+    p_workspace_id: workspaceId,
+  })
+  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-${Date.now()}`
+
+  const { data, error: dbError } = await supabase
+    .from('cotizaciones')
+    .insert({
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      consecutivo,
+      codigo: '',
+      modo: original.modo,
+      descripcion: original.descripcion,
+      valor_total: original.valor_total,
+      estado: 'borrador',
+    } as never)
+    .select('id')
+    .single()
+
+  if (dbError) return { success: false as const, error: dbError.message }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { success: true as const, id: (data as { id: string }).id }
 }

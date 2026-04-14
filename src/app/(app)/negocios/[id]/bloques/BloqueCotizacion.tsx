@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
-import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock } from 'lucide-react'
+import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy } from 'lucide-react'
 import { toast } from 'sonner'
-import { aceptarCotizacionNegocio, rechazarCotizacionNegocio } from '../cotizacion/actions'
+import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio } from '../cotizacion/actions'
 
 interface CotizacionResumen {
   id: string
@@ -62,6 +62,30 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
     const bEstado = b.id === optimisticAceptadaId ? 'aceptada' : (b.estado ?? 'borrador')
     return (ESTADO_ORDER[aEstado] ?? 99) - (ESTADO_ORDER[bEstado] ?? 99)
   })
+
+  const hayEnviada = cotizaciones.some(c => c.estado === 'enviada')
+
+  const handleDuplicar = (cotizacionId: string) => {
+    startTransition(async () => {
+      const res = await duplicarCotizacionNegocio(cotizacionId, negocioId)
+      if (!res.success) {
+        toast.error(res.error)
+      } else {
+        toast.success('Cotización duplicada como borrador')
+      }
+    })
+  }
+
+  const handleEnviar = (cotizacionId: string) => {
+    startTransition(async () => {
+      const res = await enviarCotizacionNegocio(cotizacionId, negocioId)
+      if (!res.success) {
+        toast.error(res.error)
+      } else {
+        toast.success('Cotización enviada')
+      }
+    })
+  }
 
   const handleAprobar = (cotizacionId: string) => {
     setOptimisticAceptadaId(cotizacionId)
@@ -148,10 +172,10 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
                   </div>
                 </Link>
 
-                {/* Botón Enviar — borradores: auto-aprueba (borrador → aceptada) */}
-                {modo === 'editable' && !hayAceptada && cot.estado === 'borrador' && (
+                {/* Botón Enviar — borradores: borrador → enviada (solo si no hay otra enviada) */}
+                {modo === 'editable' && !hayAceptada && !hayEnviada && cot.estado === 'borrador' && (
                   <button
-                    onClick={() => handleAprobar(cot.id)}
+                    onClick={() => handleEnviar(cot.id)}
                     disabled={isPending}
                     className="shrink-0 rounded-lg border border-[#10B981] bg-[#10B981]/10 px-3 py-2 text-[10px] font-semibold text-[#10B981] hover:bg-[#10B981]/20 disabled:opacity-50 transition-colors"
                   >
@@ -177,6 +201,18 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
                       Rechazar
                     </button>
                   </div>
+                )}
+
+                {/* Botón Duplicar — rechazadas: crea copia en borrador */}
+                {modo === 'editable' && !hayAceptada && cot.estado === 'rechazada' && (
+                  <button
+                    onClick={() => handleDuplicar(cot.id)}
+                    disabled={isPending}
+                    className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors flex items-center gap-1"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Duplicar
+                  </button>
                 )}
               </div>
             )

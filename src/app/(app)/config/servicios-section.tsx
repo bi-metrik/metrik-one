@@ -252,6 +252,7 @@ export default function ServiciosSection({ initialData }: Props) {
                 {rubros.map((r, i) => (
                   <div key={i} className="flex items-center gap-2 rounded border bg-background px-2.5 py-1.5 text-xs">
                     <span className="font-medium">{getRubroLabel(r.tipo)}</span>
+                    {r.descripcion && <span className="text-muted-foreground truncate max-w-[100px]">{r.descripcion}</span>}
                     <span className="text-muted-foreground">{r.cantidad} {r.unidad}</span>
                     <span className="text-muted-foreground">× {formatCOP(r.valor_unitario)}</span>
                     <span className="ml-auto font-medium">{formatCOP(r.cantidad * r.valor_unitario)}</span>
@@ -423,6 +424,7 @@ export default function ServiciosSection({ initialData }: Props) {
                         <thead>
                           <tr className="border-b text-left text-muted-foreground">
                             <th className="pb-1 pr-2">Tipo</th>
+                            <th className="pb-1 pr-2">Descripción</th>
                             <th className="pb-1 pr-2">Cant.</th>
                             <th className="pb-1 pr-2">Unidad</th>
                             <th className="pb-1 pr-2 text-right">Vr. Unit.</th>
@@ -433,6 +435,7 @@ export default function ServiciosSection({ initialData }: Props) {
                           {tpl.map((r, i) => (
                             <tr key={i} className="border-b border-dashed last:border-0">
                               <td className="py-1.5 pr-2">{getRubroLabel(r.tipo)}</td>
+                              <td className="py-1.5 pr-2 text-muted-foreground max-w-[120px] truncate">{r.descripcion || '—'}</td>
                               <td className="py-1.5 pr-2">{r.cantidad}</td>
                               <td className="py-1.5 pr-2">{r.unidad}</td>
                               <td className="py-1.5 pr-2 text-right">{formatCOP(r.valor_unitario)}</td>
