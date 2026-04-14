@@ -1777,7 +1777,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   if (negocioBloqueIds.length > 0) {
     const { data: itemsData } = await db(supabase)
       .from('bloque_items')
-      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden')
+      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin')
       .in('negocio_bloque_id', negocioBloqueIds)
       .order('orden', { ascending: true })
     if (itemsData) {
