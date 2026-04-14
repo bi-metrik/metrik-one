@@ -12,7 +12,7 @@ import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
   addRubro, updateRubro, deleteRubro, recalcularTotales,
-  addItemFromServicio,
+  addItemFromServicio, reconciliarAjuste,
 } from '../../cotizaciones/actions-v2'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/pipeline/pdf-actions'
@@ -41,6 +41,7 @@ interface ItemRow {
   precio_venta?: number | null
   descuento_porcentaje?: number | null
   descripcion?: string | null
+  es_ajuste?: boolean
   rubros: RubroRow[]
 }
 
@@ -517,30 +518,37 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const itemPrecio = Number(item.precio_venta) || 0
             const itemDescPct = Number(item.descuento_porcentaje) || 0
             const itemNeto = Math.round(itemPrecio * (1 - itemDescPct / 100))
+            const isAjuste = item.es_ajuste === true
+            const isNegativo = itemPrecio < 0
 
             return (
-            <div key={item.id} className="rounded-lg border">
+            <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
               <div
-                className="flex cursor-pointer items-center justify-between px-4 py-3"
-                onClick={() => toggleItem(item.id)}
+                className={`flex ${isAjuste ? '' : 'cursor-pointer'} items-center justify-between px-4 py-3`}
+                onClick={() => !isAjuste && toggleItem(item.id)}
               >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                  {!isAjuste && (expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />)}
                   <div className="min-w-0">
-                    <span className="text-sm font-medium truncate block">{item.nombre || 'Item sin nombre'}</span>
-                    {item.descripcion && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">{item.nombre || 'Item sin nombre'}</span>
+                      {isAjuste && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Auto</span>
+                      )}
+                    </div>
+                    {!isAjuste && item.descripcion && (
                       <span className="text-[10px] text-muted-foreground truncate block">{item.descripcion}</span>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <div className="text-right">
-                    <span className="text-xs font-medium">{formatCOP(itemPrecio)}</span>
-                    {itemDescPct > 0 && (
+                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''}`}>{formatCOP(itemPrecio)}</span>
+                    {!isAjuste && itemDescPct > 0 && (
                       <span className="block text-[10px] text-red-500">-{itemDescPct}% = {formatCOP(itemNeto)}</span>
                     )}
                   </div>
-                  {editable && (
+                  {editable && !isAjuste && (
                     <button
                       onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
                       className="rounded p-1 text-red-500 hover:bg-red-50"
@@ -551,7 +559,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </div>
               </div>
 
-              {expandedItems.has(item.id) && (
+              {!isAjuste && expandedItems.has(item.id) && (
                 <div className="border-t px-4 pb-3 pt-2">
                   {/* Item sale fields */}
                   {editable && (
@@ -837,7 +845,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             onSave={(val, pct) => {
               startTransition(async () => {
                 const dv = Math.round(val * (Math.min(100, Math.max(0, Number(pct) || 0))) / 100)
-                await updateCotizacion(cotizacion.id, { valor_total: val, descuento_porcentaje: Number(pct) || 0, descuento_valor: dv })
+                // Reconcile: creates/updates adjustment item + sets valor_total
+                await reconciliarAjuste(cotizacion.id, val)
+                // Also persist discount separately
+                await updateCotizacion(cotizacion.id, { descuento_porcentaje: Number(pct) || 0, descuento_valor: dv })
                 router.refresh()
               })
             }}

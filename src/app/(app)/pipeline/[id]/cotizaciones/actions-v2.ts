@@ -33,13 +33,15 @@ export async function getCotizacionItems(cotizacionId: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return []
 
-  const { data } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
     .from('items')
     .select('*, rubros(*)')
     .eq('cotizacion_id', cotizacionId)
     .order('orden')
 
-  return data ?? []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data ?? []) as any[]
 }
 
 export async function createCotizacionFlash(oportunidadId: string, descripcion: string, valorTotal: number) {
@@ -189,29 +191,43 @@ export async function deleteItem(id: string) {
   if (error) return { success: false, error: 'No autenticado' }
 
   // Fetch item details before deleting
-  const { data: item } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: item } = await (supabase as any)
     .from('items')
-    .select('cotizacion_id, servicio_origen_id, subtotal')
+    .select('cotizacion_id, servicio_origen_id, subtotal, es_ajuste')
     .eq('id', id)
     .single()
 
   if (!item) return { success: false, error: 'Item no encontrado' }
 
+  // Never allow deleting the adjustment item directly
+  if (item.es_ajuste) return { success: false, error: 'El item de ajuste se gestiona automáticamente' }
+
+  // Check if there's an active adjustment item for this cotizacion
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ajusteItems } = await (supabase as any)
+    .from('items')
+    .select('id')
+    .eq('cotizacion_id', item.cotizacion_id)
+    .eq('es_ajuste', true)
+    .limit(1)
+  const hayAjuste = (ajusteItems ?? []).length > 0
+
   // Determine how much to subtract from valor_total:
   // 1. If item has servicio_origen_id → use that service's precio_estandar
   // 2. Fallback → use the item's subtotal (cost-based estimate)
   let precioRestar = 0
-  if (item.servicio_origen_id) {
-    const { data: servicio } = await supabase
-      .from('servicios')
-      .select('precio_estandar')
-      .eq('id', item.servicio_origen_id)
-      .single()
-    precioRestar = servicio?.precio_estandar ?? (item.subtotal ?? 0)
-  } else {
-    // For items added from catalog before fix (servicio_origen_id was not set),
-    // or manually created items: subtract item subtotal as best approximation
-    precioRestar = item.subtotal ?? 0
+  if (!hayAjuste) {
+    if (item.servicio_origen_id) {
+      const { data: servicio } = await supabase
+        .from('servicios')
+        .select('precio_estandar')
+        .eq('id', item.servicio_origen_id)
+        .single()
+      precioRestar = servicio?.precio_estandar ?? (item.subtotal ?? 0)
+    } else {
+      precioRestar = item.subtotal ?? 0
+    }
   }
 
   const { error: dbError } = await supabase
@@ -221,8 +237,11 @@ export async function deleteItem(id: string) {
 
   if (dbError) return { success: false, error: dbError.message }
 
-  // Always subtract from valor_total when deleting an item
-  if (precioRestar > 0) {
+  if (hayAjuste) {
+    // Re-reconcile: recalcularTotales will update the adjustment item
+    // (caller should call recalcularTotales after deleteItem)
+  } else if (precioRestar > 0) {
+    // No adjustment item: subtract from valor_total manually
     const { data: cot } = await supabase
       .from('cotizaciones')
       .select('valor_total')
@@ -304,8 +323,18 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
     await supabase.from('rubros').insert(rubrosToInsert)
   }
 
-  // Add the service's sale price to the cotización valor_total
-  if (precioVenta > 0) {
+  // Check if there's an active adjustment item — if so, don't manually adjust valor_total
+  // (recalcularTotales, called by the frontend after this, will re-reconcile)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ajusteItems } = await (supabase as any)
+    .from('items')
+    .select('id')
+    .eq('cotizacion_id', cotizacionId)
+    .eq('es_ajuste', true)
+    .limit(1)
+  const hayAjuste = (ajusteItems ?? []).length > 0
+
+  if (!hayAjuste && precioVenta > 0) {
     const { data: cot } = await supabase
       .from('cotizaciones')
       .select('valor_total')
@@ -528,7 +557,7 @@ export async function duplicarCotizacion(id: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: items } = await (supabase as any)
       .from('items')
-      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
+      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, es_ajuste, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
       .eq('cotizacion_id', id)
       .order('orden')
 
@@ -544,6 +573,7 @@ export async function duplicarCotizacion(id: string) {
           orden: item.orden,
           precio_venta: item.precio_venta ?? 0,
           descuento_porcentaje: item.descuento_porcentaje ?? 0,
+          es_ajuste: item.es_ajuste ?? false,
         })
         .select('id')
         .single()
@@ -569,6 +599,80 @@ export async function duplicarCotizacion(id: string) {
   return { success: true, id: newCot?.id }
 }
 
+// ── Reconciliación automática de ajuste ────────────────────────
+
+export async function reconciliarAjuste(cotizacionId: string, valorTotalDeseado: number) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  if (valorTotalDeseado < 0) return { success: false, error: 'El valor total no puede ser negativo' }
+
+  // 1. Get all items
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: items } = await (supabase as any)
+    .from('items')
+    .select('id, precio_venta, descuento_porcentaje, es_ajuste, orden')
+    .eq('cotizacion_id', cotizacionId)
+
+  // 2. Sum net of regular items (es_ajuste = false)
+  let sumaNetaRegulares = 0
+  let ajusteExistenteId: string | null = null
+  let maxOrden = 0
+  for (const item of items ?? []) {
+    if (item.es_ajuste) {
+      ajusteExistenteId = item.id
+    } else {
+      const pv = Number(item.precio_venta) || 0
+      const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
+      sumaNetaRegulares += pv * (1 - dp / 100)
+    }
+    if ((item.orden ?? 0) > maxOrden) maxOrden = item.orden ?? 0
+  }
+
+  // 3. Difference
+  const diferencia = Math.round(valorTotalDeseado - sumaNetaRegulares)
+
+  // 4-6. Handle adjustment item
+  if (diferencia === 0) {
+    // Remove adjustment if exists
+    if (ajusteExistenteId) {
+      await supabase.from('items').delete().eq('id', ajusteExistenteId)
+    }
+  } else {
+    const nombre = diferencia > 0 ? 'Administración e imprevistos' : 'Descuento comercial'
+    if (ajusteExistenteId) {
+      // Update existing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from('items')
+        .update({ precio_venta: diferencia, nombre } as never)
+        .eq('id', ajusteExistenteId)
+    } else {
+      // Insert new
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from('items')
+        .insert({
+          cotizacion_id: cotizacionId,
+          nombre,
+          subtotal: 0,
+          orden: maxOrden + 1,
+          precio_venta: diferencia,
+          descuento_porcentaje: 0,
+          es_ajuste: true,
+        })
+    }
+  }
+
+  // 7. Set valor_total to desired value
+  await supabase
+    .from('cotizaciones')
+    .update({ valor_total: valorTotalDeseado } as never)
+    .eq('id', cotizacionId)
+
+  return { success: true }
+}
+
 // ── Recalcular totales ────────────────────────
 
 export async function recalcularTotales(cotizacionId: string) {
@@ -579,24 +683,70 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
-    .select('id, precio_venta, descuento_porcentaje, rubros(valor_total)')
+    .select('id, precio_venta, descuento_porcentaje, es_ajuste, rubros(valor_total)')
     .eq('cotizacion_id', cotizacionId)
 
   let totalCosto = 0
   let totalVenta = 0
+  let hayAjuste = false
+  let ajusteId: string | null = null
+
   for (const item of items ?? []) {
-    const subtotal = ((item.rubros as { valor_total: number }[]) ?? []).reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0)
-    await supabase.from('items').update({ subtotal } as never).eq('id', item.id)
-    totalCosto += subtotal
+    // Update subtotal from rubros (skip for adjustment item — it has no rubros)
+    if (!item.es_ajuste) {
+      const subtotal = ((item.rubros as { valor_total: number }[]) ?? []).reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0)
+      await supabase.from('items').update({ subtotal } as never).eq('id', item.id)
+      totalCosto += subtotal
+    }
 
     const pv = Number(item.precio_venta) || 0
     const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
     totalVenta += pv * (1 - dp / 100)
+
+    if (item.es_ajuste) {
+      hayAjuste = true
+      ajusteId = item.id
+    }
   }
 
-  // Update cotizacion costo_total + valor_total (from items' precio_venta)
   const updates: Record<string, unknown> = { costo_total: totalCosto }
-  if (totalVenta > 0) updates.valor_total = Math.round(totalVenta)
+
+  if (hayAjuste) {
+    // Read the user-fixed valor_total and re-reconcile the adjustment item
+    const { data: cot } = await supabase
+      .from('cotizaciones')
+      .select('valor_total')
+      .eq('id', cotizacionId)
+      .single()
+
+    const valorTotalFijado = cot?.valor_total ?? 0
+    // Sum net of regular items only (excluding adjustment)
+    let sumaNetaRegulares = 0
+    for (const item of items ?? []) {
+      if (!item.es_ajuste) {
+        const pv = Number(item.precio_venta) || 0
+        const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
+        sumaNetaRegulares += pv * (1 - dp / 100)
+      }
+    }
+    const nuevaDiferencia = Math.round(valorTotalFijado - sumaNetaRegulares)
+
+    if (nuevaDiferencia === 0 && ajusteId) {
+      // No longer needed — remove
+      await supabase.from('items').delete().eq('id', ajusteId)
+    } else if (ajusteId) {
+      const nombre = nuevaDiferencia > 0 ? 'Administración e imprevistos' : 'Descuento comercial'
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from('items')
+        .update({ precio_venta: nuevaDiferencia, nombre } as never)
+        .eq('id', ajusteId)
+    }
+    // valor_total stays as the user set it — don't overwrite
+  } else {
+    // Normal behavior: valor_total = sum of items
+    if (totalVenta > 0) updates.valor_total = Math.round(totalVenta)
+  }
 
   await supabase
     .from('cotizaciones')
