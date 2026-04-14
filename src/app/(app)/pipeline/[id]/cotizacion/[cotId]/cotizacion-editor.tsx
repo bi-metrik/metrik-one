@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, Send, Copy, Save, Plus, Trash2, Pencil, Percent, FileDown,
+  ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
   ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -89,13 +89,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const estado = cotizacion.estado as EstadoCotizacion
   const editable = isEditable(estado)
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
-  const isFlash = cotizacion.modo === 'flash'
-
-  // Flash mode state
-  const [flashDesc, setFlashDesc] = useState(cotizacion.descripcion ?? '')
-  const [flashValor, setFlashValor] = useState(cotizacion.valor_total?.toString() ?? '')
-
-  // Discount state (shared between flash and detallada)
+  // Discount state
   const [discountPct, setDiscountPct] = useState(cotizacion.descuento_porcentaje?.toString() ?? '0')
 
   // Detallada mode state
@@ -152,21 +146,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
-    })
-  }
-
-  const handleSaveFlash = () => {
-    startTransition(async () => {
-      const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
-      const val = Math.round(Number(flashValor) * pct / 100)
-      const res = await updateCotizacion(cotizacion.id, {
-        descripcion: flashDesc.trim(),
-        valor_total: Number(flashValor),
-        descuento_porcentaje: pct,
-        descuento_valor: val,
-      })
-      if (res.success) toast.success('Guardado')
-      else toast.error(res.error)
     })
   }
 
@@ -328,22 +307,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estadoConfig?.chipClass}`}>
               {estadoConfig?.label}
             </span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium">
-              {isFlash ? 'Rápida' : 'Detallada'}
-            </span>
           </div>
         </div>
         <div className="flex gap-1.5">
-          {editable && isFlash && (
-            <button
-              onClick={handleSaveFlash}
-              disabled={isPending}
-              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
-            >
-              <Save className="h-3 w-3" />
-              Guardar
-            </button>
-          )}
           {editable && (
             <button
               onClick={handleEnviar}
@@ -380,139 +346,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </div>
       )}
 
-      {/* Flash editor */}
-      {isFlash && (
-        <div className="space-y-3 rounded-lg border p-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Descripción</label>
-            <textarea
-              value={flashDesc}
-              onChange={e => setFlashDesc(e.target.value)}
-              disabled={!editable}
-              rows={3}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none disabled:opacity-60"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Valor total</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={Number(flashValor) ? Number(flashValor).toLocaleString('es-CO') : flashValor}
-                onChange={e => {
-                  const raw = e.target.value.replace(/[^0-9]/g, '')
-                  setFlashValor(raw)
-                }}
-                disabled={!editable}
-                className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm disabled:opacity-60"
-              />
-            </div>
-          </div>
-
-          {/* Discount */}
-          {editable && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Descuento</label>
-              <div className="flex items-center gap-2">
-                <div className="relative w-24">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={discountPct}
-                    onChange={e => {
-                      const raw = e.target.value.replace(/[^0-9.]/g, '')
-                      setDiscountPct(raw)
-                    }}
-                    className="w-full rounded-md border bg-background py-2 pl-3 pr-7 text-sm"
-                    placeholder="0"
-                  />
-                  <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                </div>
-                {Number(discountPct) > 0 && Number(flashValor) > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    = -{formatCOP(Math.round(Number(flashValor) * Number(discountPct) / 100))}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-          {!editable && (cotizacion.descuento_porcentaje ?? 0) > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Descuento ({cotizacion.descuento_porcentaje}%)</span>
-              <span className="font-medium text-red-600">-{formatCOP(cotizacion.descuento_valor ?? 0)}</span>
-            </div>
-          )}
-
-          {/* Fiscal result preview */}
-          {(() => {
-            const valorBruto = Number(flashValor) || 0
-            const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
-            const descVal = Math.round(valorBruto * pct / 100)
-            const valor = valorBruto - descVal
-            const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
-            if (!hasFiscal || valor === 0) {
-              return (
-                <div className="rounded-lg bg-green-50 p-4 text-center">
-                  <p className="text-xs font-medium text-green-700">TU RECIBES</p>
-                  <p className="text-2xl font-bold text-green-700">{formatCOP(valor)}</p>
-                  <p className="mt-1 text-[10px] text-green-600">
-                    {!fiscalProfile?.is_complete
-                      ? 'Resultado fiscal: se calcula al completar el perfil fiscal de la empresa'
-                      : 'Completa el perfil fiscal del cliente para ver el desglose'}
-                  </p>
-                </div>
-              )
-            }
-            const resumen = generarResumenFiscal(
-              fiscalProfile as FiscalProfile,
-              clientFiscal as unknown as Client,
-              valor,
-              0
-            )
-            return (
-              <div className="space-y-2">
-                {/* Cliente paga */}
-                <div className="rounded-lg bg-blue-50 p-3 text-center">
-                  <p className="text-[10px] font-medium text-blue-600">EL CLIENTE PAGA</p>
-                  <p className="text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
-                  {resumen.iva > 0 && (
-                    <p className="text-[10px] text-blue-500">Base {formatCOP(valor)} + IVA {formatCOP(resumen.iva)}</p>
-                  )}
-                </div>
-                {/* Retenciones */}
-                {(resumen.retefuente_valor > 0 || resumen.reteica_valor > 0 || resumen.reteiva_valor > 0) && (
-                  <div className="rounded-lg bg-amber-50 p-3">
-                    <p className="mb-1 text-center text-[10px] font-medium text-amber-700">RETENCIONES</p>
-                    <div className="space-y-0.5 text-[10px] text-amber-600">
-                      {resumen.retefuente_valor > 0 && (
-                        <div className="flex justify-between"><span>ReteFuente ({resumen.retefuente_pct}%)</span><span>-{formatCOP(resumen.retefuente_valor)}</span></div>
-                      )}
-                      {resumen.reteica_valor > 0 && (
-                        <div className="flex justify-between"><span>ReteICA ({resumen.reteica_pct}‰)</span><span>-{formatCOP(resumen.reteica_valor)}</span></div>
-                      )}
-                      {resumen.reteiva_valor > 0 && (
-                        <div className="flex justify-between"><span>ReteIVA ({resumen.reteiva_pct}%)</span><span>-{formatCOP(resumen.reteiva_valor)}</span></div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {/* Tú recibes */}
-                <div className="rounded-lg bg-green-50 p-3 text-center">
-                  <p className="text-[10px] font-medium text-green-600">TÚ RECIBES</p>
-                  <p className="text-xl font-bold text-green-700">{formatCOP(resumen.neto_recibido)}</p>
-                  <p className="text-[10px] text-green-500">Margen real neto: {resumen.margen_real_neto_pct}%</p>
-                </div>
-              </div>
-            )
-          })()}
-        </div>
-      )}
-
-      {/* Detallada editor */}
-      {!isFlash && (
-        <div className="space-y-3">
+      {/* Items editor */}
+      <div className="space-y-3">
           {/* Items */}
           {initialItems.map(item => {
             const itemPrecio = Number(item.precio_venta) || 0
@@ -960,7 +795,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             )
           })()}
         </div>
-      )}
 
       {/* Staff datalist for mano de obra rubros */}
       {staffMembers && staffMembers.length > 0 && (

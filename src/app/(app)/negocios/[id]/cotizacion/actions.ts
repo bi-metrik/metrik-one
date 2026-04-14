@@ -16,40 +16,6 @@ export async function getCotizacionesNegocio(negocioId: string) {
   return data ?? []
 }
 
-export async function createCotizacionFlashNegocio(
-  negocioId: string,
-  descripcion: string,
-  valorTotal: number
-) {
-  const { supabase, workspaceId, error } = await getWorkspace()
-  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
-
-  const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
-    p_workspace_id: workspaceId,
-  })
-  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-0000`
-
-  const { data, error: dbError } = await supabase
-    .from('cotizaciones')
-    .insert({
-      workspace_id: workspaceId,
-      negocio_id: negocioId,
-      consecutivo,
-      codigo: '',
-      modo: 'flash',
-      descripcion: descripcion.trim(),
-      valor_total: valorTotal,
-      estado: 'borrador',
-    } as never)
-    .select('id')
-    .single()
-
-  if (dbError) return { success: false as const, error: dbError.message }
-
-  revalidatePath(`/negocios/${negocioId}`)
-  return { success: true as const, id: (data as { id: string }).id }
-}
-
 export async function createCotizacionDetalladaNegocio(negocioId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
