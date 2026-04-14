@@ -60,6 +60,23 @@ export default async function CotizacionNegocioPage({
 
   const fiscalProfile = fiscalResult.success ? fiscalResult.data ?? null : null
 
+  // Fetch staff for mano de obra datalist
+  let staffMembers: { id: string; nombre: string }[] = []
+  try {
+    const { supabase: sbStaff, workspaceId: wsId } = await getWorkspace()
+    if (wsId) {
+      const { data } = await sbStaff
+        .from('staff')
+        .select('id, full_name')
+        .eq('workspace_id', wsId)
+        .eq('is_active', true)
+        .order('full_name')
+      staffMembers = (data ?? []).map(s => ({ id: s.id, nombre: s.full_name }))
+    }
+  } catch {
+    // Staff data is not critical for the editor
+  }
+
   return (
     <CotizacionEditor
       oportunidadId={id}
@@ -68,6 +85,7 @@ export default async function CotizacionNegocioPage({
       fiscalProfile={fiscalProfile}
       clientFiscal={clientFiscal}
       backUrl={`/negocios/${id}`}
+      staffMembers={staffMembers}
     />
   )
 }

@@ -67,6 +67,11 @@ interface ClientFiscal {
   agente_retenedor: boolean
 }
 
+interface StaffMember {
+  id: string
+  nombre: string
+}
+
 interface Props {
   oportunidadId: string
   cotizacion: CotizacionData
@@ -74,9 +79,10 @@ interface Props {
   fiscalProfile?: FiscalProfile | null
   clientFiscal?: ClientFiscal | null
   backUrl?: string
+  staffMembers?: StaffMember[]
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -692,6 +698,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           value={newRubro.descripcion}
                           onChange={e => setNewRubro(p => ({ ...p, descripcion: e.target.value }))}
                           className="rounded border bg-background px-2 py-1.5 text-xs"
+                          list={(newRubro.tipo === 'mo_propia' || newRubro.tipo === 'mo_terceros') && staffMembers?.length ? 'staff-list' : undefined}
                         />
                         <input
                           type="number"
@@ -755,69 +762,68 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           {/* Add item actions */}
           {editable && (
             <div className="space-y-2">
-              {/* Catalog selector */}
-              {showCatalog ? (
-                <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-blue-800">Agregar desde catálogo</span>
-                    <button onClick={() => setShowCatalog(false)} className="text-xs text-blue-600 hover:underline">Cerrar</button>
-                  </div>
-                  {catalogItems.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      No tienes servicios en tu catálogo. Créalos en Config → Mis servicios.
-                    </p>
-                  ) : (
-                    <div className="space-y-1 max-h-48 overflow-y-auto">
-                      {catalogItems.map(s => {
-                        const tpl = s.rubros_template as { tipo: string; cantidad: number; unidad: string; valor_unitario: number }[] | null
-                        return (
-                          <button
-                            key={s.id}
-                            onClick={() => handleAddFromCatalog(s.id)}
-                            disabled={isPending}
-                            className="flex w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
-                          >
-                            <div className="min-w-0">
-                              <span className="font-medium">{s.nombre}</span>
-                              {tpl && tpl.length > 0 && (
-                                <span className="ml-2 text-[10px] text-muted-foreground">{tpl.length} rubros</span>
-                              )}
-                            </div>
-                            <span className="shrink-0 text-xs font-medium">{formatCOP(s.precio_estandar ?? 0)}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <button
-                  onClick={loadCatalog}
-                  disabled={catalogLoading}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-300 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
-                >
-                  {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
-                  Agregar desde catálogo
-                </button>
-              )}
-
-              {/* Manual item */}
-              <div className="flex gap-2">
+              {/* Single row: input + add button + catalog button */}
+              <div className="relative flex gap-2">
                 <input
                   value={newItemName}
                   onChange={e => setNewItemName(e.target.value)}
-                  placeholder="O escribe el nombre del item..."
+                  placeholder="Nombre del item..."
                   className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
                   onKeyDown={e => e.key === 'Enter' && handleAddItem()}
                 />
                 <button
                   onClick={handleAddItem}
                   disabled={isPending || !newItemName.trim()}
-                  className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Item
                 </button>
+                <button
+                  onClick={loadCatalog}
+                  disabled={catalogLoading}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
+                  Desde catálogo
+                </button>
+
+                {/* Catalog dropdown */}
+                {showCatalog && (
+                  <div className="absolute right-0 top-full z-10 mt-1 w-80 rounded-lg border border-blue-200 bg-background shadow-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-blue-800">Agregar desde catálogo</span>
+                      <button onClick={() => setShowCatalog(false)} className="text-xs text-blue-600 hover:underline">Cerrar</button>
+                    </div>
+                    {catalogItems.length === 0 ? (
+                      <p className="py-3 text-center text-xs text-muted-foreground">
+                        No tienes servicios en tu catálogo. Créalos en Config → Mis servicios.
+                      </p>
+                    ) : (
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                        {catalogItems.map(s => {
+                          const tpl = s.rubros_template as { tipo: string; cantidad: number; unidad: string; valor_unitario: number }[] | null
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={() => handleAddFromCatalog(s.id)}
+                              disabled={isPending}
+                              className="flex w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
+                            >
+                              <div className="min-w-0">
+                                <span className="font-medium">{s.nombre}</span>
+                                {tpl && tpl.length > 0 && (
+                                  <span className="ml-2 text-[10px] text-muted-foreground">{tpl.length} rubros</span>
+                                )}
+                              </div>
+                              <span className="shrink-0 text-xs font-medium">{formatCOP(s.precio_estandar ?? 0)}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -943,6 +949,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             )
           })()}
         </div>
+      )}
+
+      {/* Staff datalist for mano de obra rubros */}
+      {staffMembers && staffMembers.length > 0 && (
+        <datalist id="staff-list">
+          {staffMembers.map(s => (
+            <option key={s.id} value={s.nombre} />
+          ))}
+        </datalist>
       )}
     </div>
   )
