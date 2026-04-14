@@ -20,6 +20,25 @@ export default async function CotizacionNegocioPage({
 
   if (!cotizacion) notFound()
 
+  // Check if any cotizacion in this negocio has estado='aceptada'
+  let frozen = false
+  try {
+    const { supabase: sbCheck } = await getWorkspace()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: accepted } = await (sbCheck as any)
+      .from('cotizaciones')
+      .select('id')
+      .eq('negocio_id', id)
+      .eq('estado', 'aceptada')
+      .limit(1)
+    // Freeze if there's an accepted quote AND the current one is NOT the accepted one
+    if (accepted && accepted.length > 0 && accepted[0].id !== cotId) {
+      frozen = true
+    }
+  } catch {
+    // Non-critical — if check fails, don't freeze
+  }
+
   // Obtener datos fiscales del cliente
   // 1. Desde la oportunidad vinculada (flujo pipeline)
   const opp = (cotizacion as Record<string, unknown>)?.oportunidades as Record<string, unknown> | null
@@ -86,6 +105,7 @@ export default async function CotizacionNegocioPage({
       clientFiscal={clientFiscal}
       backUrl={`/negocios/${id}`}
       staffMembers={staffMembers}
+      frozen={frozen}
     />
   )
 }

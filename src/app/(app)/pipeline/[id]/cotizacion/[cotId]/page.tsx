@@ -14,6 +14,23 @@ export default async function CotizacionDetailPage({ params }: { params: Promise
 
   if (!cotizacion) notFound()
 
+  // Check if any cotizacion in this oportunidad has estado='aceptada'
+  let frozen = false
+  try {
+    const { supabase: sbCheck } = await getWorkspace()
+    const { data: accepted } = await sbCheck
+      .from('cotizaciones')
+      .select('id')
+      .eq('oportunidad_id', id)
+      .eq('estado', 'aceptada')
+      .limit(1)
+    if (accepted && accepted.length > 0 && accepted[0].id !== cotId) {
+      frozen = true
+    }
+  } catch {
+    // Non-critical
+  }
+
   // Extract client fiscal data from the oportunidad → empresa join
   const empresa = (cotizacion as any)?.oportunidades?.empresas ?? null
   const clientFiscal = empresa ? {
@@ -50,6 +67,7 @@ export default async function CotizacionDetailPage({ params }: { params: Promise
       fiscalProfile={fiscalProfile}
       clientFiscal={clientFiscal}
       staffMembers={staffMembers}
+      frozen={frozen}
     />
   )
 }

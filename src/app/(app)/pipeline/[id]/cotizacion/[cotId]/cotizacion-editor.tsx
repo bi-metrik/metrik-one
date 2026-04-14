@@ -81,13 +81,14 @@ interface Props {
   clientFiscal?: ClientFiscal | null
   backUrl?: string
   staffMembers?: StaffMember[]
+  frozen?: boolean
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
-  const editable = isEditable(estado)
+  const editable = isEditable(estado) && !frozen
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
   // Discount state
   const [discountPct, setDiscountPct] = useState(cotizacion.descuento_porcentaje?.toString() ?? '0')
@@ -339,7 +340,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </div>
       </div>
 
-      {!editable && (
+      {frozen && (
+        <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800 dark:bg-blue-950/20 dark:border-blue-900/30 dark:text-blue-300">
+          <Lock className="h-4 w-4 shrink-0" />
+          Esta cotización está congelada porque ya hay una cotización aprobada en este negocio.
+        </div>
+      )}
+
+      {!editable && !frozen && (
         <div className="flex items-center gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
           <Lock className="h-4 w-4" />
           Esta cotización está en estado <strong>{estadoConfig?.label}</strong> y no se puede editar. Puedes duplicarla.
