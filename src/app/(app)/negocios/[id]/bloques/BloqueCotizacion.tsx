@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
-import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy } from 'lucide-react'
+import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio } from '../cotizacion/actions'
+import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador } from '../cotizacion/actions'
 
 interface CotizacionResumen {
   id: string
@@ -72,6 +72,18 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
         toast.error(res.error)
       } else {
         toast.success('Cotización duplicada como borrador')
+      }
+    })
+  }
+
+  const handleEliminar = (cotizacionId: string) => {
+    if (!confirm('¿Eliminar esta cotización en borrador?')) return
+    startTransition(async () => {
+      const res = await eliminarCotizacionBorrador(cotizacionId, negocioId)
+      if (!res.success) {
+        toast.error(res.error)
+      } else {
+        toast.success('Cotización eliminada')
       }
     })
   }
@@ -172,15 +184,27 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
                   </div>
                 </Link>
 
-                {/* Botón Enviar — borradores: borrador → enviada (solo si no hay otra enviada) */}
-                {modo === 'editable' && !hayAceptada && !hayEnviada && cot.estado === 'borrador' && (
-                  <button
-                    onClick={() => handleEnviar(cot.id)}
-                    disabled={isPending}
-                    className="shrink-0 rounded-lg border border-[#10B981] bg-[#10B981]/10 px-3 py-2 text-[10px] font-semibold text-[#10B981] hover:bg-[#10B981]/20 disabled:opacity-50 transition-colors"
-                  >
-                    Enviar
-                  </button>
+                {/* Botones borrador: Enviar + Eliminar */}
+                {modo === 'editable' && !hayAceptada && cot.estado === 'borrador' && (
+                  <div className="flex shrink-0 gap-1">
+                    {!hayEnviada && (
+                      <button
+                        onClick={() => handleEnviar(cot.id)}
+                        disabled={isPending}
+                        className="rounded-lg border border-[#10B981] bg-[#10B981]/10 px-3 py-2 text-[10px] font-semibold text-[#10B981] hover:bg-[#10B981]/20 disabled:opacity-50 transition-colors"
+                      >
+                        Enviar
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleEliminar(cot.id)}
+                      disabled={isPending}
+                      className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-500 hover:bg-red-100 disabled:opacity-50 transition-colors"
+                      title="Eliminar borrador"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 )}
 
                 {/* Botones Aprobar / Rechazar — solo enviadas, solo si no hay aceptada, solo modo editable */}

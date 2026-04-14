@@ -197,6 +197,48 @@ export async function rechazarCotizacionNegocio(cotizacionId: string, negocioId:
   return { success: true as const }
 }
 
+export async function eliminarCotizacionBorrador(cotizacionId: string, negocioId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false as const, error: 'No autenticado' }
+
+  // Verificar que la cotización está en borrador
+  const { data: cot } = await supabase
+    .from('cotizaciones')
+    .select('estado')
+    .eq('id', cotizacionId)
+    .single()
+
+  if (!cot) return { success: false as const, error: 'Cotización no encontrada' }
+  if ((cot as { estado: string }).estado !== 'borrador') {
+    return { success: false as const, error: 'Solo se pueden eliminar cotizaciones en borrador' }
+  }
+
+  // Eliminar items y sus rubros primero (cascade no está configurado)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: items } = await (supabase as any)
+    .from('items')
+    .select('id')
+    .eq('cotizacion_id', cotizacionId)
+
+  if (items && items.length > 0) {
+    const itemIds = items.map((i: { id: string }) => i.id)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('quote_items').delete().in('item_id', itemIds)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('items').delete().eq('cotizacion_id', cotizacionId)
+  }
+
+  const { error: delErr } = await supabase
+    .from('cotizaciones')
+    .delete()
+    .eq('id', cotizacionId)
+
+  if (delErr) return { success: false as const, error: delErr.message }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { success: true as const }
+}
+
 export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
