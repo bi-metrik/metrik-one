@@ -71,6 +71,7 @@ interface ClientFiscal {
 interface StaffMember {
   id: string
   nombre: string
+  tarifa_hora: number
 }
 
 interface Props {
@@ -547,7 +548,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         <input
                           placeholder="Descripción"
                           value={newRubro.descripcion}
-                          onChange={e => setNewRubro(p => ({ ...p, descripcion: e.target.value }))}
+                          onChange={e => {
+                            const val = e.target.value
+                            setNewRubro(p => {
+                              const next = { ...p, descripcion: val }
+                              // Auto-fill tarifa when selecting staff from datalist
+                              if ((p.tipo === 'mo_propia' || p.tipo === 'mo_terceros') && staffMembers?.length) {
+                                const match = staffMembers.find(s => s.nombre === val)
+                                if (match && match.tarifa_hora > 0) {
+                                  next.valor_unitario = Math.round(match.tarifa_hora).toString()
+                                }
+                              }
+                              return next
+                            })
+                          }}
                           className="rounded border bg-background px-2 py-1.5 text-xs"
                           list={(newRubro.tipo === 'mo_propia' || newRubro.tipo === 'mo_terceros') && staffMembers?.length ? 'staff-list' : undefined}
                         />

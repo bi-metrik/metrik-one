@@ -43,17 +43,21 @@ export default async function CotizacionDetailPage({ params }: { params: Promise
   const fiscalProfile = fiscalResult.success ? fiscalResult.data ?? null : null
 
   // Fetch staff for mano de obra datalist
-  let staffMembers: { id: string; nombre: string }[] = []
+  let staffMembers: { id: string; nombre: string; tarifa_hora: number }[] = []
   try {
     const { supabase, workspaceId } = await getWorkspace()
     if (workspaceId) {
       const { data } = await supabase
         .from('staff')
-        .select('id, full_name')
+        .select('id, full_name, salary, horas_disponibles_mes')
         .eq('workspace_id', workspaceId)
         .eq('is_active', true)
         .order('full_name')
-      staffMembers = (data ?? []).map(s => ({ id: s.id, nombre: s.full_name }))
+      staffMembers = (data ?? []).map(s => ({
+        id: s.id,
+        nombre: s.full_name,
+        tarifa_hora: (s.salary && s.horas_disponibles_mes) ? s.salary / s.horas_disponibles_mes : 0,
+      }))
     }
   } catch {
     // Staff data is not critical for the editor
