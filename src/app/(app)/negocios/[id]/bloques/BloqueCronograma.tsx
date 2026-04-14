@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { CalendarDays, Plus, CheckCircle2, Circle } from 'lucide-react'
+import { useState, useTransition, useEffect, useRef } from 'react'
+import { CalendarDays, Plus, CheckCircle2, Circle, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { marcarBloqueItem, marcarBloqueCompleto, agregarBloqueItem, actualizarBloqueItem } from '../../negocio-v2-actions'
+import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 
 interface CronogramaItem {
@@ -25,11 +25,12 @@ interface BloqueCronogramaProps {
   initialItems?: CronogramaItem[]
   requireAllDates?: boolean
   profiles?: { id: string; full_name: string | null }[]
+  preloadItems?: Array<{ label: string; tipo: string }>
 }
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+  return new Date(iso + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 export default function BloqueCronograma({
@@ -39,18 +40,39 @@ export default function BloqueCronograma({
   initialItems = [],
   requireAllDates = false,
   profiles = [],
+  preloadItems = [],
 }: BloqueCronogramaProps) {
   const [items, setItems] = useState<CronogramaItem[]>(initialItems)
   const [isPending, startTransition] = useTransition()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Partial<CronogramaItem>>({})
+  const preloadedRef = useRef(false)
 
-  function isComplete() {
-    if (items.length === 0) return false
-    if (requireAllDates) {
-      return items.every(i => i.fecha_inicio && i.fecha_fin)
-    }
-    return true
+  // Gap 3: Inicializar items desde config_extra.items si no hay items y hay templates
+  useEffect(() => {
+    if (preloadedRef.current) return
+    if (items.length > 0 || preloadItems.length === 0 || !negocioBloqueId) return
+    preloadedRef.current = true
+
+    startTransition(async () => {
+      const result = await inicializarBloqueItems(negocioBloqueId, preloadItems)
+      if (!result.error && result.items.length > 0) {
+        setItems(result.items.map(i => ({
+          id: i.id,
+          label: i.label,
+          completado: i.completado,
+          completado_at: i.completado_at,
+          link_url: i.link_url,
+        })))
+      }
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Gap 2: Re-evaluar completitud después de cada cambio
+  function evalCompletitud(currentItems: CronogramaItem[]) {
+    startTransition(async () => {
+      await reevaluarBloqueCronograma(negocioBloqueId, requireAllDates)
+    })
   }
 
   function handleToggle(item: CronogramaItem) {
@@ -64,9 +86,6 @@ export default function BloqueCronograma({
           i.id === item.id ? { ...i, completado: !item.completado, completado_at: !item.completado ? new Date().toISOString() : null } : i
         )
         setItems(nextItems)
-        if (isComplete() && negocioBloqueId) {
-          await marcarBloqueCompleto(negocioBloqueId, { configurado: true })
-        }
       }
     })
   }
@@ -77,6 +96,10 @@ export default function BloqueCronograma({
   }
 
   function cancelEdit() {
+    // Si era temporal y se cancela, eliminarlo
+    if (editingId?.startsWith('_tmp_')) {
+      setItems(prev => prev.filter(i => i.id !== editingId))
+    }
     setEditingId(null)
     setEditValues({})
   }
@@ -90,30 +113,62 @@ export default function BloqueCronograma({
 
     startTransition(async () => {
       if (updated.id.startsWith('_tmp_')) {
-        // Crear en DB
         const result = await agregarBloqueItem(negocioBloqueId, updated.label, 'texto', items.length)
         if (result.error) {
           toast.error(result.error)
         } else if (result.id) {
-          // Reemplazar _tmp_ con ID real
           setItems(prev => prev.map(i => i.id === updated.id ? { ...i, id: result.id! } : i))
-          // Persistir fechas si existen
-          if (updated.fecha_inicio || updated.fecha_fin) {
-            await actualizarBloqueItem(result.id, { fecha_inicio: updated.fecha_inicio, fecha_fin: updated.fecha_fin })
+          // Persistir fechas y responsable
+          const fields: Record<string, unknown> = {}
+          if (updated.fecha_inicio) fields.fecha_inicio = updated.fecha_inicio
+          if (updated.fecha_fin) fields.fecha_fin = updated.fecha_fin
+          if (updated.responsable_id) fields.responsable_id = updated.responsable_id
+          if (Object.keys(fields).length > 0) {
+            await actualizarBloqueItem(result.id, fields as Parameters<typeof actualizarBloqueItem>[1])
           }
+          // Re-evaluar completitud
+          evalCompletitud(items)
         }
       } else {
-        // Actualizar existente
-        const fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null } = { label: updated.label }
-        if (updated.fecha_inicio !== undefined) fields.fecha_inicio = updated.fecha_inicio
-        if (updated.fecha_fin !== undefined) fields.fecha_fin = updated.fecha_fin
+        const fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null } = { label: updated.label }
+        if (updated.fecha_inicio !== undefined) fields.fecha_inicio = updated.fecha_inicio || null
+        if (updated.fecha_fin !== undefined) fields.fecha_fin = updated.fecha_fin || null
+        if (updated.responsable_id !== undefined) fields.responsable_id = updated.responsable_id || null
         const result = await actualizarBloqueItem(updated.id, fields)
         if (result.error) toast.error(result.error)
+        // Gap 2: Re-evaluar completitud
+        evalCompletitud(items)
       }
     })
   }
 
-  if (items.length === 0) {
+  // Gap 4: Eliminar actividad
+  function handleDelete(item: CronogramaItem) {
+    if (item.id.startsWith('_tmp_')) {
+      setItems(prev => prev.filter(i => i.id !== item.id))
+      return
+    }
+    if (!confirm('¿Eliminar esta actividad?')) return
+    const nextItems = items.filter(i => i.id !== item.id)
+    setItems(nextItems)
+    startTransition(async () => {
+      const result = await eliminarBloqueItem(item.id)
+      if (result.error) {
+        toast.error(result.error)
+        setItems(items) // revert
+      } else {
+        evalCompletitud(nextItems)
+      }
+    })
+  }
+
+  function getProfileName(id: string | null | undefined) {
+    if (!id) return null
+    const p = profiles.find(pr => pr.id === id)
+    return p?.full_name ?? null
+  }
+
+  if (items.length === 0 && !isPending) {
     return (
       <div className="space-y-2">
         <p className="text-xs text-[#6B7280]">Sin actividades configuradas en el cronograma</p>
@@ -122,7 +177,7 @@ export default function BloqueCronograma({
             onClick={() => {
               const tmp: CronogramaItem = {
                 id: `_tmp_${Date.now()}`,
-                label: 'Nueva actividad',
+                label: '',
                 completado: false,
               }
               setItems([tmp])
@@ -147,7 +202,11 @@ export default function BloqueCronograma({
               <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Actividad</th>
               <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Inicio</th>
               <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Fin</th>
+              {profiles.length > 0 && (
+                <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Responsable</th>
+              )}
               <th className="pb-1.5 text-left text-[10px] font-medium text-[#6B7280] uppercase">Estado</th>
+              {modo === 'editable' && <th className="pb-1.5 w-6" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-[#E5E7EB]">
@@ -159,14 +218,16 @@ export default function BloqueCronograma({
                       type="text"
                       value={editValues.label ?? ''}
                       onChange={e => setEditValues(p => ({ ...p, label: e.target.value }))}
+                      placeholder="Nombre de la actividad"
                       className="w-full rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-[#10B981] focus:outline-none"
+                      autoFocus
                     />
                   ) : (
                     <span
-                      className={`${item.completado ? 'line-through text-[#6B7280]' : 'text-[#1A1A1A]'} cursor-pointer hover:text-[#10B981]`}
+                      className={`${item.completado ? 'line-through text-[#6B7280]' : 'text-[#1A1A1A]'} ${modo === 'editable' ? 'cursor-pointer hover:text-[#10B981]' : ''}`}
                       onClick={() => modo === 'editable' && startEdit(item)}
                     >
-                      {item.label}
+                      {item.label || 'Sin nombre'}
                     </span>
                   )}
                 </td>
@@ -194,10 +255,28 @@ export default function BloqueCronograma({
                     <span className="text-[#6B7280]">{fmtDate(item.fecha_fin)}</span>
                   )}
                 </td>
+                {profiles.length > 0 && (
+                  <td className="py-2 pr-2">
+                    {editingId === item.id ? (
+                      <select
+                        value={editValues.responsable_id ?? ''}
+                        onChange={e => setEditValues(p => ({ ...p, responsable_id: e.target.value || null }))}
+                        className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-[#10B981] focus:outline-none"
+                      >
+                        <option value="">Sin asignar</option>
+                        {profiles.map(p => (
+                          <option key={p.id} value={p.id}>{p.full_name ?? 'Sin nombre'}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-[#6B7280]">{getProfileName(item.responsable_id) ?? '—'}</span>
+                    )}
+                  </td>
+                )}
                 <td className="py-2">
                   {editingId === item.id ? (
                     <div className="flex gap-1">
-                      <button onClick={saveEdit} className="rounded bg-[#10B981] px-2 py-0.5 text-[10px] text-white">OK</button>
+                      <button onClick={saveEdit} disabled={!editValues.label?.trim()} className="rounded bg-[#10B981] px-2 py-0.5 text-[10px] text-white disabled:opacity-50">OK</button>
                       <button onClick={cancelEdit} className="rounded bg-slate-100 px-2 py-0.5 text-[10px] text-[#6B7280]">✕</button>
                     </div>
                   ) : (
@@ -214,18 +293,32 @@ export default function BloqueCronograma({
                     </button>
                   )}
                 </td>
+                {modo === 'editable' && (
+                  <td className="py-2">
+                    {editingId !== item.id && (
+                      <button
+                        onClick={() => handleDelete(item)}
+                        disabled={isPending}
+                        className="text-[#6B7280]/40 hover:text-red-500 disabled:opacity-50"
+                        title="Eliminar actividad"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {modo === 'editable' && (
+      {modo === 'editable' && !editingId && (
         <button
           onClick={() => {
             const tmp: CronogramaItem = {
               id: `_tmp_${Date.now()}`,
-              label: 'Nueva actividad',
+              label: '',
               completado: false,
             }
             setItems(prev => [...prev, tmp])

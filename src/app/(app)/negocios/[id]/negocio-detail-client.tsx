@@ -717,7 +717,9 @@ function BloqueRenderer({
         link_url: i.link_url,
         fecha_inicio: (i as Record<string, unknown>).fecha_inicio as string | null | undefined,
         fecha_fin: (i as Record<string, unknown>).fecha_fin as string | null | undefined,
+        responsable_id: (i as Record<string, unknown>).responsable_id as string | null | undefined,
       }))
+      const preloadItems = (configExtra.items as Array<{ label: string; tipo: string }>) ?? []
       return (
         <BloqueCronograma
           negocioId={negocioId}
@@ -727,6 +729,7 @@ function BloqueRenderer({
           initialItems={items}
           requireAllDates={(configExtra.require_all_dates as boolean) ?? false}
           profiles={profilesTyped}
+          preloadItems={preloadItems}
         />
       )
     }
