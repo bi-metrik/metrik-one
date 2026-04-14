@@ -334,9 +334,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </div>
         </div>
         <div className="flex gap-1.5">
-          {editable && (
+          {editable && isFlash && (
             <button
-              onClick={isFlash ? handleSaveFlash : () => router.refresh()}
+              onClick={handleSaveFlash}
               disabled={isPending}
               className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
             >
