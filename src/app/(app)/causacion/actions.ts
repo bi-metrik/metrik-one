@@ -34,6 +34,7 @@ export type ItemCausacion = {
   retenciones: Retencion[]
   tercero_nit: string | null
   tercero_razon_social: string | null
+  soporte_url: string | null
 }
 
 function getInitials(name: string | null): string | null {
@@ -64,7 +65,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query = (supabase as any)
       .from('gastos')
-      .select('id, fecha, monto, descripcion, mensaje_original, categoria, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, deducible, retenciones, tercero_nit, tercero_razon_social')
+      .select('id, fecha, monto, descripcion, mensaje_original, categoria, soporte_url, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, deducible, retenciones, tercero_nit, tercero_razon_social')
       .eq('workspace_id', workspaceId)
 
     if (tab === 'aprobados') {
@@ -103,6 +104,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         retenciones: ((g as any).retenciones as Retencion[]) ?? [],
         tercero_nit: (g as any).tercero_nit ?? null,
         tercero_razon_social: (g as any).tercero_razon_social ?? null,
+        soporte_url: g.soporte_url ?? null,
       })
     }
   }
@@ -153,6 +155,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         retenciones: ((c as any).retenciones as Retencion[]) ?? [],
         tercero_nit: (c as any).tercero_nit ?? empresa?.numero_documento ?? null,
         tercero_razon_social: (c as any).tercero_razon_social ?? empresa?.razon_social ?? null,
+        soporte_url: null,
       })
     }
   }

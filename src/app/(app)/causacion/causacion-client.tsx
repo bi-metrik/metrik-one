@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ChevronLeft, ChevronRight, Zap, ArrowDownCircle, ArrowUpCircle, Info, ChevronDown, CheckCircle2, Plus, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Zap, ArrowDownCircle, ArrowUpCircle, Info, ChevronDown, CheckCircle2, Plus, X, FileText } from 'lucide-react'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
 import { getRolePermissions } from '@/lib/roles'
 import { toast } from 'sonner'
@@ -102,6 +103,7 @@ type FormEntry = {
 export default function CausacionClient({ items, counts, activeTab, mes, role, totales }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const [soporteModal, setSoporteModal] = useState<{ url: string; descripcion: string } | null>(null)
   const [isPending, startTransition] = useTransition()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
@@ -422,6 +424,19 @@ export default function CausacionClient({ items, counts, activeTab, mes, role, t
                         </div>
                       )}
 
+                      {/* Soporte de pago — solo gastos con soporte */}
+                      {item.soporte_url && !item.soporte_url.startsWith('wamid.') && (
+                        <div className="mt-1.5" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => setSoporteModal({ url: item.soporte_url!, descripcion: item.descripcion })}
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60 transition-colors"
+                          >
+                            <FileText className="h-2.5 w-2.5" />
+                            Ver soporte
+                          </button>
+                        </div>
+                      )}
+
                       {/* Deducible toggle — solo gastos */}
                       {item.tabla === 'gastos' && perms.canToggleDeducible && (
                         <div className="mt-1.5 flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
@@ -575,6 +590,24 @@ export default function CausacionClient({ items, counts, activeTab, mes, role, t
           })}
         </div>
       )}
+
+      {/* Soporte image lightbox */}
+      <Dialog open={!!soporteModal} onOpenChange={() => setSoporteModal(null)}>
+        <DialogContent className="max-h-[90vh] max-w-md overflow-hidden p-2 sm:max-w-lg">
+          <DialogTitle className="sr-only">Soporte</DialogTitle>
+          {soporteModal && (
+            <div className="flex flex-col gap-2">
+              <p className="truncate px-2 pt-2 text-sm font-medium">{soporteModal.descripcion}</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={soporteModal.url}
+                alt="Soporte de pago"
+                className="max-h-[75vh] w-full rounded-lg object-contain"
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
