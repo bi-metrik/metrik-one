@@ -376,7 +376,7 @@ export default function CausacionClient({ items, counts, activeTab, mes, role, t
             return (
               <div key={item.id} className="rounded-lg border bg-card overflow-hidden">
                 {/* Card header */}
-                <button
+                <div
                   onClick={() => activeTab === 'aprobados' ? toggleExpand(item.id, item) : undefined}
                   className={`w-full px-3 py-2.5 text-left ${activeTab === 'aprobados' ? 'cursor-pointer hover:bg-accent/50 transition-colors' : ''}`}
                 >
@@ -455,7 +455,7 @@ export default function CausacionClient({ items, counts, activeTab, mes, role, t
                       )}
                     </div>
                   </div>
-                </button>
+                </div>
 
                 {/* Expanded form */}
                 {activeTab === 'aprobados' && isExpanded && form && (
