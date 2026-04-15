@@ -48,6 +48,7 @@ import BloqueEjecucion from './bloques/BloqueEjecucion'
 import BloqueHistorial from './bloques/BloqueHistorial'
 import type { HistorialData } from './bloques/BloqueHistorial'
 import BloqueFormulario from './bloques/BloqueFormulario'
+import BloquePagosEpayco from './bloques/BloquePagosEpayco'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -750,6 +751,17 @@ function BloqueRenderer({
 
     case 'datos': {
       const fields = (configExtra.fields ?? []) as DatosField[]
+      if (configExtra.es_pagos_epayco) {
+        return (
+          <BloquePagosEpayco
+            negocioBloqueId={instanciaId}
+            negocioId={negocioId}
+            instancia={bloque.instancia}
+            modo={modo}
+            tipoCobro={(configExtra.tipo_cobro as string) ?? 'pago'}
+          />
+        )
+      }
       if (configExtra.es_multi_pago) {
         return (
           <BloqueDatosMultiPago
