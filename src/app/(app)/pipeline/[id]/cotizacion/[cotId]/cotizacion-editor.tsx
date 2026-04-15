@@ -364,7 +364,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {/* Items editor */}
       <div className="space-y-3">
           {/* Items */}
-          {initialItems.map(item => {
+          {initialItems.filter(i => !i.es_ajuste).map(item => {
             const itemCantidad = Number(item.cantidad) || 1
             const itemPrecio = Number(item.precio_venta) || 0
             const itemDescPct = Number(item.descuento_porcentaje) || 0
@@ -424,9 +424,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   {/* Item sale fields */}
                   {editable && (
                     <div className="mb-3 space-y-2">
-                      <div className="grid grid-cols-4 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio unit.</label>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Valor unitario</label>
                           <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
                             <input
@@ -896,6 +896,7 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
   const [adminPct, setAdminPct] = useState(aiuAdminPct ?? 0)
   const [imprevPct, setImprevPct] = useState(aiuImprevPct ?? 0)
   const hasAIU = (aiuAdminPct ?? 0) > 0 || (aiuImprevPct ?? 0) > 0
+  const [showAIU, setShowAIU] = useState(hasAIU)
 
   const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
   const dVal = Math.round(valorVenta * dPct / 100)
@@ -929,25 +930,27 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
     <div className="space-y-3">
       <div className="rounded-lg bg-muted/50 p-4 space-y-2">
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Costo total</span>
+          <span className="text-muted-foreground flex items-center gap-1.5">
+            Costo total
+            {hasAIU && <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">AIU activo</span>}
+          </span>
           <span className="font-medium">{formatCOP(costoTotal)}</span>
         </div>
-        {editable && (
+        {editable && showAIU && (
           <div className="border-t pt-2 mt-2">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-muted-foreground">AIU (sobre costos)</span>
-              {hasAIU && (
-                <button
-                  onClick={() => {
-                    setAdminPct(0)
-                    setImprevPct(0)
-                    onAIUChange(null, null)
-                  }}
-                  className="text-[10px] text-muted-foreground hover:text-red-500"
-                >
-                  Quitar AIU
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  setAdminPct(0)
+                  setImprevPct(0)
+                  setShowAIU(false)
+                  onAIUChange(null, null)
+                }}
+                className="text-[10px] text-muted-foreground hover:text-red-500"
+              >
+                Quitar AIU
+              </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -997,6 +1000,14 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
               </div>
             )}
           </div>
+        )}
+        {editable && !showAIU && (
+          <button
+            onClick={() => setShowAIU(true)}
+            className="text-[11px] text-muted-foreground hover:text-amber-600 hover:underline"
+          >
+            + Administración e imprevistos
+          </button>
         )}
         {!editable && hasAIU && costoTotal > 0 && (
           <div className="flex justify-between text-sm border-t pt-1">
