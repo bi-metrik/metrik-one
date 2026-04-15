@@ -75,11 +75,13 @@ export type NegocioDetalle = {
   created_at: string | null
   updated_at: string | null
   closed_at: string | null
+  responsable_id: string | null
   // Joins — usando columnas reales de las tablas existentes (empresas.nombre, contactos.nombre)
   lineas_negocio: { nombre: string } | null
   etapas_negocio: { nombre: string; stage: string } | null
   empresas: { id: string; nombre: string } | null
   contactos: { id: string; nombre: string } | null
+  responsable: { id: string; full_name: string } | null
 }
 
 export type NegocioResumen = {
@@ -243,10 +245,12 @@ export async function getNegocioDetalle(id: string): Promise<{
       created_at,
       updated_at,
       closed_at,
+      responsable_id,
       lineas_negocio(nombre),
       etapas_negocio(nombre, stage),
       empresas(id, nombre),
-      contactos(id, nombre)
+      contactos(id, nombre),
+      staff!negocios_responsable_id_fkey(id, full_name)
     `)
     .eq('id', id)
     .eq('workspace_id', workspaceId)
@@ -254,7 +258,13 @@ export async function getNegocioDetalle(id: string): Promise<{
 
   if (!negocio) return null
 
-  const negocioTyped = negocio as NegocioDetalle
+  // Map staff join to responsable field
+  const negocioRaw = negocio as Record<string, unknown>
+  const staffJoin = negocioRaw.staff as { id: string; full_name: string } | null
+  const negocioTyped = {
+    ...negocioRaw,
+    responsable: staffJoin ?? null,
+  } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
   let etapasLinea: EtapaNegocio[] = []
@@ -2426,6 +2436,71 @@ export async function completarNegocio(
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
+  return { error: null }
+}
+
+// ── Actualizar responsable del negocio ────────────────────────────────────────
+
+export async function actualizarResponsable(
+  negocioId: string,
+  responsableId: string | null
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Solo owner, admin, supervisor pueden asignar responsable
+  const allowed = ['owner', 'admin', 'supervisor']
+  if (!role || !allowed.includes(role)) {
+    return { error: 'Sin permisos para asignar responsable' }
+  }
+
+  // Verificar que el negocio pertenece al workspace
+  const { data: negocio } = await db(supabase)
+    .from('negocios')
+    .select('id, responsable_id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  if (!negocio) return { error: 'Negocio no encontrado' }
+
+  // Obtener nombre del nuevo responsable para el log
+  let nombreResponsable = 'Ninguno'
+  if (responsableId) {
+    const { data: staff } = await supabase
+      .from('staff')
+      .select('full_name')
+      .eq('id', responsableId)
+      .eq('workspace_id', workspaceId)
+      .single()
+    if (!staff) return { error: 'Staff no encontrado' }
+    nombreResponsable = staff.full_name ?? 'Sin nombre'
+  }
+
+  const { error: updErr } = await db(supabase)
+    .from('negocios')
+    .update({ responsable_id: responsableId })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+
+  if (updErr) return { error: (updErr as { message: string }).message }
+
+  // Registrar en activity_log
+  if (staffId) {
+    const descripcion = responsableId
+      ? `Responsable cambiado a ${nombreResponsable}`
+      : 'Responsable removido'
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_sistema',
+      autor_id: staffId,
+      contenido: descripcion,
+    })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
 }
 

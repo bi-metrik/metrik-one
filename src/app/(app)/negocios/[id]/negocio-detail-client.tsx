@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Pencil,
   Building2,
+  UserPlus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
@@ -22,7 +23,7 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio, actualizarResponsable } from '../negocio-v2-actions'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
 
@@ -183,6 +184,174 @@ function StageBadge({ stage }: { stage: string | null }) {
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${cls}`}>
       {STAGE_LABELS[stage ?? ''] ?? (stage?.toUpperCase() ?? 'ACTIVO')}
     </span>
+  )
+}
+
+// ── Selector de responsable ──────────────────────────────────────────────────
+
+function ResponsableSelector({
+  negocioId,
+  responsable,
+  staffList,
+  canEdit,
+}: {
+  negocioId: string
+  responsable: { id: string; full_name: string } | null
+  staffList: Array<{ id: string; full_name: string }>
+  canEdit: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [isPending, startTransition] = useTransition()
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  // Focus search on open
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => searchRef.current?.focus(), 0)
+    } else {
+      setSearch('')
+    }
+  }, [open])
+
+  function handleSelect(staffId: string) {
+    setOpen(false)
+    startTransition(async () => {
+      const result = await actualizarResponsable(negocioId, staffId)
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        const nombre = staffList.find(s => s.id === staffId)?.full_name ?? ''
+        toast.success(`Responsable: ${nombre}`)
+      }
+    })
+  }
+
+  function handleRemove(e: React.MouseEvent) {
+    e.stopPropagation()
+    startTransition(async () => {
+      const result = await actualizarResponsable(negocioId, null)
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        toast.success('Responsable removido')
+      }
+    })
+  }
+
+  function getInitials(name: string): string {
+    return name
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(w => w[0])
+      .join('')
+      .toUpperCase()
+  }
+
+  const filtered = staffList.filter(s =>
+    s.full_name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  // Truncate name for display
+  function truncName(name: string, max = 12): string {
+    if (name.length <= max) return name
+    return name.slice(0, max).trimEnd() + '...'
+  }
+
+  if (!canEdit) {
+    // Read-only: show responsable or nothing
+    if (!responsable) return null
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+          {getInitials(responsable.full_name)}
+        </span>
+        <span className="text-xs text-foreground">{truncName(responsable.full_name)}</span>
+      </span>
+    )
+  }
+
+  return (
+    <div className="relative" ref={popoverRef}>
+      {responsable ? (
+        <div className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
+          <div
+            onClick={() => !isPending && setOpen(!open)}
+            className="inline-flex items-center gap-1.5 cursor-pointer transition-colors hover:opacity-80"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+              {getInitials(responsable.full_name)}
+            </span>
+            <span className="text-foreground">{truncName(responsable.full_name)}</span>
+          </div>
+          <button
+            onClick={handleRemove}
+            disabled={isPending}
+            className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground transition-colors disabled:opacity-60"
+            title="Quitar responsable"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setOpen(!open)}
+          disabled={isPending}
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+        >
+          <UserPlus className="h-3.5 w-3.5" />
+          <span>Asignar</span>
+        </button>
+      )}
+
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-background shadow-lg">
+          <div className="p-2">
+            <input
+              ref={searchRef}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar..."
+              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto px-1 pb-1">
+            {filtered.length === 0 ? (
+              <p className="px-2 py-3 text-center text-xs text-muted-foreground">Sin resultados</p>
+            ) : (
+              filtered.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => handleSelect(s.id)}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent ${
+                    s.id === responsable?.id ? 'bg-accent font-medium' : ''
+                  }`}
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+                    {getInitials(s.full_name)}
+                  </span>
+                  <span className="truncate">{s.full_name}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1100,16 +1269,24 @@ export default function NegocioDetailClient({
       {/* ── BODY: Etapa actual + Bloques ── */}
       <div className="space-y-4">
         <div>
-          <div className="mb-3 flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-foreground">
-              Etapa actual:{' '}
-              <span className="text-primary">
-                {etapaActual?.nombre ?? '—'}
-              </span>
-            </h2>
-            {etapaActual?.stage && (
-              <StageBadge stage={etapaActual.stage} />
-            )}
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-foreground">
+                Etapa actual:{' '}
+                <span className="text-primary">
+                  {etapaActual?.nombre ?? '—'}
+                </span>
+              </h2>
+              {etapaActual?.stage && (
+                <StageBadge stage={etapaActual.stage} />
+              )}
+            </div>
+            <ResponsableSelector
+              negocioId={negocio.id}
+              responsable={negocio.responsable}
+              staffList={staffList}
+              canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
+            />
           </div>
 
           {bloquesExtendidos.length > 0 && (
