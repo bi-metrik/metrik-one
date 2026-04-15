@@ -17,7 +17,7 @@ export default async function CausacionPage({ searchParams }: Props) {
   const tab = (params.tab as 'aprobados' | 'causados') ?? 'aprobados'
   const mes = params.mes ?? new Date().toISOString().slice(0, 7)
 
-  const { items, counts } = await getCausacionData(tab, mes)
+  const { items, counts, totales } = await getCausacionData(tab, mes)
 
   return (
     <CausacionClient
@@ -26,6 +26,7 @@ export default async function CausacionPage({ searchParams }: Props) {
       activeTab={tab}
       mes={mes}
       role={role ?? undefined}
+      totales={totales}
     />
   )
 }

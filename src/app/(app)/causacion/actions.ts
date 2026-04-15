@@ -47,10 +47,10 @@ function getInitials(name: string | null): string | null {
 
 export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: string) {
   const { supabase, workspaceId, role, error } = await getWorkspace()
-  if (error || !workspaceId) return { items: [], counts: { aprobados: 0, causados: 0 } }
+  if (error || !workspaceId) return { items: [], counts: { aprobados: 0, causados: 0 }, totales: { egresos: 0, ingresos: 0, ivaNeto: 0, retencionesAFavor: 0, retencionesPorPagar: 0 } }
 
   const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canViewCausacion) return { items: [], counts: { aprobados: 0, causados: 0 } }
+  if (!perms.canViewCausacion) return { items: [], counts: { aprobados: 0, causados: 0 }, totales: { egresos: 0, ingresos: 0, ivaNeto: 0, retencionesAFavor: 0, retencionesPorPagar: 0 } }
 
   const currentMes = mes ?? new Date().toISOString().slice(0, 7)
   const [y, m] = currentMes.split('-').map(Number)
@@ -160,6 +160,30 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
   // Sort by fecha desc
   items.sort((a, b) => b.fecha.localeCompare(a.fecha))
 
+  // Totales del mes (solo relevante para tab causados, pero se calcula siempre)
+  const egresos = items.filter(i => i.tipo === 'egreso').reduce((s, i) => s + i.monto, 0)
+  const ingresos = items.filter(i => i.tipo === 'ingreso').reduce((s, i) => s + i.monto, 0)
+
+  let ivaGenerado = 0      // cobros → debes a DIAN
+  let ivaDescontable = 0   // gastos → a tu favor
+  let retencionesAFavor = 0   // retefuente + reteiva + reteica en cobros
+  let retencionesPorPagar = 0  // retefuente + reteiva + reteica en gastos
+
+  for (const item of items) {
+    for (const ret of item.retenciones) {
+      if (ret.tipo === 'iva') {
+        if (item.tipo === 'ingreso') ivaGenerado += ret.valor
+        else ivaDescontable += ret.valor
+      } else {
+        // retefuente, reteiva, reteica
+        if (item.tipo === 'ingreso') retencionesAFavor += ret.valor
+        else retencionesPorPagar += ret.valor
+      }
+    }
+  }
+
+  const ivaNeto = ivaGenerado - ivaDescontable
+
   // Counts for tab badges
   const { count: aprobadosGastos } = await supabase
     .from('gastos')
@@ -195,6 +219,13 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
     counts: {
       aprobados: (aprobadosGastos ?? 0) + (aprobadosCobros ?? 0),
       causados: (causadosGastos ?? 0) + (causadosCobros ?? 0),
+    },
+    totales: {
+      egresos,
+      ingresos,
+      ivaNeto,          // positivo = por pagar, negativo = a favor
+      retencionesAFavor,
+      retencionesPorPagar,
     },
   }
 }

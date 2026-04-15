@@ -66,6 +66,13 @@ interface Props {
   activeTab: 'aprobados' | 'causados'
   mes: string
   role?: string
+  totales: {
+    egresos: number
+    ingresos: number
+    ivaNeto: number
+    retencionesAFavor: number
+    retencionesPorPagar: number
+  }
 }
 
 const MESES = [
@@ -92,7 +99,7 @@ type FormEntry = {
   tercero_razon_social: string
 }
 
-export default function CausacionClient({ items, counts, activeTab, mes, role }: Props) {
+export default function CausacionClient({ items, counts, activeTab, mes, role, totales }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
@@ -261,6 +268,57 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
           &rarr;
         </button>
       </div>
+
+      {/* Summary cards — solo en tab causados */}
+      {activeTab === 'causados' && (
+        <>
+          {/* Fila 1: Flujo causado */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg border bg-card p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Egresos</p>
+              <p className="text-sm font-semibold text-red-600 dark:text-red-400">
+                {formatCOP(totales.egresos)}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-card p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Ingresos</p>
+              <p className="text-sm font-semibold text-green-600 dark:text-green-400">
+                {formatCOP(totales.ingresos)}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-card p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Neto</p>
+              <p className={`text-sm font-semibold ${(totales.ingresos - totales.egresos) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                {(totales.ingresos - totales.egresos) >= 0 ? '+' : ''}{formatCOP(totales.ingresos - totales.egresos)}
+              </p>
+            </div>
+          </div>
+
+          {/* Fila 2: Posicion fiscal */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg border bg-card p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                IVA {totales.ivaNeto >= 0 ? 'por pagar' : 'a favor'}
+              </p>
+              <p className={`text-sm font-semibold ${totales.ivaNeto >= 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                {formatCOP(Math.abs(totales.ivaNeto))}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-card p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Ret. a favor</p>
+              <p className="text-sm font-semibold text-green-600 dark:text-green-400">
+                {formatCOP(totales.retencionesAFavor)}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-card p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Ret. por pagar</p>
+              <p className="text-sm font-semibold text-red-600 dark:text-red-400">
+                {formatCOP(totales.retencionesPorPagar)}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg border bg-card p-1">
