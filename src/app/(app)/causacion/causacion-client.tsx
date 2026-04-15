@@ -149,7 +149,6 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
     if (!form) return false
     return (
       form.cuenta_contable.trim().length > 0 ||
-      form.centro_costo.trim().length > 0 ||
       form.tercero_nit.trim().length > 0 ||
       form.retenciones.length > 0
     )
@@ -181,7 +180,7 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
           ...prev,
           [id]: {
             cuenta_contable: '',
-            centro_costo: '',
+            centro_costo: '', // kept for backward compat with action
             notas_causacion: '',
             retenciones: [],
             tercero_nit: item.tercero_nit ?? '',
@@ -352,16 +351,6 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
                       {/* Causados tab: Show accounting badges */}
                       {activeTab === 'causados' && (
                         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                          {item.cuenta_contable && (
-                            <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                              PUC: {item.cuenta_contable}
-                            </span>
-                          )}
-                          {item.centro_costo && (
-                            <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
-                              CC: {item.centro_costo}
-                            </span>
-                          )}
                           {item.retenciones?.map((r, i) => (
                             <span key={i} className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300">
                               {TIPO_LABELS[r.tipo] ?? r.tipo}: {formatCOP(r.valor)}
@@ -413,34 +402,6 @@ export default function CausacionClient({ items, counts, activeTab, mes, role }:
                 {/* Expanded form */}
                 {activeTab === 'aprobados' && isExpanded && form && (
                   <div className="border-t bg-muted/30 px-3 py-3 space-y-3">
-
-                    {/* PUC + CC (opcionales) */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="mb-1 block text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Cuenta PUC</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          maxLength={9}
-                          value={form.cuenta_contable}
-                          onChange={e => updateForm(item.id, 'cuenta_contable', e.target.value)}
-                          placeholder="Ej: 519595"
-                          className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Centro costo</label>
-                        <input
-                          type="text"
-                          maxLength={50}
-                          value={form.centro_costo}
-                          onChange={e => updateForm(item.id, 'centro_costo', e.target.value)}
-                          placeholder="Ej: Operaciones"
-                          className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm"
-                        />
-                      </div>
-                    </div>
 
                     {/* Notas */}
                     <div>
