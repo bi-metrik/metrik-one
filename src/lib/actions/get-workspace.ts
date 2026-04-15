@@ -1,10 +1,15 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 
 /**
  * Helper compartido para obtener workspace_id del usuario autenticado.
  * Patron: createClient() → auth.getUser() → profiles.workspace_id
+ *
+ * Dev override: cookie __dev_ws=<slug> impersona cualquier workspace
+ * usando service role (bypassa RLS). Solo activo en NODE_ENV=development.
+ * Activar: visitar /?__ws=<slug> | Desactivar: /?__ws=off
  */
 export async function getWorkspace() {
   const supabase = await createClient()
@@ -13,6 +18,31 @@ export async function getWorkspace() {
   if (!user) {
     return { supabase, workspaceId: null, userId: null, role: null, staffId: null, error: 'No autenticado' as const }
   }
+
+  // ── Dev workspace override ────────────────────────────────────────────
+  if (process.env.NODE_ENV === 'development') {
+    const cookieStore = await cookies()
+    const devSlug = cookieStore.get('__dev_ws')?.value
+    if (devSlug) {
+      const svc = createServiceClient()
+      const { data: ws } = await svc
+        .from('workspaces')
+        .select('id')
+        .eq('slug', devSlug)
+        .single()
+      if (ws?.id) {
+        return {
+          supabase: svc,
+          workspaceId: ws.id as string,
+          userId: user.id,
+          role: 'owner' as string,
+          staffId: null,
+          error: null,
+        }
+      }
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────
 
   const { data: profile } = await supabase
     .from('profiles')

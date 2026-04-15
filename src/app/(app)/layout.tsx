@@ -1,5 +1,6 @@
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
 import FiscalNudge from './fiscal-nudge'
 import NotificationBell from '@/components/notification-bell'
@@ -28,22 +29,39 @@ export default async function AppLayout({
     redirect('/onboarding')
   }
 
+  // Dev workspace override: cookie __dev_ws=<slug> impersona cualquier workspace
+  let activeWorkspaceId: string = profile.workspace_id
+  let activeClient = supabase as ReturnType<typeof createServiceClient>
+  if (process.env.NODE_ENV === 'development') {
+    const cookieStore = await cookies()
+    const devSlug = cookieStore.get('__dev_ws')?.value
+    if (devSlug) {
+      const svc = createServiceClient()
+      const { data: ws } = await svc.from('workspaces').select('id').eq('slug', devSlug).single()
+      if (ws?.id) {
+        activeWorkspaceId = ws.id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        activeClient = svc as any
+      }
+    }
+  }
+
   const [workspaceResult, fiscalResult, modulesResult] = await Promise.all([
-    supabase
+    activeClient
       .from('workspaces')
       .select('name, slug, color_primario, color_secundario, logo_url')
-      .eq('id', profile.workspace_id)
+      .eq('id', activeWorkspaceId)
       .single(),
-    supabase
+    activeClient
       .from('fiscal_profiles')
       .select('is_complete, is_estimated, nudge_count')
-      .eq('workspace_id', profile.workspace_id)
+      .eq('workspace_id', activeWorkspaceId)
       .single(),
     // modules column added in migration 20260409300001 — not in generated types yet
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase.from('workspaces') as any)
+    (activeClient.from('workspaces') as any)
       .select('modules')
-      .eq('id', profile.workspace_id)
+      .eq('id', activeWorkspaceId)
       .single() as Promise<{ data: { modules: Record<string, boolean> | null } | null; error: unknown }>,
   ])
 

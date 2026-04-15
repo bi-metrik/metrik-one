@@ -100,6 +100,23 @@ export async function middleware(request: NextRequest) {
   }
 
   // --- MARKETING DOMAIN (no subdomain) ---
+
+  // Dev workspace override: ?__ws=<slug> → setea cookie y redirige limpio
+  if (IS_DEV) {
+    const devWs = request.nextUrl.searchParams.get('__ws')
+    if (devWs !== null) {
+      const cleanUrl = new URL(request.url)
+      cleanUrl.searchParams.delete('__ws')
+      const res = NextResponse.redirect(cleanUrl)
+      if (devWs === 'off') {
+        res.cookies.delete('__dev_ws')
+      } else {
+        res.cookies.set('__dev_ws', devWs, { path: '/', httpOnly: true, sameSite: 'lax' })
+      }
+      return res
+    }
+  }
+
   if (pathname.startsWith('/auth/callback')) return supabaseResponse
   if (pathname === '/registro') return supabaseResponse
   if (pathname === '/accept-invite') return supabaseResponse
