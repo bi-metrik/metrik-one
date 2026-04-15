@@ -1491,14 +1491,20 @@ export async function agregarBloqueItem(
   negocioBloqueId: string,
   label: string,
   tipo: string,
-  orden: number
+  orden: number,
+  extra?: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null }
 ): Promise<{ id: string | null; error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { id: null, error: 'No autenticado' }
 
+  const row: Record<string, unknown> = { negocio_bloque_id: negocioBloqueId, label, tipo, orden, completado: false, contenido: {} }
+  if (extra?.fecha_inicio) row.fecha_inicio = extra.fecha_inicio
+  if (extra?.fecha_fin) row.fecha_fin = extra.fecha_fin
+  if (extra?.responsable_id) row.responsable_id = extra.responsable_id
+
   const { data, error: insertError } = await db(supabase)
     .from('bloque_items')
-    .insert({ negocio_bloque_id: negocioBloqueId, label, tipo, orden, completado: false, contenido: {} })
+    .insert(row)
     .select('id')
     .single()
 

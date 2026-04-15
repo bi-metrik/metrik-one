@@ -143,12 +143,10 @@ export async function getNumeros(mesRef?: string) {
     cobrosTotalRes,
     configMetasRes,
     gastosFijosRes,
-    proyectosCerradosRes,
     streakRes,
     profileRes,
     // Semáforo indicators
     empresasRes,
-    oportunidadesRes,
     negociosVentaRes,
     horasRecientesRes,
     gastosFijosBorradoresRes,
@@ -161,9 +159,7 @@ export async function getNumeros(mesRef?: string) {
     // D119: Cuentas por pagar
     cxpRes,
     // KPIs negocio
-    pipelineActivoRes,
     negociosPipelineRes,
-    valorContratadoRes,
     negociosContratadosRes,
   ] = await Promise.all([
     // Latest bank balance (order by created_at — fecha can be NULL in old records)
@@ -230,7 +226,7 @@ export async function getNumeros(mesRef?: string) {
     // All facturas (for cartera) — include project name + numero_factura for COH-3
     supabase
       .from('facturas')
-      .select('id, monto, fecha_emision, numero_factura, proyecto_id, proyectos(nombre)')
+      .select('id, monto, fecha_emision, numero_factura')
       .eq('workspace_id', workspaceId),
 
     // All cobros (for cartera)
@@ -254,12 +250,6 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .eq('is_active', true),
 
-    // Proyectos cerrados (for margen contribution) — use view
-    supabase
-      .from('v_proyecto_financiero')
-      .select('presupuesto_total, costo_acumulado')
-      .eq('estado', 'cerrado'),
-
     // Streak
     supabase
       .from('streaks')
@@ -280,13 +270,6 @@ export async function getNumeros(mesRef?: string) {
       .from('empresas')
       .select('id, numero_documento, regimen_tributario')
       .eq('workspace_id', workspaceId),
-
-    // Semáforo: oportunidades activas (recent activity)
-    supabase
-      .from('oportunidades')
-      .select('id, updated_at')
-      .eq('workspace_id', workspaceId)
-      .in('etapa', ['contacto_inicial', 'propuesta', 'negociacion']),
 
     // Semáforo: negocios activos en venta (recent activity)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -343,13 +326,6 @@ export async function getNumeros(mesRef?: string) {
       .eq('estado_pago', 'pendiente')
       .neq('estado_causacion', 'RECHAZADO'),
 
-    // KPI: Pipeline activo — oportunidades no ganadas/perdidas
-    supabase
-      .from('oportunidades')
-      .select('valor_estimado')
-      .eq('workspace_id', workspaceId)
-      .not('etapa', 'in', '(ganada,perdida)'),
-
     // KPI: En venta — negocios en etapa venta
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
@@ -358,13 +334,6 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .eq('stage_actual', 'venta')
       .eq('estado', 'abierto'),
-
-    // KPI: Valor contratado — proyectos en ejecución
-    supabase
-      .from('proyectos')
-      .select('presupuesto_total')
-      .eq('workspace_id', workspaceId)
-      .eq('estado', 'en_ejecucion'),
 
     // KPI: Valor contratado — negocios en ejecución/cobro
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -412,15 +381,11 @@ export async function getNumeros(mesRef?: string) {
   const cxpTotal = cxpData.reduce((s, g) => s + Number(g.monto), 0)
   const cxpCount = cxpData.length
 
-  // KPIs negocio (oportunidades + negocios)
-  const pipelineActivo =
-    (pipelineActivoRes.data ?? []).reduce((s, o) => s + Number(o.valor_estimado ?? 0), 0) +
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (negociosPipelineRes.data ?? []).reduce((s: number, n: any) => s + Number(n.precio_estimado ?? 0), 0)
-  const valorContratado =
-    (valorContratadoRes.data ?? []).reduce((s, p) => s + Number(p.presupuesto_total ?? 0), 0) +
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (negociosContratadosRes.data ?? []).reduce((s: number, n: any) => s + Number(n.precio_aprobado ?? 0), 0)
+  // KPIs negocio
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pipelineActivo = (negociosPipelineRes.data ?? []).reduce((s: number, n: any) => s + Number(n.precio_estimado ?? 0), 0)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const valorContratado = (negociosContratadosRes.data ?? []).reduce((s: number, n: any) => s + Number(n.precio_aprobado ?? 0), 0)
 
   // Gastos avg (3 months)
   const gastos3m = gastos3mRes.data ?? []
@@ -491,7 +456,7 @@ export async function getNumeros(mesRef?: string) {
       const saldo = Number(f.monto) - cobrado
       const dias = Math.floor((today.getTime() - new Date(f.fecha_emision).getTime()) / 86400000)
       return {
-        proyectoNombre: (f as unknown as { proyectos: { nombre: string } | null }).proyectos?.nombre ?? 'Sin proyecto',
+        proyectoNombre: 'Sin asignar',
         facturaRef: (f as unknown as { numero_factura: string | null }).numero_factura ?? 'Sin numero',
         saldo,
         diasVencimiento: dias,
@@ -616,7 +581,7 @@ export async function getNumeros(mesRef?: string) {
     metaVentas,
     empresas: empresasRes.data ?? [],
     diasDesdeUltimoSaldo: diasDesdeUltimo,
-    oportunidades: [...(oportunidadesRes.data ?? []), ...(negociosVentaRes.data ?? [])],
+    oportunidades: negociosVentaRes.data ?? [],
     gastosFijosBorradores: gastosFijosBorradoresRes.data ?? [],
     horasRecientes: (horasRecientesRes.data?.length ?? 0) > 0,
     diferencia,
@@ -763,7 +728,7 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     action: saldoScore !== 'green' ? '/numeros?saldo=1' : undefined,
   })
 
-  // 5. Oportunidades actualizadas (Medio, peso 1)
+  // 5. Negocios actualizados (Medio, peso 1)
   const now = Date.now()
   const oppsActivas = input.oportunidades
   const oppsRecientes = oppsActivas.filter(o => o.updated_at && (now - new Date(o.updated_at).getTime()) < 14 * 86400000)
@@ -774,12 +739,12 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
   else if (oppsScore === 'yellow') greenWeight += 0.5
   if (oppsScore !== 'green' && oppsActivas.length > 0) {
     pendientes.push({
-      label: 'Oportunidades actualizadas',
+      label: 'Negocios actualizados',
       done: false,
-      action: '/pipeline',
+      action: '/negocios',
     })
   } else {
-    pendientes.push({ label: 'Oportunidades actualizadas', done: oppsActivas.length === 0 || oppsScore === 'green' })
+    pendientes.push({ label: 'Negocios actualizados', done: oppsActivas.length === 0 || oppsScore === 'green' })
   }
 
   // 6. Gastos fijos mes confirmados (Medio, peso 1)
@@ -799,13 +764,13 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     pendientes.push({ label: 'Gastos fijos del mes confirmados', done: true })
   }
 
-  // 7. Proyectos con horas al día (Bajo, peso 1)
+  // 7. Horas al día (Bajo, peso 1)
   totalWeight += 1
   if (input.horasRecientes) greenWeight += 1
   pendientes.push({
-    label: 'Horas de proyectos al día',
+    label: 'Horas al día',
     done: input.horasRecientes,
-    action: !input.horasRecientes ? '/proyectos' : undefined,
+    action: !input.horasRecientes ? '/negocios' : undefined,
   })
 
   // 8. Diferencia conciliación (Medio, peso 1)

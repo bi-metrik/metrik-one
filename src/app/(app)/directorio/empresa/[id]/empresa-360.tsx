@@ -3,34 +3,15 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, Flame, FolderKanban, ShieldCheck, ShieldAlert, User } from 'lucide-react'
+import { ArrowLeft, Save, Flame, ShieldCheck, ShieldAlert, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateEmpresa } from '../../actions'
-import { SECTORES_EMPRESA, TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO, ETAPA_CONFIG, ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
+import { SECTORES_EMPRESA, TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO } from '@/lib/pipeline/constants'
 import { formatNit, formatCOP } from '@/lib/contacts/constants'
 import type { Empresa } from '@/types/database'
-import type { EtapaPipeline, EstadoProyecto } from '@/lib/pipeline/constants'
 import NotesSection from '@/components/notes-section'
 import RutUploadCard from '@/components/rut-upload-card'
 import RutDataDisplay from '@/components/rut-data-display'
-
-interface OportunidadRow {
-  id: string
-  descripcion: string | null
-  etapa: string | null
-  valor_estimado: number | null
-  created_at: string | null
-  contactos: { nombre: string } | null
-}
-
-interface ProyectoRow {
-  id: string
-  nombre: string | null
-  estado: string | null
-  presupuesto_total: number | null
-  avance_porcentaje: number | null
-  created_at: string | null
-}
 
 interface NegocioRow {
   id: string
@@ -52,12 +33,10 @@ const STAGE_CHIP: Record<string, { label: string; class: string }> = {
 
 interface Props {
   empresa: Empresa
-  oportunidades: OportunidadRow[]
-  proyectos: ProyectoRow[]
   negocios: NegocioRow[]
 }
 
-export default function Empresa360({ empresa, oportunidades, proyectos, negocios }: Props) {
+export default function Empresa360({ empresa, negocios }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -323,71 +302,6 @@ export default function Empresa360({ empresa, oportunidades, proyectos, negocios
                     {n.precio_estimado != null && <span className="text-xs font-medium">{formatCOP(n.precio_estimado)}</span>}
                     {chip && <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.class}`}>{chip.label}</span>}
                     {n.estado === 'completado' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">Cerrado</span>}
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Oportunidades (legacy) */}
-      <div className="space-y-3 rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Oportunidades ({oportunidades.length})</h2>
-        {oportunidades.length === 0 ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">Sin oportunidades</p>
-        ) : (
-          <div className="space-y-2">
-            {oportunidades.map(o => {
-              const ec = ETAPA_CONFIG[o.etapa as EtapaPipeline]
-              return (
-                <Link
-                  key={o.id}
-                  href={`/pipeline/${o.id}`}
-                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent/50"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Flame className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-                      <span className="truncate text-sm font-medium">{o.descripcion || 'Sin descripcion'}</span>
-                    </div>
-                    {o.contactos && (
-                      <p className="ml-5.5 text-xs text-muted-foreground">{(o.contactos as { nombre: string }).nombre}</p>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {o.valor_estimado && <span className="text-xs font-medium">{formatCOP(o.valor_estimado)}</span>}
-                    {ec && <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${ec.chipClass}`}>{ec.label}</span>}
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Proyectos */}
-      <div className="space-y-3 rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Proyectos ({proyectos.length})</h2>
-        {proyectos.length === 0 ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">Sin proyectos</p>
-        ) : (
-          <div className="space-y-2">
-            {proyectos.map(p => {
-              const ec = ESTADO_PROYECTO_CONFIG[p.estado as EstadoProyecto]
-              return (
-                <Link
-                  key={p.id}
-                  href={`/proyectos/${p.id}`}
-                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent/50"
-                >
-                  <div className="flex items-center gap-2">
-                    <FolderKanban className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                    <span className="text-sm font-medium">{p.nombre || 'Sin nombre'}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {p.presupuesto_total && <span className="text-xs font-medium">{formatCOP(p.presupuesto_total)}</span>}
-                    {ec && <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${ec.chipClass}`}>{ec.label}</span>}
                   </div>
                 </Link>
               )

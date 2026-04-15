@@ -18,7 +18,7 @@ export interface ActiveTimer {
 
 export async function startTimer(
   destinoId: string,
-  destinoTipo: 'negocio' | 'proyecto' = 'proyecto',
+  destinoTipo: 'negocio' | 'proyecto' = 'negocio',
   descripcion?: string,
 ) {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -221,25 +221,17 @@ export async function getDestinosParaTimer() {
   if (error || !workspaceId) return { negocios: [], proyectos: [] }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [negociosRes, proyectosRes] = await Promise.all([
-    (supabase as any)
-      .from('negocios')
-      .select('id, nombre, codigo')
-      .eq('workspace_id', workspaceId)
-      .eq('estado', 'abierto')
-      .order('nombre'),
-    supabase
-      .from('proyectos')
-      .select('id, nombre, codigo')
-      .eq('workspace_id', workspaceId)
-      .eq('estado', 'en_ejecucion')
-      .order('codigo'),
-  ])
+  const { data } = await (supabase as any)
+    .from('negocios')
+    .select('id, nombre, codigo')
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'abierto')
+    .order('nombre')
 
   return {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    negocios: (negociosRes.data ?? []).map((n: any) => ({ id: n.id, name: n.nombre ?? 'Sin nombre', code: n.codigo ?? '' })),
-    proyectos: (proyectosRes.data ?? []).map(p => ({ id: p.id, name: p.nombre ?? 'Sin nombre', code: p.codigo ?? '' })),
+    negocios: (data ?? []).map((n: any) => ({ id: n.id, name: n.nombre ?? 'Sin nombre', code: n.codigo ?? '' })),
+    proyectos: [],
   }
 }
 

@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  startTimer, stopTimer, getActiveTimer, getProyectosActivos,
+  startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
   type ActiveTimer,
 } from './timer-actions'
 import { FEATURES } from '@/lib/feature-flags'
@@ -93,11 +93,9 @@ export default function FAB({ role }: FABProps) {
   const [timerPanel, setTimerPanel] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
-  const projectContextMatch = pathname.match(/^\/proyectos\/([a-f0-9-]{36})/)
   const negocioContextMatch = pathname.match(/^\/negocios\/([a-f0-9-]{36})/)
-  const contextProyectoId = projectContextMatch?.[1] ?? null
   const contextNegocioId = negocioContextMatch?.[1] ?? null
-  const contextEntityId = contextNegocioId ?? contextProyectoId
+  const contextEntityId = contextNegocioId
 
   // Timer state
   const [timer, setTimer] = useState<TimerLocal>(DEFAULT_TIMER)
@@ -117,11 +115,11 @@ export default function FAB({ role }: FABProps) {
 
   useEffect(() => {
     async function hydrate() {
-      const [activeTimer, projs] = await Promise.all([
+      const [activeTimer, destinos] = await Promise.all([
         getActiveTimer(),
-        getProyectosActivos(),
+        getDestinosParaTimer(),
       ])
-      setProjects(projs)
+      setProjects(destinos.negocios)
 
       if (activeTimer) {
         const s: TimerLocal = {
@@ -182,20 +180,16 @@ export default function FAB({ role }: FABProps) {
     setOpen(false)
     if (action.action === 'saldo') {
       router.push('/numeros?saldo=1')
-    } else if (action.action === 'factura' && contextProyectoId) {
-      router.push(`/proyectos/${contextProyectoId}?action=factura`)
+    } else if (action.action === 'factura' && contextNegocioId) {
+      router.push(`/negocios/${contextNegocioId}?action=factura`)
     } else if (action.href) {
       let href = action.href
-      if (action.contextAware) {
-        if (contextNegocioId) {
-          href = `${action.href}?negocio=${contextNegocioId}`
-        } else if (contextProyectoId) {
-          href = `${action.href}?proyecto=${contextProyectoId}`
-        }
+      if (action.contextAware && contextNegocioId) {
+        href = `${action.href}?negocio=${contextNegocioId}`
       }
       router.push(href)
     }
-  }, [router, contextProyectoId, contextNegocioId])
+  }, [router, contextNegocioId])
 
   const handleOpenTimer = () => {
     setOpen(false)
@@ -209,7 +203,7 @@ export default function FAB({ role }: FABProps) {
       return
     }
     startTransition(async () => {
-      const res = await startTimer(destinoId)
+      const res = await startTimer(destinoId, 'negocio')
       if (res.success && res.timer) {
         const s: TimerLocal = {
           isRunning: true,

@@ -1,12 +1,6 @@
-import { getProyectos } from './actions-v2'
-import { getActiveTimer } from '../timer-actions'
-import ProyectosList from './proyectos-list'
+import { redirect } from 'next/navigation'
 
-export default async function ProyectosPage() {
-  const [proyectos, activeTimer] = await Promise.all([
-    getProyectos(),
-    getActiveTimer(),
-  ])
-
-  return <ProyectosList proyectos={proyectos} activeTimer={activeTimer} />
+// Legacy: /proyectos redirige a /negocios (módulo principal)
+export default function ProyectosPage() {
+  redirect('/negocios')
 }

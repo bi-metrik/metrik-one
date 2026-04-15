@@ -11,15 +11,6 @@ import type {
 
 // ── Helpers ────────────────────────────────────────────────
 
-const ETAPA_ORDER = ['lead', 'prospecto', 'propuesta', 'negociacion', 'ganado', 'perdido']
-const ETAPA_LABELS: Record<string, string> = {
-  lead: 'Lead', prospecto: 'Prospecto', propuesta: 'Propuesta',
-  negociacion: 'Negociacion', ganado: 'Ganado', perdido: 'Perdido',
-}
-const ESTADO_LABELS: Record<string, string> = {
-  en_ejecucion: 'En ejecucion', pausado: 'Pausado', completado: 'Completado',
-  rework: 'Rework', cancelado: 'Cancelado', cerrado: 'Cerrado',
-}
 const CATEGORIA_LABELS: Record<string, string> = {
   materiales: 'Materiales', transporte: 'Transporte', servicios_profesionales: 'Servicios Prof.',
   viaticos: 'Viaticos', software: 'Software', impuestos_seguros: 'Impuestos/Seguros',
@@ -136,12 +127,13 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
       .eq('workspace_id', workspaceId)
       .eq('is_active', true),
 
-    // Projects financial view for cartera (facturado > cobrado)
-    supabase
-      .from('v_proyecto_financiero')
-      .select('nombre, facturado, cobrado, proyecto_id, created_at')
+    // Negocios completados (for cartera proxy)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('nombre, precio_aprobado, estado, closed_at')
       .eq('workspace_id', workspaceId)
-      .gt('facturado', 0),
+      .eq('estado', 'completado'),
 
     // Fiscal profile
     supabase
@@ -186,7 +178,8 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
   const gastosHist = gastosHistRes.data || []
   const gastosFijos = gastosFijosRes.data || []
   const staff = staffRes.data || []
-  const proyectosFin = proyectosFinRes.data || []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const negociosCerrados: any[] = proyectosFinRes.data || []
 
   // Saldo
   const saldoActual = Number(saldo?.saldo_real || 0)
@@ -255,21 +248,19 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
   const gastoTotalMensual = gastoPromedioMensual + costosFijos
   const runwayMeses = gastoTotalMensual > 0 ? saldoActual / gastoTotalMensual : 99
 
-  // Cartera pendiente por proyecto
+  // Cartera pendiente — simplified using negocios completados
   const now = new Date()
-  const carteraPendiente: ProyectoCartera[] = proyectosFin
-    .map(p => {
-      const facturado = Number(p.facturado || 0)
-      const cobrado = Number(p.cobrado || 0)
-      const cartera = facturado - cobrado
-      // Usar created_at del proyecto como proxy para dias de atraso
-      const diasAtraso = p.created_at
-        ? Math.max(0, Math.round((now.getTime() - new Date(p.created_at as string).getTime()) / (1000 * 60 * 60 * 24)))
+  const carteraPendiente: ProyectoCartera[] = negociosCerrados
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((n: any) => {
+      const precioAprobado = Number(n.precio_aprobado || 0)
+      const diasAtraso = n.closed_at
+        ? Math.max(0, Math.round((now.getTime() - new Date(n.closed_at as string).getTime()) / (1000 * 60 * 60 * 24)))
         : 0
-      return { nombre: p.nombre || '', facturado, cobrado, cartera, diasAtraso }
+      return { nombre: n.nombre || '', facturado: precioAprobado, cobrado: 0, cartera: precioAprobado, diasAtraso }
     })
-    .filter(p => p.cartera > 0)
-    .sort((a, b) => b.cartera - a.cartera)
+    .filter((p: ProyectoCartera) => p.cartera > 0)
+    .sort((a: ProyectoCartera, b: ProyectoCartera) => b.cartera - a.cartera)
     .slice(0, 5)
 
   // Posicion neta de caja
@@ -345,17 +336,17 @@ export async function getComercialData(periodo: Periodo = 'mes'): Promise<Comerc
   const prev = getPrevMonthRange()
 
   const [
-    oportunidadesRes,
+    negociosRes,
     cobrosRes,
     cobrosPrevRes,
     configMetasRes,
-    etapaHistorialRes,
-    proyectosGanadosRes,
+    negociosCerradosRes,
   ] = await Promise.all([
-    // All opportunities (not filtered by date — pipeline is current state)
-    supabase
-      .from('oportunidades')
-      .select('id, codigo, descripcion, etapa, valor_estimado, probabilidad, razon_perdida, created_at, fecha_cierre_estimada, empresa_id, empresas(nombre)')
+    // All negocios (current state — not filtered by date)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('id, codigo, nombre, stage_actual, estado, precio_estimado, precio_aprobado, razon_cierre, created_at, updated_at, empresa_id, empresas(nombre)')
       .eq('workspace_id', workspaceId),
 
     // Cobros current month
@@ -381,217 +372,125 @@ export async function getComercialData(periodo: Periodo = 'mes'): Promise<Comerc
       .eq('workspace_id', workspaceId)
       .single(),
 
-    // Etapa historial para calcular dias sin movimiento y ritmo
-    supabase
-      .from('etapa_historial')
-      .select('oportunidad_id, etapa_anterior, etapa_nueva, created_at')
+    // Negocios cerrados para calcular close time
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('created_at, closed_at')
       .eq('workspace_id', workspaceId)
-      .order('created_at', { ascending: false }),
-
-    // Projects created from won opportunities (for close time calculation)
-    supabase
-      .from('proyectos')
-      .select('created_at, oportunidad_id')
-      .eq('workspace_id', workspaceId)
-      .not('oportunidad_id', 'is', null),
+      .eq('estado', 'completado'),
   ])
 
-  const opps = oportunidadesRes.data || []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const negs: any[] = negociosRes.data || []
   const cobros = cobrosRes.data || []
   const cobrosPrev = cobrosPrevRes.data || []
-  const historial = etapaHistorialRes.data || []
 
   // Recaudo
   const recaudoMes = cobros.reduce((s, c) => s + Number(c.monto), 0)
   const recaudoPrev = cobrosPrev.reduce((s, c) => s + Number(c.monto), 0)
   const recaudoDelta = recaudoPrev > 0 ? ((recaudoMes - recaudoPrev) / recaudoPrev) * 100 : 0
 
-  // Pipeline by stage (solo activas)
+  // Pipeline by stage (solo negocios abiertos en venta)
+  const STAGE_ORDER = ['venta', 'ejecucion', 'cobro', 'cierre']
+  const STAGE_LABELS: Record<string, string> = {
+    venta: 'En venta', ejecucion: 'Ejecucion', cobro: 'Cobro', cierre: 'Cierre',
+  }
   const stageMap = new Map<string, { count: number; valor: number }>()
-  for (const etapa of ETAPA_ORDER) {
-    stageMap.set(etapa, { count: 0, valor: 0 })
+  for (const stage of STAGE_ORDER) {
+    stageMap.set(stage, { count: 0, valor: 0 })
   }
-  for (const o of opps) {
-    const e = o.etapa || 'lead'
-    const existing = stageMap.get(e) || { count: 0, valor: 0 }
+  const negociosAbiertos = negs.filter(n => n.estado === 'abierto')
+  for (const n of negociosAbiertos) {
+    const s = n.stage_actual || 'venta'
+    const existing = stageMap.get(s) || { count: 0, valor: 0 }
     existing.count++
-    existing.valor += Number(o.valor_estimado || 0)
-    stageMap.set(e, existing)
+    existing.valor += Number(n.precio_estimado || n.precio_aprobado || 0)
+    stageMap.set(s, existing)
   }
-  const pipeline: PipelineStage[] = ETAPA_ORDER
-    .filter(e => !['ganado', 'perdido'].includes(e))
-    .map(e => ({
-      etapa: ETAPA_LABELS[e] || e,
-      count: stageMap.get(e)?.count || 0,
-      valor: stageMap.get(e)?.valor || 0,
+  const pipeline: PipelineStage[] = STAGE_ORDER
+    .map(s => ({
+      etapa: STAGE_LABELS[s] || s,
+      count: stageMap.get(s)?.count || 0,
+      valor: stageMap.get(s)?.valor || 0,
     }))
     .filter(p => p.count > 0 || p.valor > 0)
 
   // Conversion rate
-  const ganados = opps.filter(o => o.etapa === 'ganado').length
-  const perdidos = opps.filter(o => o.etapa === 'perdido').length
+  const ganados = negs.filter(n => n.estado === 'completado').length
+  const perdidos = negs.filter(n => n.estado === 'perdido').length
   const totalOportunidadesCerradas = ganados + perdidos
   const conversionRate = totalOportunidadesCerradas > 0 ? (ganados / totalOportunidadesCerradas) * 100 : 0
 
   // Razones perdida
   const razonesMap = new Map<string, number>()
-  for (const o of opps.filter(o => o.etapa === 'perdido' && o.razon_perdida)) {
-    razonesMap.set(o.razon_perdida!, (razonesMap.get(o.razon_perdida!) || 0) + 1)
+  for (const n of negs.filter(n => n.estado === 'perdido' && n.razon_cierre)) {
+    razonesMap.set(n.razon_cierre, (razonesMap.get(n.razon_cierre) || 0) + 1)
   }
   const razonesPerdida: RazonPerdida[] = Array.from(razonesMap.entries())
     .map(([razon, count]) => ({ razon, count }))
     .sort((a, b) => b.count - a.count)
 
-  // Ultimo movimiento por oportunidad (desde etapa_historial)
-  const ultimoMovimientoMap = new Map<string, string>()
-  for (const h of historial) {
-    if (h.oportunidad_id && !ultimoMovimientoMap.has(h.oportunidad_id)) {
-      ultimoMovimientoMap.set(h.oportunidad_id, h.created_at as string)
-    }
-  }
-
-  // Oportunidades urgentes
-  const abiertas = opps.filter(o => !['ganado', 'perdido'].includes(o.etapa || ''))
-  const valoresOrdenados = abiertas.map(o => Number(o.valor_estimado || 0)).sort((a, b) => a - b)
+  // Negocios urgentes (en venta, sin movimiento > 15 dias o alto valor)
+  const enVenta = negociosAbiertos.filter(n => n.stage_actual === 'venta')
+  const valoresOrdenados = enVenta.map(n => Number(n.precio_estimado || 0)).sort((a: number, b: number) => a - b)
   const p75Index = Math.floor(valoresOrdenados.length * 0.75)
   const percentil75 = valoresOrdenados[p75Index] || 0
 
   const now = new Date()
-  const mesActualStart = curr.start
-  const mesActualEnd = curr.end
 
   const oportunidadesUrgentes: OportunidadUrgente[] = []
-  for (const o of abiertas) {
+  for (const n of enVenta) {
     const razones: OportunidadUrgente['razones'] = []
-    const ultimoMovimiento = ultimoMovimientoMap.get(o.id)
-    const diasSinMovimiento = ultimoMovimiento
-      ? Math.round((now.getTime() - new Date(ultimoMovimiento).getTime()) / (1000 * 60 * 60 * 24))
-      : Math.round((now.getTime() - new Date(o.created_at as string).getTime()) / (1000 * 60 * 60 * 24))
+    const diasSinMovimiento = n.updated_at
+      ? Math.round((now.getTime() - new Date(n.updated_at as string).getTime()) / (1000 * 60 * 60 * 24))
+      : Math.round((now.getTime() - new Date(n.created_at as string).getTime()) / (1000 * 60 * 60 * 24))
 
     if (diasSinMovimiento > 15) razones.push('estancada')
 
-    const fechaCierre = o.fecha_cierre_estimada as string | null
-    if (
-      fechaCierre &&
-      fechaCierre >= mesActualStart &&
-      fechaCierre < mesActualEnd &&
-      o.etapa !== 'negociacion'
-    ) {
-      razones.push('cierre_proximo')
-    }
-
-    const valor = Number(o.valor_estimado || 0)
+    const valor = Number(n.precio_estimado || 0)
     if (valor > percentil75 && percentil75 > 0) razones.push('alto_valor')
 
     if (razones.length > 0) {
       oportunidadesUrgentes.push({
-        id: o.id,
-        nombre: o.descripcion || o.codigo || '',
-        empresa: (o.empresas as any)?.nombre || '',
+        id: n.id,
+        nombre: n.nombre || n.codigo || '',
+        empresa: n.empresas?.nombre || '',
         valor,
-        etapa: ETAPA_LABELS[o.etapa || ''] || o.etapa || '',
+        etapa: STAGE_LABELS[n.stage_actual || 'venta'] || n.stage_actual || '',
         razones,
         diasSinMovimiento,
       })
     }
   }
 
-  // Ritmo del embudo
+  // Ritmo pipeline — simplified (no etapa_historial for negocios yet)
   let ritmoPipeline: RitmoPipeline | null = null
-  if (historial.length >= 3) {
-    // Dias promedio por etapa (tiempo entre transiciones)
-    const etapaDias = new Map<string, number[]>()
-    // Agrupar por oportunidad para calcular tiempo en cada etapa
-    const histPorOpp = new Map<string, typeof historial>()
-    for (const h of historial) {
-      if (!h.oportunidad_id) continue
-      const arr = histPorOpp.get(h.oportunidad_id) || []
-      arr.push(h)
-      histPorOpp.set(h.oportunidad_id, arr)
-    }
-    for (const [, rows] of histPorOpp) {
-      const sorted = rows.sort((a, b) => new Date(a.created_at as string).getTime() - new Date(b.created_at as string).getTime())
-      for (let i = 0; i < sorted.length - 1; i++) {
-        const etapa = sorted[i].etapa_nueva || sorted[i].etapa_anterior || 'lead'
-        const dias = Math.round(
-          (new Date(sorted[i + 1].created_at as string).getTime() - new Date(sorted[i].created_at as string).getTime()) /
-          (1000 * 60 * 60 * 24)
-        )
-        if (dias >= 0) {
-          const arr = etapaDias.get(etapa) || []
-          arr.push(dias)
-          etapaDias.set(etapa, arr)
-        }
-      }
-    }
-
-    let etapaMasLenta = 'lead'
-    let diasPromedioMax = 0
-    for (const [etapa, dias] of etapaDias) {
-      const prom = dias.reduce((a, b) => a + b, 0) / dias.length
-      if (prom > diasPromedioMax) {
-        diasPromedioMax = prom
-        etapaMasLenta = etapa
-      }
-    }
-
-    const sevenDaysAgo = new Date()
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-    const sevenDaysAgoStr = sevenDaysAgo.toISOString()
-    const transicionesEstaSemana = historial.filter(h => (h.created_at as string) >= sevenDaysAgoStr).length
-
-    // Cierres mes anterior
-    const cierresMesAnterior = historial.filter(h =>
-      h.etapa_nueva === 'ganado' &&
-      (h.created_at as string) >= prev.start &&
-      (h.created_at as string) < prev.end
-    ).length
-
-    // Dias promedio de cierre (desde created_at opp hasta ganado)
-    const proyectosGanados = proyectosGanadosRes.data || []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const negsCerrados: any[] = negociosCerradosRes.data || []
+  if (negsCerrados.length >= 3) {
     const closeTimes: number[] = []
-    for (const p of proyectosGanados) {
-      const opp = opps.find(o => o.id === p.oportunidad_id)
-      if (opp && p.created_at && opp.created_at) {
-        const days = Math.round((new Date(p.created_at as string).getTime() - new Date(opp.created_at as string).getTime()) / (1000 * 60 * 60 * 24))
+    for (const n of negsCerrados) {
+      if (n.created_at && n.closed_at) {
+        const days = Math.round((new Date(n.closed_at).getTime() - new Date(n.created_at).getTime()) / (1000 * 60 * 60 * 24))
         if (days >= 0) closeTimes.push(days)
       }
     }
     const diasPromedioCierre = closeTimes.length > 0
-      ? Math.round(closeTimes.reduce((a, b) => a + b, 0) / closeTimes.length)
+      ? Math.round(closeTimes.reduce((a: number, b: number) => a + b, 0) / closeTimes.length)
       : 0
 
     ritmoPipeline = {
-      etapaMasLenta: ETAPA_LABELS[etapaMasLenta] || etapaMasLenta,
-      diasPromedioEtapaMasLenta: Math.round(diasPromedioMax),
-      transicionesEstaSemana,
-      cierresMesAnterior,
+      etapaMasLenta: 'Venta',
+      diasPromedioEtapaMasLenta: 0,
+      transicionesEstaSemana: 0,
+      cierresMesAnterior: 0,
       diasPromedioCierre,
     }
   }
 
-  // ROI por canal (solo si >= 10 cerradas)
-  let canalesAdquisicion: CanalAdquisicion[] | null = null
-  if (totalOportunidadesCerradas >= 10) {
-    // Necesitaria JOIN con contactos.fuente_adquisicion — simplificamos
-    // agrupando oportunidades por fuente si el campo existe en la tabla
-    const canalMap = new Map<string, { total: number; ganadas: number }>()
-    for (const o of opps.filter(o => ['ganado', 'perdido'].includes(o.etapa || ''))) {
-      const canal = (o as any).fuente_adquisicion || 'directo'
-      const entry = canalMap.get(canal) || { total: 0, ganadas: 0 }
-      entry.total++
-      if (o.etapa === 'ganado') entry.ganadas++
-      canalMap.set(canal, entry)
-    }
-    canalesAdquisicion = Array.from(canalMap.entries())
-      .map(([canal, data]) => ({
-        canal,
-        total: data.total,
-        ganadas: data.ganadas,
-        conversionRate: data.total > 0 ? (data.ganadas / data.total) * 100 : 0,
-      }))
-      .sort((a, b) => b.conversionRate - a.conversionRate)
-  }
+  // ROI por canal — omitted (negocios don't have fuente_adquisicion yet)
+  const canalesAdquisicion: CanalAdquisicion[] | null = null
 
   return {
     recaudoMes,
@@ -621,24 +520,19 @@ export async function getOperativoData(periodo: Periodo = 'mes'): Promise<Operat
   const curr = getCurrentMonthRange()
 
   const [
-    proyectosFinRes,
-    proyectosRes,
+    negociosActivosRes,
     staffRes,
     horasRes,
-    proyectosFinCerradosRes,
+    negociosCerradosRes,
   ] = await Promise.all([
-    // Financial view for active projects
-    supabase
-      .from('v_proyecto_financiero')
-      .select('*')
+    // Negocios activos (ejecucion + cobro)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('id, nombre, codigo, estado, stage_actual, precio_aprobado, updated_at, created_at')
       .eq('workspace_id', workspaceId)
-      .in('estado', ['en_ejecucion', 'rework', 'pausado']),
-
-    // All projects for estado count + completados + alertas
-    supabase
-      .from('proyectos')
-      .select('id, estado, updated_at, nombre, fecha_entrega_estimada, avance_porcentaje, fecha_inicio, fecha_fin_estimada')
-      .eq('workspace_id', workspaceId),
+      .eq('estado', 'abierto')
+      .in('stage_actual', ['ejecucion', 'cobro']),
 
     // Staff activo
     supabase
@@ -655,154 +549,94 @@ export async function getOperativoData(periodo: Periodo = 'mes'): Promise<Operat
       .gte('fecha', curr.start)
       .lt('fecha', curr.end),
 
-    // Proyectos cerrados para rentabilidad
-    supabase
-      .from('v_proyecto_financiero')
-      .select('proyecto_id, nombre, facturado, gastos_directos, ganancia_actual, fecha_cierre, updated_at')
+    // Negocios cerrados para rentabilidad
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('negocios')
+      .select('id, nombre, codigo, precio_aprobado, estado, closed_at, updated_at')
       .eq('workspace_id', workspaceId)
-      .in('estado', ['completado', 'cerrado'])
+      .eq('estado', 'completado')
       .order('updated_at', { ascending: false })
       .limit(10),
   ])
 
-  const proyectos = proyectosRes.data || []
-  const proyectosFin = proyectosFinRes.data || []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const negociosActivos: any[] = negociosActivosRes.data || []
   const staffList = staffRes.data || []
   const horas = horasRes.data || []
-  const proyectosFinCerrados = proyectosFinCerradosRes.data || []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const negociosCerrados: any[] = negociosCerradosRes.data || []
 
-  // Proyectos por estado
-  const estadoMap = new Map<string, number>()
-  for (const p of proyectos) {
-    estadoMap.set(p.estado, (estadoMap.get(p.estado) || 0) + 1)
+  // Negocios por stage
+  const STAGE_LABELS_OP: Record<string, string> = {
+    venta: 'En venta', ejecucion: 'Ejecucion', cobro: 'Cobro', cierre: 'Cierre',
   }
-  const proyectosPorEstado: ProyectoEstado[] = Object.keys(ESTADO_LABELS)
-    .map(e => ({
-      estado: ESTADO_LABELS[e],
-      count: estadoMap.get(e) || 0,
+  const stageMap = new Map<string, number>()
+  for (const n of negociosActivos) {
+    const stage = n.stage_actual || 'ejecucion'
+    stageMap.set(stage, (stageMap.get(stage) || 0) + 1)
+  }
+  const proyectosPorEstado: ProyectoEstado[] = Object.keys(STAGE_LABELS_OP)
+    .map(s => ({
+      estado: STAGE_LABELS_OP[s],
+      count: stageMap.get(s) || 0,
     }))
     .filter(e => e.count > 0)
 
   // Completados este mes
-  const completadosMes = proyectos.filter(p =>
-    ['completado', 'cerrado'].includes(p.estado) &&
-    p.updated_at && p.updated_at >= curr.start && p.updated_at < curr.end
+  const completadosMes = negociosCerrados.filter(n =>
+    n.updated_at && n.updated_at >= curr.start && n.updated_at < curr.end
   ).length
 
-  // Activos para metricas
-  const activos = proyectosFin.filter(p =>
-    ['en_ejecucion', 'rework'].includes(p.estado || '')
-  )
-  const totalProyectosActivos = activos.length
+  const totalProyectosActivos = negociosActivos.length
 
-  // Promedios presupuesto y horas
-  const presupuestos = activos.map(p => Number(p.presupuesto_consumido_pct || 0))
-  const promedioPresupuestoConsumido = presupuestos.length > 0
-    ? presupuestos.reduce((a, b) => a + b, 0) / presupuestos.length
-    : 0
+  // Simplified health: negocios without inactivity (updated in last 7 days) are healthy
+  const now = new Date()
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const proyectosSaludables = negociosActivos.filter(n =>
+    n.updated_at && new Date(n.updated_at) >= sevenDaysAgo
+  ).length
+  const saludPct = totalProyectosActivos > 0 ? (proyectosSaludables / totalProyectosActivos) * 100 : 100
 
-  const horasPromedios = activos
-    .filter(p => Number(p.horas_estimadas) > 0)
-    .map(p => (Number(p.horas_reales) / Number(p.horas_estimadas)) * 100)
-  const promedioHorasConsumidas = horasPromedios.length > 0
-    ? horasPromedios.reduce((a, b) => a + b, 0) / horasPromedios.length
-    : 0
-
-  // Proyectos en riesgo presupuesto y horas
-  const proyectosEnRiesgoPresupuesto = activos.filter(p => Number(p.presupuesto_consumido_pct || 0) > 80).length
-  const proyectosEnRiesgoHoras = activos.filter(p => {
-    const est = Number(p.horas_estimadas)
-    if (est <= 0) return false
-    return (Number(p.horas_reales) / est) * 100 > 80
-  }).length
-
-  // Salud: saludables = presupuesto < 70% Y horas < 70%
-  const proyectosSaludables = activos.filter(p => {
-    const presPct = Number(p.presupuesto_consumido_pct || 0)
-    const est = Number(p.horas_estimadas)
-    const horasPct = est > 0 ? (Number(p.horas_reales) / est) * 100 : 0
-    return presPct < 70 && (est <= 0 || horasPct < 70)
-  }).length
-  const saludPct = activos.length > 0 ? (proyectosSaludables / activos.length) * 100 : 100
-
-  // Alertas unificadas
-  const now7dias = new Date()
-  now7dias.setDate(now7dias.getDate() + 7)
-  const now7str = now7dias.toISOString().split('T')[0]
-  const nowStr = new Date().toISOString().split('T')[0]
-
+  // Alertas: inactividad (>7 dias sin update)
   const alertas: AlertaProyecto[] = []
-  for (const p of activos) {
+  for (const n of negociosActivos) {
     const tipo: AlertaProyecto['tipo'] = []
-    const presPct = Number(p.presupuesto_consumido_pct || 0)
-    const est = Number(p.horas_estimadas)
-    const horasPct = est > 0 ? (Number(p.horas_reales) / est) * 100 : 0
-
-    if (presPct > 90) tipo.push('presupuesto')
-    if (est > 0 && horasPct > 90) tipo.push('horas')
-
-    // Buscar datos del proyecto base para fecha entrega y avance
-    const proyBase = proyectos.find(pb => pb.id === p.proyecto_id)
-    let diasParaEntrega: number | undefined
-    if (proyBase?.fecha_entrega_estimada) {
-      const diasDiff = Math.round(
-        (new Date(proyBase.fecha_entrega_estimada).getTime() - new Date(nowStr).getTime()) / (1000 * 60 * 60 * 24)
-      )
-      if (diasDiff >= 0 && diasDiff <= 7) {
-        tipo.push('entrega_proxima')
-        diasParaEntrega = diasDiff
-      }
-    }
-
-    // Avance bajo: avance < 50% pero tiempo transcurrido > 75%
-    const avancePct = Number(proyBase?.avance_porcentaje ?? 0)
-    if (
-      proyBase?.fecha_inicio && proyBase?.fecha_fin_estimada && avancePct < 50
-    ) {
-      const inicio = new Date(proyBase.fecha_inicio).getTime()
-      const fin = new Date(proyBase.fecha_fin_estimada).getTime()
-      const ahora = Date.now()
-      const tiempoTranscurrido = fin > inicio ? (ahora - inicio) / (fin - inicio) : 0
-      if (tiempoTranscurrido > 0.75) tipo.push('avance_bajo')
-    }
+    const diasInactivo = n.updated_at
+      ? Math.round((now.getTime() - new Date(n.updated_at).getTime()) / (1000 * 60 * 60 * 24))
+      : 999
+    if (diasInactivo > 7) tipo.push('avance_bajo')
 
     if (tipo.length > 0) {
       alertas.push({
-        id: p.proyecto_id || '',
-        nombre: p.nombre || '',
+        id: n.id,
+        nombre: n.nombre || n.codigo || '',
         tipo,
-        presupuestoPct: presPct,
-        horasPct: est > 0 ? horasPct : undefined,
-        diasParaEntrega,
-        avancePct,
+        presupuestoPct: 0,
+        avancePct: 0,
       })
     }
   }
 
-  // Rentabilidad cerrados
-  const rentabilidadCerrados: RentabilidadProyecto[] = proyectosFinCerrados
-    .map(p => {
-      const facturado = Number(p.facturado || 0)
-      const margenPct = facturado > 0 ? (Number(p.ganancia_actual || 0) / facturado) * 100 : 0
-      return {
-        nombre: p.nombre || '',
-        margenPct,
-        fechaCierre: (p.fecha_cierre || p.updated_at || '') as string,
-      }
-    })
-    .filter(p => p.nombre)
-
-  // Costo por proyecto (activos)
-  const costoPorProyecto: CostoProyecto[] = activos
-    .map(p => ({
-      id: p.proyecto_id || '',
-      nombre: p.nombre || '',
-      presupuesto: Number(p.presupuesto_total || 0),
-      gastoReal: Number(p.gastos_directos || 0),
-      pct: Number(p.presupuesto_consumido_pct || 0),
+  // Rentabilidad cerrados — precio_aprobado as proxy
+  const rentabilidadCerrados: RentabilidadProyecto[] = negociosCerrados
+    .map(n => ({
+      nombre: n.nombre || n.codigo || '',
+      margenPct: 0, // No cost data available for negocios yet
+      fechaCierre: (n.closed_at || n.updated_at || '') as string,
     }))
-    .filter(p => p.nombre)
-    .sort((a, b) => b.pct - a.pct)
+    .filter((p: RentabilidadProyecto) => p.nombre)
+
+  // Costo por proyecto — simplified (no financial view for negocios)
+  const costoPorProyecto: CostoProyecto[] = negociosActivos
+    .map(n => ({
+      id: n.id,
+      nombre: n.nombre || n.codigo || '',
+      presupuesto: Number(n.precio_aprobado || 0),
+      gastoReal: 0,
+      pct: 0,
+    }))
+    .filter((p: CostoProyecto) => p.nombre)
 
   // Productividad equipo
   const horasPorStaff = new Map<string, number>()
@@ -824,15 +658,15 @@ export async function getOperativoData(periodo: Periodo = 'mes'): Promise<Operat
 
   return {
     saludPct,
-    proyectosActivos: activos.length,
+    proyectosActivos: totalProyectosActivos,
     proyectosSaludables,
     alertas,
     proyectosPorEstado,
     completadosMes,
-    promedioPresupuestoConsumido,
-    promedioHorasConsumidas,
-    proyectosEnRiesgoPresupuesto,
-    proyectosEnRiesgoHoras,
+    promedioPresupuestoConsumido: 0,
+    promedioHorasConsumidas: 0,
+    proyectosEnRiesgoPresupuesto: 0,
+    proyectosEnRiesgoHoras: 0,
     totalProyectosActivos,
     rentabilidadCerrados,
     costoPorProyecto,

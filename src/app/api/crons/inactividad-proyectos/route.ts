@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-// N7 — Cron de inactividad en proyectos
-// Solo proyectos en estado 'en_ejecucion'
-// Día 2: Supervisor. Día 5: Supervisor + Empresario
-// Señales que reinician el reloj: horas, gastos, comentario, cambio de estado
+// N7 — Cron de inactividad en negocios (etapa ejecución)
+// Día 2: Supervisor. Día 5: Supervisor + Owner
+// Señales que reinician el reloj: horas, gastos, comentario
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -23,39 +22,39 @@ export async function GET(req: NextRequest) {
   let procesadas = 0
   let notificacionesCreadas = 0
 
-  const { data: proyectos } = await supabase
-    .from('proyectos')
-    .select('id, workspace_id, nombre, estado, responsable_id, created_at')
-    .eq('estado', 'en_ejecucion')
+  const { data: negocios } = await supabase
+    .from('negocios')
+    .select('id, workspace_id, nombre, stage_actual, created_at, updated_at')
+    .eq('estado', 'abierto')
+    .eq('stage_actual', 'ejecucion')
 
-  if (!proyectos || proyectos.length === 0) {
+  if (!negocios || negocios.length === 0) {
     return NextResponse.json({ ok: true, procesadas: 0, notificaciones: 0 })
   }
 
-  for (const proyecto of proyectos) {
+  for (const negocio of negocios) {
     procesadas++
 
-    // Calcular última señal de actividad
     const [horasRes, gastosRes, activityRes] = await Promise.all([
       supabase
         .from('horas')
         .select('created_at')
-        .eq('proyecto_id', proyecto.id)
+        .eq('negocio_id', negocio.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
       supabase
         .from('gastos')
         .select('created_at')
-        .eq('proyecto_id', proyecto.id)
+        .eq('negocio_id', negocio.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
       supabase
         .from('activity_log')
         .select('created_at')
-        .eq('entidad_tipo', 'proyecto')
-        .eq('entidad_id', proyecto.id)
+        .eq('entidad_tipo', 'negocio')
+        .eq('entidad_id', negocio.id)
         .eq('tipo', 'comentario')
         .order('created_at', { ascending: false })
         .limit(1)
@@ -66,7 +65,8 @@ export async function GET(req: NextRequest) {
       horasRes.data?.created_at,
       gastosRes.data?.created_at,
       activityRes.data?.created_at,
-      proyecto.created_at,
+      negocio.updated_at,
+      negocio.created_at,
     ].filter(Boolean) as string[]
 
     const ultimaActividad = new Date(fechas.sort().reverse()[0])
@@ -74,35 +74,20 @@ export async function GET(req: NextRequest) {
 
     if (diasSinActividad < 2) continue
 
-    // Resolver nombre del responsable
-    let responsableNombre = 'Sin asignar'
-    if (proyecto.responsable_id) {
-      const { data: st } = await supabase
-        .from('staff')
-        .select('full_name')
-        .eq('id', proyecto.responsable_id)
-        .maybeSingle()
-      if (st?.full_name) responsableNombre = st.full_name
-    }
+    const contenido = `"${negocio.nombre}" lleva ${diasSinActividad} días sin actividad`
 
-    const contenido = `"${proyecto.nombre}" lleva ${diasSinActividad} días sin actividad — responsable: ${responsableNombre}`
-
-    // Perfiles del workspace
     const { data: perfiles } = await supabase
       .from('profiles')
       .select('id, role, area')
-      .eq('workspace_id', proyecto.workspace_id)
+      .eq('workspace_id', negocio.workspace_id)
 
     if (!perfiles) continue
 
     const destinatarios = new Set<string>()
 
-    // N7 (proyectos): supervisor con area='operaciones' O area IS NULL
-    // Si no hay supervisor calificado → escalar directo al owner
     const supervisorOperaciones = perfiles.find(p =>
       p.role === 'supervisor' && (p.area === 'operaciones' || p.area === null)
     )
-    // Admin también recibe si hay uno (legacy behavior)
     const admin = perfiles.find(p => p.role === 'admin')
     const owner = perfiles.find(p => p.role === 'owner')
 
@@ -112,7 +97,6 @@ export async function GET(req: NextRequest) {
       } else if (admin) {
         destinatarios.add(admin.id)
       } else if (owner) {
-        // Sin supervisor ni admin: escalar directo al owner
         destinatarios.add(owner.id)
       }
     }
@@ -126,24 +110,23 @@ export async function GET(req: NextRequest) {
         .select('id')
         .eq('destinatario_id', destinatarioId)
         .eq('tipo', 'inactividad_proyecto')
-        .eq('entidad_id', proyecto.id)
+        .eq('entidad_id', negocio.id)
         .eq('estado', 'pendiente')
         .maybeSingle()
 
       if (existente) continue
 
       const { error } = await supabase.from('notificaciones').insert({
-        workspace_id: proyecto.workspace_id,
+        workspace_id: negocio.workspace_id,
         destinatario_id: destinatarioId,
         tipo: 'inactividad_proyecto',
         estado: 'pendiente',
         contenido,
-        entidad_tipo: 'proyecto',
-        entidad_id: proyecto.id,
-        deep_link: `/proyectos/${proyecto.id}`,
+        entidad_tipo: 'negocio',
+        entidad_id: negocio.id,
+        deep_link: `/negocios/${negocio.id}`,
         metadata: {
           dias_inactivo: diasSinActividad,
-          responsable_nombre: responsableNombre,
         },
       })
 

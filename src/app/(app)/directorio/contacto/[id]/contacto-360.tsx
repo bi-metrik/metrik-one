@@ -6,20 +6,10 @@ import Link from 'next/link'
 import { ArrowLeft, Phone, Mail, Save, Flame, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateContacto } from '../../actions'
-import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO, ETAPA_CONFIG } from '@/lib/pipeline/constants'
+import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Contacto } from '@/types/database'
-import type { EtapaPipeline } from '@/lib/pipeline/constants'
 import NotesSection from '@/components/notes-section'
-
-interface OportunidadRow {
-  id: string
-  descripcion: string | null
-  etapa: string | null
-  valor_estimado: number | null
-  created_at: string | null
-  empresas: { nombre: string } | null
-}
 
 interface NegocioRow {
   id: string
@@ -41,12 +31,11 @@ const STAGE_CHIP: Record<string, { label: string; class: string }> = {
 
 interface Props {
   contacto: Contacto
-  oportunidades: OportunidadRow[]
   empresaVinculada: { id: string; nombre: string } | null
   negocios: NegocioRow[]
 }
 
-export default function Contacto360({ contacto, oportunidades, empresaVinculada, negocios }: Props) {
+export default function Contacto360({ contacto, empresaVinculada, negocios }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -223,51 +212,6 @@ export default function Contacto360({ contacto, oportunidades, empresaVinculada,
                     {n.precio_estimado != null && <span className="text-xs font-medium">{formatCOP(n.precio_estimado)}</span>}
                     {chip && <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.class}`}>{chip.label}</span>}
                     {n.estado === 'completado' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">Cerrado</span>}
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Oportunidades (legacy) */}
-      <div className="space-y-3 rounded-lg border p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Oportunidades originadas ({oportunidades.length})</h2>
-        </div>
-        {oportunidades.length === 0 ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">
-            Este contacto no tiene oportunidades aún
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {oportunidades.map(o => {
-              const etapaConfig = ETAPA_CONFIG[o.etapa as EtapaPipeline]
-              return (
-                <Link
-                  key={o.id}
-                  href={`/pipeline/${o.id}`}
-                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent/50"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Flame className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-                      <span className="truncate text-sm font-medium">{o.descripcion || 'Sin descripcion'}</span>
-                    </div>
-                    {o.empresas && (
-                      <p className="ml-5.5 text-xs text-muted-foreground">{(o.empresas as { nombre: string }).nombre}</p>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {o.valor_estimado && (
-                      <span className="text-xs font-medium">{formatCOP(o.valor_estimado)}</span>
-                    )}
-                    {etapaConfig && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${etapaConfig.chipClass}`}>
-                        {etapaConfig.label}
-                      </span>
-                    )}
                   </div>
                 </Link>
               )

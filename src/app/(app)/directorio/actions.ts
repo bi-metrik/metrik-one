@@ -230,17 +230,18 @@ export async function deleteEmpresa(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
-  // Check for related oportunidades before deleting
-  const { data: oportunidades } = await supabase
-    .from('oportunidades')
+  // Check for related negocios before deleting
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negociosAsociados } = await (supabase as any)
+    .from('negocios')
     .select('id')
     .eq('empresa_id', id)
     .limit(1)
 
-  if (oportunidades && oportunidades.length > 0) {
+  if (negociosAsociados && negociosAsociados.length > 0) {
     return {
       success: false,
-      error: 'No se puede eliminar esta empresa porque tiene oportunidades asociadas en el pipeline. Elimina primero las oportunidades.',
+      error: 'No se puede eliminar esta empresa porque tiene negocios asociados. Elimina primero los negocios.',
     }
   }
 
@@ -290,47 +291,6 @@ export async function checkPerfilFiscal(empresaId: string) {
   if (data.agente_retenedor === null) missing.push('Agente retenedor')
 
   return { complete: missing.length === 0, missing }
-}
-
-// ── Oportunidades por contacto/empresa (para vistas 360) ──
-
-export async function getOportunidadesPorContacto(contactoId: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return []
-
-  const { data } = await supabase
-    .from('oportunidades')
-    .select('id, descripcion, etapa, valor_estimado, created_at, empresas(nombre)')
-    .eq('contacto_id', contactoId)
-    .order('created_at', { ascending: false })
-
-  return data ?? []
-}
-
-export async function getOportunidadesPorEmpresa(empresaId: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return []
-
-  const { data } = await supabase
-    .from('oportunidades')
-    .select('id, descripcion, etapa, valor_estimado, created_at, contactos(nombre)')
-    .eq('empresa_id', empresaId)
-    .order('created_at', { ascending: false })
-
-  return data ?? []
-}
-
-export async function getProyectosPorEmpresa(empresaId: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return []
-
-  const { data } = await supabase
-    .from('proyectos')
-    .select('id, nombre, estado, presupuesto_total, avance_porcentaje, created_at')
-    .eq('empresa_id', empresaId)
-    .order('created_at', { ascending: false })
-
-  return data ?? []
 }
 
 // ── Negocios por empresa/contacto (para vistas 360) ────────
@@ -514,6 +474,6 @@ export async function confirmRutData(
 
   revalidatePath('/directorio/empresas')
   revalidatePath(`/directorio/empresa/${empresaId}`)
-  revalidatePath('/pipeline')
+  revalidatePath('/negocios')
   return { success: true }
 }
