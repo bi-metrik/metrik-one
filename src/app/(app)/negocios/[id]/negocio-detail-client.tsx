@@ -46,6 +46,7 @@ import BloqueResumenFinanciero from './bloques/BloqueResumenFinanciero'
 import BloqueEjecucion from './bloques/BloqueEjecucion'
 import BloqueHistorial from './bloques/BloqueHistorial'
 import type { HistorialData } from './bloques/BloqueHistorial'
+import BloqueFormulario from './bloques/BloqueFormulario'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -552,6 +553,7 @@ function BloqueRenderer({
       case 'aprobacion':
       case 'cobros':
       case 'documento':
+      case 'formulario':
         return GERENCIAL.includes(userRole) ? 'editable' : 'visible'
       case 'resumen_financiero':
       case 'ejecucion':
@@ -672,6 +674,7 @@ function BloqueRenderer({
             tipos_permitidos?: string[]
             max_size_mb?: number
             campos_extraccion?: import('@/lib/ai/extract-fields').CampoExtraccion[]
+            campos_visibles?: string[]
           }}
         />
       )
@@ -742,6 +745,25 @@ function BloqueRenderer({
 
     case 'historial':
       return <BloqueHistorial data={historialData} />
+
+    case 'formulario':
+      return (
+        <BloqueFormulario
+          negocioBloqueId={instanciaId}
+          negocioId={negocioId}
+          instancia={bloque.instancia}
+          modo={modo}
+          configExtra={configExtra as {
+            label: string
+            template: string
+            campos_fuente: Array<{
+              slug: string
+              source: { etapa_orden: number; bloque_orden: number; campo_slug: string; tipo: string }
+            }>
+            campos_constantes?: Record<string, string>
+          }}
+        />
+      )
 
     default:
       return (

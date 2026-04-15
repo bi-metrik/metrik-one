@@ -28,6 +28,7 @@ interface BloqueDocumentoProps {
     tipos_permitidos?: string[]
     max_size_mb?: number
     campos_extraccion?: CampoExtraccion[]
+    campos_visibles?: string[]
   }
 }
 
@@ -157,6 +158,7 @@ export default function BloqueDocumento({
 
   const label = configExtra.label ?? 'Documento'
   const camposConfig = configExtra.campos_extraccion ?? []
+  const camposVisibles = configExtra.campos_visibles ?? null
   const maxSizeMb = configExtra.max_size_mb ?? 20
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
@@ -265,12 +267,28 @@ export default function BloqueDocumento({
         </div>
         {camposConfig.length > 0 && Object.keys(campos).length > 0 && (
           <div className="ml-5.5 flex flex-wrap gap-x-3 gap-y-0.5">
-            {camposConfig.map(config => {
-              const campo = campos[config.slug]
+            {camposConfig
+              .filter(c => !camposVisibles || camposVisibles.includes(c.slug))
+              .map(config => {
+                const campo = campos[config.slug]
+                if (!campo?.value) return null
+                return (
+                  <span key={config.slug} className="text-[11px] text-muted-foreground">
+                    {config.label}: <span className="text-foreground">{campo.value}</span>
+                  </span>
+                )
+              })}
+          </div>
+        )}
+        {camposConfig.length === 0 && camposVisibles && Object.keys(campos).length > 0 && (
+          <div className="ml-5.5 flex flex-wrap gap-x-3 gap-y-0.5">
+            {camposVisibles.map(slug => {
+              const campo = campos[slug]
               if (!campo?.value) return null
+              const displayLabel = slug.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
               return (
-                <span key={config.slug} className="text-[11px] text-muted-foreground">
-                  {config.label}: <span className="text-foreground">{campo.value}</span>
+                <span key={slug} className="text-[11px] text-muted-foreground">
+                  {displayLabel}: <span className="text-foreground">{campo.value}</span>
                 </span>
               )
             })}
