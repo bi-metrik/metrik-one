@@ -15,6 +15,8 @@ export type Movimiento = {
   categoria: string | null
   proyecto: string | null
   proyecto_codigo: string | null
+  negocio: string | null
+  negocio_codigo: string | null
   deducible: boolean
   soporte_url: string | null
   tipo_gasto: 'directo' | 'empresa' | 'fijo' | null
@@ -88,9 +90,9 @@ export async function getMovimientos(filters?: {
     const skipGastos = false
 
     if (!skipGastos) {
-      let query = supabase
-        .from('gastos')
-        .select('id, fecha, monto, descripcion, mensaje_original, categoria, deducible, soporte_url, tipo, canal_registro, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let query = (supabase.from('gastos') as any)
+        .select('id, fecha, monto, descripcion, mensaje_original, categoria, deducible, soporte_url, tipo, canal_registro, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), negocio_id, negocios(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
         .eq('workspace_id', workspaceId)
         .gte('fecha', startDate)
         .lte('fecha', endDate)
@@ -125,6 +127,7 @@ export async function getMovimientos(filters?: {
 
       for (const g of gastos ?? []) {
         const proy = g.proyectos as { nombre: string; codigo: string } | null
+        const neg = g.negocios as { nombre: string; codigo: string } | null
         const profile = g.created_by_profile as { full_name: string } | null
         results.push({
           id: g.id,
@@ -136,6 +139,8 @@ export async function getMovimientos(filters?: {
           categoria: g.categoria,
           proyecto: proy?.nombre ?? null,
           proyecto_codigo: proy?.codigo ?? null,
+          negocio: neg?.nombre ?? null,
+          negocio_codigo: neg?.codigo ?? null,
           deducible: g.deducible ?? false,
           soporte_url: g.soporte_url ?? null,
           tipo_gasto: (g.tipo as Movimiento['tipo_gasto']) ?? null,
@@ -155,9 +160,9 @@ export async function getMovimientos(filters?: {
   // Skip ingresos if estadoPago filter is set (cobros don't have estado_pago)
   const skipIngresos = !!estadoPagoFilter || !!catFilter || tipoProyFilter === 'empresa'
   if ((tipoFilter === 'todos' || tipoFilter === 'ingresos') && !skipIngresos) {
-    let query = supabase
-      .from('cobros')
-      .select('id, fecha, monto, notas, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query = (supabase.from('cobros') as any)
+      .select('id, fecha, monto, notas, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), negocio_id, negocios(nombre, codigo), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
@@ -185,6 +190,7 @@ export async function getMovimientos(filters?: {
 
     for (const c of cobros ?? []) {
       const proy = c.proyectos as { nombre: string; codigo: string } | null
+      const neg = c.negocios as { nombre: string; codigo: string } | null
       const profile = c.created_by_profile as { full_name: string } | null
       results.push({
         id: c.id,
@@ -196,6 +202,8 @@ export async function getMovimientos(filters?: {
         categoria: null,
         proyecto: proy?.nombre ?? null,
         proyecto_codigo: proy?.codigo ?? null,
+        negocio: neg?.nombre ?? null,
+        negocio_codigo: neg?.codigo ?? null,
         deducible: false,
         soporte_url: null,
         tipo_gasto: null,

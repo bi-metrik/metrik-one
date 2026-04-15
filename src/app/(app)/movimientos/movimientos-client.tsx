@@ -598,14 +598,14 @@ export default function MovimientosClient({
                             </span>
                           </div>
 
-                          {/* Line 2: Proyecto + Categoria badge */}
-                          {(mov.proyecto || mov.categoria) && (
+                          {/* Line 2: Negocio/Proyecto + Categoria badge */}
+                          {(mov.negocio || mov.proyecto || mov.categoria) && (
                             <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                              {mov.proyecto_codigo && (
-                                <span className="text-[11px] font-medium text-foreground/70">{mov.proyecto_codigo}</span>
+                              {(mov.negocio_codigo || mov.proyecto_codigo) && (
+                                <span className="text-[11px] font-medium text-foreground/70">{mov.negocio_codigo ?? mov.proyecto_codigo}</span>
                               )}
-                              {mov.proyecto && (
-                                <span className="text-[11px] text-muted-foreground truncate">{mov.proyecto}</span>
+                              {(mov.negocio || mov.proyecto) && (
+                                <span className="text-[11px] text-muted-foreground truncate">{mov.negocio ?? mov.proyecto}</span>
                               )}
                               {mov.categoria && (() => {
                                 const cfg = CATEGORIA_CONFIG[mov.categoria]
