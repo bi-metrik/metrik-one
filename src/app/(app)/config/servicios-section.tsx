@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, X, Trash2, Check, ChevronDown, ChevronRight,
@@ -13,13 +13,14 @@ import {
 import type { RubroTemplate } from './servicios-actions'
 import { TIPOS_RUBRO } from '@/lib/pipeline/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import type { Servicio } from '@/types/database'
+import type { Servicio, Staff } from '@/types/database'
 
 interface Props {
   initialData: Servicio[]
+  staffMembers?: Staff[]
 }
 
-export default function ServiciosSection({ initialData }: Props) {
+export default function ServiciosSection({ initialData, staffMembers = [] }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [servicios, setServicios] = useState(initialData)
@@ -41,6 +42,16 @@ export default function ServiciosSection({ initialData }: Props) {
     valor_unitario: 0,
   })
 
+  // Auto-save refs and state
+  const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const draftIdRef = useRef<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+
+  // Staff members eligible for rubros (active, with salary and hours)
+  const eligibleStaff = staffMembers.filter(
+    s => s.is_active !== false && (s.salary ?? 0) > 0 && (s.horas_disponibles_mes ?? 0) > 0
+  )
+
   const resetForm = () => {
     setNombre('')
     setPrecio('')
@@ -50,6 +61,66 @@ export default function ServiciosSection({ initialData }: Props) {
     setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: 1, unidad: 'horas', valor_unitario: 0 })
     setShowAddForm(false)
     setEditingId(null)
+    draftIdRef.current = null
+    setSaveStatus('idle')
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
+  }
+
+  const calcPrecioFromRubros = () => {
+    return rubros.reduce((sum, r) => sum + (r.cantidad * r.valor_unitario), 0)
+  }
+
+  // ── Auto-save logic (only in creation mode) ──
+
+  const scheduleAutoSave = (newNombre: string, newPrecio: string, newRubros?: RubroTemplate[], newCostoEstimado?: string) => {
+    // Only in creation mode
+    if (editingId) return
+
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
+
+    const nombreVal = newNombre.trim()
+    const precioVal = Number(newPrecio)
+    if (!nombreVal || precioVal <= 0) {
+      setSaveStatus('idle')
+      return
+    }
+
+    const rubrosToUse = newRubros ?? rubros
+    const costoToUse = newCostoEstimado ?? costoEstimado
+
+    autoSaveRef.current = setTimeout(async () => {
+      setSaveStatus('saving')
+      const costoVal = rubrosToUse.length > 0
+        ? rubrosToUse.reduce((sum, r) => sum + (r.cantidad * r.valor_unitario), 0)
+        : (Number(costoToUse) || 0)
+
+      if (draftIdRef.current) {
+        // Update existing draft
+        const res = await updateServicio(draftIdRef.current, {
+          nombre: nombreVal,
+          precio_estandar: precioVal,
+          costo_estimado: costoVal,
+          rubros_template: rubrosToUse.length > 0 ? rubrosToUse : null,
+        })
+        if (res.success && 'servicio' in res && res.servicio) {
+          setServicios(prev => prev.map(s => s.id === draftIdRef.current ? res.servicio! : s))
+          setSaveStatus('saved')
+        }
+      } else {
+        // Create new
+        const res = await createServicio({
+          nombre: nombreVal,
+          precio_estandar: precioVal,
+          costo_estimado: costoVal,
+          rubros_template: rubrosToUse.length > 0 ? rubrosToUse : undefined,
+        })
+        if (res.success && 'servicio' in res && res.servicio) {
+          draftIdRef.current = res.servicio.id
+          setServicios(prev => [...prev, res.servicio!])
+          setSaveStatus('saved')
+        }
+      }
+    }, 800)
   }
 
   const addRubroToList = () => {
@@ -57,18 +128,18 @@ export default function ServiciosSection({ initialData }: Props) {
       toast.error('El valor unitario debe ser mayor a 0')
       return
     }
-    setRubros(prev => [...prev, { ...newRubro }])
+    const updatedRubros = [...rubros, { ...newRubro }]
+    setRubros(updatedRubros)
     const t = TIPOS_RUBRO.find(r => r.value === 'mo_propia')
     setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: 1, unidad: t?.unidadDefault ?? 'horas', valor_unitario: 0 })
     setShowRubroForm(false)
+    scheduleAutoSave(nombre, precio, updatedRubros)
   }
 
   const removeRubro = (index: number) => {
-    setRubros(prev => prev.filter((_, i) => i !== index))
-  }
-
-  const calcPrecioFromRubros = () => {
-    return rubros.reduce((sum, r) => sum + (r.cantidad * r.valor_unitario), 0)
+    const updatedRubros = rubros.filter((_, i) => i !== index)
+    setRubros(updatedRubros)
+    scheduleAutoSave(nombre, precio, updatedRubros)
   }
 
   const handleCreate = () => {
@@ -143,6 +214,11 @@ export default function ServiciosSection({ initialData }: Props) {
   }
 
   const startEdit = (s: Servicio) => {
+    // Clear any draft state first
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
+    draftIdRef.current = null
+    setSaveStatus('idle')
+
     setEditingId(s.id)
     setNombre(s.nombre)
     setPrecio(s.precio_estandar?.toString() ?? '')
@@ -154,6 +230,11 @@ export default function ServiciosSection({ initialData }: Props) {
 
   const getRubroLabel = (tipo: string) =>
     TIPOS_RUBRO.find(t => t.value === tipo)?.label ?? tipo
+
+  const getStaffName = (staffId: string) => {
+    const s = staffMembers.find(m => m.id === staffId)
+    return s?.full_name ?? null
+  }
 
   const activeCount = servicios.filter(s => s.activo !== false).length
 
@@ -178,12 +259,26 @@ export default function ServiciosSection({ initialData }: Props) {
       {/* Create / Edit form */}
       {showAddForm && (
         <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+          {/* Save status indicator */}
+          {saveStatus !== 'idle' && !editingId && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {saveStatus === 'saving' ? (
+                <><Loader2 className="h-3 w-3 animate-spin" /> Guardando...</>
+              ) : (
+                <><Check className="h-3 w-3 text-green-500" /> Guardado</>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Nombre del servicio *</label>
               <input
                 value={nombre}
-                onChange={e => setNombre(e.target.value)}
+                onChange={e => {
+                  setNombre(e.target.value)
+                  scheduleAutoSave(e.target.value, precio)
+                }}
                 placeholder="Ej: Diseno de marca"
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                 autoFocus
@@ -196,7 +291,10 @@ export default function ServiciosSection({ initialData }: Props) {
                 <input
                   type="number"
                   value={precio}
-                  onChange={e => setPrecio(e.target.value)}
+                  onChange={e => {
+                    setPrecio(e.target.value)
+                    scheduleAutoSave(nombre, e.target.value)
+                  }}
                   placeholder="1500000"
                   min="0"
                   className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
@@ -211,7 +309,10 @@ export default function ServiciosSection({ initialData }: Props) {
                   <input
                     type="number"
                     value={costoEstimado}
-                    onChange={e => setCostoEstimado(e.target.value)}
+                    onChange={e => {
+                      setCostoEstimado(e.target.value)
+                      scheduleAutoSave(nombre, precio, undefined, e.target.value)
+                    }}
                     placeholder="500000"
                     min="0"
                     className="w-full rounded-md border bg-background py-2 pl-7 pr-3 text-sm"
@@ -252,9 +353,13 @@ export default function ServiciosSection({ initialData }: Props) {
                 {rubros.map((r, i) => (
                   <div key={i} className="flex items-center gap-2 rounded border bg-background px-2.5 py-1.5 text-xs">
                     <span className="font-medium">{getRubroLabel(r.tipo)}</span>
-                    {r.descripcion && <span className="text-muted-foreground truncate max-w-[100px]">{r.descripcion}</span>}
+                    {r.staff_id && getStaffName(r.staff_id) ? (
+                      <span className="text-muted-foreground truncate max-w-[100px]">{getStaffName(r.staff_id)}</span>
+                    ) : r.descripcion ? (
+                      <span className="text-muted-foreground truncate max-w-[100px]">{r.descripcion}</span>
+                    ) : null}
                     <span className="text-muted-foreground">{r.cantidad} {r.unidad}</span>
-                    <span className="text-muted-foreground">× {formatCOP(r.valor_unitario)}</span>
+                    <span className="text-muted-foreground">{formatCOP(r.valor_unitario)}</span>
                     <span className="ml-auto font-medium">{formatCOP(r.cantidad * r.valor_unitario)}</span>
                     <button onClick={() => removeRubro(i)} className="rounded p-0.5 text-red-500 hover:bg-red-50">
                       <X className="h-3 w-3" />
@@ -271,7 +376,14 @@ export default function ServiciosSection({ initialData }: Props) {
                     value={newRubro.tipo}
                     onChange={e => {
                       const t = TIPOS_RUBRO.find(r => r.value === e.target.value)
-                      setNewRubro(p => ({ ...p, tipo: e.target.value, unidad: t?.unidadDefault ?? 'unidades' }))
+                      const isNoLongerMoPropia = e.target.value !== 'mo_propia'
+                      setNewRubro(p => ({
+                        ...p,
+                        tipo: e.target.value,
+                        unidad: t?.unidadDefault ?? 'unidades',
+                        // Clear staff_id when switching away from mo_propia
+                        ...(isNoLongerMoPropia ? { staff_id: undefined, descripcion: '', valor_unitario: 0 } : {}),
+                      }))
                     }}
                     className="rounded border bg-background px-2 py-1.5 text-xs"
                   >
@@ -279,12 +391,46 @@ export default function ServiciosSection({ initialData }: Props) {
                       <option key={t.value} value={t.value}>{t.label}</option>
                     ))}
                   </select>
-                  <input
-                    placeholder="Descripción (opcional)"
-                    value={newRubro.descripcion}
-                    onChange={e => setNewRubro(p => ({ ...p, descripcion: e.target.value }))}
-                    className="rounded border bg-background px-2 py-1.5 text-xs"
-                  />
+
+                  {/* Staff selector for mo_propia */}
+                  {newRubro.tipo === 'mo_propia' && eligibleStaff.length > 0 ? (
+                    <select
+                      value={newRubro.staff_id ?? ''}
+                      onChange={e => {
+                        const staffId = e.target.value
+                        if (!staffId) {
+                          setNewRubro(p => ({ ...p, staff_id: undefined, descripcion: '', valor_unitario: 0 }))
+                          return
+                        }
+                        const member = staffMembers.find(s => s.id === staffId)
+                        if (member) {
+                          const tarifaHora = Math.round((member.salary ?? 0) / (member.horas_disponibles_mes ?? 1))
+                          setNewRubro(p => ({
+                            ...p,
+                            staff_id: staffId,
+                            descripcion: member.full_name,
+                            valor_unitario: tarifaHora,
+                          }))
+                        }
+                      }}
+                      className="rounded border bg-background px-2 py-1.5 text-xs"
+                    >
+                      <option value="">Seleccionar persona...</option>
+                      {eligibleStaff.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.full_name} ({formatCOP(Math.round((s.salary ?? 0) / (s.horas_disponibles_mes ?? 1)))}/h)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      placeholder="Descripcion (opcional)"
+                      value={newRubro.descripcion}
+                      onChange={e => setNewRubro(p => ({ ...p, descripcion: e.target.value }))}
+                      className="rounded border bg-background px-2 py-1.5 text-xs"
+                    />
+                  )}
+
                   <input
                     type="number"
                     placeholder="Cantidad"
@@ -335,13 +481,31 @@ export default function ServiciosSection({ initialData }: Props) {
             )}
           </div>
 
-          <button
-            onClick={() => editingId ? handleUpdate(editingId) : handleCreate()}
-            disabled={isPending}
-            className="flex h-10 w-full items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : editingId ? 'Actualizar servicio' : 'Crear servicio'}
-          </button>
+          {/* Action button */}
+          {editingId ? (
+            <button
+              onClick={() => handleUpdate(editingId)}
+              disabled={isPending}
+              className="flex h-10 w-full items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Actualizar servicio'}
+            </button>
+          ) : draftIdRef.current ? (
+            <button
+              disabled
+              className="flex h-10 w-full items-center justify-center rounded-lg bg-muted text-sm font-medium text-muted-foreground"
+            >
+              Guardado automatico
+            </button>
+          ) : (
+            <button
+              onClick={handleCreate}
+              disabled={isPending}
+              className="flex h-10 w-full items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Crear servicio'}
+            </button>
+          )}
         </div>
       )}
 
@@ -424,7 +588,7 @@ export default function ServiciosSection({ initialData }: Props) {
                         <thead>
                           <tr className="border-b text-left text-muted-foreground">
                             <th className="pb-1 pr-2">Tipo</th>
-                            <th className="pb-1 pr-2">Descripción</th>
+                            <th className="pb-1 pr-2">Descripcion</th>
                             <th className="pb-1 pr-2">Cant.</th>
                             <th className="pb-1 pr-2">Unidad</th>
                             <th className="pb-1 pr-2 text-right">Vr. Unit.</th>
@@ -435,7 +599,9 @@ export default function ServiciosSection({ initialData }: Props) {
                           {tpl.map((r, i) => (
                             <tr key={i} className="border-b border-dashed last:border-0">
                               <td className="py-1.5 pr-2">{getRubroLabel(r.tipo)}</td>
-                              <td className="py-1.5 pr-2 text-muted-foreground max-w-[120px] truncate">{r.descripcion || '—'}</td>
+                              <td className="py-1.5 pr-2 text-muted-foreground max-w-[120px] truncate">
+                                {r.staff_id && getStaffName(r.staff_id) ? getStaffName(r.staff_id) : r.descripcion || '—'}
+                              </td>
                               <td className="py-1.5 pr-2">{r.cantidad}</td>
                               <td className="py-1.5 pr-2">{r.unidad}</td>
                               <td className="py-1.5 pr-2 text-right">{formatCOP(r.valor_unitario)}</td>
@@ -454,7 +620,7 @@ export default function ServiciosSection({ initialData }: Props) {
       ) : !showAddForm && (
         <div className="rounded-lg border border-dashed p-6 text-center">
           <p className="text-sm text-muted-foreground">
-            Crea tu catálogo de servicios. Al cotizar, podrás agregar servicios del catálogo y los rubros se llenan solos.
+            Crea tu catalogo de servicios. Al cotizar, podras agregar servicios del catalogo y los rubros se llenan solos.
           </p>
         </div>
       )}

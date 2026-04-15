@@ -10,6 +10,7 @@ export interface RubroTemplate {
   cantidad: number
   unidad: string
   valor_unitario: number
+  staff_id?: string
 }
 
 // ── CRUD Servicios ────────────────────────────────────────

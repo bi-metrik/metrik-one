@@ -453,7 +453,7 @@ export default function ConfigClient({
       {/* ── Mis Servicios Section ── */}
       {activeSection === 'mis-servicios' && (
         <div className="space-y-4 rounded-xl border bg-card p-6">
-          <ServiciosSection initialData={servicios} />
+          <ServiciosSection initialData={servicios} staffMembers={staffMembers} />
         </div>
       )}
     </div>
