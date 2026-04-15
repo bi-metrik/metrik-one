@@ -167,7 +167,7 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
   return { success: true, id: (data as { id: string }).id }
 }
 
-export async function updateItem(id: string, updates: { nombre?: string; precio_venta?: number; descuento_porcentaje?: number; descripcion?: string | null }) {
+export async function updateItem(id: string, updates: { nombre?: string; precio_venta?: number; descuento_porcentaje?: number; descripcion?: string | null; cantidad?: number }) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
@@ -176,6 +176,7 @@ export async function updateItem(id: string, updates: { nombre?: string; precio_
   if (updates.precio_venta !== undefined) patch.precio_venta = updates.precio_venta
   if (updates.descuento_porcentaje !== undefined) patch.descuento_porcentaje = updates.descuento_porcentaje
   if (updates.descripcion !== undefined) patch.descripcion = updates.descripcion?.trim() || null
+  if (updates.cantidad !== undefined) patch.cantidad = updates.cantidad
 
   const { error: dbError } = await supabase
     .from('items')
@@ -545,7 +546,7 @@ export async function duplicarCotizacion(id: string) {
       costo_total: original.costo_total,
       estado: 'borrador',
       duplicada_de: id,
-      ...({ descuento_porcentaje: descPct, descuento_valor: descVal, negocio_id: negocioIdOrig } as any),
+      ...({ descuento_porcentaje: descPct, descuento_valor: descVal, negocio_id: negocioIdOrig, aiu_admin_pct: (discountData as any)?.aiu_admin_pct ?? null, aiu_imprevistos_pct: (discountData as any)?.aiu_imprevistos_pct ?? null } as any),
     })
     .select('id')
     .single()
@@ -557,7 +558,7 @@ export async function duplicarCotizacion(id: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: items } = await (supabase as any)
       .from('items')
-      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, es_ajuste, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
+      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, es_ajuste, cantidad, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
       .eq('cotizacion_id', id)
       .order('orden')
 
@@ -574,6 +575,7 @@ export async function duplicarCotizacion(id: string) {
           precio_venta: item.precio_venta ?? 0,
           descuento_porcentaje: item.descuento_porcentaje ?? 0,
           es_ajuste: item.es_ajuste ?? false,
+          cantidad: item.cantidad ?? 1,
         })
         .select('id')
         .single()
@@ -611,7 +613,7 @@ export async function reconciliarAjuste(cotizacionId: string, valorTotalDeseado:
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
-    .select('id, precio_venta, descuento_porcentaje, es_ajuste, orden')
+    .select('id, precio_venta, descuento_porcentaje, es_ajuste, orden, cantidad')
     .eq('cotizacion_id', cotizacionId)
 
   // 2. Sum net of regular items (es_ajuste = false)
@@ -623,8 +625,9 @@ export async function reconciliarAjuste(cotizacionId: string, valorTotalDeseado:
       ajusteExistenteId = item.id
     } else {
       const pv = Number(item.precio_venta) || 0
+      const cant = Number(item.cantidad) || 1
       const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
-      sumaNetaRegulares += pv * (1 - dp / 100)
+      sumaNetaRegulares += pv * cant * (1 - dp / 100)
     }
     if ((item.orden ?? 0) > maxOrden) maxOrden = item.orden ?? 0
   }
@@ -683,7 +686,7 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
-    .select('id, precio_venta, descuento_porcentaje, es_ajuste, rubros(valor_total)')
+    .select('id, precio_venta, descuento_porcentaje, es_ajuste, cantidad, rubros(valor_total)')
     .eq('cotizacion_id', cotizacionId)
 
   let totalCosto = 0
@@ -700,8 +703,9 @@ export async function recalcularTotales(cotizacionId: string) {
     }
 
     const pv = Number(item.precio_venta) || 0
+    const cant = Number(item.cantidad) || 1
     const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
-    totalVenta += pv * (1 - dp / 100)
+    totalVenta += pv * cant * (1 - dp / 100)
 
     if (item.es_ajuste) {
       hayAjuste = true
@@ -725,8 +729,9 @@ export async function recalcularTotales(cotizacionId: string) {
     for (const item of items ?? []) {
       if (!item.es_ajuste) {
         const pv = Number(item.precio_venta) || 0
+        const cant = Number(item.cantidad) || 1
         const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
-        sumaNetaRegulares += pv * (1 - dp / 100)
+        sumaNetaRegulares += pv * cant * (1 - dp / 100)
       }
     }
     const nuevaDiferencia = Math.round(valorTotalFijado - sumaNetaRegulares)
@@ -754,4 +759,99 @@ export async function recalcularTotales(cotizacionId: string) {
     .eq('id', cotizacionId)
 
   return { success: true, costoTotal: totalCosto, valorVenta: Math.round(totalVenta) }
+}
+
+// ── AIU (Admin + Imprevistos sobre costos) ────────────────────
+
+export async function aplicarAIU(cotizacionId: string, adminPct: number | null, imprevPct: number | null) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  // Guardar porcentajes en cotizacion
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (supabase as any)
+    .from('cotizaciones')
+    .update({ aiu_admin_pct: adminPct, aiu_imprevistos_pct: imprevPct } as never)
+    .eq('id', cotizacionId)
+
+  // Si ambos son null o 0, quitar ajuste AIU y dejar flujo normal
+  const adminVal = adminPct ?? 0
+  const imprevVal = imprevPct ?? 0
+  if (adminVal === 0 && imprevVal === 0) {
+    // Eliminar item de ajuste si existe
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: ajuste } = await (supabase as any)
+      .from('items')
+      .select('id')
+      .eq('cotizacion_id', cotizacionId)
+      .eq('es_ajuste', true)
+      .maybeSingle()
+    if (ajuste) {
+      await supabase.from('items').delete().eq('id', ajuste.id)
+    }
+    // Recalcular totales normal
+    await recalcularTotales(cotizacionId)
+    return { success: true }
+  }
+
+  // Calcular costoTotal (sum de rubros de items regulares)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: items } = await (supabase as any)
+    .from('items')
+    .select('id, precio_venta, descuento_porcentaje, es_ajuste, orden, cantidad, rubros(valor_total)')
+    .eq('cotizacion_id', cotizacionId)
+
+  let costoTotal = 0
+  let sumaNetaRegulares = 0
+  let ajusteId: string | null = null
+  let maxOrden = 0
+
+  for (const item of items ?? []) {
+    if (item.es_ajuste) {
+      ajusteId = item.id
+    } else {
+      const rubrosSum = ((item.rubros as { valor_total: number }[]) ?? []).reduce((s: number, r: { valor_total: number }) => s + (r.valor_total ?? 0), 0)
+      costoTotal += rubrosSum
+      const pv = Number(item.precio_venta) || 0
+      const cant = Number(item.cantidad) || 1
+      const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
+      sumaNetaRegulares += pv * cant * (1 - dp / 100)
+    }
+    if ((item.orden ?? 0) > maxOrden) maxOrden = item.orden ?? 0
+  }
+
+  // Calcular AIU sobre costos
+  const aiuAmount = Math.round(costoTotal * (adminVal + imprevVal) / 100)
+  const nombre = `Administración (${adminVal}%) e imprevistos (${imprevVal}%)`
+
+  if (ajusteId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any)
+      .from('items')
+      .update({ precio_venta: aiuAmount, nombre } as never)
+      .eq('id', ajusteId)
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any)
+      .from('items')
+      .insert({
+        cotizacion_id: cotizacionId,
+        nombre,
+        subtotal: 0,
+        orden: maxOrden + 1,
+        precio_venta: aiuAmount,
+        descuento_porcentaje: 0,
+        es_ajuste: true,
+      })
+  }
+
+  // Actualizar valor_total = sumaNetaRegulares + aiuAmount
+  const valorTotal = Math.round(sumaNetaRegulares + aiuAmount)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (supabase as any)
+    .from('cotizaciones')
+    .update({ valor_total: valorTotal, costo_total: costoTotal } as never)
+    .eq('id', cotizacionId)
+
+  return { success: true }
 }

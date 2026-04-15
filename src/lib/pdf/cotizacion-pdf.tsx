@@ -38,6 +38,7 @@ interface CotizacionPDFProps {
     descripcion: string | null
     precio_venta: number
     descuento_porcentaje: number
+    cantidad: number
   }[]
   fiscal: {
     subtotal: number
@@ -77,13 +78,16 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
   const pcLight = lighten(pc, 0.08)
 
   // Pre-calculate item totals
+  const hasQuantity = items.some(i => (i.cantidad ?? 1) > 1)
   const itemsWithTotals = items.map(item => {
-    const descVal = Math.round(item.precio_venta * (item.descuento_porcentaje / 100))
-    return { ...item, descuento_valor: descVal, neto: item.precio_venta - descVal }
+    const cant = item.cantidad ?? 1
+    const lineTotal = Math.round(item.precio_venta * cant)
+    const descVal = Math.round(lineTotal * (item.descuento_porcentaje / 100))
+    return { ...item, lineTotal, descuento_valor: descVal, neto: lineTotal - descVal }
   })
 
   const hasItemDiscounts = itemsWithTotals.some(i => i.descuento_porcentaje > 0)
-  const subtotalItems = itemsWithTotals.reduce((sum, i) => sum + i.precio_venta, 0)
+  const subtotalItems = itemsWithTotals.reduce((sum, i) => sum + i.lineTotal, 0)
   const totalDescuentoItems = itemsWithTotals.reduce((sum, i) => sum + i.descuento_valor, 0)
   const baseGravable = cotizacion.valor_total - (cotizacion.descuento_valor ?? 0)
   const ivaAmount = fiscal?.iva ?? 0
@@ -206,12 +210,17 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
               <Text style={{ width: '5%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1 }}>
                 #
               </Text>
-              <Text style={{ width: hasItemDiscounts ? '50%' : '60%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1 }}>
+              <Text style={{ width: hasItemDiscounts ? (hasQuantity ? '40%' : '50%') : (hasQuantity ? '47%' : '60%'), fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1 }}>
                 Concepto
               </Text>
+              {hasQuantity && (
+                <Text style={{ width: '8%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+                  Cant.
+                </Text>
+              )}
               {hasItemDiscounts && (
                 <>
-                  <Text style={{ width: '20%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+                  <Text style={{ width: hasQuantity ? '17%' : '20%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
                     Valor
                   </Text>
                   <Text style={{ width: '10%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
@@ -219,7 +228,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
                   </Text>
                 </>
               )}
-              <Text style={{ width: hasItemDiscounts ? '15%' : '35%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+              <Text style={{ width: hasItemDiscounts ? (hasQuantity ? '20%' : '15%') : (hasQuantity ? '30%' : '35%'), fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
                 Subtotal
               </Text>
             </View>
@@ -240,7 +249,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
                 <Text style={{ width: '5%', fontSize: 9, fontFamily: 'Helvetica-Bold', color: pc }}>
                   {i + 1}
                 </Text>
-                <View style={{ width: hasItemDiscounts ? '50%' : '60%' }}>
+                <View style={{ width: hasItemDiscounts ? (hasQuantity ? '40%' : '50%') : (hasQuantity ? '47%' : '60%') }}>
                   <Text style={{ fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: '#111827' }}>
                     {item.nombre}
                   </Text>
@@ -250,17 +259,22 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
                     </Text>
                   )}
                 </View>
+                {hasQuantity && (
+                  <Text style={{ width: '8%', fontSize: 9, color: '#374151', textAlign: 'right' }}>
+                    {(item.cantidad ?? 1) > 1 ? String(item.cantidad ?? 1) : ''}
+                  </Text>
+                )}
                 {hasItemDiscounts && (
                   <>
-                    <Text style={{ width: '20%', fontSize: 9, color: '#374151', textAlign: 'right' }}>
-                      {fmt(item.precio_venta)}
+                    <Text style={{ width: hasQuantity ? '17%' : '20%', fontSize: 9, color: '#374151', textAlign: 'right' }}>
+                      {fmt(item.lineTotal)}
                     </Text>
                     <Text style={{ width: '10%', fontSize: 9, color: item.descuento_porcentaje > 0 ? '#DC2626' : '#374151', textAlign: 'right' }}>
                       {item.descuento_porcentaje > 0 ? `-${item.descuento_porcentaje}%` : '\u2014'}
                     </Text>
                   </>
                 )}
-                <Text style={{ width: hasItemDiscounts ? '15%' : '35%', fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827', textAlign: 'right' }}>
+                <Text style={{ width: hasItemDiscounts ? (hasQuantity ? '20%' : '15%') : (hasQuantity ? '30%' : '35%'), fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827', textAlign: 'right' }}>
                   {fmt(item.neto)}
                 </Text>
               </View>

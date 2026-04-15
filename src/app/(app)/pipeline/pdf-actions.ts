@@ -86,7 +86,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: itemsData } = await (supabase as any)
       .from('items')
-      .select('nombre, descripcion, precio_venta, descuento_porcentaje')
+      .select('nombre, descripcion, precio_venta, descuento_porcentaje, cantidad')
       .eq('cotizacion_id', cotizacionId)
       .order('orden')
     items = itemsData ?? []
@@ -150,11 +150,12 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       direccion: (vendorFiscal as any)?.direccion_fiscal ?? null,
       ciudad: [(vendorFiscal as any)?.municipio, (vendorFiscal as any)?.departamento].filter(Boolean).join(', ') || null,
     },
-    items: items.map((i: { nombre: string; descripcion: string | null; precio_venta: number; descuento_porcentaje: number }) => ({
+    items: items.map((i: { nombre: string; descripcion: string | null; precio_venta: number; descuento_porcentaje: number; cantidad?: number }) => ({
       nombre: i.nombre ?? '',
       descripcion: i.descripcion ?? null,
       precio_venta: Number(i.precio_venta) || 0,
       descuento_porcentaje: Number(i.descuento_porcentaje) || 0,
+      cantidad: Number(i.cantidad) || 1,
     })),
     fiscal,
   })

@@ -12,7 +12,7 @@ import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
   addRubro, updateRubro, deleteRubro, recalcularTotales,
-  addItemFromServicio, reconciliarAjuste,
+  addItemFromServicio, reconciliarAjuste, aplicarAIU,
 } from '../../cotizaciones/actions-v2'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/pipeline/pdf-actions'
@@ -42,6 +42,7 @@ interface ItemRow {
   descuento_porcentaje?: number | null
   descripcion?: string | null
   es_ajuste?: boolean
+  cantidad?: number | null
   rubros: RubroRow[]
 }
 
@@ -59,6 +60,8 @@ interface CotizacionData {
   fecha_validez: string | null
   descuento_porcentaje?: number | null
   descuento_valor?: number | null
+  aiu_admin_pct?: number | null
+  aiu_imprevistos_pct?: number | null
 }
 
 interface ClientFiscal {
@@ -359,9 +362,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       <div className="space-y-3">
           {/* Items */}
           {initialItems.map(item => {
+            const itemCantidad = Number(item.cantidad) || 1
             const itemPrecio = Number(item.precio_venta) || 0
             const itemDescPct = Number(item.descuento_porcentaje) || 0
-            const itemNeto = Math.round(itemPrecio * (1 - itemDescPct / 100))
+            const itemLineTotal = Math.round(itemPrecio * itemCantidad)
+            const itemNeto = Math.round(itemLineTotal * (1 - itemDescPct / 100))
             const isAjuste = item.es_ajuste === true
             const isNegativo = itemPrecio < 0
 
@@ -387,7 +392,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <div className="text-right">
-                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''}`}>{formatCOP(itemPrecio)}</span>
+                    {itemCantidad > 1 && (
+                      <span className="text-[10px] text-muted-foreground mr-1">{itemCantidad} x</span>
+                    )}
+                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''}`}>{formatCOP(itemLineTotal)}</span>
                     {!isAjuste && itemDescPct > 0 && (
                       <span className="block text-[10px] text-red-500">-{itemDescPct}% = {formatCOP(itemNeto)}</span>
                     )}
@@ -408,9 +416,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   {/* Item sale fields */}
                   {editable && (
                     <div className="mb-3 space-y-2">
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-4 gap-2">
                         <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio venta</label>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio unit.</label>
                           <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
                             <input
@@ -435,6 +443,26 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           </div>
                         </div>
                         <div>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Cantidad</label>
+                          <input
+                            type="number"
+                            defaultValue={itemCantidad}
+                            placeholder="1"
+                            min="0.01"
+                            step="0.01"
+                            className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                            onBlur={e => {
+                              const val = Math.max(0.01, Number(e.target.value) || 1)
+                              if (val === itemCantidad) return
+                              startTransition(async () => {
+                                await updateItem(item.id, { cantidad: val })
+                                await recalcularTotales(cotizacion.id)
+                                router.refresh()
+                              })
+                            }}
+                          />
+                        </div>
+                        <div>
                           <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descuento %</label>
                           <input
                             type="number"
@@ -454,9 +482,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           />
                         </div>
                         <div className="flex items-end pb-0.5">
-                          {itemPrecio > 0 && (item.subtotal ?? 0) > 0 && (
+                          {itemLineTotal > 0 && (item.subtotal ?? 0) > 0 && (
                             <span className="text-[10px] text-green-600">
-                              Margen: {((itemPrecio - (item.subtotal ?? 0)) / itemPrecio * 100).toFixed(0)}%
+                              Margen: {((itemLineTotal - (item.subtotal ?? 0)) / itemLineTotal * 100).toFixed(0)}%
                             </span>
                           )}
                         </div>
@@ -706,6 +734,18 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 await reconciliarAjuste(cotizacion.id, val)
                 // Also persist discount separately
                 await updateCotizacion(cotizacion.id, { descuento_porcentaje: Number(pct) || 0, descuento_valor: dv })
+                // Si el usuario cambia manualmente el valor de venta, resetear AIU
+                if ((cotizacion.aiu_admin_pct ?? 0) > 0 || (cotizacion.aiu_imprevistos_pct ?? 0) > 0) {
+                  await aplicarAIU(cotizacion.id, null, null)
+                }
+                router.refresh()
+              })
+            }}
+            aiuAdminPct={cotizacion.aiu_admin_pct ?? null}
+            aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
+            onAIUChange={(adminPct, imprevPct) => {
+              startTransition(async () => {
+                await aplicarAIU(cotizacion.id, adminPct, imprevPct)
                 router.refresh()
               })
             }}
@@ -832,16 +872,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
 // ── Totales + Margen bidireccional ─────────────────────────────
 
-function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, onSave }: {
+function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, onSave, aiuAdminPct, aiuImprevPct, onAIUChange }: {
   costoTotal: number
   valorVentaInicial: number
   discountPct: string
   editable: boolean
   onSave: (val: number, pct: string) => void
+  aiuAdminPct: number | null
+  aiuImprevPct: number | null
+  onAIUChange: (adminPct: number | null, imprevPct: number | null) => void
 }) {
   const [valorVenta, setValorVenta] = useState(valorVentaInicial)
   const [margenInput, setMargenInput] = useState('')
   const [ventaInput, setVentaInput] = useState(valorVentaInicial ? valorVentaInicial.toString() : '')
+  const [adminPct, setAdminPct] = useState(aiuAdminPct ?? 0)
+  const [imprevPct, setImprevPct] = useState(aiuImprevPct ?? 0)
+  const hasAIU = (aiuAdminPct ?? 0) > 0 || (aiuImprevPct ?? 0) > 0
 
   const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
   const dVal = Math.round(valorVenta * dPct / 100)
@@ -878,6 +924,78 @@ function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, o
           <span className="text-muted-foreground">Costo total</span>
           <span className="font-medium">{formatCOP(costoTotal)}</span>
         </div>
+        {editable && (
+          <div className="border-t pt-2 mt-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">AIU (sobre costos)</span>
+              {hasAIU && (
+                <button
+                  onClick={() => {
+                    setAdminPct(0)
+                    setImprevPct(0)
+                    onAIUChange(null, null)
+                  }}
+                  className="text-[10px] text-muted-foreground hover:text-red-500"
+                >
+                  Quitar AIU
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-0.5 block text-[10px] text-muted-foreground">Admin %</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={adminPct || ''}
+                    placeholder="0"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    className="w-full rounded border bg-background px-2 py-1.5 pr-6 text-xs"
+                    onChange={e => setAdminPct(Number(e.target.value) || 0)}
+                    onBlur={() => onAIUChange(adminPct || null, imprevPct || null)}
+                  />
+                  <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                </div>
+                {costoTotal > 0 && adminPct > 0 && (
+                  <span className="text-[10px] text-muted-foreground">= {formatCOP(Math.round(costoTotal * adminPct / 100))}</span>
+                )}
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] text-muted-foreground">Imprevistos %</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={imprevPct || ''}
+                    placeholder="0"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    className="w-full rounded border bg-background px-2 py-1.5 pr-6 text-xs"
+                    onChange={e => setImprevPct(Number(e.target.value) || 0)}
+                    onBlur={() => onAIUChange(adminPct || null, imprevPct || null)}
+                  />
+                  <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                </div>
+                {costoTotal > 0 && imprevPct > 0 && (
+                  <span className="text-[10px] text-muted-foreground">= {formatCOP(Math.round(costoTotal * imprevPct / 100))}</span>
+                )}
+              </div>
+            </div>
+            {(adminPct > 0 || imprevPct > 0) && costoTotal > 0 && (
+              <div className="mt-1 text-[10px] text-amber-600 font-medium">
+                Total AIU: {formatCOP(Math.round(costoTotal * (adminPct + imprevPct) / 100))} ({adminPct + imprevPct}% sobre costos)
+              </div>
+            )}
+          </div>
+        )}
+        {!editable && hasAIU && costoTotal > 0 && (
+          <div className="flex justify-between text-sm border-t pt-1">
+            <span className="text-muted-foreground">AIU ({(aiuAdminPct ?? 0) + (aiuImprevPct ?? 0)}% sobre costos)</span>
+            <span className="font-medium text-amber-600">{formatCOP(Math.round(costoTotal * ((aiuAdminPct ?? 0) + (aiuImprevPct ?? 0)) / 100))}</span>
+          </div>
+        )}
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Valor venta</span>
           <span className="font-bold">{formatCOP(valorVenta)}</span>
