@@ -73,8 +73,8 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
     } else {
       query = query
         .eq('estado_causacion', 'CAUSADO')
-        .gte('fecha_causacion', `${startDate}T00:00:00`)
-        .lte('fecha_causacion', `${endDate}T23:59:59`)
+        .gte('fecha', startDate)
+        .lte('fecha', endDate)
     }
 
     query = query.order('fecha', { ascending: false })
@@ -122,8 +122,8 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
     } else {
       query = query
         .eq('estado_causacion', 'CAUSADO')
-        .gte('fecha_causacion', `${startDate}T00:00:00`)
-        .lte('fecha_causacion', `${endDate}T23:59:59`)
+        .gte('fecha', startDate)
+        .lte('fecha', endDate)
     }
 
     query = query.order('fecha', { ascending: false })
@@ -200,22 +200,22 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
     .eq('workspace_id', workspaceId)
     .eq('estado_causacion', 'APROBADO')
 
-  // Causados this month
+  // Causados this month (by execution date)
   const { count: causadosGastos } = await supabase
     .from('gastos')
     .select('id', { count: 'exact', head: true })
     .eq('workspace_id', workspaceId)
     .eq('estado_causacion', 'CAUSADO')
-    .gte('fecha_causacion', `${startDate}T00:00:00`)
-    .lte('fecha_causacion', `${endDate}T23:59:59`)
+    .gte('fecha', startDate)
+    .lte('fecha', endDate)
 
   const { count: causadosCobros } = await supabase
     .from('cobros')
     .select('id', { count: 'exact', head: true })
     .eq('workspace_id', workspaceId)
     .eq('estado_causacion', 'CAUSADO')
-    .gte('fecha_causacion', `${startDate}T00:00:00`)
-    .lte('fecha_causacion', `${endDate}T23:59:59`)
+    .gte('fecha', startDate)
+    .lte('fecha', endDate)
 
   return {
     items,
