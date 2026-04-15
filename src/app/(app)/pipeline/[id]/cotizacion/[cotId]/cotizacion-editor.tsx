@@ -293,7 +293,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   }
 
   const costoTotal = initialItems.reduce((sum, item) => {
-    return sum + ((item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0))
+    if (item.es_ajuste) return sum
+    const rubrosSum = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
+    const cant = Number(item.cantidad) || 1
+    return sum + rubrosSum * cant
   }, 0)
 
   return (

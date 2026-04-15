@@ -699,7 +699,8 @@ export async function recalcularTotales(cotizacionId: string) {
     if (!item.es_ajuste) {
       const subtotal = ((item.rubros as { valor_total: number }[]) ?? []).reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0)
       await supabase.from('items').update({ subtotal } as never).eq('id', item.id)
-      totalCosto += subtotal
+      const cant = Number(item.cantidad) || 1
+      totalCosto += subtotal * cant
     }
 
     const pv = Number(item.precio_venta) || 0
@@ -811,9 +812,9 @@ export async function aplicarAIU(cotizacionId: string, adminPct: number | null, 
       ajusteId = item.id
     } else {
       const rubrosSum = ((item.rubros as { valor_total: number }[]) ?? []).reduce((s: number, r: { valor_total: number }) => s + (r.valor_total ?? 0), 0)
-      costoTotal += rubrosSum
-      const pv = Number(item.precio_venta) || 0
       const cant = Number(item.cantidad) || 1
+      costoTotal += rubrosSum * cant
+      const pv = Number(item.precio_venta) || 0
       const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
       sumaNetaRegulares += pv * cant * (1 - dp / 100)
     }
