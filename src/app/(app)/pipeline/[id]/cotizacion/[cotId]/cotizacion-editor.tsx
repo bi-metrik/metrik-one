@@ -372,6 +372,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const itemNeto = Math.round(itemLineTotal * (1 - itemDescPct / 100))
             const isAjuste = item.es_ajuste === true
             const isNegativo = itemPrecio < 0
+            const costoUnitario = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -388,8 +389,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Auto</span>
                       )}
                     </div>
-                    {!isAjuste && item.descripcion && (
-                      <span className="text-[10px] text-muted-foreground truncate block">{item.descripcion}</span>
+                    {!isAjuste && (item.descripcion || costoUnitario > 0) && (
+                      <span className="text-[10px] text-muted-foreground truncate block">
+                        {costoUnitario > 0 && <span>Costo unit. {formatCOP(costoUnitario)}</span>}
+                        {costoUnitario > 0 && item.descripcion && <span> · </span>}
+                        {item.descripcion}
+                      </span>
                     )}
                   </div>
                 </div>
