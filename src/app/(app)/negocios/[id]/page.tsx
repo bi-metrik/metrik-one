@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation'
 import { getNegocioDetalleCompleto } from '../negocio-v2-actions'
 import NegocioDetailClient from './negocio-detail-client'
 
+export const maxDuration = 60
+
 interface Props {
   params: Promise<{ id: string }>
   searchParams: Promise<{ err?: string }>

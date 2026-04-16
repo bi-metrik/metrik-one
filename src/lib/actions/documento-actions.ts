@@ -5,7 +5,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
-import { createDriveFolder, uploadFileToDrive, setFilePublicByLink } from '@/lib/google-drive'
+import { createDriveFolder, uploadFileToDrive, setFilePublicByLink, deleteDriveFile } from '@/lib/google-drive'
 
 const BUCKET = 've-documentos'
 
@@ -24,12 +24,18 @@ function mimeTypeFromName(fileName: string): string {
   return map[ext] ?? 'application/pdf'
 }
 
-// ── 1. Upload documento a Drive ──────────────────────────────────────────────
+// ── 1. Procesar documento ya subido a Storage ─────────────────────────────────
 
-export async function uploadDocumento(
+/**
+ * Server action: procesa un documento que ya fue subido a Supabase Storage
+ * desde el cliente. Lee el archivo, sube a Drive, extrae AI, actualiza bloque.
+ */
+export async function procesarDocumento(
   negocioBloqueId: string,
   negocioId: string,
-  formData: FormData,
+  storagePath: string,
+  fileName: string,
+  oldDriveFileId?: string,
 ): Promise<{
   success: boolean
   drive_url?: string
@@ -39,31 +45,27 @@ export async function uploadDocumento(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  const file = formData.get('file') as File | null
-  if (!file) return { success: false, error: 'No se proporcionó archivo' }
-
   const admin = createServiceClient()
+  const mimeType = mimeTypeFromName(fileName)
+  const ext = fileName.split('.').pop()?.toLowerCase() || 'pdf'
 
   try {
-    // ── 1. Upload temporal a Supabase Storage ──────────────────────────────
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf'
-    const tempPath = `${workspaceId}/negocios/${negocioId}/${negocioBloqueId}/documento.${ext}`
-    const arrayBuf = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuf)
-    const mimeType = file.type || mimeTypeFromName(file.name)
-
-    const { error: uploadError } = await admin.storage
+    // ── 1. Descargar archivo de Storage ──────────────────────────────────
+    console.log(`[documento] Step 1: downloading ${fileName} from Storage...`)
+    const { data: fileData, error: dlError } = await admin.storage
       .from(BUCKET)
-      .upload(tempPath, buffer, {
-        contentType: mimeType,
-        upsert: true,
-      })
+      .download(storagePath)
 
-    if (uploadError) {
-      return { success: false, error: `Error subiendo archivo: ${uploadError.message}` }
+    if (dlError || !fileData) {
+      console.error('[documento] Step 1 FAILED:', dlError?.message)
+      return { success: false, error: `Error leyendo archivo: ${dlError?.message ?? 'no data'}` }
     }
 
-    // ── 2. Leer config del bloque (label, campos_extraccion) ───────────────
+    const arrayBuf = await fileData.arrayBuffer()
+    const buffer = Buffer.from(arrayBuf)
+    console.log(`[documento] Step 1 OK: ${(buffer.length / 1024).toFixed(0)}KB`)
+
+    // ── 2. Leer config del bloque (label, campos_extraccion) ────────────
     const { data: bloqueData } = await db(supabase)
       .from('negocio_bloques')
       .select(`
@@ -78,7 +80,7 @@ export async function uploadDocumento(
     const label = (configExtra.label as string) ?? 'Documento'
     const camposExtraccion = (configExtra.campos_extraccion ?? []) as CampoExtraccion[]
 
-    // ── 3. Obtener drive_folder_id del workspace ───────────────────────────
+    // ── 3. Obtener drive_folder_id del workspace ────────────────────────
     const { data: workspace } = await db(supabase)
       .from('workspaces')
       .select('drive_folder_id')
@@ -86,12 +88,13 @@ export async function uploadDocumento(
       .single()
 
     const driveFolderId = workspace?.drive_folder_id as string | null
+    console.log(`[documento] Step 3 OK: drive_folder_id=${driveFolderId ? 'yes' : 'none'}`)
 
     let driveUrl: string | null = null
     let driveFileId: string | null = null
 
     if (driveFolderId) {
-      // ── 4. Crear carpeta del negocio en Drive ────────────────────────────
+      // ── 4. Crear carpeta del negocio en Drive ─────────────────────────
       const { data: negocio } = await db(supabase)
         .from('negocios')
         .select('codigo')
@@ -104,62 +107,80 @@ export async function uploadDocumento(
       }
 
       const folderName = (negocio.codigo as string) ?? negocioId
+      console.log(`[documento] Step 4: creating Drive folder "${folderName}"...`)
       const negocioFolderId = await createDriveFolder(folderName, driveFolderId)
+      console.log(`[documento] Step 4 OK: folder=${negocioFolderId}`)
 
-      // ── 5. Subir archivo a Drive ─────────────────────────────────────────
+      // ── 4b. Eliminar archivo anterior de Drive si existe ────────────────
+      if (oldDriveFileId) {
+        try {
+          await deleteDriveFile(oldDriveFileId)
+          console.log(`[documento] Step 4b OK: old file ${oldDriveFileId} deleted`)
+        } catch (delErr) {
+          console.warn('[documento] Step 4b WARN: could not delete old file:', delErr)
+          // Continue — don't fail the upload because of a delete failure
+        }
+      }
+
+      // ── 5. Subir archivo a Drive ──────────────────────────────────────
       const driveFileName = `${label}.${ext}`
+      console.log(`[documento] Step 5: uploading "${driveFileName}" to Drive...`)
       const result = await uploadFileToDrive(buffer, driveFileName, mimeType, negocioFolderId)
       driveFileId = result.fileId
       driveUrl = result.webViewLink
+      console.log(`[documento] Step 5 OK: fileId=${driveFileId}`)
 
-      // ── 6. Hacer accesible por link ──────────────────────────────────────
+      // ── 6. Hacer accesible por link ───────────────────────────────────
       await setFilePublicByLink(driveFileId)
+      console.log('[documento] Step 6 OK: permissions set')
 
-      // ── 7. Borrar archivo temporal de Supabase Storage ───────────────────
-      await admin.storage.from(BUCKET).remove([tempPath])
+      // ── 7. Borrar archivo temporal de Supabase Storage ────────────────
+      await admin.storage.from(BUCKET).remove([storagePath])
+      console.log('[documento] Step 7 OK: temp file removed')
     } else {
       // Sin Drive configurado: guardar URL de Supabase Storage
-      const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(tempPath)
+      const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
       driveUrl = publicData.publicUrl
     }
 
-    // ── 8. Guardar en negocio_bloques.data ─────────────────────────────────
+    // ── 8. Guardar en negocio_bloques.data ──────────────────────────────
     const currentData = (bloqueData?.data as Record<string, unknown>) ?? {}
     const newData: Record<string, unknown> = {
       ...currentData,
       drive_url: driveUrl,
       drive_file_id: driveFileId,
-      file_name: file.name,
+      file_name: fileName,
       mime_type: mimeType,
       uploaded_at: new Date().toISOString(),
     }
 
-    // ── 9. Extracción AI si hay campos configurados ────────────────────────
+    // ── 9. Extracción AI si hay campos configurados ─────────────────────
     let camposResult: Record<string, CampoResultado> | null = null
 
     if (camposExtraccion.length > 0) {
+      console.log(`[documento] Step 9: AI extraction (${camposExtraccion.length} campos)...`)
       const apiKey = getServerKey('gemini')
       if (apiKey) {
         const extraction = await extractFieldsFromDocument(buffer, mimeType, camposExtraccion, apiKey)
         if (extraction.data) {
           camposResult = extraction.data
           newData.campos = camposResult
+          console.log('[documento] Step 9 OK: AI extraction done')
         } else if (extraction.error) {
-          console.error('[documento-actions] AI extraction error:', extraction.error)
-          // No fallar el upload por error de AI — el archivo ya está en Drive
+          console.error('[documento] Step 9 WARN:', extraction.error)
         }
+      } else {
+        console.warn('[documento] Step 9 SKIP: no gemini API key')
       }
     }
 
-    // ── 10. Determinar si el bloque está completo ──────────────────────────
+    // ── 10. Determinar si el bloque está completo ───────────────────────
     let isComplete = true
 
     if (camposExtraccion.length > 0 && camposResult) {
-      // Verificar que todos los campos required tengan valor
       const requiredCampos = camposExtraccion.filter(c => c.required)
       isComplete = requiredCampos.every(c => camposResult![c.slug]?.value !== null)
     }
-    // Sin campos AI → completo con solo tener el archivo
 
     if (isComplete) {
       await db(supabase)
@@ -181,8 +202,9 @@ export async function uploadDocumento(
         .eq('id', negocioBloqueId)
     }
 
-    // ── 11. Revalidar ─────────────────────────────────────────────────────
+    // ── 11. Revalidar ───────────────────────────────────────────────────
     revalidatePath(`/negocios/${negocioId}`)
+    console.log('[documento] DONE — all steps completed')
 
     return {
       success: true,
@@ -191,7 +213,7 @@ export async function uploadDocumento(
     }
   } catch (err) {
     console.error('[documento-actions] Error:', err)
-    return { success: false, error: `Error: ${String(err).slice(0, 120)}` }
+    return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
   }
 }
 

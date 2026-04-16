@@ -7,9 +7,9 @@ import type { Riesgo } from '@/lib/actions/riesgos'
 
 const NIVEL_COLORS: Record<string, string> = {
   BAJO: 'bg-green-100 text-green-800',
-  MEDIO: 'bg-yellow-100 text-yellow-800',
+  MODERADO: 'bg-yellow-100 text-yellow-800',
   ALTO: 'bg-orange-100 text-orange-800',
-  CRITICO: 'bg-red-100 text-red-800',
+  EXTREMO: 'bg-red-100 text-red-800',
 }
 
 const CATEGORIA_COLORS: Record<string, string> = {
@@ -134,7 +134,7 @@ export default function MatrizClient({ riesgos, categoriaFiltro, celdaFiltro }: 
           <div className="text-sm font-medium text-[#1A1A1A]">
             {riesgos.length} riesgo{riesgos.length !== 1 ? 's' : ''}
           </div>
-          {(['CRITICO', 'ALTO', 'MEDIO', 'BAJO'] as const).map(n => (
+          {(['EXTREMO', 'ALTO', 'MODERADO', 'BAJO'] as const).map(n => (
             <div key={n} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold ${NIVEL_COLORS[n]}`}>
               {n}: {countByNivel[n] ?? 0}
             </div>

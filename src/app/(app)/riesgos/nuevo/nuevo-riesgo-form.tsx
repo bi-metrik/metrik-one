@@ -47,9 +47,9 @@ const IMPACTO_LABELS: Record<number, string> = {
 
 function calcNivel(prob: number, imp: number): { label: string; color: string } {
   const score = prob * imp
-  if (score >= 20) return { label: 'CRITICO', color: 'bg-red-100 text-red-800' }
+  if (score >= 20) return { label: 'EXTREMO', color: 'bg-red-100 text-red-800' }
   if (score >= 12) return { label: 'ALTO', color: 'bg-orange-100 text-orange-800' }
-  if (score >= 6) return { label: 'MEDIO', color: 'bg-yellow-100 text-yellow-800' }
+  if (score >= 6) return { label: 'MODERADO', color: 'bg-yellow-100 text-yellow-800' }
   return { label: 'BAJO', color: 'bg-green-100 text-green-800' }
 }
 

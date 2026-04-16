@@ -823,12 +823,18 @@ export async function cambiarEtapaNegocio(
   // Solo heredar estado/data para bloques VISIBLE (editable siempre empieza pendiente)
   const { data: bloqueConfigs } = await db(supabase)
     .from('bloque_configs')
-    .select('id, bloque_definition_id, estado')
+    .select('id, bloque_definition_id, estado, config_extra, bloque_definitions(tipo)')
     .eq('etapa_id', nuevaEtapaId)
     .eq('workspace_id', workspaceId)
 
   if (bloqueConfigs && (bloqueConfigs as Record<string, unknown>[]).length > 0) {
-    const typedConfigs = bloqueConfigs as Array<{ id: string; bloque_definition_id: string; estado: string }>
+    const typedConfigs = bloqueConfigs as Array<{
+      id: string
+      bloque_definition_id: string
+      estado: string
+      config_extra: Record<string, unknown> | null
+      bloque_definitions: { tipo: string } | null
+    }>
     const configIds = typedConfigs.map(b => b.id)
 
     const instanciasExistentes = await db(supabase)
@@ -846,7 +852,7 @@ export async function cambiarEtapaNegocio(
     // Obtener bloques completados de este negocio (de cualquier etapa) con su definition_id + bloque_items
     const { data: completadosRaw } = await db(supabase)
       .from('negocio_bloques')
-      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id)')
+      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id, config_extra, bloque_definitions(tipo))')
       .eq('negocio_id', negocioId)
       .eq('estado', 'completo')
 
@@ -862,12 +868,41 @@ export async function cambiarEtapaNegocio(
       }
     }
 
+    // Mapa adicional para bloques documento: keyed por {definition_id}:{label}
+    // Necesario porque TODOS los documento comparten el mismo bloque_definition_id
+    const completadosPorLabel = new Map<string, { id: string; data: Record<string, unknown>; completado_at: string | null }>()
+    for (const c of ((completadosRaw ?? []) as Record<string, unknown>[])) {
+      const config = c.bloque_configs as Record<string, unknown> | null
+      const defId = config?.bloque_definition_id as string | null
+      const tipo = (config?.bloque_definitions as Record<string, unknown> | null)?.tipo as string | null
+      const label = (config?.config_extra as Record<string, unknown> | null)?.label as string | null
+      if (tipo === 'documento' && defId && label) {
+        completadosPorLabel.set(`${defId}:${label}`, {
+          id: c.id as string,
+          data: (c.data ?? {}) as Record<string, unknown>,
+          completado_at: c.completado_at as string | null,
+        })
+      }
+    }
+
     const nuevas = typedConfigs
       .filter(bc => !existingIds.has(bc.id))
       .map(bc => {
-        // Solo heredar para bloques VISIBLE — editables empiezan en blanco
         const isVisible = bc.estado === 'visible'
-        const prevCompleto = isVisible ? completadosPorDef.get(bc.bloque_definition_id) : undefined
+        const tipo = bc.bloque_definitions?.tipo
+        const isDocumento = tipo === 'documento'
+
+        let prevCompleto
+        if (isVisible) {
+          prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
+        } else if (isDocumento) {
+          // Documento blocks: match by label across etapas (all share same definition_id)
+          const label = (bc.config_extra as Record<string, unknown> | null)?.label as string | null
+          if (label) {
+            prevCompleto = completadosPorLabel.get(`${bc.bloque_definition_id}:${label}`)
+          }
+        }
+
         return {
           negocio_id: negocioId,
           bloque_config_id: bc.id,

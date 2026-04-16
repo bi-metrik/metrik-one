@@ -9,9 +9,9 @@ import RiesgosExcelActions from './riesgos-excel-actions'
 
 const NIVEL_COLORS: Record<string, string> = {
   BAJO: 'bg-green-100 text-green-800',
-  MEDIO: 'bg-yellow-100 text-yellow-800',
+  MODERADO: 'bg-yellow-100 text-yellow-800',
   ALTO: 'bg-orange-100 text-orange-800',
-  CRITICO: 'bg-red-100 text-red-800',
+  EXTREMO: 'bg-red-100 text-red-800',
 }
 
 const CATEGORIA_COLORS: Record<string, string> = {
@@ -128,7 +128,7 @@ export default async function RiesgosPage({ searchParams }: Props) {
 
       {/* Summary badges */}
       <div className="flex flex-wrap gap-3">
-        {(['CRITICO', 'ALTO', 'MEDIO', 'BAJO'] as const).map(n => (
+        {(['EXTREMO', 'ALTO', 'MODERADO', 'BAJO'] as const).map(n => (
           <div key={n} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${NIVEL_COLORS[n]}`}>
             {n}: {countByNivel[n] ?? 0}
           </div>
@@ -162,9 +162,9 @@ export default async function RiesgosPage({ searchParams }: Props) {
           paramKey="nivel"
           options={[
             { value: 'todos', label: 'Todos' },
-            { value: 'CRITICO', label: 'Critico' },
+            { value: 'EXTREMO', label: 'Extremo' },
             { value: 'ALTO', label: 'Alto' },
-            { value: 'MEDIO', label: 'Medio' },
+            { value: 'MODERADO', label: 'Moderado' },
             { value: 'BAJO', label: 'Bajo' },
           ]}
           buildUrl={buildFilterUrl}

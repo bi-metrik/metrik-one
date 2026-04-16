@@ -7,14 +7,20 @@ import RiesgoDetail from './riesgo-detail'
 export default async function RiesgoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  const { role } = await getWorkspace()
+  const { supabase, role } = await getWorkspace()
   const perms = getRolePermissions(role ?? 'read_only')
   if (!perms.canViewRiesgos) redirect('/')
 
-  const [riesgo, controles, equipo] = await Promise.all([
+  const [riesgo, controles, equipo, causasRes, controlesFullRes] = await Promise.all([
     getRiesgo(id),
     getControlesRiesgo(id),
     getEquipoParaRiesgo(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).from('riesgo_causas')
+      .select('*').eq('riesgo_id', id).order('referencia'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).from('riesgos_controles')
+      .select('*').eq('riesgo_id', id).order('referencia'),
   ])
 
   if (!riesgo) notFound()
@@ -24,6 +30,8 @@ export default async function RiesgoDetailPage({ params }: { params: Promise<{ i
       riesgo={riesgo}
       controles={controles}
       equipo={equipo}
+      causas={causasRes.data || []}
+      controlesFull={controlesFullRes.data || []}
       canEdit={perms.canEditRiesgos}
       canDelete={perms.canDeleteRiesgos}
     />

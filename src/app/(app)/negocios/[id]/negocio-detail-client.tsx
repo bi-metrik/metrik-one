@@ -658,6 +658,7 @@ interface BloqueExtendido extends BloqueConfig {
 function BloqueRenderer({
   bloque,
   negocioId,
+  workspaceId,
   profiles,
   cobros,
   cotizacionesNegocio,
@@ -669,6 +670,7 @@ function BloqueRenderer({
 }: {
   bloque: BloqueExtendido
   negocioId: string
+  workspaceId: string
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   cobros: Array<{
     id: string
@@ -848,6 +850,7 @@ function BloqueRenderer({
         <BloqueDocumento
           negocioBloqueId={instanciaId}
           negocioId={negocioId}
+          workspaceId={workspaceId}
           instancia={bloque.instancia}
           modo={modo}
           configExtra={configExtra as {
@@ -960,6 +963,7 @@ function BloqueRenderer({
 function BloqueCard({
   bloque,
   negocioId,
+  workspaceId,
   profiles,
   cobros,
   cotizacionesNegocio,
@@ -971,6 +975,7 @@ function BloqueCard({
 }: {
   bloque: BloqueExtendido
   negocioId: string
+  workspaceId: string
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   cobros: Array<{
     id: string
@@ -1072,6 +1077,7 @@ function BloqueCard({
             <BloqueRenderer
               bloque={bloque}
               negocioId={negocioId}
+              workspaceId={workspaceId}
               profiles={profiles}
               cobros={cobros}
               cotizacionesNegocio={cotizacionesNegocio}
@@ -1308,6 +1314,7 @@ export default function NegocioDetailClient({
                   key={bloque.id}
                   bloque={bloque}
                   negocioId={negocio.id}
+                  workspaceId={negocio.workspace_id}
                   profiles={profiles}
                   cobros={cobros}
                   cotizacionesNegocio={cotizacionesNegocio}

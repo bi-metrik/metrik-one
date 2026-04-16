@@ -173,3 +173,24 @@ export async function setFilePublicByLink(fileId: string): Promise<void> {
     throw new Error(`Error configurando permisos en Drive (${res.status})`)
   }
 }
+
+// ── File deletion ────────────────────────────────────────────────────────────
+
+/** Delete a file from Drive */
+export async function deleteDriveFile(fileId: string): Promise<void> {
+  const token = await getAccessToken()
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  )
+
+  if (!res.ok && res.status !== 404) {
+    const errBody = await res.text()
+    console.error('[google-drive] Delete failed:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error eliminando archivo de Drive (${res.status})`)
+  }
+}

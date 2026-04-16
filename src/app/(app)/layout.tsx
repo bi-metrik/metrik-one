@@ -4,6 +4,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
 import FiscalNudge from './fiscal-nudge'
 import NotificationBell from '@/components/notification-bell'
+import DevWorkspaceBar from '@/components/dev-workspace-bar'
 
 export default async function AppLayout({
   children,
@@ -31,18 +32,29 @@ export default async function AppLayout({
 
   // Dev workspace override: cookie __dev_ws=<slug> impersona cualquier workspace
   let activeWorkspaceId: string = profile.workspace_id
+  let activeSlug: string | null = null
+  let allWorkspaces: { slug: string; name: string }[] = []
   let activeClient = supabase as ReturnType<typeof createServiceClient>
   if (process.env.NODE_ENV === 'development') {
+    const svc = createServiceClient()
     const cookieStore = await cookies()
     const devSlug = cookieStore.get('__dev_ws')?.value
+    // Load all workspaces for the switcher
+    const { data: wsAll } = await svc.from('workspaces').select('slug, name').order('name')
+    allWorkspaces = wsAll ?? []
     if (devSlug) {
-      const svc = createServiceClient()
-      const { data: ws } = await svc.from('workspaces').select('id').eq('slug', devSlug).single()
-      if (ws?.id) {
-        activeWorkspaceId = ws.id
+      const ws = allWorkspaces.find(w => w.slug === devSlug)
+      if (ws) {
+        activeWorkspaceId = (await svc.from('workspaces').select('id').eq('slug', devSlug).single()).data?.id ?? activeWorkspaceId
+        activeSlug = devSlug
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         activeClient = svc as any
       }
+    }
+    if (!activeSlug) {
+      // Mostrar el workspace real del perfil como activo
+      const { data: myWs } = await svc.from('workspaces').select('slug').eq('id', profile.workspace_id).single()
+      activeSlug = myWs?.slug ?? null
     }
   }
 
@@ -75,32 +87,37 @@ export default async function AppLayout({
   const fiscal = fiscalResult.data
 
   return (
-    <AppShell
-      fullName={profile.full_name || 'Usuario'}
-      workspaceName={workspace.name}
-      workspaceSlug={workspace.slug}
-      role={profile.role}
-      displayRole={profile.display_role ?? null}
-      isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}
-      branding={{
-        colorPrimario: workspace.color_primario ?? undefined,
-        colorSecundario: workspace.color_secundario ?? undefined,
-        logoUrl: workspace.logo_url ?? undefined,
-      }}
-      modules={workspaceModules}
-      notificationBell={<NotificationBell userId={user.id} />}
-    >
-      {/* D235/D236: Fiscal nudge — shows when profile incomplete, max 3 nudges. Not for contador. */}
-      {fiscal && !fiscal.is_complete && profile.role !== 'contador' && (
-        <div className="mb-4">
-          <FiscalNudge
-            isComplete={fiscal.is_complete ?? false}
-            isEstimated={fiscal.is_estimated ?? false}
-            nudgeCount={fiscal.nudge_count ?? 0}
-          />
-        </div>
+    <>
+      <AppShell
+        fullName={profile.full_name || 'Usuario'}
+        workspaceName={workspace.name}
+        workspaceSlug={workspace.slug}
+        role={profile.role}
+        displayRole={profile.display_role ?? null}
+        isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}
+        branding={{
+          colorPrimario: workspace.color_primario ?? undefined,
+          colorSecundario: workspace.color_secundario ?? undefined,
+          logoUrl: workspace.logo_url ?? undefined,
+        }}
+        modules={workspaceModules}
+        notificationBell={<NotificationBell userId={user.id} />}
+      >
+        {/* D235/D236: Fiscal nudge — shows when profile incomplete, max 3 nudges. Not for contador. */}
+        {fiscal && !fiscal.is_complete && profile.role !== 'contador' && (
+          <div className="mb-4">
+            <FiscalNudge
+              isComplete={fiscal.is_complete ?? false}
+              isEstimated={fiscal.is_estimated ?? false}
+              nudgeCount={fiscal.nudge_count ?? 0}
+            />
+          </div>
+        )}
+        {children}
+      </AppShell>
+      {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
+        <DevWorkspaceBar workspaces={allWorkspaces} activeSlug={activeSlug ?? ''} />
       )}
-      {children}
-    </AppShell>
+    </>
   )
 }

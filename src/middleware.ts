@@ -37,8 +37,22 @@ const ROLES_WITH_NUMBERS = ['owner', 'admin', 'supervisor', 'read_only']
 // Contador: acceso exclusivo a /causacion
 const CONTADOR_ONLY_ROLE = 'contador'
 
-async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string): Promise<string> {
+async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string, workspaceId?: string): Promise<string> {
   if (role === CONTADOR_ONLY_ROLE) return '/causacion'
+
+  // Check workspace modules — compliance-only skips business landing
+  if (workspaceId) {
+    const { data: ws } = await (supabase.from('workspaces') as any)
+      .select('modules')
+      .eq('id', workspaceId)
+      .single()
+    const modules = (ws?.modules as Record<string, boolean> | null) ?? { business: true }
+    if (!modules.business) {
+      if (modules.compliance) return '/riesgos'
+      return '/mi-negocio'
+    }
+  }
+
   if (role && !ROLES_WITH_NUMBERS.includes(role)) {
     return '/negocios'
   }
@@ -77,10 +91,10 @@ export async function middleware(request: NextRequest) {
     if (pathname === '/') {
       const { data: tenantProfile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, workspace_id')
         .eq('id', user.id)
         .single()
-      const landing = await getLanding(supabase, tenantProfile?.role ?? undefined)
+      const landing = await getLanding(supabase, tenantProfile?.role ?? undefined, tenantProfile?.workspace_id ?? undefined)
       return NextResponse.redirect(new URL(landing, request.url))
     }
 
@@ -147,7 +161,7 @@ export async function middleware(request: NextRequest) {
           .single()
 
         if (ws?.slug) {
-          const landing = await getLanding(supabase, profile.role ?? undefined)
+          const landing = await getLanding(supabase, profile.role ?? undefined, profile.workspace_id ?? undefined)
           if (IS_DEV) {
             return NextResponse.redirect(new URL(landing, request.url))
           }
@@ -182,7 +196,7 @@ export async function middleware(request: NextRequest) {
           .single()
 
         if (ws?.slug) {
-          const landing = await getLanding(supabase, profile.role ?? undefined)
+          const landing = await getLanding(supabase, profile.role ?? undefined, profile.workspace_id ?? undefined)
           if (IS_DEV) {
             return NextResponse.redirect(new URL(landing, request.url))
           }

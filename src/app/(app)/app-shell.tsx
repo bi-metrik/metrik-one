@@ -155,9 +155,14 @@ export default function AppShell({
   const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 
+  // Home href based on active modules
+  const homeHref = mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio')
+
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
   const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedItems]
-  const primaryHrefs = MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator
+  const primaryHrefs = (!mod.business && mod.compliance)
+    ? ['/riesgos', '/matriz', '/tableros', '/directorio']
+    : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
   const mobilePrimary = allMobileItems.filter(item => primaryHrefs.includes(item.href))
   const mobileSecondary = allMobileItems.filter(item => !primaryHrefs.includes(item.href))
   const showMoreButton = mobileSecondary.length > 0
@@ -201,7 +206,7 @@ export default function AppShell({
         {/* Sidebar header: MéTRIK branding + collapse */}
         <div className="flex h-14 items-center justify-between px-3">
           {sidebarExpanded ? (
-            <Link href="/numeros" className="flex-1 overflow-hidden">
+            <Link href={homeHref} className="flex-1 overflow-hidden">
               <div className="inline-flex flex-col">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont }}>
                   <span style={{ fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em', color: 'var(--sidebar-foreground)' }}>MéTRIK</span>
@@ -211,7 +216,7 @@ export default function AppShell({
               </div>
             </Link>
           ) : (
-            <Link href="/numeros" className="flex h-8 w-10 shrink-0 items-center justify-center">
+            <Link href={homeHref} className="flex h-8 w-10 shrink-0 items-center justify-center">
               <div className="inline-flex flex-col items-center">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
@@ -466,7 +471,7 @@ export default function AppShell({
         {/* Mobile header — MéTRIK isotipo + company logo + avatar/logout */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
           <div className="flex items-center gap-3">
-            <Link href="/numeros" className="flex items-center shrink-0">
+            <Link href={homeHref} className="flex items-center shrink-0">
               <div className="inline-flex flex-col items-center">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>

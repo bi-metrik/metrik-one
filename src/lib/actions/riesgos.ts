@@ -12,12 +12,24 @@ export type Riesgo = {
   id: string
   workspace_id: string
   codigo: string | null
+  referencia: string | null
   categoria: 'LA' | 'FT' | 'FPADM' | 'PTEE'
   descripcion: string
+  evento_riesgo: string | null
   factor_riesgo: string
   probabilidad: number
   impacto: number
+  impacto_legal: number | null
+  impacto_reputacional: number | null
+  impacto_operativo: number | null
+  impacto_contagio: number | null
+  probabilidad_tipo: string | null
+  probabilidad_ocurrencia: number | null
+  probabilidad_frecuencia: number | null
   nivel_riesgo: string
+  riesgo_residual_probabilidad: number | null
+  riesgo_residual_impacto: number | null
+  nivel_riesgo_residual: string | null
   estado: string
   responsable_id: string | null
   fuente_identificacion: string | null
@@ -63,7 +75,7 @@ export async function getRiesgos(filters?: {
     query = query.eq('factor_riesgo', filters.factor_riesgo)
   }
 
-  // Order: CRITICO first, then ALTO, MEDIO, BAJO
+  // Order: EXTREMO first, then ALTO, MODERADO, BAJO
   query = query.order('created_at', { ascending: false })
 
   const { data } = await query
@@ -74,8 +86,8 @@ export async function getRiesgos(filters?: {
     responsable_nombre: r.responsable?.full_name ?? null,
   }))
 
-  // Sort by nivel: CRITICO > ALTO > MEDIO > BAJO
-  const nivelOrder: Record<string, number> = { CRITICO: 0, ALTO: 1, MEDIO: 2, BAJO: 3 }
+  // Sort by nivel: EXTREMO > ALTO > MODERADO > BAJO
+  const nivelOrder: Record<string, number> = { EXTREMO: 0, ALTO: 1, MODERADO: 2, BAJO: 3 }
   riesgos.sort((a: Riesgo, b: Riesgo) => (nivelOrder[a.nivel_riesgo] ?? 4) - (nivelOrder[b.nivel_riesgo] ?? 4))
 
   return riesgos as Riesgo[]
@@ -219,6 +231,23 @@ export async function eliminarRiesgo(id: string) {
   redirect('/riesgos')
 }
 
+// ── Get riesgo_causas for a riesgo ──────────────────────────
+
+export async function getCausasRiesgo(riesgoId: string) {
+  const { supabase, role, error } = await getWorkspace()
+  if (error) return []
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
+    .from('riesgo_causas')
+    .select('*')
+    .eq('riesgo_id', riesgoId)
+    .order('referencia', { ascending: true })
+
+  return data ?? []
+}
+
 // ── Get riesgos_controles for a riesgo ─────────────────────
 
 export async function getControlesRiesgo(riesgoId: string) {
@@ -231,7 +260,7 @@ export async function getControlesRiesgo(riesgoId: string) {
     .from('riesgos_controles')
     .select('*')
     .eq('riesgo_id', riesgoId)
-    .order('created_at', { ascending: false })
+    .order('referencia', { ascending: true })
 
   return data ?? []
 }
@@ -416,9 +445,9 @@ export async function generarPlantillaRiesgos(): Promise<{ data: string; filenam
     ['NIVELES DE RIESGO (Probabilidad x Impacto)'],
     ['Rango', 'Nivel', 'Accion requerida'],
     ['1-5', 'BAJO', 'Monitoreo periodico, controles estandar'],
-    ['6-11', 'MEDIO', 'Plan de mitigacion, controles reforzados'],
+    ['6-11', 'MODERADO', 'Plan de mitigacion, controles reforzados'],
     ['12-19', 'ALTO', 'Atencion prioritaria, controles especificos, reporte a gerencia'],
-    ['20-25', 'CRITICO', 'Accion inmediata, reporte a UIAF si aplica, controles extraordinarios'],
+    ['20-25', 'EXTREMO', 'Accion inmediata, reporte a UIAF si aplica, controles extraordinarios'],
     [],
     ['FUENTES DE IDENTIFICACION'],
     ['Cliente nuevo', 'Identificado durante proceso de vinculacion de cliente'],
