@@ -707,7 +707,10 @@ function BloqueRenderer({
   const SUPERVISOR_UP = ['owner', 'admin', 'supervisor']
 
   function getBloqueMode(): 'editable' | 'visible' {
-    if ((bloque.estado as string) === 'completo') return 'visible'
+    // Config-level: bloque marked as read-only (inherited/visible)
+    if (bloque.estado === 'visible') return 'visible'
+    // Instance-level: bloque already completed
+    if (bloque.instancia?.estado === 'completo') return 'visible'
     switch (tipo) {
       case 'datos':
         return (configExtra.es_multi_pago && !GERENCIAL.includes(userRole)) ? 'visible' : 'editable'
