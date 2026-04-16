@@ -823,7 +823,7 @@ export async function cambiarEtapaNegocio(
   // Solo heredar estado/data para bloques VISIBLE (editable siempre empieza pendiente)
   const { data: bloqueConfigs } = await db(supabase)
     .from('bloque_configs')
-    .select('id, bloque_definition_id, estado, config_extra, bloque_definitions(tipo)')
+    .select('id, bloque_definition_id, estado, nombre, config_extra, bloque_definitions(tipo)')
     .eq('etapa_id', nuevaEtapaId)
     .eq('workspace_id', workspaceId)
 
@@ -832,6 +832,7 @@ export async function cambiarEtapaNegocio(
       id: string
       bloque_definition_id: string
       estado: string
+      nombre: string | null
       config_extra: Record<string, unknown> | null
       bloque_definitions: { tipo: string } | null
     }>
@@ -852,7 +853,7 @@ export async function cambiarEtapaNegocio(
     // Obtener bloques completados de este negocio (de cualquier etapa) con su definition_id + bloque_items
     const { data: completadosRaw } = await db(supabase)
       .from('negocio_bloques')
-      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id, config_extra, bloque_definitions(tipo))')
+      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id, nombre, config_extra, bloque_definitions(tipo))')
       .eq('negocio_id', negocioId)
       .eq('estado', 'completo')
 
@@ -868,20 +869,26 @@ export async function cambiarEtapaNegocio(
       }
     }
 
-    // Mapa adicional para bloques documento: keyed por {definition_id}:{label}
-    // Necesario porque TODOS los documento comparten el mismo bloque_definition_id
+    // Mapa adicional para tipos que comparten bloque_definition_id:
+    // - documento: keyed por {definition_id}:{config_extra.label}
+    // - datos: keyed por {definition_id}:{bloque_configs.nombre}
     const completadosPorLabel = new Map<string, { id: string; data: Record<string, unknown>; completado_at: string | null }>()
     for (const c of ((completadosRaw ?? []) as Record<string, unknown>[])) {
       const config = c.bloque_configs as Record<string, unknown> | null
       const defId = config?.bloque_definition_id as string | null
       const tipo = (config?.bloque_definitions as Record<string, unknown> | null)?.tipo as string | null
-      const label = (config?.config_extra as Record<string, unknown> | null)?.label as string | null
-      if (tipo === 'documento' && defId && label) {
-        completadosPorLabel.set(`${defId}:${label}`, {
-          id: c.id as string,
-          data: (c.data ?? {}) as Record<string, unknown>,
-          completado_at: c.completado_at as string | null,
-        })
+      const entry = {
+        id: c.id as string,
+        data: (c.data ?? {}) as Record<string, unknown>,
+        completado_at: c.completado_at as string | null,
+      }
+      if (tipo === 'documento' && defId) {
+        const label = (config?.config_extra as Record<string, unknown> | null)?.label as string | null
+        if (label) completadosPorLabel.set(`${defId}:${label}`, entry)
+      }
+      if (tipo === 'datos' && defId) {
+        const nombre = config?.nombre as string | null
+        if (nombre) completadosPorLabel.set(`${defId}:${nombre}`, entry)
       }
     }
 
@@ -891,10 +898,17 @@ export async function cambiarEtapaNegocio(
         const isVisible = bc.estado === 'visible'
         const tipo = bc.bloque_definitions?.tipo
         const isDocumento = tipo === 'documento'
+        const isDatos = tipo === 'datos'
 
         let prevCompleto
         if (isVisible) {
-          prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
+          // Datos and documento share definition_id — use nombre/label for disambiguation
+          if (isDatos && bc.nombre) {
+            prevCompleto = completadosPorLabel.get(`${bc.bloque_definition_id}:${bc.nombre}`)
+          }
+          if (!prevCompleto) {
+            prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
+          }
         } else if (isDocumento) {
           // Documento blocks: match by label across etapas (all share same definition_id)
           const label = (bc.config_extra as Record<string, unknown> | null)?.label as string | null
@@ -1121,6 +1135,37 @@ export async function cambiarEtapaNegocioConGate(
         .eq('tipo', 'comentario')
       if ((count ?? 0) === 0) {
         return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: 'Comentario en actividad', es_gate: true }] }
+      }
+    }
+
+    // Gate custom: saldo_cero — saldo del negocio debe ser cero para avanzar
+    if (etapaGates.includes('saldo_cero')) {
+      const [negPrecioRes, cobrosRes] = await Promise.all([
+        db(supabase)
+          .from('negocios')
+          .select('precio_aprobado, precio_estimado')
+          .eq('id', negocioId)
+          .single(),
+        supabase
+          .from('cobros')
+          .select('monto')
+          .eq('negocio_id', negocioId)
+          .eq('workspace_id', workspaceId)
+          .in('estado_causacion', ['APROBADO', 'CAUSADO']),
+      ])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const negPrecio = negPrecioRes.data as any
+      const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
+      const totalCobrado = ((cobrosRes.data ?? []) as Array<{ monto: number }>)
+        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+      const saldo = precio - totalCobrado
+
+      if (saldo > 0) {
+        const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+        return {
+          error: 'gate_bloqueado',
+          bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}`, es_gate: true }],
+        }
       }
     }
   }
