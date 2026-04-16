@@ -177,9 +177,15 @@ export async function procesarDocumento(
     // ── 10. Determinar si el bloque está completo ───────────────────────
     let isComplete = true
 
-    if (camposExtraccion.length > 0 && camposResult) {
-      const requiredCampos = camposExtraccion.filter(c => c.required)
-      isComplete = requiredCampos.every(c => camposResult![c.slug]?.value !== null)
+    if (camposExtraccion.length > 0) {
+      if (!camposResult) {
+        // Extracción AI falló o no hubo key: NO marcar completo, el usuario
+        // debe llenar manualmente los campos requeridos.
+        isComplete = false
+      } else {
+        const requiredCampos = camposExtraccion.filter(c => c.required)
+        isComplete = requiredCampos.every(c => camposResult![c.slug]?.value !== null)
+      }
     }
 
     if (isComplete) {

@@ -635,8 +635,9 @@ export default function BloqueDocumento({
         </button>
       )}
 
-      {/* Campos AI */}
-      {camposConfig.length > 0 && uploadState === 'uploaded' && Object.keys(campos).length > 0 && (
+      {/* Campos AI — se muestran siempre que haya config + archivo,
+          aunque la extracción AI haya fallado (permite llenar manual). */}
+      {camposConfig.length > 0 && uploadState === 'uploaded' && (
         <CamposExtraidos
           negocioBloqueId={negocioBloqueId}
           negocioId={negocioId}
