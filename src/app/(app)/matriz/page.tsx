@@ -1,4 +1,4 @@
-import { getRiesgos } from '@/lib/actions/riesgos'
+import { getAllCausasGrouped } from '@/lib/actions/riesgos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { Grid3X3 } from 'lucide-react'
@@ -8,7 +8,7 @@ import MatrizClient from './matriz-client'
 interface Props {
   searchParams: Promise<{
     categoria?: string
-    celda?: string // "prob-imp" format e.g. "3-4"
+    celda?: string
   }>
 }
 
@@ -20,22 +20,23 @@ export default async function MatrizPage({ searchParams }: Props) {
   const { role } = await getWorkspace()
   if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) redirect('/')
 
-  const riesgos = await getRiesgos({
+  const { causas } = await getAllCausasGrouped({
     categoria: categoria,
   })
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <Grid3X3 className="h-6 w-6 text-[#10B981]" />
         <div>
           <h1 className="text-xl font-bold text-[#1A1A1A]">Matriz de riesgos</h1>
-          <p className="text-sm text-[#6B7280]">Visualizacion probabilidad vs impacto</p>
+          <p className="text-sm text-[#6B7280]">
+            {causas.length} causa{causas.length !== 1 ? 's' : ''} — Probabilidad vs Impacto ponderado
+          </p>
         </div>
       </div>
 
-      <MatrizClient riesgos={riesgos} categoriaFiltro={categoria} celdaFiltro={celda} />
+      <MatrizClient causas={causas} categoriaFiltro={categoria} celdaFiltro={celda} />
     </div>
   )
 }

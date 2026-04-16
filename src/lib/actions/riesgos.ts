@@ -420,6 +420,45 @@ export async function getAllCausasGrouped(filters?: {
   return { riesgos, causas, controlesByCausaId }
 }
 
+// ── Get single causa with parent riesgo and controls ─────────
+
+export async function getCausa(causaId: string) {
+  const { supabase, role, error } = await getWorkspace()
+  if (error) return null
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: causa } = await (supabase as any)
+    .from('riesgo_causas')
+    .select('*')
+    .eq('id', causaId)
+    .single()
+
+  if (!causa) return null
+
+  // Fetch parent riesgo
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: riesgo } = await (supabase as any)
+    .from('riesgos')
+    .select('*, responsable:profiles!responsable_id(full_name)')
+    .eq('id', causa.riesgo_id)
+    .single()
+
+  // Fetch controls assigned to this causa
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: controles } = await (supabase as any)
+    .from('riesgos_controles')
+    .select('*')
+    .eq('causa_id', causaId)
+    .order('referencia', { ascending: true })
+
+  return {
+    causa,
+    riesgo: riesgo ? { ...riesgo, responsable_nombre: riesgo.responsable?.full_name ?? null } as Riesgo : null,
+    controles: controles ?? [],
+  }
+}
+
 // ── Excel: Constants ────────────────────────────────────────
 
 const CATEGORIAS_VALIDAS = ['LA', 'FT', 'FPADM', 'PTEE'] as const
