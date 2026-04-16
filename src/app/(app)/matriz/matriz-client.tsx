@@ -127,17 +127,17 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Summary + category filter */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-3">
-          <div className="text-sm font-medium text-[#1A1A1A]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-[#1A1A1A]">
             {causas.length} causa{causas.length !== 1 ? 's' : ''}
-          </div>
+          </span>
           {(['EXTREMO', 'ALTO', 'MODERADO', 'BAJO'] as const).map(n => (
-            <div key={n} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold ${NIVEL_COLORS[n]}`}>
+            <span key={n} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${NIVEL_COLORS[n]}`}>
               {n}: {countByNivel[n] ?? 0}
-            </div>
+            </span>
           ))}
         </div>
         <div className="flex gap-1">
@@ -157,64 +157,65 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
         </div>
       </div>
 
-      {/* Matrix 5x5 */}
-      <div className="overflow-x-auto">
-        <div className="min-w-[480px]">
-          <div className="flex">
-            <div className="w-28 shrink-0" />
-            <div className="flex-1 text-center text-xs font-semibold text-[#6B7280] pb-2">
-              PROBABILIDAD
+      {/* Compact 5x5 matrix */}
+      <div className="mx-auto max-w-lg">
+        {/* Column headers: PROBABILIDAD */}
+        <div className="flex items-end gap-0.5 pl-20 pr-1 pb-1">
+          {[1, 2, 3, 4, 5].map(p => (
+            <div key={p} className="flex-1 text-center">
+              <div className="text-[10px] font-bold text-[#6B7280]">{p}</div>
+              <div className="text-[8px] text-[#6B7280] leading-tight truncate">{PROB_LABELS[p]}</div>
             </div>
+          ))}
+        </div>
+
+        {/* Grid rows: 5→1 (top=high impact) */}
+        <div className="flex">
+          {/* Y-axis label */}
+          <div className="w-5 shrink-0 flex items-center justify-center">
+            <span className="text-[10px] font-semibold text-[#6B7280] -rotate-90 whitespace-nowrap tracking-wider">
+              IMPACTO
+            </span>
           </div>
 
-          <div className="flex">
-            <div className="w-28 shrink-0 flex flex-col items-center justify-center">
-              <span className="text-xs font-semibold text-[#6B7280] -rotate-90 whitespace-nowrap">
-                IMPACTO
-              </span>
-            </div>
-
-            <div className="flex-1">
-              <div className="grid grid-cols-5 gap-1 mb-1">
-                {[1, 2, 3, 4, 5].map(p => (
-                  <div key={p} className="text-center text-[10px] font-medium text-[#6B7280]">
-                    <div>{p}</div>
-                    <div className="truncate">{PROB_LABELS[p]}</div>
-                  </div>
-                ))}
-              </div>
-
-              {[5, 4, 3, 2, 1].map(imp => (
-                <div key={imp} className="flex items-center gap-1 mb-1">
-                  <div className="w-0 flex-1 grid grid-cols-5 gap-1">
-                    {[1, 2, 3, 4, 5].map(prob => {
-                      const key = `${prob}-${imp}`
-                      const count = grid[key]?.length ?? 0
-                      return (
-                        <button
-                          key={key}
-                          onClick={() => handleCellClick(prob, imp)}
-                          className={`aspect-square rounded-md flex items-center justify-center text-sm font-bold transition-all ${getCellColor(prob, imp)} ${getCellBorder(prob, imp, selectedCell)}`}
-                          title={`Prob: ${prob} (${PROB_LABELS[prob]}), Imp: ${imp} (${IMPACTO_LABELS[imp]}) — ${count} causa${count !== 1 ? 's' : ''} — ${getNivelFromCell(prob, imp)}`}
-                        >
-                          {count > 0 ? count : ''}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <div className="w-24 shrink-0 text-right text-[10px] font-medium text-[#6B7280] pl-2">
-                    {imp} - {IMPACTO_LABELS[imp]}
-                  </div>
+          {/* Row labels + cells */}
+          <div className="flex-1">
+            {[5, 4, 3, 2, 1].map(imp => (
+              <div key={imp} className="flex items-center gap-0.5 mb-0.5">
+                {/* Row label left */}
+                <div className="w-14 shrink-0 text-right pr-1.5">
+                  <span className="text-[10px] font-medium text-[#6B7280]">{imp}</span>
+                  <span className="text-[8px] text-[#6B7280] ml-0.5 hidden sm:inline">{IMPACTO_LABELS[imp]}</span>
                 </div>
-              ))}
-            </div>
+                {/* 5 cells */}
+                {[1, 2, 3, 4, 5].map(prob => {
+                  const key = `${prob}-${imp}`
+                  const count = grid[key]?.length ?? 0
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => handleCellClick(prob, imp)}
+                      className={`flex-1 h-9 rounded flex items-center justify-center text-xs font-bold transition-all cursor-pointer ${getCellColor(prob, imp)} ${getCellBorder(prob, imp, selectedCell)}`}
+                      title={`P:${prob} (${PROB_LABELS[prob]}) × I:${imp} (${IMPACTO_LABELS[imp]}) — ${count} causa${count !== 1 ? 's' : ''} — ${getNivelFromCell(prob, imp)}`}
+                    >
+                      {count > 0 ? count : ''}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
           </div>
+        </div>
+
+        {/* Axis label */}
+        <div className="text-center text-[10px] font-semibold text-[#6B7280] tracking-wider pt-1 pl-20">
+          PROBABILIDAD
         </div>
       </div>
 
       {/* Selected cell indicator */}
       {selectedCell && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-2">
           <span className="text-xs text-[#6B7280]">
             Filtrando: Prob {selectedCell.split('-')[0]} ({PROB_LABELS[parseInt(selectedCell.split('-')[0])]}) × Imp {selectedCell.split('-')[1]} ({IMPACTO_LABELS[parseInt(selectedCell.split('-')[1])]})
             {' — '}
@@ -243,13 +244,13 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-[#6B7280]">
               <tr>
-                <th className="px-4 py-3">Ref</th>
-                <th className="px-4 py-3">Cat</th>
-                <th className="px-4 py-3 min-w-[200px]">Causa</th>
-                <th className="px-4 py-3">Factor</th>
-                <th className="px-4 py-3 text-center">Prob</th>
-                <th className="px-4 py-3 text-center">Imp</th>
-                <th className="px-4 py-3">Nivel</th>
+                <th className="px-4 py-2.5">Ref</th>
+                <th className="px-4 py-2.5">Cat</th>
+                <th className="px-4 py-2.5 min-w-[200px]">Causa</th>
+                <th className="px-4 py-2.5">Factor</th>
+                <th className="px-4 py-2.5 text-center">Prob</th>
+                <th className="px-4 py-2.5 text-center">Imp</th>
+                <th className="px-4 py-2.5">Nivel</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5E7EB] bg-white">
@@ -258,25 +259,25 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
                 const nivel = getNivelFromCell(c.gridProb, c.gridImp)
                 return (
                   <tr key={c.id} className="transition-colors hover:bg-gray-50">
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2.5">
                       <Link href={`/riesgos/causa/${c.id}`} className="font-mono text-xs font-medium text-[#10B981] hover:underline">
                         {c.referencia ?? '—'}
                       </Link>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2.5">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${CATEGORIA_COLORS[c.riesgo_categoria] ?? ''}`}>
                         {c.riesgo_categoria}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-[#1A1A1A]">
+                    <td className="px-4 py-2.5 text-[#1A1A1A]">
                       <Link href={`/riesgos/causa/${c.id}`} className="hover:underline line-clamp-2">
                         {c.descripcion}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-xs text-[#6B7280] capitalize">{c.factor_riesgo ?? '—'}</td>
-                    <td className="px-4 py-3 text-center font-mono text-xs">{c.gridProb}</td>
-                    <td className="px-4 py-3 text-center font-mono text-xs">{c.gridImp}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2.5 text-xs text-[#6B7280] capitalize">{c.factor_riesgo ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-center font-mono text-xs">{c.gridProb}</td>
+                    <td className="px-4 py-2.5 text-center font-mono text-xs">{c.gridImp}</td>
+                    <td className="px-4 py-2.5">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${NIVEL_COLORS[nivel] ?? ''}`}>
                         {nivel}
                       </span>
