@@ -20,6 +20,7 @@ interface BloqueCotizacionProps {
   negocioId: string
   modo: 'editable' | 'visible'
   cotizaciones: CotizacionResumen[]
+  skipEnviar?: boolean
 }
 
 const fmt = (v: number) =>
@@ -49,7 +50,7 @@ const ESTADO_ORDER: Record<string, number> = {
   vencida: 4,
 }
 
-export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: BloqueCotizacionProps) {
+export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar }: BloqueCotizacionProps) {
   const [isPending, startTransition] = useTransition()
   const [optimisticAceptadaId, setOptimisticAceptadaId] = useState<string | null>(null)
 
@@ -184,17 +185,36 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones }: Bloq
                   </div>
                 </Link>
 
-                {/* Botones borrador: Enviar + Eliminar */}
+                {/* Botones borrador: Aprobar directo (skipEnviar) o Enviar + Eliminar */}
                 {modo === 'editable' && !hayAceptada && cot.estado === 'borrador' && (
                   <div className="flex shrink-0 gap-1">
-                    {!hayEnviada && (
-                      <button
-                        onClick={() => handleEnviar(cot.id)}
-                        disabled={isPending}
-                        className="rounded-lg border border-[#10B981] bg-[#10B981]/10 px-3 py-2 text-[10px] font-semibold text-[#10B981] hover:bg-[#10B981]/20 disabled:opacity-50 transition-colors"
-                      >
-                        Enviar
-                      </button>
+                    {skipEnviar ? (
+                      <>
+                        <button
+                          onClick={() => handleAprobar(cot.id)}
+                          disabled={isPending}
+                          className="rounded-lg border border-green-200 bg-green-50 px-2.5 py-2 text-[10px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50 transition-colors"
+                        >
+                          Aprobar
+                        </button>
+                        <button
+                          onClick={() => handleRechazar(cot.id)}
+                          disabled={isPending}
+                          className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-[10px] font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors"
+                        >
+                          Rechazar
+                        </button>
+                      </>
+                    ) : (
+                      !hayEnviada && (
+                        <button
+                          onClick={() => handleEnviar(cot.id)}
+                          disabled={isPending}
+                          className="rounded-lg border border-[#10B981] bg-[#10B981]/10 px-3 py-2 text-[10px] font-semibold text-[#10B981] hover:bg-[#10B981]/20 disabled:opacity-50 transition-colors"
+                        >
+                          Enviar
+                        </button>
+                      )
                     )}
                     <button
                       onClick={() => handleEliminar(cot.id)}

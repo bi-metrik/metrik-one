@@ -98,8 +98,9 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
     .single()
 
   if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
-  if ((cot as { estado: string }).estado !== 'enviada') {
-    return { success: false as const, error: 'Solo se pueden aprobar cotizaciones enviadas' }
+  const estadoCot = (cot as { estado: string }).estado
+  if (estadoCot !== 'enviada' && estadoCot !== 'borrador') {
+    return { success: false as const, error: 'Solo se pueden aprobar cotizaciones en borrador o enviadas' }
   }
 
   // Marcar cotización como aceptada (enviada → aceptada)

@@ -873,6 +873,7 @@ function BloqueRenderer({
           negocioId={negocioId}
           modo={modo}
           cotizaciones={cotizacionesNegocio}
+          skipEnviar={configExtra?.skip_enviar === true}
         />
       )
 
