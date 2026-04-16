@@ -3,9 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Pencil, Save, X, Loader2 } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, ShieldCheck, Pencil, Save, X, Loader2, Check } from 'lucide-react'
 import { actualizarCausa } from '@/lib/actions/riesgos'
-import CausaControles from './causa-controles'
 
 const NIVEL_COLORS: Record<string, string> = {
   BAJO: 'bg-green-100 text-green-800',
@@ -389,13 +388,83 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
         </div>
       )}
 
-      {/* Controls assigned to this causa */}
-      <CausaControles
-        causaId={causaId}
-        riesgoId={causa.riesgo_id}
-        controles={controles}
-        canEdit={canEdit}
-      />
+      {/* Controls assigned to this causa (read-only, managed from /controles) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-[#10B981]" />
+            <h2 className="text-base font-semibold text-[#1A1A1A]">
+              Controles asignados
+              <span className="ml-2 text-sm font-normal text-[#6B7280]">({controles.length})</span>
+            </h2>
+          </div>
+          <Link
+            href="/controles/nuevo"
+            className="text-xs font-medium text-[#10B981] hover:underline"
+          >
+            Gestionar controles
+          </Link>
+        </div>
+
+        {controles.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center">
+            <p className="text-xs text-[#6B7280]">Sin controles asignados a esta causa.</p>
+            <Link href="/controles/nuevo" className="mt-2 inline-block text-xs font-medium text-[#10B981] hover:underline">
+              Crear un control
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {controles.map((ctrl: any) => {
+              const efectividad = ctrl.ponderacion_efectividad != null ? Math.round(ctrl.ponderacion_efectividad * 100) : null
+              return (
+                <Link key={ctrl.id} href={`/controles/${ctrl.id}`} className="block rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-2 transition-colors hover:border-[#10B981]/30">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-[#10B981]">{ctrl.referencia ?? '\u2014'}</span>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          ctrl.tipo_control === 'preventivo' ? 'bg-blue-100 text-blue-800' :
+                          ctrl.tipo_control === 'detectivo' ? 'bg-purple-100 text-purple-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {ctrl.tipo_control}
+                        </span>
+                        {ctrl.periodicidad && (
+                          <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                            {ctrl.periodicidad}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm font-medium text-[#1A1A1A]">{ctrl.nombre_control}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {efectividad != null && (
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                          efectividad >= 80 ? 'bg-green-100 text-green-800' :
+                          efectividad >= 60 ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {efectividad}%
+                        </span>
+                      )}
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+                        ctrl.estado === 'IMPLEMENTADO' ? 'bg-green-100 text-green-800' :
+                        ctrl.estado === 'EN_PROGRESO' ? 'bg-yellow-100 text-yellow-800' :
+                        ctrl.estado === 'SUSPENDIDO' ? 'bg-red-100 text-red-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {ctrl.estado}
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

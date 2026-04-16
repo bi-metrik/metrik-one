@@ -398,23 +398,42 @@ export async function getAllCausasGrouped(filters?: {
     }
   })
 
-  // 3. Fetch ALL controles where causa_id IS NOT NULL for these riesgos
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: controlesRaw } = await (supabase as any)
-    .from('riesgos_controles')
-    .select('*')
-    .in('riesgo_id', riesgoIds)
-    .not('causa_id', 'is', null)
-    .order('referencia', { ascending: true })
-
-  // Group controles by causa_id
+  // 3. Fetch control assignments via junction table
+  const causaIds = causas.map(c => c.id)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlesByCausaId: Record<string, any[]> = {}
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const ctrl of (controlesRaw ?? []) as any[]) {
-    const key = ctrl.causa_id as string
-    if (!controlesByCausaId[key]) controlesByCausaId[key] = []
-    controlesByCausaId[key].push(ctrl)
+
+  if (causaIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: links } = await (supabase as any)
+      .from('control_causa')
+      .select('control_id, causa_id')
+      .in('causa_id', causaIds)
+
+    const uniqueControlIds = [...new Set((links ?? []).map((l: { control_id: string }) => l.control_id))]
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const controlesMap: Record<string, any> = {}
+    if (uniqueControlIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: ctrlData } = await (supabase as any)
+        .from('riesgos_controles')
+        .select('*')
+        .in('id', uniqueControlIds)
+        .order('referencia', { ascending: true })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const ctrl of (ctrlData ?? []) as any[]) {
+        controlesMap[ctrl.id] = ctrl
+      }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const link of (links ?? []) as any[]) {
+      const ctrl = controlesMap[link.control_id]
+      if (!ctrl) continue
+      if (!controlesByCausaId[link.causa_id]) controlesByCausaId[link.causa_id] = []
+      controlesByCausaId[link.causa_id].push(ctrl)
+    }
   }
 
   return { riesgos, causas, controlesByCausaId }
@@ -444,13 +463,25 @@ export async function getCausa(causaId: string) {
     .eq('id', causa.riesgo_id)
     .single()
 
-  // Fetch controls assigned to this causa
+  // Fetch controls assigned to this causa via junction table
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: controles } = await (supabase as any)
-    .from('riesgos_controles')
-    .select('*')
+  const { data: links } = await (supabase as any)
+    .from('control_causa')
+    .select('control_id')
     .eq('causa_id', causaId)
-    .order('referencia', { ascending: true })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let controles: any[] = []
+  const linkControlIds = (links ?? []).map((l: { control_id: string }) => l.control_id)
+  if (linkControlIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: ctrlData } = await (supabase as any)
+      .from('riesgos_controles')
+      .select('*')
+      .in('id', linkControlIds)
+      .order('referencia', { ascending: true })
+    controles = ctrlData ?? []
+  }
 
   return {
     causa,
@@ -646,6 +677,267 @@ export async function crearControlCausa(formData: FormData) {
   revalidatePath('/riesgos')
   revalidatePath('/matriz')
   return { success: true }
+}
+
+// ── Get all controls for workspace ──────────────────────────
+
+export async function getControles() {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: controles } = await (supabase as any)
+    .from('riesgos_controles')
+    .select('*, responsable:profiles!responsable_id(full_name)')
+    .eq('workspace_id', workspaceId)
+    .order('referencia', { ascending: true })
+
+  if (!controles || controles.length === 0) return []
+
+  const controlIds = controles.map((c: { id: string }) => c.id)
+
+  // Fetch junction links
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: junctionLinks } = await (supabase as any)
+    .from('control_causa')
+    .select('control_id, causa_id')
+    .in('control_id', controlIds)
+
+  // Fetch causas + parent riesgos
+  const causaIds = [...new Set((junctionLinks ?? []).map((l: { causa_id: string }) => l.causa_id))]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const causasMap: Record<string, any> = {}
+  if (causaIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: causasData } = await (supabase as any)
+      .from('riesgo_causas')
+      .select('id, referencia, descripcion, riesgo_id')
+      .in('id', causaIds)
+
+    const riesgoIds = [...new Set((causasData ?? []).map((c: { riesgo_id: string }) => c.riesgo_id))]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const riesgosMap: Record<string, any> = {}
+    if (riesgoIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: riesgosData } = await (supabase as any)
+        .from('riesgos')
+        .select('id, codigo, categoria')
+        .in('id', riesgoIds)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const r of (riesgosData ?? []) as any[]) riesgosMap[r.id] = r
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const c of (causasData ?? []) as any[]) {
+      const parent = riesgosMap[c.riesgo_id]
+      causasMap[c.id] = { ...c, riesgo_codigo: parent?.codigo ?? null, riesgo_categoria: parent?.categoria ?? null }
+    }
+  }
+
+  // Group causas by control
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const causasByControl: Record<string, any[]> = {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const link of (junctionLinks ?? []) as any[]) {
+    const causa = causasMap[link.causa_id]
+    if (!causa) continue
+    if (!causasByControl[link.control_id]) causasByControl[link.control_id] = []
+    causasByControl[link.control_id].push(causa)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return controles.map((ctrl: any) => ({
+    ...ctrl,
+    responsable_nombre: ctrl.responsable?.full_name ?? null,
+    causas_asignadas: causasByControl[ctrl.id] ?? [],
+  }))
+}
+
+// ── Get single control with assigned causas ─────────────────
+
+export async function getControl(controlId: string) {
+  const { supabase, role, error } = await getWorkspace()
+  if (error) return null
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: control } = await (supabase as any)
+    .from('riesgos_controles')
+    .select('*, responsable:profiles!responsable_id(full_name)')
+    .eq('id', controlId)
+    .single()
+
+  if (!control) return null
+
+  // Fetch assigned causas via junction
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: jLinks } = await (supabase as any)
+    .from('control_causa')
+    .select('causa_id')
+    .eq('control_id', controlId)
+
+  const cIds = (jLinks ?? []).map((l: { causa_id: string }) => l.causa_id)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let causas: any[] = []
+  if (cIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: causasData } = await (supabase as any)
+      .from('riesgo_causas')
+      .select('id, referencia, descripcion, riesgo_id, impacto_ponderado, probabilidad')
+      .in('id', cIds)
+      .order('referencia', { ascending: true })
+
+    // Fetch parent riesgos
+    const rIds = [...new Set((causasData ?? []).map((c: { riesgo_id: string }) => c.riesgo_id))]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rMap: Record<string, any> = {}
+    if (rIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rData } = await (supabase as any)
+        .from('riesgos')
+        .select('id, codigo, categoria')
+        .in('id', rIds)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const r of (rData ?? []) as any[]) rMap[r.id] = r
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    causas = (causasData ?? []).map((c: any) => {
+      const parent = rMap[c.riesgo_id]
+      return { ...c, riesgo_codigo: parent?.codigo ?? null, riesgo_categoria: parent?.categoria ?? null }
+    })
+  }
+
+  return {
+    control: { ...control, responsable_nombre: control.responsable?.full_name ?? null },
+    causas,
+  }
+}
+
+// ── Get all causas (lightweight) for control selector ────────
+
+export async function getCausasParaControlSelector() {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: causas } = await (supabase as any)
+    .from('riesgo_causas')
+    .select('id, referencia, descripcion, riesgo_id')
+    .order('referencia', { ascending: true })
+
+  if (!causas || causas.length === 0) return []
+
+  // Filter to causas in this workspace via parent riesgos
+  const riesgoIds = [...new Set(causas.map((c: { riesgo_id: string }) => c.riesgo_id))]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: riesgos } = await (supabase as any)
+    .from('riesgos')
+    .select('id, codigo, categoria')
+    .eq('workspace_id', workspaceId)
+    .in('id', riesgoIds)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rMap: Record<string, any> = {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const r of (riesgos ?? []) as any[]) rMap[r.id] = r
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return causas
+    .filter((c: { riesgo_id: string }) => rMap[c.riesgo_id])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((c: any) => ({
+      id: c.id,
+      referencia: c.referencia,
+      descripcion: c.descripcion,
+      riesgo_codigo: rMap[c.riesgo_id]?.codigo ?? null,
+      riesgo_categoria: rMap[c.riesgo_id]?.categoria ?? null,
+    }))
+}
+
+// ── Create control (independent entity) + assign causas ─────
+
+export async function crearControl(data: {
+  referencia?: string | null
+  nombre_control: string
+  tipo_control: string
+  actividad_control?: string | null
+  clasificacion?: string
+  periodicidad?: string | null
+  responsable_id?: string | null
+  causa_ids: string[]
+  ef_certeza: number
+  ef_cambios_personal: number
+  ef_multiples_localidades: number
+  ef_juicios_significativos: number
+  ef_actividades_complejas: number
+  ef_depende_otros: number
+  ef_sujeto_actualizaciones: number
+}) {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!getRolePermissions(role ?? 'read_only').canEditRiesgos) {
+    return { success: false, error: 'No tienes permisos para crear controles' }
+  }
+
+  if (!data.nombre_control?.trim() || !data.tipo_control) {
+    return { success: false, error: 'Nombre y tipo de control son requeridos' }
+  }
+  if (!data.causa_ids || data.causa_ids.length === 0) {
+    return { success: false, error: 'Debes asignar al menos una causa de riesgo' }
+  }
+
+  const efFields = ['ef_certeza', 'ef_cambios_personal', 'ef_multiples_localidades',
+    'ef_juicios_significativos', 'ef_actividades_complejas', 'ef_depende_otros', 'ef_sujeto_actualizaciones'] as const
+  const efValues: Record<string, number> = {}
+  for (const f of efFields) {
+    efValues[f] = data[f] === 3 ? 3 : 1
+  }
+  const efSum = Object.values(efValues).reduce((a, b) => a + b, 0)
+  const ponderacion = efSum / 21
+
+  // Insert control
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: created, error: dbError } = await (supabase as any)
+    .from('riesgos_controles')
+    .insert({
+      workspace_id: workspaceId,
+      nombre_control: data.nombre_control.trim(),
+      tipo_control: data.tipo_control,
+      actividad_control: data.actividad_control?.trim() || null,
+      clasificacion: data.clasificacion || 'manual',
+      periodicidad: data.periodicidad || null,
+      responsable_id: data.responsable_id || null,
+      referencia: data.referencia?.trim() || null,
+      ...efValues,
+      ponderacion_factores: ponderacion,
+      ponderacion_efectividad: ponderacion,
+    })
+    .select('id')
+    .single()
+
+  if (dbError) return { success: false, error: dbError.message }
+  if (!created) return { success: false, error: 'Error al crear el control' }
+
+  // Insert junction rows
+  const junctionRows = data.causa_ids.map(causaId => ({
+    control_id: created.id,
+    causa_id: causaId,
+  }))
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: jError } = await (supabase as any)
+    .from('control_causa')
+    .insert(junctionRows)
+
+  if (jError) return { success: false, error: jError.message }
+
+  revalidatePath('/controles')
+  revalidatePath('/riesgos')
+  revalidatePath('/matriz')
+  return { success: true, controlId: created.id }
 }
 
 // ── Excel: Constants ────────────────────────────────────────

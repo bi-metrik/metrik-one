@@ -117,8 +117,7 @@ export default function RiesgosList({ riesgos, causasByRiesgo, controlesByCausaI
                       <th className="px-4 py-2">Factor</th>
                       <th className="px-4 py-2 text-center">Imp.</th>
                       <th className="px-4 py-2 text-center">Prob</th>
-                      <th className="px-4 py-2">Control</th>
-                      <th className="px-4 py-2 text-center">Efect.</th>
+                      <th className="px-4 py-2 text-center">Control</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E5E7EB]">
@@ -126,11 +125,6 @@ export default function RiesgosList({ riesgos, causasByRiesgo, controlesByCausaI
                     {rCausas.map((c: any) => {
                       const impPonderado = parseFloat(c.impacto_ponderado ?? 0)
                       const controles = controlesByCausaId[c.id] ?? []
-                      const control = controles[0]
-                      const efectividad = control?.ponderacion_efectividad != null
-                        ? Math.round(control.ponderacion_efectividad * 100)
-                        : null
-
                       return (
                         <tr key={c.id} className="transition-colors hover:bg-gray-50">
                           <td className="px-4 py-2.5">
@@ -154,30 +148,16 @@ export default function RiesgosList({ riesgos, causasByRiesgo, controlesByCausaI
                               {c.probabilidad ?? 1}
                             </span>
                           </td>
-                          <td className="px-4 py-2.5">
-                            {control ? (
-                              <div className="flex items-center gap-1.5">
-                                <ShieldCheck className="h-3.5 w-3.5 text-[#10B981] shrink-0" />
-                                <span className="text-xs text-[#1A1A1A] line-clamp-1">{control.referencia ?? control.nombre_control}</span>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-[#6B7280] italic">Sin control</span>
-                            )}
-                            {controles.length > 1 && (
-                              <span className="text-[10px] text-[#6B7280]">+{controles.length - 1} mas</span>
-                            )}
-                          </td>
                           <td className="px-4 py-2.5 text-center">
-                            {efectividad != null ? (
-                              <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                efectividad >= 80 ? 'bg-green-100 text-green-800' :
-                                efectividad >= 60 ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {efectividad}%
+                            {controles.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-800">
+                                <ShieldCheck className="h-3 w-3" />
+                                {controles.length}
                               </span>
                             ) : (
-                              <span className="text-[10px] text-[#6B7280]">—</span>
+                              <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-600">
+                                Sin control
+                              </span>
                             )}
                           </td>
                         </tr>
