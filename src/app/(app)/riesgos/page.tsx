@@ -1,8 +1,8 @@
 import Link from 'next/link'
-import { getRiesgos } from '@/lib/actions/riesgos'
+import { getRiesgos, getAllCausasGrouped } from '@/lib/actions/riesgos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
-import { ShieldAlert, Plus } from 'lucide-react'
+import { ShieldAlert, Plus, ChevronRight, ShieldCheck } from 'lucide-react'
 import { redirect } from 'next/navigation'
 import type { Riesgo } from '@/lib/actions/riesgos'
 import RiesgosExcelActions from './riesgos-excel-actions'
@@ -47,6 +47,21 @@ const FACTOR_LABELS: Record<string, string> = {
   operaciones: 'Operaciones',
 }
 
+function getImpactoBadgeColor(value: number): string {
+  if (value <= 1.5) return 'bg-green-100 text-green-800'
+  if (value <= 2.5) return 'bg-yellow-100 text-yellow-800'
+  if (value <= 3.5) return 'bg-orange-100 text-orange-800'
+  return 'bg-red-100 text-red-800'
+}
+
+const PROB_COLORS: Record<number, string> = {
+  1: 'bg-green-100 text-green-800',
+  2: 'bg-yellow-100 text-yellow-800',
+  3: 'bg-orange-100 text-orange-800',
+  4: 'bg-red-100 text-red-700',
+  5: 'bg-red-200 text-red-900',
+}
+
 interface Props {
   searchParams: Promise<{
     categoria?: string
@@ -63,27 +78,34 @@ export default async function RiesgosPage({ searchParams }: Props) {
   const estado = params.estado ?? 'todos'
   const factor = params.factor ?? 'todos'
 
-  // Role-based permissions (compliance module)
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role ?? 'read_only')
   if (!perms.canViewRiesgos) redirect('/')
 
-  const riesgos = await getRiesgos({
-    categoria: categoria,
+  const { riesgos, causas, controlesByCausaId } = await getAllCausasGrouped({
+    categoria,
     nivel_riesgo: nivel,
-    estado: estado,
+    estado,
     factor_riesgo: factor,
   })
 
-  // Counts by category
+  // Group causas by riesgo_id
+  const causasByRiesgo = new Map<string, typeof causas>()
+  for (const c of causas) {
+    const list = causasByRiesgo.get(c.riesgo_id) ?? []
+    list.push(c)
+    causasByRiesgo.set(c.riesgo_id, list)
+  }
+
+  // Counts
+  const totalCausas = causas.length
   const countByCategoria = riesgos.reduce((acc, r) => {
-    acc[r.categoria] = (acc[r.categoria] || 0) + 1
+    acc[r.categoria] = (acc[r.categoria] || 0) + (causasByRiesgo.get(r.id)?.length ?? 0)
     return acc
   }, {} as Record<string, number>)
 
-  // Counts by nivel
   const countByNivel = riesgos.reduce((acc, r) => {
-    acc[r.nivel_riesgo] = (acc[r.nivel_riesgo] || 0) + 1
+    acc[r.nivel_riesgo] = (acc[r.nivel_riesgo] || 0) + (causasByRiesgo.get(r.id)?.length ?? 0)
     return acc
   }, {} as Record<string, number>)
 
@@ -105,8 +127,10 @@ export default async function RiesgosPage({ searchParams }: Props) {
         <div className="flex items-center gap-3">
           <ShieldAlert className="h-6 w-6 text-[#10B981]" />
           <div>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">Riesgos</h1>
-            <p className="text-sm text-[#6B7280]">{riesgos.length} riesgo{riesgos.length !== 1 ? 's' : ''} registrado{riesgos.length !== 1 ? 's' : ''}</p>
+            <h1 className="text-xl font-bold text-[#1A1A1A]">Matriz de Riesgos</h1>
+            <p className="text-sm text-[#6B7280]">
+              {totalCausas} causa{totalCausas !== 1 ? 's' : ''} en {riesgos.length} evento{riesgos.length !== 1 ? 's' : ''} de riesgo
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -202,61 +226,128 @@ export default async function RiesgosPage({ searchParams }: Props) {
         />
       </div>
 
-      {/* Table */}
+      {/* Causas grouped by riesgo */}
       {riesgos.length === 0 ? (
         <div className="rounded-lg border border-[#E5E7EB] bg-white p-12 text-center">
           <ShieldAlert className="mx-auto h-10 w-10 text-[#6B7280] mb-3" />
           <p className="text-sm font-medium text-[#1A1A1A]">Sin riesgos registrados</p>
-          <p className="mt-1 text-xs text-[#6B7280]">Agrega el primer riesgo para comenzar la matriz de riesgos.</p>
+          <p className="mt-1 text-xs text-[#6B7280]">Agrega el primer riesgo para comenzar la matriz.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-[#E5E7EB]">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-[#6B7280]">
-              <tr>
-                <th className="px-4 py-3">Codigo</th>
-                <th className="px-4 py-3">Categoria</th>
-                <th className="px-4 py-3 min-w-[200px]">Descripcion</th>
-                <th className="px-4 py-3">Factor</th>
-                <th className="px-4 py-3 text-center">Prob</th>
-                <th className="px-4 py-3 text-center">Imp</th>
-                <th className="px-4 py-3">Nivel</th>
-                <th className="px-4 py-3">Estado</th>
-                <th className="px-4 py-3">Responsable</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#E5E7EB] bg-white">
-              {riesgos.map((r: Riesgo) => (
-                <tr key={r.id} className="transition-colors hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <Link href={`/riesgos/${r.id}`} className="font-mono text-xs font-medium text-[#10B981] hover:underline">
-                      {r.codigo ?? '—'}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3">
+        <div className="space-y-4">
+          {riesgos.map((r: Riesgo) => {
+            const rCausas = causasByRiesgo.get(r.id) ?? []
+            return (
+              <div key={r.id} className="rounded-lg border border-[#E5E7EB] bg-white overflow-hidden">
+                {/* Risk event header */}
+                <Link
+                  href={`/riesgos/${r.id}`}
+                  className="flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors border-b border-[#E5E7EB]"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xs font-bold text-[#10B981]">{r.codigo ?? '—'}</span>
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${CATEGORIA_COLORS[r.categoria] ?? ''}`}>
                       {r.categoria}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-[#1A1A1A]">
-                    <Link href={`/riesgos/${r.id}`} className="hover:underline line-clamp-2">
-                      {r.descripcion}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[#6B7280]">{FACTOR_LABELS[r.factor_riesgo] ?? r.factor_riesgo}</td>
-                  <td className="px-4 py-3 text-center font-mono text-xs">{r.probabilidad}</td>
-                  <td className="px-4 py-3 text-center font-mono text-xs">{r.impacto}</td>
-                  <td className="px-4 py-3">
+                    <span className="text-sm font-medium text-[#1A1A1A] line-clamp-1">{r.descripcion}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${NIVEL_COLORS[r.nivel_riesgo] ?? ''}`}>
                       {r.nivel_riesgo}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[#6B7280]">{ESTADO_LABELS[r.estado] ?? r.estado}</td>
-                  <td className="px-4 py-3 text-xs text-[#6B7280]">{r.responsable_nombre ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <span className="text-xs text-[#6B7280]">{rCausas.length} causa{rCausas.length !== 1 ? 's' : ''}</span>
+                    <ChevronRight className="h-4 w-4 text-[#6B7280]" />
+                  </div>
+                </Link>
+
+                {/* Causas table */}
+                {rCausas.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-left text-[10px] font-medium uppercase tracking-wider text-[#6B7280] bg-white">
+                        <tr>
+                          <th className="px-4 py-2">Ref</th>
+                          <th className="px-4 py-2 min-w-[200px]">Causa</th>
+                          <th className="px-4 py-2">Factor</th>
+                          <th className="px-4 py-2 text-center">Imp. Pond.</th>
+                          <th className="px-4 py-2 text-center">Prob</th>
+                          <th className="px-4 py-2">Control</th>
+                          <th className="px-4 py-2 text-center">Efect.</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E5E7EB]">
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {rCausas.map((c: any) => {
+                          const impPonderado = parseFloat(c.impacto_ponderado ?? 0)
+                          const controles = controlesByCausaId[c.id] ?? []
+                          const control = controles[0] // Primary control
+                          const efectividad = control?.ponderacion_efectividad != null
+                            ? Math.round(control.ponderacion_efectividad * 100)
+                            : null
+
+                          return (
+                            <tr key={c.id} className="transition-colors hover:bg-gray-50">
+                              <td className="px-4 py-2.5">
+                                <span className="font-mono text-xs font-medium text-[#10B981]">{c.referencia}</span>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <Link href={`/riesgos/${r.id}`} className="hover:underline">
+                                  <p className="text-[#1A1A1A] line-clamp-2 text-sm">{c.descripcion}</p>
+                                </Link>
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-[#6B7280] capitalize">{c.factor_riesgo ?? '—'}</td>
+                              <td className="px-4 py-2.5 text-center">
+                                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${getImpactoBadgeColor(impPonderado)}`}>
+                                  {impPonderado.toFixed(1)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${PROB_COLORS[c.probabilidad ?? 1] ?? 'bg-gray-100 text-gray-800'}`}>
+                                  {c.probabilidad ?? 1}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                {control ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <ShieldCheck className="h-3.5 w-3.5 text-[#10B981] shrink-0" />
+                                    <span className="text-xs text-[#1A1A1A] line-clamp-1">{control.referencia ?? control.nombre_control}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-[#6B7280] italic">Sin control</span>
+                                )}
+                                {controles.length > 1 && (
+                                  <span className="text-[10px] text-[#6B7280]">+{controles.length - 1} más</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {efectividad != null ? (
+                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    efectividad >= 80 ? 'bg-green-100 text-green-800' :
+                                    efectividad >= 60 ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {efectividad}%
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-[#6B7280]">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {rCausas.length === 0 && (
+                  <div className="px-4 py-4 text-center">
+                    <p className="text-xs text-[#6B7280] italic">Sin causas identificadas para este evento de riesgo</p>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

@@ -45,42 +45,6 @@ const PROB_LABELS: Record<number, string> = {
   5: 'Casi seguro',
 }
 
-const IMPACTO_LABELS: Record<number, string> = {
-  1: 'Insignificante',
-  2: 'Menor',
-  3: 'Moderado',
-  4: 'Mayor',
-  5: 'Catastrofico',
-}
-
-const FACTORES = [
-  { value: 'clientes', label: 'Clientes' },
-  { value: 'proveedores', label: 'Proveedores' },
-  { value: 'empleados', label: 'Empleados' },
-  { value: 'canales', label: 'Canales' },
-  { value: 'jurisdicciones', label: 'Jurisdicciones' },
-  { value: 'productos', label: 'Productos' },
-  { value: 'operaciones', label: 'Operaciones' },
-]
-
-const FUENTES = [
-  { value: '', label: 'Sin especificar' },
-  { value: 'cliente_nuevo', label: 'Cliente nuevo' },
-  { value: 'transaccion_atipica', label: 'Transaccion atipica' },
-  { value: 'lista_internacional', label: 'Lista internacional' },
-  { value: 'reporte_interno', label: 'Reporte interno' },
-  { value: 'auditoria', label: 'Auditoria' },
-  { value: 'otro', label: 'Otro' },
-]
-
-function calcNivel(prob: number, imp: number): { label: string; color: string } {
-  const score = prob * imp
-  if (score >= 20) return { label: 'EXTREMO', color: 'bg-red-100 text-red-800' }
-  if (score >= 12) return { label: 'ALTO', color: 'bg-orange-100 text-orange-800' }
-  if (score >= 6) return { label: 'MODERADO', color: 'bg-yellow-100 text-yellow-800' }
-  return { label: 'BAJO', color: 'bg-green-100 text-green-800' }
-}
-
 const IMPACTO_NIVEL: Record<number, { label: string; color: string }> = {
   1: { label: 'Insignificante', color: 'bg-green-100 text-green-800' },
   2: { label: 'Menor', color: 'bg-yellow-100 text-yellow-800' },
@@ -121,27 +85,19 @@ interface Props {
 
 export default function RiesgoDetail({ riesgo, controles, equipo, causas, controlesFull, canEdit, canDelete }: Props) {
   const [isPending, startTransition] = useTransition()
-  const [prob, setProb] = useState(riesgo.probabilidad)
-  const [imp, setImp] = useState(riesgo.impacto)
   const [estado, setEstado] = useState(riesgo.estado)
   const [responsableId, setResponsableId] = useState(riesgo.responsable_id ?? '')
   const [notas, setNotas] = useState(riesgo.notas ?? '')
-  const [factorRiesgo, setFactorRiesgo] = useState(riesgo.factor_riesgo)
-  const [fuente, setFuente] = useState(riesgo.fuente_identificacion ?? '')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-
-  const nivel = calcNivel(prob, imp)
 
   function handleSave() {
     startTransition(async () => {
       const fd = new FormData()
       fd.set('estado', estado)
-      fd.set('probabilidad', String(prob))
-      fd.set('impacto', String(imp))
       fd.set('responsable_id', responsableId)
       fd.set('notas', notas)
-      fd.set('factor_riesgo', factorRiesgo)
-      fd.set('fuente_identificacion', fuente)
+      fd.set('probabilidad', String(riesgo.probabilidad))
+      fd.set('impacto', String(riesgo.impacto))
 
       const result = await actualizarRiesgo(riesgo.id, fd)
       if (result.success) {
@@ -154,13 +110,24 @@ export default function RiesgoDetail({ riesgo, controles, equipo, causas, contro
 
   function handleDelete() {
     startTransition(async () => {
-      // eliminarRiesgo redirects on success
       await eliminarRiesgo(riesgo.id)
     })
   }
 
+  // Group controls by causa_id
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controlesByCausa = new Map<string, any[]>()
+  for (const ctrl of controlesFull) {
+    if (!ctrl.causa_id) continue
+    const list = controlesByCausa.get(ctrl.causa_id) ?? []
+    list.push(ctrl)
+    controlesByCausa.set(ctrl.causa_id, list)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const unassignedControls = controlesFull.filter((c: any) => !c.causa_id)
+
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -177,8 +144,13 @@ export default function RiesgoDetail({ riesgo, controles, equipo, causas, contro
                 {riesgo.categoria}
               </span>
               <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${NIVEL_COLORS[riesgo.nivel_riesgo]}`}>
-                {riesgo.nivel_riesgo}
+                Inherente: {riesgo.nivel_riesgo}
               </span>
+              {riesgo.nivel_riesgo_residual && (
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${NIVEL_COLORS[riesgo.nivel_riesgo_residual]}`}>
+                  Residual: {riesgo.nivel_riesgo_residual}
+                </span>
+              )}
             </div>
             <p className="text-xs text-[#6B7280]">{CATEGORIA_LABELS[riesgo.categoria]}</p>
           </div>
@@ -232,40 +204,36 @@ export default function RiesgoDetail({ riesgo, controles, equipo, causas, contro
         </div>
       )}
 
-      {/* Descripcion */}
-      <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Descripcion del riesgo</h2>
+      {/* Evento de riesgo summary */}
+      <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
+        <h2 className="text-sm font-semibold text-[#1A1A1A]">Evento de riesgo</h2>
         <p className="text-sm text-[#1A1A1A] leading-relaxed">{riesgo.descripcion}</p>
-      </div>
+        {riesgo.evento_riesgo && (
+          <p className="text-xs text-[#6B7280] italic leading-relaxed">{riesgo.evento_riesgo}</p>
+        )}
 
-      {/* Editable fields */}
-      <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-5">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Evaluacion</h2>
-
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          {/* Estado */}
-          <div className="space-y-1.5">
+        {/* Estado + Responsable + Nivel inline */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 pt-2 border-t border-[#E5E7EB]">
+          <div className="space-y-1">
             <label className="block text-xs font-medium text-[#6B7280]">Estado</label>
             <select
               value={estado}
               onChange={e => setEstado(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               {ESTADOS.map(e => (
                 <option key={e.value} value={e.value}>{e.label}</option>
               ))}
             </select>
           </div>
-
-          {/* Responsable */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <label className="block text-xs font-medium text-[#6B7280]">Responsable</label>
             <select
               value={responsableId}
               onChange={e => setResponsableId(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
             >
               <option value="">Sin asignar</option>
               {equipo.map(m => (
@@ -273,84 +241,24 @@ export default function RiesgoDetail({ riesgo, controles, equipo, causas, contro
               ))}
             </select>
           </div>
-
-          {/* Probabilidad */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-[#6B7280]">Probabilidad</label>
-            <select
-              value={prob}
-              onChange={e => setProb(parseInt(e.target.value))}
-              disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
-            >
-              {[1, 2, 3, 4, 5].map(v => (
-                <option key={v} value={v}>{v} — {PROB_LABELS[v]}</option>
-              ))}
-            </select>
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-[#6B7280]">Riesgo inherente</label>
+            <div className="flex items-center gap-2 h-[34px]">
+              <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${NIVEL_COLORS[riesgo.nivel_riesgo]}`}>
+                {riesgo.nivel_riesgo}
+              </span>
+              <span className="text-xs text-[#6B7280]">P:{riesgo.probabilidad} × I:{riesgo.impacto}</span>
+            </div>
           </div>
-
-          {/* Impacto */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-[#6B7280]">Impacto</label>
-            <select
-              value={imp}
-              onChange={e => setImp(parseInt(e.target.value))}
-              disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
-            >
-              {[1, 2, 3, 4, 5].map(v => (
-                <option key={v} value={v}>{v} — {IMPACTO_LABELS[v]}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Factor */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-[#6B7280]">Factor de riesgo</label>
-            <select
-              value={factorRiesgo}
-              onChange={e => setFactorRiesgo(e.target.value)}
-              disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
-            >
-              {FACTORES.map(f => (
-                <option key={f.value} value={f.value}>{f.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Fuente */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-[#6B7280]">Fuente de identificacion</label>
-            <select
-              value={fuente}
-              onChange={e => setFuente(e.target.value)}
-              disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
-            >
-              {FUENTES.map(f => (
-                <option key={f.value} value={f.value}>{f.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Nivel preview */}
-        <div className="flex items-center gap-3 rounded-lg border border-[#E5E7EB] bg-gray-50 px-4 py-3">
-          <span className="text-sm font-medium text-[#6B7280]">Nivel calculado:</span>
-          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${nivel.color}`}>
-            {nivel.label}
-          </span>
-          <span className="text-xs text-[#6B7280]">({prob} x {imp} = {prob * imp})</span>
         </div>
 
         {/* Notas */}
-        <div className="space-y-1.5">
+        <div className="space-y-1 pt-2">
           <label className="block text-xs font-medium text-[#6B7280]">Notas</label>
           <textarea
             value={notas}
             onChange={e => setNotas(e.target.value)}
-            rows={3}
+            rows={2}
             disabled={!canEdit}
             placeholder="Observaciones adicionales..."
             className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm placeholder:text-[#6B7280] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
@@ -358,10 +266,234 @@ export default function RiesgoDetail({ riesgo, controles, equipo, causas, contro
         </div>
       </div>
 
+      {/* ── CAUSAS (primary sections) ─────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-5 w-5 text-orange-500" />
+          <h2 className="text-base font-semibold text-[#1A1A1A]">
+            Causas identificadas
+            <span className="ml-2 text-sm font-normal text-[#6B7280]">({causas.length})</span>
+          </h2>
+        </div>
+
+        {causas.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center">
+            <p className="text-xs text-[#6B7280]">Sin causas identificadas.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {causas.map((c: any) => {
+              const impPonderado = parseFloat(c.impacto_ponderado ?? 0)
+              const causaControles = controlesByCausa.get(c.id) ?? []
+
+              return (
+                <div key={c.id} className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                  {/* Causa header */}
+                  <div className="px-5 py-4 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-[#10B981]">{c.referencia}</span>
+                          {c.factor_riesgo && (
+                            <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                              {c.factor_riesgo}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-[#1A1A1A] leading-relaxed">{c.descripcion}</p>
+                        {c.contexto && (
+                          <p className="text-xs text-[#6B7280] italic leading-relaxed">{c.contexto}</p>
+                        )}
+                      </div>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold shrink-0 ${getImpactoBadgeColor(impPonderado)}`}>
+                        Imp: {impPonderado.toFixed(1)}
+                      </span>
+                    </div>
+
+                    {/* Scoring row */}
+                    <div className="flex flex-wrap items-center gap-3">
+                      {/* 4 dimensiones */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { key: 'impacto_legal', label: 'Legal', peso: '0.3' },
+                          { key: 'impacto_reputacional', label: 'Reputac.', peso: '0.4' },
+                          { key: 'impacto_operativo', label: 'Operativo', peso: '0.2' },
+                          { key: 'impacto_contagio', label: 'Contagio', peso: '0.1' },
+                        ].map(dim => {
+                          const val = c[dim.key] ?? 1
+                          const nivel = IMPACTO_NIVEL[val] ?? IMPACTO_NIVEL[1]
+                          return (
+                            <span
+                              key={dim.key}
+                              title={`${dim.label} (peso ${dim.peso}): ${val} — ${nivel.label}`}
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${nivel.color}`}
+                            >
+                              {dim.label}: {val}
+                            </span>
+                          )
+                        })}
+                      </div>
+
+                      <div className="border-l border-[#E5E7EB] h-4" />
+
+                      {/* Probabilidad */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-[#6B7280]">Prob:</span>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${IMPACTO_NIVEL[c.probabilidad ?? 1]?.color ?? 'bg-gray-100 text-gray-800'}`}>
+                          {c.probabilidad ?? 1} — {PROB_LABELS[c.probabilidad ?? 1]}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Controls for this causa */}
+                  {causaControles.length > 0 && (
+                    <div className="border-t border-gray-100 bg-gray-50/50">
+                      <div className="px-5 py-2">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <ShieldCheck className="h-3.5 w-3.5 text-[#10B981]" />
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
+                            Control{causaControles.length > 1 ? 'es' : ''} ({causaControles.length})
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                          {causaControles.map((ctrl: any) => {
+                            const efectividad = ctrl.ponderacion_efectividad != null ? Math.round(ctrl.ponderacion_efectividad * 100) : null
+                            const efFactors = [
+                              'ef_certeza', 'ef_cambios_personal', 'ef_multiples_localidades',
+                              'ef_juicios_significativos', 'ef_actividades_complejas',
+                              'ef_depende_otros', 'ef_sujeto_actualizaciones',
+                            ]
+                            return (
+                              <div key={ctrl.id} className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+                                <div className="flex items-start justify-between">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-[10px] font-bold text-[#10B981]">{ctrl.referencia ?? '—'}</span>
+                                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                        ctrl.tipo_control === 'preventivo' ? 'bg-blue-100 text-blue-800' :
+                                        ctrl.tipo_control === 'detectivo' ? 'bg-purple-100 text-purple-800' :
+                                        'bg-gray-100 text-gray-800'
+                                      }`}>
+                                        {ctrl.tipo_control}
+                                      </span>
+                                      {ctrl.clasificacion && (
+                                        <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                                          {ctrl.clasificacion}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs font-medium text-[#1A1A1A]">{ctrl.nombre_control}</p>
+                                    {ctrl.actividad_control && (
+                                      <p className="text-[11px] text-[#6B7280] leading-relaxed">{ctrl.actividad_control}</p>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {efectividad != null && (
+                                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                                        efectividad >= 80 ? 'bg-green-100 text-green-800' :
+                                        efectividad >= 60 ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-red-100 text-red-800'
+                                      }`}>
+                                        {efectividad}%
+                                      </span>
+                                    )}
+                                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                      ctrl.estado === 'IMPLEMENTADO' ? 'bg-green-100 text-green-800' :
+                                      ctrl.estado === 'EN_PROGRESO' ? 'bg-yellow-100 text-yellow-800' :
+                                      ctrl.estado === 'SUSPENDIDO' ? 'bg-red-100 text-red-800' :
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {ctrl.estado}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* 7 effectiveness factors */}
+                                {efFactors.some(f => ctrl[f] != null) && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {efFactors.map(f => {
+                                      const val = ctrl[f]
+                                      if (val == null) return null
+                                      const isGood = val === 3
+                                      return (
+                                        <span
+                                          key={f}
+                                          title={EF_FACTOR_LABELS[f]}
+                                          className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                            isGood ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                                          }`}
+                                        >
+                                          {isGood ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                                          {EF_FACTOR_LABELS[f]}
+                                        </span>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {causaControles.length === 0 && (
+                    <div className="border-t border-gray-100 px-5 py-2 bg-gray-50/50">
+                      <p className="text-[10px] text-[#6B7280] italic flex items-center gap-1">
+                        <ShieldCheck className="h-3 w-3" />
+                        Sin control asignado
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Unassigned controls */}
+      {unassignedControls.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-[#6B7280]" />
+            <h2 className="text-sm font-semibold text-[#6B7280]">
+              Controles sin causa asignada ({unassignedControls.length})
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {unassignedControls.map((ctrl: any) => (
+              <div key={ctrl.id} className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] font-bold text-[#6B7280]">{ctrl.referencia ?? '—'}</span>
+                  <span className="text-xs text-[#1A1A1A]">{ctrl.nombre_control}</span>
+                </div>
+                {ctrl.actividad_control && (
+                  <p className="text-[11px] text-[#6B7280]">{ctrl.actividad_control}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Metadata */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-2">
         <h2 className="text-sm font-semibold text-[#1A1A1A]">Informacion</h2>
         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs">
+          <div>
+            <span className="text-[#6B7280]">Referencia:</span>{' '}
+            <span className="text-[#1A1A1A] font-medium">{riesgo.referencia ?? '—'}</span>
+          </div>
+          <div>
+            <span className="text-[#6B7280]">Factor de riesgo:</span>{' '}
+            <span className="text-[#1A1A1A] font-medium capitalize">{riesgo.factor_riesgo}</span>
+          </div>
           <div>
             <span className="text-[#6B7280]">Fecha identificacion:</span>{' '}
             <span className="text-[#1A1A1A] font-medium">{riesgo.fecha_identificacion ?? '—'}</span>
@@ -379,195 +511,6 @@ export default function RiesgoDetail({ riesgo, controles, equipo, causas, contro
             <span className="text-[#1A1A1A] font-medium">{new Date(riesgo.updated_at).toLocaleDateString('es-CO')}</span>
           </div>
         </div>
-      </div>
-
-      {/* ── Causas Identificadas ─────────────────────────────── */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-orange-500" />
-          <h2 className="text-base font-semibold text-[#1A1A1A]">Causas identificadas</h2>
-        </div>
-        <div className="h-px bg-[#E5E7EB]" />
-
-        {causas.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center">
-            <p className="text-xs text-[#6B7280]">
-              Sin causas identificadas. Las causas se configuran en el analisis de riesgo.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            {causas.map((c: any) => {
-              const impPonderado = parseFloat(c.impacto_ponderado ?? 0)
-              return (
-                <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
-                  {/* Header: referencia + impacto ponderado */}
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="font-mono text-xs font-bold text-[#10B981]">{c.referencia}</span>
-                      {c.factor_riesgo && (
-                        <span className="ml-2 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
-                          {c.factor_riesgo}
-                        </span>
-                      )}
-                    </div>
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${getImpactoBadgeColor(impPonderado)}`}>
-                      {impPonderado.toFixed(1)}
-                    </span>
-                  </div>
-
-                  {/* Descripcion */}
-                  <p className="text-sm text-[#1A1A1A] leading-relaxed">{c.descripcion}</p>
-
-                  {/* Contexto */}
-                  {c.contexto && (
-                    <p className="text-xs text-[#6B7280] italic leading-relaxed">{c.contexto}</p>
-                  )}
-
-                  {/* Probabilidad */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[#6B7280]">Probabilidad:</span>
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${IMPACTO_NIVEL[c.probabilidad ?? 1]?.color ?? 'bg-gray-100 text-gray-800'}`}>
-                      {c.probabilidad ?? 1} — {PROB_LABELS[c.probabilidad ?? 1]}
-                    </span>
-                  </div>
-
-                  {/* 4 dimensiones de impacto */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { key: 'impacto_legal', label: 'Legal' },
-                      { key: 'impacto_reputacional', label: 'Reputacional' },
-                      { key: 'impacto_operativo', label: 'Operativo' },
-                      { key: 'impacto_contagio', label: 'Contagio' },
-                    ].map(dim => {
-                      const val = c[dim.key] ?? 1
-                      const nivel = IMPACTO_NIVEL[val] ?? IMPACTO_NIVEL[1]
-                      return (
-                        <span key={dim.key} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${nivel.color}`}>
-                          {dim.label}: {val}
-                        </span>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ── Controles ────────────────────────────────────────── */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5 text-[#10B981]" />
-          <h2 className="text-base font-semibold text-[#1A1A1A]">Controles</h2>
-        </div>
-        <div className="h-px bg-[#E5E7EB]" />
-
-        {controlesFull.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center">
-            <p className="text-xs text-[#6B7280]">
-              Sin controles asignados. Los controles se configuran en una fase posterior.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            {controlesFull.map((c: any) => {
-              const efectividad = c.ponderacion_efectividad != null ? Math.round(c.ponderacion_efectividad * 100) : null
-              const efFactors = [
-                'ef_certeza',
-                'ef_cambios_personal',
-                'ef_multiples_localidades',
-                'ef_juicios_significativos',
-                'ef_actividades_complejas',
-                'ef_depende_otros',
-                'ef_sujeto_actualizaciones',
-              ]
-              return (
-                <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
-                  {/* Header: referencia + estado */}
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-0.5">
-                      <span className="font-mono text-xs font-bold text-[#10B981]">{c.referencia ?? '—'}</span>
-                      <p className="text-sm font-medium text-[#1A1A1A]">{c.nombre_control}</p>
-                      {c.actividad_control && (
-                        <p className="text-xs text-[#6B7280] leading-relaxed">{c.actividad_control}</p>
-                      )}
-                    </div>
-                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                      c.estado === 'IMPLEMENTADO' ? 'bg-green-100 text-green-800' :
-                      c.estado === 'EN_PROGRESO' ? 'bg-yellow-100 text-yellow-800' :
-                      c.estado === 'SUSPENDIDO' ? 'bg-red-100 text-red-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {c.estado}
-                    </span>
-                  </div>
-
-                  {/* Tipo + Clasificacion + Periodicidad */}
-                  <div className="flex flex-wrap gap-1.5">
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      c.tipo_control === 'preventivo' ? 'bg-blue-100 text-blue-800' :
-                      c.tipo_control === 'detectivo' ? 'bg-purple-100 text-purple-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {c.tipo_control}
-                    </span>
-                    {c.clasificacion && (
-                      <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
-                        {c.clasificacion}
-                      </span>
-                    )}
-                    {c.periodicidad && (
-                      <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
-                        {c.periodicidad}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Efectividad */}
-                  {efectividad != null && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-[#6B7280]">Efectividad:</span>
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                        efectividad >= 80 ? 'bg-green-100 text-green-800' :
-                        efectividad >= 60 ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {efectividad}%
-                      </span>
-                    </div>
-                  )}
-
-                  {/* 7 factores de efectividad */}
-                  {efFactors.some(f => c[f] != null) && (
-                    <div className="flex flex-wrap gap-1">
-                      {efFactors.map(f => {
-                        const val = c[f]
-                        if (val == null) return null
-                        const isGood = val === 3
-                        return (
-                          <span
-                            key={f}
-                            title={EF_FACTOR_LABELS[f]}
-                            className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                              isGood ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-                            }`}
-                          >
-                            {isGood ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                            {EF_FACTOR_LABELS[f]}
-                          </span>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
       </div>
     </div>
   )

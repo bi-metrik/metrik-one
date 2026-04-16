@@ -284,6 +284,142 @@ export async function getEquipoParaRiesgo() {
   }))
 }
 
+// ── Types: Causa enriched with parent riesgo ────────────────
+
+export type CausaWithRiesgo = {
+  id: string
+  referencia: string | null
+  descripcion: string | null
+  factor_riesgo: string | null
+  contexto: string | null
+  impacto_legal: number | null
+  impacto_reputacional: number | null
+  impacto_operativo: number | null
+  impacto_contagio: number | null
+  impacto_ponderado: number | null
+  probabilidad_ocurrencia: number | null
+  probabilidad_frecuencia: number | null
+  probabilidad: number | null
+  riesgo_id: string
+  // Parent riesgo info
+  riesgo_codigo: string | null
+  riesgo_categoria: string | null
+  riesgo_nivel: string | null
+  riesgo_estado: string | null
+}
+
+// ── Get ALL causas grouped by riesgo ────────────────────────
+
+export async function getAllCausasGrouped(filters?: {
+  categoria?: string
+  nivel_riesgo?: string
+  estado?: string
+  factor_riesgo?: string
+}) {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { riesgos: [], causas: [], controlesByCausaId: {} }
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) {
+    return { riesgos: [], causas: [], controlesByCausaId: {} }
+  }
+
+  // 1. Fetch riesgos with filters (same as getRiesgos)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let riesgosQuery = (supabase as any)
+    .from('riesgos')
+    .select('*, responsable:profiles!responsable_id(full_name)')
+    .eq('workspace_id', workspaceId)
+
+  if (filters?.categoria && filters.categoria !== 'todos') {
+    riesgosQuery = riesgosQuery.eq('categoria', filters.categoria)
+  }
+  if (filters?.nivel_riesgo && filters.nivel_riesgo !== 'todos') {
+    riesgosQuery = riesgosQuery.eq('nivel_riesgo', filters.nivel_riesgo)
+  }
+  if (filters?.estado && filters.estado !== 'todos') {
+    riesgosQuery = riesgosQuery.eq('estado', filters.estado)
+  }
+  if (filters?.factor_riesgo && filters.factor_riesgo !== 'todos') {
+    riesgosQuery = riesgosQuery.eq('factor_riesgo', filters.factor_riesgo)
+  }
+
+  riesgosQuery = riesgosQuery.order('created_at', { ascending: false })
+
+  const { data: riesgosRaw } = await riesgosQuery
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const riesgos: Riesgo[] = (riesgosRaw ?? []).map((r: any) => ({
+    ...r,
+    responsable_nombre: r.responsable?.full_name ?? null,
+  }))
+
+  // Sort by nivel: EXTREMO > ALTO > MODERADO > BAJO
+  const nivelOrder: Record<string, number> = { EXTREMO: 0, ALTO: 1, MODERADO: 2, BAJO: 3 }
+  riesgos.sort((a, b) => (nivelOrder[a.nivel_riesgo] ?? 4) - (nivelOrder[b.nivel_riesgo] ?? 4))
+
+  if (riesgos.length === 0) {
+    return { riesgos, causas: [], controlesByCausaId: {} }
+  }
+
+  const riesgoIds = riesgos.map(r => r.id)
+
+  // Build a lookup for parent riesgo info
+  const riesgoMap = new Map(riesgos.map(r => [r.id, r]))
+
+  // 2. Fetch ALL causas for those riesgos
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: causasRaw } = await (supabase as any)
+    .from('riesgo_causas')
+    .select('*')
+    .in('riesgo_id', riesgoIds)
+    .order('referencia', { ascending: true })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const causas: CausaWithRiesgo[] = (causasRaw ?? []).map((c: any) => {
+    const parent = riesgoMap.get(c.riesgo_id)
+    return {
+      id: c.id,
+      referencia: c.referencia ?? null,
+      descripcion: c.descripcion ?? null,
+      factor_riesgo: c.factor_riesgo ?? null,
+      contexto: c.contexto ?? null,
+      impacto_legal: c.impacto_legal ?? null,
+      impacto_reputacional: c.impacto_reputacional ?? null,
+      impacto_operativo: c.impacto_operativo ?? null,
+      impacto_contagio: c.impacto_contagio ?? null,
+      impacto_ponderado: c.impacto_ponderado ?? null,
+      probabilidad_ocurrencia: c.probabilidad_ocurrencia ?? null,
+      probabilidad_frecuencia: c.probabilidad_frecuencia ?? null,
+      probabilidad: c.probabilidad ?? null,
+      riesgo_id: c.riesgo_id,
+      riesgo_codigo: parent?.codigo ?? null,
+      riesgo_categoria: parent?.categoria ?? null,
+      riesgo_nivel: parent?.nivel_riesgo ?? null,
+      riesgo_estado: parent?.estado ?? null,
+    }
+  })
+
+  // 3. Fetch ALL controles where causa_id IS NOT NULL for these riesgos
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: controlesRaw } = await (supabase as any)
+    .from('riesgos_controles')
+    .select('*')
+    .in('riesgo_id', riesgoIds)
+    .not('causa_id', 'is', null)
+    .order('referencia', { ascending: true })
+
+  // Group controles by causa_id
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controlesByCausaId: Record<string, any[]> = {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const ctrl of (controlesRaw ?? []) as any[]) {
+    const key = ctrl.causa_id as string
+    if (!controlesByCausaId[key]) controlesByCausaId[key] = []
+    controlesByCausaId[key].push(ctrl)
+  }
+
+  return { riesgos, causas, controlesByCausaId }
+}
+
 // ── Excel: Constants ────────────────────────────────────────
 
 const CATEGORIAS_VALIDAS = ['LA', 'FT', 'FPADM', 'PTEE'] as const
