@@ -1527,6 +1527,7 @@ export async function autoCrearCobros(
       monto: valorAnticipo,
       external_ref: referenciaEpayco ?? null,
     }).eq('id', (existente as Record<string, unknown>[])[0].id)
+    await reevaluarBloquesCobros(negocioId)
     revalidatePath(`/negocios/${negocioId}`)
     return { error: null }
   }
@@ -1546,6 +1547,7 @@ export async function autoCrearCobros(
   const { error: insertError } = await (supabase as any).from('cobros').insert(cobro)
   if (insertError) return { error: (insertError as { message: string }).message }
 
+  await reevaluarBloquesCobros(negocioId)
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
 }
@@ -1593,6 +1595,7 @@ export async function autoCrearCobrosMulti(
     if (insertError) return { error: (insertError as { message: string }).message }
   }
 
+  await reevaluarBloquesCobros(negocioId)
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
 }
@@ -1656,6 +1659,79 @@ export async function eliminarBloqueItem(
     .eq('id', bloqueItemId)
 
   if (delError) return { error: (delError as { message: string }).message }
+  return { error: null }
+}
+
+// ── Re-evaluar completitud de bloques cobros del negocio ────────────────────
+// Un bloque de cobros se considera completo cuando el saldo del negocio es 0
+// (precio_aprobado/estimado - sum(cobros APROBADO|CAUSADO) <= 0).
+
+export async function reevaluarBloquesCobros(
+  negocioId: string
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  // Precio del negocio y cobros aprobados/causados en paralelo
+  const [negocioRes, cobrosRes] = await Promise.all([
+    db(supabase)
+      .from('negocios')
+      .select('precio_aprobado, precio_estimado')
+      .eq('id', negocioId)
+      .single(),
+    supabase
+      .from('cobros')
+      .select('monto')
+      .eq('negocio_id', negocioId)
+      .in('estado_causacion', ['APROBADO', 'CAUSADO']),
+  ])
+
+  const neg = negocioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+  const precio = neg?.precio_aprobado ?? neg?.precio_estimado ?? 0
+  const totalCobrado = ((cobrosRes.data ?? []) as Array<{ monto: number }>)
+    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  const saldo = precio - totalCobrado
+  const shouldBeComplete = precio > 0 && saldo <= 0
+
+  // Buscar todas las instancias de bloques cobros del negocio
+  const { data: bloquesRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select(`
+      id,
+      estado,
+      bloque_configs!inner(
+        bloque_definitions!inner(tipo)
+      )
+    `)
+    .eq('negocio_id', negocioId)
+
+  type BloqueRow = {
+    id: string
+    estado: string
+    bloque_configs: { bloque_definitions: { tipo: string } | null } | null
+  }
+  const bloquesCobros = ((bloquesRaw ?? []) as BloqueRow[])
+    .filter(b => b.bloque_configs?.bloque_definitions?.tipo === 'cobros')
+
+  if (bloquesCobros.length === 0) return { error: null }
+
+  const now = new Date().toISOString()
+  const toComplete = bloquesCobros.filter(b => shouldBeComplete && b.estado !== 'completo').map(b => b.id)
+  const toPending = bloquesCobros.filter(b => !shouldBeComplete && b.estado === 'completo').map(b => b.id)
+
+  if (toComplete.length > 0) {
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'completo', completado_at: now, updated_at: now })
+      .in('id', toComplete)
+  }
+  if (toPending.length > 0) {
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'pendiente', completado_at: null, updated_at: now })
+      .in('id', toPending)
+  }
+
   return { error: null }
 }
 
@@ -1758,6 +1834,8 @@ export async function confirmarPagoCobro(
           campo_modificado: 'cobro_confirmado',
           contenido: `Pago confirmado: ${cobro.notas ?? 'Cobro'} por $${montoFinal.toLocaleString('es-CO')}`,
         })
+
+      await reevaluarBloquesCobros(negocioId)
     }
   }
 
@@ -1809,6 +1887,7 @@ export async function actualizarPrecioAprobado(
       })
   }
 
+  await reevaluarBloquesCobros(negocioId)
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
 }

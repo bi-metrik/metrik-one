@@ -5,7 +5,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { uploadFileToDrive, setFilePublicByLink, createDriveFolder } from '@/lib/google-drive'
 import { renderToBuffer } from '@react-pdf/renderer'
-import Formulario010PDF from '@/lib/pdf/formulario-010-pdf'
+import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { createElement } from 'react'
@@ -112,18 +112,6 @@ function getTemplateComponent(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): React.ReactElement<any> | null {
   switch (template) {
-    case 'formulario-010':
-      return createElement(Formulario010PDF, {
-        datos,
-        constantes: constantes as {
-          concepto: string
-          concepto_label: string
-          tipo_obligacion: string
-          tipo_solicitud: string
-        },
-        fechaGeneracion,
-        codigoNegocio,
-      })
     case 'declaracion-juramentada':
       return createElement(DeclaracionJuramentadaPDF, {
         datos: datos as {
@@ -228,11 +216,19 @@ export async function generarFormulario(
     const fechaGeneracion = new Date().toISOString()
 
     // 4. Render PDF
-    const element = getTemplateComponent(template, datos, constantes, fechaGeneracion, codigoNegocio)
-    if (!element) return { success: false, error: `Template "${template}" no soportado` }
-
-    const pdfBuffer = await renderToBuffer(element)
-    const buffer = Buffer.from(pdfBuffer)
+    let buffer: Buffer
+    if (template === 'formulario-010') {
+      // Overlay sobre el PDF oficial de la DIAN (no se modifica el fondo).
+      const f010Datos = datos as unknown as Formulario010Datos
+      const f010Constantes = constantes as unknown as Formulario010Constantes
+      const bytes = await generarFormulario010(f010Datos, f010Constantes)
+      buffer = Buffer.from(bytes)
+    } else {
+      const element = getTemplateComponent(template, datos, constantes, fechaGeneracion, codigoNegocio)
+      if (!element) return { success: false, error: `Template "${template}" no soportado` }
+      const pdfBuffer = await renderToBuffer(element)
+      buffer = Buffer.from(pdfBuffer)
+    }
 
     // 5. Upload to Drive
     const { data: workspace } = await db(admin)

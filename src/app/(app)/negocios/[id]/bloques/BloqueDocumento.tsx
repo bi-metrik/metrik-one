@@ -11,6 +11,8 @@ import {
   AlertTriangle,
   Sparkles,
   ExternalLink,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento } from '@/lib/actions/documento-actions'
@@ -137,6 +139,34 @@ function CurrencyField({
 
 // ── Campos extraidos form ────────────────────────────────────────────────────
 
+function CopyButton({ value, disabled }: { value: string | null | undefined; disabled?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const canCopy = !!value && !disabled
+
+  const handleCopy = async () => {
+    if (!canCopy) return
+    try {
+      await navigator.clipboard.writeText(String(value))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      toast.error('No se pudo copiar')
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      disabled={!canCopy}
+      title={canCopy ? 'Copiar' : 'Sin valor'}
+      className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted/50 disabled:opacity-30 disabled:hover:border-transparent disabled:hover:bg-transparent transition-colors"
+    >
+      {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  )
+}
+
 function CamposExtraidos({
   negocioBloqueId,
   negocioId,
@@ -183,36 +213,39 @@ function CamposExtraidos({
               ? 'border-green-200 bg-green-50/30'
               : 'border-amber-200 bg-amber-50/30'
 
-          const inputClass = `w-full rounded-md border px-2.5 py-1.5 text-sm transition-all placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60 ${baseClass} ${isCurrency ? 'tabular-nums text-right' : ''}`
+          const inputClass = `w-full rounded-md border px-3 py-2 text-base transition-all placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60 ${baseClass} ${isCurrency ? 'tabular-nums text-right' : ''}`
 
           return (
-            <div key={config.slug} className="flex items-center gap-2">
-              <label className="w-28 shrink-0 text-[11px] font-medium text-muted-foreground truncate">
-                {config.label}
-                {config.required && <span className="text-red-500 ml-0.5">*</span>}
-              </label>
-              <div className="flex-1 min-w-0">
-                {isCurrency ? (
-                  <CurrencyField
-                    rawValue={campo?.value ?? null}
-                    onCommit={val => handleCommit(config.slug, val)}
-                    disabled={saving}
-                    placeholder={isManual ? '$0' : undefined}
-                    className={inputClass}
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    defaultValue={campo?.value ?? ''}
-                    onBlur={e => handleCommit(config.slug, e.target.value)}
-                    placeholder={isManual ? 'Completar manualmente' : undefined}
-                    disabled={saving}
-                    className={inputClass}
-                  />
-                )}
-              </div>
-              <div className="w-16 shrink-0 text-right">
+            <div key={config.slug} className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  {config.label}
+                  {config.required && <span className="text-red-500 ml-0.5">*</span>}
+                </label>
                 {campo && <ConfidenceBadge confidence={campo.confidence} />}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  {isCurrency ? (
+                    <CurrencyField
+                      rawValue={campo?.value ?? null}
+                      onCommit={val => handleCommit(config.slug, val)}
+                      disabled={saving}
+                      placeholder={isManual ? '$0' : undefined}
+                      className={inputClass}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      defaultValue={campo?.value ?? ''}
+                      onBlur={e => handleCommit(config.slug, e.target.value)}
+                      placeholder={isManual ? 'Completar manualmente' : undefined}
+                      disabled={saving}
+                      className={inputClass}
+                    />
+                  )}
+                </div>
+                <CopyButton value={campo?.value} disabled={saving} />
               </div>
             </div>
           )

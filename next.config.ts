@@ -16,6 +16,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '20mb',
     },
   },
+  outputFileTracingIncludes: {
+    '/**/*': ['./src/lib/pdf/templates/**/*'],
+  },
 }
 
 export default nextConfig

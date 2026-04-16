@@ -543,3 +543,6 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-12 | FOLLOWUP detectado por fast-path regex, no pasa por Gemini | Patrones como "los otros", "ver más", "el resto" no necesitan NLP. Fast-path ahorra ~700 tokens por mensaje FOLLOWUP |
 | 2026-04-12 | last_context TTL 5 minutos, preload en sesión nueva | Si pasan más de 5 min sin interacción, la sesión siguiente no carga el contexto anterior. Evita resoluciones falsas de anáfora |
 | 2026-04-12 | hasAnaphoricSignal usa patrones manuales, no \\b de JS | \\b en JS regex no reconoce caracteres acentuados (í, á) como word boundaries. Fix: lookarounds con \\s y puntuación explícita |
+| 2026-04-16 | skip_enviar configurable por workspace en BloqueCotizacion | config_extra.skip_enviar=true muestra Aprobar/Rechazar directo en borradores. aceptarCotizacionNegocio acepta borrador o enviada. Patron generico reutilizable |
+| 2026-04-16 | Bloques datos se inicializan con defaults de config al crearse | computeFieldDefaults() en negocio-v2-actions.ts. Aplica en crearNegocio y cambiarEtapaNegocio. Resuelve bug de herencia/condiciones con campos no tocados |
+| 2026-04-16 | auto_fill normaliza acentos antes de comparar | normalize('NFD') + strip diacriticals. "Eléctrico" matchea "electrico" en mappings |

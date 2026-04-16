@@ -3,7 +3,7 @@
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { CheckCircle2, Circle, Download } from 'lucide-react'
+import { CheckCircle2, Circle, Download, Copy, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
@@ -52,6 +52,34 @@ const SLUGS_CON_AI = ['factura', 'cedula', 'soporte_upme', 'rut']
 
 // ── Formulario de campos extraídos ────────────────────────────────────────────
 
+function CopyButton({ value, disabled }: { value: string | null | undefined; disabled?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const canCopy = !!value && !disabled
+
+  const handleCopy = async () => {
+    if (!canCopy) return
+    try {
+      await navigator.clipboard.writeText(String(value))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      toast.error('No se pudo copiar')
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      disabled={!canCopy}
+      title={canCopy ? 'Copiar' : 'Sin valor'}
+      className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted/50 disabled:opacity-30 disabled:hover:border-transparent disabled:hover:bg-transparent transition-colors"
+    >
+      {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  )
+}
+
 function CamposForm({
   negocioBloqueId,
   campos,
@@ -78,20 +106,23 @@ function CamposForm({
       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         Datos extraídos
       </p>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {keys.map(key => (
-          <div key={key}>
-            <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+          <div key={key} className="space-y-1">
+            <label className="block text-xs font-medium text-muted-foreground">
               {CAMPOS_LABELS[key]}
             </label>
-            <input
-              type="text"
-              defaultValue={campos[key] ?? ''}
-              onBlur={e => handleBlur(key, e.target.value)}
-              placeholder="—"
-              disabled={isPending}
-              className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm transition-all disabled:opacity-60"
-            />
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                defaultValue={campos[key] ?? ''}
+                onBlur={e => handleBlur(key, e.target.value)}
+                placeholder="—"
+                disabled={isPending}
+                className="flex-1 min-w-0 rounded-md border bg-background px-3 py-2 text-base transition-all disabled:opacity-60"
+              />
+              <CopyButton value={campos[key]} disabled={isPending} />
+            </div>
           </div>
         ))}
       </div>
