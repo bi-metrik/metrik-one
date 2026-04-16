@@ -2210,6 +2210,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         const srcData = datosOtrasEtapas[f.auto_fill.source_etapa_orden]
         if (srcData) {
           const srcVal = String(srcData[f.auto_fill.field] ?? '').toLowerCase().trim()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents: eléctrico → electrico
           if (srcVal && f.auto_fill.mapping[srcVal] !== undefined) {
             autoFill[f.slug] = f.auto_fill.mapping[srcVal]
           }
