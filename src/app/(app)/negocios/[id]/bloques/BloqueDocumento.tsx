@@ -436,7 +436,7 @@ export default function BloqueDocumento({
           )}
         </div>
         {camposConfig.length > 0 && Object.keys(campos).length > 0 && (
-          <div className="ml-5.5 flex flex-wrap gap-x-3 gap-y-0.5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {camposConfig
               .filter(c => !camposVisibles || camposVisibles.includes(c.slug))
               .map(config => {
@@ -446,23 +446,39 @@ export default function BloqueDocumento({
                   ? formatCurrencyDisplay(campo.value)
                   : campo.value
                 return (
-                  <span key={config.slug} className="text-[11px] text-muted-foreground">
-                    {config.label}: <span className={`text-foreground ${config.tipo === 'currency' ? 'tabular-nums' : ''}`}>{displayValue}</span>
-                  </span>
+                  <div key={config.slug} className="space-y-1">
+                    <label className="block text-xs font-medium text-muted-foreground">
+                      {config.label}
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <div className={`flex-1 min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-base text-foreground break-words ${config.tipo === 'currency' ? 'tabular-nums' : ''}`}>
+                        {displayValue}
+                      </div>
+                      <CopyButton value={campo.value} />
+                    </div>
+                  </div>
                 )
               })}
           </div>
         )}
         {camposConfig.length === 0 && camposVisibles && Object.keys(campos).length > 0 && (
-          <div className="ml-5.5 flex flex-wrap gap-x-3 gap-y-0.5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {camposVisibles.map(slug => {
               const campo = campos[slug]
               if (!campo?.value) return null
               const displayLabel = slug.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
               return (
-                <span key={slug} className="text-[11px] text-muted-foreground">
-                  {displayLabel}: <span className="text-foreground">{campo.value}</span>
-                </span>
+                <div key={slug} className="space-y-1">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    {displayLabel}
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1 min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-base text-foreground break-words">
+                      {campo.value}
+                    </div>
+                    <CopyButton value={campo.value} />
+                  </div>
+                </div>
               )
             })}
           </div>
