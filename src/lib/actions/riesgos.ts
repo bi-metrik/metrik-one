@@ -459,6 +459,76 @@ export async function getCausa(causaId: string) {
   }
 }
 
+// ── Get riesgos for selector (lightweight) ──────────────────
+
+export async function getRiesgosParaSelector() {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
+    .from('riesgos')
+    .select('id, codigo, categoria, descripcion')
+    .eq('workspace_id', workspaceId)
+    .order('codigo', { ascending: true })
+
+  return (data ?? []) as { id: string; codigo: string; categoria: string; descripcion: string }[]
+}
+
+// ── Create causa ────────────────────────────────────────────
+
+export async function crearCausa(data: {
+  riesgo_id: string
+  referencia?: string | null
+  descripcion: string
+  contexto?: string | null
+  factor_riesgo?: string | null
+  impacto_legal: number
+  impacto_reputacional: number
+  impacto_operativo: number
+  impacto_contagio: number
+  probabilidad_ocurrencia: number
+  probabilidad_frecuencia: number
+}) {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!getRolePermissions(role ?? 'read_only').canEditRiesgos) {
+    return { success: false, error: 'No tienes permisos para crear causas' }
+  }
+
+  if (!data.riesgo_id || !data.descripcion?.trim()) {
+    return { success: false, error: 'Evento de riesgo y descripcion son requeridos' }
+  }
+
+  const clamp = (v: number) => Math.max(1, Math.min(5, Math.round(v)))
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: created, error: dbError } = await (supabase as any)
+    .from('riesgo_causas')
+    .insert({
+      riesgo_id: data.riesgo_id,
+      referencia: data.referencia?.trim() || null,
+      descripcion: data.descripcion.trim(),
+      contexto: data.contexto?.trim() || null,
+      factor_riesgo: data.factor_riesgo || null,
+      impacto_legal: clamp(data.impacto_legal),
+      impacto_reputacional: clamp(data.impacto_reputacional),
+      impacto_operativo: clamp(data.impacto_operativo),
+      impacto_contagio: clamp(data.impacto_contagio),
+      probabilidad_ocurrencia: clamp(data.probabilidad_ocurrencia),
+      probabilidad_frecuencia: clamp(data.probabilidad_frecuencia),
+    })
+    .select('id')
+    .single()
+
+  if (dbError) return { success: false, error: dbError.message }
+
+  revalidatePath('/riesgos')
+  revalidatePath('/matriz')
+  return { success: true, causaId: created?.id }
+}
+
 // ── Update causa ────────────────────────────────────────────
 
 export async function actualizarCausa(causaId: string, data: {

@@ -101,7 +101,7 @@ export default async function RiesgosPage({ searchParams }: Props) {
               className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669]"
             >
               <Plus className="h-4 w-4" />
-              Nuevo riesgo
+              Nueva causa
             </Link>
           )}
         </div>
