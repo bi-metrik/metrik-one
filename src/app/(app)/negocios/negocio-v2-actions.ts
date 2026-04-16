@@ -110,6 +110,18 @@ function db(supabase: unknown): any {
   return supabase
 }
 
+/** Compute initial data defaults from bloque_config config_extra.fields */
+function computeFieldDefaults(configExtra: Record<string, unknown> | null): Record<string, unknown> {
+  const fields = ((configExtra?.fields ?? []) as Array<{ slug: string; tipo?: string; default?: unknown }>)
+  const defaults: Record<string, unknown> = {}
+  for (const f of fields) {
+    if (f.default !== undefined) {
+      defaults[f.slug] = f.default
+    }
+  }
+  return defaults
+}
+
 // ── Listar negocios del workspace ─────────────────────────────────────────────
 
 export async function getNegociosV2(estado: 'abierto' | 'completado' | 'todos' = 'abierto'): Promise<NegocioResumen[]> {
@@ -658,12 +670,15 @@ export async function crearNegocio(input: {
       .eq('workspace_id', workspaceId)
 
     if (bloqueConfigs && (bloqueConfigs as Record<string, unknown>[]).length > 0) {
-      const instancias = (bloqueConfigs as Record<string, unknown>[]).map(bc => ({
-        negocio_id: negocioData.id,
-        bloque_config_id: bc.id as string,
-        estado: 'pendiente',
-        data: {},
-      }))
+      const instancias = (bloqueConfigs as Record<string, unknown>[]).map(bc => {
+        const defaults = computeFieldDefaults(bc.config_extra as Record<string, unknown> | null)
+        return {
+          negocio_id: negocioData.id,
+          bloque_config_id: bc.id as string,
+          estado: 'pendiente',
+          data: Object.keys(defaults).length > 0 ? defaults : {},
+        }
+      })
 
       await db(supabase).from('negocio_bloques').insert(instancias)
 
@@ -920,11 +935,15 @@ export async function cambiarEtapaNegocio(
           prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
         }
 
+        // If no inherited data, initialize with field defaults from config
+        const data = prevCompleto?.data
+          ?? (isDatos ? computeFieldDefaults(bc.config_extra as Record<string, unknown> | null) : {})
+
         return {
           negocio_id: negocioId,
           bloque_config_id: bc.id,
           estado: prevCompleto ? 'completo' : 'pendiente',
-          data: prevCompleto?.data ?? {},
+          data,
           completado_at: prevCompleto?.completado_at ?? null,
         }
       })
