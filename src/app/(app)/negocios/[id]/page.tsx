@@ -31,6 +31,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       historialData={data.historialData}
       actividad={data.actividad}
       staffList={data.staffList}
+      datosOtrasEtapas={data.datosOtrasEtapas}
       errorMsg={err}
     />
   )

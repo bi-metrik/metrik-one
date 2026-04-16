@@ -709,8 +709,8 @@ function BloqueRenderer({
   function getBloqueMode(): 'editable' | 'visible' {
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
-    // Instance-level: bloque already completed
-    if (bloque.instancia?.estado === 'completo') return 'visible'
+    // Instance-level: bloque already completed (except datos — auto-save needs re-editing)
+    if (bloque.instancia?.estado === 'completo' && tipo !== 'datos') return 'visible'
     switch (tipo) {
       case 'datos':
         return (configExtra.es_multi_pago && !GERENCIAL.includes(userRole)) ? 'visible' : 'editable'
@@ -785,6 +785,7 @@ function BloqueRenderer({
           fields={fields}
           requireConfirm={!!configExtra.require_confirm}
           confirmLabel={configExtra.confirm_label as string | undefined}
+          autoFillDefaults={(configExtra._auto_fill ?? undefined) as Record<string, unknown> | undefined}
         />
       )
     }
@@ -1143,6 +1144,7 @@ interface Props {
     autor_nombre: string | null
   }>
   staffList: Array<{ id: string; full_name: string }>
+  datosOtrasEtapas: Record<number, Record<string, unknown>>
   errorMsg?: string
 }
 
@@ -1162,6 +1164,7 @@ export default function NegocioDetailClient({
   ejecucionData,
   historialData,
   staffList,
+  datosOtrasEtapas,
   errorMsg,
 }: Props) {
   useEffect(() => {
@@ -1186,9 +1189,13 @@ export default function NegocioDetailClient({
   }
 
   const bloquesExtendidos = allBloques.filter(b => {
-    const cond = b.config_extra?.condition as { field: string; value: string } | undefined
+    const cond = b.config_extra?.condition as { field: string; value: string; source_etapa_orden?: number } | undefined
     if (!cond) return true
-    return String(datosEtapa[cond.field] ?? '') === cond.value
+    // Cross-etapa condition: read from another etapa's data
+    const source = cond.source_etapa_orden
+      ? (datosOtrasEtapas[cond.source_etapa_orden] ?? {})
+      : datosEtapa
+    return String(source[cond.field] ?? '') === cond.value
   })
 
   return (

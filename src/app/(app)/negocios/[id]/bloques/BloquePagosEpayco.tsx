@@ -150,18 +150,35 @@ export default function BloquePagosEpayco({
       <div className="border-t border-[#E5E7EB] pt-3 mt-1">
         <p className="text-[11px] font-medium text-[#6B7280] mb-2">Nuevo pago</p>
         <div className="flex gap-2">
-          <input
-            type="text"
-            value={newRef}
-            onChange={e => setNewRef(e.target.value)}
-            placeholder="Referencia ePayco"
-            disabled={consultando || isPending}
-            className="flex-1 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
-          />
+          <div className="flex-1">
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={9}
+              value={newRef}
+              onChange={e => {
+                const v = e.target.value.replace(/\D/g, '')
+                if (v.length <= 9) setNewRef(v)
+              }}
+              placeholder="Ej: 344799998"
+              disabled={consultando || isPending}
+              className={`w-full rounded-lg border bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60 ${
+                newRef.length > 0 && newRef.length !== 9
+                  ? 'border-amber-400 focus:border-amber-400'
+                  : 'border-[#E5E7EB] focus:border-[#10B981]'
+              }`}
+            />
+            <p className="mt-1 text-[10px] text-[#6B7280]">
+              La referencia debe tener 9 digitos{newRef.length > 0 && newRef.length !== 9 && (
+                <span className="text-amber-600 font-medium"> ({newRef.length}/9)</span>
+              )}
+            </p>
+          </div>
           <button
             onClick={handleConsultar}
-            disabled={consultando || !newRef.trim()}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#3B82F6] px-3 py-2 text-[10px] font-medium text-white hover:bg-[#2563EB] disabled:opacity-60 transition-colors whitespace-nowrap"
+            disabled={consultando || newRef.length !== 9}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[#3B82F6] px-3 py-2 text-[10px] font-medium text-white hover:bg-[#2563EB] disabled:opacity-60 transition-colors whitespace-nowrap self-start"
           >
             {consultando ? 'Consultando...' : <><Search className="h-3 w-3" />Consultar</>}
           </button>

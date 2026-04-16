@@ -915,6 +915,9 @@ export async function cambiarEtapaNegocio(
           if (label) {
             prevCompleto = completadosPorLabel.get(`${bc.bloque_definition_id}:${label}`)
           }
+        } else if (tipo === 'cotizacion') {
+          // Cotización: inherit completion state across etapas (unique definition_id)
+          prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
         }
 
         return {
@@ -1911,6 +1914,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }>
   }>
   etapasLinea: EtapaNegocio[]
+  datosOtrasEtapas: Record<number, Record<string, unknown>>
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   currentUserId: string | null
   userRole: string
@@ -2137,26 +2141,106 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     .filter(c => c.estado_causacion === 'PENDIENTE')
     .reduce((sum, c) => sum + (c.monto ?? 0), 0)
 
-  const bloquesConExtra = base.bloques.map(b => ({
-    ...b,
-    config_extra: bloqueConfigsExtra[b.id] ?? {},
-    items: (itemsByBloqueId[b.instancia?.id ?? ''] ?? []) as Array<{
-      id: string
-      label: string
-      tipo: string
-      completado: boolean
-      completado_por: string | null
-      completado_at: string | null
-      link_url: string | null
-      imagen_data: string | null
-      orden: number
-    }>,
-  }))
+  // ── Cross-etapa data for conditions + auto_fill ────────────────────────────
+  const sourceEtapaOrdens = new Set<number>()
+  for (const bcId of Object.keys(bloqueConfigsExtra)) {
+    const ce = bloqueConfigsExtra[bcId]
+    const cond = ce?.condition as { source_etapa_orden?: number } | undefined
+    if (cond?.source_etapa_orden) sourceEtapaOrdens.add(cond.source_etapa_orden)
+    const fields = (ce?.fields ?? []) as Array<{ auto_fill?: { source_etapa_orden?: number } }>
+    for (const f of fields) {
+      if (f.auto_fill?.source_etapa_orden) sourceEtapaOrdens.add(f.auto_fill.source_etapa_orden)
+    }
+  }
+
+  const datosOtrasEtapas: Record<number, Record<string, unknown>> = {}
+  if (sourceEtapaOrdens.size > 0 && base.negocio.linea_id) {
+    const { data: etapasSource } = await db(supabase)
+      .from('etapas_negocio')
+      .select('id, orden')
+      .eq('linea_id', base.negocio.linea_id)
+      .in('orden', [...sourceEtapaOrdens])
+    if (etapasSource) {
+      const etapaIdToOrden = new Map<string, number>()
+      const etapaIds = (etapasSource as Array<{ id: string; orden: number }>).map(e => {
+        etapaIdToOrden.set(e.id, e.orden)
+        return e.id
+      })
+      const { data: bloquesOtras } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo))')
+        .eq('negocio_id', id)
+        .in('bloque_configs.etapa_id', etapaIds)
+      for (const b of ((bloquesOtras ?? []) as Record<string, unknown>[])) {
+        const config = b.bloque_configs as Record<string, unknown>
+        const etapaId = config.etapa_id as string
+        const orden = etapaIdToOrden.get(etapaId)
+        if (orden === undefined) continue
+        if (!datosOtrasEtapas[orden]) datosOtrasEtapas[orden] = {}
+        const data = b.data as Record<string, unknown> | null
+        if (data) {
+          Object.assign(datosOtrasEtapas[orden], data)
+          // Flatten AI-extracted campos into top-level for condition/auto_fill lookup
+          const campos = data.campos as Record<string, { value: string | null }> | undefined
+          if (campos) {
+            for (const [slug, campo] of Object.entries(campos)) {
+              if (campo?.value !== null && campo?.value !== undefined) {
+                datosOtrasEtapas[orden][slug] = campo.value
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Build enriched bloques with auto_fill values ──────────────────────────
+  const bloquesConExtra = base.bloques.map(b => {
+    const configExtra = bloqueConfigsExtra[b.id] ?? {}
+
+    // Compute auto_fill defaults for datos fields
+    const autoFill: Record<string, unknown> = {}
+    const fields = (configExtra.fields ?? []) as Array<{
+      slug: string
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      auto_fill?: { field: string; source: string; mapping: Record<string, any>; source_etapa_orden: number }
+    }>
+    for (const f of fields) {
+      if (f.auto_fill) {
+        const srcData = datosOtrasEtapas[f.auto_fill.source_etapa_orden]
+        if (srcData) {
+          const srcVal = String(srcData[f.auto_fill.field] ?? '').toLowerCase().trim()
+          if (srcVal && f.auto_fill.mapping[srcVal] !== undefined) {
+            autoFill[f.slug] = f.auto_fill.mapping[srcVal]
+          }
+        }
+      }
+    }
+
+    return {
+      ...b,
+      config_extra: Object.keys(autoFill).length > 0
+        ? { ...configExtra, _auto_fill: autoFill }
+        : configExtra,
+      items: (itemsByBloqueId[b.instancia?.id ?? ''] ?? []) as Array<{
+        id: string
+        label: string
+        tipo: string
+        completado: boolean
+        completado_por: string | null
+        completado_at: string | null
+        link_url: string | null
+        imagen_data: string | null
+        orden: number
+      }>,
+    }
+  })
 
   return {
     negocio: base.negocio,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
+    datosOtrasEtapas,
     profiles: (profilesData ?? []).map(p => ({
       id: p.id,
       full_name: p.full_name,

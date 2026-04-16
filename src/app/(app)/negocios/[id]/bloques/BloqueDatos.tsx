@@ -27,6 +27,7 @@ interface BloqueDatosProps {
   confirmLabel?: string
   onComplete?: () => void
   epaycoLookup?: { triggerField: string; fill: Record<string, string> }
+  autoFillDefaults?: Record<string, unknown>
 }
 
 const fmt = (v: number) =>
@@ -41,13 +42,14 @@ export default function BloqueDatos({
   confirmLabel,
   onComplete,
   epaycoLookup,
+  autoFillDefaults,
 }: BloqueDatosProps) {
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const init: Record<string, unknown> = {}
     fields.forEach(f => {
       const fallback = f.default !== undefined ? f.default : (f.tipo === 'toggle' ? false : '')
-      init[f.slug] = saved[f.slug] ?? fallback
+      init[f.slug] = saved[f.slug] ?? autoFillDefaults?.[f.slug] ?? fallback
     })
     return init
   })
