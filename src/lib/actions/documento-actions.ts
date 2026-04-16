@@ -5,7 +5,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
-import { createDriveFolder, uploadFileToDrive, setFilePublicByLink, deleteDriveFile } from '@/lib/google-drive'
+import { createDriveFolder, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 
 const BUCKET = 've-documentos'
 
@@ -219,6 +219,99 @@ export async function procesarDocumento(
     }
   } catch (err) {
     console.error('[documento-actions] Error:', err)
+    return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
+  }
+}
+
+// ── 1b. Reprocesar AI sobre documento ya subido a Drive ─────────────────────
+
+/**
+ * Re-ejecuta la extracción AI sobre el archivo ya guardado en Drive.
+ * Útil cuando la AI falló la primera vez, cambió la API key o se ajustó
+ * la configuración de campos_extraccion.
+ */
+export async function reprocesarDocumento(
+  negocioBloqueId: string,
+  negocioId: string,
+): Promise<{
+  success: boolean
+  campos?: Record<string, CampoResultado>
+  error?: string
+}> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  try {
+    // 1. Leer bloque + config
+    const { data: bloqueData } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs(config_extra)')
+      .eq('id', negocioBloqueId)
+      .single()
+
+    if (!bloqueData) return { success: false, error: 'Bloque no encontrado' }
+
+    const currentData = (bloqueData.data as Record<string, unknown>) ?? {}
+    const driveFileId = currentData.drive_file_id as string | undefined
+    const fileName = (currentData.file_name as string) ?? 'documento.pdf'
+
+    if (!driveFileId) {
+      return { success: false, error: 'No hay archivo en Drive para reprocesar' }
+    }
+
+    const configExtra = (bloqueData.bloque_configs as Record<string, unknown>)?.config_extra as Record<string, unknown> ?? {}
+    const camposExtraccion = (configExtra.campos_extraccion ?? []) as CampoExtraccion[]
+
+    if (camposExtraccion.length === 0) {
+      return { success: false, error: 'Este bloque no tiene campos de extracción configurados' }
+    }
+
+    // 2. API key Gemini
+    const apiKey = getServerKey('gemini')
+    if (!apiKey) return { success: false, error: 'API key de Gemini no configurada' }
+
+    // 3. Descargar archivo de Drive
+    console.log(`[reprocesar] Downloading ${driveFileId} from Drive...`)
+    const buffer = await downloadDriveFile(driveFileId)
+    const mimeType = mimeTypeFromName(fileName)
+
+    // 4. Extraer con AI
+    console.log(`[reprocesar] AI extraction (${camposExtraccion.length} campos)...`)
+    const extraction = await extractFieldsFromDocument(buffer, mimeType, camposExtraccion, apiKey)
+    if (!extraction.data) {
+      return { success: false, error: extraction.error ?? 'Error en extracción AI' }
+    }
+
+    // 5. Merge con data existente preservando campos manuales
+    const existingCampos = (currentData.campos as Record<string, CampoResultado>) ?? {}
+    const mergedCampos: Record<string, CampoResultado> = { ...extraction.data }
+    for (const [slug, campo] of Object.entries(existingCampos)) {
+      if (campo?.manual && campo.value) {
+        mergedCampos[slug] = campo
+      }
+    }
+
+    // 6. Determinar completitud
+    const requiredCampos = camposExtraccion.filter(c => c.required)
+    const isComplete = requiredCampos.every(c => mergedCampos[c.slug]?.value !== null && mergedCampos[c.slug]?.value !== undefined)
+
+    const now = new Date().toISOString()
+    const newData = { ...currentData, campos: mergedCampos }
+
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({
+        data: newData,
+        ...(isComplete ? { estado: 'completo', completado_at: now } : { estado: 'pendiente', completado_at: null }),
+        updated_at: now,
+      })
+      .eq('id', negocioBloqueId)
+
+    revalidatePath(`/negocios/${negocioId}`)
+
+    return { success: true, campos: mergedCampos }
+  } catch (err) {
+    console.error('[reprocesar-documento] Error:', err)
     return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
   }
 }

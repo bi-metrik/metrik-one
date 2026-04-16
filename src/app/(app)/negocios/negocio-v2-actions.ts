@@ -1224,6 +1224,75 @@ export async function cambiarEtapaNegocioConGate(
   return resultCambio
 }
 
+// ── Retroceder a etapa anterior ──────────────────────────────────────────────
+
+/**
+ * Retrocede el negocio a una etapa anterior preservando TODO el progreso.
+ * No valida gates. No borra negocio_bloques ni datos. Solo cambia etapa_actual_id.
+ * Registra el retroceso en activity_log.
+ */
+export async function retrocederEtapaNegocio(
+  negocioId: string,
+  etapaDestinoId: string,
+  motivo?: string,
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const { data: negocioRaw } = await db(supabase)
+    .from('negocios')
+    .select('etapa_actual_id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  const negocio = negocioRaw as { etapa_actual_id: string | null } | null
+  if (!negocio?.etapa_actual_id) return { error: 'Negocio sin etapa actual' }
+
+  const [actualRes, destinoRes] = await Promise.all([
+    db(supabase).from('etapas_negocio').select('orden, linea_id, nombre').eq('id', negocio.etapa_actual_id).single(),
+    db(supabase).from('etapas_negocio').select('orden, linea_id, stage, nombre').eq('id', etapaDestinoId).single(),
+  ])
+
+  const actual = actualRes.data as { orden: number; linea_id: string; nombre: string } | null
+  const destino = destinoRes.data as { orden: number; linea_id: string; stage: string; nombre: string } | null
+  if (!actual || !destino) return { error: 'Etapa no encontrada' }
+  if (actual.linea_id !== destino.linea_id) return { error: 'Etapas de líneas distintas' }
+  if (destino.orden >= actual.orden) return { error: 'La etapa destino debe ser anterior a la actual' }
+
+  const { error: updateError } = await db(supabase)
+    .from('negocios')
+    .update({
+      etapa_actual_id: etapaDestinoId,
+      stage_actual: destino.stage,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+
+  if (updateError) return { error: (updateError as { message: string }).message }
+
+  if (staffId) {
+    await supabase
+      .from('activity_log')
+      .insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio_etapa',
+        autor_id: staffId,
+        campo_modificado: 'etapa',
+        valor_anterior: actual.nombre,
+        valor_nuevo: destino.nombre,
+        contenido: motivo ? `Retroceso: ${motivo}` : 'Retroceso manual de etapa',
+      })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null }
+}
+
 // ── Marcar bloque completo ─────────────────────────────────────────────────────
 
 export async function marcarBloqueCompleto(

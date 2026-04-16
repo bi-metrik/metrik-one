@@ -15,7 +15,7 @@ import {
   Check,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { procesarDocumento, actualizarCampoDocumento } from '@/lib/actions/documento-actions'
+import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado } from '@/lib/ai/extract-fields'
 
@@ -286,6 +286,23 @@ export default function BloqueDocumento({
   })
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [pendingStoragePath, setPendingStoragePath] = useState<string | null>(null)
+  const [reprocessing, setReprocessing] = useState(false)
+
+  const handleReprocesar = async () => {
+    setReprocessing(true)
+    try {
+      const res = await reprocesarDocumento(negocioBloqueId, negocioId)
+      if (!res.success) {
+        toast.error(res.error ?? 'Error reprocesando')
+        return
+      }
+      if (res.campos) setCampos(res.campos)
+      toast.success('Documento reprocesado con IA')
+      router.refresh()
+    } finally {
+      setReprocessing(false)
+    }
+  }
 
   // ── Handler upload ──────────────────────────────────────────────────────
 
@@ -599,13 +616,27 @@ export default function BloqueDocumento({
               </a>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="rounded-md border border-green-300 bg-white px-2 py-0.5 text-[10px] font-medium text-green-700 hover:bg-green-50 shrink-0"
-          >
-            Reemplazar
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {camposConfig.length > 0 && (
+              <button
+                type="button"
+                onClick={handleReprocesar}
+                disabled={reprocessing}
+                title="Reprocesar con IA"
+                className="rounded-md border border-primary/30 bg-white px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/5 disabled:opacity-50 inline-flex items-center gap-1"
+              >
+                {reprocessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                {reprocessing ? 'Procesando…' : 'Reprocesar IA'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="rounded-md border border-green-300 bg-white px-2 py-0.5 text-[10px] font-medium text-green-700 hover:bg-green-50"
+            >
+              Reemplazar
+            </button>
+          </div>
         </div>
       )}
 

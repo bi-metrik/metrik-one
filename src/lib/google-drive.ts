@@ -177,6 +177,24 @@ export async function setFilePublicByLink(fileId: string): Promise<void> {
 // ── File deletion ────────────────────────────────────────────────────────────
 
 /** Delete a file from Drive */
+export async function downloadDriveFile(fileId: string): Promise<Buffer> {
+  const token = await getAccessToken()
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    console.error('[google-drive] Download failed:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error descargando archivo de Drive (${res.status})`)
+  }
+
+  const arrBuf = await res.arrayBuffer()
+  return Buffer.from(arrBuf)
+}
+
 export async function deleteDriveFile(fileId: string): Promise<void> {
   const token = await getAccessToken()
 

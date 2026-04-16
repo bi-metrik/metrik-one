@@ -4,6 +4,7 @@ import { useState, useTransition, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import {
   ChevronRight,
+  ChevronLeft,
   FolderOpen,
   CheckCircle2,
   Circle,
@@ -23,7 +24,7 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, actualizarCarpetaUrlNegocio, actualizarResponsable } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, actualizarCarpetaUrlNegocio, actualizarResponsable } from '../negocio-v2-actions'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
 
@@ -521,6 +522,29 @@ function SelectorEtapa({
         .find(e => e.orden === etapaActual.orden + 1) ?? null
     : null
 
+  // Etapa anterior en orden estricto (para retroceso)
+  const etapaAnterior = etapaActual
+    ? [...etapasLinea]
+        .sort((a, b) => b.orden - a.orden)
+        .find(e => e.orden < etapaActual.orden) ?? null
+    : null
+
+  function handleRetroceder() {
+    if (!etapaAnterior) return
+    const ok = typeof window !== 'undefined'
+      ? window.confirm(`Retroceder a "${etapaAnterior.nombre}"? Se conservan todos los datos y bloques completados.`)
+      : true
+    if (!ok) return
+    startTransition(async () => {
+      const result = await retrocederEtapaNegocio(negocioId, etapaAnterior.id)
+      if (result.error) {
+        toast.error('Error al retroceder: ' + result.error)
+      } else {
+        toast.success(`Retrocedido a: ${etapaAnterior.nombre}`)
+      }
+    })
+  }
+
   // Si ya esta cerrado/perdido/cancelado/completado, no mostrar nada
   const estadosCerrados = ['cerrado', 'perdido', 'cancelado', 'completado']
   if (negocioEstado && estadosCerrados.includes(negocioEstado)) return null
@@ -564,14 +588,27 @@ function SelectorEtapa({
   if (!siguienteEtapa) {
     return (
       <>
-        <button
-          onClick={() => setShowCierreDialog(true)}
-          disabled={isPending}
-          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-60 ${cierreConfig.btnClass}`}
-        >
-          <CierreIcon className="h-3.5 w-3.5" />
-          {cierreConfig.label}
-        </button>
+        <div className="flex items-center gap-1.5">
+          {etapaAnterior && (
+            <button
+              onClick={handleRetroceder}
+              disabled={isPending}
+              title={`Retroceder a ${etapaAnterior.nombre}`}
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+            >
+              <ChevronLeft className="h-3 w-3" />
+              <span className="hidden sm:inline truncate max-w-[100px]">{etapaAnterior.nombre}</span>
+            </button>
+          )}
+          <button
+            onClick={() => setShowCierreDialog(true)}
+            disabled={isPending}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-60 ${cierreConfig.btnClass}`}
+          >
+            <CierreIcon className="h-3.5 w-3.5" />
+            {cierreConfig.label}
+          </button>
+        </div>
 
         {showCierreDialog && (
           <CierreNegocioDialog
@@ -590,6 +627,17 @@ function SelectorEtapa({
   return (
     <>
       <div className="flex items-center gap-1.5">
+        {etapaAnterior && (
+          <button
+            onClick={handleRetroceder}
+            disabled={isPending}
+            title={`Retroceder a ${etapaAnterior.nombre}`}
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+          >
+            <ChevronLeft className="h-3 w-3" />
+            <span className="hidden sm:inline truncate max-w-[100px]">{etapaAnterior.nombre}</span>
+          </button>
+        )}
         <button
           onClick={handleAvanzar}
           disabled={isPending}
