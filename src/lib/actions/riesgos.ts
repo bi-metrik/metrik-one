@@ -459,6 +459,125 @@ export async function getCausa(causaId: string) {
   }
 }
 
+// ── Update causa ────────────────────────────────────────────
+
+export async function actualizarCausa(causaId: string, data: {
+  descripcion?: string
+  contexto?: string | null
+  factor_riesgo?: string | null
+  impacto_legal?: number
+  impacto_reputacional?: number
+  impacto_operativo?: number
+  impacto_contagio?: number
+  probabilidad_ocurrencia?: number
+  probabilidad_frecuencia?: number
+}) {
+  const { supabase, role, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+  if (!getRolePermissions(role ?? 'read_only').canEditRiesgos) {
+    return { success: false, error: 'No tienes permisos para editar causas' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updates: Record<string, any> = {}
+
+  if (data.descripcion !== undefined) updates.descripcion = data.descripcion.trim()
+  if (data.contexto !== undefined) updates.contexto = data.contexto?.trim() || null
+  if (data.factor_riesgo !== undefined) updates.factor_riesgo = data.factor_riesgo || null
+
+  const numFields = ['impacto_legal', 'impacto_reputacional', 'impacto_operativo', 'impacto_contagio', 'probabilidad_ocurrencia', 'probabilidad_frecuencia'] as const
+  for (const f of numFields) {
+    if (data[f] !== undefined) {
+      const v = Math.max(1, Math.min(5, Math.round(data[f]!)))
+      updates[f] = v
+    }
+  }
+
+  updates.updated_at = new Date().toISOString()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: dbError } = await (supabase as any)
+    .from('riesgo_causas')
+    .update(updates)
+    .eq('id', causaId)
+
+  if (dbError) return { success: false, error: dbError.message }
+
+  revalidatePath(`/riesgos/causa/${causaId}`)
+  revalidatePath('/riesgos')
+  revalidatePath('/matriz')
+  return { success: true }
+}
+
+// ── Create control for a causa ──────────────────────────────
+
+export async function crearControlCausa(formData: FormData) {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!getRolePermissions(role ?? 'read_only').canEditRiesgos) {
+    return { success: false, error: 'No tienes permisos para crear controles' }
+  }
+
+  const causa_id = formData.get('causa_id') as string
+  const riesgo_id = formData.get('riesgo_id') as string
+  const nombre_control = (formData.get('nombre_control') as string)?.trim()
+  const tipo_control = formData.get('tipo_control') as string
+  const actividad_control = (formData.get('actividad_control') as string)?.trim() || null
+  const clasificacion = (formData.get('clasificacion') as string) || 'manual'
+  const periodicidad = (formData.get('periodicidad') as string) || null
+  const referencia = (formData.get('referencia') as string)?.trim() || null
+
+  if (!causa_id || !riesgo_id || !nombre_control || !tipo_control) {
+    return { success: false, error: 'Campos requeridos: nombre del control y tipo' }
+  }
+
+  // Parse 7 effectiveness factors (each 1 or 3)
+  const efFields = [
+    'ef_certeza', 'ef_cambios_personal', 'ef_multiples_localidades',
+    'ef_juicios_significativos', 'ef_actividades_complejas',
+    'ef_depende_otros', 'ef_sujeto_actualizaciones',
+  ]
+  const efValues: Record<string, number | null> = {}
+  for (const f of efFields) {
+    const v = formData.get(f) as string | null
+    efValues[f] = v === '3' ? 3 : v === '1' ? 1 : null
+  }
+
+  // Compute ponderacion_factores and ponderacion_efectividad
+  const efArr = efFields.map(f => efValues[f]).filter(v => v != null) as number[]
+  let ponderacion_factores: number | null = null
+  let ponderacion_efectividad: number | null = null
+  if (efArr.length === 7) {
+    ponderacion_factores = efArr.reduce((a, b) => a + b, 0) / 21 // max = 21 (7 * 3)
+    ponderacion_efectividad = ponderacion_factores
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: dbError } = await (supabase as any)
+    .from('riesgos_controles')
+    .insert({
+      workspace_id: workspaceId,
+      riesgo_id,
+      causa_id,
+      nombre_control,
+      tipo_control,
+      actividad_control,
+      clasificacion,
+      periodicidad,
+      referencia,
+      ...efValues,
+      ponderacion_factores,
+      ponderacion_efectividad,
+    })
+
+  if (dbError) return { success: false, error: dbError.message }
+
+  revalidatePath(`/riesgos/causa/${causa_id}`)
+  revalidatePath('/riesgos')
+  revalidatePath('/matriz')
+  return { success: true }
+}
+
 // ── Excel: Constants ────────────────────────────────────────
 
 const CATEGORIAS_VALIDAS = ['LA', 'FT', 'FPADM', 'PTEE'] as const
