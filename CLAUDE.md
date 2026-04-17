@@ -116,6 +116,13 @@ metrik-one/
 │   │   │   ├── mi-negocio/       # Perfil empresa/marca
 │   │   │   ├── promotores/       # Promotores/referidos
 │   │   │   ├── semaforo/         # Score de salud (schema listo, formula pendiente)
+│   │   │   ├── riesgos/           # Compliance: listado + detalle riesgos SARLAFT
+│   │   │   │   ├── causa/[id]/   # Detalle causa + controles read-only
+│   │   │   │   └── [id]/         # Detalle riesgo + causas
+│   │   │   ├── controles/        # Compliance: CRUD controles independientes
+│   │   │   │   ├── nuevo/        # Crear control + multi-select causas
+│   │   │   │   └── [id]/         # Detalle control + causas asignadas
+│   │   │   ├── matriz/           # Compliance: heat map 5x5 compacta
 │   │   │   ├── story-mode/       # Tutorial interactivo (7 pantallas)
 │   │   │   └── dashboard/        # Dashboard bienvenida (legacy, no trackeado)
 │   │   └── accept-invite/        # Aceptar invitacion de equipo
@@ -135,7 +142,7 @@ metrik-one/
 │   │   ├── pipeline/             # Constantes pipeline (5 etapas)
 │   │   ├── projects/             # Config proyectos (6 estados)
 │   │   ├── contacts/             # Constantes contactos
-│   │   ├── roles.ts              # 4 roles: owner, admin, operator, read_only
+│   │   ├── roles.ts              # 6 roles: owner, admin, supervisor, operator, contador, read_only + permisos compliance
 │   │   ├── pdf/                  # Generacion PDF cotizaciones (@react-pdf)
 │   │   └── export-csv.ts         # Exportacion CSV
 │   ├── types/
@@ -192,6 +199,13 @@ metrik-one/
 - `/promotores` — Promotores/referidos
 - `/semaforo` — Score de salud del negocio
 - `/story-mode` — Tutorial interactivo (7 pantallas)
+- `/riesgos` — Listado riesgos SARLAFT con badges control por causa
+- `/riesgos/[id]` — Detalle riesgo + causas
+- `/riesgos/causa/[id]` — Detalle causa + controles read-only con links
+- `/controles` — Listado controles independientes (cards con efectividad %)
+- `/controles/nuevo` — Crear control: info + multi-select causas + 7 factores efectividad
+- `/controles/[id]` — Detalle control + tabla causas asignadas
+- `/matriz` — Heat map 5x5 compacta (max-w-lg, celdas h-9)
 - `/accept-invite` — Aceptar invitacion de equipo
 
 ## Base de datos
@@ -215,6 +229,10 @@ metrik-one/
 - `labels` + `entity_labels` — Etiquetas con colores, many-to-many con entidades
 - `tenant_rules` — Motor de reglas condicionales: gates, automatizaciones, notificaciones por tenant (post-MVP)
 - `activity_log` — Timeline de comentarios + cambios automaticos del sistema
+- `riesgos` — Riesgos SARLAFT por workspace (4 categorias: LA/FT/FPADM/PTEE, 7 factores, nivel_riesgo GENERATED)
+- `riesgo_causas` — Causas de riesgo (4 dimensiones impacto + 2 probabilidades, linked to riesgos)
+- `riesgos_controles` — Controles de riesgo (7 factores efectividad binarios, ponderacion GENERATED, responsable, periodicidad)
+- `control_causa` — Junction M:N controles↔causas (RLS via join a riesgos_controles.workspace_id)
 
 ### Vistas
 - `v_proyecto_financiero` — Resumen financiero por proyecto
@@ -295,38 +313,31 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-12 (sesiones WA bot — FOLLOWUP + context injection + anaphora)
-**Branch:** main (uncommitted — 34 archivos modificados)
+**Sesion:** 2026-04-17 (cotizacion cantidad + AIU + cronograma fix)
+**Branch:** main
 
 Que se hizo:
-- Feat: Intent FOLLOWUP — fast-path regex para "los otros", "ver más", "cuéntame más", "el resto" + handler `followup.ts` que lee `last_context.items.slice(shown)` para mostrar items restantes
-- Feat: ESTADO_PIPELINE → ESTADO_NEGOCIOS rename con `stage_filter` (venta/ejecucion/cobro/cierre/all) — queries dinámicos por stage
-- Feat: Sistema `last_context` persistente — `saveLastContext()` en handlers, `getRecentLastContext()` en sesión nueva (TTL 5 min), preload automático en `getOrCreateSession()`
-- Feat: Inyección de contexto en Gemini `system_instruction` — `hasAnaphoricSignal()` detecta pronombres/ordinales, `buildContextHint()` genera hint con few-shot examples adaptativos al contexto real
-- Fix: Regex `hasAnaphoricSignal` unicode-aware — `\b` en JS no detecta acentos (ej: "ahí"), reemplazado por patrones con lookarounds manuales
-- Feat: Framework wa-stress — `scripts/wa-stress/` con runner Node.js, golden set 99 casos, edge function `wa-parse-test` para tests aislados del parser
-- Ops: Edge functions `wa-webhook` + `wa-parse-test` desplegadas en producción
-- Golden set: 98/99 (99%) — único fallo pre-existente (timer-03 "empezar a trabajar en mirador" → ACTIVIDAD)
+- Fix: Cronograma fechas persisten con INSERT atomico (antes eran 2 llamadas, la segunda fallaba silenciosamente)
+- Feat: Campo `cantidad` por item en cotizaciones — precio_venta es unitario, total = unit x cant
+- Feat: AIU manual (Admin % + Imprevistos %) sobre costos internos (rubros), no sobre precio de venta
+- Fix: costoTotal multiplica rubros x cantidad del item (antes era solo per-unit)
+- Feat: Costo unitario visible en header de cada item ("Costo unit. $X")
+- UX: 5 ajustes de Carmen/Hana/Noor — AIU oculto por defecto, item ajuste invisible en lista, grid responsive, rename label, badge AIU activo
 
-**Archivos nuevos:**
-- `supabase/functions/_shared/handlers/followup.ts` — handler FOLLOWUP
-- `supabase/functions/wa-parse-test/index.ts` — endpoint testing parser (acepta `last_context` para tests anafóricos)
-- `scripts/wa-stress/runner.mjs` + `corpus/golden.jsonl` — framework de regresión
+**Migraciones aplicadas:**
+- `20260414100003_items_cantidad_aiu.sql` — items.cantidad + cotizaciones.aiu_admin_pct/aiu_imprevistos_pct
 
-**Hallazgo pendiente:** `/negocios` page no muestra cerrados — `getNegociosV2` filtra `.in('estado', ['activo','abierto'])`. Propuesta: agregar pill "Cerrados" con filtro server-side
+## Estado actual (2026-04-17)
 
-## Estado actual (2026-04-12)
-
-- **Branch:** main (34 archivos uncommitted — incluye cambios WA bot + AFI compliance + SOENA de varias sesiones)
-- **Produccion Vercel:** commit `ceb0a2e` (web app). Edge functions desplegadas por separado con cambios mas recientes
-- **WhatsApp bot:** Edge functions `wa-webhook` + `wa-parse-test` desplegadas con todos los cambios WA. Parser: Gemini 2.5 Flash-Lite + fast-path regex + defense layer. Nuevos: FOLLOWUP intent, ESTADO_NEGOCIOS con stage_filter, last_context con anáfora, golden set 98/99
-- **WhatsApp bot — arquitectura parser:** fast-path regex → Gemini NLP (con inyección condicional de contexto) → regex fallback. Anáfora: `hasAnaphoricSignal()` (unicode-aware) + `buildContextHint()` (few-shot adaptativos). Costo: ~200 tokens extra solo en ~2-5% de mensajes
-- **WhatsApp bot — test framework:** `scripts/wa-stress/` con runner Node.js + golden set 99 casos. `wa-parse-test` edge function acepta `last_context` para tests anafóricos. Token: `WA_STRESS_TOKEN` en `.credentials.md`
+- **Branch:** main — produccion en Vercel (auto-deploy)
+- **Cotizaciones:** cantidad por item + AIU manual sobre costos + costo unitario visible. AIU oculto por defecto, se activa con link discreto. Item de ajuste invisible en UI (sigue en DB/PDF)
+- **Cronograma (B10):** fechas, responsable, preload, delete, re-evaluacion completitud — todo funcional
+- **WhatsApp bot:** Edge functions desplegadas. Parser: Gemini 2.5 Flash-Lite + fast-path regex + defense layer. FOLLOWUP, ESTADO_NEGOCIOS, last_context con anafora, golden set 98/99
 - **Workspace metrik:** LIMPIO — sin datos, listo para demo fresca
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales
 - **Workflow engine:** Activo en produccion
 - **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
-- **Modulo negocios:** Operativo. 12 tipos de bloques. Pendiente critico: fix persona natural (empresa_id=NULL)
+- **Modulo negocios:** Operativo. 13 tipos de bloques (B01-B13). Pendiente critico: fix persona natural (empresa_id=NULL)
 - **Gotcha negocios.estado:** Valores reales son `'abierto'` y `'completado'`, NO `'activo'`
 - **Gotcha /negocios cerrados:** La page filtra `.in('estado', ['activo','abierto'])` — negocios completados NO se muestran. Pendiente agregar pill o filtro
 - **CRITICO — Modulo negocios reemplaza pipeline y proyectos:** `/negocios` es el flujo principal. `/pipeline` y `/proyectos` son legacy. Todo apunta a negocios: FAB, WhatsApp, gastos, KPIs, navegacion
@@ -447,6 +458,12 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [x] KPI numeros: filtro estado 'abierto' + renombrar Pipeline → En venta — sesion H 2026-04-09
 - [x] Limpieza completa workspace metrik para demo — sesion H 2026-04-09
 - [x] Mejorar flujo WhatsApp: FOLLOWUP, ESTADO_NEGOCIOS, last_context, anáfora — completado 2026-04-12
+- [x] Fix cronograma fechas no persistian — INSERT atomico en agregarBloqueItem — completado 2026-04-17
+- [x] Cotizacion: cantidad por item + AIU manual sobre costos + costo unitario visible — completado 2026-04-17
+- [x] Cotizacion: 5 ajustes UX (Carmen/Hana/Noor) — AIU oculto, ajuste invisible, grid responsive — completado 2026-04-17
+- [x] Modulo compliance: riesgos + causas + controles + matriz — UI completa con CRUD, import/export, permisos por rol — completado 2026-04-17
+- [x] Controles reestructurados: entidad independiente M:N con causas via control_causa junction — completado 2026-04-17
+- [x] Matriz 5x5 compacta: max-w-lg, celdas h-9, labels 8-10px — completado 2026-04-17
 - [ ] **CRITICO:** Persona natural debe crear empresa automaticamente en `crearNegocio` (ver workspaces/soena/CONTEXT.md para detalle)
 - [ ] **SOENA:** Pendientes criticos en `workspaces/soena/CONTEXT.md` — incluye bloque `devolucion_dian` + storage + generacion docs
 - [ ] **INTEGRAR (sesión SOENA 2026-04-12):** Commit `c51d246` agrega 2 features genéricos al producto que deben validarse: (1) `source_etapa_orden` en routing eval de `cambiarEtapaNegocioConGate` — permite leer campos de bloques datos de una etapa distinta a la actual, backward compatible (si no se pasa, lee etapa actual como antes); (2) `DatosField.default` en `BloqueDatos.tsx` — permite inicializar toggles con valor distinto de false. Ambos ya están en producción via SOENA. Revisar y documentar como features de producto si se validan correctos
@@ -454,6 +471,7 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [ ] **PENDIENTE:** /negocios no muestra cerrados — agregar pill "Cerrados" con filtro server-side en getNegociosV2
 - [ ] **PENDIENTE:** Commitear 34 archivos uncommitted (WA bot + AFI compliance + SOENA) — split por tema
 - [x] ID negocio formato `S1 26 3` — triggers auto-generan codigos, documentado en seccion "Sistema de codigos" — completado 2026-04-09
+- [x] Responsable en header de etapa — selector con avatar+nombre, dropdown filtrable, permisos owner/admin/supervisor — completado 2026-04-17
 - [ ] **PENDIENTE:** Header negocio refinado segun spec Noor (jerarquia 4 filas: nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso)
 - [ ] Verificar tableros en browser real (desktop + mobile viewport)
 - [ ] Verificar cards condicionales en ambiente real (F6, C6, O7, O2 emptyMessage)
@@ -546,3 +564,12 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-16 | skip_enviar configurable por workspace en BloqueCotizacion | config_extra.skip_enviar=true muestra Aprobar/Rechazar directo en borradores. aceptarCotizacionNegocio acepta borrador o enviada. Patron generico reutilizable |
 | 2026-04-16 | Bloques datos se inicializan con defaults de config al crearse | computeFieldDefaults() en negocio-v2-actions.ts. Aplica en crearNegocio y cambiarEtapaNegocio. Resuelve bug de herencia/condiciones con campos no tocados |
 | 2026-04-16 | auto_fill normaliza acentos antes de comparar | normalize('NFD') + strip diacriticals. "Eléctrico" matchea "electrico" en mappings |
+| 2026-04-17 | AIU se calcula sobre costoTotal (rubros), nunca sobre precio de venta | Modelo colombiano estandar. Admin% e Imprevistos% independientes, sobre costos directos |
+| 2026-04-17 | AIU oculto por defecto — 90% del ICP no lo necesita | Revisado por Carmen/Hana/Noor. Link discreto para activar. Auto-mostrar si hay valores guardados |
+| 2026-04-17 | Item de ajuste (es_ajuste) invisible en UI, visible en DB/PDF | El usuario no debe ver items que no creo. El ajuste es detalle interno de calculo |
+| 2026-04-17 | Cuando usuario edita valor_total manualmente, AIU se resetea a null | Dos modelos mentales (margen vs AIU) no conviven — el ultimo en editarse gana |
+| 2026-04-17 | items.cantidad default 1, precio_venta es unitario | costoTotal = sum(rubros x cant). Total linea = precio_venta x cantidad. Compatible con datos existentes |
+| 2026-04-17 | Controles son entidad independiente M:N con causas via control_causa | Un control impacta multiples causas de diferentes riesgos. Junction table con RLS via join. Creacion desde /controles, no inline en causa |
+| 2026-04-17 | Compliance: 6 roles reutilizados, supervisor = oficial operativo | owner/admin full; supervisor ve+edita+importa (no elimina, no cambia reglas); read_only = auditor (ve+exporta). Flags en roles.ts |
+| 2026-04-17 | Riesgos se archivan via estado, nunca se borran | Trazabilidad SARLAFT: solo owner/admin DELETE permanente. Supervisor cambia estado, no elimina |
+| 2026-04-17 | Responsable en header de etapa, no en bloque | negocios.responsable_id → staff(id). Selector en header de etapa (avatar+nombre+dropdown). BloqueEquipo deprecated pero no borrado (legacy). Decision cerebro 2026-04-13 implementada |

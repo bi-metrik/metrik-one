@@ -2,7 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
-import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
+import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
 import { createDriveFolder } from '@/lib/google-drive'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
@@ -76,6 +76,13 @@ export type NegocioDetalle = {
   updated_at: string | null
   closed_at: string | null
   responsable_id: string | null
+  // Pausa
+  pausado: boolean
+  pausado_hasta: string | null
+  motivo_pausa: string | null
+  motivo_pausa_detalle: string | null
+  veces_pausado: number
+  ultimo_pausado_at: string | null
   // Joins — usando columnas reales de las tablas existentes (empresas.nombre, contactos.nombre)
   lineas_negocio: { nombre: string } | null
   etapas_negocio: { nombre: string; stage: string } | null
@@ -102,6 +109,10 @@ export type NegocioResumen = {
   contacto_nombre: string | null
   // Ejecucion
   costos_ejecutados: number
+  // Pausa
+  pausado: boolean
+  pausado_hasta: string | null
+  motivo_pausa: string | null
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -124,7 +135,10 @@ function computeFieldDefaults(configExtra: Record<string, unknown> | null): Reco
 
 // ── Listar negocios del workspace ─────────────────────────────────────────────
 
-export async function getNegociosV2(estado: 'abierto' | 'completado' | 'todos' = 'abierto'): Promise<NegocioResumen[]> {
+export async function getNegociosV2(
+  estado: 'abierto' | 'completado' | 'todos' = 'abierto',
+  incluirPausados = false,
+): Promise<NegocioResumen[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
@@ -140,6 +154,9 @@ export async function getNegociosV2(estado: 'abierto' | 'completado' | 'todos' =
       stage_actual,
       estado,
       created_at,
+      pausado,
+      pausado_hasta,
+      motivo_pausa,
       lineas_negocio(nombre),
       etapas_negocio(nombre, stage),
       empresas(nombre),
@@ -150,6 +167,9 @@ export async function getNegociosV2(estado: 'abierto' | 'completado' | 'todos' =
 
   if (estado !== 'todos') {
     query = query.eq('estado', estado)
+  }
+  if (!incluirPausados) {
+    query = query.eq('pausado', false)
   }
 
   const { data } = await query
@@ -202,6 +222,9 @@ export async function getNegociosV2(estado: 'abierto' | 'completado' | 'todos' =
       empresa_nombre: (row.empresas as { nombre: string } | null)?.nombre ?? null,
       contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
       costos_ejecutados: Math.round((gastosPorNeg[id] ?? 0) + (horasCostoPorNeg[id] ?? 0)),
+      pausado: (row.pausado as boolean) ?? false,
+      pausado_hasta: (row.pausado_hasta as string) ?? null,
+      motivo_pausa: (row.motivo_pausa as string) ?? null,
     }
   })
 }
@@ -258,6 +281,12 @@ export async function getNegocioDetalle(id: string): Promise<{
       updated_at,
       closed_at,
       responsable_id,
+      pausado,
+      pausado_hasta,
+      motivo_pausa,
+      motivo_pausa_detalle,
+      veces_pausado,
+      ultimo_pausado_at,
       lineas_negocio(nombre),
       etapas_negocio(nombre, stage),
       empresas(id, nombre),
@@ -2125,6 +2154,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     autor_nombre: string | null
   }>
   staffList: Array<{ id: string; full_name: string }>
+  pausaEnabled: boolean
 } | null> {
   const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -2132,6 +2162,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Cargar negocio base
   const base = await getNegocioDetalle(id)
   if (!base) return null
+
+  // Feature flag pausa_enabled
+  const { data: wsRow } = await db(supabase)
+    .from('workspaces')
+    .select('modules')
+    .eq('id', workspaceId)
+    .single()
+  const wsModules = (wsRow as { modules: Record<string, unknown> | null } | null)?.modules ?? {}
+  const pausaEnabled = wsModules.pausa_enabled === true
 
   // Cargar config_extra de los bloque_configs
   const bloqueConfigIds = base.bloques.map(b => b.id)
@@ -2518,6 +2557,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       id: s.id,
       full_name: s.full_name,
     })),
+    pausaEnabled,
   }
 }
 
@@ -2629,6 +2669,218 @@ export async function perderNegocio(
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
   return { error: null }
+}
+
+// ── Pausar negocio (stage venta) ──────────────────────────────────────────────
+
+/**
+ * Pausa un negocio que el cliente no ha avanzado. Oculto del pipeline activo.
+ * Validaciones:
+ * - Feature flag workspaces.modules.pausa_enabled = true
+ * - Solo stage venta, estado abierto
+ * - Motivo en lista cerrada (si otro → detalle requerido)
+ * - Existe actividad en ultimos 30d (fuerza contacto real antes de pausar)
+ * - fechaReapertura <= ultima_actividad + MAX_DIAS_PAUSA
+ * - Al cuarto intento de pausa → auto-perdido con no_conversion_post_pausa
+ */
+export async function pausarNegocio(
+  negocioId: string,
+  motivo: string,
+  fechaReapertura: string, // YYYY-MM-DD
+  detalle?: string,
+): Promise<{ error: string | null; autoPerdido?: boolean }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Validar feature flag
+  const { data: wsRaw } = await db(supabase)
+    .from('workspaces')
+    .select('modules')
+    .eq('id', workspaceId)
+    .single()
+  const modules = (wsRaw as { modules: Record<string, unknown> } | null)?.modules ?? {}
+  if (modules.pausa_enabled !== true) {
+    return { error: 'Funcionalidad de pausa no habilitada en este workspace' }
+  }
+
+  // Validar motivo
+  const motivosValidos = MOTIVOS_PAUSA.map(m => m.value) as readonly string[]
+  if (!motivosValidos.includes(motivo)) {
+    return { error: 'Motivo de pausa no valido' }
+  }
+  if (motivo === 'otro' && !detalle?.trim()) {
+    return { error: 'El detalle es obligatorio cuando el motivo es "otro"' }
+  }
+
+  // Cargar negocio
+  const { data: negocio } = await db(supabase)
+    .from('negocios')
+    .select('id, stage_actual, estado, pausado, veces_pausado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  if (!negocio) return { error: 'Negocio no encontrado' }
+
+  type N = { stage_actual: string; estado: string; pausado: boolean; veces_pausado: number }
+  const n = negocio as N
+  if (n.estado !== 'abierto') return { error: 'El negocio ya esta cerrado' }
+  if (n.stage_actual !== 'venta') return { error: 'Solo se puede pausar un negocio en etapa de venta' }
+  if (n.pausado) return { error: 'El negocio ya esta pausado' }
+
+  // Si ya alcanzo el maximo de pausas → auto-perdido
+  if (n.veces_pausado >= MAX_PAUSAS) {
+    const { error: updErr } = await db(supabase)
+      .from('negocios')
+      .update({
+        estado: 'perdido',
+        razon_cierre: 'no_conversion_post_pausa',
+        descripcion_cierre: `Maximo de ${MAX_PAUSAS} pausas alcanzado sin conversion`,
+        closed_at: new Date().toISOString(),
+      })
+      .eq('id', negocioId)
+      .eq('workspace_id', workspaceId)
+    if (updErr) return { error: (updErr as { message: string }).message }
+
+    if (staffId) {
+      await supabase.from('activity_log').insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio_estado',
+        autor_id: staffId,
+        contenido: `Negocio auto-perdido: ${MAX_PAUSAS} pausas sin conversion`,
+        valor_nuevo: 'perdido',
+      })
+    }
+    revalidatePath(`/negocios/${negocioId}`)
+    revalidatePath('/negocios')
+    return { error: null, autoPerdido: true }
+  }
+
+  // Validar actividad reciente (ultimos 30d) — fuerza contacto real antes de pausar
+  const desdeFecha = new Date()
+  desdeFecha.setDate(desdeFecha.getDate() - 30)
+  const { data: actividades } = await supabase
+    .from('activity_log')
+    .select('created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad_tipo', 'negocio')
+    .eq('entidad_id', negocioId)
+    .gte('created_at', desdeFecha.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  const ultimaActividad = ((actividades ?? []) as Array<{ created_at: string }>)[0]?.created_at
+  if (!ultimaActividad) {
+    return { error: 'Debe registrar al menos una interaccion con el cliente antes de pausar' }
+  }
+
+  // Validar fecha de reapertura <= ultima_actividad + MAX_DIAS_PAUSA
+  const fechaLimite = new Date(ultimaActividad)
+  fechaLimite.setDate(fechaLimite.getDate() + MAX_DIAS_PAUSA)
+  const fechaReaperturaDate = new Date(`${fechaReapertura}T00:00:00`)
+  if (isNaN(fechaReaperturaDate.getTime())) return { error: 'Fecha de reapertura invalida' }
+  if (fechaReaperturaDate.getTime() > fechaLimite.getTime()) {
+    return { error: `La fecha de reapertura no puede superar ${MAX_DIAS_PAUSA} dias desde la ultima actividad (${fechaLimite.toISOString().slice(0, 10)})` }
+  }
+
+  const now = new Date().toISOString()
+  const { error: pauseErr } = await db(supabase)
+    .from('negocios')
+    .update({
+      pausado: true,
+      pausado_hasta: fechaReapertura,
+      motivo_pausa: motivo,
+      motivo_pausa_detalle: detalle?.trim() || null,
+      veces_pausado: n.veces_pausado + 1,
+      ultimo_pausado_at: now,
+      updated_at: now,
+    })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+  if (pauseErr) return { error: (pauseErr as { message: string }).message }
+
+  const motivoLabel = MOTIVOS_PAUSA.find(m => m.value === motivo)?.label ?? motivo
+  if (staffId) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_estado',
+      autor_id: staffId,
+      contenido: `Pausado hasta ${fechaReapertura}. Motivo: ${motivoLabel}${detalle ? ` — ${detalle}` : ''}`,
+      valor_nuevo: `pausado:${motivo}`,
+    })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null }
+}
+
+// ── Reactivar negocio (salir de pausa) ────────────────────────────────────────
+
+/**
+ * Reactiva un negocio pausado. Si la reactivacion ocurre dentro de las
+ * SAFETY_NET_HORAS siguientes a la pausa, decrementa veces_pausado (evita
+ * quemar una pausa por error del comercial).
+ */
+export async function reactivarNegocio(
+  negocioId: string,
+): Promise<{ error: string | null; safetyNet?: boolean }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const { data: negocio } = await db(supabase)
+    .from('negocios')
+    .select('id, pausado, veces_pausado, ultimo_pausado_at, estado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  if (!negocio) return { error: 'Negocio no encontrado' }
+
+  type N = { pausado: boolean; veces_pausado: number; ultimo_pausado_at: string | null; estado: string }
+  const n = negocio as N
+  if (n.estado !== 'abierto') return { error: 'El negocio ya esta cerrado' }
+  if (!n.pausado) return { error: 'El negocio no esta pausado' }
+
+  // Safety-net 24h: si pausa fue en las ultimas N horas → decrementar contador
+  let decrementar = false
+  if (n.ultimo_pausado_at) {
+    const horasDesdePausa = (Date.now() - new Date(n.ultimo_pausado_at).getTime()) / 3600000
+    if (horasDesdePausa <= SAFETY_NET_HORAS) decrementar = true
+  }
+
+  const now = new Date().toISOString()
+  const { error: updErr } = await db(supabase)
+    .from('negocios')
+    .update({
+      pausado: false,
+      pausado_hasta: null,
+      motivo_pausa: null,
+      motivo_pausa_detalle: null,
+      veces_pausado: decrementar ? Math.max(0, n.veces_pausado - 1) : n.veces_pausado,
+      updated_at: now,
+    })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+  if (updErr) return { error: (updErr as { message: string }).message }
+
+  if (staffId) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_estado',
+      autor_id: staffId,
+      contenido: decrementar ? 'Negocio reactivado (safety-net 24h: pausa no consumida)' : 'Negocio reactivado',
+      valor_nuevo: 'activo',
+    })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null, safetyNet: decrementar }
 }
 
 // ── Cancelar negocio (stage ejecucion) ────────────────────────────────────────

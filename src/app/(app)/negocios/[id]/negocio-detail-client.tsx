@@ -16,6 +16,8 @@ import {
   Pencil,
   Building2,
   UserPlus,
+  Pause,
+  Play,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
@@ -24,7 +26,8 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, actualizarCarpetaUrlNegocio, actualizarResponsable } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarResponsable } from '../negocio-v2-actions'
+import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
 
@@ -497,6 +500,10 @@ function SelectorEtapa({
   stageActual,
   resumenFinanciero,
   precioAprobado,
+  pausaEnabled,
+  pausado,
+  pausadoHasta,
+  vecesPausado,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -505,6 +512,10 @@ function SelectorEtapa({
   stageActual: string | null
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   precioAprobado: number | null
+  pausaEnabled: boolean
+  pausado: boolean
+  pausadoHasta: string | null
+  vecesPausado: number
 }) {
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
@@ -512,6 +523,26 @@ function SelectorEtapa({
     bloques: Array<{ nombre: string; es_gate: boolean }>
   } | null>(null)
   const [showCierreDialog, setShowCierreDialog] = useState(false)
+  const [showPausaDialog, setShowPausaDialog] = useState(false)
+
+  const puedePausar = pausaEnabled && stageActual === 'venta' && !pausado && negocioEstado === 'abierto'
+
+  function handleReactivar() {
+    const ok = typeof window !== 'undefined'
+      ? window.confirm('Reactivar el negocio? Vuelve al pipeline activo.')
+      : true
+    if (!ok) return
+    startTransition(async () => {
+      const result = await reactivarNegocio(negocioId)
+      if (result.error) {
+        toast.error('Error: ' + result.error)
+      } else if (result.safetyNet) {
+        toast.success('Negocio reactivado (pausa no consumida — safety-net 24h)')
+      } else {
+        toast.success('Negocio reactivado')
+      }
+    })
+  }
 
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
@@ -627,40 +658,65 @@ function SelectorEtapa({
   return (
     <>
       <div className="flex items-center gap-1.5">
-        {etapaAnterior && (
+        {pausado ? (
           <button
-            onClick={handleRetroceder}
+            onClick={handleReactivar}
             disabled={isPending}
-            title={`Retroceder a ${etapaAnterior.nombre}`}
-            className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+            title="Reactivar negocio"
+            className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-700 shadow-sm transition-colors hover:bg-amber-100 disabled:opacity-60"
           >
-            <ChevronLeft className="h-3 w-3" />
-            <span className="hidden sm:inline truncate max-w-[100px]">{etapaAnterior.nombre}</span>
+            <Play className="h-3 w-3" />
+            <span className="hidden sm:inline">Reactivar</span>
           </button>
+        ) : (
+          <>
+            {etapaAnterior && (
+              <button
+                onClick={handleRetroceder}
+                disabled={isPending}
+                title={`Retroceder a ${etapaAnterior.nombre}`}
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+              >
+                <ChevronLeft className="h-3 w-3" />
+                <span className="hidden sm:inline truncate max-w-[100px]">{etapaAnterior.nombre}</span>
+              </button>
+            )}
+            <button
+              onClick={handleAvanzar}
+              disabled={isPending}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+            >
+              {isPending ? (
+                <span className="text-muted-foreground">Cambiando...</span>
+              ) : (
+                <>
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                  <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
+                </>
+              )}
+            </button>
+            {puedePausar && (
+              <button
+                onClick={() => setShowPausaDialog(true)}
+                disabled={isPending}
+                title={`Pausar negocio (${vecesPausado}/${MAX_PAUSAS} pausas usadas)`}
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
+              >
+                <Pause className="h-3 w-3" />
+                <span className="hidden sm:inline">Pausar</span>
+              </button>
+            )}
+            <button
+              onClick={() => setShowCierreDialog(true)}
+              disabled={isPending}
+              title={cierreConfig.label}
+              className={`inline-flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-40 ${cierreConfig.btnClass}`}
+            >
+              <CierreIcon className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{cierreConfig.label}</span>
+            </button>
+          </>
         )}
-        <button
-          onClick={handleAvanzar}
-          disabled={isPending}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-        >
-          {isPending ? (
-            <span className="text-muted-foreground">Cambiando...</span>
-          ) : (
-            <>
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-              <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
-            </>
-          )}
-        </button>
-        <button
-          onClick={() => setShowCierreDialog(true)}
-          disabled={isPending}
-          title={cierreConfig.label}
-          className={`inline-flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-40 ${cierreConfig.btnClass}`}
-        >
-          <CierreIcon className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">{cierreConfig.label}</span>
-        </button>
       </div>
 
       {gateModal && (
@@ -680,7 +736,145 @@ function SelectorEtapa({
           onClose={() => setShowCierreDialog(false)}
         />
       )}
+
+      {showPausaDialog && (
+        <PausaNegocioDialog
+          negocioId={negocioId}
+          vecesPausado={vecesPausado}
+          onClose={() => setShowPausaDialog(false)}
+        />
+      )}
     </>
+  )
+}
+
+// ── Modal de pausa ────────────────────────────────────────────────────────────
+
+function PausaNegocioDialog({
+  negocioId,
+  vecesPausado,
+  onClose,
+}: {
+  negocioId: string
+  vecesPausado: number
+  onClose: () => void
+}) {
+  const [motivo, setMotivo] = useState<string>('')
+  const [detalle, setDetalle] = useState('')
+  const today = new Date().toISOString().slice(0, 10)
+  const maxDate = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() + MAX_DIAS_PAUSA)
+    return d.toISOString().slice(0, 10)
+  })()
+  const [fecha, setFecha] = useState(maxDate)
+  const [isPending, startTransition] = useTransition()
+
+  const pausasRestantes = MAX_PAUSAS - vecesPausado
+  const esUltima = pausasRestantes === 1
+
+  function handleSubmit() {
+    if (!motivo) {
+      toast.error('Selecciona un motivo')
+      return
+    }
+    if (motivo === 'otro' && !detalle.trim()) {
+      toast.error('Especifica el detalle del motivo')
+      return
+    }
+    startTransition(async () => {
+      const result = await pausarNegocio(negocioId, motivo, fecha, detalle.trim() || undefined)
+      if (result.error) {
+        toast.error(result.error)
+        return
+      }
+      if (result.autoPerdido) {
+        toast.error(`Negocio auto-cerrado: ${MAX_PAUSAS} pausas sin conversion`)
+      } else {
+        toast.success(`Negocio pausado hasta ${fecha}`)
+      }
+      onClose()
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl bg-background border border-border shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold">Pausar negocio</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Pausas usadas: {vecesPausado}/{MAX_PAUSAS}
+              {esUltima && <span className="ml-1 text-amber-600 font-medium">— última antes de auto-cierre</span>}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3 px-4 py-4">
+          <div>
+            <label className="block text-xs font-medium mb-1">Motivo</label>
+            <select
+              value={motivo}
+              onChange={e => setMotivo(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Seleccionar…</option>
+              {MOTIVOS_PAUSA.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {motivo === 'otro' && (
+            <div>
+              <label className="block text-xs font-medium mb-1">Detalle</label>
+              <textarea
+                value={detalle}
+                onChange={e => setDetalle(e.target.value)}
+                rows={2}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                placeholder="Describe el motivo"
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium mb-1">Fecha de reapertura</label>
+            <input
+              type="date"
+              value={fecha}
+              min={today}
+              max={maxDate}
+              onChange={e => setFecha(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Máximo {MAX_DIAS_PAUSA} días desde hoy. El negocio vuelve al pipeline automáticamente en esa fecha.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+          <button
+            onClick={onClose}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isPending || !motivo}
+            className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            <Pause className="h-3 w-3" />
+            {isPending ? 'Pausando…' : 'Pausar'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1194,6 +1388,7 @@ interface Props {
   }>
   staffList: Array<{ id: string; full_name: string }>
   datosOtrasEtapas: Record<number, Record<string, unknown>>
+  pausaEnabled: boolean
   errorMsg?: string
 }
 
@@ -1214,6 +1409,7 @@ export default function NegocioDetailClient({
   historialData,
   staffList,
   datosOtrasEtapas,
+  pausaEnabled,
   errorMsg,
 }: Props) {
   useEffect(() => {
@@ -1289,9 +1485,32 @@ export default function NegocioDetailClient({
               stageActual={negocio.stage_actual}
               resumenFinanciero={resumenFinanciero}
               precioAprobado={negocio.precio_aprobado}
+              pausaEnabled={pausaEnabled}
+              pausado={negocio.pausado}
+              pausadoHasta={negocio.pausado_hasta}
+              vecesPausado={negocio.veces_pausado}
             />
           </div>
         </div>
+
+        {/* Badge de pausa si aplica */}
+        {negocio.pausado && negocio.pausado_hasta && (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900/40 px-3 py-2">
+            <Pause className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+            <div className="flex-1 text-xs">
+              <span className="font-medium text-amber-800 dark:text-amber-300">
+                Pausado hasta {new Date(negocio.pausado_hasta + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
+              </span>
+              {negocio.motivo_pausa && (
+                <span className="text-amber-700 dark:text-amber-400 ml-1">
+                  · {MOTIVOS_PAUSA.find(m => m.value === negocio.motivo_pausa)?.label ?? negocio.motivo_pausa}
+                  {negocio.motivo_pausa_detalle && <span className="text-amber-600"> — {negocio.motivo_pausa_detalle}</span>}
+                </span>
+              )}
+              <span className="text-amber-600 ml-1">({negocio.veces_pausado}/{MAX_PAUSAS})</span>
+            </div>
+          </div>
+        )}
 
         {/* Fila 3 — empresa + contacto + precio */}
         <div className="flex items-center justify-between gap-3">
