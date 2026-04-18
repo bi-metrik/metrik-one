@@ -6,10 +6,10 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import StaffSection from '../config/staff-section'
 import { updateEquipoDeclarado } from './actions'
-import type { Staff } from '@/types/database'
+import type { Staff, Workspace } from '@/types/database'
 
 interface Props {
-  workspace: any
+  workspace: Workspace | null
   staffMembers: Staff[]
   licenseUsed: number
   licenseMax: number

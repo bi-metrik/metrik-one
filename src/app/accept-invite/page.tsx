@@ -33,7 +33,7 @@ export default async function AcceptInvitePage({
   const serviceClient = createServiceClient()
 
   // Find invitation: by token or by authenticated user's email
-  let invitation: any = null
+  let invitation: import('@/types/database').TeamInvitation | null = null
 
   if (token) {
     const { data } = await serviceClient
@@ -169,7 +169,7 @@ export default async function AcceptInvitePage({
       full_name: fullName,
       role: invitation.role,
       display_role: displayRoleFromMeta,
-    } as any)
+    })
 
   if (profileError) {
     return (

@@ -55,8 +55,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
 
   // ── Gastos ──────────────────────────────────────────
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query = (supabase as any)
+    let query = supabase
       .from('gastos')
       .select('id, fecha, monto, descripcion, mensaje_original, categoria, soporte_url, proyecto_id, proyectos(nombre), created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, deducible, retenciones, tercero_nit, tercero_razon_social')
       .eq('workspace_id', workspaceId)
@@ -86,7 +85,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         descripcion: g.descripcion || g.categoria || 'Gasto',
         categoria: g.categoria,
         proyecto: proy?.nombre ?? null,
-        created_by_name: profile?.full_name ?? (g as any).created_by_wa_name ?? null,
+        created_by_name: profile?.full_name ?? g.created_by_wa_name ?? null,
         fecha_aprobacion: g.fecha_aprobacion ?? null,
         cuenta_contable: g.cuenta_contable ?? null,
         centro_costo: g.centro_costo ?? null,
@@ -94,9 +93,9 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         retencion_aplicada: g.retencion_aplicada ? Number(g.retencion_aplicada) : null,
         fecha_causacion: g.fecha_causacion ?? null,
         deducible: g.deducible ?? null,
-        retenciones: ((g as any).retenciones as Retencion[]) ?? [],
-        tercero_nit: (g as any).tercero_nit ?? null,
-        tercero_razon_social: (g as any).tercero_razon_social ?? null,
+        retenciones: (g.retenciones as Retencion[] | null) ?? [],
+        tercero_nit: g.tercero_nit ?? null,
+        tercero_razon_social: g.tercero_razon_social ?? null,
         soporte_url: g.soporte_url ?? null,
       })
     }
@@ -104,8 +103,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
 
   // ── Cobros ──────────────────────────────────────────
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query = (supabase as any)
+    let query = supabase
       .from('cobros')
       .select('id, fecha, monto, notas, proyecto_id, proyectos(nombre), created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, fecha_aprobacion, cuenta_contable, centro_costo, notas_causacion, retencion_aplicada, fecha_causacion, retenciones, tercero_nit, tercero_razon_social, negocio_id, negocios(empresa_id, empresas(numero_documento, razon_social))')
       .eq('workspace_id', workspaceId)
@@ -126,7 +124,7 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
     for (const c of cobros ?? []) {
       const proy = c.proyectos as { nombre: string } | null
       const profile = c.created_by_profile as { full_name: string } | null
-      const negocio = (c as any).negocios as { empresa_id: string; empresas: { numero_documento: string | null; razon_social: string | null } | null } | null
+      const negocio = c.negocios as { empresa_id: string; empresas: { numero_documento: string | null; razon_social: string | null } | null } | null
       const empresa = negocio?.empresas ?? null
       items.push({
         id: c.id,
@@ -145,9 +143,9 @@ export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: stri
         retencion_aplicada: c.retencion_aplicada ? Number(c.retencion_aplicada) : null,
         fecha_causacion: c.fecha_causacion ?? null,
         deducible: null,
-        retenciones: ((c as any).retenciones as Retencion[]) ?? [],
-        tercero_nit: (c as any).tercero_nit ?? empresa?.numero_documento ?? null,
-        tercero_razon_social: (c as any).tercero_razon_social ?? empresa?.razon_social ?? null,
+        retenciones: (c.retenciones as Retencion[] | null) ?? [],
+        tercero_nit: c.tercero_nit ?? empresa?.numero_documento ?? null,
+        tercero_razon_social: c.tercero_razon_social ?? empresa?.razon_social ?? null,
         soporte_url: null,
       })
     }
@@ -287,8 +285,8 @@ export async function causarMovimiento(input: {
   }
 
   const { error: updateError } = input.tabla === 'gastos'
-    ? await supabase.from('gastos').update(updatePayload as any).eq('id', input.registroId)
-    : await supabase.from('cobros').update(updatePayload as any).eq('id', input.registroId)
+    ? await supabase.from('gastos').update(updatePayload).eq('id', input.registroId)
+    : await supabase.from('cobros').update(updatePayload).eq('id', input.registroId)
 
   if (updateError) return { success: false, error: updateError.message }
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from 'react'
 import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
+import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 
 // Existing config sections — reused via import
 import MonthlyTargetsSection from '../config/monthly-targets-section'
@@ -26,7 +26,7 @@ import ReglasValidacionSection from './reglas-validacion-section'
 type FixedExpenseWithCategory = FixedExpense & { categoryName: string | null }
 
 interface MiNegocioClientProps {
-  workspace: any
+  workspace: Workspace | null
   modules?: Record<string, boolean>
   fiscalProfile: FiscalProfile | null
   staffMembers: Staff[]
@@ -330,7 +330,7 @@ export default function MiNegocioClient({
 function renderSection(
   key: string,
   props: {
-    workspace: any
+    workspace: Workspace | null
     fiscalProfile: FiscalProfile | null
     staffMembers: Staff[]
     monthlyTargets: MonthlyTarget[]

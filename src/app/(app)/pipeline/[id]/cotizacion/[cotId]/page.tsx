@@ -32,7 +32,15 @@ export default async function CotizacionDetailPage({ params }: { params: Promise
   }
 
   // Extract client fiscal data from the oportunidad → empresa join
-  const empresa = (cotizacion as any)?.oportunidades?.empresas ?? null
+  type EmpresaFiscal = {
+    tipo_persona?: string | null
+    person_type?: string | null
+    regimen_tributario?: string | null
+    tax_regime?: string | null
+    gran_contribuyente?: boolean | null
+    agente_retenedor?: boolean | null
+  }
+  const empresa = ((cotizacion as unknown as { oportunidades?: { empresas?: EmpresaFiscal } }).oportunidades?.empresas) ?? null
   const clientFiscal = empresa ? {
     person_type: empresa.tipo_persona ?? empresa.person_type ?? null,
     tax_regime: empresa.regimen_tributario ?? empresa.tax_regime ?? null,

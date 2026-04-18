@@ -5,9 +5,10 @@ import { Check, Loader2, Palette, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { updateBranding, uploadLogo } from './actions'
+import type { Workspace } from '@/types/database'
 
 interface Props {
-  workspace: any
+  workspace: Workspace | null
 }
 
 export default function MarcaSection({ workspace }: Props) {

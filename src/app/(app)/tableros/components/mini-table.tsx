@@ -4,11 +4,13 @@ interface Column {
   key: string
   label: string
   align?: 'left' | 'right'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- valor del row es arbitrario en el punto de consumo
   render?: (value: any) => React.ReactNode
 }
 
 interface MiniTableProps {
   columns: Column[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rows son estructurados en el call-site
   data: Record<string, any>[]
   emptyMessage?: string
 }

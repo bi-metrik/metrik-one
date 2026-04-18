@@ -262,7 +262,7 @@ export async function getLineasDisponibles() {
 
 
   const [lineasRes, wsRes] = await Promise.all([
-    (supabase as any)
+    supabase
       .from('lineas_negocio')
       .select('id, nombre, descripcion, tipo')
       .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
@@ -277,7 +277,7 @@ export async function getLineasDisponibles() {
 
   return {
     lineas: (lineasRes.data ?? []) as { id: string; nombre: string; descripcion: string | null; tipo: string }[],
-    lineaActivaId: (wsRes.data as any)?.linea_activa_id as string | null,
+    lineaActivaId: wsRes.data?.linea_activa_id ?? null,
   }
 }
 
@@ -288,7 +288,7 @@ export async function updateLineaActiva(lineaId: string) {
 
   const { error: dbError } = await supabase
     .from('workspaces')
-    .update({ linea_activa_id: lineaId } as any)
+    .update({ linea_activa_id: lineaId })
     .eq('id', workspaceId)
 
   if (dbError) return { success: false, error: dbError.message }

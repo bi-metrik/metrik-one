@@ -14,7 +14,8 @@ export default async function TablerosPage() {
   // Load workspace modules
   let modules: Record<string, boolean> = { business: true }
   if (workspaceId && supabase) {
-    const { data: ws } = await (supabase.from('workspaces') as any)
+    const { data: ws } = await supabase
+      .from('workspaces')
       .select('modules')
       .eq('id', workspaceId)
       .single()

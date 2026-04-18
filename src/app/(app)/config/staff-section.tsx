@@ -181,7 +181,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       tipo_vinculo: s.tipo_vinculo || '',
       rol_plataforma: s.rol_plataforma || 'ejecutor',
       area: s.area || 'operaciones',
-      display_role: (s as any).display_role || '',
+      display_role: s.display_role || '',
     })
     setEditingId(s.id)
     setShowForm(true)

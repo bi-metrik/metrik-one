@@ -26,6 +26,7 @@ export async function getFacturasPendientes() {
   const cobrosPorFactura = new Map<string, number>()
   ;(cobros ?? []).forEach(c => {
     const fid = c.factura_id
+    if (!fid) return
     cobrosPorFactura.set(fid, (cobrosPorFactura.get(fid) ?? 0) + Number(c.monto))
   })
 

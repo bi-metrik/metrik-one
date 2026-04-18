@@ -214,6 +214,188 @@ export type Database = {
           },
         ]
       }
+      bloque_configs: {
+        Row: {
+          bloque_definition_id: string
+          config_extra: Json
+          created_at: string
+          descripcion: string | null
+          es_gate: boolean
+          estado: string
+          etapa_id: string
+          id: string
+          nombre: string | null
+          orden: number
+          workspace_id: string
+        }
+        Insert: {
+          bloque_definition_id: string
+          config_extra?: Json
+          created_at?: string
+          descripcion?: string | null
+          es_gate?: boolean
+          estado?: string
+          etapa_id: string
+          id?: string
+          nombre?: string | null
+          orden?: number
+          workspace_id: string
+        }
+        Update: {
+          bloque_definition_id?: string
+          config_extra?: Json
+          created_at?: string
+          descripcion?: string | null
+          es_gate?: boolean
+          estado?: string
+          etapa_id?: string
+          id?: string
+          nombre?: string | null
+          orden?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bloque_configs_bloque_definition_id_fkey"
+            columns: ["bloque_definition_id"]
+            isOneToOne: false
+            referencedRelation: "bloque_definitions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bloque_configs_etapa_id_fkey"
+            columns: ["etapa_id"]
+            isOneToOne: false
+            referencedRelation: "etapas_negocio"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bloque_configs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bloque_definitions: {
+        Row: {
+          can_be_gate: boolean
+          codigo: string | null
+          created_at: string
+          default_estado: string
+          descripcion: string | null
+          icon_name: string | null
+          id: string
+          is_visualization: boolean
+          nombre: string
+          supports_array_items: boolean
+          tipo: string
+        }
+        Insert: {
+          can_be_gate?: boolean
+          codigo?: string | null
+          created_at?: string
+          default_estado?: string
+          descripcion?: string | null
+          icon_name?: string | null
+          id?: string
+          is_visualization?: boolean
+          nombre: string
+          supports_array_items?: boolean
+          tipo: string
+        }
+        Update: {
+          can_be_gate?: boolean
+          codigo?: string | null
+          created_at?: string
+          default_estado?: string
+          descripcion?: string | null
+          icon_name?: string | null
+          id?: string
+          is_visualization?: boolean
+          nombre?: string
+          supports_array_items?: boolean
+          tipo?: string
+        }
+        Relationships: []
+      }
+      bloque_items: {
+        Row: {
+          completado: boolean
+          completado_at: string | null
+          completado_por: string | null
+          contenido: Json
+          created_at: string
+          fecha_fin: string | null
+          fecha_inicio: string | null
+          id: string
+          imagen_data: string | null
+          label: string
+          link_url: string | null
+          negocio_bloque_id: string
+          orden: number
+          responsable_id: string | null
+          tipo: string
+        }
+        Insert: {
+          completado?: boolean
+          completado_at?: string | null
+          completado_por?: string | null
+          contenido?: Json
+          created_at?: string
+          fecha_fin?: string | null
+          fecha_inicio?: string | null
+          id?: string
+          imagen_data?: string | null
+          label: string
+          link_url?: string | null
+          negocio_bloque_id: string
+          orden?: number
+          responsable_id?: string | null
+          tipo?: string
+        }
+        Update: {
+          completado?: boolean
+          completado_at?: string | null
+          completado_por?: string | null
+          contenido?: Json
+          created_at?: string
+          fecha_fin?: string | null
+          fecha_inicio?: string | null
+          id?: string
+          imagen_data?: string | null
+          label?: string
+          link_url?: string | null
+          negocio_bloque_id?: string
+          orden?: number
+          responsable_id?: string | null
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bloque_items_completado_por_fkey"
+            columns: ["completado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bloque_items_negocio_bloque_id_fkey"
+            columns: ["negocio_bloque_id"]
+            isOneToOne: false
+            referencedRelation: "negocio_bloques"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bloque_items_responsable_id_fkey"
+            columns: ["responsable_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bot_sessions: {
         Row: {
           context: Json | null
@@ -399,7 +581,7 @@ export type Database = {
           enviado_alegra: boolean | null
           estado_causacion: string
           external_ref: string | null
-          factura_id: string
+          factura_id: string | null
           fecha: string
           fecha_aprobacion: string | null
           fecha_causacion: string | null
@@ -407,11 +589,16 @@ export type Database = {
           id: string
           mensaje_original: string | null
           monto: number
+          negocio_id: string | null
           notas: string | null
           notas_causacion: string | null
-          proyecto_id: string
+          proyecto_id: string | null
           rechazo_motivo: string | null
           retencion_aplicada: number | null
+          retenciones: Json | null
+          tercero_nit: string | null
+          tercero_razon_social: string | null
+          tipo_cobro: string | null
           workspace_id: string
         }
         Insert: {
@@ -427,7 +614,7 @@ export type Database = {
           enviado_alegra?: boolean | null
           estado_causacion?: string
           external_ref?: string | null
-          factura_id: string
+          factura_id?: string | null
           fecha?: string
           fecha_aprobacion?: string | null
           fecha_causacion?: string | null
@@ -435,11 +622,16 @@ export type Database = {
           id?: string
           mensaje_original?: string | null
           monto: number
+          negocio_id?: string | null
           notas?: string | null
           notas_causacion?: string | null
-          proyecto_id: string
+          proyecto_id?: string | null
           rechazo_motivo?: string | null
           retencion_aplicada?: number | null
+          retenciones?: Json | null
+          tercero_nit?: string | null
+          tercero_razon_social?: string | null
+          tipo_cobro?: string | null
           workspace_id: string
         }
         Update: {
@@ -455,7 +647,7 @@ export type Database = {
           enviado_alegra?: boolean | null
           estado_causacion?: string
           external_ref?: string | null
-          factura_id?: string
+          factura_id?: string | null
           fecha?: string
           fecha_aprobacion?: string | null
           fecha_causacion?: string | null
@@ -463,11 +655,16 @@ export type Database = {
           id?: string
           mensaje_original?: string | null
           monto?: number
+          negocio_id?: string | null
           notas?: string | null
           notas_causacion?: string | null
-          proyecto_id?: string
+          proyecto_id?: string | null
           rechazo_motivo?: string | null
           retencion_aplicada?: number | null
+          retenciones?: Json | null
+          tercero_nit?: string | null
+          tercero_razon_social?: string | null
+          tipo_cobro?: string | null
           workspace_id?: string
         }
         Relationships: [
@@ -491,6 +688,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_facturas_estado"
             referencedColumns: ["factura_id"]
+          },
+          {
+            foreignKeyName: "cobros_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "cobros_proyecto_id_fkey"
@@ -762,6 +966,42 @@ export type Database = {
           },
         ]
       }
+      control_causa: {
+        Row: {
+          causa_id: string
+          control_id: string
+          created_at: string | null
+          id: string
+        }
+        Insert: {
+          causa_id: string
+          control_id: string
+          created_at?: string | null
+          id?: string
+        }
+        Update: {
+          causa_id?: string
+          control_id?: string
+          created_at?: string | null
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "control_causa_causa_id_fkey"
+            columns: ["causa_id"]
+            isOneToOne: false
+            referencedRelation: "riesgo_causas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "control_causa_control_id_fkey"
+            columns: ["control_id"]
+            isOneToOne: false
+            referencedRelation: "riesgos_controles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       costos_referencia: {
         Row: {
           costo_promedio: number | null
@@ -805,6 +1045,8 @@ export type Database = {
       }
       cotizaciones: {
         Row: {
+          aiu_admin_pct: number | null
+          aiu_imprevistos_pct: number | null
           codigo: string
           condiciones_pago: string | null
           consecutivo: string
@@ -821,13 +1063,16 @@ export type Database = {
           id: string
           margen_porcentaje: number | null
           modo: string
+          negocio_id: string | null
           notas: string | null
-          oportunidad_id: string
+          oportunidad_id: string | null
           updated_at: string | null
           valor_total: number
           workspace_id: string
         }
         Insert: {
+          aiu_admin_pct?: number | null
+          aiu_imprevistos_pct?: number | null
           codigo: string
           condiciones_pago?: string | null
           consecutivo: string
@@ -844,13 +1089,16 @@ export type Database = {
           id?: string
           margen_porcentaje?: number | null
           modo: string
+          negocio_id?: string | null
           notas?: string | null
-          oportunidad_id: string
+          oportunidad_id?: string | null
           updated_at?: string | null
           valor_total?: number
           workspace_id: string
         }
         Update: {
+          aiu_admin_pct?: number | null
+          aiu_imprevistos_pct?: number | null
           codigo?: string
           condiciones_pago?: string | null
           consecutivo?: string
@@ -867,8 +1115,9 @@ export type Database = {
           id?: string
           margen_porcentaje?: number | null
           modo?: string
+          negocio_id?: string | null
           notas?: string | null
-          oportunidad_id?: string
+          oportunidad_id?: string | null
           updated_at?: string | null
           valor_total?: number
           workspace_id?: string
@@ -879,6 +1128,13 @@ export type Database = {
             columns: ["duplicada_de"]
             isOneToOne: false
             referencedRelation: "cotizaciones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cotizaciones_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
             referencedColumns: ["id"]
           },
           {
@@ -1214,6 +1470,47 @@ export type Database = {
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      etapas_negocio: {
+        Row: {
+          config_extra: Json
+          created_at: string
+          id: string
+          is_active: boolean
+          linea_id: string
+          nombre: string
+          orden: number
+          stage: string
+        }
+        Insert: {
+          config_extra?: Json
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          linea_id: string
+          nombre: string
+          orden?: number
+          stage: string
+        }
+        Update: {
+          config_extra?: Json
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          linea_id?: string
+          nombre?: string
+          orden?: number
+          stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "etapas_negocio_linea_id_fkey"
+            columns: ["linea_id"]
+            isOneToOne: false
+            referencedRelation: "lineas_negocio"
             referencedColumns: ["id"]
           },
         ]
@@ -1612,13 +1909,17 @@ export type Database = {
           id: string
           mensaje_original: string | null
           monto: number
+          negocio_id: string | null
           notas_causacion: string | null
           proyecto_id: string | null
           rechazo_motivo: string | null
           retencion_aplicada: number | null
+          retenciones: Json | null
           rubro_id: string | null
           soporte_pendiente: boolean | null
           soporte_url: string | null
+          tercero_nit: string | null
+          tercero_razon_social: string | null
           tipo: string | null
           workspace_id: string
         }
@@ -1649,13 +1950,17 @@ export type Database = {
           id?: string
           mensaje_original?: string | null
           monto: number
+          negocio_id?: string | null
           notas_causacion?: string | null
           proyecto_id?: string | null
           rechazo_motivo?: string | null
           retencion_aplicada?: number | null
+          retenciones?: Json | null
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
+          tercero_nit?: string | null
+          tercero_razon_social?: string | null
           tipo?: string | null
           workspace_id: string
         }
@@ -1686,13 +1991,17 @@ export type Database = {
           id?: string
           mensaje_original?: string | null
           monto?: number
+          negocio_id?: string | null
           notas_causacion?: string | null
           proyecto_id?: string | null
           rechazo_motivo?: string | null
           retencion_aplicada?: number | null
+          retenciones?: Json | null
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
+          tercero_nit?: string | null
+          tercero_razon_social?: string | null
           tipo?: string | null
           workspace_id?: string
         }
@@ -1745,6 +2054,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_proyecto_financiero"
             referencedColumns: ["empresa_id"]
+          },
+          {
+            foreignKeyName: "gastos_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "gastos_proyecto_id_fkey"
@@ -1937,7 +2253,8 @@ export type Database = {
           id: string
           inicio: string | null
           mensaje_original: string | null
-          proyecto_id: string
+          negocio_id: string | null
+          proyecto_id: string | null
           rechazo_motivo: string | null
           staff_id: string | null
           timer_activo: boolean | null
@@ -1958,7 +2275,8 @@ export type Database = {
           id?: string
           inicio?: string | null
           mensaje_original?: string | null
-          proyecto_id: string
+          negocio_id?: string | null
+          proyecto_id?: string | null
           rechazo_motivo?: string | null
           staff_id?: string | null
           timer_activo?: boolean | null
@@ -1979,13 +2297,21 @@ export type Database = {
           id?: string
           inicio?: string | null
           mensaje_original?: string | null
-          proyecto_id?: string
+          negocio_id?: string | null
+          proyecto_id?: string | null
           rechazo_motivo?: string | null
           staff_id?: string | null
           timer_activo?: boolean | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "horas_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "horas_proyecto_id_fkey"
             columns: ["proyecto_id"]
@@ -2088,29 +2414,44 @@ export type Database = {
       }
       items: {
         Row: {
+          cantidad: number
           cotizacion_id: string
           created_at: string | null
+          descripcion: string | null
+          descuento_porcentaje: number | null
+          es_ajuste: boolean
           id: string
           nombre: string
           orden: number
+          precio_venta: number | null
           servicio_origen_id: string | null
           subtotal: number | null
         }
         Insert: {
+          cantidad?: number
           cotizacion_id: string
           created_at?: string | null
+          descripcion?: string | null
+          descuento_porcentaje?: number | null
+          es_ajuste?: boolean
           id?: string
           nombre: string
           orden?: number
+          precio_venta?: number | null
           servicio_origen_id?: string | null
           subtotal?: number | null
         }
         Update: {
+          cantidad?: number
           cotizacion_id?: string
           created_at?: string | null
+          descripcion?: string | null
+          descuento_porcentaje?: number | null
+          es_ajuste?: boolean
           id?: string
           nombre?: string
           orden?: number
+          precio_venta?: number | null
           servicio_origen_id?: string | null
           subtotal?: number | null
         }
@@ -2159,6 +2500,47 @@ export type Database = {
           },
         ]
       }
+      lineas_negocio: {
+        Row: {
+          created_at: string
+          descripcion: string | null
+          drive_folder_id: string | null
+          id: string
+          is_active: boolean
+          nombre: string
+          tipo: string
+          workspace_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          descripcion?: string | null
+          drive_folder_id?: string | null
+          id?: string
+          is_active?: boolean
+          nombre: string
+          tipo?: string
+          workspace_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          descripcion?: string | null
+          drive_folder_id?: string | null
+          id?: string
+          is_active?: boolean
+          nombre?: string
+          tipo?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lineas_negocio_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       monthly_targets: {
         Row: {
           collection_target: number | null
@@ -2193,6 +2575,220 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "monthly_targets_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      negocio_bloques: {
+        Row: {
+          bloque_config_id: string
+          completado_at: string | null
+          completado_por: string | null
+          created_at: string
+          data: Json
+          estado: string
+          id: string
+          negocio_id: string
+          updated_at: string
+        }
+        Insert: {
+          bloque_config_id: string
+          completado_at?: string | null
+          completado_por?: string | null
+          created_at?: string
+          data?: Json
+          estado?: string
+          id?: string
+          negocio_id: string
+          updated_at?: string
+        }
+        Update: {
+          bloque_config_id?: string
+          completado_at?: string | null
+          completado_por?: string | null
+          created_at?: string
+          data?: Json
+          estado?: string
+          id?: string
+          negocio_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "negocio_bloques_bloque_config_id_fkey"
+            columns: ["bloque_config_id"]
+            isOneToOne: false
+            referencedRelation: "bloque_configs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocio_bloques_completado_por_fkey"
+            columns: ["completado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocio_bloques_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      negocios: {
+        Row: {
+          balance_final: Json | null
+          carpeta_url: string | null
+          cierre_snapshot: Json | null
+          closed_at: string | null
+          codigo: string | null
+          contacto_id: string | null
+          created_at: string
+          descripcion_cierre: string | null
+          empresa_id: string | null
+          estado: string
+          etapa_actual_id: string | null
+          id: string
+          lecciones_aprendidas: string | null
+          linea_id: string | null
+          motivo_cierre: string | null
+          motivo_pausa: string | null
+          motivo_pausa_detalle: string | null
+          nombre: string
+          pausado: boolean
+          pausado_hasta: string | null
+          precio_aprobado: number | null
+          precio_estimado: number | null
+          razon_cierre: string | null
+          responsable_id: string | null
+          stage_actual: string
+          tipo_cierre: string | null
+          ultimo_pausado_at: string | null
+          updated_at: string
+          veces_pausado: number
+          workspace_id: string
+        }
+        Insert: {
+          balance_final?: Json | null
+          carpeta_url?: string | null
+          cierre_snapshot?: Json | null
+          closed_at?: string | null
+          codigo?: string | null
+          contacto_id?: string | null
+          created_at?: string
+          descripcion_cierre?: string | null
+          empresa_id?: string | null
+          estado?: string
+          etapa_actual_id?: string | null
+          id?: string
+          lecciones_aprendidas?: string | null
+          linea_id?: string | null
+          motivo_cierre?: string | null
+          motivo_pausa?: string | null
+          motivo_pausa_detalle?: string | null
+          nombre: string
+          pausado?: boolean
+          pausado_hasta?: string | null
+          precio_aprobado?: number | null
+          precio_estimado?: number | null
+          razon_cierre?: string | null
+          responsable_id?: string | null
+          stage_actual?: string
+          tipo_cierre?: string | null
+          ultimo_pausado_at?: string | null
+          updated_at?: string
+          veces_pausado?: number
+          workspace_id: string
+        }
+        Update: {
+          balance_final?: Json | null
+          carpeta_url?: string | null
+          cierre_snapshot?: Json | null
+          closed_at?: string | null
+          codigo?: string | null
+          contacto_id?: string | null
+          created_at?: string
+          descripcion_cierre?: string | null
+          empresa_id?: string | null
+          estado?: string
+          etapa_actual_id?: string | null
+          id?: string
+          lecciones_aprendidas?: string | null
+          linea_id?: string | null
+          motivo_cierre?: string | null
+          motivo_pausa?: string | null
+          motivo_pausa_detalle?: string | null
+          nombre?: string
+          pausado?: boolean
+          pausado_hasta?: string | null
+          precio_aprobado?: number | null
+          precio_estimado?: number | null
+          razon_cierre?: string | null
+          responsable_id?: string | null
+          stage_actual?: string
+          tipo_cierre?: string | null
+          ultimo_pausado_at?: string | null
+          updated_at?: string
+          veces_pausado?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "negocios_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "contactos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocios_contacto_id_fkey"
+            columns: ["contacto_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["contacto_id"]
+          },
+          {
+            foreignKeyName: "negocios_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocios_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["empresa_id"]
+          },
+          {
+            foreignKeyName: "negocios_etapa_actual_id_fkey"
+            columns: ["etapa_actual_id"]
+            isOneToOne: false
+            referencedRelation: "etapas_negocio"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocios_linea_id_fkey"
+            columns: ["linea_id"]
+            isOneToOne: false
+            referencedRelation: "lineas_negocio"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocios_responsable_id_fkey"
+            columns: ["responsable_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocios_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -3373,6 +3969,343 @@ export type Database = {
           },
         ]
       }
+      riesgo_causas: {
+        Row: {
+          contexto: string | null
+          created_at: string
+          descripcion: string
+          factor_riesgo: string | null
+          id: string
+          impacto_contagio: number | null
+          impacto_contagio_detalle: string | null
+          impacto_legal: number | null
+          impacto_legal_detalle: string | null
+          impacto_operativo: number | null
+          impacto_operativo_detalle: string | null
+          impacto_ponderado: number | null
+          impacto_reputacional: number | null
+          impacto_reputacional_detalle: string | null
+          probabilidad: number | null
+          probabilidad_frecuencia: number | null
+          probabilidad_frecuencia_detalle: string | null
+          probabilidad_ocurrencia: number | null
+          probabilidad_ocurrencia_detalle: string | null
+          referencia: string
+          riesgo_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          contexto?: string | null
+          created_at?: string
+          descripcion: string
+          factor_riesgo?: string | null
+          id?: string
+          impacto_contagio?: number | null
+          impacto_contagio_detalle?: string | null
+          impacto_legal?: number | null
+          impacto_legal_detalle?: string | null
+          impacto_operativo?: number | null
+          impacto_operativo_detalle?: string | null
+          impacto_ponderado?: number | null
+          impacto_reputacional?: number | null
+          impacto_reputacional_detalle?: string | null
+          probabilidad?: number | null
+          probabilidad_frecuencia?: number | null
+          probabilidad_frecuencia_detalle?: string | null
+          probabilidad_ocurrencia?: number | null
+          probabilidad_ocurrencia_detalle?: string | null
+          referencia: string
+          riesgo_id: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          contexto?: string | null
+          created_at?: string
+          descripcion?: string
+          factor_riesgo?: string | null
+          id?: string
+          impacto_contagio?: number | null
+          impacto_contagio_detalle?: string | null
+          impacto_legal?: number | null
+          impacto_legal_detalle?: string | null
+          impacto_operativo?: number | null
+          impacto_operativo_detalle?: string | null
+          impacto_ponderado?: number | null
+          impacto_reputacional?: number | null
+          impacto_reputacional_detalle?: string | null
+          probabilidad?: number | null
+          probabilidad_frecuencia?: number | null
+          probabilidad_frecuencia_detalle?: string | null
+          probabilidad_ocurrencia?: number | null
+          probabilidad_ocurrencia_detalle?: string | null
+          referencia?: string
+          riesgo_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "riesgo_causas_riesgo_id_fkey"
+            columns: ["riesgo_id"]
+            isOneToOne: false
+            referencedRelation: "riesgos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "riesgo_causas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      riesgos: {
+        Row: {
+          categoria: string
+          codigo: string | null
+          created_at: string | null
+          descripcion: string
+          estado: string
+          evaluado_por: string | null
+          evento_riesgo: string | null
+          evidencias: Json | null
+          factor_riesgo: string
+          fecha_evaluacion: string | null
+          fecha_identificacion: string | null
+          fuente_identificacion: string | null
+          id: string
+          impacto: number
+          impacto_contagio: number | null
+          impacto_legal: number | null
+          impacto_operativo: number | null
+          impacto_reputacional: number | null
+          nivel_riesgo: string | null
+          nivel_riesgo_residual: string | null
+          notas: string | null
+          probabilidad: number
+          probabilidad_frecuencia: number | null
+          probabilidad_ocurrencia: number | null
+          probabilidad_tipo: string | null
+          referencia: string | null
+          responsable_id: string | null
+          riesgo_residual_impacto: number | null
+          riesgo_residual_probabilidad: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          categoria: string
+          codigo?: string | null
+          created_at?: string | null
+          descripcion: string
+          estado?: string
+          evaluado_por?: string | null
+          evento_riesgo?: string | null
+          evidencias?: Json | null
+          factor_riesgo: string
+          fecha_evaluacion?: string | null
+          fecha_identificacion?: string | null
+          fuente_identificacion?: string | null
+          id?: string
+          impacto: number
+          impacto_contagio?: number | null
+          impacto_legal?: number | null
+          impacto_operativo?: number | null
+          impacto_reputacional?: number | null
+          nivel_riesgo?: string | null
+          nivel_riesgo_residual?: string | null
+          notas?: string | null
+          probabilidad: number
+          probabilidad_frecuencia?: number | null
+          probabilidad_ocurrencia?: number | null
+          probabilidad_tipo?: string | null
+          referencia?: string | null
+          responsable_id?: string | null
+          riesgo_residual_impacto?: number | null
+          riesgo_residual_probabilidad?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          categoria?: string
+          codigo?: string | null
+          created_at?: string | null
+          descripcion?: string
+          estado?: string
+          evaluado_por?: string | null
+          evento_riesgo?: string | null
+          evidencias?: Json | null
+          factor_riesgo?: string
+          fecha_evaluacion?: string | null
+          fecha_identificacion?: string | null
+          fuente_identificacion?: string | null
+          id?: string
+          impacto?: number
+          impacto_contagio?: number | null
+          impacto_legal?: number | null
+          impacto_operativo?: number | null
+          impacto_reputacional?: number | null
+          nivel_riesgo?: string | null
+          nivel_riesgo_residual?: string | null
+          notas?: string | null
+          probabilidad?: number
+          probabilidad_frecuencia?: number | null
+          probabilidad_ocurrencia?: number | null
+          probabilidad_tipo?: string | null
+          referencia?: string | null
+          responsable_id?: string | null
+          riesgo_residual_impacto?: number | null
+          riesgo_residual_probabilidad?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "riesgos_evaluado_por_fkey"
+            columns: ["evaluado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "riesgos_responsable_id_fkey"
+            columns: ["responsable_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "riesgos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      riesgos_controles: {
+        Row: {
+          actividad_control: string | null
+          causa_id: string | null
+          clasificacion: string | null
+          config_extra: Json | null
+          created_at: string | null
+          ef_actividades_complejas: number | null
+          ef_cambios_personal: number | null
+          ef_certeza: number | null
+          ef_depende_otros: number | null
+          ef_juicios_significativos: number | null
+          ef_multiples_localidades: number | null
+          ef_sujeto_actualizaciones: number | null
+          estado: string
+          id: string
+          negocio_id: string | null
+          nombre_control: string
+          periodicidad: string | null
+          ponderacion_efectividad: number | null
+          ponderacion_factores: number | null
+          referencia: string | null
+          responsable_id: string | null
+          riesgo_id: string | null
+          tipo_control: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          actividad_control?: string | null
+          causa_id?: string | null
+          clasificacion?: string | null
+          config_extra?: Json | null
+          created_at?: string | null
+          ef_actividades_complejas?: number | null
+          ef_cambios_personal?: number | null
+          ef_certeza?: number | null
+          ef_depende_otros?: number | null
+          ef_juicios_significativos?: number | null
+          ef_multiples_localidades?: number | null
+          ef_sujeto_actualizaciones?: number | null
+          estado?: string
+          id?: string
+          negocio_id?: string | null
+          nombre_control: string
+          periodicidad?: string | null
+          ponderacion_efectividad?: number | null
+          ponderacion_factores?: number | null
+          referencia?: string | null
+          responsable_id?: string | null
+          riesgo_id?: string | null
+          tipo_control: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          actividad_control?: string | null
+          causa_id?: string | null
+          clasificacion?: string | null
+          config_extra?: Json | null
+          created_at?: string | null
+          ef_actividades_complejas?: number | null
+          ef_cambios_personal?: number | null
+          ef_certeza?: number | null
+          ef_depende_otros?: number | null
+          ef_juicios_significativos?: number | null
+          ef_multiples_localidades?: number | null
+          ef_sujeto_actualizaciones?: number | null
+          estado?: string
+          id?: string
+          negocio_id?: string | null
+          nombre_control?: string
+          periodicidad?: string | null
+          ponderacion_efectividad?: number | null
+          ponderacion_factores?: number | null
+          referencia?: string | null
+          responsable_id?: string | null
+          riesgo_id?: string | null
+          tipo_control?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "riesgos_controles_causa_id_fkey"
+            columns: ["causa_id"]
+            isOneToOne: false
+            referencedRelation: "riesgo_causas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "riesgos_controles_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "riesgos_controles_responsable_id_fkey"
+            columns: ["responsable_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "riesgos_controles_riesgo_id_fkey"
+            columns: ["riesgo_id"]
+            isOneToOne: false
+            referencedRelation: "riesgos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "riesgos_controles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rubros: {
         Row: {
           cantidad: number
@@ -3966,7 +4899,8 @@ export type Database = {
           descripcion: string | null
           id: string
           inicio: string
-          proyecto_id: string
+          negocio_id: string | null
+          proyecto_id: string | null
           workspace_id: string
         }
         Insert: {
@@ -3974,7 +4908,8 @@ export type Database = {
           descripcion?: string | null
           id?: string
           inicio?: string
-          proyecto_id: string
+          negocio_id?: string | null
+          proyecto_id?: string | null
           workspace_id: string
         }
         Update: {
@@ -3982,10 +4917,18 @@ export type Database = {
           descripcion?: string | null
           id?: string
           inicio?: string
-          proyecto_id?: string
+          negocio_id?: string | null
+          proyecto_id?: string | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "timer_activo_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "timer_activo_proyecto_id_fkey"
             columns: ["proyecto_id"]
@@ -4004,6 +4947,47 @@ export type Database = {
             foreignKeyName: "timer_activo_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ve_procesamiento_log: {
+        Row: {
+          campos_extraidos: Json | null
+          costo_usd: number | null
+          documentos_procesados: string[]
+          exitoso: boolean
+          id: string
+          oportunidad_id: string
+          procesado_en: string
+          workspace_id: string
+        }
+        Insert: {
+          campos_extraidos?: Json | null
+          costo_usd?: number | null
+          documentos_procesados?: string[]
+          exitoso?: boolean
+          id?: string
+          oportunidad_id: string
+          procesado_en?: string
+          workspace_id: string
+        }
+        Update: {
+          campos_extraidos?: Json | null
+          costo_usd?: number | null
+          documentos_procesados?: string[]
+          exitoso?: boolean
+          id?: string
+          oportunidad_id?: string
+          procesado_en?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ve_procesamiento_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
@@ -4052,29 +5036,47 @@ export type Database = {
       }
       wa_message_log: {
         Row: {
+          confidence: number | null
           created_at: string | null
           direction: string
+          gemini_input_tokens: number | null
+          gemini_latency_ms: number | null
+          gemini_model: string | null
+          gemini_output_tokens: number | null
           id: string
           intent: string | null
           message_preview: string | null
+          parser_source: string | null
           phone: string
           workspace_id: string | null
         }
         Insert: {
+          confidence?: number | null
           created_at?: string | null
           direction: string
+          gemini_input_tokens?: number | null
+          gemini_latency_ms?: number | null
+          gemini_model?: string | null
+          gemini_output_tokens?: number | null
           id?: string
           intent?: string | null
           message_preview?: string | null
+          parser_source?: string | null
           phone: string
           workspace_id?: string | null
         }
         Update: {
+          confidence?: number | null
           created_at?: string | null
           direction?: string
+          gemini_input_tokens?: number | null
+          gemini_latency_ms?: number | null
+          gemini_model?: string | null
+          gemini_output_tokens?: number | null
           id?: string
           intent?: string | null
           message_preview?: string | null
+          parser_source?: string | null
           phone?: string
           workspace_id?: string | null
         }
@@ -4187,17 +5189,23 @@ export type Database = {
           color_primario: string | null
           color_secundario: string | null
           created_at: string | null
+          drive_folder_id: string | null
           equipo_declarado: number | null
           id: string
+          linea_activa_id: string | null
           logo_url: string | null
           max_seats: number
+          modules: Json
           name: string
           onboarding_completed: boolean | null
           profession: string | null
+          proyecto_modules: Json
           slug: string
+          stages_activos: Json
           subscription_expires_at: string | null
           subscription_started_at: string | null
           subscription_status: string
+          tipo: string
           trial_ends_at: string | null
           updated_at: string | null
           years_independent: number | null
@@ -4206,17 +5214,23 @@ export type Database = {
           color_primario?: string | null
           color_secundario?: string | null
           created_at?: string | null
+          drive_folder_id?: string | null
           equipo_declarado?: number | null
           id?: string
+          linea_activa_id?: string | null
           logo_url?: string | null
           max_seats?: number
+          modules?: Json
           name: string
           onboarding_completed?: boolean | null
           profession?: string | null
+          proyecto_modules?: Json
           slug: string
+          stages_activos?: Json
           subscription_expires_at?: string | null
           subscription_started_at?: string | null
           subscription_status?: string
+          tipo?: string
           trial_ends_at?: string | null
           updated_at?: string | null
           years_independent?: number | null
@@ -4225,22 +5239,36 @@ export type Database = {
           color_primario?: string | null
           color_secundario?: string | null
           created_at?: string | null
+          drive_folder_id?: string | null
           equipo_declarado?: number | null
           id?: string
+          linea_activa_id?: string | null
           logo_url?: string | null
           max_seats?: number
+          modules?: Json
           name?: string
           onboarding_completed?: boolean | null
           profession?: string | null
+          proyecto_modules?: Json
           slug?: string
+          stages_activos?: Json
           subscription_expires_at?: string | null
           subscription_started_at?: string | null
           subscription_status?: string
+          tipo?: string
           trial_ends_at?: string | null
           updated_at?: string | null
           years_independent?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "workspaces_linea_activa_id_fkey"
+            columns: ["linea_activa_id"]
+            isOneToOne: false
+            referencedRelation: "lineas_negocio"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -4439,6 +5467,10 @@ export type Database = {
       }
     }
     Functions: {
+      apply_plantilla_to_workspace: {
+        Args: { p_linea_id: string; p_workspace_id: string }
+        Returns: undefined
+      }
       check_perfil_fiscal_completo: {
         Args: { p_empresa_id: string }
         Returns: boolean
@@ -4469,6 +5501,14 @@ export type Database = {
         Args: { p_nombre: string; p_workspace_id: string }
         Returns: string
       }
+      generate_negocio_codigo: {
+        Args: { p_empresa_id: string; p_workspace_id: string }
+        Returns: string
+      }
+      generate_negocio_codigo_sin_empresa: {
+        Args: { p_contacto_id: string; p_workspace_id: string }
+        Returns: string
+      }
       generate_oportunidad_codigo: {
         Args: { p_empresa_id: string; p_workspace_id: string }
         Returns: string
@@ -4483,6 +5523,10 @@ export type Database = {
       }
       get_user_role: { Args: never; Returns: string }
       is_admin_or_owner: { Args: never; Returns: boolean }
+      puede_avanzar_etapa: {
+        Args: { p_etapa_id: string; p_negocio_id: string }
+        Returns: boolean
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       unaccent: { Args: { "": string }; Returns: string }
@@ -4669,7 +5713,6 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type Client = Database['public']['Tables']['clients']['Row']
 export type Contacto = Database['public']['Tables']['contactos']['Row']

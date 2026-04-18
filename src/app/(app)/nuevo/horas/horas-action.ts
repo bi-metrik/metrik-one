@@ -15,7 +15,7 @@ export async function getDestinosParaHoras() {
 
 
   const [negociosRes, proyectosRes] = await Promise.all([
-    (supabase as any)
+    supabase
       .from('negocios')
       .select('id, nombre, codigo')
       .eq('workspace_id', workspaceId)

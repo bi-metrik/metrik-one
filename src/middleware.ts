@@ -42,7 +42,8 @@ async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['s
 
   // Check workspace modules — compliance-only skips business landing
   if (workspaceId) {
-    const { data: ws } = await (supabase.from('workspaces') as any)
+    const { data: ws } = await supabase
+      .from('workspaces')
       .select('modules')
       .eq('id', workspaceId)
       .single()

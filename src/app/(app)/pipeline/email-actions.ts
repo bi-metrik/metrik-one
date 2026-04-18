@@ -73,8 +73,9 @@ export async function enviarCotizacionEmail(cotizacionId: string, emailTo: strin
     if (emailError) {
       return { success: false, error: emailError.message }
     }
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Error enviando email' }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error enviando email'
+    return { success: false, error: msg }
   }
 
   // Update cotización state and email_enviado_a

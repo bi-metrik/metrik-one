@@ -68,15 +68,14 @@ export async function createGasto(input: {
     tipo = 'empresa'
   } else if (destinoTipo === 'negocio') {
     // Validate negocio is activo
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: negocio } = await (supabase as any)
+    const { data: negocio } = await supabase
       .from('negocios')
       .select('estado')
       .eq('id', destinoId)
       .single()
 
     if (!negocio) return { success: false, error: 'Negocio no encontrado' }
-    if ((negocio as any).estado === 'completado') {
+    if (negocio.estado === 'completado') {
       return { success: false, error: 'No se pueden registrar gastos en negocios completados' }
     }
 
@@ -99,8 +98,7 @@ export async function createGasto(input: {
     proyectoId = destinoId
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const insertData: Record<string, any> = {
+  const insertData = {
     workspace_id: workspaceId,
     fecha: input.fecha || new Date().toISOString().split('T')[0],
     monto: input.monto,
@@ -114,13 +112,12 @@ export async function createGasto(input: {
     soporte_url: input.soporte_url ?? null,
     canal_registro: 'app',
     created_by: userId,
+    ...(negocioId ? { negocio_id: negocioId } : {}),
   }
-  if (negocioId) insertData.negocio_id = negocioId
-
 
   const { error: dbError } = await supabase
     .from('gastos')
-    .insert(insertData as any)
+    .insert(insertData)
 
   if (dbError) return { success: false, error: dbError.message }
 
@@ -138,7 +135,7 @@ export async function getDestinosParaGasto() {
 
 
   const [negociosRes, proyectosRes] = await Promise.all([
-    (supabase as any)
+    supabase
       .from('negocios')
       .select('id, nombre, codigo')
       .eq('workspace_id', workspaceId)
@@ -153,8 +150,7 @@ export async function getDestinosParaGasto() {
   ])
 
   return {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    negocios: (negociosRes.data ?? []).map((n: any) => ({
+    negocios: (negociosRes.data ?? []).map(n => ({
       id: n.id,
       nombre: n.nombre ?? 'Sin nombre',
       codigo: n.codigo ?? '',

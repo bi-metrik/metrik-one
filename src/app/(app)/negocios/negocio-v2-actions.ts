@@ -745,8 +745,10 @@ export async function crearNegocio(input: {
 // config_extra.auto_cotizacion configurado (ej: SOENA VE).
 
 
+type SupabaseClient = Awaited<ReturnType<typeof import('@/lib/actions/get-workspace').getWorkspace>>['supabase']
+
 async function crearCotizacionAutomatica(
-  supabase: any,
+  supabase: SupabaseClient,
   workspaceId: string,
   negocioId: string,
   servicioNombre: string,
@@ -825,10 +827,10 @@ async function crearCotizacionAutomatica(
 
   // 6. Si precio_estimado > 0, ya se puso como valor_total arriba.
   //    Si es 0, usar precio_estandar del servicio.
-  if (precioEstimado === 0 && servicio.precio_estandar > 0) {
+  if (precioEstimado === 0 && (servicio.precio_estandar ?? 0) > 0) {
     await supabase
       .from('cotizaciones')
-      .update({ valor_total: servicio.precio_estandar })
+      .update({ valor_total: servicio.precio_estandar ?? 0 })
       .eq('id', cotizacionId)
   }
 }

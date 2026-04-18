@@ -36,7 +36,7 @@ export default function BloquePagosEpayco({
   tipoCobro,
 }: BloquePagosEpaycoProps) {
   const [pagos, setPagos] = useState<PagoRegistrado[]>(
-    () => (instancia?.data as any)?.pagos ?? []
+    () => ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
   )
   const [newRef, setNewRef] = useState('')
   const [previewDesglose, setPreviewDesglose] = useState<EpaycoDesglose | null>(null)

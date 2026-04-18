@@ -516,15 +516,15 @@ export async function duplicarCotizacion(id: string) {
 
   if (!original) return { success: false, error: 'Cotizacion no encontrada' }
 
-  // Get extra fields separately (columns added via migration, may not be in generated types yet)
+  // Get extra fields separately
   const { data: discountData } = await supabase
     .from('cotizaciones')
     .select('*')
     .eq('id', id)
     .single()
-  const descPct = (discountData as any)?.descuento_porcentaje ?? 0
-  const descVal = (discountData as any)?.descuento_valor ?? 0
-  const negocioIdOrig = (discountData as any)?.negocio_id ?? null
+  const descPct = discountData?.descuento_porcentaje ?? 0
+  const descVal = discountData?.descuento_valor ?? 0
+  const negocioIdOrig = discountData?.negocio_id ?? null
 
   // Get new consecutivo
   const { data: dupConsRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
@@ -546,7 +546,11 @@ export async function duplicarCotizacion(id: string) {
       costo_total: original.costo_total,
       estado: 'borrador',
       duplicada_de: id,
-      ...({ descuento_porcentaje: descPct, descuento_valor: descVal, negocio_id: negocioIdOrig, aiu_admin_pct: (discountData as any)?.aiu_admin_pct ?? null, aiu_imprevistos_pct: (discountData as any)?.aiu_imprevistos_pct ?? null } as any),
+      descuento_porcentaje: descPct,
+      descuento_valor: descVal,
+      negocio_id: negocioIdOrig,
+      aiu_admin_pct: discountData?.aiu_admin_pct ?? null,
+      aiu_imprevistos_pct: discountData?.aiu_imprevistos_pct ?? null,
     })
     .select('id')
     .single()

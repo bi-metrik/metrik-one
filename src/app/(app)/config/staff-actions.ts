@@ -264,7 +264,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
         full_name: staffMember.full_name,
         invited_role: inviteRole,
         workspace_id: profile.workspace_id,
-        display_role: (staffMember as any).display_role || null,
+        display_role: staffMember.display_role || null,
       },
     })
 
@@ -292,7 +292,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
         })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
-          return { error: `Error enviando email: ${(err as any).message || res.statusText}` }
+          return { error: `Error enviando email: ${(err as { message?: string }).message || res.statusText}` }
         }
       } else {
         return { error: `Error invitando: ${inviteErr.message}` }

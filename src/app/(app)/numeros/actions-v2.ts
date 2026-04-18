@@ -429,6 +429,7 @@ export async function getNumeros(mesRef?: string) {
   const cobrosPorFactura = new Map<string, number>()
   allCobros.forEach(c => {
     const fid = c.factura_id
+    if (!fid) return
     cobrosPorFactura.set(fid, (cobrosPorFactura.get(fid) ?? 0) + Number(c.monto))
   })
   const totalFacturado = allFacturas.reduce((s, f) => s + Number(f.monto), 0)
