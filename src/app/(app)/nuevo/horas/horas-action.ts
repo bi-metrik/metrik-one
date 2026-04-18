@@ -13,7 +13,7 @@ export async function getDestinosParaHoras() {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocios: [], proyectos: [] }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const [negociosRes, proyectosRes] = await Promise.all([
     (supabase as any)
       .from('negocios')

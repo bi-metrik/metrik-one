@@ -260,7 +260,7 @@ export async function getLineasDisponibles() {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { lineas: [], lineaActivaId: null }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- lineas_negocio not in generated types yet
+
   const [lineasRes, wsRes] = await Promise.all([
     (supabase as any)
       .from('lineas_negocio')
@@ -285,7 +285,7 @@ export async function updateLineaActiva(lineaId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- linea_activa_id not in generated types yet
+
   const { error: dbError } = await supabase
     .from('workspaces')
     .update({ linea_activa_id: lineaId } as any)

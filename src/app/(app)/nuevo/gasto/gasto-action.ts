@@ -117,7 +117,7 @@ export async function createGasto(input: {
   }
   if (negocioId) insertData.negocio_id = negocioId
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const { error: dbError } = await supabase
     .from('gastos')
     .insert(insertData as any)
@@ -136,7 +136,7 @@ export async function getDestinosParaGasto() {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocios: [] as { id: string; nombre: string; codigo: string }[], proyectos: [] as { id: string; nombre: string; tipo: string; codigo: string }[] }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const [negociosRes, proyectosRes] = await Promise.all([
     (supabase as any)
       .from('negocios')

@@ -85,7 +85,7 @@ export async function getNegocios(): Promise<{
 
   // Obtener custom_data de proyectos VE (estado_ve)
   const proyectoIds = (proyectos ?? []).map(p => p.proyecto_id).filter(Boolean) as string[]
-  let customDataMap: Record<string, Record<string, unknown>> = {}
+  const customDataMap: Record<string, Record<string, unknown>> = {}
   if (proyectoIds.length > 0) {
     const { data: proyectosExtra } = await supabase
       .from('proyectos')

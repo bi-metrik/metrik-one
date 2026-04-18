@@ -844,7 +844,7 @@ export async function getCausasParaControlSelector() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const r of (riesgos ?? []) as any[]) rMap[r.id] = r
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   return causas
     .filter((c: { riesgo_id: string }) => rMap[c.riesgo_id])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

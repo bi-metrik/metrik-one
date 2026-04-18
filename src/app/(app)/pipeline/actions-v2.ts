@@ -411,8 +411,8 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     .maybeSingle()
 
   // Calculate financials from cotización items if available
-  let gananciaEstimada: number | null = null
-  let retencionesEstimadas: number | null = null
+  const gananciaEstimada: number | null = null
+  const retencionesEstimadas: number | null = null
   let horasEstimadas: number | null = null
   let presupuestoTotal = opp.valor_estimado ?? 0
 

@@ -41,7 +41,7 @@ interface RiesgoHeader {
   nivel_riesgo: string
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 interface Props {
   riesgos: RiesgoHeader[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

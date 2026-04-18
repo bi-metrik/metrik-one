@@ -744,7 +744,7 @@ export async function crearNegocio(input: {
 // Se llama internamente desde crearNegocio() si el bloque cotización tiene
 // config_extra.auto_cotizacion configurado (ej: SOENA VE).
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 async function crearCotizacionAutomatica(
   supabase: any,
   workspaceId: string,
@@ -2208,7 +2208,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
 
   // Cargar config_extra de los bloque_configs
   const bloqueConfigIds = base.bloques.map(b => b.id)
-  let bloqueConfigsExtra: Record<string, Record<string, unknown>> = {}
+  const bloqueConfigsExtra: Record<string, Record<string, unknown>> = {}
   if (bloqueConfigIds.length > 0) {
     const { data: extras } = await db(supabase)
       .from('bloque_configs')
@@ -2223,7 +2223,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
 
   // Cargar bloque_items de todos los negocio_bloques
   const negocioBloqueIds = base.bloques.map(b => b.instancia?.id).filter(Boolean) as string[]
-  let itemsByBloqueId: Record<string, unknown[]> = {}
+  const itemsByBloqueId: Record<string, unknown[]> = {}
   if (negocioBloqueIds.length > 0) {
     const { data: itemsData } = await db(supabase)
       .from('bloque_items')
@@ -2270,7 +2270,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     .order('created_at', { ascending: true })
 
   // Cargar gastos del negocio para costosEjecutados + historial
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const { data: gastosData } = await db(supabase)
     .from('gastos')
     .select('id, descripcion, monto, categoria, fecha')
@@ -2279,7 +2279,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     .order('fecha', { ascending: false })
 
   // Cargar horas del negocio
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const { data: horasData } = await db(supabase)
     .from('horas')
     .select('id, horas, descripcion, fecha, staff_id')
