@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import {
   Plus, FileText, DollarSign, Clock, Check, X,
-  Search, Filter, Loader2, Trash2, Receipt, Download,
+  Search, Loader2, Receipt,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createInvoice, markInvoicePaid, deleteInvoice } from './actions'

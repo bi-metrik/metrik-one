@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { MessageSquare, Plus, Trash2, X, Send, Tag } from 'lucide-react'
+import { MessageSquare, Trash2, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { getNotes, addNote, deleteNote } from '@/app/(app)/notes-actions'
 import type { Note } from '@/types/database'

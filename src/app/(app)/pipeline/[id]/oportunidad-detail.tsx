@@ -4,8 +4,8 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, Building2, User, ChevronRight, Flame, XCircle,
-  Trophy, FileText, Plus, Clock, ShieldAlert, Copy, Send, Check, X,
+  ArrowLeft, Building2, User, ChevronRight, XCircle,
+  Trophy, FileText, Plus, Copy, Send, Check, X,
   FolderOpen, ChevronDown, TrendingUp, TrendingDown, Banknote,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -156,12 +156,6 @@ export default function OportunidadDetail({
       }
     })
   }
-
-  // Valor total de cotizaciones para el resumen comercial
-  const valorTotalCotizaciones = cotizaciones.reduce((sum, c) => {
-    const descuento = Number(c.descuento_valor ?? 0)
-    return sum + (c.valor_total ?? 0) - descuento
-  }, 0)
 
   // Build dynamic stage list from workspace_stages, falling back to hardcoded constants
   const etapasActivas: string[] = stages.length > 0

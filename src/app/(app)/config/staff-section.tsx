@@ -192,7 +192,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   }
 
   const handleVinculoChange = (value: string) => {
-    const opt = TIPO_VINCULO.find(t => t.value === value)
     setForm(prev => ({
       ...prev,
       tipo_vinculo: value,

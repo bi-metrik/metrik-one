@@ -1,11 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Play, Pause, Square, Clock, X } from 'lucide-react'
+import { Square, Clock, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getProyectosActivos,
-  type ActiveTimer,
 } from '@/app/(app)/timer-actions'
 
 const STORAGE_KEY = 'metrik-timer-v2'

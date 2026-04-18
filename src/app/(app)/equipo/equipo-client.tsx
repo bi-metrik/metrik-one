@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Clock, ChevronLeft, ChevronRight, Filter, ShieldCheck, ShieldX,
-  RotateCcw, AlertTriangle, FolderKanban, User, CheckCircle2, X,
+  RotateCcw, AlertTriangle, FolderKanban, User, CheckCircle2,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'

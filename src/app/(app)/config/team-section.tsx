@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { Users, Mail, Shield, Eye, Wrench, Crown, Loader2, X, UserPlus, Clock, Trash2 } from 'lucide-react'
+import { Mail, Shield, Eye, Wrench, Crown, Loader2, X, UserPlus, Clock, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   inviteTeamMember,

@@ -1,12 +1,11 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, X, CreditCard, Workflow, ShieldCheck } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, WorkspaceFeature } from '@/types/database'
 
 // Existing config sections — reused via import
-import StaffSection from '../config/staff-section'
 import MonthlyTargetsSection from '../config/monthly-targets-section'
 import ServiciosSection from '../config/servicios-section'
 
@@ -147,43 +146,6 @@ export default function MiNegocioClient({
         return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
       case 'reglas-validacion':
         return 'Listas cautelares'
-      default:
-        return ''
-    }
-  }
-
-  const getStatusBadge = (key: string) => {
-    switch (key) {
-      case 'mi-plan':
-        return 'Activo'
-      case 'mi-flujo':
-        return lineaActivaId ? 'Configurado' : 'Pendiente'
-      case 'perfil-fiscal':
-        return fiscalProfile?.is_complete
-          ? 'Completo'
-          : fiscalProfile?.is_estimated
-          ? 'Estimado'
-          : 'Pendiente'
-      case 'mi-marca':
-        return workspace?.logo_url || (workspace?.color_primario !== '#10B981') ? 'Configurado' : 'Pendiente'
-      case 'mis-servicios': {
-        const active = servicios.filter(s => s.activo !== false)
-        return active.length > 0 ? `${active.length} servicio${active.length !== 1 ? 's' : ''}` : 'Pendiente'
-      }
-      case 'gastos-fijos': {
-        const active = fixedExpenses.filter(f => f.is_active)
-        if (active.length === 0) return 'Pendiente'
-        const total = active.reduce((s, f) => s + f.monthly_amount, 0)
-        return `$${total.toLocaleString('es-CO')}/mes`
-      }
-      case 'mi-equipo': {
-        const withSalary = staffMembers.filter(s => (s.salary ?? 0) > 0)
-        return withSalary.length > 0 ? `${staffMembers.length} persona${staffMembers.length !== 1 ? 's' : ''}` : 'Pendiente'
-      }
-      case 'metas-mensuales':
-        return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
-      case 'reglas-validacion':
-        return 'Configurar'
       default:
         return ''
     }

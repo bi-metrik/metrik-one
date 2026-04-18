@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useTransition, useRef } from 'react'
+import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowDownCircle, ArrowUpCircle, FileText, Filter, X, Smartphone, Building2, FolderOpen, SlidersHorizontal, Clock, CheckCircle2, ShieldCheck, ShieldX, XCircle, User, Upload, Loader2, RotateCcw, AlertTriangle } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -73,6 +73,7 @@ function needsSoporte(mov: Movimiento, regimen: string | null): boolean {
 }
 
 // D246: Causación badge config
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- legacy, kept for future badge restoration
 const CAUSACION_BADGES: Record<string, { label: string; className: string } | null> = {
   PENDIENTE: { label: 'Pendiente', className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' },
   APROBADO: { label: 'Aprobado', className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' },
@@ -108,7 +109,6 @@ export default function MovimientosClient({
   const [revertMotivo, setRevertMotivo] = useState('')
 
   // Soporte upload with image compression
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingId, setUploadingId] = useState<string | null>(null)
 
   const compressImage = useCallback(async (file: File, maxWidth = 1600, quality = 0.8): Promise<File> => {
@@ -570,7 +570,6 @@ export default function MovimientosClient({
                 {porFecha[fecha].map(mov => {
                   const faltaSoporte = needsSoporte(mov, regimenFiscal)
                   const hasSoporteImage = mov.soporte_url && !mov.soporte_url.startsWith('wamid.')
-                  const causacionBadge = CAUSACION_BADGES[mov.estado_causacion]
                   return (
                     <div
                       key={mov.id}

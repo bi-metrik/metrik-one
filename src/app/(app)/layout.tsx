@@ -91,7 +91,6 @@ export default async function AppLayout({
       <AppShell
         fullName={profile.full_name || 'Usuario'}
         workspaceName={workspace.name}
-        workspaceSlug={workspace.slug}
         role={profile.role}
         displayRole={profile.display_role ?? null}
         isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}

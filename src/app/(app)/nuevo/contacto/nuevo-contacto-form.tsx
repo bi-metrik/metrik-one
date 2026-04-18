@@ -3,7 +3,7 @@
 import { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, UserPlus } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { createContacto } from '@/app/(app)/directorio/actions'
 import { FUENTES_ADQUISICION } from '@/lib/pipeline/constants'

@@ -37,7 +37,6 @@ function fmtDate(iso: string | null) {
 
 export default function BloqueChecklist({
   negocioBloqueId,
-  instancia,
   modo,
   itemTemplates = [],
   initialItems = [],

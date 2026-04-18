@@ -32,7 +32,6 @@ async function applyAutoTransition(
   if (!stage) return
 
   const nuevoSlug = stage.sistema_slug || stage.slug
-  const table = entidadTipo === 'oportunidad' ? 'oportunidades' : 'proyectos'
   const campo = entidadTipo === 'oportunidad' ? 'etapa' : 'estado'
 
   // Obtener etapa actual para el log

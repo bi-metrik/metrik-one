@@ -429,7 +429,7 @@ export async function getNumerosData() {
     opportunitiesResult,
     projectsResult,
     paymentsResult,
-    workspaceResult,
+    ,
     fiscalResult,
   ] = await Promise.all([
     // Current month expenses

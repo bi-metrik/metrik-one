@@ -39,7 +39,7 @@ interface ReglasValidacionSectionProps {
   workspaceId?: string
 }
 
-export default function ReglasValidacionSection({ workspaceId }: ReglasValidacionSectionProps) {
+export default function ReglasValidacionSection({ }: ReglasValidacionSectionProps) {
   return (
     <div className="space-y-5">
       <div>

@@ -30,14 +30,6 @@ export type Movimiento = {
   rechazo_motivo: string | null
 }
 
-// D142: Categorías deducibles para régimen ordinario
-const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
-
-function esCategoriaDeducible(categoria: string | null): boolean {
-  if (!categoria) return false
-  return CATEGORIAS_DEDUCIBLES.includes(categoria)
-}
-
 function getInitials(name: string | null): string | null {
   if (!name) return null
   const parts = name.trim().split(/\s+/)

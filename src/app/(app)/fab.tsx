@@ -6,7 +6,6 @@ import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileT
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
-  type ActiveTimer,
 } from './timer-actions'
 import { FEATURES } from '@/lib/feature-flags'
 

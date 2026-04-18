@@ -2,13 +2,13 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ChevronLeft, ChevronRight, Zap, ArrowDownCircle, ArrowUpCircle, Info, ChevronDown, CheckCircle2, Plus, X, FileText } from 'lucide-react'
+import { Zap, ArrowDownCircle, ArrowUpCircle, Info, ChevronDown, CheckCircle2, Plus, X, FileText } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { formatCOP } from '@/lib/contacts/constants'
 import { getRolePermissions } from '@/lib/roles'
 import { toast } from 'sonner'
 import type { ItemCausacion, Retencion } from './actions'
-import { causarMovimiento, getCausacionData, toggleDeducible } from './actions'
+import { causarMovimiento, toggleDeducible } from './actions'
 
 // ── Tipos locales ─────────────────────────────────────────
 

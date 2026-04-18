@@ -14,7 +14,6 @@ const GREEN = '#10B981'
 const GREEN_LIGHT = '#D1FAE5'
 const GREEN_MED = '#6EE7B7'
 const GREEN_BRIGHT = '#34D399'
-const RED = '#EF4444'
 const YELLOW = '#F59E0B'
 const BLUE = '#3B82F6'
 

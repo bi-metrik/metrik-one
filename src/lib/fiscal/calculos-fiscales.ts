@@ -19,7 +19,6 @@
 
 import type { FiscalProfile, Client, Empresa } from '@/types/database'
 import {
-  UVT_2026,
   TOPE_NO_RESPONSABLE_IVA_COP,
   RETEFUENTE_HONORARIOS_DECLARANTE_PCT,
   RETEFUENTE_HONORARIOS_NO_DECLARANTE_PCT,

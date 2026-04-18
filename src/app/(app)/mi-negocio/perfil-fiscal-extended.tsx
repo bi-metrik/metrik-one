@@ -16,7 +16,7 @@ interface Props {
   onClose: () => void
 }
 
-export default function PerfilFiscalExtended({ fiscalProfile, onClose }: Props) {
+export default function PerfilFiscalExtended({ fiscalProfile }: Props) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [isPending, startTransition] = useTransition()

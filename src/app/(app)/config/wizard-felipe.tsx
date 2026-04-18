@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import {
   ArrowLeft, ArrowRight, Check, Loader2, HelpCircle,
-  Building2, User, Shield, Receipt, MapPin,
+  Building2, User, Shield, MapPin,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { saveFiscalProfile, skipFiscalSetup } from './fiscal-actions'

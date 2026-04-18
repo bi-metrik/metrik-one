@@ -1477,7 +1477,7 @@ export async function actualizarBloqueData(
   data: Record<string, unknown>,
   negocioId?: string
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   const { data: row, error: updateError } = await db(supabase)

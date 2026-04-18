@@ -6,12 +6,12 @@ import Link from 'next/link'
 import {
   ArrowLeft, FolderOpen, Clock, Banknote, Pause, Play,
   Lock, Plus, TrendingUp, TrendingDown, FileText, AlertTriangle,
-  ChevronDown, RefreshCw, ArrowUpCircle, User, Building2, Smartphone, Upload, Loader2, Calendar,
+  ChevronDown, ArrowUpCircle, User, Building2, Smartphone, Calendar,
   Check, X,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { updateAvance, cambiarEstadoProyecto, marcarEntregado, updateProyectoCarpeta, updateProyectoResponsable } from '../actions-v2'
+import { cambiarEstadoProyecto, marcarEntregado, updateProyectoCarpeta, updateProyectoResponsable } from '../actions-v2'
 import { formatCOP } from '@/lib/contacts/constants'
 import { ESTADO_PROYECTO_CONFIG } from '@/lib/pipeline/constants'
 import type { EstadoProyecto } from '@/lib/pipeline/constants'
@@ -161,10 +161,8 @@ export default function ProyectoDetail({
   financiero: f,
   rubros,
   facturas,
-  timeline,
   gastosAll,
   horasAll,
-  rubrosLista,
   staffList,
   cotizacionId,
   oportunidadId,
@@ -175,7 +173,6 @@ export default function ProyectoDetail({
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
-  const [avance, setAvance] = useState(f.avance_porcentaje ?? 0)
   const [dialog, setDialog] = useState<'horas' | 'factura' | 'cobro' | 'cierre' | null>(null)
   const [entregarModal, setEntregarModal] = useState(false)
   const [carpetaUrl, setCarpetaUrl] = useState(f.carpeta_url ?? '')
@@ -216,14 +213,6 @@ export default function ProyectoDetail({
   const consumo = Math.min(f.presupuesto_consumido_pct ?? 0, 150)
   const semaforoBar = consumo > 90 ? 'bg-red-500' : consumo > 70 ? 'bg-yellow-500' : 'bg-green-500'
   const ganancia = f.ganancia_actual ?? 0
-
-  const handleAvanceChange = (newVal: number) => {
-    setAvance(newVal)
-    startTransition(async () => {
-      const res = await updateAvance(proyectoId, newVal)
-      if (!res.success) toast.error(res.error)
-    })
-  }
 
   const cartera = (f.facturado ?? 0) - (f.cobrado ?? 0)
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState, useTransition } from 'react'
-import { Upload, Loader2, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, FileText } from 'lucide-react'
+import { Upload, Loader2, ShieldCheck, CheckCircle2, XCircle, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { uploadAndParseRUT, confirmRutData } from '@/app/(app)/directorio/actions'

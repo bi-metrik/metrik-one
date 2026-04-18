@@ -351,7 +351,6 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
     let Icon = ArrowRight
     let iconClass = 'text-primary/70'
     let labelClass = 'text-foreground'
-    let verbo = 'cambio estado a'
 
     if (isCompletado) {
       Icon = CheckCircle2
@@ -361,7 +360,6 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       Icon = XCircle
       iconClass = 'text-red-500'
       labelClass = 'text-red-600'
-      verbo = 'cerro como'
     }
 
     // Use contenido as display text if available, else valor_nuevo

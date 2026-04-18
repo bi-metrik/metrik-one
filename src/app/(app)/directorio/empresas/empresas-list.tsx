@@ -20,7 +20,7 @@ function isPerfilFiscalCompleto(e: Empresa): boolean {
 export default function EmpresasList({ empresas }: Props) {
   const [search, setSearch] = useState('')
   const [fiscalFilter, setFiscalFilter] = useState<'all' | 'completo' | 'incompleto'>('all')
-  const [isPending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
   const router = useRouter()
 
   const filtered = empresas.filter(e => {

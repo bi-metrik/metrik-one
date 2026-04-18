@@ -502,7 +502,6 @@ function SelectorEtapa({
   precioAprobado,
   pausaEnabled,
   pausado,
-  pausadoHasta,
   vecesPausado,
 }: {
   negocioId: string
@@ -1412,7 +1411,6 @@ export default function NegocioDetailClient({
   userRole,
   cobros,
   cotizacionesNegocio,
-  actividad,
   resumenFinanciero,
   ejecucionData,
   historialData,

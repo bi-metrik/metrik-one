@@ -40,7 +40,6 @@ interface AppShellProps {
   children: React.ReactNode
   fullName: string
   workspaceName: string
-  workspaceSlug: string
   role: string
   displayRole?: string | null
   isAdminWorkspace?: boolean
@@ -125,7 +124,6 @@ export default function AppShell({
   children,
   fullName,
   workspaceName,
-  workspaceSlug,
   role,
   displayRole,
   isAdminWorkspace,
@@ -465,6 +463,7 @@ export default function AppShell({
           <div className="flex items-center gap-3">
             {notificationBell}
             {hasLogo && (
+              // eslint-disable-next-line @next/next/no-img-element -- dinámico desde Supabase storage, tamaño variable
               <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
             )}
           </div>
@@ -483,6 +482,7 @@ export default function AppShell({
               </div>
             </Link>
             {hasLogo && (
+              // eslint-disable-next-line @next/next/no-img-element -- dinámico desde Supabase storage, tamaño variable
               <img src={branding!.logoUrl} alt={workspaceName} className="h-7 max-w-[120px] object-contain" />
             )}
             {!hasLogo && (

@@ -328,7 +328,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
 // Comercial
 // ============================================================
 
-export async function getComercialData(periodo: Periodo = 'mes'): Promise<ComercialData | null> {
+export async function getComercialData(_periodo: Periodo = 'mes'): Promise<ComercialData | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
@@ -513,7 +513,7 @@ export async function getComercialData(periodo: Periodo = 'mes'): Promise<Comerc
 // Operativo
 // ============================================================
 
-export async function getOperativoData(periodo: Periodo = 'mes'): Promise<OperativoData | null> {
+export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<OperativoData | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 

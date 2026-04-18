@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { ShieldCheck, Upload } from 'lucide-react'
+import { ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { ganarOportunidad } from '../actions-v2'
 import { TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO } from '@/lib/pipeline/constants'

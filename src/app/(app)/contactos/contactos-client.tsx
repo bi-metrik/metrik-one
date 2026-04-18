@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Search, Plus, Mail, Phone, Building2, MoreHorizontal,
-  Pencil, Trash2, UserPlus, ArrowRightLeft,
+  Pencil, Trash2, ArrowRightLeft,
 } from 'lucide-react'
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,

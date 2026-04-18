@@ -7,7 +7,7 @@ import { ArrowLeft, Save, Flame, ShieldCheck, ShieldAlert, User } from 'lucide-r
 import { toast } from 'sonner'
 import { updateEmpresa } from '../../actions'
 import { SECTORES_EMPRESA, TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO } from '@/lib/pipeline/constants'
-import { formatNit, formatCOP } from '@/lib/contacts/constants'
+import { formatCOP } from '@/lib/contacts/constants'
 import type { Empresa } from '@/types/database'
 import NotesSection from '@/components/notes-section'
 import RutUploadCard from '@/components/rut-upload-card'

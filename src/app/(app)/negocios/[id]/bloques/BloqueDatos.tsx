@@ -179,6 +179,7 @@ export default function BloqueDatos({
                   {v ? 'Sí' : 'No'}
                 </span>
               ) : f.tipo === 'imagen_clipboard' && v ? (
+                // eslint-disable-next-line @next/next/no-img-element -- data URL desde clipboard paste, no optimizable por next/image
                 <img src={v as string} alt={f.label} className="max-h-40 rounded-lg border border-[#E5E7EB] object-contain" />
               ) : f.tipo === 'numero' && v ? (
                 <span className="text-xs text-[#1A1A1A] tabular-nums">{fmt(Number(v))}</span>
@@ -330,6 +331,7 @@ export default function BloqueDatos({
               className="flex min-h-[80px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-3 focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
             >
               {pasteImgs[f.slug] || (values[f.slug] as string) ? (
+                // eslint-disable-next-line @next/next/no-img-element -- data URL desde clipboard paste, no optimizable por next/image
                 <img
                   src={(pasteImgs[f.slug] || values[f.slug]) as string}
                   alt={f.label}

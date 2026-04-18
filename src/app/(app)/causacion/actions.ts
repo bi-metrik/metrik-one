@@ -37,13 +37,6 @@ export type ItemCausacion = {
   soporte_url: string | null
 }
 
-function getInitials(name: string | null): string | null {
-  if (!name) return null
-  const parts = name.trim().split(/\s+/)
-  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-  return parts[0].substring(0, 2).toUpperCase()
-}
-
 // ── getCausacionData ─────────────────────────────────────
 
 export async function getCausacionData(tab: 'aprobados' | 'causados', mes?: string) {

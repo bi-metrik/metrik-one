@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useTransition, useRef } from 'react'
 import {
   Plus, X, Trash2, Check, ChevronDown, ChevronRight,
-  Pencil, Power, PowerOff, Loader2,
+  Pencil, Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -21,7 +20,6 @@ interface Props {
 }
 
 export default function ServiciosSection({ initialData, staffMembers = [] }: Props) {
-  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [servicios, setServicios] = useState(initialData)
   const [showAddForm, setShowAddForm] = useState(false)

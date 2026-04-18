@@ -1,7 +1,7 @@
 'use client'
 
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, Bar, XAxis, YAxis, Tooltip,
   CartesianGrid, ComposedChart, ReferenceLine,
 } from 'recharts'
 import type { FinancieroData } from '../types'

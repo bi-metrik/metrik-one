@@ -1,4 +1,4 @@
-import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
+import { Document, Page, Text, View, StyleSheet, Image as PdfImage } from '@react-pdf/renderer'
 
 interface CotizacionPDFProps {
   cotizacion: {
@@ -117,7 +117,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
           {/* Left: vendor info */}
           <View style={{ maxWidth: '55%' }}>
             {vendedor.logo_url && (
-              <Image
+              <PdfImage
                 src={vendedor.logo_url}
                 style={{ width: 100, height: 50, objectFit: 'contain', marginBottom: 4 }}
               />

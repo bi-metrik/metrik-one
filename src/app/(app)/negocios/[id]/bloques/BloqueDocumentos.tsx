@@ -164,7 +164,7 @@ export default function BloqueDocumentos({
   const [processingSlots, setProcessingSlots] = useState<Set<string>>(new Set())
 
   // Track URLs subidas en esta sesión para no perderlas en marcarBloqueCompleto
-  const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({})
+  const [, setUploadedUrls] = useState<Record<string, string>>({})
 
   // Ref para tracking confiable de slugs subidos (evita timing issues de setState)
   const uploadedSlugsRef = useRef<Set<string>>(new Set(

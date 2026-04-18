@@ -17,7 +17,7 @@ export default function ContactosList({ contactos }: Props) {
   const [search, setSearch] = useState('')
   const [rolFilter, setRolFilter] = useState<string | null>(null)
   const [segmentoFilter, setSegmentoFilter] = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
   const router = useRouter()
 
   const filtered = contactos.filter(c => {
@@ -93,8 +93,6 @@ export default function ContactosList({ contactos }: Props) {
       }
     })
   }
-
-  const promotorCount = contactos.filter(c => c.rol === 'promotor').length
 
   if (contactos.length === 0) {
     return (

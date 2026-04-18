@@ -105,6 +105,7 @@ export default function MarcaSection({ workspace }: Props) {
       {/* Logo preview */}
       {logoUrl && (
         <div className="flex items-center gap-3 rounded-lg border p-3">
+          {/* eslint-disable-next-line @next/next/no-img-element -- preview local de URL subida por usuario */}
           <img
             src={logoUrl}
             alt="Logo preview"
@@ -160,6 +161,7 @@ export default function MarcaSection({ workspace }: Props) {
         <p className="text-xs font-medium text-muted-foreground mb-2">Vista previa</p>
         <div className="flex items-center gap-3 rounded-md p-3" style={{ backgroundColor: colorSecundario }}>
           {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- preview local de URL subida por usuario
             <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
           ) : (
             <div className="flex h-8 w-8 items-center justify-center rounded" style={{ backgroundColor: colorPrimario }}>

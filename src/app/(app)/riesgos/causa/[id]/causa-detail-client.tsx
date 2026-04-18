@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, ShieldCheck, Pencil, Save, X, Loader2, Check } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, ShieldCheck, Pencil, Save, X, Loader2 } from 'lucide-react'
 import { actualizarCausa } from '@/lib/actions/riesgos'
 
 const NIVEL_COLORS: Record<string, string> = {

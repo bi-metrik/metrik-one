@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Building2, Paperclip, X, FileText, Image } from 'lucide-react'
+import { ArrowLeft, Building2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { createGasto, getRubrosProyecto, uploadSoporteGasto } from './gasto-action'
@@ -335,7 +335,7 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
           {soporteFile ? (
             <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
               {soportePreview ? (
-                <Image className="h-4 w-4 text-blue-500 shrink-0" />
+                <ImageIcon className="h-4 w-4 text-blue-500 shrink-0" />
               ) : (
                 <FileText className="h-4 w-4 text-blue-500 shrink-0" />
               )}

@@ -78,10 +78,6 @@ export default function NumerosV2Client({ initialData }: Props) {
     : data.recaudoMes >= ritmoRecaudo * 0.8 ? '#F59E0B'
     : '#EF4444'
 
-  const ritmoVentas = data.metaVentas
-    ? data.metaVentas * (data.diaActual / data.diasDelMes)
-    : null
-
   // P4 color
   let ventasColor: string | undefined
   if (monthType === 'current' && data.puntoEquilibrio > 0) {

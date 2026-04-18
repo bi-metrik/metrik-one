@@ -49,6 +49,7 @@ export default function DevWorkspaceBar({
           </a>
         )
       })}
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- dev-only query param navigation */}
       <a
         href="/?__ws=off"
         style={{

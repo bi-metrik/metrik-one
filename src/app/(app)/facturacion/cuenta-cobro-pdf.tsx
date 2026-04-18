@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { FileText, Loader2, X, Check } from 'lucide-react'
+import { FileText, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { numeroALetras } from '@/lib/numero-a-letras'
 

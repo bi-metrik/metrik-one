@@ -35,7 +35,6 @@ function fmtDate(iso: string | null | undefined) {
 
 export default function BloqueCronograma({
   negocioBloqueId,
-  instancia,
   modo,
   initialItems = [],
   requireAllDates = false,
@@ -69,7 +68,7 @@ export default function BloqueCronograma({
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Gap 2: Re-evaluar completitud después de cada cambio
-  function evalCompletitud(currentItems: CronogramaItem[]) {
+  function evalCompletitud() {
     startTransition(async () => {
       await reevaluarBloqueCronograma(negocioBloqueId, requireAllDates)
     })
@@ -122,7 +121,7 @@ export default function BloqueCronograma({
           toast.error(result.error)
         } else if (result.id) {
           setItems(prev => prev.map(i => i.id === updated.id ? { ...i, id: result.id! } : i))
-          evalCompletitud(items)
+          evalCompletitud()
         }
       } else {
         const fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null } = { label: updated.label }
@@ -132,7 +131,7 @@ export default function BloqueCronograma({
         const result = await actualizarBloqueItem(updated.id, fields)
         if (result.error) toast.error(result.error)
         // Gap 2: Re-evaluar completitud
-        evalCompletitud(items)
+        evalCompletitud()
       }
     })
   }
@@ -152,7 +151,7 @@ export default function BloqueCronograma({
         toast.error(result.error)
         setItems(items) // revert
       } else {
-        evalCompletitud(nextItems)
+        evalCompletitud()
       }
     })
   }

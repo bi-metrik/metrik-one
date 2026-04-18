@@ -26,13 +26,6 @@ export async function enviarCotizacionEmail(cotizacionId: string, emailTo: strin
 
   if (!cot) return { success: false, error: 'Cotización no encontrada' }
 
-  // Get empresa name
-  const { data: empresa } = await supabase
-    .from('empresas')
-    .select('nombre')
-    .eq('id', cot.oportunidades.empresa_id)
-    .single()
-
   // Get workspace name
   const { data: ws } = await supabase
     .from('workspaces')

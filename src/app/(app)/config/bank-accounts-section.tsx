@@ -36,9 +36,6 @@ const ACCOUNT_TYPES = [
   { value: 'digital', label: 'Digital (Nequi, Daviplata)' },
 ]
 
-const fmt = (v: number) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
-
 export default function BankAccountsSection({ initialData }: BankAccountsSectionProps) {
   const router = useRouter()
   const [accounts, setAccounts] = useState<BankAccount[]>(initialData)

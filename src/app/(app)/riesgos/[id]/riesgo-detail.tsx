@@ -83,7 +83,7 @@ interface Props {
   canDelete: boolean
 }
 
-export default function RiesgoDetail({ riesgo, controles, equipo, causas, controlesFull, canEdit, canDelete }: Props) {
+export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, canEdit, canDelete }: Props) {
   const [isPending, startTransition] = useTransition()
   const [estado, setEstado] = useState(riesgo.estado)
   const [responsableId, setResponsableId] = useState(riesgo.responsable_id ?? '')
