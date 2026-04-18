@@ -2082,34 +2082,34 @@ export async function actualizarAprobacion(
 
   if (updateError) return { error: (updateError as { message: string }).message }
 
-  // Registrar en activity_log
-  if (staffId && workspaceId) {
-    const { data: bloqueInfo } = await db(supabase)
-      .from('negocio_bloques')
-      .select('negocio_id')
-      .eq('id', negocioBloqueId)
-      .single()
+  const { data: bloqueInfo } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id')
+    .eq('id', negocioBloqueId)
+    .single()
 
-    const negocioId = (bloqueInfo as { negocio_id: string } | null)?.negocio_id
-    if (negocioId) {
-      const estadoLabel = data.estado ?? 'pendiente'
-      const contenido = data.comentario
-        ? `Aprobación: ${estadoLabel}. ${data.comentario}`
-        : `Aprobación: ${estadoLabel}`
-      await supabase
-        .from('activity_log')
-        .insert({
-          workspace_id: workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: negocioId,
-          tipo: 'cambio',
-          autor_id: staffId,
-          campo_modificado: 'aprobacion',
-          valor_nuevo: estadoLabel,
-          contenido,
-        })
-    }
+  const negocioId = (bloqueInfo as { negocio_id: string } | null)?.negocio_id
+
+  if (staffId && workspaceId && negocioId) {
+    const estadoLabel = data.estado ?? 'pendiente'
+    const contenido = data.comentario
+      ? `Aprobación: ${estadoLabel}. ${data.comentario}`
+      : `Aprobación: ${estadoLabel}`
+    await supabase
+      .from('activity_log')
+      .insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio',
+        autor_id: staffId,
+        campo_modificado: 'aprobacion',
+        valor_nuevo: estadoLabel,
+        contenido,
+      })
   }
+
+  if (negocioId) revalidatePath(`/negocios/${negocioId}`)
 
   return { error: null }
 }
@@ -2996,8 +2996,8 @@ export async function completarNegocio(
     .single()
 
   if (!negocio) return { error: 'Negocio no encontrado' }
-  if (negocio.stage_actual !== 'cobro') {
-    return { error: 'Solo se puede completar un negocio en etapa de cobro' }
+  if (negocio.stage_actual === 'venta') {
+    return { error: 'Los negocios en etapa de venta se cierran con Perder, no con Completar' }
   }
   if (negocio.estado !== 'abierto') {
     return { error: 'El negocio ya esta cerrado' }
