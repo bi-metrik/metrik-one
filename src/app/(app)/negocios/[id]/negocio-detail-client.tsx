@@ -1446,53 +1446,54 @@ export default function NegocioDetailClient({
   return (
     <div className="mx-auto max-w-2xl px-4 py-4">
       {/* ── HEADER NOOR 5 FILAS ── */}
+      {/* Fila 1 — nav (scrollea) */}
+      <div className="flex items-center mb-2.5">
+        <Link
+          href="/negocios"
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-3 w-3" />
+          Negocios
+        </Link>
+      </div>
+
+      {/* Fila 2 — STICKY titulo + accion */}
+      <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="mb-0.5">
+            <StageBadge stage={negocio.stage_actual} />
+          </div>
+          <h1 className="flex items-baseline gap-1.5 text-lg font-bold leading-tight">
+            {negocio.codigo && (
+              <>
+                <span className="shrink-0 font-mono text-foreground select-all">
+                  {formatNegocioCodigo(negocio.codigo)}
+                </span>
+                <span className="text-muted-foreground font-normal">—</span>
+              </>
+            )}
+            <span className="truncate">{negocio.nombre}</span>
+          </h1>
+        </div>
+        <div className="shrink-0 mt-1">
+          <SelectorEtapa
+            negocioId={negocio.id}
+            etapasLinea={etapasLinea}
+            etapaActualId={negocio.etapa_actual_id}
+            negocioEstado={negocio.estado}
+            stageActual={negocio.stage_actual}
+            resumenFinanciero={resumenFinanciero}
+            precioAprobado={negocio.precio_aprobado}
+            pausaEnabled={pausaEnabled}
+            pausado={negocio.pausado}
+            pausadoHasta={negocio.pausado_hasta}
+            vecesPausado={negocio.veces_pausado}
+          />
+        </div>
+      </div>
+
+      {/* Badge + Filas 3, 4, 5 (scrollean) */}
       <div className="space-y-2.5 mb-4">
-        {/* Fila 1 — nav */}
-        <div className="flex items-center">
-          <Link
-            href="/negocios"
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-3 w-3" />
-            Negocios
-          </Link>
-        </div>
-
-        {/* Fila 2 — titulo + accion */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="mb-0.5">
-              <StageBadge stage={negocio.stage_actual} />
-            </div>
-            <h1 className="flex items-baseline gap-1.5 text-lg font-bold leading-tight">
-              {negocio.codigo && (
-                <>
-                  <span className="shrink-0 font-mono text-foreground select-all">
-                    {formatNegocioCodigo(negocio.codigo)}
-                  </span>
-                  <span className="text-muted-foreground font-normal">—</span>
-                </>
-              )}
-              <span className="truncate">{negocio.nombre}</span>
-            </h1>
-          </div>
-          <div className="shrink-0 mt-1">
-            <SelectorEtapa
-              negocioId={negocio.id}
-              etapasLinea={etapasLinea}
-              etapaActualId={negocio.etapa_actual_id}
-              negocioEstado={negocio.estado}
-              stageActual={negocio.stage_actual}
-              resumenFinanciero={resumenFinanciero}
-              precioAprobado={negocio.precio_aprobado}
-              pausaEnabled={pausaEnabled}
-              pausado={negocio.pausado}
-              pausadoHasta={negocio.pausado_hasta}
-              vecesPausado={negocio.veces_pausado}
-            />
-          </div>
-        </div>
-
         {/* Badge de pausa si aplica */}
         {negocio.pausado && negocio.pausado_hasta && (
           <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900/40 px-3 py-2">
