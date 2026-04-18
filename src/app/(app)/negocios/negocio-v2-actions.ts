@@ -1221,6 +1221,40 @@ export async function cambiarEtapaNegocioConGate(
     }
   }
 
+  // Skip etapa cobro cuando saldo es 0 — si el destino tiene stage='cobro' y saldo<=0,
+  // avanzar automáticamente a la siguiente etapa en orden.
+  {
+    const { data: destStageRaw } = await db(supabase)
+      .from('etapas_negocio')
+      .select('stage, orden, linea_id')
+      .eq('id', resolvedEtapaId)
+      .single()
+    const destStage = destStageRaw as { stage: string | null; orden: number; linea_id: string } | null
+
+    if (destStage?.stage === 'cobro') {
+      const [negPrecioRes, cobrosSkipRes] = await Promise.all([
+        db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
+        supabase.from('cobros').select('monto').eq('negocio_id', negocioId).in('estado_causacion', ['APROBADO', 'CAUSADO']),
+      ])
+      const negPrecio = negPrecioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+      const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
+      const totalCobrado = ((cobrosSkipRes.data ?? []) as Array<{ monto: number }>)
+        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+
+      if (precio > 0 && precio - totalCobrado <= 0) {
+        const { data: nextEtapaRaw } = await db(supabase)
+          .from('etapas_negocio')
+          .select('id')
+          .eq('linea_id', destStage.linea_id)
+          .eq('orden', destStage.orden + 1)
+          .single()
+        if (nextEtapaRaw) {
+          resolvedEtapaId = (nextEtapaRaw as { id: string }).id
+        }
+      }
+    }
+  }
+
   // Obtener nombre de la nueva etapa para el log
   const { data: nuevaEtapaInfoRaw } = await db(supabase)
     .from('etapas_negocio')

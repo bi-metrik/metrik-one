@@ -1,9 +1,6 @@
 'use client'
 
-import { useTransition } from 'react'
-import { CheckCircle2, Clock, AlertCircle, Square } from 'lucide-react'
-import { toast } from 'sonner'
-import { confirmarPagoCobro } from '../../negocio-v2-actions'
+import { CheckCircle2, Clock, AlertCircle } from 'lucide-react'
 
 interface Cobro {
   id: string
@@ -39,39 +36,16 @@ const TIPO_LABELS: Record<string, string> = {
 }
 
 function CobroRow({ cobro }: { cobro: Cobro }) {
-  const [isPending, startTransition] = useTransition()
   const isPendiente = cobro.estado_causacion === 'PENDIENTE'
   const isValidado = cobro.estado_causacion === 'CAUSADO' || cobro.estado_causacion === 'APROBADO'
 
-  function handleValidar() {
-    startTransition(async () => {
-      const result = await confirmarPagoCobro(cobro.id)
-      if (result.error) {
-        toast.error(result.error)
-      } else {
-        toast.success('Cobro validado')
-      }
-    })
-  }
-
   return (
     <div className="flex items-center gap-2 rounded-lg border border-[#E5E7EB] p-2.5">
-      {/* Checkbox de validacion */}
-      {isPendiente ? (
-        <button
-          onClick={handleValidar}
-          disabled={isPending}
-          className="shrink-0 text-[#6B7280] hover:text-[#10B981] transition-colors disabled:opacity-40"
-          title="Validar cobro"
-        >
-          {isPending ? (
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#10B981] border-t-transparent" />
-          ) : (
-            <Square className="h-4 w-4" />
-          )}
-        </button>
-      ) : isValidado ? (
+      {/* Estado del cobro (solo lectura — aprobación desde Movimientos) */}
+      {isValidado ? (
         <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+      ) : isPendiente ? (
+        <Clock className="h-4 w-4 text-amber-400 shrink-0" />
       ) : (
         <AlertCircle className="h-4 w-4 text-[#6B7280]/40 shrink-0" />
       )}
@@ -147,7 +121,7 @@ export default function BloqueCobros({ cobros, precioTotal }: BloqueCobrosProps)
       {cobros.some(c => c.estado_causacion === 'PENDIENTE') && (
         <div className="flex items-center gap-1.5 text-[10px] text-[#6B7280]">
           <Clock className="h-3 w-3" />
-          <span>Haz clic en el cuadro para validar cada cobro</span>
+          <span>Aprobación desde Movimientos</span>
         </div>
       )}
     </div>
