@@ -606,12 +606,19 @@ function SelectorEtapa({
     })
   }
 
+  // Detectar etapa terminal (las últimas 3 etapas del flujo pueden ser la última según condicionales)
+  const maxOrden = etapasLinea.length > 0 ? Math.max(...etapasLinea.map(e => e.orden)) : 0
+  const isTerminalStage = etapaActual ? etapaActual.orden >= maxOrden - 2 : false
+
   // Texto y estilo del boton de cierre segun stage
-  const cierreConfig = {
-    venta: { label: 'Perder', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
-    ejecucion: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
-    cobro: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
-  }[stageActual ?? 'venta'] ?? { label: 'Cerrar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' }
+  const esEjecucionTerminal = stageActual === 'ejecucion' && isTerminalStage
+  const cierreConfig = esEjecucionTerminal
+    ? { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' }
+    : ({
+        venta: { label: 'Perder', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+        ejecucion: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+        cobro: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
+      }[stageActual ?? 'venta'] ?? { label: 'Cerrar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' })
 
   const CierreIcon = cierreConfig.icon
 
@@ -645,6 +652,7 @@ function SelectorEtapa({
           <CierreNegocioDialog
             negocioId={negocioId}
             stage={stageActual ?? 'venta'}
+            isTerminalStage={isTerminalStage}
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
             onClose={() => setShowCierreDialog(false)}
@@ -731,6 +739,7 @@ function SelectorEtapa({
         <CierreNegocioDialog
           negocioId={negocioId}
           stage={stageActual ?? 'venta'}
+          isTerminalStage={isTerminalStage}
           resumenFinanciero={resumenFinanciero}
           precioAprobado={precioAprobado}
           onClose={() => setShowCierreDialog(false)}

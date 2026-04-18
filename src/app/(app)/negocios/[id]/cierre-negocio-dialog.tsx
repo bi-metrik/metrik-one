@@ -24,6 +24,7 @@ const formatCOP = (v: number) =>
 interface CierreNegocioDialogProps {
   negocioId: string
   stage: string // 'venta' | 'ejecucion' | 'cobro'
+  isTerminalStage?: boolean
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   precioAprobado: number | null
   onClose: () => void
@@ -298,20 +299,24 @@ function FinCard({ label, value, highlight }: { label: string; value: string; hi
 export default function CierreNegocioDialog({
   negocioId,
   stage,
+  isTerminalStage,
   resumenFinanciero,
   precioAprobado,
   onClose,
 }: CierreNegocioDialogProps) {
+  const showCompletar = stage === 'cobro' || (stage === 'ejecucion' && isTerminalStage)
+  const showCancelar = stage === 'ejecucion' && !isTerminalStage
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-xl bg-white shadow-xl p-6 space-y-1">
         {stage === 'venta' && (
           <PerderForm negocioId={negocioId} onClose={onClose} />
         )}
-        {stage === 'ejecucion' && (
+        {showCancelar && (
           <CancelarForm negocioId={negocioId} onClose={onClose} />
         )}
-        {stage === 'cobro' && (
+        {showCompletar && (
           <CompletarForm
             negocioId={negocioId}
             resumenFinanciero={resumenFinanciero}
