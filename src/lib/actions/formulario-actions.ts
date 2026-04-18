@@ -133,10 +133,14 @@ function getTemplateComponent(
           nombre_proveedor: string | null
           marca: string | null
           linea: string | null
+          tipo_vehiculo: string | null
           valor_unitario_sin_iva: string | null
           valor_iva: string | null
           nombre_solicitante: string | null
           numero_identificacion: string | null
+          municipio: string | null
+          email: string | null
+          telefono: string | null
         },
         fechaGeneracion,
         codigoNegocio,
