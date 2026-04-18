@@ -464,9 +464,12 @@ export default function BloqueDocumento({
                   : campo.value
                 return (
                   <div key={config.slug} className="space-y-1">
-                    <label className="block text-xs font-medium text-muted-foreground">
-                      {config.label}
-                    </label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="block text-xs font-medium text-muted-foreground">
+                        {config.label}
+                      </label>
+                      {!campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <div className={`flex-1 min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-base text-foreground break-words ${config.tipo === 'currency' ? 'tabular-nums' : ''}`}>
                         {displayValue}
@@ -486,9 +489,12 @@ export default function BloqueDocumento({
               const displayLabel = slug.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
               return (
                 <div key={slug} className="space-y-1">
-                  <label className="block text-xs font-medium text-muted-foreground">
-                    {displayLabel}
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-medium text-muted-foreground">
+                      {displayLabel}
+                    </label>
+                    {!campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
+                  </div>
                   <div className="flex items-center gap-1.5">
                     <div className="flex-1 min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-base text-foreground break-words">
                       {campo.value}
