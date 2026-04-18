@@ -313,23 +313,33 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-17 (cotizacion cantidad + AIU + cronograma fix)
+**Sesion:** 2026-04-18 (metrik-one--core: UX, bugfix, security, WA templates)
 **Branch:** main
 
 Que se hizo:
-- Fix: Cronograma fechas persisten con INSERT atomico (antes eran 2 llamadas, la segunda fallaba silenciosamente)
-- Feat: Campo `cantidad` por item en cotizaciones — precio_venta es unitario, total = unit x cant
-- Feat: AIU manual (Admin % + Imprevistos %) sobre costos internos (rubros), no sobre precio de venta
-- Fix: costoTotal multiplica rubros x cantidad del item (antes era solo per-unit)
-- Feat: Costo unitario visible en header de cada item ("Costo unit. $X")
-- UX: 5 ajustes de Carmen/Hana/Noor — AIU oculto por defecto, item ajuste invisible en lista, grid responsive, rename label, badge AIU activo
+- UX: header de /negocios/[id] sticky al scrollear — titulo + selector de etapa quedan fijos, resto scrollea normal (36555bd)
+- Fix: BloqueAprobacion refresca UI tras aprobar/rechazar — faltaba revalidatePath en actualizarAprobacion (6605ef8)
+- Docs WA: 10 templates Utility listos para Meta Business Manager en docs/wa-templates.md — 1 opt-in + 9 notificaciones mapeadas al schema real (52d6819)
+- Security Fase 1: 4 fixes criticos del linter Supabase aplicados via Management API (218361b)
+  - ve_procesamiento_log: RLS + policy SELECT by workspace_id
+  - v_equipo_activo: DROP+CREATE con security_invoker=true
+  - Bucket gastos-soportes: eliminada policy listing publico
+  - notificaciones: reemplazada policy insert permisiva por same-workspace
+- Security Fase 2: 46 funciones con search_path mutable fixed via DO block iterando pg_proc (1bdb49d)
 
 **Migraciones aplicadas:**
-- `20260414100003_items_cantidad_aiu.sql` — items.cantidad + cotizaciones.aiu_admin_pct/aiu_imprevistos_pct
+- `20260418000000_security_fase1_critical.sql`
+- `20260418000001_security_fase2_search_path.sql`
 
-## Estado actual (2026-04-17)
+## Estado actual (2026-04-18)
 
 - **Branch:** main — produccion en Vercel (auto-deploy)
+- **Header /negocios/[id]:** titulo + selector de etapa sticky al scrollear (desktop + mobile)
+- **BloqueAprobacion:** UI refresca automaticamente tras aprobar/rechazar
+- **Security linter Supabase:** 51 de 54 hallazgos cerrados. Pendientes low: 3 extensions en public, wa_message_log sin policy, leaked password protection
+- **WhatsApp notificaciones:** proyecto iniciado. Bloqueado por (1) metrik.com.co con Vercel SSO activo — devuelve 401 todo el dominio, (2) verificacion contenido politica tratamiento (Emilio)
+- **Management API Supabase:** verificado que funciona con access token para ejecutar SQL arbitrario — fallback util cuando CLI falla por desync de migrations
+- **13 migraciones remotas desync:** pendiente `supabase migration repair --status reverted` + `db pull` para realinear
 - **Cotizaciones:** cantidad por item + AIU manual sobre costos + costo unitario visible. AIU oculto por defecto, se activa con link discreto. Item de ajuste invisible en UI (sigue en DB/PDF)
 - **Cronograma (B10):** fechas, responsable, preload, delete, re-evaluacion completitud — todo funcional
 - **WhatsApp bot:** Edge functions desplegadas. Parser: Gemini 2.5 Flash-Lite + fast-path regex + defense layer. FOLLOWUP, ESTADO_NEGOCIOS, last_context con anafora, golden set 98/99
@@ -464,6 +474,19 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [x] Modulo compliance: riesgos + causas + controles + matriz — UI completa con CRUD, import/export, permisos por rol — completado 2026-04-17
 - [x] Controles reestructurados: entidad independiente M:N con causas via control_causa junction — completado 2026-04-17
 - [x] Matriz 5x5 compacta: max-w-lg, celdas h-9, labels 8-10px — completado 2026-04-17
+- [x] Header /negocios/[id] sticky al scrollear — completado 2026-04-18
+- [x] Fix BloqueAprobacion no refrescaba UI tras decision — completado 2026-04-18
+- [x] Security linter Fase 1: 4 fixes criticos (RLS, SECURITY DEFINER, bucket listing, policy permisiva) — completado 2026-04-18
+- [x] Security linter Fase 2: 46 funciones con search_path mutable fixed — completado 2026-04-18
+- [x] Docs wa-templates.md: 10 templates listos para Meta Business Manager — completado 2026-04-18
+- [ ] **WA notificaciones:** liberar Vercel SSO en metrik.com.co/privacidad (todo el dominio bloqueado hoy)
+- [ ] **WA notificaciones:** validar que politica tratamiento menciona WhatsApp + telefono + opt-out (Emilio)
+- [ ] **WA notificaciones:** cargar los 10 templates a Meta Business Manager (Yuto, post bloqueadores)
+- [ ] **WA notificaciones:** construir edge function `wa-notify` + trigger SQL en tabla notificaciones + flow opt-in en primera interaccion (Max, post aprobacion Meta)
+- [ ] **Security low:** mover extensions unaccent, pg_trgm, pg_net fuera de public
+- [ ] **Security low:** policy explicita para wa_message_log o documentar como service-role-only
+- [ ] **Security low:** activar Leaked Password Protection en Supabase Auth dashboard
+- [ ] **DevOps:** supabase migration repair + db pull para realinear 13 migraciones remotas
 - [ ] **CRITICO:** Persona natural debe crear empresa automaticamente en `crearNegocio` (ver workspaces/soena/CONTEXT.md para detalle)
 - [ ] **SOENA:** Pendientes criticos en `workspaces/soena/CONTEXT.md` — incluye bloque `devolucion_dian` + storage + generacion docs
 - [ ] **INTEGRAR (sesión SOENA 2026-04-12):** Commit `c51d246` agrega 2 features genéricos al producto que deben validarse: (1) `source_etapa_orden` en routing eval de `cambiarEtapaNegocioConGate` — permite leer campos de bloques datos de una etapa distinta a la actual, backward compatible (si no se pasa, lee etapa actual como antes); (2) `DatosField.default` en `BloqueDatos.tsx` — permite inicializar toggles con valor distinto de false. Ambos ya están en producción via SOENA. Revisar y documentar como features de producto si se validan correctos
@@ -573,3 +596,9 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-17 | Compliance: 6 roles reutilizados, supervisor = oficial operativo | owner/admin full; supervisor ve+edita+importa (no elimina, no cambia reglas); read_only = auditor (ve+exporta). Flags en roles.ts |
 | 2026-04-17 | Riesgos se archivan via estado, nunca se borran | Trazabilidad SARLAFT: solo owner/admin DELETE permanente. Supervisor cambia estado, no elimina |
 | 2026-04-17 | Responsable en header de etapa, no en bloque | negocios.responsable_id → staff(id). Selector en header de etapa (avatar+nombre+dropdown). BloqueEquipo deprecated pero no borrado (legacy). Decision cerebro 2026-04-13 implementada |
+| 2026-04-18 | Skill `/one` es entrada directa al producto ONE (vs `/ws` para workspaces Clarity) | Distincion semantica: cambios transversales al producto vs workspace-especificos. Sesion se nombra `metrik-one--core`. Evita ambiguedad con workspaces llamados "one" (metrik/one, afi/one) |
+| 2026-04-18 | Management API Supabase como fallback cuando `db push` falla por desync | Con SUPABASE_ACCESS_TOKEN + endpoint `/v1/projects/{ref}/database/query` se ejecuta SQL arbitrario sin tocar migration history. Util mientras el historial remoto esta fuera de sync |
+| 2026-04-18 | WA notificaciones: cobrar 50K COP/ws/mes, modelo definitivo post-piloto | Carmen recomendo modelo A (flat + cap 500 notifs/mes) por margen estable. Mauricio opto por recoger data real 1 mes antes de fijar pricing |
+| 2026-04-18 | Politica tratamiento Habeas Data NO es suficiente para opt-in Meta | Son dos compliance distintos: Ley 1581 Colombia (Emilio) y contrato Meta WhatsApp (Yuto). Ambos requeridos antes de enviar notificacion proactiva |
+| 2026-04-18 | 9 notificaciones ONE como templates Utility (no Marketing) en Meta | Utility se aprueba en 1-24h (vs 1-3 dias Marketing) y cuesta ~40% menos. Copy sin promocion, sin emojis en v1 para maximizar tasa de aprobacion |
+| 2026-04-18 | Security Fase 1+2 priorizada antes que WA notificaciones | 51 de 54 hallazgos del linter Supabase cerrados en una sesion. Aprovecho bloqueo WA para limpiar deuda de seguridad. Los 3 restantes son low priority |
