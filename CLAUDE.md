@@ -313,29 +313,30 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-18 (metrik-one--core: UX, bugfix, security, WA templates)
+**Sesion:** 2026-04-18 (metrik-one--core: cierre terminal, confidence badge, lint cleanup 3 fases)
 **Branch:** main
 
 Que se hizo:
-- UX: header de /negocios/[id] sticky al scrollear — titulo + selector de etapa quedan fijos, resto scrollea normal (36555bd)
-- Fix: BloqueAprobacion refresca UI tras aprobar/rechazar — faltaba revalidatePath en actualizarAprobacion (6605ef8)
-- Docs WA: 10 templates Utility listos para Meta Business Manager en docs/wa-templates.md — 1 opt-in + 9 notificaciones mapeadas al schema real (52d6819)
-- Security Fase 1: 4 fixes criticos del linter Supabase aplicados via Management API (218361b)
-  - ve_procesamiento_log: RLS + policy SELECT by workspace_id
-  - v_equipo_activo: DROP+CREATE con security_invoker=true
-  - Bucket gastos-soportes: eliminada policy listing publico
-  - notificaciones: reemplazada policy insert permisiva por same-workspace
-- Security Fase 2: 46 funciones con search_path mutable fixed via DO block iterando pg_proc (1bdb49d)
+- Feat: Botón "Cerrar" en etapas terminales (Certificación/Cobro/Devolución) — detecta `orden >= maxOrden-2`, muestra verde y enruta a CompletarForm. Guard de `completarNegocio` relajado para permitir stage `ejecucion` (6e15e8e)
+- Fix: ConfidenceBadge IA visible también en modo read-only de BloqueDocumento (d088322)
+- Lint cleanup masivo: 184 → 28 issues (85% eliminado) en 3 fases:
+  - Fase 1 (fa1db2e): prefer-const + disable comments obsoletos
+  - Fase 2 (9f88388): 25+ archivos con imports/vars sin uso, img/a11y, eslint config con argsIgnorePattern: ^_
+  - Fase 3 (5b5c184): database.ts regenerado (PostgrestVersion 14.1, 40 aliases preservados) + cero `no-explicit-any` restantes
+- Tipos fuertes: EmpresaRow, VendorFiscalRow, ItemRow en pdf-actions; Workspace en mi-negocio/marca/equipo; TeamInvitation en accept-invite
 
-**Migraciones aplicadas:**
-- `20260418000000_security_fase1_critical.sql`
-- `20260418000001_security_fase2_search_path.sql`
+**Migraciones aplicadas:** ninguna nueva esta sesion
 
 ## Estado actual (2026-04-18)
 
 - **Branch:** main — produccion en Vercel (auto-deploy)
+- **Cierre negocio:** boton "Cerrar" verde aparece en Certificación/Cobro/Devolución (stages ejecucion+terminal o cobro). Enruta a CompletarForm con resumen financiero
+- **ConfidenceBadge:** % confianza IA se muestra en BloqueDocumento tanto editable como read-only (solo si `!campo.manual`)
 - **Header /negocios/[id]:** titulo + selector de etapa sticky al scrollear (desktop + mobile)
 - **BloqueAprobacion:** UI refresca automaticamente tras aprobar/rechazar
+- **Lint status:** 28 issues restantes — TODOS react-hooks (set-state-in-effect, purity, exhaustive-deps, static-components, immutability, refs). Cero no-explicit-any, cero no-unused-vars. Fase 4 pendiente
+- **database.ts:** regenerado 2026-04-18 con PostgrestVersion 14.1. NO revertir a `as any` casts en tablas estandar — usar los tipos generados
+- **eslint.config.mjs:** ignora patterns `^_` en args/vars/destructuring (útil para params no usados en API públicas)
 - **Security linter Supabase:** 51 de 54 hallazgos cerrados. Pendientes low: 3 extensions en public, wa_message_log sin policy, leaked password protection
 - **WhatsApp notificaciones:** proyecto iniciado. Bloqueado por (1) metrik.com.co con Vercel SSO activo — devuelve 401 todo el dominio, (2) verificacion contenido politica tratamiento (Emilio)
 - **Management API Supabase:** verificado que funciona con access token para ejecutar SQL arbitrario — fallback util cuando CLI falla por desync de migrations
@@ -490,7 +491,8 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [ ] **CRITICO:** Persona natural debe crear empresa automaticamente en `crearNegocio` (ver workspaces/soena/CONTEXT.md para detalle)
 - [ ] **SOENA:** Pendientes criticos en `workspaces/soena/CONTEXT.md` — incluye bloque `devolucion_dian` + storage + generacion docs
 - [ ] **INTEGRAR (sesión SOENA 2026-04-12):** Commit `c51d246` agrega 2 features genéricos al producto que deben validarse: (1) `source_etapa_orden` en routing eval de `cambiarEtapaNegocioConGate` — permite leer campos de bloques datos de una etapa distinta a la actual, backward compatible (si no se pasa, lee etapa actual como antes); (2) `DatosField.default` en `BloqueDatos.tsx` — permite inicializar toggles con valor distinto de false. Ambos ya están en producción via SOENA. Revisar y documentar como features de producto si se validan correctos
-- [ ] **PENDIENTE:** Regenerar `database.ts` types tras migraciones 011-015 y quitar `as any` casts de cobros
+- [x] **PENDIENTE:** Regenerar `database.ts` types tras migraciones 011-015 y quitar `as any` casts de cobros — completado 2026-04-18
+- [ ] **Lint Fase 4:** 28 issues de react-hooks pendientes (set-state-in-effect, purity, exhaustive-deps, static-components, immutability, refs) — requieren análisis por feature
 - [ ] **PENDIENTE:** /negocios no muestra cerrados — agregar pill "Cerrados" con filtro server-side en getNegociosV2
 - [ ] **PENDIENTE:** Commitear 34 archivos uncommitted (WA bot + AFI compliance + SOENA) — split por tema
 - [x] ID negocio formato `S1 26 3` — triggers auto-generan codigos, documentado en seccion "Sistema de codigos" — completado 2026-04-09
@@ -596,6 +598,11 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-17 | Compliance: 6 roles reutilizados, supervisor = oficial operativo | owner/admin full; supervisor ve+edita+importa (no elimina, no cambia reglas); read_only = auditor (ve+exporta). Flags en roles.ts |
 | 2026-04-17 | Riesgos se archivan via estado, nunca se borran | Trazabilidad SARLAFT: solo owner/admin DELETE permanente. Supervisor cambia estado, no elimina |
 | 2026-04-17 | Responsable en header de etapa, no en bloque | negocios.responsable_id → staff(id). Selector en header de etapa (avatar+nombre+dropdown). BloqueEquipo deprecated pero no borrado (legacy). Decision cerebro 2026-04-13 implementada |
+| 2026-04-18 | Cierre negocio aplica a últimas 3 etapas del flujo | Detecta `etapa.orden >= maxOrden - 2` como terminal. Stage `ejecucion` terminal se enruta a CompletarForm (verde) en vez de CancelarForm (rojo). Habilita SOENA VE: Certificación/Cobro/Devolución |
+| 2026-04-18 | `completarNegocio` acepta stage `ejecucion`, solo bloquea `venta` | Guard anterior exigía stage `cobro` estricto. Cambio: bloquear solo `venta` (ese cierre va por Perder). Permite cerrar en ejecución terminal sin pasar por cobro |
+| 2026-04-18 | ConfidenceBadge visible también en modo read-only de BloqueDocumento | Etapas completadas muestran `✓ XX%` o `⚠ Verificar` junto al label. Solo si `!campo.manual` — valores editados a mano no muestran badge |
+| 2026-04-18 | `database.ts` regenerado: no volver a castear `as any` en tablas estandar | PostgrestVersion 14.1. Los campos retenciones/tercero_nit/created_by_wa_name/negocio_id/aiu_* ya están tipados. Usar tipos generados, no casts |
+| 2026-04-18 | eslint config con argsIgnorePattern `^_` | Params/vars/destructuring con prefix `_` son ignorados por no-unused-vars. Convención para API pública donde se reciben props que no se usan internamente |
 | 2026-04-18 | Skill `/one` es entrada directa al producto ONE (vs `/ws` para workspaces Clarity) | Distincion semantica: cambios transversales al producto vs workspace-especificos. Sesion se nombra `metrik-one--core`. Evita ambiguedad con workspaces llamados "one" (metrik/one, afi/one) |
 | 2026-04-18 | Management API Supabase como fallback cuando `db push` falla por desync | Con SUPABASE_ACCESS_TOKEN + endpoint `/v1/projects/{ref}/database/query` se ejecuta SQL arbitrario sin tocar migration history. Util mientras el historial remoto esta fuera de sync |
 | 2026-04-18 | WA notificaciones: cobrar 50K COP/ws/mes, modelo definitivo post-piloto | Carmen recomendo modelo A (flat + cap 500 notifs/mes) por margen estable. Mauricio opto por recoger data real 1 mes antes de fijar pricing |
