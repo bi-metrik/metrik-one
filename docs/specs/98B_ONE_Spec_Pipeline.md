@@ -3,8 +3,10 @@ doc_id: 98B
 version: 2.0
 updated: 2026-02-19
 depends_on: [21], [99]
-depended_by: [98A], [98C], [98D], [98E]
+depended_by: [98A], [98C]
 decisiones_producto: D1-D68 (spec METRIK_ONE_Spec_UI_CRM_Completa.md)
+vigente: false
+nota_vigencia: "Modulo /pipeline es LEGACY. Reemplazado por modulo /negocios (decision 2026-04-09). Ver metrik-one/CLAUDE.md para estado actual."
 ---
 
 # Spec: Mi Pipeline — CRM Comercial Liviano
@@ -17,7 +19,7 @@ Pregunta central: **"¿Qué tengo en el horno y cuánto me va a quedar?"**
 
 Entradas: App (creación de oportunidades, cotizaciones, cambios de etapa), WhatsApp Bot (registro contactos, notas, actualizaciones de oportunidad vía texto/audio), Config (perfil fiscal, catálogo servicios, personal).
 
-Salidas: → Proyectos [98C] (cotización aceptada genera proyecto con herencia completa), → Números [98A] (forecast: valor ponderado por probabilidad, pipeline activo).
+Salidas: -> Proyectos [98C] (cotización aceptada genera proyecto con herencia completa), -> Números [98A] (forecast: valor ponderado por probabilidad, pipeline activo).
 
 Frecuencia: Near real-time vía Supabase Realtime.
 
@@ -36,14 +38,14 @@ Una persona con la que hago negocios. Entidad suelta — NO pertenece a ninguna 
 | email | Text | No | — |
 | fuente_adquisicion | Enum | Sí | 1 de 8 opciones (ver §2.7) |
 | fuente_detalle | Text | No | Sub-selección según fuente |
-| fuente_promotor_id | UUID | Condicional | FK → contactos. Solo si fuente = 'promotor' |
+| fuente_promotor_id | UUID | Condicional | FK -> contactos. Solo si fuente = 'promotor' |
 | fuente_referido_nombre | Text | No | Texto libre si fuente = 'referido' |
 | rol | Enum | No | promotor / decisor / influenciador / operativo |
 | comision_porcentaje | Decimal | Condicional | Default 10%. Solo si rol = promotor |
 
 Crear contacto requiere 3 datos: nombre + teléfono + fuente (D15). Se puede crear desde la app o desde WhatsApp (texto/audio).
 
-Indicador completitud: 🔴 si falta email.
+Indicador completitud: si falta email.
 
 ### 2.2 Empresa
 
@@ -67,7 +69,7 @@ Crear empresa requiere 2 datos: nombre + sector (D4). Se crea inline al crear op
 
 Perfil fiscal completo = los 5 campos marcados con * tienen valor.
 
-Indicador completitud: dual — 🔴 fiscal incompleto / ✅ fiscal completo (D37). Única entidad con doble indicador.
+Indicador completitud: dual — fiscal incompleto / Si fiscal completo (D37). Única entidad con doble indicador.
 
 ### 2.3 Oportunidad
 
@@ -77,8 +79,8 @@ Un negocio que estoy persiguiendo. Puente que conecta contacto con empresa.
 |-------|------|-------------|-------|
 | id | UUID | Auto | PK |
 | tenant_id | UUID | Auto | RLS |
-| contacto_id | UUID | Sí | FK → contactos |
-| empresa_id | UUID | Sí | FK → empresas |
+| contacto_id | UUID | Sí | FK -> contactos |
+| empresa_id | UUID | Sí | FK -> empresas |
 | descripcion | Text | Sí | Texto libre |
 | etapa | Enum | Auto | Default: lead_nuevo |
 | probabilidad | Integer | Auto | Derivado de etapa |
@@ -92,7 +94,7 @@ Se crea SOLO desde la app (D16), nunca desde WhatsApp. Formulario inline de 3 pa
 
 Se ACTUALIZA desde WhatsApp (texto/audio) con loop de confirmación obligatorio (D9).
 
-Indicador completitud: 🔴 si falta información.
+Indicador completitud: si falta información.
 
 ### 2.4 Cotización
 
@@ -102,7 +104,7 @@ Lo que le propongo cobrar. Siempre dentro de una oportunidad, nunca suelta (D14)
 |-------|------|-------------|-------|
 | id | UUID | Auto | PK |
 | tenant_id | UUID | Auto | RLS |
-| oportunidad_id | UUID | Sí | FK → oportunidades |
+| oportunidad_id | UUID | Sí | FK -> oportunidades |
 | consecutivo | Text | Auto | COT-YYYY-NNNN (D51). Reset anual (D57). |
 | modo | Enum | Sí | flash / detallada |
 | descripcion | Text | No | Solo en flash |
@@ -112,7 +114,7 @@ Lo que le propongo cobrar. Siempre dentro de una oportunidad, nunca suelta (D14)
 | estado | Enum | Auto | borrador / enviada / aceptada / rechazada / vencida |
 | fecha_envio | Timestamp | No | Al enviar |
 | fecha_validez | Date | No | Default: fecha_envio + 30 días (D60) |
-| duplicada_de | UUID | No | FK → cotizaciones. Trazabilidad duplicación. |
+| duplicada_de | UUID | No | FK -> cotizaciones. Trazabilidad duplicación. |
 | notas | Text | No | Internas, no van al PDF |
 | condiciones_pago | Text | No | Para el PDF |
 | email_enviado_a | Text | No | Registro de envío |
@@ -125,17 +127,17 @@ Lo que le propongo cobrar. Siempre dentro de una oportunidad, nunca suelta (D14)
 | Inmutabilidad | Enviada = todos los campos read-only. No se edita. | D49 |
 | Duplicación | Crea borrador nuevo con consecutivo nuevo + datos copiados. Campo `duplicada_de` registra origen. | D49, D55 |
 | Borradores ilimitados | N borradores simultáneos permitidos | D48 |
-| Vencimiento auto | fecha_validez < hoy AND estado = enviada → estado = vencida | D60 |
+| Vencimiento auto | fecha_validez < hoy AND estado = enviada -> estado = vencida | D60 |
 | Enviar segunda | Bloqueado si ya hay una enviada. Marcar anterior como rechazada/vencida primero. | D48 |
 
 **Transiciones de estado:**
 
 ```
-Borrador → Enviada (vía email con PDF adjunto)
-Enviada → Aceptada (trigger: crear proyecto)
-Enviada → Rechazada
-Enviada → Vencida (automático)
-Borrador → Eliminable
+Borrador -> Enviada (vía email con PDF adjunto)
+Enviada -> Aceptada (trigger: crear proyecto)
+Enviada -> Rechazada
+Enviada -> Vencida (automático)
+Borrador -> Eliminable
 ```
 
 ### 2.5 Ítem
@@ -145,11 +147,11 @@ Línea dentro de cotización detallada.
 | Campo | Tipo | Obligatorio | Notas |
 |-------|------|-------------|-------|
 | id | UUID | Auto | PK |
-| cotizacion_id | UUID | Sí | FK → cotizaciones |
+| cotizacion_id | UUID | Sí | FK -> cotizaciones |
 | nombre | Text | Sí | Nombre del entregable |
 | subtotal | Decimal | Calculado | Suma de rubros |
 | orden | Integer | Auto | Secuencia visual |
-| servicio_origen_id | UUID | No | FK → servicios. Si vino del catálogo. |
+| servicio_origen_id | UUID | No | FK -> servicios. Si vino del catálogo. |
 
 ### 2.6 Rubro
 
@@ -158,7 +160,7 @@ Componente de costo dentro de un ítem. Formulario IDÉNTICO para los 6 tipos �
 | Campo | Tipo | Obligatorio | Notas |
 |-------|------|-------------|-------|
 | id | UUID | Auto | PK |
-| item_id | UUID | Sí | FK → items |
+| item_id | UUID | Sí | FK -> items |
 | tipo | Enum | Sí | 1 de 6 tipos |
 | descripcion | Text | Sí | — |
 | cantidad | Decimal | Sí | — |
@@ -205,7 +207,7 @@ Sub-selecciones son opcionales — no agregan fricción al crear.
 
 ### 2.8 Servicio (catálogo de plantillas)
 
-Plantilla reutilizable de ítem. Vive en Config → Mis servicios.
+Plantilla reutilizable de ítem. Vive en Config -> Mis servicios.
 
 | Campo | Tipo | Obligatorio | Notas |
 |-------|------|-------------|-------|
@@ -216,30 +218,30 @@ Plantilla reutilizable de ítem. Vive en Config → Mis servicios.
 | rubros_template | JSONB | No | Array de rubros precargados |
 | activo | Boolean | Auto | Default: true |
 
-Flujo: usuario selecciona servicio del catálogo → se copia como ítem nuevo en cotización con rubros precargados (deep copy del JSON) → edita lo que necesite → original intacto (D42).
+Flujo: usuario selecciona servicio del catálogo -> se copia como ítem nuevo en cotización con rubros precargados (deep copy del JSON) -> edita lo que necesite -> original intacto (D42).
 
 ### 2.9 Relaciones entre entidades
 
 ```
-Contacto (suelto) ──[origina]──→ Oportunidad ←──[factura a]── Empresa (suelta)
-                                      │
-                                      ├── Cotización (1 enviada máx, N borradores)
-                                      │     └── Ítem
-                                      │           └── Rubro (6 tipos)
-                                      │
-                                      └──[al ganar + hard gate fiscal]──→ Proyecto [98C]
+Contacto (suelto) ──[origina]──-> Oportunidad <-──[factura a]── Empresa (suelta)
+ │
+ ├── Cotización (1 enviada máx, N borradores)
+ │ └── Ítem
+ │ └── Rubro (6 tipos)
+ │
+ └──[al ganar + hard gate fiscal]──-> Proyecto [98C]
 ```
 
 | Relación | Tipo | Nota |
 |----------|------|------|
-| Contacto → Empresa | Ninguna directa | Se conectan VÍA oportunidad (D19) |
-| Contacto → Oportunidad | 1:N | Un contacto origina muchas oportunidades |
-| Empresa → Oportunidad | 1:N | Una empresa tiene muchas oportunidades |
-| Oportunidad → Cotización | 1:N | Pero max 1 enviada a la vez (D48) |
-| Cotización → Ítem | 1:N | Solo en modo detallada |
-| Ítem → Rubro | 1:N | 6 tipos |
-| Oportunidad → Proyecto | 1:1 | Al ganar con cotización aceptada (D45) |
-| Servicio → Ítem | 1:N (copia) | Plantilla se copia, no se referencia |
+| Contacto -> Empresa | Ninguna directa | Se conectan VÍA oportunidad (D19) |
+| Contacto -> Oportunidad | 1:N | Un contacto origina muchas oportunidades |
+| Empresa -> Oportunidad | 1:N | Una empresa tiene muchas oportunidades |
+| Oportunidad -> Cotización | 1:N | Pero max 1 enviada a la vez (D48) |
+| Cotización -> Ítem | 1:N | Solo en modo detallada |
+| Ítem -> Rubro | 1:N | 6 tipos |
+| Oportunidad -> Proyecto | 1:1 | Al ganar con cotización aceptada (D45) |
+| Servicio -> Ítem | 1:N (copia) | Plantilla se copia, no se referencia |
 
 ## 3. Etapas del embudo
 
@@ -250,10 +252,10 @@ Contacto (suelto) ──[origina]──→ Oportunidad ←──[factura a]─�
 | 3 | Discovery hecha | discovery_hecha | 40% | Enviar propuesta |
 | 4 | Propuesta enviada | propuesta_enviada | 60% | Follow-up |
 | 5 | Negociación | negociacion | 80% | Cerrar |
-| 6 | Ganada | ganada | 100% | → Proyecto [98C] |
+| 6 | Ganada | ganada | 100% | -> Proyecto [98C] |
 | 7 | Perdida | perdida | 0% | Registrar razón (obligatorio) |
 
-Chips de color con gradiente: gris claro (Lead) → escala a verde (Ganada). Rojo para Perdida (D39).
+Chips de color con gradiente: gris claro (Lead) -> escala a verde (Ganada). Rojo para Perdida (D39).
 
 Probabilidad se actualiza automáticamente vía trigger al cambiar etapa.
 
@@ -288,20 +290,20 @@ Máximo 6 campos si todo es nuevo. 1 campo si contacto y empresa ya existen.
 **Paso 3: ¿Qué? (Descripción)**
 - Descripción del trabajo (1 campo texto libre)
 
-Submit → crea contacto (si nuevo) + empresa (si nueva) + oportunidad en "Lead nuevo" (10%). Redirect a detalle de oportunidad.
+Submit -> crea contacto (si nuevo) + empresa (si nueva) + oportunidad en "Lead nuevo" (10%). Redirect a detalle de oportunidad.
 
-Solo disponible desde la app (D16). FAB → Nueva oportunidad.
+Solo disponible desde la app (D16). FAB -> Nueva oportunidad.
 
 ### 5.2 Crear cotización
 
-Desde detalle de oportunidad → sección Cotizaciones → [+ Nueva cotización].
+Desde detalle de oportunidad -> sección Cotizaciones -> [+ Nueva cotización].
 
 **Selección de modo:**
 
 | Modo | Para qué | Campos |
 |------|----------|--------|
 | Flash (D63) | Cotizar rápido | 2 campos: valor total + descripción. Sistema calcula retenciones. |
-| Detallada (D40) | Desglose completo | Ítems → rubros → margen → resultado fiscal |
+| Detallada (D40) | Desglose completo | Ítems -> rubros -> margen -> resultado fiscal |
 
 **Modo detallado — flujo:**
 
@@ -309,14 +311,14 @@ Desde detalle de oportunidad → sección Cotizaciones → [+ Nueva cotización]
 2. Dentro de cada ítem: agregar rubros (6 tipos, formulario idéntico)
 3. Definir margen deseado (%)
 4. Sistema calcula: costo total + margen = precio venta
-5. Resultado fiscal: retenciones estimadas → "TE QUEDA" (D43)
-6. Si perfil fiscal empresa incompleto → sección fiscal bloqueada con CTA visible (D18)
+5. Resultado fiscal: retenciones estimadas -> "TE QUEDA" (D43)
+6. Si perfil fiscal empresa incompleto -> sección fiscal bloqueada con CTA visible (D18)
 
 Ítems en accordion: contraído en móvil (1 abierto a la vez), semi-expandido en desktop (D41).
 
 ### 5.3 Enviar cotización (D50)
 
-Al tocar [Enviar cotización →]:
+Al tocar [Enviar cotización ->]:
 
 1. Modal de envío: destinatario (precargado), asunto (auto), mensaje (template editable), PDF adjunto (auto-generado)
 2. Envío vía Resend (API transaccional)
@@ -324,8 +326,8 @@ Al tocar [Enviar cotización →]:
 
 ### 5.4 PDF de cotización (D52-D54, D58)
 
-- Layout fijo MVP (D54) con branding de empresa del usuario (logo + datos legales desde Config → Mi empresa)
-- Sin logo si no configurado → PDF funcional + aviso sutil (D53)
+- Layout fijo MVP (D54) con branding de empresa del usuario (logo + datos legales desde Config -> Mi empresa)
+- Sin logo si no configurado -> PDF funcional + aviso sutil (D53)
 - Consecutivo visible: COT-YYYY-NNNN
 - Desglose de ítems y rubros (si detallada) o valor total (si flash)
 - **SIN desglose de retenciones** (D58) — línea informativa al pie: "Sujeto a retenciones de ley según condición del contratante"
@@ -338,32 +340,32 @@ Cotización enviada = inmutable. Botón "Duplicar y editar" prominente (no menú
 ### 5.6 Vista cotizaciones dentro de oportunidad (D56)
 
 ```
-COT-2026-0043  [Borrador]         $8.190.000   [Editar] [Enviar →]
-COT-2026-0042  [Enviada 🔒]       $7.500.000   [Duplicar y editar] [Ver PDF]
-COT-2026-0041  [Rechazada 🔒]     $9.200.000   [Ver PDF]
+COT-2026-0043 [Borrador] $8.190.000 [Editar] [Enviar ->]
+COT-2026-0042 [Enviada ] $7.500.000 [Duplicar y editar] [Ver PDF]
+COT-2026-0041 [Rechazada ] $9.200.000 [Ver PDF]
 ```
 
-Orden: más reciente arriba. Candado (🔒) en inmutables.
+Orden: más reciente arriba. Candado () en inmutables.
 
 ## 6. Hard gate fiscal (D5, D44, D45)
 
 ### Trigger
 
-Usuario intenta mover oportunidad a "Ganada" AND empresa tiene perfil fiscal incompleto (falta ≥1 de: NIT, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor).
+Usuario intenta mover oportunidad a "Ganada" AND empresa tiene perfil fiscal incompleto (falta >=1 de: NIT, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor).
 
 ### Comportamiento
 
 Flujo inline positivo — NO modal de error (D44):
 
-- Título: "🎯 Un paso más para cerrar este negocio"
-- Muestra campos fiscales con ✅ (completo) y ❌ (faltante, editable in-situ)
+- Título: " Un paso más para cerrar este negocio"
+- Muestra campos fiscales con Si (completo) y No (faltante, editable in-situ)
 - Al completar: transacción atómica Supabase (D45):
-  1. UPDATE empresa (perfil fiscal)
-  2. UPDATE oportunidad (etapa = ganada)
-  3. Confirmación: "¿Crear proyecto a partir de esta cotización?"
-  4. Si confirma → INSERT proyecto (hereda datos D68)
+ 1. UPDATE empresa (perfil fiscal)
+ 2. UPDATE oportunidad (etapa = ganada)
+ 3. Confirmación: "¿Crear proyecto a partir de esta cotización?"
+ 4. Si confirma -> INSERT proyecto (hereda datos D68)
 
-Si "Volver al pipeline" → no pasa nada, oportunidad queda en etapa actual.
+Si "Volver al pipeline" -> no pasa nada, oportunidad queda en etapa actual.
 
 ### Hard gate — campos obligatorios
 
@@ -399,11 +401,11 @@ $52.374 — parametrizable en configuración del tenant.
 ### Output en pantalla
 
 ```
-Precio venta:        $X.XXX.XXX
-Retención fuente:   -$XXX.XXX
-Retención ICA:      -$XXX.XXX
+Precio venta: $X.XXX.XXX
+Retención fuente: -$XXX.XXX
+Retención ICA: -$XXX.XXX
 ────────────────────────────────
-TE QUEDA:            $X.XXX.XXX  ← prominente, verde
+TE QUEDA: $X.XXX.XXX <- prominente, verde
 ```
 
 Disclaimer obligatorio: "Valores estimados. Consulte su contador para declaraciones oficiales."
@@ -418,36 +420,36 @@ Disclaimer obligatorio: "Valores estimados. Consulte su contador para declaracio
 | Ver resultados fiscales en cotización | perfil fiscal empresa completo |
 | Pasar a "Ganada" (hard gate) | NIT + tipo persona + régimen + gran contribuyente + agente retenedor |
 
-Indicador de completitud (🔴 dot rojo) visible en cada card de cada entidad (D34). No bloquea nada excepto los dos hard blocks: resultados fiscales y gate a Ganada.
+Indicador de completitud ( dot rojo) visible en cada card de cada entidad (D34). No bloquea nada excepto los dos hard blocks: resultados fiscales y gate a Ganada.
 
 ## 9. Interacción WhatsApp
 
 | Acción | WhatsApp | App |
 |--------|----------|-----|
-| Registrar contacto | ✅ texto/audio | ✅ |
-| Registrar notas/interacciones | ✅ texto/audio | ✅ |
-| Actualizar oportunidad (etapa, notas) | ✅ texto/audio | ✅ |
-| Consultar pipeline | ✅ texto | ✅ |
-| Crear oportunidad | ❌ | ✅ |
-| Crear empresa | ❌ | ✅ |
-| Crear cotización | ❌ | ✅ |
-| Gate fiscal | ❌ | ✅ |
-| Vistas 360 | ❌ | ✅ |
+| Registrar contacto | Si texto/audio | Si |
+| Registrar notas/interacciones | Si texto/audio | Si |
+| Actualizar oportunidad (etapa, notas) | Si texto/audio | Si |
+| Consultar pipeline | Si texto | Si |
+| Crear oportunidad | No | Si |
+| Crear empresa | No | Si |
+| Crear cotización | No | Si |
+| Gate fiscal | No | Si |
+| Vistas 360 | No | Si |
 
 Pipeline de audio:
 
 ```
-Audio WhatsApp (.ogg) → Gemini 2.0 Flash (multimodal nativo)
-→ Extracción: contacto, empresa, acción, etapa, fecha, nota
-→ Mensaje confirmación al usuario (loop obligatorio D9)
-→ Usuario confirma/corrige → Escritura Supabase
+Audio WhatsApp (.ogg) -> Gemini 2.0 Flash (multimodal nativo)
+-> Extracción: contacto, empresa, acción, etapa, fecha, nota
+-> Mensaje confirmación al usuario (loop obligatorio D9)
+-> Usuario confirma/corrige -> Escritura Supabase
 ```
 
 Costo: ~$0.0001 USD/audio. Latencia: <5 seg. Límite: 60 seg/audio.
 
 ## 10. Navegación y ubicación en la app
 
-Pipeline es la **segunda tab** (D46): Números → **Pipeline** → Proyectos → Directorio → Config.
+Pipeline es la **segunda tab** (D46): Números -> **Pipeline** -> Proyectos -> Directorio -> Config.
 
 ### Contenido de la tab Pipeline
 
@@ -471,7 +473,7 @@ Cada oportunidad es un EntityCard (D30) con:
 |---------|---------|---------|
 | Contacto + Empresa | Etapa (chip color D39) | Última acción + fecha relativa |
 
-+ indicador 🔴 si incompleta.
++ indicador si incompleta.
 
 **Comportamiento responsive (D31, D32):**
 - Móvil: cards contraídas, expandibles por tap, una a la vez
@@ -490,9 +492,9 @@ Chips horizontales por etapa (7 + "Todas") + sort (fecha / valor). Búsqueda por
 ```
 HEADER
 ├── Etapa: [chip editable]
-├── Contacto: [nombre] → link a Directorio
-├── Empresa: [nombre + indicador fiscal] → link a Directorio
-└── 🔴 si incompleta
+├── Contacto: [nombre] -> link a Directorio
+├── Empresa: [nombre + indicador fiscal] -> link a Directorio
+└── si incompleta
 
 SECCIONES EXPANDIBLES
 ├── Descripción del trabajo
@@ -502,7 +504,7 @@ SECCIONES EXPANDIBLES
 
 ACCIONES
 ├── [+ Nueva cotización]
-├── [Cambiar etapa →]
+├── [Cambiar etapa ->]
 └── [Marcar como perdida]
 ```
 
@@ -516,7 +518,7 @@ Al aceptar cotización y crear proyecto:
 | Empresa | oportunidad.empresa_id | proyecto.empresa_id |
 | Contacto | oportunidad.contacto_id | proyecto.contacto_id |
 | Presupuesto | cotizacion.valor_total | proyecto.presupuesto_total |
-| Ítems | cotizacion → items | Líneas presupuestarias referenciales |
+| Ítems | cotizacion -> items | Líneas presupuestarias referenciales |
 
 Estado inicial del proyecto: "En ejecución". Detalle en [98C].
 
@@ -531,7 +533,7 @@ Estado inicial del proyecto: "En ejecución". Detalle en [98C].
 | D5 | Hard gate fiscal antes de Ganada | §6 |
 | D9 | Loop confirmación WhatsApp obligatorio | §9 |
 | D14 | Cotización siempre dentro de oportunidad | §2.4 |
-| D15 | Cadena obligatoria: Contacto → Oportunidad → Cotización | §8 |
+| D15 | Cadena obligatoria: Contacto -> Oportunidad -> Cotización | §8 |
 | D16 | Oportunidad solo desde la app | §5.1 |
 | D17 | Referido ≠ Promotor | §2.7 |
 | D18 | Bloqueo fiscal en cotización sin perfil completo | §5.2 |
@@ -558,7 +560,7 @@ Estado inicial del proyecto: "En ejecución". Detalle en [98C].
 | D58-D59 | Retenciones = herramienta interna | §5.4, §7 |
 | D60 | Validez 30 días default | §2.4 |
 | D63 | Flash = 2 campos | §5.2 |
-| D68 | Herencia cotización → proyecto | §12 |
+| D68 | Herencia cotización -> proyecto | §12 |
 
 ---
 

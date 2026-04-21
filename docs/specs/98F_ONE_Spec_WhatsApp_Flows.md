@@ -1,12 +1,12 @@
 ---
 doc_id: 98F
-version: 2.1
-updated: 2026-02-22
-depends_on: [21], [98A], [98B], [98C], [98E], [99]
+version: 2.0
+updated: 2026-02-20
+depends_on: [21], [98A], [98B], [98C], [99]
 depended_by: ninguno
-changelog: |
-  v2.0 — Fusión spec completa + delta Sesión 5. Agrega W32, W33, actualiza W16/W29. Decisiones D91-D118.
-  v2.1 — Gastos Empresariales: confirmación W02 enriquecida (D103) + desambiguación proyecto vs empresa (D104).
+changelog: v2.0 — Fusión spec completa + delta Sesión 5 (Mis Números). Agrega W32 (saldo bancario), W33 (push saldo), actualiza W16/W29 con conciliación y streak. Corrige errores de numeración del delta original. Decisiones D109-D118.
+vigente: false
+nota_vigencia: "Spec desactualizada. El bot WhatsApp esta vivo pero con cambios: Gemini 2.5 Flash-Lite (no 2.0), nuevos intents FOLLOWUP/ESTADO_NEGOCIOS, anafora, golden set 98/99. Opera sobre modulo /negocios (no pipeline/proyectos). Ver metrik-one/CLAUDE.md para estado actual."
 ---
 
 # Spec: Flujos WhatsApp Bot — MéTRIK ONE
@@ -19,32 +19,32 @@ Código: MOD-WA. Canal de registro y consulta por lenguaje natural vía WhatsApp
 
 ```
 USUARIO envía mensaje
-    │
-    ▼
+ │
+ ▼
 FASE 1 — PARSE (Gemini 2.0 Flash)
-    Clasifica intención (1 de 16 MVP)
-    Extrae hints textuales (monto, nombre, concepto)
-    NO resuelve contra datos reales
-    │
-    ▼
+ Clasifica intención (1 de 16 MVP)
+ Extrae hints textuales (monto, nombre, concepto)
+ NO resuelve contra datos reales
+ │
+ ▼
 FASE 2 — LOOKUP (Edge Function + Supabase)
-    Resuelve hints contra datos reales del tenant
-    Match difuso por nombre (pg_trgm)
-    Valida reglas de negocio
-    │
-    ▼
-FASE 3 — PRESENT (Edge Function → WhatsApp)
-    Muestra opciones con contexto real (%, saldo, horas)
-    Si 1 solo match → confirmación directa
-    Si múltiples → menú numerado (máx 5 opciones)
-    Si 0 matches → pide clarificación
-    │
-    ▼
+ Resuelve hints contra datos reales del tenant
+ Match difuso por nombre (pg_trgm)
+ Valida reglas de negocio
+ │
+ ▼
+FASE 3 — PRESENT (Edge Function -> WhatsApp)
+ Muestra opciones con contexto real (%, saldo, horas)
+ Si 1 solo match -> confirmación directa
+ Si múltiples -> menú numerado (máx 5 opciones)
+ Si 0 matches -> pide clarificación
+ │
+ ▼
 FASE 4 — CONFIRM + SAVE (Edge Function + Supabase)
-    Usuario confirma con "1", "sí", o emoji ✅
-    INSERT/UPDATE en Supabase
-    Responde con impacto: estado actualizado post-registro
-    Supabase Realtime → UI web se actualiza
+ Usuario confirma con "1", "sí", o emoji Si
+ INSERT/UPDATE en Supabase
+ Responde con impacto: estado actualizado post-registro
+ Supabase Realtime -> UI web se actualiza
 ```
 
 ### Stack Técnico
@@ -154,21 +154,21 @@ NOTAS PARA SALDO_BANCARIO:
 - Saldo = estado actual de la cuenta. No es un movimiento.
 - Extraer SOLO monto (obligatorio). No extraer nombre de banco ni fecha.
 - CONFUSIÓN FRECUENTE:
-  - "Me pagaron 3 millones" → COBRO, NO saldo
-  - "Tengo 3 millones en cartera" → CONSULTA (CARTERA), NO saldo
-  - "Gasté 500 mil" → GASTO, NO saldo
+ - "Me pagaron 3 millones" -> COBRO, NO saldo
+ - "Tengo 3 millones en cartera" -> CONSULTA (CARTERA), NO saldo
+ - "Gasté 500 mil" -> GASTO, NO saldo
 
 FORMATO DE RESPUESTA:
 
 {
-  "intent": "GASTO_DIRECTO",
-  "confidence": 0.92,
-  "fields": {
-    "amount": 180000,
-    "concept": "transporte",
-    "entity_hint": "Pérez",
-    "category_hint": "transporte"
-  }
+ "intent": "GASTO_DIRECTO",
+ "confidence": 0.92,
+ "fields": {
+ "amount": 180000,
+ "concept": "transporte",
+ "entity_hint": "Pérez",
+ "category_hint": "transporte"
+ }
 }
 ```
 
@@ -219,8 +219,8 @@ FORMATO DE RESPUESTA:
 1. Usuario dice "Pérez aceptó"
 2. Bot confirma: "¡Bien! Voy a mover lo de Pérez a Ganada."
 3. Bot valida si el contacto tiene datos fiscales completos
-4. Si NO tiene datos fiscales → "Para cerrar esta oportunidad necesito los datos fiscales de Pérez. Complétalo en la app: [link directo al contacto]"
-5. Si SÍ tiene datos fiscales → Cambia estado, crea proyecto automáticamente, responde con resumen
+4. Si NO tiene datos fiscales -> "Para cerrar esta oportunidad necesito los datos fiscales de Pérez. Complétalo en la app: [link directo al contacto]"
+5. Si SÍ tiene datos fiscales -> Cambia estado, crea proyecto automáticamente, responde con resumen
 
 **Razón:** Los datos fiscales (NIT, régimen, agente retenedor) requieren precisión que WhatsApp no garantiza. Un error fiscal genera facturas incorrectas. Hana valida: "El hard gate es protección, no burocracia."
 
@@ -237,19 +237,19 @@ FORMATO DE RESPUESTA:
 ```
 Bot: "No estoy seguro de entender. ¿Qué quieres hacer?
 
-1️⃣ Registrar un gasto
-2️⃣ Registrar horas
-3️⃣ Registrar un cobro
-4️⃣ Consultar un proyecto
-5️⃣ Ver mis números
-6️⃣ Otra cosa
+1⃣ Registrar un gasto
+2⃣ Registrar horas
+3⃣ Registrar un cobro
+4⃣ Consultar un proyecto
+5⃣ Ver mis números
+6⃣ Otra cosa
 
 Responde con el número."
 ```
 
-Si el usuario responde "6" → "Escríbeme con más detalle qué necesitas y lo intento de nuevo. Si prefieres, entra a la app: [link]"
+Si el usuario responde "6" -> "Escríbeme con más detalle qué necesitas y lo intento de nuevo. Si prefieres, entra a la app: [link]"
 
-Si el usuario envía 3 mensajes UNCLEAR consecutivos → "Parece que no estoy entendiendo bien. Te recomiendo usar la app para esto: [link]. Si crees que debería entender tu mensaje, escríbeme 'ayuda' para ver qué puedo hacer."
+Si el usuario envía 3 mensajes UNCLEAR consecutivos -> "Parece que no estoy entendiendo bien. Te recomiendo usar la app para esto: [link]. Si crees que debería entender tu mensaje, escríbeme 'ayuda' para ver qué puedo hacer."
 
 ### D97 — Pregunta #8: Rate Limiting
 
@@ -272,21 +272,21 @@ Si el usuario envía 3 mensajes UNCLEAR consecutivos → "Parece que no estoy en
 
 | Intención | Dueño | Colaborador |
 |-----------|-------|-------------|
-| W01 Gasto directo | ✅ | ✅ (solo proyectos asignados) |
-| W02 Gasto operativo | ✅ | ❌ |
-| W03 Horas | ✅ | ✅ (solo proyectos asignados) |
-| W04 Cobro | ✅ | ❌ |
-| W06 Contacto nuevo | ✅ | ❌ |
-| W09 Nota oportunidad | ✅ | ❌ |
-| W11 Nota proyecto | ✅ | ✅ (solo proyectos asignados) |
-| W14 Estado proyecto | ✅ | ✅ (solo proyectos asignados) |
-| W15-W17, W19 Consultas | ✅ | ❌ |
-| W22-W23 Opp ganada/perdida | ✅ | ❌ |
-| W24 Ayuda | ✅ | ✅ |
-| W25, W29, W33 Alertas | ✅ | ❌ |
-| W32 Saldo bancario | ✅ | ❌ |
+| W01 Gasto directo | Si | Si (solo proyectos asignados) |
+| W02 Gasto operativo | Si | No |
+| W03 Horas | Si | Si (solo proyectos asignados) |
+| W04 Cobro | Si | No |
+| W06 Contacto nuevo | Si | No |
+| W09 Nota oportunidad | Si | No |
+| W11 Nota proyecto | Si | Si (solo proyectos asignados) |
+| W14 Estado proyecto | Si | Si (solo proyectos asignados) |
+| W15-W17, W19 Consultas | Si | No |
+| W22-W23 Opp ganada/perdida | Si | No |
+| W24 Ayuda | Si | Si |
+| W25, W29, W33 Alertas | Si | No |
+| W32 Saldo bancario | Si | No |
 
-**Identificación del colaborador:** Por número de teléfono registrado en la tabla `personal` del tenant. Si el número no está registrado → "No te tengo registrado. Pídele a tu jefe que te agregue en la app."
+**Identificación del colaborador:** Por número de teléfono registrado en la tabla `personal` del tenant. Si el número no está registrado -> "No te tengo registrado. Pídele a tu jefe que te agregue en la app."
 
 ### D100 — Formato de Mensajes WhatsApp
 
@@ -295,9 +295,9 @@ Si el usuario envía 3 mensajes UNCLEAR consecutivos → "Parece que no estoy en
 - Montos siempre formateados: $2.350.000
 - Porcentajes con 1 decimal: 73.2%
 - Nombres en negrita: *Pérez*
-- Confirmaciones usan ✅, alertas usan ⚠️, errores usan ❌
+- Confirmaciones usan Si, alertas usan [ATENCION], errores usan No
 - Mensajes máximo 500 caracteres (WhatsApp trunca después)
-- Si la respuesta requiere más de 500 chars → enviar en 2 mensajes con 1 segundo de delay
+- Si la respuesta requiere más de 500 chars -> enviar en 2 mensajes con 1 segundo de delay
 - No usar markdown complejo (WhatsApp solo soporta *bold*, _italic_, ~strikethrough~, ```code```)
 
 ---
@@ -314,14 +314,14 @@ Si el usuario envía 3 mensajes UNCLEAR consecutivos → "Parece que no estoy en
 
 ```json
 {
-  "intent": "GASTO_DIRECTO",
-  "confidence": 0.91,
-  "fields": {
-    "amount": 180000,
-    "concept": "transporte",
-    "entity_hint": "Pérez",
-    "category_hint": "transporte"
-  }
+ "intent": "GASTO_DIRECTO",
+ "confidence": 0.91,
+ "fields": {
+ "amount": 180000,
+ "concept": "transporte",
+ "entity_hint": "Pérez",
+ "category_hint": "transporte"
+ }
 }
 ```
 
@@ -330,20 +330,20 @@ Si el usuario envía 3 mensajes UNCLEAR consecutivos → "Parece que no estoy en
 ```sql
 -- 1. Buscar proyectos activos que matcheen con entity_hint
 SELECT p.id, p.nombre, c.nombre as cliente, p.presupuesto_total, 
-       p.gasto_acumulado, p.presupuesto_total - p.gasto_acumulado as saldo_disponible
+ p.gasto_acumulado, p.presupuesto_total - p.gasto_acumulado as saldo_disponible
 FROM proyectos p
 JOIN contactos c ON p.contacto_id = c.id
 WHERE p.tenant_id = :tenant_id
-  AND p.estado = 'activo'
-  AND (similarity(c.nombre, :entity_hint) > 0.3 
-       OR similarity(p.nombre, :entity_hint) > 0.3)
+ AND p.estado = 'activo'
+ AND (similarity(c.nombre, :entity_hint) > 0.3 
+ OR similarity(p.nombre, :entity_hint) > 0.3)
 ORDER BY similarity(c.nombre, :entity_hint) DESC
 LIMIT 5;
 
 -- 2. Mapear category_hint a categoría de gasto
 SELECT id, nombre FROM categorias_gasto
 WHERE tenant_id = :tenant_id
-  AND similarity(nombre, :category_hint) > 0.3
+ AND similarity(nombre, :category_hint) > 0.3
 ORDER BY similarity(nombre, :category_hint) DESC
 LIMIT 3;
 
@@ -351,11 +351,11 @@ LIMIT 3;
 SELECT gf.id, gf.concepto, gf.monto_esperado, gf.mes
 FROM gastos_fijos_borradores gf
 WHERE gf.tenant_id = :tenant_id
-  AND gf.estado = 'pendiente'
-  AND gf.mes = date_trunc('month', CURRENT_DATE)
-  AND (similarity(gf.concepto, :concept) > 0.4 
-       OR gf.categoria_id = :matched_category_id)
-  AND ABS(gf.monto_esperado - :amount) / gf.monto_esperado < 0.2  -- ±20% tolerancia
+ AND gf.estado = 'pendiente'
+ AND gf.mes = date_trunc('month', CURRENT_DATE)
+ AND (similarity(gf.concepto, :concept) > 0.4 
+ OR gf.categoria_id = :matched_category_id)
+ AND ABS(gf.monto_esperado - :amount) / gf.monto_esperado < 0.2 -- ±20% tolerancia
 LIMIT 1;
 ```
 
@@ -364,12 +364,12 @@ LIMIT 1;
 **Caso A — 1 proyecto match + categoría clara + sin match gasto fijo:**
 
 ```
-✅ Registro gasto directo:
+Si Registro gasto directo:
 
-📂 Proyecto: *Remodelación Pérez*
-💰 Monto: $180.000
-📋 Categoría: Transporte y movilidad
-📅 Fecha: Hoy
+ Proyecto: *Remodelación Pérez*
+ Monto: $180.000
+ Categoría: Transporte y movilidad
+ Fecha: Hoy
 
 Presupuesto Pérez: $4.500.000 gastado de $8.000.000 (56.3%)
 Con este gasto quedaría en $4.680.000 (58.5%)
@@ -380,14 +380,14 @@ Con este gasto quedaría en $4.680.000 (58.5%)
 **Caso B — Match contra borrador gasto fijo (D84):**
 
 ```
-🔄 Encontré un gasto fijo pendiente similar:
+ Encontré un gasto fijo pendiente similar:
 
 Borrador: *Transporte mensual* — $200.000 esperado
 Tu gasto: $180.000
 
-1️⃣ Es el mismo gasto fijo (confirmar borrador con $180.000)
-2️⃣ Es un gasto aparte del proyecto *Pérez*
-3️⃣ Cancelar
+1⃣ Es el mismo gasto fijo (confirmar borrador con $180.000)
+2⃣ Es un gasto aparte del proyecto *Pérez*
+3⃣ Cancelar
 
 ¿Cuál?
 ```
@@ -395,10 +395,10 @@ Tu gasto: $180.000
 **Caso C — Múltiples proyectos match:**
 
 ```
-💰 Gasto de $180.000 en transporte. ¿Para cuál proyecto?
+ Gasto de $180.000 en transporte. ¿Para cuál proyecto?
 
-1️⃣ *Remodelación Pérez* — 56.3% presupuesto usado
-2️⃣ *Ampliación Pérez* — 23.1% presupuesto usado
+1⃣ *Remodelación Pérez* — 56.3% presupuesto usado
+2⃣ *Ampliación Pérez* — 23.1% presupuesto usado
 
 Responde con el número.
 ```
@@ -406,12 +406,12 @@ Responde con el número.
 **Caso D — 0 proyectos match:**
 
 ```
-❌ No encontré proyecto activo con "*Pérez*".
+No No encontré proyecto activo con "*Pérez*".
 
 Tus proyectos activos son:
-1️⃣ *Remodelación Torres*
-2️⃣ *Casa García*
-3️⃣ Registrar como gasto operativo (sin proyecto)
+1⃣ *Remodelación Torres*
+2⃣ *Casa García*
+3⃣ Registrar como gasto operativo (sin proyecto)
 
 ¿Cuál? O escríbeme el nombre correcto.
 ```
@@ -419,12 +419,12 @@ Tus proyectos activos son:
 **Caso E — Categoría no clara:**
 
 ```
-💰 Gasto de $180.000 en *Pérez*. ¿Qué categoría?
+ Gasto de $180.000 en *Pérez*. ¿Qué categoría?
 
-1️⃣ Transporte y movilidad 🚗
-2️⃣ Materiales e insumos 📦
-3️⃣ Alimentación trabajo 🍽️
-4️⃣ Otra
+1⃣ Transporte y movilidad 
+2⃣ Materiales e insumos 
+3⃣ Alimentación trabajo 
+4⃣ Otra
 
 Responde con el número.
 ```
@@ -439,9 +439,9 @@ VALUES (:tenant_id, :proyecto_id, 180000, :cat_id, 'transporte', CURRENT_DATE, '
 **Respuesta post-registro:**
 
 ```
-✅ Gasto registrado.
+Si Gasto registrado.
 
-📂 *Remodelación Pérez*
+ *Remodelación Pérez*
 ├ Presupuesto usado: $4.680.000 / $8.000.000 (58.5%)
 ├ Horas registradas: 42 / 60h
 └ Margen proyectado: 34.2%
@@ -452,93 +452,34 @@ VALUES (:tenant_id, :proyecto_id, 180000, :cat_id, 'transporte', CURRENT_DATE, '
 | Caso | Manejo |
 |------|--------|
 | Monto = 0 o negativo | "El monto debe ser mayor a $0. ¿Cuánto fue el gasto?" |
-| Monto > presupuesto restante | Registrar + alerta: "⚠️ Este gasto supera el presupuesto restante de *Pérez*. Presupuesto excedido en $180.000." |
+| Monto > presupuesto restante | Registrar + alerta: "[ATENCION] Este gasto supera el presupuesto restante de *Pérez*. Presupuesto excedido en $180.000." |
 | Sin proyectos activos | "No tienes proyectos activos. ¿Quieres registrarlo como gasto operativo?" |
 | Colaborador en proyecto no asignado | "No estás asignado al proyecto *Pérez*. Solo puedes registrar gastos en tus proyectos." |
 | Mensaje con foto adjunta | Guardar imagen como `soporte_url` en el registro. "Guardé el soporte fotográfico." |
 
 ---
 
-## §5. Flujo W02 — Registrar Gasto Operativo — 🆕v2.1
+## §5. Flujo W02 — Registrar Gasto Operativo
 
-**Intención:** Gasto general del negocio, no asociado a proyecto. Incluye gastos fijos recurrentes y gastos de empresa esporádicos (categorías 6-9).
+**Intención:** Gasto general del negocio, no asociado a proyecto. Incluye gastos fijos.
 
-**Ejemplos:**
-- "Pagué el arriendo, 2 millones"
-- "Pagué la pauta de LinkedIn, 150 mil"
-- "Compré materiales de oficina, 80 mil"
+**Ejemplo:** "Pagué el arriendo, 2 millones"
 
-**Complejidad:** Media — match contra borradores gastos fijos (D84), categorización, desambiguación proyecto vs empresa (D104).
-
----
-
-### Fase 0: 🆕v2.1 PRE-CHECK — Desambiguación (D104)
-
-**Trigger:** ANTES de ejecutar Fase 1 (PARSE), evaluar si aplica desambiguación.
-
-```
-SI intent = GASTO_OPERATIVO Y (category_hint IN [1,2,3,4,5] O confidence < 0.75):
-  → ACTIVAR flujo de desambiguación (ver abajo)
-
-SI intent = GASTO_OPERATIVO Y category_hint IN [6,7,8,9] Y confidence >= 0.75:
-  → Continuar a Fase 1 normal (es claramente gasto de empresa)
-```
-
-**Categorías 1-5 que activan desambiguación:**
-- Mano de obra / subcontratistas
-- Materiales e insumos
-- Viáticos (transporte + alimentación)
-- Software y tecnología
-- Servicios profesionales
-
-**Razonamiento:** Estas categorías pueden ser tanto costo directo de un proyecto como gasto operativo de empresa. Gemini puede confundirlas.
-
-**Flujo de desambiguación:**
-
-```
-Bot → usuario:
-"💰 ${monto} en {concept}.
-
-¿Este gasto es de...?
-1️⃣ 📂 Un proyecto de trabajo
-2️⃣ 🏢 Mi empresa (gasto operativo)
-
-Responde con el número."
-```
-
-```
-SI usuario responde 1️⃣ → rutear a W01 (GASTO_DIRECTO)
-  → Continuar flujo W01 desde Fase 2 (LOOKUP proyectos)
-
-SI usuario responde 2️⃣ → continuar W02 Fase 1 (PARSE) con categoría del hint
-  → tipo = 'empresa' en el INSERT final
-```
-
-**Edge cases desambiguación:**
-
-| Caso | Manejo |
-|------|--------|
-| Usuario no responde 1 ni 2 | "Responde 1 para proyecto o 2 para empresa. ¿Cuál es?" |
-| Usuario dice "ninguno" | "Entendido. ¿Quieres cancelar el registro?" |
-| Sin proyectos activos | Saltar desambiguación → registrar como empresa directamente |
-
----
+**Complejidad:** Media — match contra borradores gastos fijos (D84), categorización.
 
 ### Fase 1: PARSE
 
 ```json
 {
-  "intent": "GASTO_OPERATIVO",
-  "confidence": 0.94,
-  "fields": {
-    "amount": 2000000,
-    "concept": "arriendo",
-    "category_hint": "arriendo"
-  }
+ "intent": "GASTO_OPERATIVO",
+ "confidence": 0.94,
+ "fields": {
+ "amount": 2000000,
+ "concept": "arriendo",
+ "category_hint": "arriendo"
+ }
 }
 ```
-
----
 
 ### Fase 2: LOOKUP
 
@@ -548,42 +489,30 @@ SELECT gf.id, gf.concepto, gf.monto_esperado, gf.categoria_id, c.nombre as categ
 FROM gastos_fijos_borradores gf
 JOIN categorias_gasto c ON gf.categoria_id = c.id
 WHERE gf.tenant_id = :tenant_id
-  AND gf.estado = 'pendiente'
-  AND gf.mes = date_trunc('month', CURRENT_DATE)
-  AND (similarity(gf.concepto, :concept) > 0.4 
-       OR similarity(c.nombre, :category_hint) > 0.3)
+ AND gf.estado = 'pendiente'
+ AND gf.mes = date_trunc('month', CURRENT_DATE)
+ AND (similarity(gf.concepto, :concept) > 0.4 
+ OR similarity(c.nombre, :category_hint) > 0.3)
 ORDER BY similarity(gf.concepto, :concept) DESC
 LIMIT 3;
 
 -- 2. Si no hay match en borradores, buscar categoría
 SELECT id, nombre FROM categorias_gasto
 WHERE tenant_id = :tenant_id
-  AND similarity(nombre, :category_hint) > 0.3
+ AND similarity(nombre, :category_hint) > 0.3
 ORDER BY similarity(nombre, :category_hint) DESC
 LIMIT 3;
-
--- 3. 🆕v2.1 Acumulado gastos empresa del mes (para feedback D103)
-SELECT 
-  SUM(monto) as total_empresa_mes,
-  COUNT(*) as num_gastos
-FROM gastos
-WHERE tenant_id = :tenant_id
-  AND proyecto_id IS NULL
-  AND fecha >= date_trunc('month', CURRENT_DATE)
-  AND fecha < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month';
 ```
-
----
 
 ### Fase 3: PRESENT
 
 **Caso A — Match exacto con borrador gasto fijo:**
 
 ```
-🔄 Confirmo gasto fijo del mes:
+ Confirmo gasto fijo del mes:
 
-📋 *Arriendo oficina* — Esperado: $2.000.000
-💰 Tu pago: $2.000.000 ✅ Coincide
+ *Arriendo oficina* — Esperado: $2.000.000
+ Tu pago: $2.000.000 Si Coincide
 
 ¿Confirmo? (Sí/No)
 ```
@@ -591,28 +520,27 @@ WHERE tenant_id = :tenant_id
 **Caso B — Match con borrador pero monto diferente:**
 
 ```
-🔄 Encontré gasto fijo similar:
+ Encontré gasto fijo similar:
 
-📋 *Arriendo oficina* — Esperado: $2.200.000
-💰 Tu pago: $2.000.000 (diferencia: -$200.000)
+ *Arriendo oficina* — Esperado: $2.200.000
+ Tu pago: $2.000.000 (diferencia: -$200.000)
 
-1️⃣ Confirmar con $2.000.000 (actualizar monto real)
-2️⃣ Es un gasto diferente, no es el arriendo
-3️⃣ Cancelar
+1⃣ Confirmar con $2.000.000 (actualizar monto real)
+2⃣ Es un gasto diferente, no es el arriendo
+3⃣ Cancelar
 ```
 
 **Caso C — Sin match en borradores:**
 
 ```
-💰 Gasto de empresa:
+ Gasto operativo de $2.000.000 por *arriendo*.
 
-💵 $2.000.000 — Arriendo y espacios
-📅 Hoy
+ Categoría: Arriendo y servicios
 
 ¿Confirmo? (Sí/No)
-```
 
----
+Tip: Si este es un gasto que pagas todos los meses, configúralo como gasto fijo en la app para que no se te olvide 
+```
 
 ### Fase 4: CONFIRM + SAVE
 
@@ -626,51 +554,19 @@ WHERE id = :borrador_id;
 Si es gasto nuevo:
 ```sql
 INSERT INTO gastos (tenant_id, monto, categoria_id, descripcion, fecha, tipo, registrado_via)
-VALUES (:tenant_id, :amount, :cat_id, :concept, CURRENT_DATE, 'empresa', 'whatsapp');
--- 🆕v2.1: tipo = 'empresa' (no 'operativo') para gastos registrados por path empresa
+VALUES (:tenant_id, 2000000, :cat_id, 'arriendo', CURRENT_DATE, 'operativo', 'whatsapp');
 ```
 
----
-
-### Respuesta post-registro — 🆕v2.1 (D103)
-
-**Formato enriquecido:**
+**Respuesta post-registro:**
 
 ```
-✅ Gasto de empresa registrado:
-💰 $2.000.000 — Arriendo y espacios
-📊 Gastos empresa este mes: $3.800.000
-   (Arriendo $2M · Internet $800K · Contador $1M)
-📎 ¿Tienes soporte? 📷 Ahora / ⏰ Después / ❌ No
+Si Gasto registrado.
+
+ Gastos del mes: $4.350.000 / $6.500.000 fijos
+├ Confirmados: 4 de 7 gastos fijos
+├ Pendientes: Internet, Contador, Seguros
+└ Punto de equilibrio: $8.200.000 (facturas del mes: $12.500.000 Si)
 ```
-
-**Variables del mensaje:**
-
-| Variable | Fuente |
-|----------|--------|
-| Monto registrado | Input del usuario |
-| Categoría confirmada | Match Fase 2 |
-| `Gastos empresa este mes` | Query acumulado §Fase 2 Query 3 |
-| Detalle últimos gastos | `SELECT concepto, monto FROM gastos WHERE proyecto_id IS NULL ORDER BY fecha DESC LIMIT 3` |
-
-**Regla de longitud:** Si el detalle de gastos supera 3 ítems o 400 caracteres → truncar a "y X más".
-
-**Manejo de soporte:**
-- Usuario responde 📷 / "foto" / "ahora" → bot espera imagen por 5 min → `UPDATE gastos SET soporte_url = :url WHERE id = :gasto_id`
-- Usuario responde "después" → registrar sin soporte, marcar `soporte_pendiente = true`
-- Usuario responde "no" → registrar sin soporte
-
----
-
-### Edge Cases W02
-
-| Caso | Manejo |
-|------|--------|
-| Monto = 0 o negativo | "El monto debe ser mayor a $0. ¿Cuánto fue el gasto?" |
-| Categoría no identificada (confidence < 0.5) | "¿Qué tipo de gasto es? 1️⃣ Arriendo 2️⃣ Marketing 3️⃣ Impuestos/Seguros 4️⃣ Capacitación" |
-| Gemini clasifica como GASTO_OPERATIVO pero usuario menciona cliente | Activar desambiguación D104 aunque confidence sea alta |
-| Sin acumulado del mes (primer gasto) | Omitir línea de acumulado. Solo mostrar categoría + soporte prompt |
-| Gasto muy alto (>$10M) | Agregar: "⚠️ Monto alto. ¿Confirmas $10.500.000?" |
 
 ---
 
@@ -686,13 +582,13 @@ VALUES (:tenant_id, :amount, :cat_id, :concept, CURRENT_DATE, 'empresa', 'whatsa
 
 ```json
 {
-  "intent": "HORAS",
-  "confidence": 0.93,
-  "fields": {
-    "hours": 4,
-    "entity_hint": "María",
-    "date_hint": "hoy"
-  }
+ "intent": "HORAS",
+ "confidence": 0.93,
+ "fields": {
+ "hours": 4,
+ "entity_hint": "María",
+ "date_hint": "hoy"
+ }
 }
 ```
 
@@ -700,16 +596,16 @@ VALUES (:tenant_id, :amount, :cat_id, :concept, CURRENT_DATE, 'empresa', 'whatsa
 
 ```sql
 SELECT p.id, p.nombre, c.nombre as cliente, 
-       p.horas_estimadas, p.horas_registradas,
-       p.horas_estimadas - p.horas_registradas as horas_disponibles,
-       CASE WHEN p.horas_registradas + :hours > p.horas_estimadas * 1.1 
-            THEN true ELSE false END as excede_estimado
+ p.horas_estimadas, p.horas_registradas,
+ p.horas_estimadas - p.horas_registradas as horas_disponibles,
+ CASE WHEN p.horas_registradas + :hours > p.horas_estimadas * 1.1 
+ THEN true ELSE false END as excede_estimado
 FROM proyectos p
 JOIN contactos c ON p.contacto_id = c.id
 WHERE p.tenant_id = :tenant_id
-  AND p.estado = 'activo'
-  AND (similarity(c.nombre, :entity_hint) > 0.3 
-       OR similarity(p.nombre, :entity_hint) > 0.3)
+ AND p.estado = 'activo'
+ AND (similarity(c.nombre, :entity_hint) > 0.3 
+ OR similarity(p.nombre, :entity_hint) > 0.3)
 ORDER BY similarity(c.nombre, :entity_hint) DESC
 LIMIT 5;
 ```
@@ -719,11 +615,11 @@ LIMIT 5;
 **Caso A — 1 proyecto, dentro del estimado:**
 
 ```
-⏱️ Registro de horas:
+⏱ Registro de horas:
 
-📂 Proyecto: *Casa María Rodríguez*
-🕐 Horas: 4h (hoy)
-📊 Acumulado: 38h / 60h estimadas (63.3%)
+ Proyecto: *Casa María Rodríguez*
+ Horas: 4h (hoy)
+ Acumulado: 38h / 60h estimadas (63.3%)
 
 ¿Confirmo? (Sí/No)
 ```
@@ -731,13 +627,13 @@ LIMIT 5;
 **Caso B — 1 proyecto, excede estimado (D88):**
 
 ```
-⚠️ Registro de horas:
+[ATENCION] Registro de horas:
 
-📂 Proyecto: *Casa María Rodríguez*
-🕐 Horas: 4h (hoy)
-📊 Acumulado: 64h / 60h estimadas (106.7%)
+ Proyecto: *Casa María Rodríguez*
+ Horas: 4h (hoy)
+ Acumulado: 64h / 60h estimadas (106.7%)
 
-⚠️ Superaste el estimado de horas en 4h. Esto reduce tu margen.
+[ATENCION] Superaste el estimado de horas en 4h. Esto reduce tu margen.
 
 ¿Confirmo de todas formas? (Sí/No)
 ```
@@ -747,7 +643,7 @@ LIMIT 5;
 Si el usuario tiene un solo proyecto activo y no mencionó entidad:
 
 ```
-⏱️ 4 horas para *Casa María Rodríguez* (tu único proyecto activo).
+⏱ 4 horas para *Casa María Rodríguez* (tu único proyecto activo).
 
 Acumulado: 38h / 60h (63.3%)
 
@@ -757,11 +653,11 @@ Acumulado: 38h / 60h (63.3%)
 **Caso D — Colaborador registra horas:**
 
 ```
-⏱️ Registro de horas:
+⏱ Registro de horas:
 
-📂 Proyecto: *Casa María Rodríguez*
-👤 Técnico: Juan Pérez
-🕐 Horas: 4h (hoy)
+ Proyecto: *Casa María Rodríguez*
+ Técnico: Juan Pérez
+ Horas: 4h (hoy)
 
 ¿Confirmo? (Sí/No)
 ```
@@ -776,9 +672,9 @@ VALUES (:tenant_id, :proyecto_id, :persona_id, 4, CURRENT_DATE, 'whatsapp');
 **Respuesta:**
 
 ```
-✅ 4 horas registradas en *María Rodríguez*.
+Si 4 horas registradas en *María Rodríguez*.
 
-📂 *Casa María Rodríguez*
+ *Casa María Rodríguez*
 ├ Horas: 42 / 60h (70.0%)
 ├ Costo acumulado horas: $2.520.000
 └ Margen proyectado: 31.5%
@@ -792,7 +688,7 @@ VALUES (:tenant_id, :proyecto_id, :persona_id, 4, CURRENT_DATE, 'whatsapp');
 | Horas = 0 | "El registro debe ser mayor a 0 horas." |
 | Horas con decimales | Aceptar: "3.5 horas" = 3h 30min |
 | "Trabajé todo el día" | "¿Cuántas horas fueron? (ej: 8)" |
-| Colaborador sin costo hora | Registrar horas pero nota: "⚠️ No tienes tarifa hora configurada. Pídele a tu jefe que la configure." |
+| Colaborador sin costo hora | Registrar horas pero nota: "[ATENCION] No tienes tarifa hora configurada. Pídele a tu jefe que la configure." |
 
 ---
 
@@ -808,12 +704,12 @@ VALUES (:tenant_id, :proyecto_id, :persona_id, 4, CURRENT_DATE, 'whatsapp');
 
 ```json
 {
-  "intent": "COBRO",
-  "confidence": 0.90,
-  "fields": {
-    "amount": 3000000,
-    "entity_hint": "edificio"
-  }
+ "intent": "COBRO",
+ "confidence": 0.90,
+ "fields": {
+ "amount": 3000000,
+ "entity_hint": "edificio"
+ }
 }
 ```
 
@@ -825,19 +721,19 @@ SELECT p.id, p.nombre, c.nombre as cliente
 FROM proyectos p
 JOIN contactos c ON p.contacto_id = c.id
 WHERE p.tenant_id = :tenant_id
-  AND p.estado IN ('activo', 'pausado')
-  AND (similarity(c.nombre, :entity_hint) > 0.3 
-       OR similarity(p.nombre, :entity_hint) > 0.3)
+ AND p.estado IN ('activo', 'pausado')
+ AND (similarity(c.nombre, :entity_hint) > 0.3 
+ OR similarity(p.nombre, :entity_hint) > 0.3)
 LIMIT 5;
 
 -- 2. Buscar facturas con saldo del proyecto
 SELECT f.id, f.numero, f.monto_total, f.monto_cobrado, 
-       f.monto_total - f.monto_cobrado as saldo_pendiente,
-       f.fecha_emision, 
-       CURRENT_DATE - f.fecha_emision as dias_emision
+ f.monto_total - f.monto_cobrado as saldo_pendiente,
+ f.fecha_emision, 
+ CURRENT_DATE - f.fecha_emision as dias_emision
 FROM facturas f
 WHERE f.proyecto_id = :proyecto_id
-  AND f.monto_total - f.monto_cobrado > 0
+ AND f.monto_total - f.monto_cobrado > 0
 ORDER BY f.fecha_emision ASC;
 ```
 
@@ -846,11 +742,11 @@ ORDER BY f.fecha_emision ASC;
 **Caso A — 1 factura con saldo que matchea el cobro:**
 
 ```
-💰 Cobro recibido:
+ Cobro recibido:
 
-📂 Proyecto: *Edificio Torres*
-📄 Factura: #0023 — Saldo pendiente: $3.000.000
-💵 Cobro: $3.000.000 ✅ Pago completo
+ Proyecto: *Edificio Torres*
+ Factura: #0023 — Saldo pendiente: $3.000.000
+ Cobro: $3.000.000 Si Pago completo
 
 ¿Confirmo? (Sí/No)
 ```
@@ -858,11 +754,11 @@ ORDER BY f.fecha_emision ASC;
 **Caso B — Múltiples facturas con saldo:**
 
 ```
-💰 Cobro de $3.000.000 para *Edificio Torres*. ¿A cuál factura?
+ Cobro de $3.000.000 para *Edificio Torres*. ¿A cuál factura?
 
-1️⃣ Factura #0023 — Saldo: $3.000.000 (emitida hace 15 días)
-2️⃣ Factura #0025 — Saldo: $5.200.000 (emitida hace 3 días)
-3️⃣ Abono general (sin asociar a factura específica)
+1⃣ Factura #0023 — Saldo: $3.000.000 (emitida hace 15 días)
+2⃣ Factura #0025 — Saldo: $5.200.000 (emitida hace 3 días)
+3⃣ Abono general (sin asociar a factura específica)
 
 Responde con el número.
 ```
@@ -870,13 +766,13 @@ Responde con el número.
 **Caso C — Cobro mayor al saldo de una factura:**
 
 ```
-💰 Cobro de $3.000.000 para *Edificio Torres*.
+ Cobro de $3.000.000 para *Edificio Torres*.
 
-📄 Factura #0023 tiene saldo de $2.000.000.
+ Factura #0023 tiene saldo de $2.000.000.
 
-1️⃣ Aplicar $2.000.000 a factura #0023 + $1.000.000 a factura #0025
-2️⃣ Aplicar todo a factura #0023 ($1.000.000 queda como anticipo)
-3️⃣ Cancelar y corregir monto
+1⃣ Aplicar $2.000.000 a factura #0023 + $1.000.000 a factura #0025
+2⃣ Aplicar todo a factura #0023 ($1.000.000 queda como anticipo)
+3⃣ Cancelar y corregir monto
 
 ¿Cuál?
 ```
@@ -884,9 +780,9 @@ Responde con el número.
 **Caso D — Sin facturas emitidas:**
 
 ```
-💰 Cobro de $3.000.000 para *Edificio Torres*.
+ Cobro de $3.000.000 para *Edificio Torres*.
 
-⚠️ No hay facturas emitidas para este proyecto. El cobro se registra como anticipo.
+[ATENCION] No hay facturas emitidas para este proyecto. El cobro se registra como anticipo.
 
 ¿Confirmo? (Sí/No)
 ```
@@ -904,9 +800,9 @@ UPDATE facturas SET monto_cobrado = monto_cobrado + 3000000 WHERE id = :factura_
 **Respuesta:**
 
 ```
-✅ Cobro registrado.
+Si Cobro registrado.
 
-📂 *Edificio Torres*
+ *Edificio Torres*
 ├ Facturado: $12.000.000
 ├ Cobrado: $9.500.000 (79.2%)
 ├ Cartera pendiente: $2.500.000
@@ -927,13 +823,13 @@ UPDATE facturas SET monto_cobrado = monto_cobrado + 3000000 WHERE id = :factura_
 
 ```json
 {
-  "intent": "CONTACTO_NUEVO",
-  "confidence": 0.95,
-  "fields": {
-    "name": "Ana Gómez",
-    "phone": "3155551234",
-    "role": "arquitecta"
-  }
+ "intent": "CONTACTO_NUEVO",
+ "confidence": 0.95,
+ "fields": {
+ "name": "Ana Gómez",
+ "phone": "3155551234",
+ "role": "arquitecta"
+ }
 }
 ```
 
@@ -944,8 +840,8 @@ UPDATE facturas SET monto_cobrado = monto_cobrado + 3000000 WHERE id = :factura_
 SELECT id, nombre, telefono, email
 FROM contactos
 WHERE tenant_id = :tenant_id
-  AND (similarity(nombre, :name) > 0.7 
-       OR telefono = :phone)
+ AND (similarity(nombre, :name) > 0.7 
+ OR telefono = :phone)
 LIMIT 3;
 ```
 
@@ -954,38 +850,38 @@ LIMIT 3;
 **Caso A — Sin duplicados:**
 
 ```
-👤 Nuevo contacto:
+ Nuevo contacto:
 
-📛 Nombre: *Ana Gómez*
-📱 Teléfono: 315 555 1234
-💼 Rol: Arquitecta
+ Nombre: *Ana Gómez*
+ Teléfono: 315 555 1234
+ Rol: Arquitecta
 
 ¿Confirmo? (Sí/No)
 
-Tip: Completa email y datos fiscales en la app cuando la contactes 💡
+Tip: Completa email y datos fiscales en la app cuando la contactes 
 ```
 
 **Caso B — Posible duplicado:**
 
 ```
-⚠️ Ya existe un contacto similar:
+[ATENCION] Ya existe un contacto similar:
 
-👤 *Ana Gómez López* — 315 555 1234
+ *Ana Gómez López* — 315 555 1234
 
-1️⃣ Es la misma persona (no crear nuevo)
-2️⃣ Es diferente, crear contacto nuevo
-3️⃣ Cancelar
+1⃣ Es la misma persona (no crear nuevo)
+2⃣ Es diferente, crear contacto nuevo
+3⃣ Cancelar
 ```
 
 **Caso C — Datos incompletos (solo nombre):**
 
 ```
-👤 Nuevo contacto: *Ana Gómez*
+ Nuevo contacto: *Ana Gómez*
 
 No tengo teléfono ni email. ¿Quieres agregarlo así o me das más datos?
 
-1️⃣ Crear solo con nombre
-2️⃣ Cancelar y completar en la app
+1⃣ Crear solo con nombre
+2⃣ Cancelar y completar en la app
 ```
 
 ### Fase 4: CONFIRM + SAVE
@@ -998,7 +894,7 @@ VALUES (:tenant_id, 'Ana Gómez', '3155551234', 'arquitecta', 'whatsapp');
 **Respuesta:**
 
 ```
-✅ Contacto creado: *Ana Gómez* (Arquitecta)
+Si Contacto creado: *Ana Gómez* (Arquitecta)
 
 Para crear una oportunidad con Ana, escríbeme:
 "Nueva oportunidad con Ana Gómez, [descripción], [valor estimado]"
@@ -1022,11 +918,11 @@ O completa sus datos fiscales en la app para poder facturarle.
 
 ```json
 {
-  "intent": "SALDO_BANCARIO",
-  "confidence": 0.93,
-  "fields": {
-    "amount": 12000000
-  }
+ "intent": "SALDO_BANCARIO",
+ "confidence": 0.93,
+ "fields": {
+ "amount": 12000000
+ }
 }
 ```
 
@@ -1037,9 +933,9 @@ O completa sus datos fiscales en la app para poder facturarle.
 ```sql
 -- 1. Obtener último saldo registrado + saldo teórico
 SELECT 
-  sb.saldo_real as ultimo_saldo_real,
-  sb.fecha as fecha_ultimo_saldo,
-  CURRENT_DATE - sb.fecha::date as dias_sin_actualizar
+ sb.saldo_real as ultimo_saldo_real,
+ sb.fecha as fecha_ultimo_saldo,
+ CURRENT_DATE - sb.fecha::date as dias_sin_actualizar
 FROM saldos_banco sb
 WHERE sb.tenant_id = :tenant_id
 ORDER BY sb.fecha DESC
@@ -1048,16 +944,16 @@ LIMIT 1;
 -- 2. Calcular saldo teórico desde último saldo real
 -- saldo_teorico = ultimo_saldo_real + cobros_desde - gastos_desde
 SELECT 
-  COALESCE(SUM(c.monto), 0) as cobros_desde
+ COALESCE(SUM(c.monto), 0) as cobros_desde
 FROM cobros c
 WHERE c.tenant_id = :tenant_id
-  AND c.fecha > (SELECT MAX(fecha) FROM saldos_banco WHERE tenant_id = :tenant_id);
+ AND c.fecha > (SELECT MAX(fecha) FROM saldos_banco WHERE tenant_id = :tenant_id);
 
 SELECT 
-  COALESCE(SUM(g.monto), 0) as gastos_desde
+ COALESCE(SUM(g.monto), 0) as gastos_desde
 FROM gastos g
 WHERE g.tenant_id = :tenant_id
-  AND g.fecha > (SELECT MAX(fecha) FROM saldos_banco WHERE tenant_id = :tenant_id);
+ AND g.fecha > (SELECT MAX(fecha) FROM saldos_banco WHERE tenant_id = :tenant_id);
 
 -- saldo_teorico = ultimo_saldo_real + cobros_desde - gastos_desde
 -- diferencia = :nuevo_saldo_real - saldo_teorico
@@ -1073,10 +969,10 @@ WHERE tenant_id = :tenant_id AND tipo = 'conciliacion';
 **Caso A — Diferencia dentro de tolerancia (D111: ±$50K o ±2%):**
 
 ```
-🏦 ¿Actualizo tu saldo del banco a $12.000.000?
+ ¿Actualizo tu saldo del banco a $12.000.000?
 
 Saldo teórico calculado: $11.800.000
-Diferencia: +$200.000 (1.7%) ✅ Dentro de tolerancia
+Diferencia: +$200.000 (1.7%) Si Dentro de tolerancia
 
 ¿Confirmo? (Sí/No)
 ```
@@ -1084,12 +980,12 @@ Diferencia: +$200.000 (1.7%) ✅ Dentro de tolerancia
 **Caso B — Diferencia menor (D111: $50K-500K o 2-10%):**
 
 ```
-🏦 ¿Actualizo tu saldo del banco a $12.000.000?
+ ¿Actualizo tu saldo del banco a $12.000.000?
 
 Saldo teórico calculado: $11.200.000
-Diferencia: +$800.000 (7.1%) ⚠️
+Diferencia: +$800.000 (7.1%) [ATENCION]
 
-Puede haber un ingreso o gasto sin registrar. Revisa en la app → Números.
+Puede haber un ingreso o gasto sin registrar. Revisa en la app -> Números.
 
 ¿Confirmo de todas formas? (Sí/No)
 ```
@@ -1097,21 +993,21 @@ Puede haber un ingreso o gasto sin registrar. Revisa en la app → Números.
 **Caso C — Diferencia importante (D111: >$500K o >10%):**
 
 ```
-🏦 ¿Actualizo tu saldo del banco a $12.000.000?
+ ¿Actualizo tu saldo del banco a $12.000.000?
 
 Saldo teórico calculado: $9.500.000
-Diferencia: +$2.500.000 (26.3%) ⚠️ Importante
+Diferencia: +$2.500.000 (26.3%) [ATENCION] Importante
 
-Hay movimientos sin registrar. Te recomiendo revisar en la app → Números antes de continuar.
+Hay movimientos sin registrar. Te recomiendo revisar en la app -> Números antes de continuar.
 
-1️⃣ Confirmar de todas formas
-2️⃣ Cancelar y revisar primero
+1⃣ Confirmar de todas formas
+2⃣ Cancelar y revisar primero
 ```
 
 **Caso D — Primer saldo (sin historial):**
 
 ```
-🏦 ¿Registro tu saldo inicial del banco en $12.000.000?
+ ¿Registro tu saldo inicial del banco en $12.000.000?
 
 Es tu primer registro de saldo. A partir de ahora, el sistema calculará la diferencia entre lo que registras y lo que debería haber según tus cobros y gastos.
 
@@ -1123,9 +1019,9 @@ Es tu primer registro de saldo. A partir de ahora, el sistema calculará la dife
 Después de confirmar, si alcanza milestone:
 
 ```
-✅ Saldo actualizado.
+Si Saldo actualizado.
 
-🏆 ¡Llevas 12 semanas seguidas actualizando! 🥈
+ ¡Llevas 12 semanas seguidas actualizando! 
 
 Diferencia: +$200.000 (dentro de tolerancia)
 ```
@@ -1135,29 +1031,29 @@ Diferencia: +$200.000 (dentro de tolerancia)
 ```sql
 -- Calcular saldo teórico antes de insertar
 WITH calculo AS (
-  SELECT 
-    COALESCE(sb.saldo_real, 0) + 
-    COALESCE((SELECT SUM(monto) FROM cobros WHERE tenant_id = :tenant_id AND fecha > sb.fecha), 0) -
-    COALESCE((SELECT SUM(monto) FROM gastos WHERE tenant_id = :tenant_id AND fecha > sb.fecha), 0)
-    as saldo_teorico
-  FROM saldos_banco sb
-  WHERE sb.tenant_id = :tenant_id
-  ORDER BY sb.fecha DESC
-  LIMIT 1
+ SELECT 
+ COALESCE(sb.saldo_real, 0) + 
+ COALESCE((SELECT SUM(monto) FROM cobros WHERE tenant_id = :tenant_id AND fecha > sb.fecha), 0) -
+ COALESCE((SELECT SUM(monto) FROM gastos WHERE tenant_id = :tenant_id AND fecha > sb.fecha), 0)
+ as saldo_teorico
+ FROM saldos_banco sb
+ WHERE sb.tenant_id = :tenant_id
+ ORDER BY sb.fecha DESC
+ LIMIT 1
 )
 INSERT INTO saldos_banco (tenant_id, saldo_real, saldo_teorico, diferencia, fecha, registrado_via)
 VALUES (
-  :tenant_id, 
-  :amount, 
-  (SELECT saldo_teorico FROM calculo),
-  :amount - (SELECT saldo_teorico FROM calculo),
-  NOW(), 
-  'whatsapp'
+ :tenant_id, 
+ :amount, 
+ (SELECT saldo_teorico FROM calculo),
+ :amount - (SELECT saldo_teorico FROM calculo),
+ NOW(), 
+ 'whatsapp'
 );
 
 -- Actualizar streak
 UPDATE streaks 
-SET semanas_actuales = semanas_actuales  -- el cron semanal evalúa esto
+SET semanas_actuales = semanas_actuales -- el cron semanal evalúa esto
 WHERE tenant_id = :tenant_id AND tipo = 'conciliacion';
 -- Nota: El streak se evalúa con cron dominical, no en el INSERT.
 -- El INSERT solo registra el saldo. El cron verifica si hubo registro en la semana.
@@ -1166,12 +1062,12 @@ WHERE tenant_id = :tenant_id AND tipo = 'conciliacion';
 **Respuesta post-registro (sin milestone):**
 
 ```
-✅ Saldo actualizado a $12.000.000.
+Si Saldo actualizado a $12.000.000.
 
 Saldo teórico era: $11.800.000
-Diferencia: +$200.000 ✅
+Diferencia: +$200.000 Si
 
-🏃 Racha: 8 semanas
+ Racha: 8 semanas
 ```
 
 ### Edge Cases
@@ -1190,25 +1086,25 @@ Diferencia: +$200.000 ✅
 ```sql
 -- Tabla: saldos_banco
 CREATE TABLE saldos_banco (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL REFERENCES tenants(id),
-  saldo_real BIGINT NOT NULL,
-  saldo_teorico BIGINT,
-  diferencia BIGINT,
-  fecha TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  registrado_via TEXT NOT NULL CHECK (registrado_via IN ('app', 'whatsapp')),
-  created_at TIMESTAMPTZ DEFAULT NOW()
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ tenant_id UUID NOT NULL REFERENCES tenants(id),
+ saldo_real BIGINT NOT NULL,
+ saldo_teorico BIGINT,
+ diferencia BIGINT,
+ fecha TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ registrado_via TEXT NOT NULL CHECK (registrado_via IN ('app', 'whatsapp')),
+ created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Tabla: streaks
 CREATE TABLE streaks (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL REFERENCES tenants(id),
-  tipo TEXT NOT NULL DEFAULT 'conciliacion',
-  semanas_actuales INT NOT NULL DEFAULT 0,
-  semanas_record INT NOT NULL DEFAULT 0,
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(tenant_id, tipo)
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ tenant_id UUID NOT NULL REFERENCES tenants(id),
+ tipo TEXT NOT NULL DEFAULT 'conciliacion',
+ semanas_actuales INT NOT NULL DEFAULT 0,
+ semanas_record INT NOT NULL DEFAULT 0,
+ updated_at TIMESTAMPTZ DEFAULT NOW(),
+ UNIQUE(tenant_id, tipo)
 );
 ```
 
@@ -1228,10 +1124,10 @@ CREATE TABLE streaks (
 **Respuesta:**
 
 ```
-✅ Nota agregada a *Torres — Remodelación oficinas*.
+Si Nota agregada a *Torres — Remodelación oficinas*.
 
-📋 Estado: Propuesta enviada (hace 8 días)
-💰 Valor: $20.000.000
+ Estado: Propuesta enviada (hace 8 días)
+ Valor: $20.000.000
 
 Última nota: "se puso difícil, el gerente viajó"
 ```
@@ -1249,22 +1145,22 @@ Mismo flujo que W09 pero busca en `proyectos` activos en vez de `oportunidades`.
 **Respuesta tipo:**
 
 ```
-📂 *Casa María Rodríguez*
+ *Casa María Rodríguez*
 
 ├ Estado: Activo (45% avance)
-├ ⏱️ Horas: 42 / 60h (70.0%)
-├ 💰 Presupuesto: $4.680.000 / $8.000.000 (58.5%)
-├ 📄 Facturado: $5.000.000 — Cobrado: $3.000.000
-├ 💵 Cartera: $2.000.000
-└ 📈 Margen proyectado: 31.5%
+├ ⏱ Horas: 42 / 60h (70.0%)
+├ Presupuesto: $4.680.000 / $8.000.000 (58.5%)
+├ Facturado: $5.000.000 — Cobrado: $3.000.000
+├ Cartera: $2.000.000
+└ Margen proyectado: 31.5%
 
-⚠️ Horas avanzadas (70%) vs avance reportado (45%). Revisa si necesitas ajustar el estimado.
+[ATENCION] Horas avanzadas (70%) vs avance reportado (45%). Revisa si necesitas ajustar el estimado.
 ```
 
 ### W15 — Estado Pipeline
 
 ```
-📊 Tu pipeline:
+ Tu pipeline:
 
 ├ Lead nuevo: 2 ($8.5M)
 ├ Contacto inicial: 1 ($3M)
@@ -1272,10 +1168,10 @@ Mismo flujo que W09 pero busca en `proyectos` activos en vez de `oportunidades`.
 ├ Propuesta enviada: 2 ($25M)
 ├ Negociación: 1 ($12M)
 
-💰 Valor total: $48.5M
-💰 Ponderado: $18.9M
+ Valor total: $48.5M
+ Ponderado: $18.9M
 
-⚠️ Sin oportunidades en Discovery. ¿Estás haciendo follow-up?
+[ATENCION] Sin oportunidades en Discovery. ¿Estás haciendo follow-up?
 ```
 
 ### W16 — Mis Números (ACTUALIZADO v2.0)
@@ -1283,56 +1179,56 @@ Mismo flujo que W09 pero busca en `proyectos` activos en vez de `oportunidades`.
 Incluye estado de conciliación bancaria y streak (D109, D115, D117).
 
 ```
-📊 Tus números — Febrero 2026:
+ Tus números — Febrero 2026:
 
-├ 🏦 Banco: $12.000.000 (actualizado hace 2 días) ✅
-├ 💵 Ingresos cobrados: $9.500.000
-├ 💸 Gastos: $4.350.000
-├ 📈 Utilidad bruta: $5.150.000
-├ 🏛️ Provisión impuestos: ~$1.030.000
-├ 💰 Disponible para ti: ~$4.120.000
-└ 🏦 Runway: 4.2 meses
+├ Banco: $12.000.000 (actualizado hace 2 días) Si
+├ Ingresos cobrados: $9.500.000
+├ Gastos: $4.350.000
+├ Utilidad bruta: $5.150.000
+├ Provisión impuestos: ~$1.030.000
+├ Disponible para ti: ~$4.120.000
+└ Runway: 4.2 meses
 
-🏃 Racha conciliación: 8 semanas 🥈
+ Racha conciliación: 8 semanas 
 
-Comparado con enero: Ingresos +12%, Gastos -5% ✅
+Comparado con enero: Ingresos +12%, Gastos -5% Si
 ```
 
 **Variantes de la línea de banco según estado:**
 
 | Estado | Línea |
 |--------|-------|
-| Cuadra (tolerancia ✅) | 🏦 Banco: $12.000.000 (hace 2 días) ✅ |
-| Diferencia menor | 🏦 Banco: $12.000.000 (hace 2 días) ⚠️ Diferencia: $350K |
-| Diferencia importante | 🏦 Banco: $12.000.000 (hace 2 días) ⚠️ Diferencia: $2.5M — Revisa en app |
-| Sin actualizar > 7 días | 🏦 Banco: sin actualizar hace 9 días ⚠️ Escríbeme tu saldo |
-| Sin saldo registrado | 🏦 Banco: sin configurar. Escríbeme "Mi saldo es [monto]" |
+| Cuadra (tolerancia Si) | Banco: $12.000.000 (hace 2 días) Si |
+| Diferencia menor | Banco: $12.000.000 (hace 2 días) [ATENCION] Diferencia: $350K |
+| Diferencia importante | Banco: $12.000.000 (hace 2 días) [ATENCION] Diferencia: $2.5M — Revisa en app |
+| Sin actualizar > 7 días | Banco: sin actualizar hace 9 días [ATENCION] Escríbeme tu saldo |
+| Sin saldo registrado | Banco: sin configurar. Escríbeme "Mi saldo es [monto]" |
 
 ### W17 — Cartera Pendiente
 
 ```
-💵 Cartera pendiente:
+ Cartera pendiente:
 
-1️⃣ *Edificio Torres* — $2.500.000 (Fact #0025, 3 días)
-2️⃣ *Casa María* — $2.000.000 (Fact #0018, 22 días)
-3️⃣ *Remodelación Pérez* — $1.800.000 (Fact #0019, 35 días) ⚠️
+1⃣ *Edificio Torres* — $2.500.000 (Fact #0025, 3 días)
+2⃣ *Casa María* — $2.000.000 (Fact #0018, 22 días)
+3⃣ *Remodelación Pérez* — $1.800.000 (Fact #0019, 35 días) [ATENCION]
 
-💰 Total cartera: $6.300.000
-⚠️ 1 factura con más de 30 días.
+ Total cartera: $6.300.000
+[ATENCION] 1 factura con más de 30 días.
 ```
 
 ### W19 — Info de Contacto
 
 ```
-👤 *Juan Pérez Torres*
+ *Juan Pérez Torres*
 
-📱 315 222 3344
-📧 jperez@torres.com
-🏢 Torres & Asociados
-💼 Gerente de proyectos
+ 315 222 3344
+ jperez@torres.com
+ Torres & Asociados
+ Gerente de proyectos
 
-📂 Proyectos: Remodelación Pérez (activo)
-📋 Pipeline: Ampliación oficinas ($8M, en negociación)
+ Proyectos: Remodelación Pérez (activo)
+ Pipeline: Ampliación oficinas ($8M, en negociación)
 ```
 
 ---
@@ -1346,11 +1242,11 @@ Ver decisión D94 arriba. Flujo con redirect a app si faltan datos fiscales.
 **Respuesta exitosa (datos fiscales completos):**
 
 ```
-🎉 ¡Oportunidad ganada!
+ ¡Oportunidad ganada!
 
-📋 *Torres — Remodelación oficinas*
-💰 Valor: $20.000.000
-📂 Proyecto creado automáticamente
+ *Torres — Remodelación oficinas*
+ Valor: $20.000.000
+ Proyecto creado automáticamente
 
 Siguiente paso: Registra la primera factura en la app o escríbeme "Facturé [monto] a Torres".
 ```
@@ -1366,11 +1262,11 @@ Siguiente paso: Registra la primera factura en la app o escríbeme "Facturé [mo
 **Respuesta:**
 
 ```
-📋 Oportunidad marcada como perdida.
+ Oportunidad marcada como perdida.
 
 *Torres — Remodelación oficinas*
-💰 Valor: $20.000.000
-📝 Razón: "Eligieron a otro proveedor más barato"
+ Valor: $20.000.000
+ Razón: "Eligieron a otro proveedor más barato"
 
 Pipeline actualizado: 5 oportunidades activas ($28.5M)
 ```
@@ -1378,24 +1274,24 @@ Pipeline actualizado: 5 oportunidades activas ($28.5M)
 ### W24 — Ayuda (ACTUALIZADO v2.0)
 
 ```
-👋 ¡Hola! Soy tu asistente MéTRIK ONE. Puedo ayudarte con:
+ ¡Hola! Soy tu asistente MéTRIK ONE. Puedo ayudarte con:
 
-💰 *Registrar:*
+ *Registrar:*
 • "Gasté [monto] en [concepto] para [proyecto]"
 • "Trabajé [X] horas en [proyecto]"
 • "Me pagaron [monto] de [proyecto]"
 • "Mi saldo es [monto]"
 
-📋 *Consultar:*
+ *Consultar:*
 • "¿Cómo va [proyecto]?"
 • "¿Cómo estoy este mes?"
 • "¿Quién me debe?"
 
-🎯 *Actualizar:*
+ *Actualizar:*
 • "[Prospecto] aceptó" / "no se dio"
 • "Nota para [proyecto]: [texto]"
 
-Escríbeme con naturalidad, no necesitas comandos exactos 😊
+Escríbeme con naturalidad, no necesitas comandos exactos 
 ```
 
 ---
@@ -1408,11 +1304,11 @@ Escríbeme con naturalidad, no necesitas comandos exactos 😊
 **Frecuencia:** Primera vez cuando ocurre. Recordatorio cada 7 días.
 
 ```
-⚠️ Factura vencida:
+[ATENCION] Factura vencida:
 
-📄 Factura #0019 — *Remodelación Pérez*
-💰 Saldo: $1.800.000
-📅 Emitida: 15 ene 2026 (hace 36 días)
+ Factura #0019 — *Remodelación Pérez*
+ Saldo: $1.800.000
+ Emitida: 15 ene 2026 (hace 36 días)
 
 ¿Quieres que te recuerde el teléfono de Pérez para cobrarle?
 ```
@@ -1424,45 +1320,45 @@ Escríbeme con naturalidad, no necesitas comandos exactos 😊
 Incluye estado de conciliación bancaria y streak (D109, D117).
 
 ```
-📊 Resumen semanal — 17-23 Feb 2026
+ Resumen semanal — 17-23 Feb 2026
 
-💰 Cobros recibidos: $3.000.000
-💸 Gastos registrados: $1.250.000
-⏱️ Horas trabajadas: 28h
+ Cobros recibidos: $3.000.000
+ Gastos registrados: $1.250.000
+⏱ Horas trabajadas: 28h
 
-🏦 Banco: $12.000.000 — cuadra ✅ (actualizado hace 3 días)
+ Banco: $12.000.000 — cuadra Si (actualizado hace 3 días)
 
-📂 Proyectos activos: 3
-├ *María Rodríguez* — 70% avance ✅
+ Proyectos activos: 3
+├ *María Rodríguez* — 70% avance Si
 ├ *Edificio Torres* — 45% avance
-└ *Pérez* — 85% avance ✅
+└ *Pérez* — 85% avance Si
 
-📋 Pipeline: 6 oportunidades ($48.5M)
-⚠️ *Torres Remodelación* sin actividad hace 12 días
+ Pipeline: 6 oportunidades ($48.5M)
+[ATENCION] *Torres Remodelación* sin actividad hace 12 días
 
-💵 Cartera: $6.300.000 (1 vencida ⚠️)
-🏦 Runway: 4.2 meses
+ Cartera: $6.300.000 (1 vencida [ATENCION])
+ Runway: 4.2 meses
 
-🏃 Racha conciliación: 8 semanas 🥈
+ Racha conciliación: 8 semanas 
 
-¡Buena semana! 💪
+¡Buena semana! 
 ```
 
 **Variantes de la línea de banco en W29:**
 
 | Estado | Línea |
 |--------|-------|
-| Cuadra | 🏦 Banco: $12.000.000 — cuadra ✅ (hace 3 días) |
-| Diferencia menor | 🏦 Banco: $12.000.000 — diferencia de $350K ⚠️ |
-| Diferencia importante | 🏦 Banco: $12.000.000 — diferencia de $2.5M ⚠️ Revisa en app |
-| Sin actualizar > 7 días | 🏦 Banco: ⚠️ 9 días sin actualizar. Escríbeme tu saldo |
+| Cuadra | Banco: $12.000.000 — cuadra Si (hace 3 días) |
+| Diferencia menor | Banco: $12.000.000 — diferencia de $350K [ATENCION] |
+| Diferencia importante | Banco: $12.000.000 — diferencia de $2.5M [ATENCION] Revisa en app |
+| Sin actualizar > 7 días | Banco: [ATENCION] 9 días sin actualizar. Escríbeme tu saldo |
 
 ### W33 — Push Recordatorio Saldo Bancario (NUEVO v2.0)
 
 **Decisión fuente:** D114 (3 canales para actualizar saldo).
 
 **Trigger:** Martes y viernes, SOLO si el saldo no se ha actualizado en más de 7 días.
-**Tipo:** Proactivo (sistema → usuario, template pre-aprobado por Meta).
+**Tipo:** Proactivo (sistema -> usuario, template pre-aprobado por Meta).
 
 **Template:**
 
@@ -1487,18 +1383,18 @@ El bot necesita conocer la mecánica para respuestas contextuales.
 |-------|-------|
 | Unidad | Semanal (se evalúa cada domingo 23:59 con cron) |
 | Se mantiene si | Hubo al menos 1 actualización de saldo en la semana |
-| Se rompe si | 7+ días sin actualizar → streak = 0 |
-| Milestones | 4 semanas 🥉, 12 semanas 🥈, 26 semanas 🥇, 52 semanas 🏆 |
+| Se rompe si | 7+ días sin actualizar -> streak = 0 |
+| Milestones | 4 semanas , 12 semanas , 26 semanas , 52 semanas |
 | Irrecuperable | Si se rompe, arranca de 0 |
 
 **Tabla:** `streaks` (tenant_id, tipo='conciliacion', semanas_actuales, semanas_record)
 
 **Uso en bot:**
-- W32: Cuando el usuario actualiza saldo y está en semana de milestone → "✅ Saldo actualizado. ¡Llevas 12 semanas seguidas! 🥈"
+- W32: Cuando el usuario actualiza saldo y está en semana de milestone -> "Si Saldo actualizado. ¡Llevas 12 semanas seguidas! "
 - W16: Mostrar streak actual con medalla
 - W29: Incluir streak en resumen semanal
 
-### Contexto: FAB → WhatsApp (D118)
+### Contexto: FAB -> WhatsApp (D118)
 
 D118 define 4 acciones en el FAB: nueva oportunidad, registrar gasto, registrar cobro, actualizar saldo.
 
@@ -1508,7 +1404,7 @@ D118 define 4 acciones en el FAB: nueva oportunidad, registrar gasto, registrar 
 |-------|---------------|
 | App (FAB) | 'app' |
 | WhatsApp (W32) | 'whatsapp' |
-| Push (W33 → respuesta) | 'whatsapp' |
+| Push (W33 -> respuesta) | 'whatsapp' |
 
 ---
 
@@ -1517,7 +1413,7 @@ D118 define 4 acciones en el FAB: nueva oportunidad, registrar gasto, registrar 
 ### Pre-requisito (Mauricio, ~35 min)
 
 - [ ] Crear Meta Business App
-- [ ] Configurar webhook URL → Edge Function `wa-webhook`
+- [ ] Configurar webhook URL -> Edge Function `wa-webhook`
 - [ ] Obtener token permanente Meta API
 - [ ] Agregar números de test al sandbox
 - [ ] Autenticar Supabase CLI en Claude Code
@@ -1537,48 +1433,11 @@ D118 define 4 acciones en el FAB: nueva oportunidad, registrar gasto, registrar 
 | Entregable | Descripción |
 |-----------|-------------|
 | W01 | Gasto directo con match proyecto + reconciliación |
-| W02 | 🆕v2.1 Gasto empresa con desambiguación (D104) + respuesta enriquecida (D103) |
+| W02 | Gasto operativo con match gastos fijos |
 | W03 | Registro de horas con feedback acumulado |
 | W32 | Actualizar saldo bancario (nuevo v2.0) |
 | pg_trgm | Configurar extensión para match difuso |
 | Tablas | `saldos_banco` + `streaks` (DDL en §9A) |
-
-**Checklist v2.1 para W02:**
-
-```
-□ 🆕v2.1 Fase 0 — PRE-CHECK desambiguación (D104)
-  □ Lógica: category_hint IN [1-5] OR confidence < 0.75
-  □ Mensaje desambiguación con 2 opciones (1️⃣ proyecto / 2️⃣ empresa)
-  □ Routing: opción 1 → W01, opción 2 → continuar W02
-  □ Edge case: sin proyectos activos → saltar desambiguación
-
-□ 🆕v2.1 Fase 2 — Query acumulado gastos empresa del mes (D103)
-  □ SELECT SUM(monto) WHERE proyecto_id IS NULL AND mes actual
-
-□ 🆕v2.1 Fase 4 — INSERT con tipo = 'empresa' (no 'operativo')
-
-□ 🆕v2.1 Respuesta post-registro enriquecida (D103)
-  □ Categoría confirmada
-  □ Acumulado mes con detalle últimos 3 gastos
-  □ Prompt soporte 3 opciones: foto / después / no
-  □ Manejo de imagen entrante (5 min timeout)
-  □ Truncar detalle si > 400 chars
-```
-
-**Verificaciones post-ejecución W02 v2.1:**
-
-```
-□ Enviar "Compré materiales, $50K" → debe activar desambiguación (cat 1-5)
-□ Responder 1️⃣ → debe rutear a W01 y mostrar lista de proyectos
-□ Responder 2️⃣ → debe continuar W02 y registrar como empresa
-□ Enviar "Pagué el arriendo, $2M" → NO debe desambiguar (cat 6, alta confianza)
-□ Enviar "Compré algo, $30K" (confidence baja) → debe desambiguar
-□ Post-registro: verificar que acumulado empresa del mes aparece en respuesta
-□ Post-registro: verificar prompt de soporte con 3 opciones
-□ Responder con foto → verificar UPDATE en gastos.soporte_url
-□ Verificar que INSERT tiene tipo = 'empresa'
-□ Sin proyectos activos: "Pagué combustible, 80 mil" → NO debe desambiguar
-```
 
 ### Sprint WA-3: Cobros + Acciones (W04, W22, W23)
 
@@ -1631,21 +1490,14 @@ D118 define 4 acciones en el FAB: nueva oportunidad, registrar gasto, registrar 
 
 | # | Decisión | Impacto en WhatsApp | Quién decidió |
 |---|---------|---------------------|---------------|
-| D109 | Conciliación bancaria simplificada: saldo real vs teórico | Origen de W32 | Carmen + equipo → Mauricio ✅ |
-| D110 | Una sola cuenta bancaria en MVP | W32 no pregunta cuál cuenta | Max + Carmen → Mauricio ✅ |
-| D111 | Tolerancia: ±$50K/2% cuadra, $50K-500K/2-10% menor, >$500K/>10% importante | Respuesta W32 varía según diferencia | Carmen → Mauricio ✅ |
-| D113 | Saldo > 7 días sin actualizar baja score completitud Capa 1 | W33 se dispara a los 7 días | Hana + Sofía → Mauricio ✅ |
-| D114 | 3 canales para actualizar saldo: app (FAB), WhatsApp (W32), push (W33) | Define W32 + W33 | Hana → Mauricio ✅ |
-| D115 | P1 y P5 siempre usan saldo real del banco, no el teórico | W16 muestra saldo real | Carmen → Mauricio ✅ |
-| D117 | Streak tipo Duolingo: semanal, irrecuperable, milestones 4/12/26/52 | W16 y W32 incluyen streak | Santiago → Mauricio ✅ |
-| D118 | FAB con 4 acciones: oportunidad, gasto, cobro, saldo | Saldo es uno de los 4 | Max → Mauricio ✅ |
-
-### 🆕v2.1 Decisiones — Gastos Empresariales (D103-D104)
-
-| # | Decisión | Descripción | Sprint |
-|---|----------|-------------|--------|
-| **🆕v2.1 D103** | **Confirmación W02 enriquecida** | **Post-registro GASTO_OPERATIVO incluye: categoría confirmada + acumulado gastos empresa del mes + detalle últimos 3 gastos + prompt de soporte con instrucción de deducibilidad.** | **WA-2** |
-| **🆕v2.1 D104** | **Desambiguación proyecto vs empresa** | **Cuando Gemini clasifica GASTO_OPERATIVO pero category_hint es 1-5 (ambigua) o confidence < 0.75 → bot pregunta "¿proyecto o empresa?" ANTES de registrar. Si proyecto → rutear a W01. Si empresa → continuar W02. Sin proyectos activos → saltar desambiguación.** | **WA-2** |
+| D109 | Conciliación bancaria simplificada: saldo real vs teórico | Origen de W32 | Carmen + equipo -> Mauricio Si |
+| D110 | Una sola cuenta bancaria en MVP | W32 no pregunta cuál cuenta | Max + Carmen -> Mauricio Si |
+| D111 | Tolerancia: ±$50K/2% cuadra, $50K-500K/2-10% menor, >$500K/>10% importante | Respuesta W32 varía según diferencia | Carmen -> Mauricio Si |
+| D113 | Saldo > 7 días sin actualizar baja score completitud Capa 1 | W33 se dispara a los 7 días | Hana + Sofía -> Mauricio Si |
+| D114 | 3 canales para actualizar saldo: app (FAB), WhatsApp (W32), push (W33) | Define W32 + W33 | Hana -> Mauricio Si |
+| D115 | P1 y P5 siempre usan saldo real del banco, no el teórico | W16 muestra saldo real | Carmen -> Mauricio Si |
+| D117 | Streak tipo Duolingo: semanal, irrecuperable, milestones 4/12/26/52 | W16 y W32 incluyen streak | Santiago -> Mauricio Si |
+| D118 | FAB con 4 acciones: oportunidad, gasto, cobro, saldo | Saldo es uno de los 4 | Max -> Mauricio Si |
 
 ---
 
