@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Grid3X3,
+  Workflow,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -78,8 +79,9 @@ const SHARED_NAV_ITEMS = [
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
 ]
 
-// Admin section — solo owner
+// Admin section — solo owner. Orden visual: Workflows encima de Mi Bolsillo.
 const ADMIN_NAV_ITEMS = [
+  { href: '/admin/workflows', label: 'Workflows', icon: Workflow, roles: ['owner'] },
   { href: '/admin/mibolsillo', label: 'Mi Bolsillo', icon: Activity, roles: ['owner'] },
 ]
 
