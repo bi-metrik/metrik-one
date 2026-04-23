@@ -8,9 +8,8 @@ export default async function AdminWorkflowsPage() {
   if (error || role !== 'owner' || workspaceId !== process.env.ADMIN_WORKSPACE_ID) redirect('/numeros')
 
   const workflows = await listWorkflows()
-  const allTags = Array.from(new Set(workflows.flatMap(w => w.tags ?? []))).sort()
-  const allLineas = Array.from(new Set(workflows.map(w => w.linea_negocio))).sort()
   const clientes = Array.from(new Set(workflows.map(w => w.cliente_slug))).sort()
+  const lineasCliente = Array.from(new Set(workflows.map(w => w.linea_negocio_cliente).filter(Boolean))).sort()
 
   return (
     <div className="mx-auto max-w-6xl p-6">
@@ -27,7 +26,7 @@ export default async function AdminWorkflowsPage() {
             {clientes.length} clientes
           </span>
           <span className="rounded-md border border-gray-200 bg-white px-2.5 py-1">
-            {allLineas.length} lineas de negocio
+            {lineasCliente.length} lineas de negocio
           </span>
         </div>
       </header>
@@ -40,7 +39,7 @@ export default async function AdminWorkflowsPage() {
           </p>
         </div>
       ) : (
-        <WorkflowsFilters workflows={workflows} tags={allTags} />
+        <WorkflowsFilters workflows={workflows} />
       )}
     </div>
   )
