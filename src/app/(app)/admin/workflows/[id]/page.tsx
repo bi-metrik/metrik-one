@@ -22,6 +22,9 @@ export default async function WorkflowDetailPage({
   const identificador = wf.numero_flujo
     ? `${wf.cliente_slug}${wf.numero_flujo}`
     : wf.cliente_slug
+  const displayName = wf.linea_negocio_cliente
+    ? `${identificador} - ${wf.linea_negocio_cliente}`
+    : `${identificador} - ${wf.nombre_flujo}`
 
   return (
     <div className="mx-auto max-w-[1600px] p-4">
@@ -29,10 +32,8 @@ export default async function WorkflowDetailPage({
         <Link href="/admin/workflows" className="text-xs text-gray-400 hover:text-gray-600">
           ← Workflows
         </Link>
-        <div className="text-[11px] text-gray-400">
-          <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px]">{identificador}</code>
-          <span className="mx-2">·</span>
-          {wf.nombre_flujo}
+        <div className="text-sm font-semibold text-[#1A1A1A]">
+          {displayName}
         </div>
       </header>
 
@@ -49,7 +50,7 @@ export default async function WorkflowDetailPage({
             src={htmlUrl}
             sandbox="allow-scripts allow-same-origin"
             className="h-full w-full"
-            title={wf.nombre_flujo}
+            title={displayName}
           />
         </div>
 

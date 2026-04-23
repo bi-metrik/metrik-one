@@ -74,6 +74,9 @@ export default function WorkflowsFilters({ workflows }: Props) {
                         <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                           {grouped[cliente][proyecto][lin].map(wf => {
                             const ident = wf.numero_flujo ? `${wf.cliente_slug}${wf.numero_flujo}` : wf.cliente_slug
+                            const displayName = wf.linea_negocio_cliente
+                              ? `${ident} - ${wf.linea_negocio_cliente}`
+                              : `${ident} - ${wf.nombre_flujo}`
                             return (
                               <Link
                                 key={wf.id}
@@ -83,11 +86,9 @@ export default function WorkflowsFilters({ workflows }: Props) {
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
                                     <p className="truncate text-[13px] font-semibold text-[#1A1A1A] group-hover:text-[#10B981]">
-                                      {wf.nombre_flujo}
+                                      {displayName}
                                     </p>
                                     <p className="text-[11px] text-gray-400">
-                                      <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px]">{ident}</code>
-                                      <span className="mx-1">·</span>
                                       v{wf.version} · {wf.total_fases ?? '?'} fases · {wf.total_etapas ?? '?'} etapas
                                     </p>
                                   </div>
