@@ -38,8 +38,29 @@ export async function GET(
     return new NextResponse('Download error', { status: 500 })
   }
 
-  const buffer = Buffer.from(await blob.arrayBuffer())
-  return new NextResponse(buffer, {
+  const original = Buffer.from(await blob.arrayBuffer()).toString('utf-8')
+
+  // Inyectar CSS que oculta los elementos que Mauricio pidio sacar de la vista admin:
+  // header interno (MéTRIK lockup + titulo), tabs, legend, tab-catalogo, footer.
+  // El HTML original queda intacto para el PDF cliente via skill local.
+  const injection = `
+<style id="__admin_view_overrides__">
+  body > .container > header,
+  body > .container > .tabs,
+  body > .container > .tabs-border,
+  body > .container > #tab-catalogo,
+  body > .container > footer,
+  #tab-flujo > .legend,
+  #tab-flujo > .bloque-legend {
+    display: none !important;
+  }
+  body > .container { padding-top: 8px !important; }
+  body { padding-top: 0 !important; }
+</style>
+</head>`
+  const processed = original.replace(/<\/head>/i, injection)
+
+  return new NextResponse(processed, {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',

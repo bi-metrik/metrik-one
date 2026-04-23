@@ -28,6 +28,7 @@ interface SyncBody {
   total_bloques?: number
   tiene_condicionales?: boolean
   fecha_actualizacion?: string
+  linea_negocio_cliente?: string | null
   html_content_b64: string
   pdf_content_b64?: string | null
   metadata?: Record<string, unknown>
@@ -125,6 +126,7 @@ export async function POST(req: NextRequest) {
     pdf_storage_path: pdfPath,
     metadata: body.metadata ?? {},
     fecha_actualizacion: body.fecha_actualizacion ?? null,
+    linea_negocio_cliente: body.linea_negocio_cliente ?? null,
   }
 
   // admin_workflows not in generated types yet — migration 20260422000001

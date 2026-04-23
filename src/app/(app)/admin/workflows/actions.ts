@@ -11,8 +11,10 @@ export interface WorkflowRow {
   cliente_nombre: string | null
   proyecto_slug: string
   nombre_flujo: string
+  numero_flujo: number | null
   version: number
   linea_negocio: string
+  linea_negocio_cliente: string | null
   tipo_proceso: string | null
   fase_cubierta: string[] | null
   fase_detallada: string | null
@@ -29,7 +31,19 @@ export interface WorkflowRow {
   html_storage_path: string
   pdf_storage_path: string | null
   fecha_actualizacion: string | null
+  created_at: string
   updated_at: string
+}
+
+export async function setEstado(id: string, estado: 'en_construccion' | 'listo_revision' | 'vigente' | 'archivado'): Promise<boolean> {
+  const err = await requireAdmin()
+  if (err) return false
+  const svc = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await ((svc as any).from('admin_workflows'))
+    .update({ estado })
+    .eq('id', id)
+  return !error
 }
 
 async function requireAdmin(): Promise<string | null> {
