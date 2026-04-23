@@ -1442,6 +1442,19 @@ export async function marcarBloqueCompleto(
       }
     }
 
+    // ── Hook AFI: si es el bloque "Generar paquete" del workspace afi, disparar motor Fase B ──
+    if (tipo === 'datos' && bloque.bloque_configs?.nombre === 'Generar paquete') {
+      const { data: ws } = await db(supabase)
+        .from('workspaces').select('slug').eq('id', workspaceId as string).single()
+      if ((ws as { slug: string } | null)?.slug === 'afi') {
+        // Fire-and-forget: el motor se ejecuta en background para no bloquear la UI
+        const { disparararGeneracionAFI } = await import('@/lib/afi/generar-paquete')
+        disparararGeneracionAFI(bloque.negocio_id).catch(err => {
+          console.error('[AFI] Error motor generacion:', err)
+        })
+      }
+    }
+
     // Registrar en activity_log con detalle de campos que cambiaron
     if (staffId && workspaceId) {
       const bloqueNombre = bloque.bloque_configs?.nombre ?? bloque.bloque_configs?.bloque_definitions?.nombre ?? 'Bloque'
