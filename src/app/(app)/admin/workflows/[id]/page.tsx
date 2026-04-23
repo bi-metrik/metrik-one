@@ -1,7 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { getWorkflow, getHtmlSignedUrl } from '../actions'
+import { getWorkflow } from '../actions'
 import WorkflowDetailClient from './workflow-detail-client'
 
 const LINEA_LABELS: Record<string, string> = {
@@ -24,8 +24,9 @@ export default async function WorkflowDetailPage({
   const wf = await getWorkflow(id)
   if (!wf) notFound()
 
-  const htmlUrl = await getHtmlSignedUrl(id)
-  if (!htmlUrl) notFound()
+  // Servimos el HTML via ruta local (content-type correcto garantizado).
+  // Supabase signed URL devuelve text/plain para .html aunque el mime almacenado sea text/html.
+  const htmlUrl = `/api/admin/workflows/html/${id}`
 
   return (
     <div className="mx-auto max-w-[1400px] p-4">
