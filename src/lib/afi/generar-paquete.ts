@@ -71,8 +71,18 @@ export async function disparararGeneracionAFI(negocio_id: string): Promise<Resul
   }
 
   const productosData = (findData('Producto contratado') as unknown as ProductosContratados) || {}
-  const rutData = (findData('RUT') as unknown as RutExtraction) || {}
-  const logoData = (findData('Logo') as { archivo_url?: string; url?: string }) || {}
+  const rutRaw = findData('RUT') as { campos?: Record<string, { value?: string }> } | null
+  // El bloque RUT guarda campos extraidos con AI en data.campos.{slug}.value
+  const rutData: RutExtraction = {}
+  if (rutRaw?.campos) {
+    for (const [k, v] of Object.entries(rutRaw.campos)) {
+      if (v && typeof v.value === 'string') {
+        (rutData as Record<string, string>)[k] = v.value
+      }
+    }
+  }
+  const logoRaw = findData('Logo') as { drive_url?: string; archivo_url?: string; url?: string } | null
+  const logoData = { archivo_url: logoRaw?.drive_url || logoRaw?.archivo_url || logoRaw?.url }
   const oficialData = (findData('Oficial de Cumplimiento') as unknown as OficialData) || {}
 
   const codes = templatesAGenerar(productosData)
