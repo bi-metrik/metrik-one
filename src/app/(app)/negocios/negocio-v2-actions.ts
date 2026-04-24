@@ -1,5 +1,7 @@
 'use server'
 
+export const maxDuration = 60  // Server actions pueden correr hasta 60s (motor AFI tarda 30-60s)
+
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
@@ -1443,15 +1445,22 @@ export async function marcarBloqueCompleto(
     }
 
     // ── Hook AFI: si es el bloque "Generar paquete" del workspace afi, disparar motor Fase B ──
+    // Await sincrono — fire-and-forget no funciona en Vercel serverless (promesas mueren al retornar).
+    // Mauricio espera el tiempo de generacion, pero ve feedback real si hay error.
     if (tipo === 'datos' && bloque.bloque_configs?.nombre === 'Generar paquete') {
       const { data: ws } = await db(supabase)
         .from('workspaces').select('slug').eq('id', workspaceId as string).single()
       if ((ws as { slug: string } | null)?.slug === 'afi') {
-        // Fire-and-forget: el motor se ejecuta en background para no bloquear la UI
-        const { disparararGeneracionAFI } = await import('@/lib/afi/generar-paquete')
-        disparararGeneracionAFI(bloque.negocio_id).catch(err => {
+        try {
+          const { disparararGeneracionAFI } = await import('@/lib/afi/generar-paquete')
+          const result = await disparararGeneracionAFI(bloque.negocio_id)
+          if (!result.ok) {
+            console.error('[AFI] Motor completo con error:', result.error)
+            // No bloqueamos el flujo — el bloque queda completado pero error visible en generaciones_log
+          }
+        } catch (err) {
           console.error('[AFI] Error motor generacion:', err)
-        })
+        }
       }
     }
 
