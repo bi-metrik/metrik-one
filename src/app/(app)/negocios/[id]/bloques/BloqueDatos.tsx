@@ -130,10 +130,29 @@ export default function BloqueDatos({
       const result = await marcarBloqueCompleto(negocioBloqueId, values)
       if (result.error) {
         toast.error(result.error)
-      } else {
-        toast.success(confirmLabel ? `${confirmLabel} registrado` : 'Datos confirmados')
-        if (onComplete) onComplete()
+        return
       }
+      toast.success(confirmLabel ? `${confirmLabel} registrado` : 'Datos confirmados')
+
+      // Hook AFI: si el server actio lo indica, disparar motor de generacion
+      if (result.trigger_afi_generation && result.negocio_id) {
+        const tid = toast.loading('Generando paquete documental… esto puede tardar 30-60s')
+        try {
+          const res = await fetch(`/api/afi/generar/${result.negocio_id}`, { method: 'POST' })
+          const json = await res.json()
+          toast.dismiss(tid)
+          if (json.ok) {
+            toast.success(`${json.docs_generados} documentos generados y subidos a Drive`)
+          } else {
+            toast.error(`Error: ${json.error ?? 'desconocido'}`)
+          }
+        } catch (e) {
+          toast.dismiss(tid)
+          toast.error(`Error al llamar motor: ${(e as Error).message}`)
+        }
+      }
+
+      if (onComplete) onComplete()
     })
   }
 
