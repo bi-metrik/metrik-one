@@ -70,6 +70,7 @@ const COMPLIANCE_NAV_ITEMS = [
   { href: '/riesgos', label: 'Riesgos', icon: ShieldAlert, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/controles', label: 'Controles', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/matriz', label: 'Matriz', icon: Grid3X3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  { href: '/compliance/validacion', label: 'Validación', icon: UserCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
 ]
 
 // Compartidos (siempre visibles)
