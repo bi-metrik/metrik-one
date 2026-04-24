@@ -92,7 +92,7 @@ export async function disparararGeneracionAFI(negocio_id: string): Promise<Resul
 
   // 4. Descargar logo (si hay)
   let logoBuffer: ArrayBuffer | null = null
-  const logoUrl = logoData.archivo_url || logoData.url
+  const logoUrl = logoData.archivo_url
   if (logoUrl) {
     try {
       const res = await fetch(logoUrl)
