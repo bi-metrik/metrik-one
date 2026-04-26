@@ -156,24 +156,9 @@ export async function disparararGeneracionAFI(negocio_id: string): Promise<Resul
     }
   }
 
-  // 7. Actualizar bloques de la etapa Generacion
-  const docsResumen = docs_generados.map(d => `${d.codigo}: ${d.filename}`).join('\n')
-  const instDocs = (instRows as unknown as { id: string; bloque_configs: { nombre: string } }[])
-    .find(r => r.bloque_configs?.nombre === 'Documentos generados')
-  if (instDocs) {
-    await svc.from('negocio_bloques').update({
-      data: { docs_count: docs_generados.length, docs_lista: docsResumen, docs_json: docs_generados },
-      estado: 'completado',
-    }).eq('id', instDocs.id)
-  }
-  const instDrive = (instRows as unknown as { id: string; bloque_configs: { nombre: string } }[])
-    .find(r => r.bloque_configs?.nombre === 'Upload a Drive')
-  if (instDrive) {
-    await svc.from('negocio_bloques').update({
-      data: { drive_folder_url: driveFolderUrl, drive_status: errors.length === 0 ? 'ok' : `${docs_generados.length} ok, ${errors.length} con errores` },
-      estado: 'completado',
-    }).eq('id', instDrive.id)
-  }
+  // 7. Actualizar bloque "Generar paquete" con metadata de ejecucion.
+  // Los bloques "Documentos generados" y "Upload a Drive" fueron eliminados — la
+  // info queda en generaciones_log + carpeta Drive + toast al usuario.
   const instGen = (instRows as unknown as { id: string; bloque_configs: { nombre: string } }[])
     .find(r => r.bloque_configs?.nombre === 'Generar paquete')
   if (instGen) {
