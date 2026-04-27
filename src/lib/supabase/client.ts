@@ -9,7 +9,9 @@ function cookieDomain(): string | undefined {
   const host = window.location.hostname
   if (host === 'localhost' || host.endsWith('.localhost') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return undefined
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN ?? 'metrikone.co'
-  return `.${baseDomain}`
+  // Browsers modernos rechazan el punto inicial (`.metrikone.co`).
+  // Pasar `metrikone.co` sin punto — el browser ya entiende que aplica a subdominios.
+  return baseDomain
 }
 
 export function createClient() {
