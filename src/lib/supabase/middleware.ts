@@ -1,16 +1,9 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// Cookie domain para compartir sesion entre subdomains tenant.metrikone.co
-function cookieDomain(): string | undefined {
-  const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN
-  if (!baseDomain || baseDomain.includes('localhost')) return undefined
-  return baseDomain
-}
-
+// Cookies host-only — la lib auth-js rechaza domain cross-subdomain.
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
-  const domain = cookieDomain()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,7 +17,7 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, { ...options, ...(domain ? { domain } : {}) })
+            supabaseResponse.cookies.set(name, value, options)
           )
         },
       },
