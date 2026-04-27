@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 function cookieDomain(): string | undefined {
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN
   if (!baseDomain || baseDomain.includes('localhost')) return undefined
-  return `.${baseDomain}`
+  return baseDomain
 }
 
 export async function updateSession(request: NextRequest) {
