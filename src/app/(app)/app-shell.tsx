@@ -20,6 +20,8 @@ import {
   ShieldCheck,
   Grid3X3,
   Workflow,
+  GitFork,
+  Blocks,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -80,10 +82,12 @@ const SHARED_NAV_ITEMS = [
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
 ]
 
-// Admin section — solo owner. Orden visual: Workflows encima de Mi Bolsillo.
+// Admin section — solo owner.
 const ADMIN_NAV_ITEMS = [
-  { href: '/admin/workflows', label: 'Workflows', icon: Workflow, roles: ['owner'] },
-  { href: '/admin/mibolsillo', label: 'Mi Bolsillo', icon: Activity, roles: ['owner'] },
+  { href: '/admin/proceso',   label: 'Proceso',    icon: GitFork,  roles: ['owner'] },
+  { href: '/admin/skills',    label: 'Skills',     icon: Blocks,   roles: ['owner'] },
+  { href: '/admin/workflows', label: 'Workflows',  icon: Workflow, roles: ['owner'] },
+  { href: '/admin/mibolsillo',label: 'Mi Bolsillo',icon: Activity, roles: ['owner'] },
 ]
 
 // Mobile: 4 primary tabs per role, rest goes to "Mas" panel
