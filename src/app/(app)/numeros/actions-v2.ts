@@ -40,7 +40,9 @@ export interface NumerosData {
   // mc/ebitda vienen de v_pyl_mes; margenContribucion = mc_pct (siempre calculado, no estimado)
   costosVariablesMes: number     // sum gastos.clasificacion_costo='variable' del mes
   margenContribucion: number     // mc_pct del mes (0-1) o fallback 0.95 si no hay data
+  mcMonto: number                // ingresos - costos_variables del mes (numero absoluto)
   ebitda: number                 // mc - fijos
+  mcNegociosTop: McNegocio[]     // top-5 negocios por MC (drill-down P2)
   puntoEquilibrio: number
 
   // P5: Cuanto aguanto
@@ -109,6 +111,17 @@ export interface CarteraItem {
   diasVencimiento: number
 }
 
+export interface McNegocio {
+  negocioId: string
+  codigo: string | null
+  nombre: string | null
+  precio: number
+  costosVariables: number
+  mc: number
+  mcPct: number | null
+  estado: string | null
+}
+
 // ── getNumeros ────────────────────────────────────────
 
 export async function getNumeros(mesRef?: string) {
@@ -156,6 +169,8 @@ export async function getNumeros(mesRef?: string) {
     staffNominaRes,
     // 2026-04-27: v_pyl_mes para MC + EBITDA (reemplaza blend D130)
     pylMesRes,
+    // 2026-04-28: top-N negocios por MC (drill-down P2)
+    mcNegociosRes,
     // D141: Perfil fiscal (régimen)
     fiscalProfileRes,
     // D119: Cuentas por pagar
@@ -308,6 +323,14 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .eq('mes', mesStart)
       .maybeSingle(),
+
+    // 2026-04-28: top-N negocios por MC (abiertos primero, luego cerrados con MC > 0)
+    supabase
+      .from('v_mc_negocio')
+      .select('negocio_id, negocio_codigo, negocio_nombre, precio_aprobado, precio_estimado, costos_variables, mc, mc_pct, estado')
+      .eq('workspace_id', workspaceId)
+      .order('mc', { ascending: false })
+      .limit(20),
 
     // D141: Perfil fiscal (régimen tributario del workspace)
     supabase
@@ -522,7 +545,24 @@ export async function getNumeros(mesRef?: string) {
   const margenContribucion = mcPctRaw !== null
     ? Math.max(0.05, Math.min(0.99, mcPctRaw))
     : 0.95  // fallback cuando no hay data del mes
+  const mcMonto = pylMes?.mc ? Number(pylMes.mc) : (ingresosMes - costosVariablesMes)
   const ebitda = pylMes?.ebitda ? Number(pylMes.ebitda) : (ingresosMes - costosVariablesMes - costosFijosMes)
+
+  // 2026-04-28: top-5 negocios por MC. Filtra precio > 0 para excluir negocios sin precio definido
+  const mcNegociosTop: McNegocio[] = (mcNegociosRes.data ?? [])
+    .filter(n => n.negocio_id !== null)
+    .map(n => ({
+      negocioId: n.negocio_id as string,
+      codigo: n.negocio_codigo,
+      nombre: n.negocio_nombre,
+      precio: Number(n.precio_aprobado ?? n.precio_estimado ?? 0),
+      costosVariables: Number(n.costos_variables ?? 0),
+      mc: Number(n.mc ?? 0),
+      mcPct: n.mc_pct !== null ? Number(n.mc_pct) : null,
+      estado: n.estado,
+    }))
+    .filter(n => n.precio > 0)
+    .slice(0, 5)
 
   // PE
   const puntoEquilibrio = margenContribucion > 0 ? costosFijosMes / margenContribucion : costosFijosMes
@@ -617,7 +657,9 @@ export async function getNumeros(mesRef?: string) {
     staffNomina,
     costosVariablesMes,
     margenContribucion,
+    mcMonto,
     ebitda,
+    mcNegociosTop,
     puntoEquilibrio,
     runwayMeses,
     gastoPromedioMensual,

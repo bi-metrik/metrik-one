@@ -178,7 +178,49 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
 
   return (
     <div className="space-y-1">
+      {/* MC + EBITDA — norte operativo (decision 2026-04-23) */}
+      <SectionTitle>Margen de contribucion y EBITDA</SectionTitle>
       <Row label="Ingresos cobrados" value={data.ingresosMes} color="green" />
+      <Row label="(-) Costos variables" value={data.costosVariablesMes} color="red" indent />
+      <Divider />
+      <Row label="Margen de contribucion" value={data.mcMonto} bold color={data.mcMonto >= 0 ? 'green' : 'red'} />
+      <Row label="MC %" value={`${Math.round(data.margenContribucion * 100)}%`} color={data.margenContribucion >= 0.4 ? 'green' : data.margenContribucion >= 0.2 ? 'yellow' : 'red'} />
+      <Row label="(-) Costos fijos" value={data.costosFijosMes} color="red" indent />
+      <Divider />
+      <Row label="EBITDA" value={data.ebitda} bold color={data.ebitda >= 0 ? 'green' : 'red'} />
+
+      {/* MC por negocio top-5 */}
+      {data.mcNegociosTop.length > 0 && (
+        <>
+          <Divider />
+          <SectionTitle>MC por negocio (top 5)</SectionTitle>
+          {data.mcNegociosTop.map(n => (
+            <div key={n.negocioId} className="flex items-center justify-between py-1.5 border-b border-[#E5E7EB] last:border-b-0">
+              <div className="min-w-0 flex-1 mr-2">
+                <p className="text-xs font-medium text-[#1A1A1A] truncate">
+                  {n.codigo ? `${n.codigo} · ` : ''}{n.nombre ?? 'Sin nombre'}
+                </p>
+                <p className="text-[10px] text-[#6B7280]">
+                  Precio {formatCOP(n.precio)} · Costos {formatCOP(n.costosVariables)}
+                </p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className={`text-xs font-semibold tabular-nums ${n.mc >= 0 ? 'text-[#059669]' : 'text-[#EF4444]'}`}>
+                  {formatCOP(n.mc)}
+                </p>
+                {n.mcPct !== null && (
+                  <p className="text-[10px] text-[#6B7280] tabular-nums">
+                    {Math.round(n.mcPct * 100)}%
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      <Divider />
+      <SectionTitle>Utilidad operativa</SectionTitle>
       {data.componenteNomina > 0 && (
         <Row label="(-) Nomina (Mi Equipo)" value={data.componenteNomina} color="red" indent />
       )}
@@ -191,9 +233,8 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       {(data.gastosMes - data.gastosProyectosMes) > 0 && (
         <Row label="(-) Otros gastos variables" value={data.gastosMes - data.gastosProyectosMes} color="red" indent />
       )}
-      <Divider />
       <Row label="Utilidad" value={data.utilidad} bold color={data.utilidad >= 0 ? 'green' : 'red'} />
-      <Row label="Margen" value={`${margenPct}%`} color={margenPct > 20 ? 'green' : margenPct > 0 ? 'yellow' : 'red'} />
+      <Row label="Margen sobre ingresos" value={`${margenPct}%`} color={margenPct > 20 ? 'green' : margenPct > 0 ? 'yellow' : 'red'} />
 
       {/* COH-2: Disponible para ti */}
       {data.utilidad > 0 && (
@@ -344,7 +385,7 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
 
       <Divider />
       <SectionTitle>Tu margen</SectionTitle>
-      <Row label="Margen efectivo" value={`${Math.round(data.margenContribucion * 100)}%`} />
+      <Row label="Margen de contribucion" value={`${Math.round(data.margenContribucion * 100)}%`} />
       <div className="flex items-center justify-between py-1">
         <span className="text-[10px] text-muted-foreground">{margenLabel}</span>
       </div>

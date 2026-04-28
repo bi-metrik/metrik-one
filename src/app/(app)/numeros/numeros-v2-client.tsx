@@ -144,6 +144,37 @@ export default function NumerosV2Client({ initialData }: Props) {
             </div>
           </div>
 
+          {/* MC + EBITDA — Norte operativo (decision 2026-04-23). Click → drill P2 */}
+          <button
+            onClick={() => setActiveDrill(2)}
+            className="w-full text-left rounded-xl border bg-card p-4 shadow-sm hover:bg-[#F5F4F2] transition-colors"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">Margen de contribucion</p>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-xl font-bold tabular-nums text-[#1A1A1A]">
+                    {Math.round(data.margenContribucion * 100)}%
+                  </span>
+                  <span className="text-xs text-[#6B7280]">
+                    {formatCOP(data.mcMonto)}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#6B7280] mt-0.5">Ingresos − costos variables</p>
+              </div>
+              <div className="h-10 w-px bg-[#E5E7EB] shrink-0" aria-hidden="true" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">EBITDA</p>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className={`text-xl font-bold tabular-nums ${data.ebitda >= 0 ? 'text-[#1A1A1A]' : 'text-[#EF4444]'}`}>
+                    {data.ebitda >= 0 ? '' : '−'}{formatCOP(Math.abs(data.ebitda))}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#6B7280] mt-0.5">MC − costos fijos</p>
+              </div>
+            </div>
+          </button>
+
           {/* P1 + P2 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* P1: ¿Cuánta plata tengo? — Saldo bancario + meta de cobro del mes */}
