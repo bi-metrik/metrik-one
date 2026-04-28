@@ -11,6 +11,7 @@ import { getRolePermissions } from '@/lib/roles'
 import type { Movimiento } from './actions'
 import { marcarComoPagado, attachSoporte } from './actions'
 import { marcarRevisado, desmarcarRevisado } from '../revision/actions'
+import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -332,6 +333,9 @@ export default function MovimientosClient({
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Mis Movimientos</h1>
       </div>
+
+      {/* Disclaimer fiscal — aprobado Emilio (CLO) 2026-04-27 */}
+      <FiscalDisclaimer />
 
       {/* Month selector */}
       <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">

@@ -4,6 +4,7 @@ import { X, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { NumerosData } from './actions-v2'
+import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
 
 interface DrillDownSheetProps {
   questionNumber: 1 | 2 | 3 | 4 | 5
@@ -229,6 +230,13 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
             <Link href="/mi-negocio" className="text-[10px] font-medium text-primary hover:underline shrink-0 ml-2">Configurar →</Link>
           </div>
         </>
+      )}
+
+      {/* Disclaimer fiscal — aprobado Emilio (CLO) 2026-04-27 */}
+      {(data.utilidad > 0 || data.regimenFiscal) && (
+        <div className="pt-2">
+          <FiscalDisclaimer />
+        </div>
       )}
 
       <Divider />

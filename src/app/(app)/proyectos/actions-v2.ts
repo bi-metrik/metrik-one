@@ -744,6 +744,7 @@ export async function addCobro(facturaId: string, input: {
   monto: number
   fecha?: string
   notas?: string
+  retencion?: number
 }): Promise<ActionResult> {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -788,6 +789,7 @@ export async function addCobro(facturaId: string, input: {
       factura_id: facturaId,
       proyecto_id: factura.proyecto_id,
       monto: input.monto,
+      retencion: input.retencion ?? 0,
       fecha: input.fecha || new Date().toISOString().split('T')[0],
       notas: input.notas?.trim() || null,
       created_by: userId,

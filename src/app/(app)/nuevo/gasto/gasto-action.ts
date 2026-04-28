@@ -42,6 +42,8 @@ export async function uploadSoporteGasto(formData: FormData) {
 export async function createGasto(input: {
   monto: number
   categoria: string
+  clasificacion_costo?: 'variable' | 'fijo' | 'no_operativo'
+  retencion?: number
   fecha: string
   descripcion?: string
   destino_id?: string | null  // UUID or 'empresa'
@@ -55,6 +57,11 @@ export async function createGasto(input: {
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   if (!input.monto || input.monto <= 0) return { success: false, error: 'Monto invalido' }
+
+  // Validacion: comision requiere negocio_id (regla Carmen+Santiago 2026-04-26)
+  if (input.categoria === 'comision' && input.destino_tipo !== 'negocio') {
+    return { success: false, error: 'Las comisiones deben asignarse a un negocio especifico' }
+  }
 
   // Determine tipo, proyecto_id, negocio_id
   let tipo: string = 'operativo'
@@ -103,6 +110,8 @@ export async function createGasto(input: {
     fecha: input.fecha || new Date().toISOString().split('T')[0],
     monto: input.monto,
     categoria: input.categoria || 'otros',
+    clasificacion_costo: input.clasificacion_costo ?? 'variable',
+    retencion: input.retencion ?? 0,
     descripcion: input.descripcion?.trim() || null,
     deducible: false,
     proyecto_id: proyectoId,

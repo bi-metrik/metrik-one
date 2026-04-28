@@ -6,6 +6,26 @@ import { ArrowLeft, Building2, Paperclip, X, FileText, Image as ImageIcon } from
 import { toast } from 'sonner'
 import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { createGasto, getRubrosProyecto, uploadSoporteGasto } from './gasto-action'
+import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
+
+type Clasificacion = 'variable' | 'fijo' | 'no_operativo'
+
+// Mapping categoria → clasificacion default. Mismo seed que migration 20260427100001
+const CATEGORIA_TO_CLASIF: Record<string, Clasificacion> = {
+  comision: 'variable',
+  materiales: 'variable',
+  transporte: 'variable',
+  viaticos: 'variable',
+  mano_de_obra: 'variable',
+  alimentacion: 'variable',
+  servicios_profesionales: 'fijo',
+  software: 'fijo',
+  impuestos_seguros: 'fijo',
+  arriendo: 'fijo',
+  marketing: 'fijo',
+  capacitacion: 'fijo',
+  otros: 'variable',
+}
 
 // Categorías empresa: costos operativos del negocio
 const CATEGORIAS_EMPRESA = CATEGORIAS_GASTO.filter(c =>
@@ -52,6 +72,8 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
   const [destinoKey, setDestinoKey] = useState<string>(getDefaultDestino())
   const [rubroId, setRubroId] = useState('')
   const [categoria, setCategoria] = useState('arriendo')
+  const [clasificacion, setClasificacion] = useState<Clasificacion>(CATEGORIA_TO_CLASIF['arriendo'] ?? 'fijo')
+  const [retencion, setRetencion] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [descripcion, setDescripcion] = useState('')
   const [yaPagado, setYaPagado] = useState(true)
@@ -88,6 +110,11 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
       setCategoria(categoriasVisibles[0]?.value ?? 'otros')
     }
   }, [isEmpresa, categoriasVisibles, categoria])
+
+  // Auto-aplicar clasificacion default al cambiar categoria (overridable por usuario despues)
+  useEffect(() => {
+    setClasificacion(CATEGORIA_TO_CLASIF[categoria] ?? 'variable')
+  }, [categoria])
 
   // Auto-asignar rubro según categoría seleccionada
   useEffect(() => {
@@ -177,6 +204,8 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
       const res = await createGasto({
         monto: montoNum,
         categoria,
+        clasificacion_costo: clasificacion,
+        retencion: parseFloat(retencion) || 0,
         fecha,
         descripcion: descripcion.trim() || undefined,
         destino_id: destinoId || 'empresa',
@@ -281,6 +310,61 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
           </select>
         </div>
 
+        {/* Clasificacion costo — toggle 3-way (decision Carmen+Santiago 2026-04-26) */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            Este gasto desaparece si no hay ventas?
+          </label>
+          <div className="grid grid-cols-3 gap-1.5">
+            {([
+              { value: 'variable', label: 'Si', sub: 'Variable' },
+              { value: 'fijo', label: 'No', sub: 'Fijo' },
+              { value: 'no_operativo', label: 'No aplica', sub: 'No operativo' },
+            ] as Array<{ value: Clasificacion; label: string; sub: string }>).map(opt => {
+              const active = clasificacion === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setClasificacion(opt.value)}
+                  className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                    active
+                      ? 'border-[#10B981] bg-[#10B981]/10 text-[#059669]'
+                      : 'border-[#E5E7EB] bg-background text-[#6B7280] hover:border-[#10B981]/50'
+                  }`}
+                >
+                  <div className="leading-tight">{opt.label}</div>
+                  <div className="mt-0.5 text-[10px] opacity-70">{opt.sub}</div>
+                </button>
+              )
+            })}
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Variable: cambia con tus ventas (materiales, comisiones). Fijo: igual cada mes (arriendo, salarios). No operativo: impuesto renta, intereses.
+          </p>
+        </div>
+
+        {/* Retencion — campo simple para reportes contador */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            Retencion <span className="text-[10px] font-normal opacity-70">(opcional)</span>
+          </label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+            <input
+              type="number"
+              value={retencion}
+              onChange={e => setRetencion(e.target.value)}
+              min="0"
+              placeholder="0"
+              className="w-full rounded-md border bg-background py-2.5 pl-7 pr-3 text-sm"
+            />
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Suma plana. Si tu contador necesita el detalle, lo registra desde su flujo.
+          </p>
+        </div>
+
         {/* Fecha */}
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">Fecha</label>
@@ -371,6 +455,8 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
           {isPending ? (uploadingFile ? 'Subiendo soporte...' : 'Registrando...') : 'Registrar gasto'}
         </button>
       </div>
+
+      <FiscalDisclaimer />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { addCobro } from '../../proyectos/actions-v2'
 import { formatCOP } from '@/lib/contacts/constants'
+import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
 
 interface FacturaPendiente {
   id: string
@@ -25,6 +26,7 @@ export default function NuevoCobroForm({ facturas }: Props) {
 
   const [facturaId, setFacturaId] = useState(facturas.length === 1 ? facturas[0].id : '')
   const [monto, setMonto] = useState('')
+  const [retencion, setRetencion] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [notas, setNotas] = useState('')
 
@@ -50,6 +52,7 @@ export default function NuevoCobroForm({ facturas }: Props) {
     startTransition(async () => {
       const res = await addCobro(facturaId, {
         monto: montoNum,
+        retencion: parseFloat(retencion) || 0,
         fecha,
         notas: notas.trim() || undefined,
       })
@@ -135,6 +138,24 @@ export default function NuevoCobroForm({ facturas }: Props) {
             )}
           </div>
 
+          {/* Retencion — campo simple para reportes contador */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Retencion <span className="text-[10px] font-normal opacity-70">(opcional)</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+              <input
+                type="number"
+                value={retencion}
+                onChange={e => setRetencion(e.target.value)}
+                min="0"
+                placeholder="0"
+                className="w-full rounded-md border bg-background py-2.5 pl-7 pr-3 text-sm"
+              />
+            </div>
+          </div>
+
           {/* Fecha */}
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Fecha</label>
@@ -167,6 +188,8 @@ export default function NuevoCobroForm({ facturas }: Props) {
           </button>
         </div>
       )}
+
+      {facturas.length > 0 && <FiscalDisclaimer />}
     </div>
   )
 }
