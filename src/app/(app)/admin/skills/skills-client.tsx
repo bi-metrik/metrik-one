@@ -10,23 +10,20 @@ interface Props {
 const TIPO_LABELS: Record<number, string> = {
   1: 'Proceso',
   2: 'Agente',
-  3: 'Conocimiento',
-  4: 'Ejecución',
+  3: 'Organización',
 }
 
 const TIPO_STYLES: Record<number, string> = {
   1: 'bg-blue-100 text-blue-700 border-blue-200',
   2: 'bg-violet-100 text-violet-700 border-violet-200',
-  3: 'bg-orange-100 text-orange-700 border-orange-200',
-  4: 'bg-teal-100 text-teal-700 border-teal-200',
+  3: 'bg-teal-100 text-teal-700 border-teal-200',
 }
 
 const TIPO_FILTER_STYLES: Record<number | 'all', string> = {
   all: 'bg-gray-100 text-gray-700 hover:bg-gray-200',
   1:   'bg-blue-100 text-blue-700 hover:bg-blue-200',
   2:   'bg-violet-100 text-violet-700 hover:bg-violet-200',
-  3:   'bg-orange-100 text-orange-700 hover:bg-orange-200',
-  4:   'bg-teal-100 text-teal-700 hover:bg-teal-200',
+  3:   'bg-teal-100 text-teal-700 hover:bg-teal-200',
 }
 
 export default function SkillsClient({ skills }: Props) {
@@ -34,7 +31,7 @@ export default function SkillsClient({ skills }: Props) {
   const [q, setQ] = useState('')
   const [tipoFilter, setTipoFilter] = useState<number | 'all'>('all')
 
-  const tipos = [1, 2, 3, 4].filter(t => skills.some(s => s.tipo === t))
+  const tipos = [1, 2, 3].filter(t => skills.some(s => s.tipo === t))
 
   const filtered = useMemo(() => {
     return skills.filter(s => {
@@ -96,14 +93,19 @@ export default function SkillsClient({ skills }: Props) {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-[#1A1A1A]">/{skill.nombre}</p>
+                    <div className="flex items-center gap-1.5">
+                      {skill.skill_id && (
+                        <span className="shrink-0 font-mono text-[10px] font-bold text-gray-400">{skill.skill_id}</span>
+                      )}
+                      <p className="text-[13px] font-semibold text-[#1A1A1A]">/{skill.nombre}</p>
+                    </div>
                     {skill.descripcion && (
                       <p className="mt-0.5 line-clamp-2 text-[11px] text-gray-500">{skill.descripcion}</p>
                     )}
                   </div>
-                  {skill.tipo && (
+                  {skill.tipo && TIPO_LABELS[skill.tipo] && (
                     <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${TIPO_STYLES[skill.tipo]}`}>
-                      T{skill.tipo}
+                      {TIPO_LABELS[skill.tipo]}
                     </span>
                   )}
                 </div>
@@ -151,8 +153,11 @@ function SkillDetail({ skill }: { skill: SkillRow }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
+              {skill.skill_id && (
+                <span className="font-mono text-sm font-bold text-gray-300">{skill.skill_id}</span>
+              )}
               <h2 className="font-mono text-lg font-bold text-[#1A1A1A]">/{skill.nombre}</h2>
-              {skill.tipo && (
+              {skill.tipo && TIPO_LABELS[skill.tipo] && (
                 <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${TIPO_STYLES[skill.tipo]}`}>
                   {TIPO_LABELS[skill.tipo]}
                 </span>

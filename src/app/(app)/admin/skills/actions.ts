@@ -6,6 +6,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 export interface SkillRow {
   id: string
   nombre: string
+  skill_id: string | null
   tipo: number | null
   descripcion: string | null
   argument_hint: string | null
@@ -35,7 +36,7 @@ export async function listSkills(): Promise<SkillRow[]> {
   const { data, error } = await ((svc as any).from('admin_skills'))
     .select('*')
     .order('tipo', { ascending: true, nullsFirst: false })
-    .order('nombre', { ascending: true })
+    .order('skill_id', { ascending: true, nullsFirst: false })
   if (error) return []
   return (data ?? []) as SkillRow[]
 }

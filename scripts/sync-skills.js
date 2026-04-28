@@ -112,6 +112,7 @@ async function main() {
 
     rows.push({
       nombre,
+      skill_id:                 meta['skill_id'] ?? meta['skill-id'] ?? null,
       tipo:                     meta.tipo ?? null,
       descripcion:              meta.description ?? null,
       argument_hint:            meta['argument-hint'] ?? null,

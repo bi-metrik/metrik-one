@@ -8,7 +8,7 @@ export default async function AdminSkillsPage() {
   if (error || role !== 'owner' || workspaceId !== process.env.ADMIN_WORKSPACE_ID) redirect('/numeros')
 
   const skills = await listSkills()
-  const byTipo = [1, 2, 3, 4].map(t => ({ tipo: t, count: skills.filter(s => s.tipo === t).length }))
+  const byTipo = [1, 2, 3].map(t => ({ tipo: t, count: skills.filter(s => s.tipo === t).length }))
     .filter(x => x.count > 0)
 
   return (
@@ -34,12 +34,11 @@ export default async function AdminSkillsPage() {
               {skills.length} skills
             </span>
             {byTipo.map(({ tipo, count }) => {
-              const labels: Record<number, string> = { 1: 'Proceso', 2: 'Agente', 3: 'Conocimiento', 4: 'Ejecución' }
+              const labels: Record<number, string> = { 1: 'Proceso', 2: 'Agente', 3: 'Organización' }
               const styles: Record<number, string> = {
                 1: 'border-blue-200 bg-blue-50 text-blue-700',
                 2: 'border-violet-200 bg-violet-50 text-violet-700',
-                3: 'border-orange-200 bg-orange-50 text-orange-700',
-                4: 'border-teal-200 bg-teal-50 text-teal-700',
+                3: 'border-teal-200 bg-teal-50 text-teal-700',
               }
               return (
                 <span key={tipo} className={`rounded-md border px-2.5 py-1 ${styles[tipo]}`}>
