@@ -3,9 +3,10 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getRevisionData } from './actions'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
+import RevisionClient from './revision-client'
 
 interface Props {
-  searchParams: Promise<{ mes?: string }>
+  searchParams: Promise<{ mes?: string; filtro?: string }>
 }
 
 export default async function RevisionPage({ searchParams }: Props) {
@@ -15,23 +16,29 @@ export default async function RevisionPage({ searchParams }: Props) {
 
   const params = await searchParams
   const mes = params.mes ?? new Date().toISOString().slice(0, 7)
+  const filtro = (params.filtro as 'todos' | 'pendientes' | 'revisados') ?? 'todos'
+
   const { items, counts } = await getRevisionData(mes)
 
+  // Apply client-side filter (server already orders pendientes first)
+  const itemsFiltrados = filtro === 'pendientes'
+    ? items.filter(i => !i.revisado)
+    : filtro === 'revisados'
+      ? items.filter(i => i.revisado)
+      : items
+
   return (
-    <div className="mx-auto max-w-4xl p-6 space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">Bandeja de revision</h1>
-        <p className="text-sm text-[#6B7280]">
-          {counts.pendientes} pendientes · {counts.revisados} revisados · mes {mes}
-        </p>
+    <>
+      <div className="mx-auto max-w-3xl px-4 pt-6">
+        <FiscalDisclaimer />
       </div>
-
-      <FiscalDisclaimer />
-
-      <p className="text-xs text-[#6B7280] italic">
-        Vista completa pendiente de implementacion (Fase B.2).
-        Items cargados: {items.length}.
-      </p>
-    </div>
+      <RevisionClient
+        items={itemsFiltrados}
+        counts={counts}
+        mes={mes}
+        filtro={filtro}
+        role={role ?? 'read_only'}
+      />
+    </>
   )
 }
