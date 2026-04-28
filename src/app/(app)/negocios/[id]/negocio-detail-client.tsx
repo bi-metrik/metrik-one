@@ -926,7 +926,7 @@ function BloqueRenderer({
     id: string
     concepto: string | null
     monto: number
-    estado_causacion: string
+    revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null
@@ -1236,7 +1236,7 @@ function BloqueCard({
     id: string
     concepto: string | null
     monto: number
-    estado_causacion: string
+    revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null
@@ -1376,7 +1376,7 @@ interface Props {
     id: string
     concepto: string | null
     monto: number
-    estado_causacion: string
+    revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null

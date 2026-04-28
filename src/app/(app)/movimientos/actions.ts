@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getRolePermissions } from '@/lib/roles'
 
 export type Movimiento = {
   id: string
@@ -25,9 +24,9 @@ export type Movimiento = {
   created_by_initials: string | null
   estado_pago: 'pagado' | 'pendiente' | null  // null for ingresos
   fecha_pago: string | null
-  // D246: Causación contable
-  estado_causacion: 'PENDIENTE' | 'APROBADO' | 'CAUSADO' | 'RECHAZADO'
-  rechazo_motivo: string | null
+  // 2026-04-27: Refactor capa fiscal — flag binario reemplaza estado_causacion
+  revisado: boolean
+  clasificacion_costo: 'variable' | 'fijo' | 'no_operativo' | null  // null for cobros
 }
 
 function getInitials(name: string | null): string | null {
@@ -44,26 +43,25 @@ export async function getMovimientos(filters?: {
   proy?: string         // proyecto_id filter
   tipoProy?: string     // 'interno' | 'cliente' | 'empresa' | 'todos'
   estadoPago?: string   // 'todos' | 'pagado' | 'pendiente'
-  estadoCausacion?: string // D246: 'todos' | 'PENDIENTE' | 'APROBADO' | 'CAUSADO' | 'RECHAZADO'
+  revisadoFiltro?: 'todos' | 'pendientes' | 'revisados'
   createdBy?: string    // user_id filter
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { movimientos: [], totales: { ingresos: 0, egresos: 0, deducible: 0 }, regimenFiscal: null as string | null }
 
   const tipoFilter = filters?.tipo ?? 'todos'
-  const mes = filters?.mes ?? new Date().toISOString().slice(0, 7) // default current month
+  const mes = filters?.mes ?? new Date().toISOString().slice(0, 7)
   const catFilter = filters?.cat && filters.cat !== 'todos' ? filters.cat : null
   const proyFilter = filters?.proy && filters.proy !== 'todos' ? filters.proy : null
   const tipoProyFilter = filters?.tipoProy && filters.tipoProy !== 'todos' ? filters.tipoProy : null
   const estadoPagoFilter = filters?.estadoPago && filters.estadoPago !== 'todos' ? filters.estadoPago : null
-  const estadoCausacionFilter = filters?.estadoCausacion && filters.estadoCausacion !== 'todos' ? filters.estadoCausacion : null
+  const revisadoFiltro = filters?.revisadoFiltro && filters.revisadoFiltro !== 'todos' ? filters.revisadoFiltro : null
   const createdByFilter = filters?.createdBy && filters.createdBy !== 'todos' ? filters.createdBy : null
 
   const startDate = `${mes}-01`
   const [y, m] = mes.split('-').map(Number)
-  const endDate = new Date(y, m, 0).toISOString().split('T')[0] // last day of month
+  const endDate = new Date(y, m, 0).toISOString().split('T')[0]
 
-  // If filtering by tipoProy, we need project IDs
   let proyectoIdsByTipo: string[] | null = null
   if (tipoProyFilter && tipoProyFilter !== 'empresa') {
     const { data: projs } = await supabase
@@ -76,90 +74,77 @@ export async function getMovimientos(filters?: {
 
   const results: Movimiento[] = []
 
-  // ── Egresos (gastos table) ──────────────────────────
+  // ── Egresos (gastos) ──────────────────────────
   if (tipoFilter === 'todos' || tipoFilter === 'egresos') {
-    // Skip gastos entirely if tipoProy='empresa' was requested and we only want ingresos
-    const skipGastos = false
-
-    if (!skipGastos) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let query = (supabase.from('gastos') as any)
-        .select('id, fecha, monto, descripcion, mensaje_original, categoria, deducible, soporte_url, tipo, canal_registro, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), negocio_id, negocios(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, estado_causacion, rechazo_motivo')
-        .eq('workspace_id', workspaceId)
-        .gte('fecha', startDate)
-        .lte('fecha', endDate)
-
-      // Apply filters
-      if (catFilter) query = query.eq('categoria', catFilter)
-      if (proyFilter === 'empresa') {
-        query = query.is('proyecto_id', null)
-      } else if (proyFilter) {
-        query = query.eq('proyecto_id', proyFilter)
-      }
-      if (tipoProyFilter === 'empresa') {
-        query = query.is('proyecto_id', null)
-      } else if (proyectoIdsByTipo && proyectoIdsByTipo.length > 0) {
-        query = query.in('proyecto_id', proyectoIdsByTipo)
-      } else if (proyectoIdsByTipo && proyectoIdsByTipo.length === 0) {
-        // No projects of that type — return empty for gastos
-        query = query.eq('id', '00000000-0000-0000-0000-000000000000') // impossible match
-      }
-      if (estadoPagoFilter) query = query.eq('estado_pago', estadoPagoFilter)
-      if (createdByFilter) query = query.eq('created_by', createdByFilter)
-      if (estadoCausacionFilter) {
-        query = query.eq('estado_causacion', estadoCausacionFilter)
-      } else {
-        // Hide rejected by default
-        query = query.neq('estado_causacion', 'RECHAZADO')
-      }
-
-      query = query.order('fecha', { ascending: false })
-
-      const { data: gastos } = await query
-
-      for (const g of gastos ?? []) {
-        const proy = g.proyectos as { nombre: string; codigo: string } | null
-        const neg = g.negocios as { nombre: string; codigo: string } | null
-        const profile = g.created_by_profile as { full_name: string } | null
-        results.push({
-          id: g.id,
-          tipo: 'egreso',
-          tabla: 'gastos',
-          fecha: g.fecha,
-          monto: Number(g.monto),
-          descripcion: g.descripcion || g.categoria || 'Gasto',
-          categoria: g.categoria,
-          proyecto: proy?.nombre ?? null,
-          proyecto_codigo: proy?.codigo ?? null,
-          negocio: neg?.nombre ?? null,
-          negocio_codigo: neg?.codigo ?? null,
-          deducible: g.deducible ?? false,
-          soporte_url: g.soporte_url ?? null,
-          tipo_gasto: (g.tipo as Movimiento['tipo_gasto']) ?? null,
-          canal_registro: (g.canal_registro as Movimiento['canal_registro']) ?? null,
-          created_by_name: profile?.full_name ?? g.created_by_wa_name ?? null,
-          created_by_initials: getInitials(profile?.full_name ?? g.created_by_wa_name ?? null),
-          estado_pago: (g.estado_pago as 'pagado' | 'pendiente') ?? 'pagado',
-          fecha_pago: g.fecha_pago ?? null,
-          estado_causacion: (g.estado_causacion as Movimiento['estado_causacion']) ?? 'PENDIENTE',
-          rechazo_motivo: g.rechazo_motivo ?? null,
-        })
-      }
-    }
-  }
-
-  // ── Ingresos (cobros table) ─────────────────────────
-  // Skip ingresos if estadoPago filter is set (cobros don't have estado_pago)
-  const skipIngresos = !!estadoPagoFilter || !!catFilter || tipoProyFilter === 'empresa'
-  if ((tipoFilter === 'todos' || tipoFilter === 'ingresos') && !skipIngresos) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query = (supabase.from('cobros') as any)
-      .select('id, fecha, monto, notas, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), negocio_id, negocios(nombre, codigo), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), estado_causacion, rechazo_motivo')
+    let query = supabase
+      .from('gastos')
+      .select('id, fecha, monto, descripcion, mensaje_original, categoria, deducible, soporte_url, tipo, canal_registro, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), negocio_id, negocios(nombre, codigo), created_by, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name), estado_pago, fecha_pago, revisado, clasificacion_costo')
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
 
-    // Apply filters
+    if (catFilter) query = query.eq('categoria', catFilter)
+    if (proyFilter === 'empresa') {
+      query = query.is('proyecto_id', null)
+    } else if (proyFilter) {
+      query = query.eq('proyecto_id', proyFilter)
+    }
+    if (tipoProyFilter === 'empresa') {
+      query = query.is('proyecto_id', null)
+    } else if (proyectoIdsByTipo && proyectoIdsByTipo.length > 0) {
+      query = query.in('proyecto_id', proyectoIdsByTipo)
+    } else if (proyectoIdsByTipo && proyectoIdsByTipo.length === 0) {
+      query = query.eq('id', '00000000-0000-0000-0000-000000000000')
+    }
+    if (estadoPagoFilter) query = query.eq('estado_pago', estadoPagoFilter)
+    if (createdByFilter) query = query.eq('created_by', createdByFilter)
+    if (revisadoFiltro === 'pendientes') query = query.eq('revisado', false)
+    if (revisadoFiltro === 'revisados') query = query.eq('revisado', true)
+
+    query = query.order('fecha', { ascending: false })
+
+    const { data: gastos } = await query
+
+    for (const g of gastos ?? []) {
+      const proy = g.proyectos as { nombre: string; codigo: string } | null
+      const neg = g.negocios as { nombre: string; codigo: string } | null
+      const profile = g.created_by_profile as { full_name: string } | null
+      results.push({
+        id: g.id,
+        tipo: 'egreso',
+        tabla: 'gastos',
+        fecha: g.fecha,
+        monto: Number(g.monto),
+        descripcion: g.descripcion || g.categoria || 'Gasto',
+        categoria: g.categoria,
+        proyecto: proy?.nombre ?? null,
+        proyecto_codigo: proy?.codigo ?? null,
+        negocio: neg?.nombre ?? null,
+        negocio_codigo: neg?.codigo ?? null,
+        deducible: g.deducible ?? false,
+        soporte_url: g.soporte_url ?? null,
+        tipo_gasto: (g.tipo as Movimiento['tipo_gasto']) ?? null,
+        canal_registro: (g.canal_registro as Movimiento['canal_registro']) ?? null,
+        created_by_name: profile?.full_name ?? g.created_by_wa_name ?? null,
+        created_by_initials: getInitials(profile?.full_name ?? g.created_by_wa_name ?? null),
+        estado_pago: (g.estado_pago as 'pagado' | 'pendiente') ?? 'pagado',
+        fecha_pago: g.fecha_pago ?? null,
+        revisado: g.revisado ?? false,
+        clasificacion_costo: (g.clasificacion_costo as Movimiento['clasificacion_costo']) ?? 'variable',
+      })
+    }
+  }
+
+  // ── Ingresos (cobros) ─────────────────────────
+  const skipIngresos = !!estadoPagoFilter || !!catFilter || tipoProyFilter === 'empresa'
+  if ((tipoFilter === 'todos' || tipoFilter === 'ingresos') && !skipIngresos) {
+    let query = supabase
+      .from('cobros')
+      .select('id, fecha, monto, notas, created_by_wa_name, proyecto_id, proyectos(nombre, codigo), negocio_id, negocios(nombre, codigo), created_by, created_by_profile:profiles!cobros_created_by_profiles_fkey(full_name), revisado')
+      .eq('workspace_id', workspaceId)
+      .gte('fecha', startDate)
+      .lte('fecha', endDate)
+
     if (proyFilter && proyFilter !== 'empresa') {
       query = query.eq('proyecto_id', proyFilter)
     }
@@ -169,12 +154,8 @@ export async function getMovimientos(filters?: {
       query = query.eq('id', '00000000-0000-0000-0000-000000000000')
     }
     if (createdByFilter) query = query.eq('created_by', createdByFilter)
-    if (estadoCausacionFilter) {
-      query = query.eq('estado_causacion', estadoCausacionFilter)
-    } else {
-      // Hide rejected by default
-      query = query.neq('estado_causacion', 'RECHAZADO')
-    }
+    if (revisadoFiltro === 'pendientes') query = query.eq('revisado', false)
+    if (revisadoFiltro === 'revisados') query = query.eq('revisado', true)
 
     query = query.order('fecha', { ascending: false })
 
@@ -188,7 +169,7 @@ export async function getMovimientos(filters?: {
         id: c.id,
         tipo: 'ingreso',
         tabla: 'cobros',
-        fecha: c.fecha,
+        fecha: c.fecha ?? '',
         monto: Number(c.monto),
         descripcion: c.notas ?? 'Cobro',
         categoria: null,
@@ -204,25 +185,20 @@ export async function getMovimientos(filters?: {
         created_by_initials: getInitials(profile?.full_name ?? c.created_by_wa_name ?? null),
         estado_pago: null,
         fecha_pago: null,
-        estado_causacion: (c.estado_causacion as Movimiento['estado_causacion']) ?? 'PENDIENTE',
-        rechazo_motivo: c.rechazo_motivo ?? null,
+        revisado: c.revisado ?? false,
+        clasificacion_costo: null,
       })
     }
   }
 
-  // Sort by date descending
   results.sort((a, b) => b.fecha.localeCompare(a.fecha))
 
-  // Totals
   const ingresos = results.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0)
   const egresos = results.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0)
-
-  // D142: Deducible total — uses DB field (set by contador in causación)
   const deducible = results
     .filter(m => m.tipo === 'egreso' && m.deducible)
     .reduce((s, m) => s + m.monto, 0)
 
-  // D141: Fiscal regime
   const { data: fiscalProfile } = await supabase
     .from('fiscal_profiles')
     .select('tax_regime')
@@ -274,7 +250,6 @@ export async function marcarComoPagado(gastoId: string, fechaPago?: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Validate gasto belongs to workspace and is pendiente
   const { data: gasto } = await supabase
     .from('gastos')
     .select('id, estado_pago')
@@ -298,206 +273,6 @@ export async function marcarComoPagado(gastoId: string, fechaPago?: string) {
   revalidatePath('/movimientos')
   revalidatePath('/numeros')
   return { success: true }
-}
-
-// ── D246: Aprobar movimiento (PENDIENTE → APROBADO) ────
-
-export async function aprobarMovimiento(tabla: 'gastos' | 'cobros', registroId: string) {
-  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
-  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
-
-  const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para aprobar' }
-
-  // Validate record belongs to workspace and is PENDIENTE
-  let estadoCausacion: string | null = null
-  if (tabla === 'gastos') {
-    const { data } = await supabase.from('gastos').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
-    if (!data) return { success: false, error: 'Registro no encontrado' }
-    estadoCausacion = data.estado_causacion
-  } else {
-    const { data } = await supabase.from('cobros').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
-    if (!data) return { success: false, error: 'Registro no encontrado' }
-    estadoCausacion = data.estado_causacion
-  }
-
-  if (estadoCausacion !== 'PENDIENTE') return { success: false, error: 'Solo se pueden aprobar movimientos PENDIENTES' }
-
-  const updatePayload = {
-    estado_causacion: 'APROBADO' as const,
-    aprobado_por: userId,
-    fecha_aprobacion: new Date().toISOString(),
-  }
-
-  const { error: updateError } = tabla === 'gastos'
-    ? await supabase.from('gastos').update(updatePayload).eq('id', registroId)
-    : await supabase.from('cobros').update(updatePayload).eq('id', registroId)
-
-  if (updateError) return { success: false, error: updateError.message }
-
-  // Log to causaciones_log
-  await supabase.from('causaciones_log').insert({
-    workspace_id: workspaceId,
-    tabla,
-    registro_id: registroId,
-    accion: 'APROBAR',
-    estado_anterior: 'PENDIENTE',
-    estado_nuevo: 'APROBADO',
-    realizado_por: userId,
-  })
-
-  revalidatePath('/movimientos')
-  revalidatePath('/causacion')
-  return { success: true }
-}
-
-// ── D246: Rechazar movimiento (PENDIENTE → RECHAZADO) ──
-
-export async function rechazarMovimiento(tabla: 'gastos' | 'cobros', registroId: string, motivo: string) {
-  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
-  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
-
-  const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para rechazar' }
-
-  if (!motivo || motivo.trim().length === 0) return { success: false, error: 'El motivo es obligatorio' }
-
-  // Validate record belongs to workspace and is PENDIENTE
-  let estadoCausacion: string | null = null
-  if (tabla === 'gastos') {
-    const { data } = await supabase.from('gastos').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
-    if (!data) return { success: false, error: 'Registro no encontrado' }
-    estadoCausacion = data.estado_causacion
-  } else {
-    const { data } = await supabase.from('cobros').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
-    if (!data) return { success: false, error: 'Registro no encontrado' }
-    estadoCausacion = data.estado_causacion
-  }
-
-  if (estadoCausacion !== 'PENDIENTE') return { success: false, error: 'Solo se pueden rechazar movimientos PENDIENTES' }
-
-  const updatePayload = {
-    estado_causacion: 'RECHAZADO' as const,
-    rechazo_motivo: motivo.trim(),
-  }
-
-  const { error: updateError } = tabla === 'gastos'
-    ? await supabase.from('gastos').update(updatePayload).eq('id', registroId)
-    : await supabase.from('cobros').update(updatePayload).eq('id', registroId)
-
-  if (updateError) return { success: false, error: updateError.message }
-
-  // Log to causaciones_log
-  await supabase.from('causaciones_log').insert({
-    workspace_id: workspaceId,
-    tabla,
-    registro_id: registroId,
-    accion: 'RECHAZAR',
-    estado_anterior: 'PENDIENTE',
-    estado_nuevo: 'RECHAZADO',
-    motivo: motivo.trim(),
-    realizado_por: userId,
-  })
-
-  revalidatePath('/movimientos')
-  revalidatePath('/causacion')
-  return { success: true }
-}
-
-// ── Revertir aprobación (APROBADO → RECHAZADO) — solo owner ──
-
-export async function revertirAprobacion(tabla: 'gastos' | 'cobros', registroId: string, motivo: string) {
-  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
-  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
-
-  const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canRevertApproval) return { success: false, error: 'Solo el dueño puede revertir aprobaciones' }
-
-  if (!motivo || motivo.trim().length === 0) return { success: false, error: 'El motivo es obligatorio' }
-
-  // Validate record belongs to workspace and is APROBADO
-  let estadoCausacion: string | null = null
-  if (tabla === 'gastos') {
-    const { data } = await supabase.from('gastos').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
-    if (!data) return { success: false, error: 'Registro no encontrado' }
-    estadoCausacion = data.estado_causacion
-  } else {
-    const { data } = await supabase.from('cobros').select('id, estado_causacion').eq('id', registroId).eq('workspace_id', workspaceId).single()
-    if (!data) return { success: false, error: 'Registro no encontrado' }
-    estadoCausacion = data.estado_causacion
-  }
-
-  if (estadoCausacion !== 'APROBADO') return { success: false, error: 'Solo se pueden revertir movimientos APROBADOS' }
-
-  const updatePayload = {
-    estado_causacion: 'RECHAZADO' as const,
-    rechazo_motivo: motivo.trim(),
-    aprobado_por: null,
-    fecha_aprobacion: null,
-  }
-
-  const { error: updateError } = tabla === 'gastos'
-    ? await supabase.from('gastos').update(updatePayload).eq('id', registroId)
-    : await supabase.from('cobros').update(updatePayload).eq('id', registroId)
-
-  if (updateError) return { success: false, error: updateError.message }
-
-  // Log to causaciones_log
-  await supabase.from('causaciones_log').insert({
-    workspace_id: workspaceId,
-    tabla,
-    registro_id: registroId,
-    accion: 'REVERTIR_APROBACION',
-    estado_anterior: 'APROBADO',
-    estado_nuevo: 'RECHAZADO',
-    motivo: motivo.trim(),
-    realizado_por: userId,
-  })
-
-  revalidatePath('/movimientos')
-  revalidatePath('/causacion')
-  return { success: true }
-}
-
-// ── Aprobar todos los movimientos visibles ────────────────────
-
-export async function aprobarTodos(items: { tabla: 'gastos' | 'cobros'; id: string }[]) {
-  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
-  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado', count: 0 }
-
-  const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para aprobar', count: 0 }
-
-  const updatePayload = {
-    estado_causacion: 'APROBADO' as const,
-    aprobado_por: userId,
-    fecha_aprobacion: new Date().toISOString(),
-  }
-
-  let approved = 0
-
-  for (const item of items) {
-    const { error: updateError } = item.tabla === 'gastos'
-      ? await supabase.from('gastos').update(updatePayload).eq('id', item.id).eq('workspace_id', workspaceId).eq('estado_causacion', 'PENDIENTE')
-      : await supabase.from('cobros').update(updatePayload).eq('id', item.id).eq('workspace_id', workspaceId).eq('estado_causacion', 'PENDIENTE')
-
-    if (!updateError) {
-      approved++
-      await supabase.from('causaciones_log').insert({
-        workspace_id: workspaceId,
-        tabla: item.tabla,
-        registro_id: item.id,
-        accion: 'APROBAR',
-        estado_anterior: 'PENDIENTE',
-        estado_nuevo: 'APROBADO',
-        realizado_por: userId,
-      })
-    }
-  }
-
-  revalidatePath('/movimientos')
-  revalidatePath('/causacion')
-  return { success: true, error: null, count: approved }
 }
 
 // ── Attach soporte to existing gasto ────────────────────────
@@ -539,6 +314,6 @@ export async function attachSoporte(gastoId: string, formData: FormData) {
   if (updateError) return { success: false, error: updateError.message }
 
   revalidatePath('/movimientos')
-  revalidatePath('/causacion')
+  revalidatePath('/revision')
   return { success: true, error: null }
 }

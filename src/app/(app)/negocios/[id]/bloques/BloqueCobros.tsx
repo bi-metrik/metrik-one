@@ -6,7 +6,7 @@ interface Cobro {
   id: string
   concepto: string | null
   monto: number
-  estado_causacion: string
+  revisado: boolean
   tipo_cobro: string | null
   fecha: string | null
   notas: string | null
@@ -36,8 +36,8 @@ const TIPO_LABELS: Record<string, string> = {
 }
 
 function CobroRow({ cobro }: { cobro: Cobro }) {
-  const isPendiente = cobro.estado_causacion === 'PENDIENTE'
-  const isValidado = cobro.estado_causacion === 'CAUSADO' || cobro.estado_causacion === 'APROBADO'
+  const isPendiente = !cobro.revisado
+  const isValidado = cobro.revisado === true
 
   return (
     <div className="flex items-center gap-2 rounded-lg border border-[#E5E7EB] p-2.5">
@@ -77,7 +77,7 @@ function CobroRow({ cobro }: { cobro: Cobro }) {
 }
 
 export default function BloqueCobros({ cobros, precioTotal }: BloqueCobrosProps) {
-  const cobrado = cobros.filter(c => c.estado_causacion === 'CAUSADO' || c.estado_causacion === 'APROBADO')
+  const cobrado = cobros.filter(c => c.revisado === true)
   const totalCobrado = cobrado.reduce((s, c) => s + c.monto, 0)
   const totalRegistrado = cobros.reduce((s, c) => s + c.monto, 0)
   const saldoPendiente = precioTotal - totalRegistrado
@@ -118,7 +118,7 @@ export default function BloqueCobros({ cobros, precioTotal }: BloqueCobrosProps)
       )}
 
       {/* Indicador de pendientes */}
-      {cobros.some(c => c.estado_causacion === 'PENDIENTE') && (
+      {cobros.some(c => !c.revisado) && (
         <div className="flex items-center gap-1.5 text-[10px] text-[#6B7280]">
           <Clock className="h-3 w-3" />
           <span>Aprobación desde Movimientos</span>

@@ -106,7 +106,6 @@ export async function registrarPagoEpayco(
         notas: tipoCobro === 'anticipo' ? 'Anticipo' : 'Pago',
         monto: desglose.monto_bruto,
         tipo_cobro: tipoCobro,
-        estado_causacion: 'PENDIENTE',
         fecha: new Date().toISOString().split('T')[0],
         external_ref: String(desglose.ref_payco),
       }
@@ -134,7 +133,6 @@ export async function registrarPagoEpayco(
         categoria: 'servicios_profesionales',
         descripcion: `Comision ePayco — Ref ${desglose.ref_payco}`,
         tipo: 'operativo',
-        estado_causacion: 'PENDIENTE',
         external_ref: gastoRef,
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

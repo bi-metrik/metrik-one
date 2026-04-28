@@ -142,7 +142,6 @@ export async function moveProyectoVe(
         monto: saldo,
         tipo_cobro: 'saldo',
         notas: 'Saldo VE — Pendiente de cobro',
-        estado_causacion: 'PENDIENTE',
       })
     }
   }

@@ -5,7 +5,7 @@ import Link from 'next/link'
 
 /** Landing page based on role permissions */
 function getLandingForRole(role: string): string {
-  if (role === 'contador') return '/causacion'
+  if (role === 'contador') return '/revision'
   const rolesWithNumbers = ['owner', 'admin', 'supervisor', 'read_only']
   if (rolesWithNumbers.includes(role)) return '/numeros'
   return '/pipeline'

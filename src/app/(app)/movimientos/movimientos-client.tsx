@@ -9,7 +9,8 @@ import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
 import { toast } from 'sonner'
 import { getRolePermissions } from '@/lib/roles'
 import type { Movimiento } from './actions'
-import { marcarComoPagado, aprobarMovimiento, rechazarMovimiento, revertirAprobacion, aprobarTodos, attachSoporte } from './actions'
+import { marcarComoPagado, attachSoporte } from './actions'
+import { marcarRevisado, desmarcarRevisado } from '../revision/actions'
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -41,7 +42,7 @@ interface Props {
   filtroProy: string
   filtroTipoProy: string
   filtroEstadoPago: string
-  filtroEstadoCausacion: string
+  filtroRevisado: string
   filtroCreatedBy: string
   regimenFiscal: string | null
   proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
@@ -84,7 +85,7 @@ const CAUSACION_BADGES: Record<string, { label: string; className: string } | nu
 export default function MovimientosClient({
   movimientos, totales, filtroTipo, filtroMes,
   filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago,
-  filtroEstadoCausacion, filtroCreatedBy, regimenFiscal, proyectos, miembros, role,
+  filtroRevisado, filtroCreatedBy, regimenFiscal, proyectos, miembros, role,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -167,7 +168,7 @@ export default function MovimientosClient({
   const [showFilters, setShowFilters] = useState(false)
 
   // Count active filters (excluding 'todos')
-  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago, filtroEstadoCausacion, filtroCreatedBy].filter(f => f !== 'todos').length
+  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago, filtroRevisado, filtroCreatedBy].filter(f => f !== 'todos').length
 
   // Auto-open filters if any are active
   useEffect(() => {
@@ -218,7 +219,7 @@ export default function MovimientosClient({
     params.delete('proy')
     params.delete('tipoProy')
     params.delete('estadoPago')
-    params.delete('estadoCausacion')
+    params.delete('revisado')
     params.delete('createdBy')
     router.push(`/movimientos?${params.toString()}`)
   }
@@ -246,9 +247,9 @@ export default function MovimientosClient({
   }
 
   // D246: Aprobar handler
-  function handleAprobar(tabla: 'gastos' | 'cobros', id: string) {
+  function handleMarcarRevisado(tabla: 'gastos' | 'cobros', id: string) {
     startTransition(async () => {
-      const res = await aprobarMovimiento(tabla, id)
+      const res = await marcarRevisado(id, tabla)
       if (res.success) {
         toast.success('Movimiento aprobado')
         router.refresh()
@@ -259,14 +260,14 @@ export default function MovimientosClient({
   }
 
   // D246: Rechazar handler
-  function handleRechazar() {
+  function handleDesmarcarPorRechazo() {
     if (!rechazoModal) return
     if (!rechazoMotivo.trim()) {
       toast.error('El motivo es obligatorio')
       return
     }
     startTransition(async () => {
-      const res = await rechazarMovimiento(rechazoModal.tabla, rechazoModal.id, rechazoMotivo)
+      const res = await desmarcarRevisado(rechazoModal.id, rechazoModal.tabla)
       if (res.success) {
         toast.success('Movimiento rechazado')
         setRechazoModal(null)
@@ -279,14 +280,14 @@ export default function MovimientosClient({
   }
 
   // Revertir aprobación handler (owner only)
-  function handleRevertir() {
+  function handleDesmarcarPorRevertir() {
     if (!revertModal) return
     if (!revertMotivo.trim()) {
       toast.error('El motivo es obligatorio')
       return
     }
     startTransition(async () => {
-      const res = await revertirAprobacion(revertModal.tabla, revertModal.id, revertMotivo)
+      const res = await desmarcarRevisado(revertModal.id, revertModal.tabla)
       if (res.success) {
         toast.success('Aprobacion revertida')
         setRevertModal(null)
@@ -298,20 +299,19 @@ export default function MovimientosClient({
     })
   }
 
-  // Pendientes visibles (for bulk approve)
-  const pendientesVisibles = movimientos.filter(m => m.estado_causacion === 'PENDIENTE')
+  // No-revisados visibles (for bulk mark as reviewed)
+  const pendientesVisibles = movimientos.filter(m => !m.revisado)
 
   function handleAprobarTodos() {
     if (pendientesVisibles.length === 0) return
     startTransition(async () => {
-      const items = pendientesVisibles.map(m => ({ tabla: m.tabla, id: m.id }))
-      const res = await aprobarTodos(items)
-      if (res.success) {
-        toast.success(`${res.count} movimientos aprobados`)
-        router.refresh()
-      } else {
-        toast.error(res.error)
+      let approved = 0
+      for (const m of pendientesVisibles) {
+        const res = await marcarRevisado(m.id, m.tabla)
+        if (res.success) approved++
       }
+      toast.success(`${approved} movimientos marcados como revisados`)
+      router.refresh()
     })
   }
 
@@ -464,8 +464,8 @@ export default function MovimientosClient({
 
             {/* D246: Estado contable filter */}
             <select
-              value={filtroEstadoCausacion}
-              onChange={e => navigate('estadoCausacion', e.target.value)}
+              value={filtroRevisado}
+              onChange={e => navigate('revisado', e.target.value)}
               className="rounded-md border bg-background px-2 py-1.5 text-xs"
             >
               <option value="todos">Estado contable</option>
@@ -504,7 +504,7 @@ export default function MovimientosClient({
       )}
 
       {/* Aprobar todo button */}
-      {perms.canApproveCausacion && pendientesVisibles.length > 0 && (
+      {perms.canMarcarRevisado && pendientesVisibles.length > 0 && (
         <button
           onClick={handleAprobarTodos}
           disabled={isPending}
@@ -632,17 +632,13 @@ export default function MovimientosClient({
                           {/* Line 3: Status badges */}
                           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                             {/* D246: Causación badge — only show RECHAZADO (PENDIENTE/APROBADO are redundant with action buttons) */}
-                            {mov.estado_causacion === 'RECHAZADO' && (
+                            {false && (
                               <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                                 <XCircle className="h-2.5 w-2.5" />
                                 Rechazado
                               </span>
                             )}
-                            {mov.estado_causacion === 'RECHAZADO' && mov.rechazo_motivo && (
-                              <span className="text-[10px] text-muted-foreground italic truncate max-w-[120px]" title={mov.rechazo_motivo}>
-                                {mov.rechazo_motivo}
-                              </span>
-                            )}
+                            {/* rechazo_motivo eliminado en refactor 2026-04-27 */}
 
                             {/* Tipo gasto badge */}
                             {mov.tipo === 'egreso' && mov.tipo_gasto && (
@@ -745,12 +741,12 @@ export default function MovimientosClient({
                           </div>
 
                           {/* Line 4: Action buttons — visually separated */}
-                          {((perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE') || mov.estado_pago === 'pendiente' || (perms.canRevertApproval && mov.estado_causacion === 'APROBADO')) && (
+                          {((perms.canMarcarRevisado && !mov.revisado) || mov.estado_pago === 'pendiente' || (perms.canMarcarRevisado && mov.revisado)) && (
                             <div className="mt-2 flex items-center gap-2 border-t pt-2">
                               {/* D246: Aprobar */}
-                              {perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE' && (
+                              {perms.canMarcarRevisado && !mov.revisado && (
                                 <button
-                                  onClick={() => handleAprobar(mov.tabla, mov.id)}
+                                  onClick={() => handleMarcarRevisado(mov.tabla, mov.id)}
                                   disabled={isPending}
                                   className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50"
                                   title="Aprobar movimiento"
@@ -761,7 +757,7 @@ export default function MovimientosClient({
                               )}
 
                               {/* D246: Rechazar */}
-                              {perms.canApproveCausacion && mov.estado_causacion === 'PENDIENTE' && (
+                              {perms.canMarcarRevisado && !mov.revisado && (
                                 <button
                                   onClick={() => {
                                     setRechazoModal({ tabla: mov.tabla, id: mov.id, descripcion: mov.descripcion })
@@ -792,7 +788,7 @@ export default function MovimientosClient({
                               )}
 
                               {/* Revertir aprobación — solo owner */}
-                              {perms.canRevertApproval && mov.estado_causacion === 'APROBADO' && (
+                              {perms.canMarcarRevisado && mov.revisado && (
                                 <button
                                   onClick={() => {
                                     setRevertModal({ tabla: mov.tabla, id: mov.id, descripcion: mov.descripcion, monto: mov.monto })
@@ -911,7 +907,7 @@ export default function MovimientosClient({
                   Cancelar
                 </button>
                 <button
-                  onClick={handleRechazar}
+                  onClick={handleDesmarcarPorRechazo}
                   disabled={isPending || !rechazoMotivo.trim()}
                   className="flex-1 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
                 >
@@ -964,7 +960,7 @@ export default function MovimientosClient({
                   Cancelar
                 </button>
                 <button
-                  onClick={handleRevertir}
+                  onClick={handleDesmarcarPorRevertir}
                   disabled={isPending || !revertMotivo.trim()}
                   className="flex-1 rounded-md bg-gradient-to-r from-amber-500 to-amber-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 transition-all"
                 >

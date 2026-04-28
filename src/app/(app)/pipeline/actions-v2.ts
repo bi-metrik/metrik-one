@@ -596,7 +596,6 @@ export async function ganarOportunidad(id: string, fiscalData?: {
       tipo_cobro: 'anticipo',
       external_ref: anticipoRef,
       notas: `Anticipo VE — Ref. Epayco: ${anticipoRef}`,
-      estado_causacion: 'PENDIENTE',
     })
   }
 
@@ -817,7 +816,7 @@ export interface ProyectoVinculadoCobro {
   monto: number
   tipo_cobro: string
   notas: string | null
-  estado_causacion: string
+  revisado: boolean
 }
 
 export interface ProyectoVinculadoFinanciero {
@@ -854,9 +853,8 @@ export async function getProyectoVinculado(oportunidadId: string): Promise<Proye
 
   // Fetch financial summary + cobros en paralelo
   // cobros.tipo_cobro y workspaces.proyecto_modules se agregan via migrations 20260404000002/3
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobrosQuery = (supabase.from('cobros') as any)
-    .select('id, fecha, monto, tipo_cobro, notas, estado_causacion')
+  const cobrosQuery = supabase.from('cobros')
+    .select('id, fecha, monto, tipo_cobro, notas, revisado')
     .eq('proyecto_id', data.id)
     .order('fecha', { ascending: true })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -872,7 +870,7 @@ export async function getProyectoVinculado(oportunidadId: string): Promise<Proye
       .eq('proyecto_id', data.id)
       .eq('workspace_id', workspaceId)
       .single(),
-    cobrosQuery as Promise<{ data: { id: string; fecha: string | null; monto: number | null; tipo_cobro: string | null; notas: string | null; estado_causacion: string | null }[] | null; error: unknown }>,
+    cobrosQuery,
     workspaceQuery as Promise<{ data: { proyecto_modules: Record<string, boolean> | null } | null; error: unknown }>,
   ])
 
@@ -887,10 +885,10 @@ export async function getProyectoVinculado(oportunidadId: string): Promise<Proye
   const cobros = (cobrosRes.data ?? []).map(c => ({
     id: c.id,
     fecha: c.fecha ?? '',
-    monto: c.monto ?? 0,
+    monto: Number(c.monto ?? 0),
     tipo_cobro: (c.tipo_cobro as string | null) ?? 'regular',
     notas: c.notas ?? null,
-    estado_causacion: c.estado_causacion ?? 'PENDIENTE',
+    revisado: c.revisado ?? false,
   }))
 
   const proyectoModules = (workspaceRes.data?.proyecto_modules as Record<string, boolean> | null) ?? {}

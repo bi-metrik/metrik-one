@@ -1204,7 +1204,7 @@ export async function cambiarEtapaNegocioConGate(
           .select('monto')
           .eq('negocio_id', negocioId)
           .eq('workspace_id', workspaceId)
-          .in('estado_causacion', ['APROBADO', 'CAUSADO']),
+          ,
       ])
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const negPrecio = negPrecioRes.data as any
@@ -1236,7 +1236,7 @@ export async function cambiarEtapaNegocioConGate(
     if (destStage?.stage === 'cobro') {
       const [negPrecioRes, cobrosSkipRes] = await Promise.all([
         db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-        supabase.from('cobros').select('monto').eq('negocio_id', negocioId).in('estado_causacion', ['APROBADO', 'CAUSADO']),
+        supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
       ])
       const negPrecio = negPrecioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
       const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
@@ -1689,7 +1689,6 @@ export async function autoCrearCobros(
     notas: 'Anticipo',
     monto: valorAnticipo,
     tipo_cobro: 'anticipo',
-    estado_causacion: 'PENDIENTE',
     fecha: new Date().toISOString().split('T')[0],
     external_ref: referenciaEpayco ?? null,
   }
@@ -1735,8 +1734,7 @@ export async function autoCrearCobrosMulti(
       notas: 'Pago',
       monto: p.valor_pago,
       tipo_cobro: 'pago',
-      estado_causacion: 'PENDIENTE',
-      fecha: new Date().toISOString().split('T')[0],
+        fecha: new Date().toISOString().split('T')[0],
       external_ref: p.referencia_epayco,
     }))
 
@@ -1834,7 +1832,7 @@ export async function reevaluarBloquesCobros(
       .from('cobros')
       .select('monto')
       .eq('negocio_id', negocioId)
-      .in('estado_causacion', ['APROBADO', 'CAUSADO']),
+      ,
   ])
 
   const neg = negocioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
@@ -1955,7 +1953,8 @@ export async function confirmarPagoCobro(
     .single()
 
   const payload: Record<string, unknown> = {
-    estado_causacion: 'APROBADO',
+    revisado: true,
+    revisado_at: new Date().toISOString(),
     notas: referencia ? `Ref: ${referencia}` : undefined,
   }
   if (valorParcial) payload.monto = valorParcial
@@ -2171,7 +2170,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     id: string
     concepto: string | null
     monto: number
-    estado_causacion: string
+    revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
     notas: string | null
@@ -2196,7 +2195,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   historialData: {
     gastos: Array<{ id: string; descripcion: string | null; monto: number; categoria: string; fecha: string }>
     horas: Array<{ id: string; descripcion: string | null; horas: number; fecha: string; staff_nombre: string | null }>
-    cobros: Array<{ id: string; notas: string | null; monto: number; fecha: string | null; estado_causacion: string; tipo_cobro: string | null }>
+    cobros: Array<{ id: string; notas: string | null; monto: number; fecha: string | null; revisado: boolean; tipo_cobro: string | null }>
   }
   actividad: Array<{
     id: string
@@ -2283,7 +2282,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Cargar cobros del negocio (db() para evitar type errors en columnas nuevas)
   const { data: cobrosData } = await db(supabase)
     .from('cobros')
-    .select('id, notas, monto, estado_causacion, tipo_cobro, fecha, external_ref')
+    .select('id, notas, monto, revisado, tipo_cobro, fecha, external_ref')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', id)
     .order('created_at', { ascending: true })
@@ -2391,13 +2390,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cobrosList = ((cobrosData ?? []) as any[]) as Array<{
     monto: number
-    estado_causacion: string
+    revisado: boolean
   }>
   const totalCobrado = cobrosList
-    .filter(c => c.estado_causacion === 'CAUSADO' || c.estado_causacion === 'APROBADO')
+    .filter(c => c.revisado === true)
     .reduce((sum, c) => sum + (c.monto ?? 0), 0)
   const porCobrar = cobrosList
-    .filter(c => c.estado_causacion === 'PENDIENTE')
+    .filter(c => c.revisado === false)
     .reduce((sum, c) => sum + (c.monto ?? 0), 0)
 
   // ── Cross-etapa data for conditions + auto_fill ────────────────────────────
@@ -2512,7 +2511,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       id: c.id as string,
       concepto: c.notas as string | null,
       monto: c.monto as number,
-      estado_causacion: c.estado_causacion as string,
+      revisado: (c.revisado as boolean | null) ?? false,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tipo_cobro: (c as any).tipo_cobro as string | null,
       fecha: c.fecha as string | null,
@@ -2600,7 +2599,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         notas: c.notas as string | null,
         monto: c.monto as number,
         fecha: c.fecha as string | null,
-        estado_causacion: c.estado_causacion as string,
+        revisado: (c.revisado as boolean | null) ?? false,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tipo_cobro: (c as any).tipo_cobro as string | null,
       })),
@@ -3025,16 +3024,16 @@ export async function completarNegocio(
   // Calcular snapshot financiero: buscar cobros del negocio
   const { data: cobrosData } = await db(supabase)
     .from('cobros')
-    .select('monto, estado_causacion')
+    .select('monto, revisado')
     .eq('negocio_id', negocioId)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number; estado_causacion: string }>
+  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number; revisado: boolean }>
   const totalCobrado = cobros
-    .filter(c => c.estado_causacion === 'CAUSADO' || c.estado_causacion === 'APROBADO')
+    .filter(c => c.revisado === true)
     .reduce((sum, c) => sum + (c.monto ?? 0), 0)
   const pendiente = cobros
-    .filter(c => c.estado_causacion === 'PENDIENTE')
+    .filter(c => c.revisado === false)
     .reduce((sum, c) => sum + (c.monto ?? 0), 0)
   const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
 

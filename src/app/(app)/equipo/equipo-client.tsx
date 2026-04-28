@@ -53,8 +53,8 @@ export default function EquipoClient({
   const [staffProfileOpen, setStaffProfileOpen] = useState(false)
 
   const perms = getRolePermissions(role)
-  const canApprove = perms.canApproveCausacion
-  const canRevert = perms.canRevertApproval
+  const canApprove = perms.canMarcarRevisado
+  const canRevert = perms.canMarcarRevisado
 
   // ── Navigation ──────────────────────────────────────
 

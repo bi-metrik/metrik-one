@@ -794,11 +794,10 @@ export default function OportunidadDetail({
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
                       <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                        c.estado_causacion === 'PENDIENTE' ? 'bg-orange-100 text-orange-700' :
-                        c.estado_causacion === 'APROBADO'  ? 'bg-green-100 text-green-700' :
-                        'bg-slate-100 text-slate-600'
+                        c.revisado ? 'bg-green-100 text-green-700' :
+                        'bg-orange-100 text-orange-700'
                       }`}>
-                        {c.estado_causacion === 'PENDIENTE' ? 'Pendiente' : c.estado_causacion === 'APROBADO' ? 'Aprobado' : c.estado_causacion}
+                        {c.revisado ? 'Revisado' : 'Pendiente'}
                       </span>
                       <span className="text-sm font-semibold tabular-nums">{formatCOP(c.monto)}</span>
                     </div>

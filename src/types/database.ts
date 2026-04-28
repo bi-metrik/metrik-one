@@ -84,6 +84,210 @@ export type Database = {
           },
         ]
       }
+      admin_proceso_etapas: {
+        Row: {
+          bloques: Json
+          created_at: string | null
+          descripcion: string | null
+          fase: string
+          gates_entrada: Json
+          id: string
+          inputs: Json
+          linea: string
+          nombre: string
+          notas: string | null
+          orden: number
+          outputs: Json
+          paralelo_con: string[] | null
+          skill_estado: string
+          skill_name: string | null
+          slug: string
+          updated_at: string | null
+        }
+        Insert: {
+          bloques?: Json
+          created_at?: string | null
+          descripcion?: string | null
+          fase: string
+          gates_entrada?: Json
+          id?: string
+          inputs?: Json
+          linea?: string
+          nombre: string
+          notas?: string | null
+          orden: number
+          outputs?: Json
+          paralelo_con?: string[] | null
+          skill_estado?: string
+          skill_name?: string | null
+          slug: string
+          updated_at?: string | null
+        }
+        Update: {
+          bloques?: Json
+          created_at?: string | null
+          descripcion?: string | null
+          fase?: string
+          gates_entrada?: Json
+          id?: string
+          inputs?: Json
+          linea?: string
+          nombre?: string
+          notas?: string | null
+          orden?: number
+          outputs?: Json
+          paralelo_con?: string[] | null
+          skill_estado?: string
+          skill_name?: string | null
+          slug?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      admin_skills: {
+        Row: {
+          allowed_tools: string[] | null
+          argument_hint: string | null
+          contenido: string | null
+          created_at: string | null
+          descripcion: string | null
+          disable_model_invocation: boolean | null
+          effort: string | null
+          id: string
+          nombre: string
+          skill_id: string | null
+          tipo: number | null
+          ultima_sync: string | null
+          updated_at: string | null
+          user_invocable: boolean | null
+        }
+        Insert: {
+          allowed_tools?: string[] | null
+          argument_hint?: string | null
+          contenido?: string | null
+          created_at?: string | null
+          descripcion?: string | null
+          disable_model_invocation?: boolean | null
+          effort?: string | null
+          id?: string
+          nombre: string
+          skill_id?: string | null
+          tipo?: number | null
+          ultima_sync?: string | null
+          updated_at?: string | null
+          user_invocable?: boolean | null
+        }
+        Update: {
+          allowed_tools?: string[] | null
+          argument_hint?: string | null
+          contenido?: string | null
+          created_at?: string | null
+          descripcion?: string | null
+          disable_model_invocation?: boolean | null
+          effort?: string | null
+          id?: string
+          nombre?: string
+          skill_id?: string | null
+          tipo?: number | null
+          ultima_sync?: string | null
+          updated_at?: string | null
+          user_invocable?: boolean | null
+        }
+        Relationships: []
+      }
+      admin_workflows: {
+        Row: {
+          autor_proceso: string | null
+          autor_tecnico: string | null
+          basado_en: string | null
+          cliente_nombre: string | null
+          cliente_slug: string
+          created_at: string | null
+          estado: string | null
+          fase_cubierta: string[] | null
+          fase_detallada: string | null
+          fecha_actualizacion: string | null
+          html_storage_path: string
+          id: string
+          linea_negocio: string
+          linea_negocio_cliente: string | null
+          metadata: Json | null
+          nombre_flujo: string
+          numero_flujo: number | null
+          owner_calidad: string | null
+          pdf_storage_path: string | null
+          proyecto_slug: string
+          tags: string[] | null
+          tiene_condicionales: boolean | null
+          tipo_proceso: string | null
+          total_bloques: number | null
+          total_etapas: number | null
+          total_fases: number | null
+          updated_at: string | null
+          version: number
+        }
+        Insert: {
+          autor_proceso?: string | null
+          autor_tecnico?: string | null
+          basado_en?: string | null
+          cliente_nombre?: string | null
+          cliente_slug: string
+          created_at?: string | null
+          estado?: string | null
+          fase_cubierta?: string[] | null
+          fase_detallada?: string | null
+          fecha_actualizacion?: string | null
+          html_storage_path: string
+          id?: string
+          linea_negocio: string
+          linea_negocio_cliente?: string | null
+          metadata?: Json | null
+          nombre_flujo: string
+          numero_flujo?: number | null
+          owner_calidad?: string | null
+          pdf_storage_path?: string | null
+          proyecto_slug: string
+          tags?: string[] | null
+          tiene_condicionales?: boolean | null
+          tipo_proceso?: string | null
+          total_bloques?: number | null
+          total_etapas?: number | null
+          total_fases?: number | null
+          updated_at?: string | null
+          version?: number
+        }
+        Update: {
+          autor_proceso?: string | null
+          autor_tecnico?: string | null
+          basado_en?: string | null
+          cliente_nombre?: string | null
+          cliente_slug?: string
+          created_at?: string | null
+          estado?: string | null
+          fase_cubierta?: string[] | null
+          fase_detallada?: string | null
+          fecha_actualizacion?: string | null
+          html_storage_path?: string
+          id?: string
+          linea_negocio?: string
+          linea_negocio_cliente?: string | null
+          metadata?: Json | null
+          nombre_flujo?: string
+          numero_flujo?: number | null
+          owner_calidad?: string | null
+          pdf_storage_path?: string | null
+          proyecto_slug?: string
+          tags?: string[] | null
+          tiene_condicionales?: boolean | null
+          tipo_proceso?: string | null
+          total_bloques?: number | null
+          total_etapas?: number | null
+          total_fases?: number | null
+          updated_at?: string | null
+          version?: number
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string
@@ -437,55 +641,23 @@ export type Database = {
           },
         ]
       }
-      causaciones_log: {
+      categoria_clasificacion_default: {
         Row: {
-          accion: string
-          created_at: string | null
-          datos: Json | null
-          estado_anterior: string
-          estado_nuevo: string
-          id: string
-          motivo: string | null
-          realizado_por: string
-          registro_id: string
-          tabla: string
-          workspace_id: string
+          categoria: string
+          clasificacion_default: string
+          updated_at: string | null
         }
         Insert: {
-          accion: string
-          created_at?: string | null
-          datos?: Json | null
-          estado_anterior: string
-          estado_nuevo: string
-          id?: string
-          motivo?: string | null
-          realizado_por: string
-          registro_id: string
-          tabla: string
-          workspace_id: string
+          categoria: string
+          clasificacion_default: string
+          updated_at?: string | null
         }
         Update: {
-          accion?: string
-          created_at?: string | null
-          datos?: Json | null
-          estado_anterior?: string
-          estado_nuevo?: string
-          id?: string
-          motivo?: string | null
-          realizado_por?: string
-          registro_id?: string
-          tabla?: string
-          workspace_id?: string
+          categoria?: string
+          clasificacion_default?: string
+          updated_at?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "causaciones_log_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       clients: {
         Row: {
@@ -569,101 +741,68 @@ export type Database = {
       }
       cobros: {
         Row: {
-          alegra_id: string | null
-          aprobado_por: string | null
           canal_registro: string | null
-          causado_por: string | null
-          centro_costo: string | null
           created_at: string | null
           created_by: string | null
           created_by_wa_name: string | null
-          cuenta_contable: string | null
-          enviado_alegra: boolean | null
-          estado_causacion: string
           external_ref: string | null
           factura_id: string | null
           fecha: string
-          fecha_aprobacion: string | null
-          fecha_causacion: string | null
-          fecha_envio_alegra: string | null
           id: string
           mensaje_original: string | null
           monto: number
           negocio_id: string | null
           notas: string | null
-          notas_causacion: string | null
           proyecto_id: string | null
-          rechazo_motivo: string | null
-          retencion_aplicada: number | null
-          retenciones: Json | null
+          retencion: number | null
+          revisado: boolean
+          revisado_at: string | null
+          revisado_por: string | null
           tercero_nit: string | null
-          tercero_razon_social: string | null
           tipo_cobro: string | null
           workspace_id: string
         }
         Insert: {
-          alegra_id?: string | null
-          aprobado_por?: string | null
           canal_registro?: string | null
-          causado_por?: string | null
-          centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
           created_by_wa_name?: string | null
-          cuenta_contable?: string | null
-          enviado_alegra?: boolean | null
-          estado_causacion?: string
           external_ref?: string | null
           factura_id?: string | null
           fecha?: string
-          fecha_aprobacion?: string | null
-          fecha_causacion?: string | null
-          fecha_envio_alegra?: string | null
           id?: string
           mensaje_original?: string | null
           monto: number
           negocio_id?: string | null
           notas?: string | null
-          notas_causacion?: string | null
           proyecto_id?: string | null
-          rechazo_motivo?: string | null
-          retencion_aplicada?: number | null
-          retenciones?: Json | null
+          retencion?: number | null
+          revisado?: boolean
+          revisado_at?: string | null
+          revisado_por?: string | null
           tercero_nit?: string | null
-          tercero_razon_social?: string | null
           tipo_cobro?: string | null
           workspace_id: string
         }
         Update: {
-          alegra_id?: string | null
-          aprobado_por?: string | null
           canal_registro?: string | null
-          causado_por?: string | null
-          centro_costo?: string | null
           created_at?: string | null
           created_by?: string | null
           created_by_wa_name?: string | null
-          cuenta_contable?: string | null
-          enviado_alegra?: boolean | null
-          estado_causacion?: string
           external_ref?: string | null
           factura_id?: string | null
           fecha?: string
-          fecha_aprobacion?: string | null
-          fecha_causacion?: string | null
-          fecha_envio_alegra?: string | null
           id?: string
           mensaje_original?: string | null
           monto?: number
           negocio_id?: string | null
           notas?: string | null
-          notas_causacion?: string | null
           proyecto_id?: string | null
-          rechazo_motivo?: string | null
-          retencion_aplicada?: number | null
-          retenciones?: Json | null
+          retencion?: number | null
+          revisado?: boolean
+          revisado_at?: string | null
+          revisado_por?: string | null
           tercero_nit?: string | null
-          tercero_razon_social?: string | null
           tipo_cobro?: string | null
           workspace_id?: string
         }
@@ -695,6 +834,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "negocios"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cobros_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
           },
           {
             foreignKeyName: "cobros_proyecto_id_fkey"
@@ -1136,6 +1282,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "negocios"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cotizaciones_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
           },
           {
             foreignKeyName: "cotizaciones_oportunidad_id_fkey"
@@ -1883,125 +2036,95 @@ export type Database = {
       }
       gastos: {
         Row: {
-          alegra_id: string | null
-          aprobado_por: string | null
           canal_registro: string | null
           categoria: string
-          causado_por: string | null
-          centro_costo: string | null
+          clasificacion_costo: string
           created_at: string | null
           created_by: string | null
           created_by_wa_name: string | null
-          cuenta_contable: string | null
           deducible: boolean | null
           descripcion: string | null
           empresa_id: string | null
-          enviado_alegra: boolean | null
-          estado_causacion: string
           estado_pago: string | null
           external_ref: string | null
           fecha: string
-          fecha_aprobacion: string | null
-          fecha_causacion: string | null
-          fecha_envio_alegra: string | null
           fecha_pago: string | null
           gasto_fijo_ref_id: string | null
           id: string
           mensaje_original: string | null
           monto: number
           negocio_id: string | null
-          notas_causacion: string | null
           proyecto_id: string | null
-          rechazo_motivo: string | null
-          retencion_aplicada: number | null
-          retenciones: Json | null
+          retencion: number | null
+          revisado: boolean
+          revisado_at: string | null
+          revisado_por: string | null
           rubro_id: string | null
           soporte_pendiente: boolean | null
           soporte_url: string | null
           tercero_nit: string | null
-          tercero_razon_social: string | null
           tipo: string | null
           workspace_id: string
         }
         Insert: {
-          alegra_id?: string | null
-          aprobado_por?: string | null
           canal_registro?: string | null
           categoria: string
-          causado_por?: string | null
-          centro_costo?: string | null
+          clasificacion_costo?: string
           created_at?: string | null
           created_by?: string | null
           created_by_wa_name?: string | null
-          cuenta_contable?: string | null
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
-          enviado_alegra?: boolean | null
-          estado_causacion?: string
           estado_pago?: string | null
           external_ref?: string | null
           fecha?: string
-          fecha_aprobacion?: string | null
-          fecha_causacion?: string | null
-          fecha_envio_alegra?: string | null
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
           mensaje_original?: string | null
           monto: number
           negocio_id?: string | null
-          notas_causacion?: string | null
           proyecto_id?: string | null
-          rechazo_motivo?: string | null
-          retencion_aplicada?: number | null
-          retenciones?: Json | null
+          retencion?: number | null
+          revisado?: boolean
+          revisado_at?: string | null
+          revisado_por?: string | null
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
           tercero_nit?: string | null
-          tercero_razon_social?: string | null
           tipo?: string | null
           workspace_id: string
         }
         Update: {
-          alegra_id?: string | null
-          aprobado_por?: string | null
           canal_registro?: string | null
           categoria?: string
-          causado_por?: string | null
-          centro_costo?: string | null
+          clasificacion_costo?: string
           created_at?: string | null
           created_by?: string | null
           created_by_wa_name?: string | null
-          cuenta_contable?: string | null
           deducible?: boolean | null
           descripcion?: string | null
           empresa_id?: string | null
-          enviado_alegra?: boolean | null
-          estado_causacion?: string
           estado_pago?: string | null
           external_ref?: string | null
           fecha?: string
-          fecha_aprobacion?: string | null
-          fecha_causacion?: string | null
-          fecha_envio_alegra?: string | null
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
           id?: string
           mensaje_original?: string | null
           monto?: number
           negocio_id?: string | null
-          notas_causacion?: string | null
           proyecto_id?: string | null
-          rechazo_motivo?: string | null
-          retencion_aplicada?: number | null
-          retenciones?: Json | null
+          retencion?: number | null
+          revisado?: boolean
+          revisado_at?: string | null
+          revisado_por?: string | null
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
           tercero_nit?: string | null
-          tercero_razon_social?: string | null
           tipo?: string | null
           workspace_id?: string
         }
@@ -2061,6 +2184,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "negocios"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gastos_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
           },
           {
             foreignKeyName: "gastos_proyecto_id_fkey"
@@ -2193,6 +2323,72 @@ export type Database = {
           },
         ]
       }
+      generaciones_log: {
+        Row: {
+          docs_generados: Json | null
+          drive_folder_url: string | null
+          duration_ms: number | null
+          ejecutada_at: string | null
+          error_message: string | null
+          id: string
+          logo_storage_path: string | null
+          negocio_id: string
+          oficial_data: Json | null
+          productos_contratados: Json | null
+          rut_extraction: Json | null
+          status: string | null
+          version_motor: string | null
+          version_templates: string | null
+        }
+        Insert: {
+          docs_generados?: Json | null
+          drive_folder_url?: string | null
+          duration_ms?: number | null
+          ejecutada_at?: string | null
+          error_message?: string | null
+          id?: string
+          logo_storage_path?: string | null
+          negocio_id: string
+          oficial_data?: Json | null
+          productos_contratados?: Json | null
+          rut_extraction?: Json | null
+          status?: string | null
+          version_motor?: string | null
+          version_templates?: string | null
+        }
+        Update: {
+          docs_generados?: Json | null
+          drive_folder_url?: string | null
+          duration_ms?: number | null
+          ejecutada_at?: string | null
+          error_message?: string | null
+          id?: string
+          logo_storage_path?: string | null
+          negocio_id?: string
+          oficial_data?: Json | null
+          productos_contratados?: Json | null
+          rut_extraction?: Json | null
+          status?: string | null
+          version_motor?: string | null
+          version_templates?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generaciones_log_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generaciones_log_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+        ]
+      }
       health_scores: {
         Row: {
           actions_per_week: number | null
@@ -2311,6 +2507,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "negocios"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "horas_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
           },
           {
             foreignKeyName: "horas_proyecto_id_fkey"
@@ -2637,6 +2840,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "negocios"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocio_bloques_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
           },
         ]
       }
@@ -4284,6 +4494,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "riesgos_controles_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
             foreignKeyName: "riesgos_controles_responsable_id_fkey"
             columns: ["responsable_id"]
             isOneToOne: false
@@ -4930,6 +5147,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "timer_activo_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
             foreignKeyName: "timer_activo_proyecto_id_fkey"
             columns: ["proyecto_id"]
             isOneToOne: false
@@ -5367,6 +5591,31 @@ export type Database = {
           },
         ]
       }
+      v_mc_negocio: {
+        Row: {
+          costos_variables: number | null
+          estado: string | null
+          gastos_count: number | null
+          mc: number | null
+          mc_pct: number | null
+          negocio_codigo: string | null
+          negocio_id: string | null
+          negocio_nombre: string | null
+          precio_aprobado: number | null
+          precio_estimado: number | null
+          stage_actual: string | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "negocios_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_proyecto_financiero: {
         Row: {
           avance_calculado: number | null
@@ -5464,6 +5713,21 @@ export type Database = {
             referencedColumns: ["proyecto_id"]
           },
         ]
+      }
+      v_pyl_mes: {
+        Row: {
+          costos_variables: number | null
+          ebitda: number | null
+          fijos_gastos_mes: number | null
+          fijos_recurrentes: number | null
+          fijos_total: number | null
+          ingresos: number | null
+          mc: number | null
+          mc_pct: number | null
+          mes: string | null
+          workspace_id: string | null
+        }
+        Relationships: []
       }
     }
     Functions: {

@@ -61,9 +61,9 @@ const BUSINESS_NAV_ITEMS = [
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
-// D246: Contabilidad — solo si workspace tiene modules.causacion (Clarity)
+// 2026-04-27: Causacion → Revision (flag binario, sin formularios fiscales)
 const CONTABILIDAD_NAV_ITEMS = [
-  { href: '/causacion', label: 'Causación', icon: BookOpen, roles: ['owner', 'admin', 'contador'] },
+  { href: '/revision', label: 'Revisión', icon: BookOpen, roles: ['owner', 'admin', 'contador'] },
 ]
 
 // Compliance module (solo si modules.compliance)

@@ -190,7 +190,7 @@ export async function aprobarHora(horaId: string): Promise<ActionResult> {
   if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
 
   const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para aprobar' }
+  if (!perms.canMarcarRevisado) return { success: false, error: 'Sin permisos para aprobar' }
 
   const { data } = await supabase
     .from('horas')
@@ -225,7 +225,7 @@ export async function rechazarHora(horaId: string, motivo: string): Promise<Acti
   if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
 
   const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para rechazar' }
+  if (!perms.canMarcarRevisado) return { success: false, error: 'Sin permisos para rechazar' }
   if (!motivo || motivo.trim().length === 0) return { success: false, error: 'El motivo es obligatorio' }
 
   const { data } = await supabase
@@ -260,7 +260,7 @@ export async function revertirHora(horaId: string, motivo: string): Promise<Acti
   if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
 
   const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canRevertApproval) return { success: false, error: 'Solo el dueno puede revertir aprobaciones' }
+  if (!perms.canMarcarRevisado) return { success: false, error: 'Solo el dueno puede revertir aprobaciones' }
   if (!motivo || motivo.trim().length === 0) return { success: false, error: 'El motivo es obligatorio' }
 
   const { data } = await supabase
@@ -297,7 +297,7 @@ export async function aprobarTodasHoras(ids: string[]): Promise<ActionResult & {
   if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
 
   const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canApproveCausacion) return { success: false, error: 'Sin permisos para aprobar' }
+  if (!perms.canMarcarRevisado) return { success: false, error: 'Sin permisos para aprobar' }
 
   let approved = 0
   for (const id of ids) {

@@ -165,12 +165,12 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
       .eq('workspace_id', workspaceId)
       .single(),
 
-    // Gastos por pagar (estado_causacion = aprobado proxy para gastos pendientes de pago)
+    // Gastos por pagar (post-refactor 2026-04-27: todos los gastos son reales)
     supabase
       .from('gastos')
       .select('monto')
       .eq('workspace_id', workspaceId)
-      .eq('estado_causacion', 'aprobado'),
+      .eq('estado_pago', 'pendiente'),
   ])
 
   const saldo = saldoRes.data?.[0]

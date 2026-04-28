@@ -27,10 +27,10 @@ export const ROLE_PERMISSIONS = {
     canCreateCotizacion: true,
     canExportCSV: true,
     canManageTeam: true,
-    canApproveCausacion: true,   // D246: aprobar PENDIENTE → APROBADO
-    canCausar: true,             // D246: causar APROBADO → CAUSADO
-    canViewCausacion: true,      // D246: ver /causacion
-    canRevertApproval: true,     // Revertir APROBADO → RECHAZADO (solo owner)
+    // 2026-04-27: causacion → revision (flag binario, sin formularios fiscales)
+    canMarcarRevisado: true,
+    canViewRevision: true,
+    canExportRevision: true,
     canToggleDeducible: true,    // Marcar/desmarcar deducible fiscal en gastos
     // ── Compliance (modulo SARLAFT) ─────────────────────────
     canViewRiesgos: true,             // Ver /riesgos y /matriz
@@ -58,10 +58,9 @@ export const ROLE_PERMISSIONS = {
     canCreateCotizacion: true,
     canExportCSV: true,
     canManageTeam: false,
-    canApproveCausacion: true,
-    canCausar: true,
-    canViewCausacion: true,
-    canRevertApproval: false,
+    canMarcarRevisado: true,
+    canViewRevision: true,
+    canExportRevision: true,
     canToggleDeducible: true,
     // Compliance
     canViewRiesgos: true,
@@ -89,10 +88,9 @@ export const ROLE_PERMISSIONS = {
     canCreateCotizacion: true,
     canExportCSV: true,
     canManageTeam: false,
-    canApproveCausacion: false,
-    canCausar: false,
-    canViewCausacion: false,
-    canRevertApproval: false,
+    canMarcarRevisado: false,
+    canViewRevision: false,
+    canExportRevision: false,
     canToggleDeducible: false,
     // Compliance — supervisor = oficial de cumplimiento operativo
     canViewRiesgos: true,
@@ -120,10 +118,9 @@ export const ROLE_PERMISSIONS = {
     canCreateCotizacion: false,
     canExportCSV: false,
     canManageTeam: false,
-    canApproveCausacion: false,
-    canCausar: false,
-    canViewCausacion: false,
-    canRevertApproval: false,
+    canMarcarRevisado: true,
+    canViewRevision: true,
+    canExportRevision: false,
     canToggleDeducible: false,
     // Compliance — operator no ve matriz (rol operativo de negocios)
     canViewRiesgos: false,
@@ -151,10 +148,9 @@ export const ROLE_PERMISSIONS = {
     canCreateCotizacion: false,
     canExportCSV: false,
     canManageTeam: false,
-    canApproveCausacion: false,   // NO puede aprobar (solo owner/admin)
-    canCausar: true,              // SI puede causar (asignar PUC+CC)
-    canViewCausacion: true,       // SI puede ver /causacion
-    canRevertApproval: false,
+    canMarcarRevisado: true,
+    canViewRevision: true,
+    canExportRevision: true,
     canToggleDeducible: true,     // SI puede marcar/desmarcar deducible fiscal
     // Compliance — contador no ve compliance (rol financiero)
     canViewRiesgos: false,
@@ -182,10 +178,9 @@ export const ROLE_PERMISSIONS = {
     canCreateCotizacion: false,
     canExportCSV: true,
     canManageTeam: false,
-    canApproveCausacion: false,
-    canCausar: false,
-    canViewCausacion: false,
-    canRevertApproval: false,
+    canMarcarRevisado: false,
+    canViewRevision: true,
+    canExportRevision: true,        // Auditor puede exportar para revisar
     canToggleDeducible: false,
     // Compliance — read_only = auditor (ve todo, no modifica)
     canViewRiesgos: true,

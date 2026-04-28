@@ -123,7 +123,7 @@ interface GastoEntry {
   categoria: string | null
   tipo: string | null
   estado_pago: string | null
-  estado_causacion: string
+  revisado: boolean
   soporte_url: string | null
   deducible: boolean
   canal_registro: string | null

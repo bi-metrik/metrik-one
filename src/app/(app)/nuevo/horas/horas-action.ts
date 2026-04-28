@@ -102,7 +102,7 @@ export async function addHorasDestino(
 
   // Auto-approve for owner/admin
   const perms = getRolePermissions(role ?? 'read_only')
-  const autoApprove = perms.canApproveCausacion
+  const autoApprove = perms.canMarcarRevisado
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const insertData: any = {

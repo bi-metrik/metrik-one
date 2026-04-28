@@ -313,11 +313,7 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
   const diasRestantes = monthType === 'current' ? data.diasDelMes - data.diaActual : 0
   const ventaDiariaRequerida = diasRestantes > 0 ? faltaParaPE / diasRestantes : 0
 
-  const margenLabel = data.margenFuente === 'calculado'
-    ? `Calculado (${data.nProyectosMargen} proyectos cerrados)`
-    : data.margenFuente === 'mixto'
-      ? `Mixto (${data.nProyectosMargen} proyecto${data.nProyectosMargen !== 1 ? 's' : ''} + estimado)`
-      : 'Estimado por ti'
+  const margenLabel = 'Calculado del PyL del mes'
 
   return (
     <div className="space-y-1">
@@ -343,9 +339,6 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
       <Row label="Margen efectivo" value={`${Math.round(data.margenContribucion * 100)}%`} />
       <div className="flex items-center justify-between py-1">
         <span className="text-[10px] text-muted-foreground">{margenLabel}</span>
-        {data.margenFuente === 'estimado' && (
-          <a href="/mi-negocio" className="text-[10px] font-medium text-primary hover:underline">Ajustar →</a>
-        )}
       </div>
 
       <Divider />

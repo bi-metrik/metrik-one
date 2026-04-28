@@ -200,9 +200,8 @@ export async function getProyectoDetalle(id: string) {
         .order('fecha', { ascending: false }),
       supabase
         .from('gastos')
-        .select('id, fecha, monto, descripcion, mensaje_original, categoria, created_at, tipo, estado_pago, estado_causacion, soporte_url, deducible, canal_registro, created_by, created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
+        .select('id, fecha, monto, descripcion, mensaje_original, categoria, created_at, tipo, estado_pago, revisado, soporte_url, deducible, canal_registro, created_by, created_by_wa_name, created_by_profile:profiles!gastos_created_by_profiles_fkey(full_name)')
         .eq('proyecto_id', id)
-        .eq('estado_causacion', 'APROBADO')
         .order('fecha', { ascending: false }),
       supabase
         .from('cobros')
@@ -318,7 +317,7 @@ export async function getProyectoDetalle(id: string) {
       categoria: g.categoria,
       tipo: g.tipo,
       estado_pago: g.estado_pago,
-      estado_causacion: g.estado_causacion ?? 'APROBADO',
+      revisado: g.revisado ?? false,
       soporte_url: g.soporte_url,
       deducible: g.deducible ?? false,
       canal_registro: g.canal_registro ?? null,
@@ -623,7 +622,7 @@ export async function addHoras(proyectoId: string, input: {
 
   // Auto-approve for owner/admin
   const perms = getRolePermissions(role ?? 'read_only')
-  const autoApprove = perms.canApproveCausacion
+  const autoApprove = perms.canMarcarRevisado
 
   const { error: dbError } = await supabase
     .from('horas')

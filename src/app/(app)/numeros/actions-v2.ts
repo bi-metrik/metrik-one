@@ -36,9 +36,11 @@ export interface NumerosData {
   componenteNomina: number       // D129: auto from staff salaries
   componenteOperativo: number    // D129: from fixed_expenses
   staffNomina: { nombre: string; salario: number }[]  // D129: detail for drill-down
-  margenContribucion: number     // D130: effective margin (3 phases)
-  margenFuente: string           // D130: 'estimado' | 'mixto' | 'calculado'
-  nProyectosMargen: number       // D130: how many projects inform the margin
+  // 2026-04-27: Refactor MC + EBITDA. Reemplaza blend D130.
+  // mc/ebitda vienen de v_pyl_mes; margenContribucion = mc_pct (siempre calculado, no estimado)
+  costosVariablesMes: number     // sum gastos.clasificacion_costo='variable' del mes
+  margenContribucion: number     // mc_pct del mes (0-1) o fallback 0.95 si no hay data
+  ebitda: number                 // mc - fijos
   puntoEquilibrio: number
 
   // P5: Cuanto aguanto
@@ -152,8 +154,8 @@ export async function getNumeros(mesRef?: string) {
     gastosFijosBorradoresRes,
     // D129: Nómina desde staff
     staffNominaRes,
-    // D130: Config financiera (margen)
-    configFinancieraRes,
+    // 2026-04-27: v_pyl_mes para MC + EBITDA (reemplaza blend D130)
+    pylMesRes,
     // D141: Perfil fiscal (régimen)
     fiscalProfileRes,
     // D119: Cuentas por pagar
@@ -187,13 +189,11 @@ export async function getNumeros(mesRef?: string) {
       .lt('fecha', prevEnd),
 
     // Gastos del mes (include proyecto_id/negocio_id for COH-5, categoria/soporte for D141/D142)
-    // Excluir RECHAZADO — PENDIENTE cuenta (usuarios sin causación), APROBADO/CAUSADO también
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any)
+    // 2026-04-27: estado_causacion eliminado, todos los gastos son reales
+    supabase
       .from('gastos')
-      .select('monto, proyecto_id, negocio_id, categoria, soporte_url')
+      .select('monto, proyecto_id, negocio_id, categoria, soporte_url, clasificacion_costo')
       .eq('workspace_id', workspaceId)
-      .neq('estado_causacion', 'RECHAZADO')
       .gte('fecha', mesStart)
       .lt('fecha', mesEnd),
 
@@ -202,7 +202,6 @@ export async function getNumeros(mesRef?: string) {
       .from('gastos')
       .select('monto')
       .eq('workspace_id', workspaceId)
-      .neq('estado_causacion', 'RECHAZADO')
       .gte('fecha', prevStart)
       .lt('fecha', prevEnd),
 
@@ -211,7 +210,6 @@ export async function getNumeros(mesRef?: string) {
       .from('gastos')
       .select('monto, fecha')
       .eq('workspace_id', workspaceId)
-      .neq('estado_causacion', 'RECHAZADO')
       .gte('fecha', tresMesesAtras)
       .lt('fecha', mesEnd),
 
@@ -303,11 +301,12 @@ export async function getNumeros(mesRef?: string) {
       .eq('is_active', true)
       .eq('tipo_vinculo', 'empleado'),
 
-    // D130: Config financiera (margen de contribución)
+    // 2026-04-27: PyL del mes desde vista (ingresos, variables, mc, fijos, ebitda)
     supabase
-      .from('config_financiera')
-      .select('margen_contribucion_estimado, margen_contribucion_calculado, margen_fuente, n_proyectos_margen')
+      .from('v_pyl_mes')
+      .select('ingresos, costos_variables, mc, mc_pct, fijos_total, ebitda')
       .eq('workspace_id', workspaceId)
+      .eq('mes', mesStart)
       .maybeSingle(),
 
     // D141: Perfil fiscal (régimen tributario del workspace)
@@ -318,13 +317,11 @@ export async function getNumeros(mesRef?: string) {
       .maybeSingle(),
 
     // D119: Cuentas por pagar (all pending gastos, not month-scoped)
-    // Excluir RECHAZADO — un gasto rechazado no es obligación de pago
     supabase
       .from('gastos')
       .select('monto')
       .eq('workspace_id', workspaceId)
-      .eq('estado_pago', 'pendiente')
-      .neq('estado_causacion', 'RECHAZADO'),
+      .eq('estado_pago', 'pendiente'),
 
     // KPI: En venta — negocios en etapa venta
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -413,7 +410,6 @@ export async function getNumeros(mesRef?: string) {
       .select('monto')
       .eq('workspace_id', workspaceId)
       .eq('estado_pago', 'pagado')  // D119: only paid gastos affect cash
-      .neq('estado_causacion', 'RECHAZADO')
       .gt('fecha', lastDateStr)
 
     const cobrosPostSaldo = (cobrosDesde.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
@@ -519,26 +515,14 @@ export async function getNumeros(mesRef?: string) {
     .filter(g => g.deducible === true)
     .reduce((s, g) => s + Number(g.monthly_amount), 0)
 
-  // D130: Margen de contribución progresivo (3 fases)
-  const configFin = configFinancieraRes.data
-  const margenEstimado = Number(configFin?.margen_contribucion_estimado ?? 0.95)
-  const margenCalculado = configFin?.margen_contribucion_calculado ? Number(configFin.margen_contribucion_calculado) : null
-  const margenFuente = configFin?.margen_fuente ?? 'estimado'
-  const nProyectosMargen = configFin?.n_proyectos_margen ?? 0
-
-  let margenContribucion: number
-  if (margenFuente === 'calculado' && margenCalculado !== null) {
-    // Phase 3: 3+ closed projects → 100% calculated
-    margenContribucion = margenCalculado
-  } else if (margenFuente === 'mixto' && margenCalculado !== null) {
-    // Phase 2: 1-2 closed projects → weighted blend
-    margenContribucion = 0.6 * margenEstimado + 0.4 * margenCalculado
-  } else {
-    // Phase 1: no closed projects → use estimated
-    margenContribucion = margenEstimado
-  }
-  // Clamp to reasonable range
-  margenContribucion = Math.max(0.05, Math.min(0.99, margenContribucion))
+  // 2026-04-27: MC + EBITDA desde v_pyl_mes (reemplaza blend D130)
+  const pylMes = pylMesRes.data
+  const costosVariablesMes = pylMes?.costos_variables ? Number(pylMes.costos_variables) : 0
+  const mcPctRaw = pylMes?.mc_pct ? Number(pylMes.mc_pct) : null
+  const margenContribucion = mcPctRaw !== null
+    ? Math.max(0.05, Math.min(0.99, mcPctRaw))
+    : 0.95  // fallback cuando no hay data del mes
+  const ebitda = pylMes?.ebitda ? Number(pylMes.ebitda) : (ingresosMes - costosVariablesMes - costosFijosMes)
 
   // PE
   const puntoEquilibrio = margenContribucion > 0 ? costosFijosMes / margenContribucion : costosFijosMes
@@ -631,9 +615,9 @@ export async function getNumeros(mesRef?: string) {
     componenteNomina,
     componenteOperativo,
     staffNomina,
+    costosVariablesMes,
     margenContribucion,
-    margenFuente,
-    nProyectosMargen,
+    ebitda,
     puntoEquilibrio,
     runwayMeses,
     gastoPromedioMensual,

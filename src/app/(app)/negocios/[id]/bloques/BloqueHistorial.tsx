@@ -35,7 +35,7 @@ export interface HistorialData {
     notas: string | null
     monto: number
     fecha: string | null
-    estado_causacion: string
+    revisado: boolean
     tipo_cobro: string | null
   }>
 }
@@ -150,11 +150,11 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
                 )}
                 {c.notas && <span className="text-[#1A1A1A] truncate">{c.notas}</span>}
                 <span className={`text-[10px] shrink-0 ${
-                  c.estado_causacion === 'APROBADO' || c.estado_causacion === 'CAUSADO'
-                    ? 'text-green-600' : c.estado_causacion === 'PENDIENTE'
+                  c.revisado === true
+                    ? 'text-green-600' : !c.revisado
                     ? 'text-amber-600' : 'text-red-600'
                 }`}>
-                  {c.estado_causacion === 'CAUSADO' || c.estado_causacion === 'APROBADO' ? '✓' : c.estado_causacion === 'PENDIENTE' ? '⏳' : '✗'}
+                  {c.revisado === true ? '✓' : !c.revisado ? '⏳' : '✗'}
                 </span>
               </div>
               <span className="text-green-600 font-medium tabular-nums ml-2 shrink-0">{fmt(c.monto)}</span>
