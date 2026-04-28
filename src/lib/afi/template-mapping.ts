@@ -1,10 +1,16 @@
 // Mapeo templates ↔ productos contratados.
 // Determina que subset de los 25 templates se genera segun la seleccion.
 
+export type SarlaftRegimen = 'ampliado' | 'simplificado' | 'ninguno'
+
 export interface ProductosContratados {
+  sarlaft_regimen?: SarlaftRegimen
+  ptee?: boolean
+  oficial?: boolean
+  seguimiento?: boolean
+  // Compat hacia atras: schema previo con flags individuales
   sarlaft_simplificado?: boolean
   sarlaft_ampliado?: boolean
-  ptee?: boolean
 }
 
 const SARLAFT_RMS_CODES = [
@@ -17,13 +23,54 @@ const SARLAFT_AMP_CODES = [
   'FO-SAR-AMP-009', 'AN-SAR-AMP-010', 'CO-SAR-AMP-011',
 ]
 const PTEE_CODES = ['MA-PTE-001', 'GU-PTE-002', 'DC-PTE-003', 'DC-PTE-004']
+const OFICIAL_CODES = ['AC-SAR-AMP-008']  // Acta designacion oficial — solo cuando contrata Oficial
+const CONTRATO_CODE = ['CT-SAR-CLIENTE']  // El contrato armado modular vivira con este codigo
 
 export function templatesAGenerar(productos: ProductosContratados): string[] {
   const codes: string[] = []
-  if (productos.sarlaft_simplificado) codes.push(...SARLAFT_RMS_CODES)
-  if (productos.sarlaft_ampliado) codes.push(...SARLAFT_AMP_CODES)
+
+  // Resolver regimen — soporta schema nuevo y legacy
+  const regimen = productos.sarlaft_regimen
+    ?? (productos.sarlaft_ampliado ? 'ampliado' : productos.sarlaft_simplificado ? 'simplificado' : 'ninguno')
+
+  if (regimen === 'simplificado') codes.push(...SARLAFT_RMS_CODES)
+  if (regimen === 'ampliado') codes.push(...SARLAFT_AMP_CODES)
   if (productos.ptee) codes.push(...PTEE_CODES)
+  if (productos.oficial) codes.push(...OFICIAL_CODES)
+  // Seguimiento por si solo no agrega documentos nuevos — el seguimiento es servicio recurrente.
+  // El contrato armado se manejara en una fase posterior.
+
   return Array.from(new Set(codes))
+}
+
+// Conteo y catalogo legible de documentos a generar — para preview en UI
+export const TEMPLATE_NAMES: Record<string, string> = {
+  'MA-SAR-RMS-001': 'Manual SARLAFT — Régimen Simplificado',
+  'FO-SAR-RMS-002': 'Anexo 2 — Formato Conocimiento Contraparte (RMS)',
+  'PR-SAR-RMS-003': 'Anexo 3 — Metodología Segmentación (RMS)',
+  'PR-SAR-RMS-004': 'Anexo 4 — Procedimiento Debida Diligencia (RMS)',
+  'PR-SAR-RMS-005': 'Anexo 5 — Procedimiento Conocimiento Contrapartes (RMS)',
+  'PR-SAR-RMS-006': 'Anexo 6 — Procedimiento Reporte ROS (RMS)',
+  'FO-SAR-RMS-007': 'Anexo 7 — Formato Reporte Operación Sospechosa (RMS)',
+  'MA-SAR-AMP-001': 'Manual SARLAFT — Régimen Ampliado',
+  'PR-SAR-AMP-002': 'Anexo 2 — Procedimiento Reporte ROS (AMP)',
+  'FO-SAR-AMP-003': 'Anexo 3 — Formato Conocimiento Contraparte (AMP)',
+  'CL-SAR-AMP-004': 'Anexo 4 — Cláusulas SARLAFT (AMP)',
+  'PR-SAR-AMP-005': 'Anexo 5 — Procedimiento Conocimiento Contrapartes (AMP)',
+  'PR-SAR-AMP-006': 'Anexo 6 — Procedimiento Debida Diligencia (AMP)',
+  'PR-SAR-AMP-007': 'Anexo 7 — Metodología Segmentación (AMP)',
+  'AC-SAR-AMP-008': 'Anexo 8 — Acta Designación Oficial de Cumplimiento',
+  'FO-SAR-AMP-009': 'Anexo 9 — Formato Reporte Operación Sospechosa (AMP)',
+  'AN-SAR-AMP-010': 'Anexo 10 — Orden de Trabajo RTM',
+  'CO-SAR-AMP-011': 'Anexo 11 — Código de Conducta',
+  'MA-PTE-001': 'Manual PTEE',
+  'GU-PTE-002': 'Anexo 2 — Guía Conflictos de Interés (PTEE)',
+  'DC-PTE-003': 'Anexo 3 — Declaración Intereses Privados (PTEE)',
+  'DC-PTE-004': 'Anexo 4 — Declaración Conflicto de Interés (PTEE)',
+  'CT-SAR-CLIENTE': 'Contrato AFI ↔ Cliente',
+  'CT-SAR-RMS-PTE': 'Contrato Implementación SARLAFT Simplificado + PTEE',
+  'CT-SAR-AMP-PTE': 'Contrato Implementación SARLAFT Ampliado + PTEE + Oficial',
+  'PP-SGN-001': 'Propuesta de Servicios de Cumplimiento Normativo',
 }
 
 export interface RutExtraction {

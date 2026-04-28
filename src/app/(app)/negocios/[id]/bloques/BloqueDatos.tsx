@@ -1,21 +1,24 @@
 'use client'
 
 import { useState, useTransition, useRef, useCallback } from 'react'
-import { ImageIcon, Search } from 'lucide-react'
+import { ImageIcon, Search, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
+import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/lib/afi/template-mapping'
 
 export interface DatosField {
   slug: string
   label: string
-  tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'select' | 'imagen_clipboard'
+  tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview'
   required: boolean
   options?: string[]
   opciones?: Array<{ value: string; label: string }>
   default?: unknown
+  // Solo renderizar si el field referenciado cumple la condicion
+  showIf?: { field: string; equals: unknown }
 }
 
 interface BloqueDatosProps {
@@ -100,10 +103,17 @@ export default function BloqueDatos({
     }
   }
 
+  // Solo renderizar fields cuyo showIf se cumple (o que no tienen showIf)
+  function visible(f: DatosField, vals: Record<string, unknown>) {
+    if (!f.showIf) return true
+    return vals[f.showIf.field] === f.showIf.equals
+  }
+
   function isComplete(vals: Record<string, unknown>) {
-    return fields.filter(f => f.required).every(f => {
+    return fields.filter(f => f.required && visible(f, vals)).every(f => {
       const v = vals[f.slug]
       if (f.tipo === 'toggle') return true
+      if (f.tipo === 'documentos_preview') return true
       return v !== '' && v !== null && v !== undefined
     })
   }
@@ -181,8 +191,15 @@ export default function BloqueDatos({
   if (modo === 'visible') {
     return (
       <div className="space-y-2">
-        {fields.map(f => {
+        {fields.filter(f => visible(f, saved)).map(f => {
           const v = saved[f.slug]
+          if (f.tipo === 'documentos_preview') {
+            return (
+              <div key={f.slug}>
+                <DocumentosPreview productos={saved as ProductosContratados} />
+              </div>
+            )
+          }
           return (
             <div key={f.slug} className="flex flex-col gap-0.5">
               <div className="flex items-center gap-1.5">
@@ -204,7 +221,7 @@ export default function BloqueDatos({
                 <span className="text-xs text-[#1A1A1A] tabular-nums">{fmt(Number(v))}</span>
               ) : (
                 <span className="text-xs text-[#1A1A1A]">{
-                f.tipo === 'select' && f.opciones
+                (f.tipo === 'select' || f.tipo === 'radio') && f.opciones
                   ? f.opciones.find(o => o.value === v)?.label ?? (v as string) ?? '—'
                   : (v as string) ?? '—'
               }</span>
@@ -224,12 +241,14 @@ export default function BloqueDatos({
 
   return (
     <div className="space-y-3">
-      {fields.map(f => (
+      {fields.filter(f => visible(f, values)).map(f => (
         <div key={f.slug}>
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
-            {f.label}
-            {f.required && <span className="ml-0.5 text-red-500">*</span>}
-          </label>
+          {f.tipo !== 'documentos_preview' && (
+            <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
+              {f.label}
+              {f.required && <span className="ml-0.5 text-red-500">*</span>}
+            </label>
+          )}
 
           {f.tipo === 'texto' && (
             isTriggerField(f.slug) ? (
@@ -364,6 +383,32 @@ export default function BloqueDatos({
               )}
             </div>
           )}
+
+          {f.tipo === 'radio' && (f.opciones || f.options) && (
+            <div className="space-y-1.5">
+              {(f.opciones ?? f.options?.map(o => ({ value: o, label: o })) ?? []).map(opt => (
+                <label
+                  key={opt.value}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs hover:border-[#10B981]/50 transition-colors"
+                >
+                  <input
+                    type="radio"
+                    name={f.slug}
+                    value={opt.value}
+                    checked={values[f.slug] === opt.value}
+                    onChange={() => handleChange(f.slug, opt.value)}
+                    disabled={isPending}
+                    className="h-3.5 w-3.5 accent-[#10B981]"
+                  />
+                  <span className="text-[#1A1A1A]">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          {f.tipo === 'documentos_preview' && (
+            <DocumentosPreview productos={values as ProductosContratados} />
+          )}
         </div>
       ))}
 
@@ -417,6 +462,34 @@ export default function BloqueDatos({
       {isPending && !requireConfirm && (
         <p className="text-[10px] text-[#6B7280]">Guardando...</p>
       )}
+    </div>
+  )
+}
+
+function DocumentosPreview({ productos }: { productos: ProductosContratados }) {
+  const codes = templatesAGenerar(productos)
+  if (codes.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-3">
+        <p className="text-[11px] text-[#6B7280]">Selecciona al menos un producto para ver los documentos a generar.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] p-3 space-y-1.5">
+      <p className="text-[11px] font-semibold text-[#10B981] flex items-center gap-1.5">
+        <FileText className="h-3.5 w-3.5" />
+        {codes.length} documento{codes.length === 1 ? '' : 's'} a generar
+      </p>
+      <ul className="space-y-0.5">
+        {codes.map(c => (
+          <li key={c} className="text-[11px] text-[#1A1A1A] flex gap-1.5">
+            <span className="text-[#6B7280] tabular-nums">{c}</span>
+            <span className="text-[#6B7280]">—</span>
+            <span>{TEMPLATE_NAMES[c] ?? c}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
