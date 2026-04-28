@@ -1363,7 +1363,7 @@ export async function retrocederEtapaNegocio(
 export async function marcarBloqueCompleto(
   negocioBloqueId: string,
   data: Record<string, unknown>
-): Promise<{ error: string | null; trigger_afi_generation?: boolean; negocio_id?: string }> {
+): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
@@ -1442,21 +1442,27 @@ export async function marcarBloqueCompleto(
       }
     }
 
-    // ── Hook AFI: si es el bloque "Generar paquete" del workspace afi, señalar al cliente
-    // que dispare el endpoint /api/afi/generar (route handler tiene maxDuration=60s).
+    // ── Hook AFI: si es uno de los bloques accionables del workspace afi, señalar al cliente
+    // que dispare el endpoint correspondiente (route handlers tienen maxDuration=60s).
     // Server actions no permiten export maxDuration, por eso no corremos el motor aqui.
     let trigger_afi_generation = false
-    if (tipo === 'datos' && bloque.bloque_configs?.nombre === 'Generar paquete') {
-      const { data: ws } = await db(supabase)
-        .from('workspaces').select('slug').eq('id', workspaceId as string).single()
-      if ((ws as { slug: string } | null)?.slug === 'afi') {
-        trigger_afi_generation = true
+    let trigger_afi_contrato = false
+    if (tipo === 'datos' && bloque.bloque_configs?.nombre) {
+      const nombre = bloque.bloque_configs.nombre
+      if (nombre === 'Generar paquete' || nombre === 'Generar contrato') {
+        const { data: ws } = await db(supabase)
+          .from('workspaces').select('slug').eq('id', workspaceId as string).single()
+        if ((ws as { slug: string } | null)?.slug === 'afi') {
+          if (nombre === 'Generar paquete') trigger_afi_generation = true
+          else if (nombre === 'Generar contrato') trigger_afi_contrato = true
+        }
       }
     }
-    // Adjuntar marcador al response al final
     if (trigger_afi_generation) {
-      // Retornamos con hint para que el cliente dispare el motor por fetch al endpoint
       return { error: null, trigger_afi_generation: true, negocio_id: bloque.negocio_id }
+    }
+    if (trigger_afi_contrato) {
+      return { error: null, trigger_afi_contrato: true, negocio_id: bloque.negocio_id }
     }
 
     // Registrar en activity_log con detalle de campos que cambiaron

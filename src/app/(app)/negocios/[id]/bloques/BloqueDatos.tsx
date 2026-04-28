@@ -144,7 +144,7 @@ export default function BloqueDatos({
       }
       toast.success(confirmLabel ? `${confirmLabel} registrado` : 'Datos confirmados')
 
-      // Hook AFI: si el server actio lo indica, disparar motor de generacion
+      // Hooks AFI: el server action retorna flags para que el cliente dispare el endpoint correspondiente
       if (result.trigger_afi_generation && result.negocio_id) {
         const tid = toast.loading('Generando paquete documental… esto puede tardar 30-60s')
         try {
@@ -153,6 +153,26 @@ export default function BloqueDatos({
           toast.dismiss(tid)
           if (json.ok) {
             toast.success(`${json.docs_generados} documentos generados y subidos a Drive`)
+          } else {
+            toast.error(`Error: ${json.error ?? 'desconocido'}`)
+          }
+        } catch (e) {
+          toast.dismiss(tid)
+          toast.error(`Error al llamar motor: ${(e as Error).message}`)
+        }
+      }
+      if (result.trigger_afi_contrato && result.negocio_id) {
+        const tid = toast.loading('Armando contrato… esto puede tardar 15-30s')
+        try {
+          const res = await fetch(`/api/afi/contrato/${result.negocio_id}`, { method: 'POST' })
+          const json = await res.json()
+          toast.dismiss(tid)
+          if (json.ok) {
+            toast.success('Contrato generado y subido a Drive', {
+              action: json.drive_url
+                ? { label: 'Abrir', onClick: () => window.open(json.drive_url, '_blank') }
+                : undefined,
+            })
           } else {
             toast.error(`Error: ${json.error ?? 'desconocido'}`)
           }
