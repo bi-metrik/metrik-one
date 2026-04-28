@@ -7,10 +7,9 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   CheckCircle2,
-  CircleDashed,
+  Download,
   FileText,
   RotateCcw,
-  Smartphone,
   User as UserIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -105,23 +104,26 @@ export default function RevisionClient({ items, counts, mes, filtro, role }: Pro
         </p>
       </div>
 
-      {/* Selector de mes */}
-      <div className="flex items-center justify-between rounded-md border border-[#E5E7EB] bg-white px-3 py-2">
-        <button
-          onClick={() => cambiarMes(-1)}
-          className="rounded px-2 py-1 text-sm text-[#6B7280] hover:bg-[#F5F4F2]"
-          aria-label="Mes anterior"
-        >
-          ←
-        </button>
-        <span className="text-sm font-medium text-[#1A1A1A]">{mesLabel(mes)}</span>
-        <button
-          onClick={() => cambiarMes(1)}
-          className="rounded px-2 py-1 text-sm text-[#6B7280] hover:bg-[#F5F4F2]"
-          aria-label="Mes siguiente"
-        >
-          →
-        </button>
+      {/* Selector de mes + Descargar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center justify-between rounded-md border border-[#E5E7EB] bg-white px-3 py-2 flex-1 min-w-[180px]">
+          <button
+            onClick={() => cambiarMes(-1)}
+            className="rounded px-2 py-1 text-sm text-[#6B7280] hover:bg-[#F5F4F2]"
+            aria-label="Mes anterior"
+          >
+            ←
+          </button>
+          <span className="text-sm font-medium text-[#1A1A1A]">{mesLabel(mes)}</span>
+          <button
+            onClick={() => cambiarMes(1)}
+            className="rounded px-2 py-1 text-sm text-[#6B7280] hover:bg-[#F5F4F2]"
+            aria-label="Mes siguiente"
+          >
+            →
+          </button>
+        </div>
+        {perms.canExportRevision && <DescargarMenu mes={mes} />}
       </div>
 
       {/* Filter pills */}
@@ -166,6 +168,45 @@ export default function RevisionClient({ items, counts, mes, filtro, role }: Pro
 }
 
 // ── Subcomponents ───────────────────────────────────────
+
+function DescargarMenu({ mes }: { mes: string }) {
+  const [open, setOpen] = useState(false)
+  const handleDownload = (formato: 'csv' | 'xlsx') => {
+    const url = `/api/revision/export?mes=${mes}&formato=${formato}`
+    window.open(url, '_blank')
+    setOpen(false)
+  }
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-medium text-[#1A1A1A] hover:bg-[#F5F4F2]"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Descargar
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-1 min-w-[140px] rounded-md border border-[#E5E7EB] bg-white shadow-lg">
+            <button
+              onClick={() => handleDownload('xlsx')}
+              className="block w-full px-3 py-2 text-left text-xs hover:bg-[#F5F4F2]"
+            >
+              Excel (3 hojas)
+            </button>
+            <button
+              onClick={() => handleDownload('csv')}
+              className="block w-full px-3 py-2 text-left text-xs hover:bg-[#F5F4F2]"
+            >
+              CSV (combinado)
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 function FilterPill({ active, onClick, label, dot }: {
   active: boolean
