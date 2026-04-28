@@ -587,8 +587,8 @@ export default function AppShell({
         </nav>
       </div>
 
-      {/* FAB */}
-      <FAB role={role} />
+      {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA) */}
+      {mod.business && <FAB role={role} />}
     </div>
   )
 }
