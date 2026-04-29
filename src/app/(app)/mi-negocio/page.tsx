@@ -28,7 +28,6 @@ export default async function MiNegocioPage() {
     fixedResult,
     categoriesResult,
     serviciosResult,
-    configFinancieraResult,
     featuresResult,
   ] = await Promise.all([
     supabase
@@ -76,13 +75,7 @@ export default async function MiNegocioPage() {
       .eq('workspace_id', workspaceId)
       .order('nombre'),
 
-    // D130: Config financiera (margen)
-    supabase
-      .from('config_financiera')
-      .select('margen_contribucion_estimado, margen_fuente, n_proyectos_margen')
-      .eq('workspace_id', workspaceId)
-      .maybeSingle(),
-
+    // 2026-04-28: config_financiera.margen_* eliminado, MC viene de v_pyl_mes
     supabase
       .from('workspace_features')
       .select('*')
@@ -122,7 +115,6 @@ export default async function MiNegocioPage() {
   const fixedExpenses = fixedResult.data || []
   const categories = categoriesResult.data || []
   const servicios = serviciosResult.data || []
-  const configFinanciera = configFinancieraResult.data
   const workspaceFeatures = featuresResult.data || []
 
   // D129: Nómina = solo empleados directos (no contratistas/freelance)
@@ -170,7 +162,6 @@ export default async function MiNegocioPage() {
       categories={categories}
       servicios={servicios}
       staffNomina={staffNomina}
-      configFinanciera={configFinanciera}
       progressPct={progressPct}
       currentUserRole={profile.role}
       licenseUsed={licenseUsed}

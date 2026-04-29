@@ -44,6 +44,7 @@ export async function getMovimientos(filters?: {
   tipoProy?: string     // 'interno' | 'cliente' | 'empresa' | 'todos'
   estadoPago?: string   // 'todos' | 'pagado' | 'pendiente'
   revisadoFiltro?: 'todos' | 'pendientes' | 'revisados'
+  clasificacionFiltro?: 'todos' | 'variable' | 'fijo' | 'no_operativo'
   createdBy?: string    // user_id filter
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -56,6 +57,7 @@ export async function getMovimientos(filters?: {
   const tipoProyFilter = filters?.tipoProy && filters.tipoProy !== 'todos' ? filters.tipoProy : null
   const estadoPagoFilter = filters?.estadoPago && filters.estadoPago !== 'todos' ? filters.estadoPago : null
   const revisadoFiltro = filters?.revisadoFiltro && filters.revisadoFiltro !== 'todos' ? filters.revisadoFiltro : null
+  const clasificacionFiltro = filters?.clasificacionFiltro && filters.clasificacionFiltro !== 'todos' ? filters.clasificacionFiltro : null
   const createdByFilter = filters?.createdBy && filters.createdBy !== 'todos' ? filters.createdBy : null
 
   const startDate = `${mes}-01`
@@ -100,6 +102,7 @@ export async function getMovimientos(filters?: {
     if (createdByFilter) query = query.eq('created_by', createdByFilter)
     if (revisadoFiltro === 'pendientes') query = query.eq('revisado', false)
     if (revisadoFiltro === 'revisados') query = query.eq('revisado', true)
+    if (clasificacionFiltro) query = query.eq('clasificacion_costo', clasificacionFiltro)
 
     query = query.order('fecha', { ascending: false })
 
@@ -136,7 +139,8 @@ export async function getMovimientos(filters?: {
   }
 
   // ── Ingresos (cobros) ─────────────────────────
-  const skipIngresos = !!estadoPagoFilter || !!catFilter || tipoProyFilter === 'empresa'
+  // Cobros no tienen clasificacion_costo (solo gastos), ocultar si filtro activo
+  const skipIngresos = !!estadoPagoFilter || !!catFilter || tipoProyFilter === 'empresa' || !!clasificacionFiltro
   if ((tipoFilter === 'todos' || tipoFilter === 'ingresos') && !skipIngresos) {
     let query = supabase
       .from('cobros')

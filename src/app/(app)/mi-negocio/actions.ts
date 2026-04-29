@@ -216,26 +216,7 @@ export async function uploadLogo(formData: FormData) {
 
 // ── D130: Update Margen de Contribución Estimado ────────
 
-export async function updateMargenEstimado(margen: number) {
-  const { supabase, workspaceId, error } = await getWorkspace()
-  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
-
-  if (margen < 0.01 || margen > 0.99) return { success: false, error: 'Margen fuera de rango' }
-
-  const { error: dbError } = await supabase
-    .from('config_financiera')
-    .upsert({
-      workspace_id: workspaceId,
-      margen_contribucion_estimado: margen,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'workspace_id' })
-
-  if (dbError) return { success: false, error: dbError.message }
-
-  revalidatePath('/mi-negocio')
-  revalidatePath('/numeros')
-  return { success: true }
-}
+// 2026-04-28: updateMargenEstimado eliminado. MC se calcula del PyL del mes (v_pyl_mes).
 
 // ── Update Equipo Declarado ─────────────────────────────
 

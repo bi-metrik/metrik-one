@@ -5,7 +5,7 @@ import { getRolePermissions } from '@/lib/roles'
 import MovimientosClient from './movimientos-client'
 
 interface Props {
-  searchParams: Promise<{ tipo?: string; mes?: string; cat?: string; proy?: string; tipoProy?: string; estadoPago?: string; revisado?: string; createdBy?: string }>
+  searchParams: Promise<{ tipo?: string; mes?: string; cat?: string; proy?: string; tipoProy?: string; estadoPago?: string; revisado?: string; clasificacion?: string; createdBy?: string }>
 }
 
 export default async function MovimientosPage({ searchParams }: Props) {
@@ -17,6 +17,7 @@ export default async function MovimientosPage({ searchParams }: Props) {
   const tipoProy = params.tipoProy ?? 'todos'
   const estadoPago = params.estadoPago ?? 'todos'
   const revisado = (params.revisado as 'todos' | 'pendientes' | 'revisados') ?? 'todos'
+  const clasificacion = (params.clasificacion as 'todos' | 'variable' | 'fijo' | 'no_operativo') ?? 'todos'
   const createdBy = params.createdBy ?? 'todos'
 
   const { role } = await getWorkspace()
@@ -24,7 +25,7 @@ export default async function MovimientosPage({ searchParams }: Props) {
   if (!perms.canViewNumbers) redirect('/negocios')
 
   const [{ movimientos, totales, regimenFiscal }, { proyectos, miembros }] = await Promise.all([
-    getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago, revisadoFiltro: revisado, createdBy }),
+    getMovimientos({ tipo, mes, cat, proy, tipoProy, estadoPago, revisadoFiltro: revisado, clasificacionFiltro: clasificacion, createdBy }),
     getFilterOptions(),
   ])
 
@@ -39,6 +40,7 @@ export default async function MovimientosPage({ searchParams }: Props) {
       filtroTipoProy={tipoProy}
       filtroEstadoPago={estadoPago}
       filtroRevisado={revisado}
+      filtroClasificacion={clasificacion}
       filtroCreatedBy={createdBy}
       regimenFiscal={regimenFiscal}
       proyectos={proyectos}

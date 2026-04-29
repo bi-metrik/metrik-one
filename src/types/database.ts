@@ -869,30 +869,18 @@ export type Database = {
         Row: {
           created_at: string | null
           id: string
-          margen_contribucion_calculado: number | null
-          margen_contribucion_estimado: number | null
-          margen_fuente: string | null
-          n_proyectos_margen: number | null
           updated_at: string | null
           workspace_id: string
         }
         Insert: {
           created_at?: string | null
           id?: string
-          margen_contribucion_calculado?: number | null
-          margen_contribucion_estimado?: number | null
-          margen_fuente?: string | null
-          n_proyectos_margen?: number | null
           updated_at?: string | null
           workspace_id: string
         }
         Update: {
           created_at?: string | null
           id?: string
-          margen_contribucion_calculado?: number | null
-          margen_contribucion_estimado?: number | null
-          margen_fuente?: string | null
-          n_proyectos_margen?: number | null
           updated_at?: string | null
           workspace_id?: string
         }

@@ -44,6 +44,7 @@ interface Props {
   filtroTipoProy: string
   filtroEstadoPago: string
   filtroRevisado: string
+  filtroClasificacion: string
   filtroCreatedBy: string
   regimenFiscal: string | null
   proyectos: { id: string; nombre: string; tipo: string; codigo: string }[]
@@ -86,7 +87,7 @@ const CAUSACION_BADGES: Record<string, { label: string; className: string } | nu
 export default function MovimientosClient({
   movimientos, totales, filtroTipo, filtroMes,
   filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago,
-  filtroRevisado, filtroCreatedBy, regimenFiscal, proyectos, miembros, role,
+  filtroRevisado, filtroClasificacion, filtroCreatedBy, regimenFiscal, proyectos, miembros, role,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -169,7 +170,7 @@ export default function MovimientosClient({
   const [showFilters, setShowFilters] = useState(false)
 
   // Count active filters (excluding 'todos')
-  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago, filtroRevisado, filtroCreatedBy].filter(f => f !== 'todos').length
+  const activeFilterCount = [filtroCat, filtroProy, filtroTipoProy, filtroEstadoPago, filtroRevisado, filtroClasificacion, filtroCreatedBy].filter(f => f !== 'todos').length
 
   // Auto-open filters if any are active
   useEffect(() => {
@@ -221,6 +222,7 @@ export default function MovimientosClient({
     params.delete('tipoProy')
     params.delete('estadoPago')
     params.delete('revisado')
+    params.delete('clasificacion')
     params.delete('createdBy')
     router.push(`/movimientos?${params.toString()}`)
   }
@@ -466,17 +468,29 @@ export default function MovimientosClient({
               <option value="pendiente">Pendientes</option>
             </select>
 
-            {/* D246: Estado contable filter */}
+            {/* 2026-04-27: revisado reemplaza estado_causacion */}
             <select
               value={filtroRevisado}
               onChange={e => navigate('revisado', e.target.value)}
               className="rounded-md border bg-background px-2 py-1.5 text-xs"
             >
-              <option value="todos">Estado contable</option>
-              <option value="PENDIENTE">Pendiente</option>
-              <option value="APROBADO">Aprobado</option>
-              <option value="CAUSADO">Causado</option>
-              <option value="RECHAZADO">Rechazado</option>
+              <option value="todos">Todos revisados</option>
+              <option value="pendientes">Pendientes</option>
+              <option value="revisados">Revisados</option>
+            </select>
+          </div>
+
+          {/* Row 2.5: Clasificacion costo (nuevo 2026-04-28) */}
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              value={filtroClasificacion}
+              onChange={e => navigate('clasificacion', e.target.value)}
+              className="rounded-md border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="todos">Toda clasificacion</option>
+              <option value="variable">Variable</option>
+              <option value="fijo">Fijo</option>
+              <option value="no_operativo">No operativo</option>
             </select>
           </div>
 
@@ -643,6 +657,19 @@ export default function MovimientosClient({
                               </span>
                             )}
                             {/* rechazo_motivo eliminado en refactor 2026-04-27 */}
+
+                            {/* Clasificacion costo badge (solo gastos) */}
+                            {mov.tipo === 'egreso' && mov.clasificacion_costo && (
+                              <span className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium ${
+                                mov.clasificacion_costo === 'variable'
+                                  ? 'bg-[#10B981]/10 text-[#059669]'
+                                  : mov.clasificacion_costo === 'fijo'
+                                    ? 'bg-[#F5F4F2] text-[#6B7280]'
+                                    : 'bg-[#F59E0B]/10 text-[#92400E]'
+                              }`}>
+                                {mov.clasificacion_costo === 'no_operativo' ? 'No oper.' : mov.clasificacion_costo}
+                              </span>
+                            )}
 
                             {/* Tipo gasto badge */}
                             {mov.tipo === 'egreso' && mov.tipo_gasto && (
