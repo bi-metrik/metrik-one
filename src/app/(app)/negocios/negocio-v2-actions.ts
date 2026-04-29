@@ -2398,12 +2398,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     monto: number
     revisado: boolean
   }>
-  const totalCobrado = cobrosList
-    .filter(c => c.revisado === true)
-    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
-  const porCobrar = cobrosList
-    .filter(c => c.revisado === false)
-    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  // 2026-04-28: cobros registrados = dinero entrado. revisado es flag para
+  // contador (bandeja /revision), no afecta cálculos operativos.
+  const totalCobrado = cobrosList.reduce((sum, c) => sum + (c.monto ?? 0), 0)
 
   // ── Cross-etapa data for conditions + auto_fill ────────────────────────────
   const sourceEtapaOrdens = new Set<number>()
@@ -2529,7 +2526,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     cotizacionesNegocio,
     resumenFinanciero: {
       totalCobrado,
-      porCobrar,
+      porCobrar: Math.max(0, (precioAprobado ?? 0) - totalCobrado),
       precioAprobado,
       costosEjecutados: (() => {
         const gastos = ((gastosData ?? []) as Array<{ monto: number }>)
@@ -3034,14 +3031,11 @@ export async function completarNegocio(
     .eq('negocio_id', negocioId)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number; revisado: boolean }>
-  const totalCobrado = cobros
-    .filter(c => c.revisado === true)
-    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
-  const pendiente = cobros
-    .filter(c => c.revisado === false)
-    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number }>
+  // 2026-04-28: todos los cobros registrados cuentan. revisado es para contador.
+  const totalCobrado = cobros.reduce((sum, c) => sum + (c.monto ?? 0), 0)
   const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
+  const pendiente = Math.max(0, precioAprobado - totalCobrado)
 
   const snapshot = {
     fecha_cierre: new Date().toISOString(),

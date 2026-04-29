@@ -149,15 +149,8 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
                   <span className="text-[10px] bg-[#F3F4F6] rounded px-1.5 py-0.5 shrink-0 capitalize">{c.tipo_cobro}</span>
                 )}
                 {c.notas && <span className="text-[#1A1A1A] truncate">{c.notas}</span>}
-                <span className={`text-[10px] shrink-0 ${
-                  c.revisado === true
-                    ? 'text-green-600' : !c.revisado
-                    ? 'text-amber-600' : 'text-red-600'
-                }`}>
-                  {c.revisado === true ? '✓' : !c.revisado ? '⏳' : '✗'}
-                </span>
               </div>
-              <span className="text-green-600 font-medium tabular-nums ml-2 shrink-0">{fmt(c.monto)}</span>
+              <span className="text-[#059669] font-medium tabular-nums ml-2 shrink-0">{fmt(c.monto)}</span>
             </div>
           ))}
         </div>

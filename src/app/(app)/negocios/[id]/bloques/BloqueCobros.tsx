@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, Clock, AlertCircle } from 'lucide-react'
+import { CheckCircle2 } from 'lucide-react'
 
 interface Cobro {
   id: string
@@ -36,19 +36,10 @@ const TIPO_LABELS: Record<string, string> = {
 }
 
 function CobroRow({ cobro }: { cobro: Cobro }) {
-  const isPendiente = !cobro.revisado
-  const isValidado = cobro.revisado === true
-
   return (
     <div className="flex items-center gap-2 rounded-lg border border-[#E5E7EB] p-2.5">
-      {/* Estado del cobro (solo lectura — aprobación desde Movimientos) */}
-      {isValidado ? (
-        <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-      ) : isPendiente ? (
-        <Clock className="h-4 w-4 text-amber-400 shrink-0" />
-      ) : (
-        <AlertCircle className="h-4 w-4 text-[#6B7280]/40 shrink-0" />
-      )}
+      {/* Cobro registrado = dinero real entrado */}
+      <CheckCircle2 className="h-4 w-4 text-[#10B981] shrink-0" />
 
       {/* Info */}
       <div className="flex-1 min-w-0">
@@ -77,30 +68,22 @@ function CobroRow({ cobro }: { cobro: Cobro }) {
 }
 
 export default function BloqueCobros({ cobros, precioTotal }: BloqueCobrosProps) {
-  const cobrado = cobros.filter(c => c.revisado === true)
-  const totalCobrado = cobrado.reduce((s, c) => s + c.monto, 0)
-  const totalRegistrado = cobros.reduce((s, c) => s + c.monto, 0)
-  const saldoPendiente = precioTotal - totalRegistrado
+  const totalCobrado = cobros.reduce((s, c) => s + c.monto, 0)
+  const saldoPendiente = precioTotal - totalCobrado
 
   return (
     <div className="space-y-4">
       {/* Resumen */}
-      <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-lg bg-green-50 border border-green-100 p-2.5 text-center">
-          <p className="text-[10px] text-green-600 font-medium">Cobrado</p>
-          <p className="text-sm font-bold text-green-700 tabular-nums">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-2.5 text-center">
+          <p className="text-[10px] font-medium text-[#059669]">Cobrado</p>
+          <p className="text-sm font-bold text-[#059669] tabular-nums">
             {fmt(totalCobrado)}
           </p>
         </div>
-        <div className="rounded-lg bg-blue-50 border border-blue-100 p-2.5 text-center">
-          <p className="text-[10px] text-blue-600 font-medium">Registrado</p>
-          <p className="text-sm font-bold text-blue-700 tabular-nums">
-            {fmt(totalRegistrado)}
-          </p>
-        </div>
-        <div className="rounded-lg bg-amber-50 border border-amber-100 p-2.5 text-center">
-          <p className="text-[10px] text-amber-600 font-medium">Saldo</p>
-          <p className="text-sm font-bold text-amber-700 tabular-nums">
+        <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5 text-center">
+          <p className="text-[10px] font-medium text-[#6B7280]">Saldo</p>
+          <p className="text-sm font-bold text-[#1A1A1A] tabular-nums">
             {fmt(saldoPendiente > 0 ? saldoPendiente : 0)}
           </p>
         </div>
@@ -114,14 +97,6 @@ export default function BloqueCobros({ cobros, precioTotal }: BloqueCobrosProps)
           {cobros.map(cobro => (
             <CobroRow key={cobro.id} cobro={cobro} />
           ))}
-        </div>
-      )}
-
-      {/* Indicador de pendientes */}
-      {cobros.some(c => !c.revisado) && (
-        <div className="flex items-center gap-1.5 text-[10px] text-[#6B7280]">
-          <Clock className="h-3 w-3" />
-          <span>Aprobación desde Movimientos</span>
         </div>
       )}
     </div>
