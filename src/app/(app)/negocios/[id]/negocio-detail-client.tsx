@@ -43,6 +43,7 @@ import BloqueDocumento from './bloques/BloqueDocumento'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
+import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
 import type { MultiPagoField } from './bloques/BloqueDatosMultiPago'
 import BloqueAprobacion from './bloques/BloqueAprobacion'
@@ -929,6 +930,9 @@ function BloqueRenderer({
     revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
+    fecha_esperada: string | null
+    numero_cuota: number | null
+    vencido: boolean
     notas: string | null
     external_ref: string | null
   }>
@@ -1137,6 +1141,26 @@ function BloqueRenderer({
         />
       )
 
+    case 'plan_recurrente':
+      return (
+        <BloquePlanRecurrente
+          negocioId={negocioId}
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia ? {
+            id: bloque.instancia.id,
+            completado: bloque.instancia.estado === 'completo',
+            data: bloque.instancia.data as Record<string, unknown> | null,
+          } : null}
+          modo={modo}
+          configExtra={configExtra as {
+            label?: string
+            pasarela_default?: 'wompi' | 'manual' | 'mixto'
+            permite_auto_renovar?: boolean
+            frecuencia_default?: 'mensual' | 'trimestral' | 'anual'
+          }}
+        />
+      )
+
     case 'aprobacion':
       return (
         <BloqueAprobacion
@@ -1239,6 +1263,9 @@ function BloqueCard({
     revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
+    fecha_esperada: string | null
+    numero_cuota: number | null
+    vencido: boolean
     notas: string | null
     external_ref: string | null
   }>
@@ -1379,6 +1406,9 @@ interface Props {
     revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
+    fecha_esperada: string | null
+    numero_cuota: number | null
+    vencido: boolean
     notas: string | null
     external_ref: string | null
   }>

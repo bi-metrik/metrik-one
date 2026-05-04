@@ -2179,6 +2179,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     revisado: boolean
     tipo_cobro: string | null
     fecha: string | null
+    fecha_esperada: string | null
+    numero_cuota: number | null
+    vencido: boolean
     notas: string | null
     external_ref: string | null
   }>
@@ -2288,7 +2291,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Cargar cobros del negocio (db() para evitar type errors en columnas nuevas)
   const { data: cobrosData } = await db(supabase)
     .from('cobros')
-    .select('id, notas, monto, revisado, tipo_cobro, fecha, external_ref')
+    .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', id)
     .order('created_at', { ascending: true })
@@ -2515,12 +2518,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       concepto: c.notas as string | null,
       monto: c.monto as number,
       revisado: (c.revisado as boolean | null) ?? false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tipo_cobro: (c as any).tipo_cobro as string | null,
+      tipo_cobro: c.tipo_cobro as string | null,
       fecha: c.fecha as string | null,
+      fecha_esperada: c.fecha_esperada as string | null,
+      numero_cuota: c.numero_cuota as number | null,
+      vencido: (c.vencido as boolean | null) ?? false,
       notas: c.notas as string | null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      external_ref: (c as any).external_ref as string | null,
+      external_ref: c.external_ref as string | null,
     })),
     cotizacion,
     cotizacionesNegocio,
