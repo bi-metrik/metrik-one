@@ -5677,6 +5677,20 @@ export type Database = {
           },
         ]
       }
+      v_mc_linea_mes: {
+        Row: {
+          costos_variables: number | null
+          ingresos: number | null
+          linea_id: string | null
+          linea_nombre: string | null
+          linea_tipo: string | null
+          mc: number | null
+          mc_pct: number | null
+          mes: string | null
+          workspace_id: string | null
+        }
+        Relationships: []
+      }
       v_mc_negocio: {
         Row: {
           costos_variables: number | null

@@ -43,6 +43,7 @@ export interface NumerosData {
   mcMonto: number                // ingresos - costos_variables del mes (numero absoluto)
   ebitda: number                 // mc - fijos
   mcNegociosTop: McNegocio[]     // top-5 negocios por MC (drill-down P2)
+  mcLineas: McLinea[]            // 2026-05-04: MC por linea del mes (drill-down P2)
   puntoEquilibrio: number
 
   // P5: Cuanto aguanto
@@ -122,6 +123,18 @@ export interface McNegocio {
   estado: string | null
 }
 
+// 2026-05-04: MC por linea (decision Carmen + Mauricio).
+// linea_id NULL = bucket "Sin linea" (gastos variables o cobros sin negocio asignado).
+export interface McLinea {
+  lineaId: string | null
+  lineaNombre: string | null
+  lineaTipo: string | null
+  ingresos: number
+  costosVariables: number
+  mc: number
+  mcPct: number | null
+}
+
 // ── getNumeros ────────────────────────────────────────
 
 export async function getNumeros(mesRef?: string) {
@@ -171,6 +184,8 @@ export async function getNumeros(mesRef?: string) {
     pylMesRes,
     // 2026-04-28: top-N negocios por MC (drill-down P2)
     mcNegociosRes,
+    // 2026-05-04: MC por linea del mes (drill-down P2)
+    mcLineasRes,
     // D141: Perfil fiscal (régimen)
     fiscalProfileRes,
     // D119: Cuentas por pagar
@@ -331,6 +346,14 @@ export async function getNumeros(mesRef?: string) {
       .eq('workspace_id', workspaceId)
       .order('mc', { ascending: false })
       .limit(20),
+
+    // 2026-05-04: MC por linea del mes (linea_id NULL = bucket "Sin linea")
+    supabase
+      .from('v_mc_linea_mes')
+      .select('linea_id, linea_nombre, linea_tipo, ingresos, costos_variables, mc, mc_pct')
+      .eq('workspace_id', workspaceId)
+      .eq('mes', mesStart)
+      .order('mc', { ascending: false }),
 
     // D141: Perfil fiscal (régimen tributario del workspace)
     supabase
@@ -564,6 +587,17 @@ export async function getNumeros(mesRef?: string) {
     .filter(n => n.precio > 0)
     .slice(0, 5)
 
+  // 2026-05-04: MC por linea del mes. linea_id NULL = bucket "Sin linea"
+  const mcLineas: McLinea[] = (mcLineasRes.data ?? []).map(l => ({
+    lineaId: l.linea_id,
+    lineaNombre: l.linea_nombre,
+    lineaTipo: l.linea_tipo,
+    ingresos: Number(l.ingresos ?? 0),
+    costosVariables: Number(l.costos_variables ?? 0),
+    mc: Number(l.mc ?? 0),
+    mcPct: l.mc_pct !== null ? Number(l.mc_pct) : null,
+  }))
+
   // PE
   const puntoEquilibrio = margenContribucion > 0 ? costosFijosMes / margenContribucion : costosFijosMes
 
@@ -660,6 +694,7 @@ export async function getNumeros(mesRef?: string) {
     mcMonto,
     ebitda,
     mcNegociosTop,
+    mcLineas,
     puntoEquilibrio,
     runwayMeses,
     gastoPromedioMensual,

@@ -189,6 +189,39 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       <Divider />
       <Row label="EBITDA" value={data.ebitda} bold color={data.ebitda >= 0 ? 'green' : 'red'} />
 
+      {/* MC por linea (decision Carmen 2026-05-04). Sin linea = bucket de costos variables sin negocio asignado */}
+      {data.mcLineas.length > 0 && (
+        <>
+          <Divider />
+          <SectionTitle>MC por linea (mes actual)</SectionTitle>
+          {data.mcLineas.map((l, idx) => {
+            const sinLinea = l.lineaId === null
+            return (
+              <div key={l.lineaId ?? `sin-linea-${idx}`} className="flex items-center justify-between py-1.5 border-b border-[#E5E7EB] last:border-b-0">
+                <div className="min-w-0 flex-1 mr-2">
+                  <p className={`text-xs font-medium truncate ${sinLinea ? 'text-[#6B7280] italic' : 'text-[#1A1A1A]'}`}>
+                    {l.lineaNombre ?? 'Sin linea (costos no asignados)'}
+                  </p>
+                  <p className="text-[10px] text-[#6B7280]">
+                    Ingresos {formatCOP(l.ingresos)} · Variables {formatCOP(l.costosVariables)}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className={`text-xs font-semibold tabular-nums ${l.mc >= 0 ? 'text-[#059669]' : 'text-[#EF4444]'}`}>
+                    {formatCOP(l.mc)}
+                  </p>
+                  {l.mcPct !== null && (
+                    <p className="text-[10px] text-[#6B7280] tabular-nums">
+                      {Math.round(l.mcPct * 100)}%
+                    </p>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </>
+      )}
+
       {/* MC por negocio top-5 */}
       {data.mcNegociosTop.length > 0 && (
         <>
