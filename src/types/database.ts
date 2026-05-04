@@ -748,11 +748,14 @@ export type Database = {
           external_ref: string | null
           factura_id: string | null
           fecha: string
+          fecha_esperada: string | null
           id: string
           mensaje_original: string | null
           monto: number
           negocio_id: string | null
           notas: string | null
+          numero_cuota: number | null
+          plan_cobro_id: string | null
           proyecto_id: string | null
           retencion: number | null
           revisado: boolean
@@ -760,6 +763,8 @@ export type Database = {
           revisado_por: string | null
           tercero_nit: string | null
           tipo_cobro: string | null
+          vencido: boolean
+          vencido_at: string | null
           workspace_id: string
         }
         Insert: {
@@ -770,11 +775,14 @@ export type Database = {
           external_ref?: string | null
           factura_id?: string | null
           fecha?: string
+          fecha_esperada?: string | null
           id?: string
           mensaje_original?: string | null
           monto: number
           negocio_id?: string | null
           notas?: string | null
+          numero_cuota?: number | null
+          plan_cobro_id?: string | null
           proyecto_id?: string | null
           retencion?: number | null
           revisado?: boolean
@@ -782,6 +790,8 @@ export type Database = {
           revisado_por?: string | null
           tercero_nit?: string | null
           tipo_cobro?: string | null
+          vencido?: boolean
+          vencido_at?: string | null
           workspace_id: string
         }
         Update: {
@@ -792,11 +802,14 @@ export type Database = {
           external_ref?: string | null
           factura_id?: string | null
           fecha?: string
+          fecha_esperada?: string | null
           id?: string
           mensaje_original?: string | null
           monto?: number
           negocio_id?: string | null
           notas?: string | null
+          numero_cuota?: number | null
+          plan_cobro_id?: string | null
           proyecto_id?: string | null
           retencion?: number | null
           revisado?: boolean
@@ -804,6 +817,8 @@ export type Database = {
           revisado_por?: string | null
           tercero_nit?: string | null
           tipo_cobro?: string | null
+          vencido?: boolean
+          vencido_at?: string | null
           workspace_id?: string
         }
         Relationships: [
@@ -841,6 +856,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_mc_negocio"
             referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "cobros_plan_cobro_id_fkey"
+            columns: ["plan_cobro_id"]
+            isOneToOne: false
+            referencedRelation: "planes_cobro"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "cobros_proyecto_id_fkey"
@@ -3455,6 +3477,82 @@ export type Database = {
           },
           {
             foreignKeyName: "payments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      planes_cobro: {
+        Row: {
+          activo: boolean
+          auto_renovar: boolean
+          created_at: string | null
+          fecha_fin: string
+          fecha_inicio: string
+          frecuencia: string
+          id: string
+          monto: number
+          negocio_id: string
+          notas: string | null
+          pasarela: string
+          referencia_wompi: string | null
+          total_cuotas: number
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean
+          auto_renovar?: boolean
+          created_at?: string | null
+          fecha_fin: string
+          fecha_inicio: string
+          frecuencia: string
+          id?: string
+          monto: number
+          negocio_id: string
+          notas?: string | null
+          pasarela?: string
+          referencia_wompi?: string | null
+          total_cuotas: number
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean
+          auto_renovar?: boolean
+          created_at?: string | null
+          fecha_fin?: string
+          fecha_inicio?: string
+          frecuencia?: string
+          id?: string
+          monto?: number
+          negocio_id?: string
+          notas?: string | null
+          pasarela?: string
+          referencia_wompi?: string | null
+          total_cuotas?: number
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "planes_cobro_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "planes_cobro_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "planes_cobro_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
