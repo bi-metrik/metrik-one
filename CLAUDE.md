@@ -313,44 +313,107 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-18 (metrik-one--core: cierre terminal, confidence badge, lint cleanup 3 fases)
-**Branch:** main
+**Sesion:** 2026-04-27 → 2026-05-04 (one core: refactor MC + EBITDA + capa fiscal + planes recurrentes + lineas MeTRIK + MC por linea)
+**Branch:** main · 12 commits
 
-Que se hizo:
-- Feat: Botón "Cerrar" en etapas terminales (Certificación/Cobro/Devolución) — detecta `orden >= maxOrden-2`, muestra verde y enruta a CompletarForm. Guard de `completarNegocio` relajado para permitir stage `ejecucion` (6e15e8e)
-- Fix: ConfidenceBadge IA visible también en modo read-only de BloqueDocumento (d088322)
-- Lint cleanup masivo: 184 → 28 issues (85% eliminado) en 3 fases:
-  - Fase 1 (fa1db2e): prefer-const + disable comments obsoletos
-  - Fase 2 (9f88388): 25+ archivos con imports/vars sin uso, img/a11y, eslint config con argsIgnorePattern: ^_
-  - Fase 3 (5b5c184): database.ts regenerado (PostgrestVersion 14.1, 40 aliases preservados) + cero `no-explicit-any` restantes
-- Tipos fuertes: EmpresaRow, VendorFiscalRow, ItemRow en pdf-actions; Workspace en mi-negocio/marca/equipo; TeamInvitation en accept-invite
+### Refactor MC + EBITDA + capa fiscal (Fase A backend) — 535a31e
 
-**Migraciones aplicadas:** ninguna nueva esta sesion
+ONE deja de ser software contable. Perimetro hasta EBITDA. Cash basis puro. Eliminado flujo causacion formal (PUC, retenciones JSONB, estados PENDIENTE/APROBADO/CAUSADO/RECHAZADO) → reemplazado por flag binario `revisado` para contador.
 
-## Estado actual (2026-04-18)
+4 migraciones:
+- `20260427100001_clasificacion_costo` — taxonomia variable/fijo/no_operativo + tabla mapeo + trigger default + backfill
+- `20260427100002_simplificar_fiscal` — DROP causaciones_log + 14 columnas fiscales + retencion NUMERIC simple + recreadas v_proyecto_financiero y v_proyecto_rubros_comparativo sin filtro estado_causacion
+- `20260427100003_revisado_flag` — revisado/revisado_at/revisado_por en gastos+cobros
+- `20260427100004_v_mc_negocio_v_pyl_mes` — vistas MC auditable y PyL mensual con EBITDA
+
+Refactor codigo: `causacion/` → `revision/`, 30+ archivos limpios, roles renombrados (canCausar/canApproveCausacion → canMarcarRevisado/canViewRevision/canExportRevision), middleware + accept-invite + sidebar actualizados.
+
+### Fase B (UI) — 5 commits
+
+- B.1 (a214f8b): FiscalDisclaimer aprobado por Emilio en /revision /movimientos /nuevo/gasto /nuevo/cobro /numeros drill-down P2 + toggle clasificacion (variable/fijo/no_operativo) en form gasto + campo retencion en gasto y cobro
+- B.2 (2f9051c): panel /revision real con bandeja interactiva, filter pills, mes selector, marcar/desmarcar revisado optimistic
+- B.3 (2dc5544): tile MC% + EBITDA en /numeros, drill MC por negocio top-5, copy "Margen efectivo" → "Margen de contribucion"
+- B.4 (fa967ca): export CSV/XLSX desde /revision via /api/revision/export, 3 hojas (Resumen, Cobros, Gastos)
+- B.5 (f83f09a): cleanup config_financiera.margen_* + filtro Clasificacion en /movimientos + badge inline
+
+### Fix critical post-Fase B (c749daa)
+
+`revisado` deja de filtrar calculos operativos. BloqueCobros, BloqueHistorial, totalCobrado en negocio detalle suman todos los cobros confirmados (`fecha IS NOT NULL`). Flag `revisado` queda exclusivo para bandeja /revision y export al contador. Bug detectado en auditoria post-Fase B: SOENA y demos mostraban $0 cobrado porque cobros pre-refactor quedaron `revisado=false` por default.
+
+### Planes de cobro recurrentes (3 fases)
+
+- **Fase 1 datos + cron** (9b9499e): tabla `planes_cobro` (negocio_id NOT NULL, monto, frecuencia, fecha_inicio, fecha_fin obligatoria, total_cuotas, pasarela wompi/manual/mixto, auto_renovar, activo), cobros tipo `programado` con `plan_cobro_id`/`numero_cuota`/`fecha_esperada`/`vencido`, trigger cierre auto-plan, cron `procesar-planes-cobro` 12:00 UTC, tipo notificacion `cobro_vencido` a 3 destinatarios (responsable + owner + staff `area=admin_finanzas`)
+- **Fase 2 UI** (3afe283): `BloquePlanRecurrente` con form completo + preview + auto-renovar opcional + advertencia Wompi pendiente; server actions crearPlanRecurrente/confirmarCobroProgramado/cancelarPlan; BloqueCobros refactor con secciones Programados/Confirmados + boton "Confirmar pago manual"; bloque registrado en catalogo admin/workflows
+- **Fase 3 lineas MeTRIK** (6391525): `MeTRIK ONE` (4 etapas: Prospecto → Contrato → Plan activo → Cierre) y `MeTRIK Resident` (6 etapas: Discovery → Propuesta → Contrato → Onboarding → Vigente → Cierre) creadas en workspace MeTRIK con bloques apropiados por etapa
+
+### Decision directiva — Naming Resident
+
+Debate Mateo (CMO) vs Santiago (CCO): Steady vs Resident. Mauricio aprobo **Resident** por escalabilidad de la convencion "[Especialista] Resident" (Oficial Cumplimiento Resident, BI Resident, Analista Financiero Resident). "Recurrente" se preserva como flag interno tipo_negocio, no como nombre comercial. Cerebro actualizado: `lineas-de-negocio.md` (4→5 lineas), `2026-05-04_linea-resident-naming.md`, `resident-como-servicio.md`.
+
+### MC por linea (decision Carmen + Mauricio)
+
+3 buckets revenue canonicos:
+- **Service revenue** = Clarity + Projects + Analytics (discrete)
+- **ARR ONE** = ONE software (recurrente sin costo marginal)
+- **ARR Resident** = Resident servicio (recurrente con costo de especialista)
+
+Excepcion: Clarity con financiacion a cuotas (caso SOENA) NO se reclasifica — sigue siendo Clarity discrete con plan de pago.
+
+Implementado (c56f9e7):
+- Migracion `20260504100003_v_mc_linea_mes` — vista que agrupa ingresos+variables por workspace+mes+linea_id, bucket "Sin linea" cuando linea_id IS NULL
+- `numeros/actions-v2.ts` — tipo `McLinea`, query a `v_mc_linea_mes`, campo `mcLineas` en `NumerosData`
+- Drill-down P2 — nueva seccion "MC por linea (mes actual)" antes de top-5 negocios. Bucket "Sin linea (costos no asignados)" en italico gris para visibilizar costos sin imputar
+
+Decisiones operativas:
+- Costos variables sin negocio → bucket "Sin linea" visible (no se prorratean)
+- MC global y MC por linea coexisten
+- Especialista Resident con gastos imputados a negocio = variable a linea Resident; sin imputacion = fijo de empresa
+
+### Cleanup migracion config_financiera
+
+Migracion `20260428100001` DROP columnas margen_contribucion_estimado/calculado/fuente/n_proyectos_margen + actualizada UI mi-negocio (MargenContribucionSection ahora read-only informativa).
+
+**Migraciones aplicadas:** 20260427100001-100004, 20260428100001, 20260504100001-100003 (8 nuevas)
+**database.ts:** regenerado 4 veces, 40 aliases preservados cada vez. Vistas v_mc_negocio, v_pyl_mes, v_mc_linea_mes registradas.
+
+### Auditoria post-deploy
+
+Workspaces con data: SOENA (15 movimientos productivos), DIMPRO (55 gastos), altavista-demo, ana-demo, MeTRIK propio, wmc-sm, AFI (vacio fiscal). Todos los workspaces afectados por el refactor — schema y codigo aplican a todos.
+
+## Estado actual (2026-05-04)
 
 - **Branch:** main — produccion en Vercel (auto-deploy)
-- **Cierre negocio:** boton "Cerrar" verde aparece en Certificación/Cobro/Devolución (stages ejecucion+terminal o cobro). Enruta a CompletarForm con resumen financiero
+- **Cash basis confirmado:** ONE perimetro hasta EBITDA. Cobros confirmados = ingresos del mes. Sin accrual.
+- **Flag revisado:** binario, exclusivo para bandeja /revision y export. NO afecta calculos operativos (saldo negocio, BloqueCobros, totalCobrado, MC, EBITDA)
+- **Causacion → Revision:** ruta /causacion eliminada; /revision activa con bandeja interactiva, filter pills, descarga mes (xlsx/csv), permisos canMarcarRevisado/canViewRevision/canExportRevision. Sidebar muestra "Revisión" para owner/admin/contador
+- **Clasificacion costo gastos:** variable/fijo/no_operativo. Trigger DB aplica default segun categoria. Form de gasto pide explicitamente al registrar. Backfill historico aplicado: gastos con negocio_id → variable, resto segun mapeo categoria
+- **Retencion en gastos y cobros:** NUMERIC simple (patron DIMPRO). ONE no calcula retenciones — el contador del cliente las registra si las necesita
+- **MC + EBITDA en /numeros:** tile principal MC% + EBITDA del mes desde v_pyl_mes. Cash basis puro. Drill P2 muestra MC global, MC por linea, MC por negocio top-5
+- **MC por linea:** vista v_mc_linea_mes con bucket "Sin linea" para costos variables sin negocio asignado. UI italico gris para visibilizar costos por imputar
+- **Bucket revenue canonico:** Service revenue (Clarity + Projects + Analytics) / ARR ONE (software) / ARR Resident (servicio). Excepcion Clarity-financiado: NO se reclasifica
+- **Lineas en workspace MeTRIK:** MeTRIK ONE (4 etapas, suscripcion SaaS post-Clarity) y MeTRIK Resident (6 etapas, servicios profesionales recurrentes). BloquePlanRecurrente en etapa Contrato de ambas
+- **BloquePlanRecurrente:** captura monto + frecuencia (mensual/trimestral/anual) + fecha inicio + total cuotas + pasarela (wompi/manual/mixto) + auto_renovar opcional. Al completarse: crea registro planes_cobro + setea precio_aprobado del negocio + activa pausado=true motivo_pausa='plan_recurrente_activo'
+- **Cron procesar-planes-cobro:** 12:00 UTC diario. Genera cobros programados con T+3 dias. Marca vencido tras 3 dias de gracia. Notifica cobro_vencido a responsable + owner + staff area=admin_finanzas
+- **BloqueCobros:** muestra Resumen (Cobrado / Saldo) + Programados pendientes (con boton "Confirmar pago manual") + Confirmados. Vencidos resaltan en rojo. Saldo = precio_total - sum(cobros confirmados)
 - **ConfidenceBadge:** % confianza IA se muestra en BloqueDocumento tanto editable como read-only (solo si `!campo.manual`)
 - **Header /negocios/[id]:** titulo + selector de etapa sticky al scrollear (desktop + mobile)
-- **BloqueAprobacion:** UI refresca automaticamente tras aprobar/rechazar
-- **Lint status:** 28 issues restantes — TODOS react-hooks (set-state-in-effect, purity, exhaustive-deps, static-components, immutability, refs). Cero no-explicit-any, cero no-unused-vars. Fase 4 pendiente
-- **database.ts:** regenerado 2026-04-18 con PostgrestVersion 14.1. NO revertir a `as any` casts en tablas estandar — usar los tipos generados
-- **eslint.config.mjs:** ignora patterns `^_` en args/vars/destructuring (útil para params no usados en API públicas)
+- **Lint status:** 28 issues restantes — TODOS react-hooks. Cero no-explicit-any, cero no-unused-vars. Fase 4 pendiente
+- **database.ts:** regenerado 4 veces durante el refactor, 40 aliases preservados, vistas v_mc_negocio + v_pyl_mes + v_mc_linea_mes registradas. NO revertir a `as any` casts en tablas estandar
 - **Security linter Supabase:** 51 de 54 hallazgos cerrados. Pendientes low: 3 extensions en public, wa_message_log sin policy, leaked password protection
-- **WhatsApp notificaciones:** proyecto iniciado. Bloqueado por (1) metrik.com.co con Vercel SSO activo — devuelve 401 todo el dominio, (2) verificacion contenido politica tratamiento (Emilio)
-- **Management API Supabase:** verificado que funciona con access token para ejecutar SQL arbitrario — fallback util cuando CLI falla por desync de migrations
-- **13 migraciones remotas desync:** pendiente `supabase migration repair --status reverted` + `db pull` para realinear
-- **Cotizaciones:** cantidad por item + AIU manual sobre costos + costo unitario visible. AIU oculto por defecto, se activa con link discreto. Item de ajuste invisible en UI (sigue en DB/PDF)
+- **WhatsApp notificaciones:** Vercel SSO LIBERADO en metrik.com.co/privacidad — listo para cargar la pagina al webhook como primer mensaje. Cargar 10 templates a Meta + edge function `wa-notify` pendientes
+- **Management API Supabase:** verificado que funciona con access token para ejecutar SQL arbitrario — fallback util cuando CLI falla por desync de migrations. Usado para todas las migraciones del refactor fiscal
+- **13+ migraciones remotas desync:** pendiente `supabase migration repair --status reverted` + `db pull` para realinear. Las nuevas migraciones aplicaron via Management API (no via supabase db push)
+- **Cotizaciones:** cantidad por item + AIU manual sobre costos + costo unitario visible. AIU oculto por defecto. Item de ajuste invisible en UI
 - **Cronograma (B10):** fechas, responsable, preload, delete, re-evaluacion completitud — todo funcional
 - **WhatsApp bot:** Edge functions desplegadas. Parser: Gemini 2.5 Flash-Lite + fast-path regex + defense layer. FOLLOWUP, ESTADO_NEGOCIOS, last_context con anafora, golden set 98/99
-- **Workspace metrik:** LIMPIO — sin datos, listo para demo fresca
+- **Workspace metrik:** sin datos fiscales, con 2 lineas configuradas (ONE + Resident) listas para crear primer negocio recurrente
 - **Google OAuth:** Preparado en codigo, deshabilitado (`googleEnabled = false`) — pendiente credenciales
 - **Workflow engine:** Activo en produccion
-- **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE
-- **Modulo negocios:** Operativo. 13 tipos de bloques (B01-B13). Pendiente critico: fix persona natural (empresa_id=NULL)
+- **Estado MVP:** COMPLETO — fase go-to-market + Clarity tailor-made sobre ONE + lineas recurrentes (suscripcion SaaS y servicios Resident)
+- **Modulo negocios:** Operativo. 13 tipos de bloques + plan_recurrente nuevo (B14). Pendiente critico SOENA: fix persona natural (empresa_id=NULL)
 - **Gotcha negocios.estado:** Valores reales son `'abierto'` y `'completado'`, NO `'activo'`
 - **Gotcha /negocios cerrados:** La page filtra `.in('estado', ['activo','abierto'])` — negocios completados NO se muestran. Pendiente agregar pill o filtro
+- **Wompi:** integracion pendiente — Mauricio investigando si puede activar cuenta empresarial como persona natural transitoria. Webhook `wa-notify`-style para suscripciones recurrentes vendra en Fase 4 cuando exista cuenta
 - **CRITICO — Modulo negocios reemplaza pipeline y proyectos:** `/negocios` es el flujo principal. `/pipeline` y `/proyectos` son legacy. Todo apunta a negocios: FAB, WhatsApp, gastos, KPIs, navegacion
 
 ## Features NO implementados (Roadmap)
@@ -480,10 +543,24 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [x] Security linter Fase 1: 4 fixes criticos (RLS, SECURITY DEFINER, bucket listing, policy permisiva) — completado 2026-04-18
 - [x] Security linter Fase 2: 46 funciones con search_path mutable fixed — completado 2026-04-18
 - [x] Docs wa-templates.md: 10 templates listos para Meta Business Manager — completado 2026-04-18
-- [ ] **WA notificaciones:** liberar Vercel SSO en metrik.com.co/privacidad (todo el dominio bloqueado hoy)
+- [x] **WA notificaciones:** liberar Vercel SSO en metrik.com.co/privacidad — completado 2026-04-28
 - [ ] **WA notificaciones:** validar que politica tratamiento menciona WhatsApp + telefono + opt-out (Emilio)
 - [ ] **WA notificaciones:** cargar los 10 templates a Meta Business Manager (Yuto, post bloqueadores)
 - [ ] **WA notificaciones:** construir edge function `wa-notify` + trigger SQL en tabla notificaciones + flow opt-in en primera interaccion (Max, post aprobacion Meta)
+- [x] **Refactor MC + EBITDA + capa fiscal Fase A backend** — completado 2026-04-27 (commit 535a31e)
+- [x] **Refactor Fase B UI completa** (5 sub-fases) — completado 2026-04-27 (commits a214f8b → f83f09a)
+- [x] **Fix bug revisado en calculos operativos** — completado 2026-04-27 (commit c749daa)
+- [x] **Planes recurrentes Fase 1 datos + cron** — completado 2026-05-04 (commit 9b9499e)
+- [x] **Planes recurrentes Fase 2 BloquePlanRecurrente + UI cobros programados** — completado 2026-05-04 (commit 3afe283)
+- [x] **Planes recurrentes Fase 3 lineas MeTRIK ONE + Resident** — completado 2026-05-04 (commit 6391525)
+- [x] **MC por linea (decision Carmen + Mauricio)** — completado 2026-05-04 (commit c56f9e7)
+- [x] **Cleanup config_financiera.margen_* legacy** — completado 2026-04-28 (commit f83f09a)
+- [ ] **Planes recurrentes Fase 4 — webhook Wompi:** pendiente activacion cuenta empresarial Wompi (Mauricio investigando si se puede como persona natural transitoria). Edge function `wompi-webhook` para suscripciones recurrentes + mapeo `referencia_wompi` → `plan_cobro` (Max + Yuto)
+- [ ] **Carmen (cerebro):** actualizar `cerebro/reglas/modelo-financiero-mrr-one.md` con regla hibrida 3 buckets revenue (Service / ARR ONE / ARR Resident) + excepcion Clarity-financiado + 3 decisiones MC por linea (Sin linea visible, MC global+linea coexisten, Resident variable a linea)
+- [ ] **Mateo:** pieza de comunicacion para diferenciar Resident de ONE en pitch comercial
+- [ ] **Santiago:** validar pricing y permanencia minima al cerrar primer contrato Resident
+- [ ] **Auditoria SOENA:** validar que el saldo del flujo VE muestra correcto el cobrado real con cobros pre-refactor (`revisado=false` en historicos pero el fix c749daa ignora ese filtro). Revisar BloqueCobros y BloqueHistorial en negocio activo
+- [ ] **Auditoria DIMPRO:** validar `/movimientos` con badge clasificacion + filtro nuevo en 55 gastos historicos
 - [ ] **Security low:** mover extensions unaccent, pg_trgm, pg_net fuera de public
 - [ ] **Security low:** policy explicita para wa_message_log o documentar como service-role-only
 - [ ] **Security low:** activar Leaked Password Protection en Supabase Auth dashboard
@@ -609,3 +686,17 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-04-18 | Politica tratamiento Habeas Data NO es suficiente para opt-in Meta | Son dos compliance distintos: Ley 1581 Colombia (Emilio) y contrato Meta WhatsApp (Yuto). Ambos requeridos antes de enviar notificacion proactiva |
 | 2026-04-18 | 9 notificaciones ONE como templates Utility (no Marketing) en Meta | Utility se aprueba en 1-24h (vs 1-3 dias Marketing) y cuesta ~40% menos. Copy sin promocion, sin emojis en v1 para maximizar tasa de aprobacion |
 | 2026-04-18 | Security Fase 1+2 priorizada antes que WA notificaciones | 51 de 54 hallazgos del linter Supabase cerrados en una sesion. Aprovecho bloqueo WA para limpiar deuda de seguridad. Los 3 restantes son low priority |
+| 2026-04-27 | Refactor MC + EBITDA: ONE no es software contable, perimetro hasta EBITDA, cash basis puro | Reemplaza flujo causacion formal (PUC, retenciones JSONB, estados PENDIENTE/APROBADO/CAUSADO/RECHAZADO) por flag binario `revisado` para contador. 4 migraciones aplicadas. Spec docs/specs/2026-04-26 |
+| 2026-04-27 | Disclaimer fiscal en /revision /movimientos /nuevo/gasto /numeros drill | Copy aprobado por Emilio (CLO): "ONE es una herramienta de gestion operativa, no software contable, y no sustituye la asesoria de tu contador..." |
+| 2026-04-27 | Causacion → Revision: ruta /causacion eliminada, /revision con bandeja interactiva | Permisos canMarcarRevisado / canViewRevision / canExportRevision reemplazan canCausar / canApproveCausacion / canViewCausacion. Sidebar muestra "Revisión" |
+| 2026-04-27 | Flag revisado es exclusivo para bandeja /revision y export, NO afecta calculos operativos | Cobros se cuentan como reales con `fecha IS NOT NULL`, no con revisado=true. Bug detectado en auditoria: SOENA y demos mostraban $0 cobrado porque cobros pre-refactor quedaron revisado=false default. Fix c749daa |
+| 2026-04-27 | Clasificacion costo gastos: variable / fijo / no_operativo | Trigger DB aplica default por categoria si no provisto. Form de gasto pide explicitamente al registrar. Backfill historico: gastos con negocio_id → variable, resto segun mapeo |
+| 2026-04-27 | Retencion en gastos y cobros: NUMERIC simple (patron DIMPRO) | ONE no calcula retenciones — el contador del cliente las registra si las necesita. Reemplaza retenciones JSONB |
+| 2026-04-27 | MC + EBITDA en /numeros desde v_pyl_mes (cash basis), reemplaza blend D130 | Tile principal MC% + EBITDA del mes. Drill P2 muestra MC global, MC por negocio top-5. Sin estimacion blend 40/60/100 historico — todo calculado del mes real |
+| 2026-04-28 | Cleanup config_financiera.margen_* legacy (DROP columnas) | Post-refactor MC, esas columnas quedaron huerfanas. UI mi-negocio MargenContribucionSection ahora read-only informativa |
+| 2026-05-04 | Linea Resident — 5ta linea MeTRIK, servicios profesionales recurrentes | Naming aprobado por Mauricio post-debate Mateo (Steady) vs Santiago (Resident). Resident gana por escalabilidad: "Oficial Cumplimiento Resident", "BI Resident", "Analista Financiero Resident". "Recurrente" se preserva como flag interno tipo_negocio |
+| 2026-05-04 | Lineas MeTRIK ONE (4 etapas) y MeTRIK Resident (6 etapas) creadas en workspace MeTRIK | BloquePlanRecurrente en etapa Contrato de ambas. ONE: Prospecto → Contrato → Plan activo → Cierre. Resident: Discovery → Propuesta → Contrato → Onboarding → Vigente → Cierre |
+| 2026-05-04 | Plan recurrente: monto + frecuencia + fecha_inicio + total_cuotas + auto_renovar | Tabla planes_cobro ligada a negocio_id. Cron diario procesar-planes-cobro genera cobros programados con T+3 dias anticipacion. Marca vencido tras 3 dias gracia. Notifica responsable + owner + staff area=admin_finanzas |
+| 2026-05-04 | 3 buckets revenue canonicos: Service revenue / ARR ONE / ARR Resident | Decision Carmen + Mauricio. Service revenue = Clarity + Projects + Analytics (discrete). ARR ONE = software (recurrente sin costo marginal). ARR Resident = servicio (recurrente con costo de especialista). Excepcion: Clarity con financiacion a cuotas NO se reclasifica |
+| 2026-05-04 | MC por linea con bucket "Sin linea" visible | Vista v_mc_linea_mes. Drill P2 muestra MC global y MC por linea coexistentes. Costos variables sin negocio asignado van a bucket "Sin linea" en italico gris (transparencia, no se prorratean). Especialista Resident con gastos imputados a negocio = variable a linea Resident; sin imputacion = fijo de empresa |
+| 2026-05-04 | Lineas con tipo `recurrente` aceptadas en check constraint lineas_negocio.tipo | Antes solo aceptaba 'plantilla' / 'clarity'. Ahora tambien 'recurrente' para ONE y Resident |
