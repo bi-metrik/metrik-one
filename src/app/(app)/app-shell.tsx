@@ -22,6 +22,8 @@ import {
   Workflow,
   GitFork,
   Blocks,
+  ListChecks,
+  Scale,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -36,6 +38,9 @@ interface BrandingProps {
 interface WorkspaceModules {
   business?: boolean
   compliance?: boolean
+  compliance_validacion?: boolean
+  compliance_dual_informa?: boolean
+  compliance_audit?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -68,11 +73,28 @@ const CONTABILIDAD_NAV_ITEMS = [
 
 // Compliance module (solo si modules.compliance)
 // read_only = auditor: ve riesgos y matriz pero no puede editar
-const COMPLIANCE_NAV_ITEMS = [
+type ComplianceItem = {
+  href: string
+  label: string
+  icon: typeof ShieldAlert
+  roles: string[]
+  /**
+   * Si se define, el item solo se muestra cuando el flag indicado en modules
+   * tiene el valor que aqui se especifica (true para activar, false para ocultar).
+   */
+  requireFlag?: { key: keyof WorkspaceModules; value: boolean }
+}
+
+const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
   { href: '/riesgos', label: 'Riesgos', icon: ShieldAlert, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/controles', label: 'Controles', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/matriz', label: 'Matriz', icon: Grid3X3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
-  { href: '/compliance/validacion', label: 'Validación', icon: UserCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  // Validacion pura solo cuando NO esta el modo dual_informa (UX transparente)
+  { href: '/compliance/validacion', label: 'Validación', icon: UserCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_dual_informa', value: false } },
+  // UX transparente — solo cuando el flag esta activo (alma-afi)
+  { href: '/compliance/listas', label: 'Listas Restrictivas', icon: ListChecks, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  // Comparativa interna MeTRIK — solo workspace metrik
+  { href: '/compliance/comparativa-informa', label: 'Comparativa Informa', icon: Scale, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_audit', value: true } },
 ]
 
 // Compartidos (siempre visibles)
@@ -103,6 +125,34 @@ const MOBILE_PRIMARY_HREFS: Record<string, string[]> = {
 function filterByRole(items: typeof BUSINESS_NAV_ITEMS, role: string) {
   return items.filter(item => item.roles.includes(role))
 }
+
+/**
+ * Filtra items de compliance por rol Y por requireFlag (cuando aplica).
+ * Considera la combinacion (flag undefined trata como false).
+ */
+function filterCompliance(items: ComplianceItem[], role: string, modules: WorkspaceModules) {
+  const hasCoreCompliance = Boolean(modules.compliance)
+  return items.filter(item => {
+    if (!item.roles.includes(role)) return false
+    if (item.requireFlag) {
+      // Item con flag explicito: comparar con valor actual
+      const current = Boolean(modules[item.requireFlag.key])
+      return current === item.requireFlag.value
+    }
+    // Item generico (riesgos/controles/matriz): solo si compliance core esta activo
+    return hasCoreCompliance
+  })
+}
+
+// Compliance module — Compliance es la version "premium" de validacion
+// Compliance se compone de cuatro submodulos:
+// - riesgos (gestion de riesgos)
+// - controles (gestion de controles)
+// - matriz (matriz de riesgo)
+// - validacion (consulta SARLAFT)
+// El flag compliance_dual_informa (alma-afi) reemplaza validacion por UX transparente.
+// El flag compliance_audit (workspace metrik) habilita la vista comparativa interna.
+
 
 function getAdminItemsForRole(role: string) {
   return ADMIN_NAV_ITEMS.filter(item => item.roles.includes(role))
@@ -158,7 +208,10 @@ export default function AppShell({
   const mod = modules ?? { business: true }
   const businessItems = mod.business ? filterByRole(BUSINESS_NAV_ITEMS, role) : []
   const contabilidadItems = mod.causacion ? filterByRole(CONTABILIDAD_NAV_ITEMS, role) : []
-  const complianceItems = mod.compliance ? filterByRole(COMPLIANCE_NAV_ITEMS, role) : []
+  // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
+  const complianceItems = (mod.compliance || mod.compliance_audit)
+    ? filterCompliance(COMPLIANCE_NAV_ITEMS, role, mod)
+    : []
   const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 
