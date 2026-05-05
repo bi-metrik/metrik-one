@@ -6,7 +6,6 @@ import {
   Check,
   Download,
   FileSpreadsheet,
-  FileText,
   Search,
   Upload,
   User,
@@ -21,14 +20,7 @@ import {
   type InformaMatch,
 } from '@/lib/actions/compliance-dual';
 
-type TabKey = 'documento' | 'nombre' | 'masiva';
-
-const TIPO_DOC_OPCIONES: Array<{ value: 'CC' | 'CE' | 'NIT' | 'PAS'; label: string; tipo: DualTipo }> = [
-  { value: 'CC', label: 'CC', tipo: 'natural' },
-  { value: 'CE', label: 'CE', tipo: 'natural' },
-  { value: 'PAS', label: 'Pasaporte', tipo: 'natural' },
-  { value: 'NIT', label: 'NIT', tipo: 'juridica' },
-];
+type TabKey = 'puntual' | 'masiva';
 
 function base64ToBlob(b64: string, mime: string): Blob {
   const bytes = atob(b64);
@@ -49,24 +41,28 @@ function triggerDownload(blob: Blob, filename: string) {
 }
 
 export default function ListasClient() {
-  const [tab, setTab] = useState<TabKey>('documento');
+  const [tab, setTab] = useState<TabKey>('puntual');
 
   return (
     <div className="space-y-6">
       <div className="flex gap-1 border-b border-[#E5E7EB]">
-        <TabButton active={tab === 'documento'} onClick={() => setTab('documento')} icon={<FileText className="h-4 w-4" />}>
-          Por documento
+        <TabButton
+          active={tab === 'puntual'}
+          onClick={() => setTab('puntual')}
+          icon={<Search className="h-4 w-4" />}
+        >
+          Consulta puntual
         </TabButton>
-        <TabButton active={tab === 'nombre'} onClick={() => setTab('nombre')} icon={<User className="h-4 w-4" />}>
-          Por nombre
-        </TabButton>
-        <TabButton active={tab === 'masiva'} onClick={() => setTab('masiva')} icon={<FileSpreadsheet className="h-4 w-4" />}>
-          Consulta masiva
+        <TabButton
+          active={tab === 'masiva'}
+          onClick={() => setTab('masiva')}
+          icon={<FileSpreadsheet className="h-4 w-4" />}
+        >
+          Carga masiva (XLSX)
         </TabButton>
       </div>
 
-      {tab === 'documento' && <ConsultaDocumentoForm />}
-      {tab === 'nombre' && <ConsultaNombreForm />}
+      {tab === 'puntual' && <ConsultaPuntualForm />}
       {tab === 'masiva' && <ConsultaMasivaForm />}
     </div>
   );
@@ -99,37 +95,48 @@ function TabButton({
   );
 }
 
-// ─── Tab: Por documento ────────────────────────────────────────────────────
+// ─── Tab: Consulta puntual (formulario unificado) ──────────────────────────
 
-function ConsultaDocumentoForm() {
+function ConsultaPuntualForm() {
   const [tipo, setTipo] = useState<DualTipo>('natural');
-  const [tipoDoc, setTipoDoc] = useState<'CC' | 'CE' | 'NIT' | 'PAS'>('CC');
   const [identificacion, setIdentificacion] = useState('');
+  const [nombre, setNombre] = useState('');
   const [resultado, setResultado] = useState<DualConsultaPublica | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validation, setValidation] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function onTipoChange(t: DualTipo) {
-    setTipo(t);
-    setTipoDoc(t === 'juridica' ? 'NIT' : 'CC');
-  }
+  const idTrim = identificacion.trim();
+  const nombreTrim = nombre.trim();
+  const isEmpty = idTrim.length === 0 && nombreTrim.length === 0;
+
+  const labelDocumento = tipo === 'juridica' ? 'NIT' : 'Cédula';
+  const placeholderDocumento = tipo === 'juridica' ? '900123456' : '1077089147';
+  const labelNombre = tipo === 'juridica' ? 'Razón social' : 'Nombre completo';
+  const placeholderNombre =
+    tipo === 'juridica' ? 'Acme Trading SAS' : 'Juan Pérez Gómez';
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setValidation(null);
     setResultado(null);
+
+    if (isEmpty) {
+      setValidation('Debes llenar al menos uno de los dos campos.');
+      return;
+    }
+
     startTransition(async () => {
       const r = await consultaDual({
-        modo: 'documento',
         tipo,
-        identificacion: identificacion.trim(),
+        ...(idTrim ? { identificacion: idTrim } : {}),
+        ...(nombreTrim ? { nombre: nombreTrim } : {}),
       });
       if (r.ok) setResultado(r.data);
       else setError(r.error);
     });
   }
-
-  const docOpciones = TIPO_DOC_OPCIONES.filter(o => o.tipo === tipo);
 
   return (
     <div className="space-y-5">
@@ -137,114 +144,63 @@ function ConsultaDocumentoForm() {
         onSubmit={onSubmit}
         className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-4"
       >
-        <SelectorTipoPersona tipo={tipo} onChange={onTipoChange} />
+        <SelectorTipoPersona
+          tipo={tipo}
+          onChange={(t) => {
+            setTipo(t);
+            setValidation(null);
+          }}
+        />
 
-        <div className="grid sm:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
-              Tipo documento
-            </label>
-            <select
-              value={tipoDoc}
-              onChange={e => setTipoDoc(e.target.value as 'CC' | 'CE' | 'NIT' | 'PAS')}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white"
-            >
-              {docOpciones.map(o => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
-              Numero de documento
+              {labelDocumento}{' '}
+              <span className="text-[#9CA3AF] normal-case font-medium">(opcional)</span>
             </label>
             <input
               type="text"
               value={identificacion}
-              onChange={e => setIdentificacion(e.target.value)}
-              required
-              minLength={3}
-              placeholder="1077089147"
+              onChange={(e) => {
+                setIdentificacion(e.target.value);
+                if (validation) setValidation(null);
+              }}
+              placeholder={placeholderDocumento}
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+              {labelNombre}{' '}
+              <span className="text-[#9CA3AF] normal-case font-medium">(opcional)</span>
+            </label>
+            <input
+              type="text"
+              value={nombre}
+              onChange={(e) => {
+                setNombre(e.target.value);
+                if (validation) setValidation(null);
+              }}
+              placeholder={placeholderNombre}
               className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
             />
           </div>
         </div>
 
+        <p className="text-xs text-[#6B7280]">
+          Llena al menos uno de los dos. Mejor si llenas ambos: la coincidencia es más precisa.
+        </p>
+
         <button
           type="submit"
-          disabled={pending || identificacion.trim().length < 3}
+          disabled={pending || isEmpty}
           className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
         >
           <Search className="h-4 w-4" />
           {pending ? 'Consultando…' : 'Consultar'}
         </button>
 
-        {error && <ErrorBox msg={error} />}
-      </form>
-
-      {resultado && <ResultadoConsulta data={resultado} />}
-    </div>
-  );
-}
-
-// ─── Tab: Por nombre ───────────────────────────────────────────────────────
-
-function ConsultaNombreForm() {
-  const [tipo, setTipo] = useState<DualTipo>('natural');
-  const [nombre, setNombre] = useState('');
-  const [resultado, setResultado] = useState<DualConsultaPublica | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setResultado(null);
-    startTransition(async () => {
-      const r = await consultaDual({
-        modo: 'nombre',
-        tipo,
-        nombre: nombre.trim(),
-      });
-      if (r.ok) setResultado(r.data);
-      else setError(r.error);
-    });
-  }
-
-  return (
-    <div className="space-y-5">
-      <form
-        onSubmit={onSubmit}
-        className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-4"
-      >
-        <SelectorTipoPersona tipo={tipo} onChange={setTipo} />
-
-        <div>
-          <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
-            {tipo === 'natural' ? 'Nombre completo' : 'Razón social'}
-          </label>
-          <input
-            type="text"
-            value={nombre}
-            onChange={e => setNombre(e.target.value)}
-            required
-            minLength={3}
-            placeholder={tipo === 'natural' ? 'Juan Pérez Gómez' : 'Acme Trading SAS'}
-            className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={pending || nombre.trim().length < 3}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
-        >
-          <Search className="h-4 w-4" />
-          {pending ? 'Consultando…' : 'Consultar'}
-        </button>
-
+        {validation && <ErrorBox msg={validation} />}
         {error && <ErrorBox msg={error} />}
       </form>
 
@@ -311,7 +267,7 @@ function ConsultaMasivaForm() {
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="text-base font-bold text-[#1A1A1A]">Consulta masiva</h3>
+          <h3 className="text-base font-bold text-[#1A1A1A]">Carga masiva (XLSX)</h3>
           <p className="text-sm text-[#6B7280] mt-1">
             Sube un XLSX con la plantilla y descarga el resultado con las coincidencias anexadas.
           </p>

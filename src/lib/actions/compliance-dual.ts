@@ -154,8 +154,7 @@ async function jsonOrError<T>(res: Response): Promise<Result<T>> {
 // ─── UI 1: Consulta puntual (alma-afi) ─────────────────────────────────────
 
 export type DualConsultaInput = {
-  modo: DualMode;
-  tipo: DualTipo;
+  tipo?: DualTipo;
   identificacion?: string;
   nombre?: string;
 };
@@ -168,6 +167,25 @@ export async function consultaDual(
   const slug = await getWorkspaceSlug(workspaceId);
   if (!slug) return { ok: false, error: 'workspace_slug_no_encontrado' };
 
+  const identificacion = input.identificacion?.trim() ?? '';
+  const nombre = input.nombre?.trim() ?? '';
+
+  if (!identificacion && !nombre) {
+    return { ok: false, error: 'validation_error' };
+  }
+
+  const body: {
+    workspace_origen: string;
+    tipo?: DualTipo;
+    identificacion?: string;
+    nombre?: string;
+  } = {
+    workspace_origen: slug,
+  };
+  if (input.tipo) body.tipo = input.tipo;
+  if (identificacion) body.identificacion = identificacion;
+  if (nombre) body.nombre = nombre;
+
   try {
     const res = await fetch(`${VALIDA_API_BASE}/v1/compliance/dual`, {
       method: 'POST',
@@ -175,13 +193,7 @@ export async function consultaDual(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${getApiKey()}`,
       },
-      body: JSON.stringify({
-        modo: input.modo,
-        tipo: input.tipo,
-        identificacion: input.identificacion ?? null,
-        nombre: input.nombre ?? null,
-        workspace_origen: slug,
-      }),
+      body: JSON.stringify(body),
       cache: 'no-store',
     });
     return jsonOrError<DualConsultaPublica>(res);
