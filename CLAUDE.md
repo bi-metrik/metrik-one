@@ -380,6 +380,29 @@ Migracion `20260428100001` DROP columnas margen_contribucion_estimado/calculado/
 
 Workspaces con data: SOENA (15 movimientos productivos), DIMPRO (55 gastos), altavista-demo, ana-demo, MeTRIK propio, wmc-sm, AFI (vacio fiscal). Todos los workspaces afectados por el refactor — schema y codigo aplican a todos.
 
+### Trabajo paralelo workspace AFI (commits c5555cf, 6128db6, 4d65d70)
+
+En paralelo al refactor MC+EBITDA, se construyo el motor de contrato modular para el workspace AFI. Aporta 3 features genericos al producto que sirven a cualquier workspace Clarity:
+
+**1. BloqueDatos extendido con 3 tipos genericos nuevos:**
+- `radio` — botones excluyentes con opciones tipadas
+- `documentos_preview` — lista en vivo (panel verde) los archivos a generar segun seleccion del bloque
+- `showIf` — propiedad por field para renderizado condicional en funcion de otro field (ej: sub-opcion que solo aparece si toggle padre activo)
+
+Aplica a cualquier bloque tipo `datos` con `config_extra.fields[]`. El componente filtra fields con `visible(f, values)` antes de renderizar tanto en modo editable como visible.
+
+**2. Patron de hook dual en `negocio-v2-actions.ts`:**
+El server action `marcarBloqueCompleto` ahora detecta multiples bloques accionables ("Generar paquete" y "Generar contrato" en workspace afi) y retorna flags como `trigger_afi_generation` o `trigger_afi_contrato` para que el cliente dispare el endpoint correspondiente. Patron extensible a cualquier "bloque de accion server-heavy" donde el motor no puede correr en server action por `maxDuration` y necesita route handler.
+
+**3. Image module respeta aspect ratio del logo:**
+`src/lib/afi/docx-engine.ts` ahora incluye parser inline para PNG/JPEG que lee dimensiones reales del logo del cliente y escala dentro de bbox 130x60 px (~3.4 x 1.6cm). Mantiene forma original sin deformar. Sin nuevas dependencias.
+
+**Codigo especifico AFI** (no migra a producto, vive en `src/lib/afi/`):
+- `contrato-engine.ts` — motor compositor del DOCX con docxtemplater section tags `{{#FLAG}}...{{/FLAG}}` (13 flags + 22 placeholders)
+- `generar-contrato.ts` — orquestador (lee bloques, descarga master, sube a Drive)
+- `/api/afi/contrato/[negocio_id]` — endpoint POST con maxDuration=60
+- `template-mapping.ts` extendido — `sarlaft_regimen` ('ampliado'|'simplificado'|'ninguno') + ptee + oficial + seguimiento, con `templatesAGenerar` backwards-compatible al schema legacy + `TEMPLATE_NAMES` catalogo legible
+
 ## Estado actual (2026-05-04)
 
 - **Branch:** main — produccion en Vercel (auto-deploy)
@@ -700,3 +723,7 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-05-04 | 3 buckets revenue canonicos: Service revenue / ARR ONE / ARR Resident | Decision Carmen + Mauricio. Service revenue = Clarity + Projects + Analytics (discrete). ARR ONE = software (recurrente sin costo marginal). ARR Resident = servicio (recurrente con costo de especialista). Excepcion: Clarity con financiacion a cuotas NO se reclasifica |
 | 2026-05-04 | MC por linea con bucket "Sin linea" visible | Vista v_mc_linea_mes. Drill P2 muestra MC global y MC por linea coexistentes. Costos variables sin negocio asignado van a bucket "Sin linea" en italico gris (transparencia, no se prorratean). Especialista Resident con gastos imputados a negocio = variable a linea Resident; sin imputacion = fijo de empresa |
 | 2026-05-04 | Lineas con tipo `recurrente` aceptadas en check constraint lineas_negocio.tipo | Antes solo aceptaba 'plantilla' / 'clarity'. Ahora tambien 'recurrente' para ONE y Resident |
+| 2026-04-27 | BloqueDatos extendido con tipos genericos `radio`, `documentos_preview`, `showIf` | Aplicable a cualquier workspace. Radio para opciones excluyentes, documentos_preview para listar archivos a generar segun seleccion en vivo, showIf para campos condicionales. Patron implementado para AFI pero util en SOENA, WMC, etc. donde haya seleccion de productos/modulos |
+| 2026-04-27 | Patron hook AFI dual en negocio-v2-actions: server action retorna flags `trigger_*` para que el cliente dispare el endpoint | Server actions no pueden export `maxDuration`, asi que motores server-heavy (>10s) viven en route handlers. Patron extensible: `trigger_afi_generation` (paquete SARLAFT 30-60s) y `trigger_afi_contrato` (contrato 15-30s). Replicar en otros workspaces con motores pesados |
+| 2026-04-27 | Image module respeta aspect ratio del logo en docx-engine AFI | Antes 300x100 px deformaba. Ahora parser inline PNG/JPEG escala dentro de bbox 130x60 manteniendo forma original. Sin nuevas dependencias (no `image-size` lib) |
+| 2026-04-27 | Composicion modular de contratos via docxtemplater section tags `{{#FLAG}}...{{/FLAG}}` | Patron probado en motor AFI. Plantilla DOCX maestra unica + 13 flags + 22 placeholders genera N combinaciones de contrato. Reusable para cualquier cliente Clarity con productos componibles. Pricing hardcoded en v1 (DEFAULT_PRICING constante), pendiente migrar a `workspaces.config_extra` |
