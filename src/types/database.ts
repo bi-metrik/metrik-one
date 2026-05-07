@@ -5262,6 +5262,92 @@ export type Database = {
           },
         ]
       }
+      valida_consultas: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          documento_numero: string | null
+          documento_tipo: string | null
+          hash_reporte: string | null
+          id: string
+          lote_id: string | null
+          matches: Json | null
+          negocio_id: string | null
+          nombre_consultado: string | null
+          severidad: string
+          tipo: string
+          tipo_persona: string
+          total_matches: number
+          valida_consulta_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          documento_numero?: string | null
+          documento_tipo?: string | null
+          hash_reporte?: string | null
+          id?: string
+          lote_id?: string | null
+          matches?: Json | null
+          negocio_id?: string | null
+          nombre_consultado?: string | null
+          severidad: string
+          tipo: string
+          tipo_persona: string
+          total_matches?: number
+          valida_consulta_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          documento_numero?: string | null
+          documento_tipo?: string | null
+          hash_reporte?: string | null
+          id?: string
+          lote_id?: string | null
+          matches?: Json | null
+          negocio_id?: string | null
+          nombre_consultado?: string | null
+          severidad?: string
+          tipo?: string
+          tipo_persona?: string
+          total_matches?: number
+          valida_consulta_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "valida_consultas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_consultas_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_consultas_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "valida_consultas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ve_procesamiento_log: {
         Row: {
           campos_extraidos: Json | null
@@ -5498,6 +5584,7 @@ export type Database = {
         Row: {
           color_primario: string | null
           color_secundario: string | null
+          config_extra: Json
           created_at: string | null
           drive_folder_id: string | null
           equipo_declarado: number | null
@@ -5523,6 +5610,7 @@ export type Database = {
         Insert: {
           color_primario?: string | null
           color_secundario?: string | null
+          config_extra?: Json
           created_at?: string | null
           drive_folder_id?: string | null
           equipo_declarado?: number | null
@@ -5548,6 +5636,7 @@ export type Database = {
         Update: {
           color_primario?: string | null
           color_secundario?: string | null
+          config_extra?: Json
           created_at?: string | null
           drive_folder_id?: string | null
           equipo_declarado?: number | null
@@ -6077,6 +6166,8 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// Type aliases custom — preservados al regenerar
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type Client = Database['public']['Tables']['clients']['Row']
 export type Contacto = Database['public']['Tables']['contactos']['Row']
@@ -6117,3 +6208,4 @@ export type TimeEntry = Database['public']['Tables']['time_entries']['Row']
 export type Workspace = Database['public']['Tables']['workspaces']['Row']
 export type WorkspaceFeature = Database['public']['Tables']['workspace_features']['Row']
 export type WorkspaceStageRow = Database['public']['Tables']['workspace_stages']['Row']
+export type ValidaConsulta = Database['public']['Tables']['valida_consultas']['Row']
