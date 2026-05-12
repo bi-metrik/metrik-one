@@ -15,8 +15,8 @@ import type { TutorialDefinition } from './types';
 export const validaStandaloneTutorial: TutorialDefinition = {
   slug: 'valida_standalone',
   version: 1,
-  title: 'Tutorial Valida', // TODO(mateo)
-  intro: 'Recorrido rapido para consultar listas SARLAFT en este workspace.', // TODO(mateo)
+  title: 'Tutorial Valida',
+  intro: 'Recorrido rapido para consultar listas SARLAFT en este workspace.',
   steps: [
     stepBienvenida('valida_explicit'),
     stepConsultaPuntual(),

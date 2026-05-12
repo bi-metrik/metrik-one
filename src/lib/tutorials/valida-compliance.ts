@@ -13,8 +13,8 @@ import type { TutorialDefinition } from './types';
 export const validaComplianceTutorial: TutorialDefinition = {
   slug: 'valida_compliance',
   version: 1,
-  title: 'Tutorial Validacion SARLAFT', // TODO(mateo)
-  intro: 'Recorrido rapido para consultar listas restrictivas desde el modulo de compliance.', // TODO(mateo)
+  title: 'Tutorial Validacion SARLAFT',
+  intro: 'Recorrido rapido para consultar listas restrictivas desde el modulo de compliance.',
   steps: [
     stepBienvenida('valida_explicit'),
     stepConsultaPuntual(),

@@ -8,17 +8,16 @@ import type { TutorialStep } from './types';
 
 export type SharedCopyVariant = 'valida_explicit' | 'dual_neutral';
 
-// TODO(mateo): copy final aprobado por Mateo. Por ahora placeholders descriptivos.
 export function stepBienvenida(variant: SharedCopyVariant): TutorialStep {
   const description =
     variant === 'dual_neutral'
-      ? 'Cada consulta cruza dos fuentes de informacion para mayor cobertura. Los resultados se unifican en una respuesta. Cumples tu obligacion como sujeto obligado sin saltar entre fuentes.' // TODO(mateo)
-      : 'ONU, OFAC, UE, PEP Colombia, CSN Colombia. Cumples tu obligacion como sujeto obligado sin saltar entre fuentes.'; // TODO(mateo)
+      ? 'Cada consulta cruza varias fuentes y unifica el resultado. Trazabilidad completa para auditoria.'
+      : 'Una consulta cruza ONU, OFAC, Union Europea, PEP Colombia y CSN. Tu obligacion como sujeto obligado, sin saltar entre fuentes.';
 
   const title =
     variant === 'dual_neutral'
-      ? 'Listas SARLAFT en una sola consulta' // TODO(mateo)
-      : 'Valida revisa listas SARLAFT en una sola consulta'; // TODO(mateo)
+      ? 'Validar listas en un solo paso'
+      : 'Validar listas SARLAFT en un solo paso';
 
   return {
     element: null,
@@ -30,9 +29,9 @@ export function stepBienvenida(variant: SharedCopyVariant): TutorialStep {
 export function stepConsultaPuntual(): TutorialStep {
   return {
     element: '[data-tutorial-target="consulta-puntual-form"]',
-    title: 'Consulta puntual', // TODO(mateo)
+    title: 'Consulta puntual',
     description:
-      'Llena nombre y/o documento. Si das ambos, el matching es mas preciso. Selector de persona natural vs juridica arriba.', // TODO(mateo)
+      'Escribe nombre, documento o ambos. Cuanto mas completo, mejor el matching. Elige persona natural o juridica arriba.',
     side: 'right',
     align: 'start',
   };
@@ -41,9 +40,9 @@ export function stepConsultaPuntual(): TutorialStep {
 export function stepLecturaResultado(): TutorialStep {
   return {
     element: '[data-tutorial-target="resultado-zona"]',
-    title: 'Como leer el resultado', // TODO(mateo)
+    title: 'Como leer el resultado',
     description:
-      'El badge muestra severidad: Alto (rojo) bloquea, Medio/Bajo (amarillo) requiere revision, Sin hallazgo (verde) puedes proceder. El tier identifica si la lista es vinculante.', // TODO(mateo)
+      'Alto (rojo): bloquea la operacion. Medio o bajo (amarillo): revisa antes de proceder. Sin hallazgo (verde): puedes continuar. El tier indica si la lista es vinculante.',
     side: 'top',
     align: 'center',
   };
@@ -52,9 +51,9 @@ export function stepLecturaResultado(): TutorialStep {
 export function stepHistorial(): TutorialStep {
   return {
     element: '[data-tutorial-target="tab-historial"]',
-    title: 'Historial auditable', // TODO(mateo)
+    title: 'Historial auditable',
     description:
-      'Toda consulta queda registrada por 5 anos (obligacion regulatoria). Filtras por fecha, severidad, tipo.', // TODO(mateo)
+      'Cada consulta queda registrada por 5 anos. Filtras por fecha, severidad o tipo. Soporte de auditoria SARLAFT.',
     side: 'bottom',
     align: 'center',
   };
@@ -63,18 +62,18 @@ export function stepHistorial(): TutorialStep {
 export function stepReportePDF(): TutorialStep {
   return {
     element: null,
-    title: 'Reporte PDF para auditoria', // TODO(mateo)
+    title: 'Reporte descargable',
     description:
-      'Cada consulta genera reporte PDF con hash de integridad para auditoria SARLAFT.', // TODO(mateo)
+      'Cada consulta genera un PDF con hash de integridad. Lo descargas desde el historial cuando lo necesites para auditoria.',
   };
 }
 
 export function stepCargaMasiva(): TutorialStep {
   return {
     element: '[data-tutorial-target="tab-masiva"]',
-    title: 'Carga masiva XLSX', // TODO(mateo)
+    title: 'Carga masiva por archivo',
     description:
-      'Descarga la plantilla, llena hasta 500 filas, sube y descarga el resultado con severidad por fila.', // TODO(mateo)
+      'Descarga la plantilla, llena hasta 500 filas y sube el archivo. Recibes un XLSX con la severidad de cada fila.',
     side: 'bottom',
     align: 'center',
   };
@@ -83,9 +82,9 @@ export function stepCargaMasiva(): TutorialStep {
 export function stepAsociarNegocio(): TutorialStep {
   return {
     element: '[data-tutorial-target="negocio-picker"]',
-    title: 'Asociar la consulta a un negocio', // TODO(mateo)
+    title: 'Asociar al negocio',
     description:
-      'Asocia la consulta a un negocio del workspace para agrupar todas las validaciones de un mismo CDA o cliente. Incluye negocios cerrados.', // TODO(mateo)
+      'Vincula la consulta a un negocio del workspace. Util para agrupar todas las validaciones de un mismo cliente o CDA. Incluye negocios cerrados.',
     side: 'top',
     align: 'start',
   };

@@ -14,8 +14,8 @@ type Props = {
 };
 
 export default function TutorialEmptyState({
-  title = 'Comienza aqui', // TODO(mateo)
-  description = 'Recorre el tutorial guiado o prueba una consulta de ejemplo. Aprendes en menos de un minuto.', // TODO(mateo)
+  title = 'Comienza por aqui',
+  description = 'Valida revisa listas SARLAFT en una sola consulta. Mira la demo o haz una consulta de prueba.',
   onStartDemo,
   onTryConsulta,
   ctaSecundario = 'Hacer consulta de prueba',

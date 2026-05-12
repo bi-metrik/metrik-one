@@ -17,8 +17,8 @@ import type { TutorialDefinition } from './types';
 export const complianceListasDualTutorial: TutorialDefinition = {
   slug: 'compliance_listas_dual',
   version: 1,
-  title: 'Tutorial Listas Restrictivas', // TODO(mateo)
-  intro: 'Recorrido rapido para consultar listas restrictivas con doble fuente.', // TODO(mateo)
+  title: 'Tutorial Listas Restrictivas',
+  intro: 'Recorrido rapido para consultar listas restrictivas con doble fuente.',
   steps: [
     stepBienvenida('dual_neutral'),
     stepConsultaPuntual(),
