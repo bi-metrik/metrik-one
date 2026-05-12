@@ -9,6 +9,7 @@ import {
   History,
   Search,
   ShieldAlert,
+  ShieldCheck,
   Upload,
   X,
 } from 'lucide-react';
@@ -27,6 +28,9 @@ import {
   type TipoPersona,
   type ValidaResultado,
 } from '@/lib/actions/valida-consultas';
+import TutorialTour from '@/components/tutorial/TutorialTour';
+import TutorialButton from '@/components/tutorial/TutorialButton';
+import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 
 type TabKey = 'puntual' | 'masiva' | 'historial';
 
@@ -83,12 +87,18 @@ function triggerDownload(blob: Blob, filename: string) {
 type Props = {
   historialInicial: ConsultaHistorialItem[];
   errorHistorial: string | null;
+  tutorialNuncaVisto?: boolean;
 };
 
-export default function ValidaClient({ historialInicial, errorHistorial }: Props) {
+export default function ValidaClient({
+  historialInicial,
+  errorHistorial,
+  tutorialNuncaVisto = false,
+}: Props) {
   const [tab, setTab] = useState<TabKey>('puntual');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
+  const [tourTrigger, setTourTrigger] = useState(0);
 
   async function refrescarHistorial(filtros?: FiltrosHistorial) {
     const r = await listarConsultasValida(filtros);
@@ -100,16 +110,55 @@ export default function ValidaClient({ historialInicial, errorHistorial }: Props
     }
   }
 
+  function dispararTutorial() {
+    setTourTrigger(t => t + 1);
+    setTab('puntual');
+  }
+
+  const mostrarEmpty = historial.length === 0 && !historialError;
+
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <ShieldCheck className="h-6 w-6 text-[#10B981]" />
+        <div className="flex-1">
+          <h1 className="text-xl font-bold text-[#1A1A1A]">Valida</h1>
+          <p className="text-sm text-[#6B7280]">
+            Consulta puntual o masiva contra listas vinculantes SARLAFT (ONU, OFAC, UE, PEP, CSN).
+          </p>
+        </div>
+        <TutorialButton onClick={dispararTutorial} />
+      </div>
+
+      {mostrarEmpty && (
+        <TutorialEmptyState
+          onStartDemo={dispararTutorial}
+          onTryConsulta={() => setTab('puntual')}
+        />
+      )}
+
       <div className="flex gap-1 border-b border-[#E5E7EB]">
-        <TabButton active={tab === 'puntual'} onClick={() => setTab('puntual')} icon={<Search className="h-4 w-4" />}>
+        <TabButton
+          active={tab === 'puntual'}
+          onClick={() => setTab('puntual')}
+          icon={<Search className="h-4 w-4" />}
+        >
           Consulta puntual
         </TabButton>
-        <TabButton active={tab === 'masiva'} onClick={() => setTab('masiva')} icon={<FileSpreadsheet className="h-4 w-4" />}>
+        <TabButton
+          active={tab === 'masiva'}
+          onClick={() => setTab('masiva')}
+          icon={<FileSpreadsheet className="h-4 w-4" />}
+          dataTutorialTarget="tab-masiva"
+        >
           Carga masiva
         </TabButton>
-        <TabButton active={tab === 'historial'} onClick={() => setTab('historial')} icon={<History className="h-4 w-4" />}>
+        <TabButton
+          active={tab === 'historial'}
+          onClick={() => setTab('historial')}
+          icon={<History className="h-4 w-4" />}
+          dataTutorialTarget="tab-historial"
+        >
           Historial
         </TabButton>
       </div>
@@ -123,6 +172,11 @@ export default function ValidaClient({ historialInicial, errorHistorial }: Props
           onFiltrar={refrescarHistorial}
         />
       )}
+
+      {/* Tutorial: auto-arranca si nunca lo vio, o forzado via boton "?" */}
+      {(tutorialNuncaVisto || tourTrigger > 0) && (
+        <TutorialTour slug="valida_standalone" forceStart={tourTrigger} />
+      )}
     </div>
   );
 }
@@ -134,16 +188,19 @@ function TabButton({
   onClick,
   icon,
   children,
+  dataTutorialTarget,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   children: React.ReactNode;
+  dataTutorialTarget?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-tutorial-target={dataTutorialTarget}
       className={`-mb-px inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
         active ? 'border-[#1A1A1A] text-[#1A1A1A]' : 'border-transparent text-[#6B7280] hover:text-[#1A1A1A]'
       }`}
@@ -186,7 +243,11 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
 
   return (
     <div className="space-y-5">
-      <form onSubmit={onSubmit} className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-4">
+      <form
+        onSubmit={onSubmit}
+        data-tutorial-target="consulta-puntual-form"
+        className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-4"
+      >
         <div className="flex gap-2">
           {(['natural', 'juridica'] as const).map(t => (
             <button
@@ -254,7 +315,7 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
           </div>
         </div>
 
-        <div>
+        <div data-tutorial-target="negocio-picker">
           <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
             Asociar a negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
           </label>
@@ -276,7 +337,11 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
         {error && <ErrorBox msg={error} />}
       </form>
 
-      {resultado && <ResultadoCard data={resultado} nombreConsultado={nombre} />}
+      {resultado && (
+        <div data-tutorial-target="resultado-zona">
+          <ResultadoCard data={resultado} nombreConsultado={nombre} />
+        </div>
+      )}
     </div>
   );
 }

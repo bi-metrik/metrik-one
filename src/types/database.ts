@@ -5262,6 +5262,53 @@ export type Database = {
           },
         ]
       }
+      tutorial_progress: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          current_step: number
+          dismissed_at: string | null
+          id: string
+          tutorial_slug: string
+          updated_at: string
+          user_id: string
+          version: number
+          workspace_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          current_step?: number
+          dismissed_at?: string | null
+          id?: string
+          tutorial_slug: string
+          updated_at?: string
+          user_id: string
+          version?: number
+          workspace_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          current_step?: number
+          dismissed_at?: string | null
+          id?: string
+          tutorial_slug?: string
+          updated_at?: string
+          user_id?: string
+          version?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutorial_progress_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       valida_consultas: {
         Row: {
           created_at: string
@@ -5918,6 +5965,25 @@ export type Database = {
         }
         Relationships: []
       }
+      v_tutorial_adopcion: {
+        Row: {
+          completados: number | null
+          descartados: number | null
+          iniciados: number | null
+          tasa_completacion_pct: number | null
+          tutorial_slug: string | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutorial_progress_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       apply_plantilla_to_workspace: {
@@ -6166,7 +6232,6 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
 // Type aliases custom — preservados al regenerar
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type Client = Database['public']['Tables']['clients']['Row']
@@ -6209,3 +6274,4 @@ export type Workspace = Database['public']['Tables']['workspaces']['Row']
 export type WorkspaceFeature = Database['public']['Tables']['workspace_features']['Row']
 export type WorkspaceStageRow = Database['public']['Tables']['workspace_stages']['Row']
 export type ValidaConsulta = Database['public']['Tables']['valida_consultas']['Row']
+export type TutorialProgress = Database['public']['Tables']['tutorial_progress']['Row']

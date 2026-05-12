@@ -6,11 +6,14 @@ import {
   Check,
   Download,
   FileSpreadsheet,
+  ListChecks,
   Search,
   Upload,
   User,
   Users,
 } from 'lucide-react';
+import TutorialTour from '@/components/tutorial/TutorialTour';
+import TutorialButton from '@/components/tutorial/TutorialButton';
 import {
   consultaDual,
   consultaDualBatch,
@@ -40,11 +43,32 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function ListasClient() {
+type ListasClientProps = {
+  tutorialNuncaVisto?: boolean;
+};
+
+export default function ListasClient({ tutorialNuncaVisto = false }: ListasClientProps) {
   const [tab, setTab] = useState<TabKey>('puntual');
+  const [tourTrigger, setTourTrigger] = useState(0);
+
+  function dispararTutorial() {
+    setTourTrigger(t => t + 1);
+    setTab('puntual');
+  }
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <ListChecks className="h-6 w-6 text-[#1A1A1A]" />
+        <div className="flex-1">
+          <h1 className="text-xl font-bold text-[#1A1A1A]">Consulta de Listas Restrictivas</h1>
+          <p className="text-sm text-[#6B7280]">
+            Consulta puntual o masiva contra listas vinculantes y de referencia.
+          </p>
+        </div>
+        <TutorialButton onClick={dispararTutorial} />
+      </div>
+
       <div className="flex gap-1 border-b border-[#E5E7EB]">
         <TabButton
           active={tab === 'puntual'}
@@ -57,6 +81,7 @@ export default function ListasClient() {
           active={tab === 'masiva'}
           onClick={() => setTab('masiva')}
           icon={<FileSpreadsheet className="h-4 w-4" />}
+          dataTutorialTarget="tab-masiva"
         >
           Carga masiva (XLSX)
         </TabButton>
@@ -64,6 +89,10 @@ export default function ListasClient() {
 
       {tab === 'puntual' && <ConsultaPuntualForm />}
       {tab === 'masiva' && <ConsultaMasivaForm />}
+
+      {(tutorialNuncaVisto || tourTrigger > 0) && (
+        <TutorialTour slug="compliance_listas_dual" forceStart={tourTrigger} />
+      )}
     </div>
   );
 }
@@ -73,16 +102,19 @@ function TabButton({
   onClick,
   icon,
   children,
+  dataTutorialTarget,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   children: React.ReactNode;
+  dataTutorialTarget?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-tutorial-target={dataTutorialTarget}
       className={`-mb-px inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
         active
           ? 'border-[#1A1A1A] text-[#1A1A1A]'
@@ -142,6 +174,7 @@ function ConsultaPuntualForm() {
     <div className="space-y-5">
       <form
         onSubmit={onSubmit}
+        data-tutorial-target="consulta-puntual-form"
         className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-4"
       >
         <SelectorTipoPersona
@@ -204,7 +237,11 @@ function ConsultaPuntualForm() {
         {error && <ErrorBox msg={error} />}
       </form>
 
-      {resultado && <ResultadoConsulta data={resultado} />}
+      {resultado && (
+        <div data-tutorial-target="resultado-zona">
+          <ResultadoConsulta data={resultado} />
+        </div>
+      )}
     </div>
   );
 }

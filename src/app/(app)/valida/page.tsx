@@ -1,8 +1,8 @@
-import { ShieldCheck } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { getWorkspace } from '@/lib/actions/get-workspace';
 import { createServiceClient } from '@/lib/supabase/server';
 import { listarConsultasValida } from '@/lib/actions/valida-consultas';
+import { getTutorialProgress } from '@/lib/actions/tutorial-progress';
 import ValidaClient from './valida-client';
 
 export const dynamic = 'force-dynamic';
@@ -22,23 +22,13 @@ export default async function ValidaPage() {
   if (!modules.valida_consulta) redirect('/');
 
   const historial = await listarConsultasValida({ limite: 100 });
+  const tutorialProgress = await getTutorialProgress('valida_standalone');
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <ShieldCheck className="h-6 w-6 text-[#10B981]" />
-        <div>
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Valida</h1>
-          <p className="text-sm text-[#6B7280]">
-            Consulta puntual o masiva contra listas vinculantes SARLAFT (ONU, OFAC, UE, PEP, CSN).
-          </p>
-        </div>
-      </div>
-
-      <ValidaClient
-        historialInicial={historial.ok ? historial.consultas : []}
-        errorHistorial={historial.ok ? null : historial.error}
-      />
-    </div>
+    <ValidaClient
+      historialInicial={historial.ok ? historial.consultas : []}
+      errorHistorial={historial.ok ? null : historial.error}
+      tutorialNuncaVisto={tutorialProgress === null}
+    />
   );
 }

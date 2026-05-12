@@ -4,11 +4,15 @@ import { useState, useTransition } from 'react';
 import { validarPersona } from '@/lib/actions/valida';
 import { buildPDFUrl } from '@/lib/valida-urls';
 import type { ConsultaResumen, ValidaResultado, TierLista, Severidad } from '@/lib/actions/valida';
-import { ShieldAlert, FileDown, Search } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, FileDown, Search } from 'lucide-react';
+import TutorialTour from '@/components/tutorial/TutorialTour';
+import TutorialButton from '@/components/tutorial/TutorialButton';
+import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 
 type Props = {
   historial: ConsultaResumen[];
   errorHistorial: string | null;
+  tutorialNuncaVisto?: boolean;
 };
 
 const TIER_CLASS: Record<TierLista, string> = {
@@ -33,7 +37,11 @@ const SEVERIDAD_CLASS: Record<Severidad, string> = {
   sin_hallazgo: 'bg-[#10B981] text-white',
 };
 
-export default function ValidacionClient({ historial, errorHistorial }: Props) {
+export default function ValidacionClient({
+  historial,
+  errorHistorial,
+  tutorialNuncaVisto = false,
+}: Props) {
   const [tipo, setTipo] = useState<'natural' | 'juridica'>('natural');
   const [nombre, setNombre] = useState('');
   const [docTipo, setDocTipo] = useState<'CC' | 'CE' | 'NIT' | 'PAS'>('CC');
@@ -41,6 +49,13 @@ export default function ValidacionClient({ historial, errorHistorial }: Props) {
   const [resultado, setResultado] = useState<ValidaResultado | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [tourTrigger, setTourTrigger] = useState(0);
+
+  function dispararTutorial() {
+    setTourTrigger(t => t + 1);
+  }
+
+  const mostrarEmpty = historial.length === 0 && !errorHistorial;
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,8 +74,27 @@ export default function ValidacionClient({ historial, errorHistorial }: Props) {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <ShieldCheck className="h-6 w-6 text-[#10B981]" />
+        <div className="flex-1">
+          <h1 className="text-xl font-bold text-[#1A1A1A]">Validacion SARLAFT</h1>
+          <p className="text-sm text-[#6B7280]">
+            Consulta contra ONU + CSN Colombia + PEP + OFAC + UE via Valida
+          </p>
+        </div>
+        <TutorialButton onClick={dispararTutorial} />
+      </div>
+
+      {mostrarEmpty && (
+        <TutorialEmptyState
+          onStartDemo={dispararTutorial}
+          onTryConsulta={undefined}
+        />
+      )}
+
       <form
         onSubmit={onSubmit}
+        data-tutorial-target="consulta-puntual-form"
         className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-4"
       >
         <div className="flex gap-2">
@@ -147,7 +181,10 @@ export default function ValidacionClient({ historial, errorHistorial }: Props) {
       </form>
 
       {resultado && (
-        <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
+        <div
+          data-tutorial-target="resultado-zona"
+          className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden"
+        >
           <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
             <div>
               <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Resultado</p>
@@ -200,7 +237,10 @@ export default function ValidacionClient({ historial, errorHistorial }: Props) {
         </div>
       )}
 
-      <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
+      <div
+        data-tutorial-target="tab-historial"
+        className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden"
+      >
         <div className="p-4 border-b border-[#E5E7EB]">
           <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
             Historial (ultimas 50)
@@ -256,6 +296,10 @@ export default function ValidacionClient({ historial, errorHistorial }: Props) {
           </div>
         )}
       </div>
+
+      {(tutorialNuncaVisto || tourTrigger > 0) && (
+        <TutorialTour slug="valida_compliance" forceStart={tourTrigger} />
+      )}
     </div>
   );
 }
