@@ -46,7 +46,7 @@ async function main() {
   console.log(`\n→ Buscando workspace "${slug}" en ONE...`);
   const { data: ws, error: errWs } = await one
     .from('workspaces')
-    .select('id, slug, name, config_extra')
+    .select('id, slug, name, config_extra, modules')
     .eq('slug', slug)
     .single();
 
@@ -116,8 +116,25 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`\nLISTO. API key emitida y persistida en workspace ${slug}.`);
-  console.log(`\nEntregar a Kaori para que la guarde en .credentials.md (seccion Valida — workspace ${slug}):`);
+  console.log(`\n→ Activando flag modules.valida_consulta en workspace ${slug}...`);
+  const currentModules = ((ws as { modules?: Record<string, boolean> }).modules ?? {}) as Record<string, boolean>;
+  const newModules = { ...currentModules, valida_consulta: true };
+  const { error: errMod } = await one
+    .from('workspaces')
+    .update({ modules: newModules })
+    .eq('id', ws.id);
+
+  if (errMod) {
+    console.error(`Fallo activando modules.valida_consulta: ${errMod.message}`);
+    process.exit(1);
+  }
+  console.log(`  modules.valida_consulta = true`);
+
+  console.log(`\nLISTO. Workspace ${slug} habilitado para Valida:`);
+  console.log(`  1. api_key emitida y persistida en config_extra (server-only)`);
+  console.log(`  2. modules.valida_consulta = true (sidebar muestra item Valida)`);
+  console.log(`  3. Tutorial in-app auto-arrancara al primer ingreso de cada usuario`);
+  console.log(`\nEntregar a Kaori para que guarde la api_key en .credentials.md (seccion Valida — workspace ${slug}):`);
   console.log(`\n  api_key: ${plain}`);
   console.log(`  cliente_id: ${cliente.cliente_id}`);
   console.log(`  prefix: ${prefix}`);

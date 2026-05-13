@@ -313,7 +313,32 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
-**Sesion:** 2026-04-27 → 2026-05-04 (one core: refactor MC + EBITDA + capa fiscal + planes recurrentes + lineas MeTRIK + MC por linea)
+
+**Sesion:** 2026-05-11 (one core: modulo Valida activable por workspace + patron config_extra para credenciales per-workspace)
+**Branch:** main · 1 commit (`bfbe9cb`)
+
+### Modulo Valida — activable por workspace_modules
+
+Nueva ruta `/valida` en ONE para workspaces que necesitan consulta SARLAFT directa contra metrik-valida. Distinto del flujo dual de ALMA (`/compliance/listas` con Informa transparente) y distinto de `/compliance/validacion` (Valida pura dentro del modulo compliance core). El item se renderiza en seccion "Extras" del sidebar inferior, separado de los modulos principales — para workspaces que NO tienen modulo compliance pero igual necesitan validar listas.
+
+Activacion (3 pasos):
+1. Migration 20260506100001 aplica + flag `modules.valida_consulta=true` en el workspace
+2. Script `npx tsx scripts/setup-valida-workspace.ts <slug> "<nombre>"` emite api_key (hash en metrik-valida.api_keys, plana en `workspaces.{slug}.config_extra.valida_api_key`)
+3. Sidebar muestra item "Valida" automaticamente al recargar (Extras > Valida con icono ShieldCheck)
+
+Primer workspace que lo usa: AFI (workflow CDAs). Yessica consulta listas SARLAFT por cada CDA cliente, opcionalmente atando cada consulta a un negocio del workspace (incluye negocios cerrados — uso comun para CDAs ya implementados). XLSX masivo soporta columna `negocio_codigo` para mezclar varios negocios en un cargue.
+
+Codigo:
+- Migration `20260506100001_valida_consultas.sql` — tabla `valida_consultas` con `negocio_id` nullable + RLS por workspace + indices (workspace_id, negocio_id, created_at, lote_id, severidad)
+- Migration `20260506100002_workspaces_config_extra.sql` — columna `workspaces.config_extra jsonb default '{}'` (ver gotcha mas abajo)
+- Server actions `src/lib/actions/valida-consultas.ts` — puntual + masivo XLSX (mismo formato ALMA, hasta 500 filas) + historial con filtros + buscador negocios. Helper `getWorkspaceValidaApiKey` lee de `config_extra.valida_api_key` con fallback a env var `VALIDA_API_KEY` (compat ALMA hasta cleanup futuro)
+- UI `src/app/(app)/valida/{page,valida-client}.tsx` — 3 tabs (puntual/masiva/historial), dropdown `NegocioPicker` reutilizable con buscador (NO filtra por estado), filtros completos historial. Marca: paleta MeTRIK pura (#1A1A1A, #6B7280, #10B981, #E5E7EB, #F5F4F2)
+- Tab "Consultas Valida" en `/negocios/[id]` — `negocio-valida-section.tsx` se renderiza al final del detalle cuando workspace tiene flag activo. Reusa `HistorialTable` exportado del valida-client
+- Sidebar `app-shell.tsx` — interface `valida_consulta?: boolean` agregada a `WorkspaceModules`. Nueva seccion "Extras" entre compartidos y admin con item "Valida". Roles: owner/admin/supervisor/operator/read_only
+- Script `scripts/setup-valida-workspace.ts` — emite api_key per-workspace. Requiere env vars: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `VALIDA_SUPABASE_URL`, `VALIDA_SUPABASE_SERVICE_ROLE_KEY`
+- database.ts regenerado: 47 aliases preservados + `ValidaConsulta`. Build limpio en archivos nuevos
+
+### Sesion previa: 2026-04-27 → 2026-05-04 (one core: refactor MC + EBITDA + capa fiscal + planes recurrentes + lineas MeTRIK + MC por linea)
 **Branch:** main · 12 commits
 
 ### Refactor MC + EBITDA + capa fiscal (Fase A backend) — 535a31e
@@ -499,6 +524,15 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - **Server actions:** Archivos en `src/lib/actions/` o colocados junto a la pagina que los usa.
 - **Idioma UI:** Espanol (Colombia). Textos hardcodeados, sin i18n.
 - **Nomenclatura:** "MéTRIK one" (one en minuscula) en toda la app. Isotipo: M₁.
+- **`workspaces.config_extra` (jsonb, server-only):** Columna agregada el 2026-05-11 para almacenar credenciales y configs por workspace que NO deben llegar al cliente. **Cuando se activa:**
+  1. **Solo cuando un modulo opcional necesita credenciales server-side per-workspace** (no globales en env var). Ejemplo canonico: `valida_api_key` y `valida_cliente_id` para que cada workspace consuma metrik-valida con su propia api_key emitida en lugar de compartir una env var unica
+  2. **NO** se usa para flags booleanos de modulo (eso vive en `workspaces.modules`)
+  3. **NO** se usa para datos visibles al cliente (logo, colores, nombre — esos tienen columnas dedicadas)
+  4. **NO** se usa para parametros de UI o features togglables (eso vive en `proyecto_modules` o `modules`)
+  5. **Acceso:** SOLO via service_role en server actions. Nunca se selecciona desde el cliente. Helper pattern: `await svc.from('workspaces').select('config_extra').eq('id', workspaceId).single()` + leer la key necesaria
+  6. **Default:** `{}`. Cualquier workspace sin config tiene jsonb vacio
+  7. **Patron de escritura:** scripts admin como `scripts/setup-valida-workspace.ts` que emiten credencial + persisten + entregan plana una sola vez para `.credentials.md`. NUNCA escribir desde server action en producto ONE — siempre via script admin con review explicita
+- **Activacion canonica del modulo Valida en un workspace:** correr `npx tsx scripts/setup-valida-workspace.ts <slug> "<nombre>"`. El script garantiza en un solo paso: (1) emite api_key con hash en metrik-valida + plana en `workspaces.config_extra.valida_api_key`, (2) activa flag `modules.valida_consulta=true` para que el item aparezca en sidebar, (3) deja el tutorial in-app listo para auto-arrancar en primer ingreso de cada usuario (no requiere accion adicional). **NO activar el flag manualmente desde SQL** — siempre via script para que api_key y flag queden consistentes
 - **Modulos por empresa:** Cuando se necesite un modulo visible solo para un workspace especifico (ej: dashboard de otro producto, panel de control interno), seguir este patron:
   1. Env var `ADMIN_WORKSPACE_ID` (o equivalente) con el UUID del workspace autorizado
   2. Server layout pasa prop `isAdminWorkspace` comparando `profile.workspace_id === process.env.ADMIN_WORKSPACE_ID`
@@ -723,6 +757,12 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-05-04 | 3 buckets revenue canonicos: Service revenue / ARR ONE / ARR Resident | Decision Carmen + Mauricio. Service revenue = Clarity + Projects + Analytics (discrete). ARR ONE = software (recurrente sin costo marginal). ARR Resident = servicio (recurrente con costo de especialista). Excepcion: Clarity con financiacion a cuotas NO se reclasifica |
 | 2026-05-04 | MC por linea con bucket "Sin linea" visible | Vista v_mc_linea_mes. Drill P2 muestra MC global y MC por linea coexistentes. Costos variables sin negocio asignado van a bucket "Sin linea" en italico gris (transparencia, no se prorratean). Especialista Resident con gastos imputados a negocio = variable a linea Resident; sin imputacion = fijo de empresa |
 | 2026-05-04 | Lineas con tipo `recurrente` aceptadas en check constraint lineas_negocio.tipo | Antes solo aceptaba 'plantilla' / 'clarity'. Ahora tambien 'recurrente' para ONE y Resident |
+| 2026-05-11 | Modulo Valida activable por workspace con flag `modules.valida_consulta=true` | Patron generico — cualquier workspace puede activarlo sin necesitar modulo compliance core. UI vive en seccion "Extras" del sidebar inferior, separada de modulos principales. Primer adopter: AFI (workflow CDAs sin compliance core activo) |
+| 2026-05-11 | Nueva columna `workspaces.config_extra jsonb` para credenciales y configs server-only por workspace | No existia. Necesaria porque api_keys per-workspace requieren almacenamiento que NO sea env var global. Default `{}`. Acceso SOLO via service_role en server actions. NUNCA exponer al cliente. Patron de escritura: scripts admin (`scripts/setup-valida-workspace.ts`), nunca server actions. Ver gotcha en seccion correspondiente para criterios de cuando se activa |
+| 2026-05-11 | API key per-workspace en `workspaces.config_extra.valida_api_key`, fallback a env var | Helper `getWorkspaceValidaApiKey(workspaceId)` lee primero de config_extra, cae a env var `VALIDA_API_KEY` (compatibilidad ALMA hasta cleanup). Habilita multi-tenant real para Valida — cada workspace tiene su propia api_key emitida + hash en metrik-valida.api_keys |
+| 2026-05-11 | Tabla `valida_consultas` generica para historico local de consultas Valida en ONE | Multi-tenant via `workspace_id` + RLS. `negocio_id` nullable permite asociacion opcional consulta ↔ negocio. `lote_id` agrupa items de un mismo cargue masivo. Indices por (workspace_id, negocio_id, created_at), por lote_id, por severidad |
+| 2026-05-11 | Buscador de negocios para Valida NO filtra por estado (incluye cerrados) | Server action `buscarNegociosParaValida` retorna todos los negocios del workspace ordenados por created_at. Comportamiento distinto al listado `/negocios` que oculta completados por default. Razon: las consultas SARLAFT suelen atarse a negocios ya implementados (CDAs cerrados) |
+| 2026-05-11 | XLSX masivo Valida soporta columna `negocio_codigo` opcional que sobrescribe seleccion de lote | Plantilla descargable con headers + 3 ejemplos. Si la celda esta vacia, usa el dropdown del lote. Si tiene valor, lo resuelve via `negocios.codigo` y asocia esa fila a ese negocio. Permite mezclar varios negocios en un mismo cargue |
 | 2026-04-27 | BloqueDatos extendido con tipos genericos `radio`, `documentos_preview`, `showIf` | Aplicable a cualquier workspace. Radio para opciones excluyentes, documentos_preview para listar archivos a generar segun seleccion en vivo, showIf para campos condicionales. Patron implementado para AFI pero util en SOENA, WMC, etc. donde haya seleccion de productos/modulos |
 | 2026-04-27 | Patron hook AFI dual en negocio-v2-actions: server action retorna flags `trigger_*` para que el cliente dispare el endpoint | Server actions no pueden export `maxDuration`, asi que motores server-heavy (>10s) viven en route handlers. Patron extensible: `trigger_afi_generation` (paquete SARLAFT 30-60s) y `trigger_afi_contrato` (contrato 15-30s). Replicar en otros workspaces con motores pesados |
 | 2026-04-27 | Image module respeta aspect ratio del logo en docx-engine AFI | Antes 300x100 px deformaba. Ahora parser inline PNG/JPEG escala dentro de bbox 130x60 manteniendo forma original. Sin nuevas dependencias (no `image-size` lib) |
