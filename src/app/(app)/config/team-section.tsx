@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { Mail, Shield, Eye, Wrench, Crown, Loader2, X, UserPlus, Clock, Trash2 } from 'lucide-react'
+import { Mail, Shield, Eye, Wrench, Crown, Briefcase, Loader2, X, UserPlus, Clock, Trash2, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   inviteTeamMember,
@@ -12,7 +12,7 @@ import {
 } from './team-actions'
 import type { RoleKey } from '@/lib/roles'
 
-type InviteRole = 'admin' | 'operator'
+type InviteRole = 'admin' | 'supervisor' | 'operator' | 'read_only'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -39,13 +39,15 @@ interface TeamSectionProps {
 
 const ROLE_OPTIONS: { value: InviteRole; label: string; icon: React.ElementType; description: string }[] = [
   { value: 'admin', label: 'Admin', icon: Shield, description: 'Todo excepto config fiscal e invitar' },
+  { value: 'supervisor', label: 'Supervisor', icon: Briefcase, description: 'Coordina equipo y proyectos por area' },
   { value: 'operator', label: 'Operador', icon: Wrench, description: 'Proyectos asignados + gastos + horas' },
-  // read_only: pausado en ONE nativo — se activa por workspace via Clarity
+  { value: 'read_only', label: 'Lectura', icon: Eye, description: 'Solo consulta, sin edicion' },
 ]
 
 const ROLE_ICONS: Record<string, React.ElementType> = {
   owner: Crown,
   admin: Shield,
+  supervisor: Briefcase,
   operator: Wrench,
   read_only: Eye,
 }
@@ -53,6 +55,7 @@ const ROLE_ICONS: Record<string, React.ElementType> = {
 const ROLE_LABELS: Record<string, string> = {
   owner: 'Dueño',
   admin: 'Admin',
+  supervisor: 'Supervisor',
   operator: 'Operador',
   read_only: 'Lectura',
 }
@@ -66,6 +69,7 @@ export default function TeamSection({ currentUserRole }: TeamSectionProps) {
   const [showInviteForm, setShowInviteForm] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<InviteRole>('operator')
+  const [transferOwnership, setTransferOwnership] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   const isOwner = currentUserRole === 'owner'
@@ -89,11 +93,21 @@ export default function TeamSection({ currentUserRole }: TeamSectionProps) {
       return
     }
 
+    if (transferOwnership) {
+      const ok = confirm(
+        `Vas a transferir ownership a ${inviteEmail}. Cuando acepte, sera el nuevo dueño del workspace. Despues debes degradar tu rol manualmente. ¿Continuar?`
+      )
+      if (!ok) return
+    }
+
+    const role: 'owner' | InviteRole = transferOwnership ? 'owner' : inviteRole
+
     startTransition(async () => {
-      const result = await inviteTeamMember({ email: inviteEmail.trim(), role: inviteRole })
+      const result = await inviteTeamMember({ email: inviteEmail.trim(), role })
       if (result.success) {
         toast.success(`Invitación enviada a ${inviteEmail}`)
         setInviteEmail('')
+        setTransferOwnership(false)
         setShowInviteForm(false)
         // Refresh
         const updated = await getTeamMembers()
@@ -187,30 +201,52 @@ export default function TeamSection({ currentUserRole }: TeamSectionProps) {
 
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted-foreground">Rol:</p>
-            {ROLE_OPTIONS.map((opt) => {
-              const Icon = opt.icon
-              return (
-                <button
-                  key={opt.value}
-                  onClick={() => setInviteRole(opt.value)}
-                  className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                    inviteRole === opt.value
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:bg-accent/50'
-                  }`}
-                >
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{opt.label}</p>
-                    <p className="text-xs text-muted-foreground">{opt.description}</p>
-                  </div>
-                  <div className={`h-4 w-4 rounded-full border-2 ${
-                    inviteRole === opt.value ? 'border-primary bg-primary' : 'border-input'
-                  }`} />
-                </button>
-              )
-            })}
+            <fieldset disabled={transferOwnership} className="space-y-2 disabled:opacity-50">
+              {ROLE_OPTIONS.map((opt) => {
+                const Icon = opt.icon
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setInviteRole(opt.value)}
+                    className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      inviteRole === opt.value
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:bg-accent/50'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{opt.label}</p>
+                      <p className="text-xs text-muted-foreground">{opt.description}</p>
+                    </div>
+                    <div className={`h-4 w-4 rounded-full border-2 ${
+                      inviteRole === opt.value ? 'border-primary bg-primary' : 'border-input'
+                    }`} />
+                  </button>
+                )
+              })}
+            </fieldset>
           </div>
+
+          {/* Transferir ownership — toggle separado con confirmacion (recomendacion Mik) */}
+          <label className="flex items-start gap-3 rounded-lg border border-dashed border-destructive/30 bg-destructive/5 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={transferOwnership}
+              onChange={(e) => setTransferOwnership(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-input"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                <p className="text-sm font-medium">Transferir ownership</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Invita a esta persona como nuevo dueño. Tras aceptar, debes degradar tu rol manualmente.
+              </p>
+            </div>
+          </label>
 
           <button
             onClick={handleInvite}
@@ -258,7 +294,9 @@ export default function TeamSection({ currentUserRole }: TeamSectionProps) {
                     disabled={isPending}
                   >
                     <option value="admin">Admin</option>
+                    <option value="supervisor">Supervisor</option>
                     <option value="operator">Operador</option>
+                    <option value="read_only">Lectura</option>
                   </select>
                   <button
                     onClick={() => handleRemove(member.id, member.full_name)}

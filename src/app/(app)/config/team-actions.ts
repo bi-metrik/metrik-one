@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { RoleKey } from '@/lib/roles'
 
@@ -9,9 +9,11 @@ export type { RoleKey } from '@/lib/roles'
 
 // ── Types ──────────────────────────────────────────────
 
+type InviteRole = 'owner' | 'admin' | 'supervisor' | 'operator' | 'read_only'
+
 interface InviteInput {
   email: string
-  role: 'admin' | 'operator' | 'read_only'
+  role: InviteRole
 }
 
 // ── Server Actions ─────────────────────────────────────
@@ -31,7 +33,7 @@ async function getAuthContext() {
   return { supabase, user, profile }
 }
 
-/** Invite a team member — only owner can invite (D97) */
+/** Invite a team member — only owner can invite (D97). Invitar como owner = transfer (validacion explicita). */
 export async function inviteTeamMember(input: InviteInput) {
   try {
     const { supabase, user, profile } = await getAuthContext()
@@ -40,56 +42,89 @@ export async function inviteTeamMember(input: InviteInput) {
       return { success: false, error: 'Solo el dueño puede invitar miembros' }
     }
 
+    // Owner-as-invite es transfer de ownership: solo owner puede emitirlo (cubierto arriba, explicito por defensa)
+    if (input.role === 'owner' && profile.role !== 'owner') {
+      return { success: false, error: 'Solo el dueño actual puede transferir ownership' }
+    }
+
     const email = input.email.trim().toLowerCase()
     if (!email || !email.includes('@')) {
       return { success: false, error: 'Email inválido' }
     }
 
-    // Check if already invited (pending)
-    const { data: existing } = await supabase
+    // Upsert invitation: reutiliza fila existente por (workspace_id, email) o crea nueva
+    const { error: upsertError } = await supabase
       .from('team_invitations')
-      .select('id, status')
-      .eq('workspace_id', profile.workspace_id)
-      .eq('email', email)
-      .single()
+      .upsert({
+        workspace_id: profile.workspace_id,
+        email,
+        role: input.role,
+        invited_by: user.id,
+        status: 'pending',
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      }, {
+        onConflict: 'workspace_id,email',
+      })
 
-    if (existing) {
-      if (existing.status === 'pending') {
-        return { success: false, error: 'Ya existe una invitación pendiente para este email' }
-      }
-      // Re-invite: update existing
-      const { error } = await supabase
-        .from('team_invitations')
-        .update({
-          role: input.role,
-          status: 'pending',
-          invited_by: user.id,
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .eq('id', existing.id)
-
-      if (error) return { success: false, error: error.message }
-    } else {
-      // New invitation
-      const { error } = await supabase
-        .from('team_invitations')
-        .insert({
-          workspace_id: profile.workspace_id,
-          email,
-          role: input.role,
-          invited_by: user.id,
-        })
-
-      if (error) {
-        if (error.code === '23505') {
-          return { success: false, error: 'Ya existe una invitación para este email' }
-        }
-        return { success: false, error: error.message }
-      }
+    if (upsertError) {
+      return { success: false, error: `Error creando invitacion: ${upsertError.message}` }
     }
 
-    // Check if user already exists in auth
-    // If they do, we could auto-add them. For now, email-based flow.
+    // Get workspace slug for redirect
+    const { data: ws } = await supabase
+      .from('workspaces')
+      .select('slug')
+      .eq('id', profile.workspace_id)
+      .maybeSingle()
+
+    const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
+    const isLocal = process.env.NODE_ENV === 'development'
+    const siteUrl = isLocal
+      ? 'http://localhost:3000'
+      : `https://${ws?.slug || 'app'}.${baseDomain}`
+
+    // Send invitation email via Supabase Auth (uses Supabase's built-in email)
+    const serviceClient = createServiceClient()
+    const { error: inviteErr } = await serviceClient.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${siteUrl}/auth/callback?redirectTo=/accept-invite`,
+      data: {
+        invited_role: input.role,
+        workspace_id: profile.workspace_id,
+      },
+    })
+
+    if (inviteErr) {
+      // Si el usuario ya existe en auth, enviar email custom con link a /login (mismo patron que staff-actions.ts)
+      // No se puede usar generateLink porque PKCE requiere code_verifier del navegador
+      if (inviteErr.message?.includes('already been registered') || inviteErr.status === 422) {
+        const resendKey = process.env.RESEND_API_KEY
+        if (!resendKey) {
+          return { success: false, error: 'RESEND_API_KEY no configurada para reinvitar usuarios existentes' }
+        }
+
+        const loginUrl = `${siteUrl}/login?redirectTo=/accept-invite`
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'MéTRIK ONE <noreply@metrikone.co>',
+            to: [email],
+            subject: 'Te invitaron a MéTRIK ONE',
+            html: `<h2>Te invitaron a MéTRIK ONE</h2>
+<p>Te invitaron a unirte a un workspace en MéTRIK ONE.</p>
+<p>Inicia sesion con tu correo para aceptar la invitacion:</p>
+<p><a href="${loginUrl}" style="display:inline-block;padding:12px 24px;background-color:#10B981;color:white;text-decoration:none;border-radius:8px;font-weight:600;">Iniciar sesion</a></p>
+<p style="color:#6B7280;font-size:14px;">Al iniciar sesion, seras redirigido automaticamente al workspace.</p>`,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          return { success: false, error: `Error enviando email: ${(err as { message?: string }).message || res.statusText}` }
+        }
+      } else {
+        return { success: false, error: `Error invitando: ${inviteErr.message}` }
+      }
+    }
 
     revalidatePath('/config')
     return { success: true }
