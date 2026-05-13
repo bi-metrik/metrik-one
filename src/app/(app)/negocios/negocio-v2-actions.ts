@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
 import { createDriveFolder } from '@/lib/google-drive'
+import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -758,7 +759,7 @@ async function crearCotizacionAutomatica(
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
   })
-  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-${Date.now()}`
+  const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
 
   // 2. Crear cotización detallada en borrador
   const { data: cotData, error: cotErr } = await supabase
@@ -1695,7 +1696,7 @@ export async function autoCrearCobros(
     notas: 'Anticipo',
     monto: valorAnticipo,
     tipo_cobro: 'anticipo',
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: todayBogotaISO(),
     external_ref: referenciaEpayco ?? null,
   }
 
@@ -1740,7 +1741,7 @@ export async function autoCrearCobrosMulti(
       notas: 'Pago',
       monto: p.valor_pago,
       tipo_cobro: 'pago',
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: todayBogotaISO(),
       external_ref: p.referencia_epayco,
     }))
 
@@ -2840,7 +2841,7 @@ export async function pausarNegocio(
   const fechaReaperturaDate = new Date(`${fechaReapertura}T00:00:00`)
   if (isNaN(fechaReaperturaDate.getTime())) return { error: 'Fecha de reapertura invalida' }
   if (fechaReaperturaDate.getTime() > fechaLimite.getTime()) {
-    return { error: `La fecha de reapertura no puede superar ${MAX_DIAS_PAUSA} dias desde la ultima actividad (${fechaLimite.toISOString().slice(0, 10)})` }
+    return { error: `La fecha de reapertura no puede superar ${MAX_DIAS_PAUSA} dias desde la ultima actividad (${todayBogotaISO(fechaLimite)})` }
   }
 
   const now = new Date().toISOString()

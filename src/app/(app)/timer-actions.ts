@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ export async function stopTimer() {
     workspace_id: workspaceId,
     proyecto_id: timer.proyecto_id ?? null,
     negocio_id: timer.negocio_id ?? null,
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: todayBogotaISO(),
     horas: elapsedHours,
     descripcion: timer.descripcion || null,
     inicio: timer.inicio,

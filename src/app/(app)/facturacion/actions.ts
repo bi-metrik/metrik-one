@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 async function getWorkspace() {
   const supabase = await createClient()
@@ -160,7 +161,7 @@ export async function markInvoicePaid(invoiceId: string, data: {
       workspace_id: ctx.workspaceId,
       invoice_id: invoiceId,
       net_received: data.netReceived,
-      payment_date: data.paymentDate || new Date().toISOString().split('T')[0],
+      payment_date: data.paymentDate || todayBogotaISO(),
       payment_method: data.paymentMethod || 'transfer',
       retention_applied: retentionApplied,
       source: 'app',

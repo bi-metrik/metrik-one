@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { FEATURES } from '@/lib/feature-flags'
+import { todayBogotaISO } from '@/lib/dates/bogota'
+
+// Rango UTC del dia calendario Bogota (UTC-5, sin DST).
+// El dia Bogota YYYY-MM-DD empieza a las 05:00 UTC y termina a las 04:59:59.999 UTC del dia siguiente.
+function rangoUtcDiaBogota(diaBogotaISO: string): { start: string; end: string } {
+  const start = new Date(`${diaBogotaISO}T05:00:00.000Z`)
+  const end = new Date(start.getTime() + 86400000 - 1) // 23:59:59.999 del siguiente dia Bogota
+  return { start: start.toISOString(), end: end.toISOString() }
+}
 
 // N6 — Cron de streak roto
 // Si el usuario no registró ningún gasto, cobro, hora NI cambio de saldo_banco ayer
@@ -22,12 +31,13 @@ export async function GET(req: NextRequest) {
   )
 
   const now = new Date()
-  // "Ayer" en Colombia (UTC-5)
-  const ayer = new Date(now)
-  ayer.setDate(ayer.getDate() - 1)
-  const ayerStr = ayer.toISOString().split('T')[0]
-  const ayerStart = `${ayerStr}T00:00:00.000Z`
-  const ayerEnd = `${ayerStr}T23:59:59.999Z`
+  // "Ayer" en calendario Bogota (UTC-5, sin DST). El cron corre 13:00 UTC = 08:00 Bogota,
+  // asi que "hoy Bogota" coincide con el dia calendario actual UTC; ayer es ese dia menos 1.
+  const hoyBogota = todayBogotaISO(now)
+  const ayerStrDate = new Date(`${hoyBogota}T05:00:00.000Z`)
+  ayerStrDate.setUTCDate(ayerStrDate.getUTCDate() - 1)
+  const ayerStr = todayBogotaISO(ayerStrDate)
+  const { start: ayerStart, end: ayerEnd } = rangoUtcDiaBogota(ayerStr)
 
   let notificacionesCreadas = 0
 
@@ -93,11 +103,10 @@ export async function GET(req: NextRequest) {
     const maxDays = 30
 
     for (let i = 2; i <= maxDays; i++) {
-      const diaCheck = new Date(now)
-      diaCheck.setDate(diaCheck.getDate() - i)
-      const diaStr = diaCheck.toISOString().split('T')[0]
-      const diaStart = `${diaStr}T00:00:00.000Z`
-      const diaEnd = `${diaStr}T23:59:59.999Z`
+      const diaCheck = new Date(`${hoyBogota}T05:00:00.000Z`)
+      diaCheck.setUTCDate(diaCheck.getUTCDate() - i)
+      const diaStr = todayBogotaISO(diaCheck)
+      const { start: diaStart, end: diaEnd } = rangoUtcDiaBogota(diaStr)
 
       const [g, c] = await Promise.all([
         supabase.from('gastos').select('id').eq('workspace_id', perfil.workspace_id)
@@ -122,7 +131,7 @@ export async function GET(req: NextRequest) {
       .eq('destinatario_id', perfil.id)
       .eq('tipo', 'streak_roto')
       .eq('estado', 'pendiente')
-      .gte('created_at', `${ayerStr}T00:00:00.000Z`)
+      .gte('created_at', ayerStart)
       .maybeSingle()
 
     if (existente) continue

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 
 export const runtime = 'nodejs'
 
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
   if (!perms.canExportRevision) return new NextResponse('Sin permisos', { status: 403 })
 
   const url = new URL(req.url)
-  const mes = url.searchParams.get('mes') ?? new Date().toISOString().slice(0, 7)
+  const mes = url.searchParams.get('mes') ?? bogotaYearMonth()
   const formato = (url.searchParams.get('formato') ?? 'xlsx') as 'csv' | 'xlsx'
 
   if (!/^\d{4}-\d{2}$/.test(mes)) return new NextResponse('Mes invalido (YYYY-MM)', { status: 400 })

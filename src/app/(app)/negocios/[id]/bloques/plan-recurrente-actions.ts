@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 export interface CrearPlanInput {
   negocioId: string
@@ -129,7 +130,7 @@ export async function confirmarCobroProgramado(cobroId: string, fecha?: string):
   if (cobro.tipo_cobro !== 'programado') return { success: false, error: 'Solo cobros programados se confirman aqui' }
   if (cobro.fecha) return { success: false, error: 'Cobro ya confirmado' }
 
-  const fechaConfirma = fecha ?? new Date().toISOString().split('T')[0]
+  const fechaConfirma = fecha ?? todayBogotaISO()
 
   const { error: updErr } = await supabase
     .from('cobros')

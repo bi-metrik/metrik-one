@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import MiNegocioClient from './mi-negocio-client'
 import { getLineasDisponibles } from './actions'
+import { bogotaYear } from '@/lib/dates/bogota'
 
 export default async function MiNegocioPage() {
   const supabase = await createClient()
@@ -53,7 +54,7 @@ export default async function MiNegocioPage() {
       .from('monthly_targets')
       .select('*')
       .eq('workspace_id', workspaceId)
-      .eq('year', new Date().getFullYear())
+      .eq('year', bogotaYear())
       .order('month'),
 
     supabase

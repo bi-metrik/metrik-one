@@ -1,5 +1,7 @@
 'use server'
 
+import { todayBogotaISO } from '@/lib/dates/bogota'
+
 /**
  * ve-proyecto.ts — Server actions para el flujo operativo VE/HEV/PHEV
  *
@@ -138,7 +140,7 @@ export async function moveProyectoVe(
       await (supabase.from('cobros') as any).insert({
         workspace_id: workspaceId,
         proyecto_id: proyectoId,
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: todayBogotaISO(),
         monto: saldo,
         tipo_cobro: 'saldo',
         notas: 'Saldo VE — Pendiente de cobro',

@@ -5,6 +5,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import * as XLSX from 'xlsx'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -1135,7 +1136,7 @@ export async function generarPlantillaRiesgos(): Promise<{ data: string; filenam
 
   return {
     data: buffer,
-    filename: `plantilla_riesgos_sarlaft_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    filename: `plantilla_riesgos_sarlaft_${todayBogotaISO()}.xlsx`,
   }
 }
 
@@ -1320,7 +1321,7 @@ export async function exportarRiesgosExcel(): Promise<{ data: string; filename: 
     r.estado,
     FUENTE_DB_TO_DISPLAY[r.fuente_identificacion] ?? r.fuente_identificacion ?? '',
     r.notas ?? '',
-    r.created_at ? new Date(r.created_at).toLocaleDateString('es-CO') : '',
+    r.created_at ? new Date(r.created_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' }) : '',
   ])
 
   const wsData = XLSX.utils.aoa_to_sheet([headers, ...rows])
@@ -1344,6 +1345,6 @@ export async function exportarRiesgosExcel(): Promise<{ data: string; filename: 
 
   return {
     data: buffer,
-    filename: `riesgos_sarlaft_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    filename: `riesgos_sarlaft_${todayBogotaISO()}.xlsx`,
   }
 }

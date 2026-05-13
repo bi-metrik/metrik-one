@@ -5,6 +5,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { logSystemChange } from '@/app/(app)/activity-actions'
 import { checkTenantRules, BlockTransitionError } from '@/lib/tenant-rules'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ export async function crearProyectoInterno(input: {
       tipo: 'interno',
       estado: 'en_ejecucion',
       presupuesto_total: presupuestoTotal,
-      fecha_inicio: input.fecha_inicio || new Date().toISOString().split('T')[0],
+      fecha_inicio: input.fecha_inicio || todayBogotaISO(),
       fecha_fin_estimada: input.fecha_fin_estimada || null,
       carpeta_url: input.carpeta_url?.trim() || null,
       responsable_id: input.responsable_id || null,
@@ -500,7 +501,7 @@ async function cerrarProyecto(
 
   const updatePayload: Record<string, unknown> = {
     estado: 'cerrado',
-    fecha_cierre: new Date().toISOString().split('T')[0],
+    fecha_cierre: todayBogotaISO(),
     cierre_snapshot: snapshot,
     lecciones_aprendidas: leccionesAprendidas?.trim() || null,
     avance_porcentaje: 100,
@@ -681,7 +682,7 @@ export async function addGastoDirecto(proyectoId: string, input: {
       rubro_id: input.rubro_id || null,
       descripcion: input.descripcion?.trim() || null,
       categoria: input.categoria || 'otros',
-      fecha: input.fecha || new Date().toISOString().split('T')[0],
+      fecha: input.fecha || todayBogotaISO(),
       tipo: 'directo',
       estado_pago: input.estado_pago ?? 'pagado',
       created_by: userId,
@@ -726,7 +727,7 @@ export async function addFactura(proyectoId: string, input: {
       workspace_id: workspaceId,
       proyecto_id: proyectoId,
       monto: input.monto,
-      fecha_emision: input.fecha_emision || new Date().toISOString().split('T')[0],
+      fecha_emision: input.fecha_emision || todayBogotaISO(),
       numero_factura: input.numero_factura?.trim() || null,
       notas: input.notas?.trim() || null,
     })
@@ -790,7 +791,7 @@ export async function addCobro(facturaId: string, input: {
       proyecto_id: factura.proyecto_id,
       monto: input.monto,
       retencion: input.retencion ?? 0,
-      fecha: input.fecha || new Date().toISOString().split('T')[0],
+      fecha: input.fecha || todayBogotaISO(),
       notas: input.notas?.trim() || null,
       created_by: userId,
     })

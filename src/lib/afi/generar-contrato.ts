@@ -13,6 +13,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
 import { generarContratoDocx, type ClienteData } from './contrato-engine'
 import type { ProductosContratados } from './template-mapping'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 interface Result {
   ok: boolean
@@ -104,7 +105,7 @@ export async function generarContratoAFI(negocio_id: string): Promise<Result> {
     await svc.from('negocios').update({ carpeta_url: `https://drive.google.com/drive/folders/${driveFolderId}` }).eq('id', negocio_id)
   }
 
-  const filename = `Contrato AFI - ${cliente.empresa_nombre} - ${new Date().toISOString().split('T')[0]}.docx`
+  const filename = `Contrato AFI - ${cliente.empresa_nombre} - ${todayBogotaISO()}.docx`
   const upload = await uploadFileToDrive(
     docxBuffer,
     filename,

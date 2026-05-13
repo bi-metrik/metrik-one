@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // ── Upload soporte to Storage ────────────────────────────────
 
@@ -107,7 +108,7 @@ export async function createGasto(input: {
 
   const insertData = {
     workspace_id: workspaceId,
-    fecha: input.fecha || new Date().toISOString().split('T')[0],
+    fecha: input.fecha || todayBogotaISO(),
     monto: input.monto,
     categoria: input.categoria || 'otros',
     clasificacion_costo: input.clasificacion_costo ?? 'variable',

@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getMovimientos, getFilterOptions } from './actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 import MovimientosClient from './movimientos-client'
 
 interface Props {
@@ -11,7 +12,7 @@ interface Props {
 export default async function MovimientosPage({ searchParams }: Props) {
   const params = await searchParams
   const tipo = (params.tipo as 'todos' | 'ingresos' | 'egresos') ?? 'todos'
-  const mes = params.mes ?? new Date().toISOString().slice(0, 7)
+  const mes = params.mes ?? bogotaYearMonth()
   const cat = params.cat ?? 'todos'
   const proy = params.proy ?? 'todos'
   const tipoProy = params.tipoProy ?? 'todos'

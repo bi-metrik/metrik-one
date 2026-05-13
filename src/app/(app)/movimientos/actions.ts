@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
+import { todayBogotaISO, bogotaYearMonth } from '@/lib/dates/bogota'
 
 export type Movimiento = {
   id: string
@@ -51,7 +52,7 @@ export async function getMovimientos(filters?: {
   if (error || !workspaceId) return { movimientos: [], totales: { ingresos: 0, egresos: 0, deducible: 0 }, regimenFiscal: null as string | null }
 
   const tipoFilter = filters?.tipo ?? 'todos'
-  const mes = filters?.mes ?? new Date().toISOString().slice(0, 7)
+  const mes = filters?.mes ?? bogotaYearMonth()
   const catFilter = filters?.cat && filters.cat !== 'todos' ? filters.cat : null
   const proyFilter = filters?.proy && filters.proy !== 'todos' ? filters.proy : null
   const tipoProyFilter = filters?.tipoProy && filters.tipoProy !== 'todos' ? filters.tipoProy : null
@@ -268,7 +269,7 @@ export async function marcarComoPagado(gastoId: string, fechaPago?: string) {
     .from('gastos')
     .update({
       estado_pago: 'pagado',
-      fecha_pago: fechaPago || new Date().toISOString().split('T')[0],
+      fecha_pago: fechaPago || todayBogotaISO(),
     })
     .eq('id', gastoId)
 

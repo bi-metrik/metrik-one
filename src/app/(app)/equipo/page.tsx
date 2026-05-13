@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getHoras, getEquipoFilterOptions } from './actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 import EquipoClient from './equipo-client'
 
 interface Props {
@@ -10,7 +11,7 @@ interface Props {
 
 export default async function EquipoPage({ searchParams }: Props) {
   const params = await searchParams
-  const mes = params.mes ?? new Date().toISOString().slice(0, 7)
+  const mes = params.mes ?? bogotaYearMonth()
   const staff = params.staff ?? 'todos'
   const proyecto = params.proyecto ?? 'todos'
   const estado = params.estado ?? 'todos'

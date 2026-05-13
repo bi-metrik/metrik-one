@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -52,7 +53,7 @@ export async function createCotizacionFlash(oportunidadId: string, descripcion: 
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
   })
-  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-0000`
+  const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-0000`
 
   const { data, error: dbError } = await supabase
     .from('cotizaciones')
@@ -82,7 +83,7 @@ export async function createCotizacionDetallada(oportunidadId: string) {
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
   })
-  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-0000`
+  const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-0000`
 
   const { data, error: dbError } = await supabase
     .from('cotizaciones')
@@ -445,7 +446,7 @@ export async function enviarCotizacion(id: string) {
     .update({
       estado: 'enviada',
       fecha_envio: new Date().toISOString(),
-      fecha_validez: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      fecha_validez: todayBogotaISO(new Date(Date.now() + 30 * 86400000)),
     } as never)
     .eq('id', id)
     .eq('estado', 'borrador')
@@ -530,7 +531,7 @@ export async function duplicarCotizacion(id: string) {
   const { data: dupConsRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
   })
-  const dupCons = dupConsRaw ?? `COT-${new Date().getFullYear()}-0000`
+  const dupCons = dupConsRaw ?? `COT-${bogotaYear()}-0000`
 
   const { data: newCot, error: dbError } = await supabase
     .from('cotizaciones')

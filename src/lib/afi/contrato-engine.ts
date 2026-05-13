@@ -8,6 +8,7 @@
 import PizZip from 'pizzip'
 import Docxtemplater from 'docxtemplater'
 import type { ProductosContratados, SarlaftRegimen } from './template-mapping'
+import { bogotaParts } from '@/lib/dates/bogota'
 
 export interface ClienteData {
   empresa_nombre: string
@@ -130,11 +131,12 @@ function buildContext(productos: ProductosContratados, cliente: ClienteData, pri
   if (SARLAFT_SIMP) valorTotalDiseno += valorDisenoSarlaftSimp
   if (PTEE) valorTotalDiseno += valorDisenoPtee
 
-  // Fecha firma — hoy (contrato se firma al generarse)
-  const hoy = new Date()
-  const FECHA_FIRMA_DIA = String(hoy.getDate()).padStart(2, '0')
-  const FECHA_FIRMA_MES = MESES_ES[hoy.getMonth()]
-  const FECHA_FIRMA_ANIO = String(hoy.getFullYear())
+  // Fecha firma — hoy en zona Colombia (contrato se firma al generarse).
+  // Vercel corre en UTC; ver src/lib/dates/bogota.ts.
+  const partsHoy = bogotaParts()
+  const FECHA_FIRMA_DIA = String(partsHoy.day).padStart(2, '0')
+  const FECHA_FIRMA_MES = MESES_ES[partsHoy.month - 1]
+  const FECHA_FIRMA_ANIO = String(partsHoy.year)
 
   return {
     // Flags condicionales

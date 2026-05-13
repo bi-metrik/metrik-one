@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 
 // ── Types ────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ export async function getRevisionData(mes?: string) {
     return { items: [], counts: { pendientes: 0, revisados: 0 } }
   }
 
-  const currentMes = mes ?? new Date().toISOString().slice(0, 7)
+  const currentMes = mes ?? bogotaYearMonth()
   const [y, m] = currentMes.split('-').map(Number)
   const startDate = `${currentMes}-01`
   const endDate = new Date(y, m, 0).toISOString().split('T')[0]

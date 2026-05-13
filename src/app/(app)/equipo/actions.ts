@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ export async function getHoras(filters?: {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { horas: [], totales: { totalHoras: 0, totalCosto: 0, pendientes: 0 } }
 
-  const mes = filters?.mes ?? new Date().toISOString().slice(0, 7)
+  const mes = filters?.mes ?? bogotaYearMonth()
   const staffFilter = filters?.staff && filters.staff !== 'todos' ? filters.staff : null
   const proyFilter = filters?.proyecto && filters.proyecto !== 'todos' ? filters.proyecto : null
   const estadoFilter = filters?.estado && filters.estado !== 'todos' ? filters.estado : null

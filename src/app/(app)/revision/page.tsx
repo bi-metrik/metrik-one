@@ -3,6 +3,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getRevisionData } from './actions'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 import RevisionClient from './revision-client'
 
 interface Props {
@@ -15,7 +16,7 @@ export default async function RevisionPage({ searchParams }: Props) {
   if (!perms.canViewRevision) redirect('/negocios')
 
   const params = await searchParams
-  const mes = params.mes ?? new Date().toISOString().slice(0, 7)
+  const mes = params.mes ?? bogotaYearMonth()
   const filtro = (params.filtro as 'todos' | 'pendientes' | 'revisados') ?? 'todos'
 
   const { items, counts } = await getRevisionData(mes)

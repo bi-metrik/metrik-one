@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // Cron de SLA de pausa de negocios
 // - Reactiva negocios cuya fecha de reapertura llega
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   )
 
-  const hoy = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+  const hoy = todayBogotaISO() // YYYY-MM-DD en Bogota; pausado_hasta es DATE en zona Colombia
 
   // 1. Workspaces con SLA automático activo
   const { data: workspaces } = await supabase

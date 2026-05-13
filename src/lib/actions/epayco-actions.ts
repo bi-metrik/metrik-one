@@ -3,6 +3,7 @@
 import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // Cast a untyped para tablas nuevas no en database.ts
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -106,7 +107,7 @@ export async function registrarPagoEpayco(
         notas: tipoCobro === 'anticipo' ? 'Anticipo' : 'Pago',
         monto: desglose.monto_bruto,
         tipo_cobro: tipoCobro,
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: todayBogotaISO(),
         external_ref: String(desglose.ref_payco),
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -128,7 +129,7 @@ export async function registrarPagoEpayco(
       const gasto = {
         workspace_id: workspaceId,
         negocio_id: negocioId,
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: todayBogotaISO(),
         monto: desglose.total_descuentos,
         categoria: 'servicios_profesionales',
         descripcion: `Comision ePayco — Ref ${desglose.ref_payco}`,
@@ -147,7 +148,7 @@ export async function registrarPagoEpayco(
       total_descuentos: desglose.total_descuentos,
       monto_neto: desglose.monto_neto,
       tipo_cobro: tipoCobro,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: todayBogotaISO(),
     }
     const updatedPagos = [...currentPagos, newPago]
     const updatedData = { ...currentData, pagos: updatedPagos }

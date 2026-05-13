@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import type {
   ComercialData, OperativoData, FinancieroData,
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
@@ -18,50 +19,38 @@ const CATEGORIA_LABELS: Record<string, string> = {
 }
 const MES_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
-function getPeriodRange(periodo: Periodo): { start: string; end: string; meses: number } {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = now.getMonth() // 0-indexed
-  const end = new Date(y, m + 1, 1).toISOString().split('T')[0]
+// Rangos de mes calculados en zona Colombia — Vercel corre en UTC; ver src/lib/dates/bogota.ts.
+function firstOfMonthBogota(yearMonthOffset: number = 0): string {
+  const p = bogotaParts()
+  const monthZeroBased = p.month - 1 + yearMonthOffset
+  const y = p.year + Math.floor(monthZeroBased / 12)
+  const m = ((monthZeroBased % 12) + 12) % 12 // 0-11
+  return `${y}-${String(m + 1).padStart(2, '0')}-01`
+}
 
+function getPeriodRange(periodo: Periodo): { start: string; end: string; meses: number } {
+  const end = firstOfMonthBogota(1)
   switch (periodo) {
-    case 'mes': {
-      const start = new Date(y, m, 1).toISOString().split('T')[0]
-      return { start, end, meses: 1 }
-    }
-    case 'trimestre': {
-      const start = new Date(y, m - 2, 1).toISOString().split('T')[0]
-      return { start, end, meses: 3 }
-    }
-    case '6meses': {
-      const start = new Date(y, m - 5, 1).toISOString().split('T')[0]
-      return { start, end, meses: 6 }
-    }
-    case 'anio': {
-      const start = new Date(y, m - 11, 1).toISOString().split('T')[0]
-      return { start, end, meses: 12 }
-    }
+    case 'mes':       return { start: firstOfMonthBogota(0),   end, meses: 1 }
+    case 'trimestre': return { start: firstOfMonthBogota(-2),  end, meses: 3 }
+    case '6meses':    return { start: firstOfMonthBogota(-5),  end, meses: 6 }
+    case 'anio':      return { start: firstOfMonthBogota(-11), end, meses: 12 }
   }
 }
 
 function getPrevMonthRange(): { start: string; end: string } {
-  const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0]
-  const end = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-  return { start, end }
+  return { start: firstOfMonthBogota(-1), end: firstOfMonthBogota(0) }
 }
 
 function getCurrentMonthRange(): { start: string; end: string } {
-  const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split('T')[0]
-  return { start, end }
+  return { start: firstOfMonthBogota(0), end: firstOfMonthBogota(1) }
 }
 
 function getDiasRestantesMes(): number {
-  const now = new Date()
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-  return lastDay.getDate() - now.getDate()
+  const p = bogotaParts()
+  // Ultimo dia del mes en Bogota — local-Date con offsets seguros.
+  const lastDay = new Date(p.year, p.month, 0).getDate()
+  return lastDay - p.day
 }
 
 // ============================================================
@@ -240,7 +229,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
   // Runway — usar últimos 3 meses de gastosHist
   const threeMonthsAgo = new Date()
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
-  const threeMonthsAgoStr = threeMonthsAgo.toISOString().split('T')[0]
+  const threeMonthsAgoStr = todayBogotaISO(threeMonthsAgo)
   const totalEgresos3m = gastosHist
     .filter(g => (g.fecha as string) >= threeMonthsAgoStr)
     .reduce((s, g) => s + Number(g.monto), 0)

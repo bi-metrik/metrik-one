@@ -5,6 +5,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { logSystemChange } from '@/app/(app)/activity-actions'
 import { checkTenantRules, BlockTransitionError } from '@/lib/tenant-rules'
+import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 
 // ── Tipo extendido para etapas con proceso (post-migración multi-proceso) ──
 
@@ -488,7 +489,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
       const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
         p_workspace_id: wsId,
       })
-      const consecutivo = (consecutivoRaw as string | null) ?? `COT-${new Date().getFullYear()}-0000`
+      const consecutivo = (consecutivoRaw as string | null) ?? `COT-${bogotaYear()}-0000`
 
       const { data: cotVe, error: cotVeErr } = await supabase
         .from('cotizaciones')
@@ -591,7 +592,7 @@ export async function ganarOportunidad(id: string, fiscalData?: {
     await (supabase.from('cobros') as any).insert({
       workspace_id: wsId,
       proyecto_id: proyecto.id,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: todayBogotaISO(),
       monto: anticipoValor,
       tipo_cobro: 'anticipo',
       external_ref: anticipoRef,

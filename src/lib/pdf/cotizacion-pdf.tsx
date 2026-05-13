@@ -396,7 +396,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
         }}>
           <Text style={{ fontSize: 7, color: '#9CA3AF' }}>{vendedor.nombre}</Text>
           <Text style={{ fontSize: 7, color: '#9CA3AF' }}>{cotizacion.consecutivo}</Text>
-          <Text style={{ fontSize: 7, color: '#9CA3AF' }}>{new Date().toLocaleDateString('es-CO')}</Text>
+          <Text style={{ fontSize: 7, color: '#9CA3AF' }}>{new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}</Text>
         </View>
 
       </Page>

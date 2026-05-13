@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { FEATURES } from '@/lib/feature-flags'
+import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -141,12 +142,14 @@ export async function getNumeros(mesRef?: string) {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
-  const now = new Date()
-  const mes = mesRef ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  // Calendario Bogota — Vercel corre en UTC; ver src/lib/dates/bogota.ts.
+  const hoyBogota = bogotaParts()
+  const mesActualStr = `${hoyBogota.year}-${String(hoyBogota.month).padStart(2, '0')}`
+  const mes = mesRef ?? mesActualStr
   const [yyyy, mm] = mes.split('-').map(Number)
   const mesStart = `${mes}-01`
   const mesEnd = new Date(yyyy, mm, 1).toISOString().split('T')[0]
-  const diaActual = (mes === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`) ? now.getDate() : new Date(yyyy, mm, 0).getDate()
+  const diaActual = mes === mesActualStr ? hoyBogota.day : new Date(yyyy, mm, 0).getDate()
   const diasDelMes = new Date(yyyy, mm, 0).getDate()
 
   // Previous month
@@ -313,7 +316,7 @@ export async function getNumeros(mesRef?: string) {
       .from('horas')
       .select('id')
       .eq('workspace_id', workspaceId)
-      .gte('fecha', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+      .gte('fecha', todayBogotaISO(new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)))
       .limit(1),
 
     // Semáforo: gastos fijos borradores del mes
@@ -1004,7 +1007,7 @@ async function upsertStreak(supabase: any, workspaceId: string) {
       semanas_actuales: 1,
       semanas_record: 1,
       ultima_actualizacion: now.toISOString(),
-      streak_inicio: now.toISOString().split('T')[0],
+      streak_inicio: todayBogotaISO(now),
     })
     return
   }
@@ -1023,7 +1026,7 @@ async function upsertStreak(supabase: any, workspaceId: string) {
   if (diasSinActualizar > 7) {
     // Streak broken — restart
     newSemanas = 1
-    streakInicio = now.toISOString().split('T')[0]
+    streakInicio = todayBogotaISO(now)
   } else {
     // Check if this week was already counted
     const lastWeekNumber = lastUpdate ? getWeekNumber(lastUpdate) : -1

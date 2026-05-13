@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -34,7 +35,9 @@ function addMeses(fecha: Date, meses: number): Date {
 }
 
 function fechaCuota(fechaInicio: string, frecuencia: string, numeroCuota: number): Date {
-  const inicio = new Date(fechaInicio + 'T00:00:00Z')
+  // Interpretamos fecha_inicio como dia calendario Bogota (UTC-5).
+  // 05:00 UTC del dia = 00:00 Bogota.
+  const inicio = new Date(`${fechaInicio}T05:00:00Z`)
   const offset = numeroCuota - 1
   switch (frecuencia) {
     case 'mensual':     return addMeses(inicio, offset)
@@ -44,8 +47,15 @@ function fechaCuota(fechaInicio: string, frecuencia: string, numeroCuota: number
   }
 }
 
+// Dias enteros entre dos instantes contando por dias calendario Bogota.
+function diasEntreBogota(desde: Date, hasta: Date): number {
+  const a = new Date(`${todayBogotaISO(desde)}T05:00:00Z`)
+  const b = new Date(`${todayBogotaISO(hasta)}T05:00:00Z`)
+  return Math.round((b.getTime() - a.getTime()) / 86400000)
+}
+
 function toIsoDate(d: Date): string {
-  return d.toISOString().split('T')[0]
+  return todayBogotaISO(d)
 }
 
 export async function GET(req: NextRequest) {
@@ -79,7 +89,7 @@ export async function GET(req: NextRequest) {
     for (let n = 1; n <= plan.total_cuotas; n++) {
       const fechaEsp = fechaCuota(plan.fecha_inicio, plan.frecuencia, n)
       const fechaEspStr = toIsoDate(fechaEsp)
-      const dias = Math.floor((fechaEsp.getTime() - hoy.getTime()) / 86400000)
+      const dias = diasEntreBogota(hoy, fechaEsp)
 
       if (dias < 0 || dias > DIAS_ANTICIPACION) continue
 
@@ -106,8 +116,9 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 2. Marcar cobros programados vencidos ─────────────────
-  const fechaLimite = new Date(hoy)
-  fechaLimite.setDate(fechaLimite.getDate() - DIAS_GRACIA)
+  // "hoy Bogota - 3 dias" como dia calendario Bogota.
+  const fechaLimite = new Date(`${todayBogotaISO(hoy)}T05:00:00Z`)
+  fechaLimite.setUTCDate(fechaLimite.getUTCDate() - DIAS_GRACIA)
   const fechaLimiteStr = toIsoDate(fechaLimite)
 
   const { data: cobrosPorVencer } = await supabase
@@ -161,7 +172,10 @@ export async function GET(req: NextRequest) {
     }
 
     const fechaEsp = cobro.fecha_esperada ?? ''
-    const diasVencido = Math.floor((hoy.getTime() - new Date(fechaEsp).getTime()) / 86400000) - DIAS_GRACIA
+    // diasVencido cuenta dias calendario Bogota desde fecha_esperada hasta hoy, menos gracia.
+    const diasVencido = fechaEsp
+      ? diasEntreBogota(new Date(`${fechaEsp}T05:00:00Z`), hoy) - DIAS_GRACIA
+      : 0
     const negocioCodigo = (negocio as { codigo: string | null } | null)?.codigo ?? ''
     const negocioNombre = (negocio as { nombre: string | null } | null)?.nombre ?? 'Negocio'
 

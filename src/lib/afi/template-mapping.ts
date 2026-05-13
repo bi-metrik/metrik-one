@@ -1,6 +1,8 @@
 // Mapeo templates ↔ productos contratados.
 // Determina que subset de los 25 templates se genera segun la seleccion.
 
+import { formatBogotaEs } from '@/lib/dates/bogota'
+
 export type SarlaftRegimen = 'ampliado' | 'simplificado' | 'ninguno'
 
 export interface ProductosContratados {
@@ -112,10 +114,10 @@ function formatNit(nit?: string, dv?: string): string {
   return dv ? `${formatted}-${dv}` : formatted
 }
 
+// Fecha de emision para el paquete SARLAFT — siempre en zona horaria Colombia
+// (Vercel corre en UTC; ver src/lib/dates/bogota.ts).
 function formatDateEs(): string {
-  const months = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
-  const d = new Date()
-  return `${d.getDate()} de ${months[d.getMonth()]} de ${d.getFullYear()}`
+  return formatBogotaEs()
 }
 
 export function buildContext(params: {

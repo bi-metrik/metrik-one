@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // ── D83: Generate draft fixed expenses for current month ──────
 
@@ -80,7 +81,7 @@ export async function confirmarBorradorGastoFijo(borradorId: string, montoAjusta
       monto: montoFinal,
       categoria: borrador.categoria,
       descripcion: borrador.nombre,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: todayBogotaISO(),
       tipo: 'fijo',
       estado_pago: 'pagado',
       gasto_fijo_ref_id: borrador.gasto_fijo_config_id,
@@ -181,7 +182,7 @@ export async function sugerirGastoFijo(monto: number, descripcion: string, categ
     .select('monto, descripcion')
     .eq('workspace_id', workspaceId)
     .eq('categoria', categoria)
-    .gte('fecha', twoMonthsAgo.toISOString().split('T')[0])
+    .gte('fecha', todayBogotaISO(twoMonthsAgo))
     .is('gasto_fijo_ref_id', null) // not already linked
 
   if (!similares || similares.length < 2) return { suggestion: null }

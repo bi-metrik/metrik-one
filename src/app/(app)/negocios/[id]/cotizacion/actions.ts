@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { bogotaYear } from '@/lib/dates/bogota'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -24,7 +25,7 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
     p_workspace_id: workspaceId,
   })
   // Fallback con epoch para garantizar unicidad si el RPC falla
-  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-${Date.now()}`
+  const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
 
   const { data, error: dbError } = await supabase
     .from('cotizaciones')
@@ -223,7 +224,7 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
   })
-  const consecutivo = consecutivoRaw ?? `COT-${new Date().getFullYear()}-${Date.now()}`
+  const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
 
   const { data, error: dbError } = await supabase
     .from('cotizaciones')

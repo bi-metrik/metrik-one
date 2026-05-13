@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { todayBogotaISO, bogotaParts } from '@/lib/dates/bogota'
 
 // ── Fetch expense categories ────────────────────────────
 
@@ -63,7 +64,7 @@ export async function createExpense(input: CreateExpenseInput) {
         amount: input.amount,
         description: input.description?.trim() || null,
         project_id: input.projectId || null,
-        expense_date: input.expenseDate || new Date().toISOString().split('T')[0],
+        expense_date: input.expenseDate || todayBogotaISO(),
         source: 'app',
       })
       .select()
@@ -416,11 +417,13 @@ export async function getNumerosData() {
   if (!profile) return { data: null, error: 'Sin perfil' }
 
   const workspaceId = profile.workspace_id
-  const now = new Date()
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  // Mes actual en Bogota — Vercel corre en UTC; ver src/lib/dates/bogota.ts.
+  const partsHoy = bogotaParts()
+  const currentMonth = `${partsHoy.year}-${String(partsHoy.month).padStart(2, '0')}`
   const monthStart = `${currentMonth}-01`
-  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  const monthEnd = nextMonth.toISOString().split('T')[0]
+  const monthEnd = partsHoy.month === 12
+    ? `${partsHoy.year + 1}-01-01`
+    : `${partsHoy.year}-${String(partsHoy.month + 1).padStart(2, '0')}-01`
 
   // Parallel fetches for performance
   const [
