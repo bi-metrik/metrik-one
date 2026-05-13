@@ -75,6 +75,13 @@ export type NegocioBusqueda = {
   estado: string;
 };
 
+export type FilaLotePreparada = {
+  posicion: number;
+  input: ValidaConsultaInput;
+  negocio_id: string | null;
+  error: string | null;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {
@@ -86,7 +93,6 @@ async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | n
     .single();
   const key = (data?.config_extra as Record<string, unknown> | null)?.valida_api_key;
   if (typeof key === 'string' && key.length > 0) return key;
-  // Fallback a env var (compatibilidad con setup actual de ALMA)
   return process.env.VALIDA_API_KEY ?? null;
 }
 
@@ -157,11 +163,11 @@ async function persistirConsulta(opts: {
   return { ok: true, id: ins.id };
 }
 
-// ─── Server Actions ───────────────────────────────────────────────────────
+// ─── Consulta puntual + items de lote ─────────────────────────────────────
 
 export async function consultarValida(
   input: ValidaConsultaInput,
-  opts: { negocio_id?: string | null } = {}
+  opts: { negocio_id?: string | null; lote_id?: string | null } = {}
 ): Promise<
   | { ok: true; data: ValidaResultado; consulta_local_id: string }
   | { ok: false; error: string }
@@ -181,8 +187,8 @@ export async function consultarValida(
     workspaceId,
     userId: user?.id ?? null,
     negocioId: opts.negocio_id ?? null,
-    loteId: null,
-    tipo: 'puntual',
+    loteId: opts.lote_id ?? null,
+    tipo: opts.lote_id ? 'masiva_item' : 'puntual',
     input,
     resultado,
   });
@@ -193,22 +199,7 @@ export async function consultarValida(
   return { ok: true, data: resultado.data, consulta_local_id: persisted.id };
 }
 
-// ─── Masivo XLSX ──────────────────────────────────────────────────────────
-//
-// Formato esperado de la plantilla (mismo que ALMA):
-//   Columna A: tipo_persona  (natural | juridica)
-//   Columna B: nombre_completo (string)
-//   Columna C: tipo_documento  (CC | CE | NIT | PAS, opcional)
-//   Columna D: numero_documento (opcional)
-//   Columna E: negocio_codigo  (opcional, sobrescribe el lote)
-
-type FilaXLSX = {
-  tipo_persona: string;
-  nombre_completo: string;
-  tipo_documento?: string;
-  numero_documento?: string;
-  negocio_codigo?: string;
-};
+// ─── Plantilla XLSX ───────────────────────────────────────────────────────
 
 export async function descargarPlantillaValida(): Promise<
   { ok: true; data: { base64: string; filename: string } } | { ok: false; error: string }
@@ -238,28 +229,35 @@ export async function descargarPlantillaValida(): Promise<
   }
 }
 
-export async function consultarValidaMasivo(
+// ─── Preparar lote ────────────────────────────────────────────────────────
+//
+// Parsea el XLSX server-side y devuelve la lista de filas listas para que el
+// cliente las procese una a una (loop con barra de progreso visible).
+// No llama a Valida ni persiste resultados — eso ocurre por fila via
+// `consultarValida(..., { lote_id })`.
+
+type FilaXLSX = {
+  tipo_persona: string;
+  nombre_completo: string;
+  tipo_documento?: string;
+  numero_documento?: string;
+  negocio_codigo?: string;
+};
+
+export async function prepararLoteValida(
   fd: FormData,
   opts: { negocio_id_lote?: string | null } = {}
 ): Promise<
-  | { ok: true; data: { base64: string; filename: string; total: number; lote_id: string } }
+  | { ok: true; data: { lote_id: string; total: number; filas: FilaLotePreparada[] } }
   | { ok: false; error: string }
 > {
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const userId = user?.id ?? null;
-
-  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
-  if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
-
   const file = fd.get('archivo');
   if (!(file instanceof File)) return { ok: false, error: 'archivo_no_provisto' };
   if (file.size > 5 * 1024 * 1024) return { ok: false, error: 'archivo_excede_5mb' };
 
-  // Parse XLSX
   let rows: FilaXLSX[];
   try {
     const buf = Buffer.from(await file.arrayBuffer());
@@ -295,20 +293,8 @@ export async function consultarValidaMasivo(
     }
   }
 
-  // Generar lote_id
   const loteId = crypto.randomUUID();
-
-  // Procesar cada fila secuencialmente (evita rate-limit y orden de matches en XLSX salida)
-  type ResultadoFila = {
-    fila: FilaXLSX;
-    severidad: Severidad;
-    total_matches: number;
-    consulta_id: string;
-    error: string | null;
-  };
-  const resultados: ResultadoFila[] = [];
-
-  for (const fila of rows) {
+  const filas: FilaLotePreparada[] = rows.map((fila, idx) => {
     const tipoPersona = String(fila.tipo_persona ?? '').trim().toLowerCase() as TipoPersona;
     const nombre = String(fila.nombre_completo ?? '').trim();
     const tipoDoc = String(fila.tipo_documento ?? '').trim().toUpperCase() as TipoDocumento;
@@ -320,14 +306,15 @@ export async function consultarValidaMasivo(
       : opts.negocio_id_lote ?? null;
 
     if (!nombre || (tipoPersona !== 'natural' && tipoPersona !== 'juridica')) {
-      resultados.push({
-        fila,
-        severidad: 'error',
-        total_matches: 0,
-        consulta_id: '',
+      return {
+        posicion: idx + 1,
+        input: {
+          tipo: tipoPersona === 'juridica' ? 'juridica' : 'natural',
+          nombre: nombre || '(sin nombre)',
+        },
+        negocio_id: negocioId,
         error: 'tipo_persona o nombre invalido',
-      });
-      continue;
+      };
     }
 
     const input: ValidaConsultaInput = {
@@ -336,56 +323,117 @@ export async function consultarValidaMasivo(
       ...(numDoc && tipoDoc ? { documento: { tipo: tipoDoc, numero: numDoc } } : {}),
     };
 
-    const r = await llamarValida(apiKey, input);
-
-    await persistirConsulta({
-      workspaceId,
-      userId,
-      negocioId,
-      loteId,
-      tipo: 'masiva_item',
+    return {
+      posicion: idx + 1,
       input,
-      resultado: r,
-    });
+      negocio_id: negocioId,
+      error: null,
+    };
+  });
 
-    resultados.push({
-      fila,
-      severidad: r.ok ? r.data.severidad : 'error',
-      total_matches: r.ok ? r.data.total_matches : 0,
-      consulta_id: r.ok ? r.data.consulta_id : '',
-      error: r.ok ? null : r.error,
-    });
-  }
+  return {
+    ok: true,
+    data: { lote_id: loteId, total: filas.length, filas },
+  };
+}
 
-  // Generar XLSX salida
+// ─── Descargar PDF reporte individual ─────────────────────────────────────
+
+export async function descargarPDFConsultaValida(
+  validaConsultaId: string
+): Promise<
+  { ok: true; data: { base64: string; filename: string } } | { ok: false; error: string }
+> {
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+
+  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
+  if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
+
   try {
-    const wb = XLSX.utils.book_new();
-    const out = resultados.map(r => ({
-      tipo_persona: r.fila.tipo_persona,
-      nombre_completo: r.fila.nombre_completo,
-      tipo_documento: r.fila.tipo_documento ?? '',
-      numero_documento: r.fila.numero_documento ?? '',
-      negocio_codigo: r.fila.negocio_codigo ?? '',
-      severidad: r.severidad,
-      total_matches: r.total_matches,
-      consulta_id: r.consulta_id,
-      error: r.error ?? '',
-    }));
-    const ws = XLSX.utils.json_to_sheet(out);
-    XLSX.utils.book_append_sheet(wb, ws, 'Resultados');
-    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte/${validaConsultaId}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
     return {
       ok: true,
       data: {
         base64: buf.toString('base64'),
-        filename: `valida_resultados_${stamp}.xlsx`,
-        total: resultados.length,
-        lote_id: loteId,
+        filename: `valida-reporte-${validaConsultaId.slice(0, 8)}.pdf`,
       },
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_generando_xlsx' };
+    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf' };
+  }
+}
+
+// ─── Generar PDF de lote completo ─────────────────────────────────────────
+
+export async function generarPDFLoteValida(
+  loteId: string,
+  titulo?: string | null
+): Promise<
+  { ok: true; data: { base64: string; filename: string } } | { ok: false; error: string }
+> {
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+
+  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
+  if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+  const { data: rows, error } = await svc
+    .from('valida_consultas')
+    .select('valida_consulta_id, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('lote_id', loteId)
+    .not('valida_consulta_id', 'is', null)
+    .order('created_at', { ascending: true });
+
+  if (error) return { ok: false, error: error.message };
+
+  const consultaIds = (rows ?? [])
+    .map((r: { valida_consulta_id: string | null }) => r.valida_consulta_id)
+    .filter((id: string | null): id is string => typeof id === 'string' && id.length > 0);
+
+  if (consultaIds.length === 0) {
+    return { ok: false, error: 'lote_sin_consultas_validas' };
+  }
+
+  try {
+    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte-lote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        consulta_ids: consultaIds,
+        titulo: titulo ?? null,
+      }),
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return {
+      ok: true,
+      data: {
+        base64: buf.toString('base64'),
+        filename: `valida-cargue-${loteId.slice(0, 8)}.pdf`,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf_lote' };
   }
 }
 

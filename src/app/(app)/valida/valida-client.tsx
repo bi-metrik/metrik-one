@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Download,
   FileSpreadsheet,
+  FileText,
   History,
   Search,
   ShieldAlert,
@@ -16,10 +17,13 @@ import {
 import {
   buscarNegociosParaValida,
   consultarValida,
-  consultarValidaMasivo,
+  descargarPDFConsultaValida,
   descargarPlantillaValida,
+  generarPDFLoteValida,
   listarConsultasValida,
+  prepararLoteValida,
   type ConsultaHistorialItem,
+  type FilaLotePreparada,
   type FiltrosHistorial,
   type NegocioBusqueda,
   type Severidad,
@@ -124,7 +128,7 @@ export default function ValidaClient({
         <div className="flex-1">
           <h1 className="text-xl font-bold text-[#1A1A1A]">Valida</h1>
           <p className="text-sm text-[#6B7280]">
-            Consulta puntual o masiva contra listas vinculantes SARLAFT (ONU, OFAC, UE, PEP, CSN).
+            Consulta puntual o por cargue contra listas vinculantes SARLAFT (ONU, OFAC, UE, PEP, CSN).
           </p>
         </div>
         <TutorialButton onClick={dispararTutorial} />
@@ -173,7 +177,6 @@ export default function ValidaClient({
         />
       )}
 
-      {/* Tutorial: auto-arranca si nunca lo vio, o forzado via boton "?" */}
       {(tutorialNuncaVisto || tourTrigger > 0) && (
         <TutorialTour slug="valida_standalone" forceStart={tourTrigger} />
       )}
@@ -219,7 +222,7 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
   const [docTipo, setDocTipo] = useState<TipoDocumento>('CC');
   const [docNumero, setDocNumero] = useState('');
   const [negocio, setNegocio] = useState<NegocioBusqueda | null>(null);
-  const [resultado, setResultado] = useState<ValidaResultado | null>(null);
+  const [resultado, setResultado] = useState<{ data: ValidaResultado; valida_id: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -233,7 +236,7 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
       if (docNumero.trim()) input.documento = { tipo: docTipo, numero: docNumero.trim() };
       const r = await consultarValida(input, { negocio_id: negocio?.id ?? null });
       if (r.ok) {
-        setResultado(r.data);
+        setResultado({ data: r.data, valida_id: r.data.consulta_id });
         onPersisted();
       } else {
         setError(r.error);
@@ -339,7 +342,11 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
 
       {resultado && (
         <div data-tutorial-target="resultado-zona">
-          <ResultadoCard data={resultado} nombreConsultado={nombre} />
+          <ResultadoCard
+            data={resultado.data}
+            nombreConsultado={nombre}
+            validaConsultaId={resultado.valida_id}
+          />
         </div>
       )}
     </div>
@@ -472,7 +479,15 @@ function NegocioPicker({
 
 // ─── Resultado puntual ────────────────────────────────────────────────────
 
-function ResultadoCard({ data, nombreConsultado }: { data: ValidaResultado; nombreConsultado: string }) {
+function ResultadoCard({
+  data,
+  nombreConsultado,
+  validaConsultaId,
+}: {
+  data: ValidaResultado;
+  nombreConsultado: string;
+  validaConsultaId: string | null;
+}) {
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
       <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
@@ -481,11 +496,14 @@ function ResultadoCard({ data, nombreConsultado }: { data: ValidaResultado; nomb
           <h3 className="text-lg font-bold text-[#1A1A1A] mt-1">{nombreConsultado}</h3>
           <p className="text-xs text-[#6B7280] font-mono">ID: {data.consulta_id}</p>
         </div>
-        <span
-          className={`${SEVERIDAD_CLASS[data.severidad]} text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider`}
-        >
-          {SEVERIDAD_LABEL[data.severidad]}
-        </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`${SEVERIDAD_CLASS[data.severidad]} text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider`}
+          >
+            {SEVERIDAD_LABEL[data.severidad]}
+          </span>
+          {validaConsultaId && <BotonPDFConsulta validaConsultaId={validaConsultaId} variante="primario" />}
+        </div>
       </div>
 
       <div className="p-5 space-y-2">
@@ -509,7 +527,9 @@ function ResultadoCard({ data, nombreConsultado }: { data: ValidaResultado; nomb
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold">{(m.score * 100).toFixed(1)}%</p>
-                  <p className="text-[10px] text-[#6B7280] uppercase">{m.resultado}</p>
+                  <p className="text-[10px] text-[#6B7280] uppercase">
+                    {m.resultado === 'exacto' ? 'Exacto' : 'Posible'} · Puntaje
+                  </p>
                 </div>
               </li>
             ))}
@@ -520,52 +540,87 @@ function ResultadoCard({ data, nombreConsultado }: { data: ValidaResultado; nomb
   );
 }
 
-// ─── Carga masiva ─────────────────────────────────────────────────────────
+// ─── Boton descargar PDF de una consulta ──────────────────────────────────
+
+function BotonPDFConsulta({
+  validaConsultaId,
+  variante = 'compacto',
+}: {
+  validaConsultaId: string;
+  variante?: 'compacto' | 'primario';
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function descargar() {
+    setError(null);
+    startTransition(async () => {
+      const r = await descargarPDFConsultaValida(validaConsultaId);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      const blob = base64ToBlob(r.data.base64, 'application/pdf');
+      triggerDownload(blob, r.data.filename);
+    });
+  }
+
+  if (variante === 'primario') {
+    return (
+      <button
+        type="button"
+        onClick={descargar}
+        disabled={pending}
+        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[#10B981] text-white font-semibold text-xs uppercase tracking-wider hover:bg-[#059669] disabled:opacity-50 transition-colors"
+        title={error ?? 'Descargar reporte PDF'}
+      >
+        <FileText className="h-3.5 w-3.5" />
+        {pending ? 'Generando…' : 'Reporte PDF'}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={descargar}
+      disabled={pending}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wider text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-40 transition-colors"
+      title={error ?? 'Descargar reporte PDF'}
+    >
+      <FileText className="h-3.5 w-3.5" />
+      {pending ? '…' : 'PDF'}
+    </button>
+  );
+}
+
+// ─── Carga masiva (con barra de progreso) ─────────────────────────────────
+
+type EstadoCargue =
+  | { fase: 'inicial' }
+  | { fase: 'preparando' }
+  | { fase: 'procesando'; loteId: string; total: number; procesadas: number; severidades: Record<Severidad, number>; tituloLote: string | null }
+  | { fase: 'completado'; loteId: string; total: number; severidades: Record<Severidad, number>; tituloLote: string | null }
+  | { fase: 'error'; mensaje: string };
+
+function severidadesIniciales(): Record<Severidad, number> {
+  return { alto: 0, medio: 0, bajo: 0, informativo: 0, sin_hallazgo: 0, error: 0 };
+}
 
 function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
   const [archivo, setArchivo] = useState<File | null>(null);
+  const [titulo, setTitulo] = useState('');
   const [negocioLote, setNegocioLote] = useState<NegocioBusqueda | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [estado, setEstado] = useState<EstadoCargue>({ fase: 'inicial' });
   const [pendingTpl, startTplTransition] = useTransition();
+  const [pendingPDF, setPendingPDF] = useState(false);
+  const [errorPDF, setErrorPDF] = useState<string | null>(null);
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setInfo(null);
-    if (!archivo) {
-      setError('Selecciona un archivo XLSX');
-      return;
-    }
-    const fd = new FormData();
-    fd.append('archivo', archivo);
-    startTransition(async () => {
-      const r = await consultarValidaMasivo(fd, { negocio_id_lote: negocioLote?.id ?? null });
-      if (!r.ok) {
-        setError(r.error);
-        return;
-      }
-      const blob = base64ToBlob(
-        r.data.base64,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      );
-      triggerDownload(blob, r.data.filename);
-      setInfo(`${r.data.total} consultas procesadas. Resultado descargado.`);
-      setArchivo(null);
-      const input = document.getElementById('archivo-batch') as HTMLInputElement | null;
-      if (input) input.value = '';
-      onPersisted();
-    });
-  }
-
-  function descargarPlantilla() {
-    setError(null);
-    setInfo(null);
+  async function descargarPlantilla() {
     startTplTransition(async () => {
       const r = await descargarPlantillaValida();
       if (!r.ok) {
-        setError(r.error);
+        setEstado({ fase: 'error', mensaje: r.error });
         return;
       }
       const blob = base64ToBlob(
@@ -575,6 +630,77 @@ function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
       triggerDownload(blob, r.data.filename);
     });
   }
+
+  async function iniciarCargue(e: React.FormEvent) {
+    e.preventDefault();
+    if (!archivo) {
+      setEstado({ fase: 'error', mensaje: 'Selecciona un archivo XLSX' });
+      return;
+    }
+    setEstado({ fase: 'preparando' });
+
+    const fd = new FormData();
+    fd.append('archivo', archivo);
+    const prep = await prepararLoteValida(fd, { negocio_id_lote: negocioLote?.id ?? null });
+
+    if (!prep.ok) {
+      setEstado({ fase: 'error', mensaje: prep.error });
+      return;
+    }
+
+    const { lote_id, total, filas } = prep.data;
+    const tituloLote = titulo.trim().length > 0 ? titulo.trim() : null;
+    const severidades = severidadesIniciales();
+
+    setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas: 0, severidades, tituloLote });
+
+    let procesadas = 0;
+    for (const fila of filas) {
+      const sev = await procesarFila(fila, lote_id);
+      procesadas += 1;
+      severidades[sev] = (severidades[sev] ?? 0) + 1;
+      setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas, severidades: { ...severidades }, tituloLote });
+    }
+
+    setEstado({ fase: 'completado', loteId: lote_id, total, severidades, tituloLote });
+    onPersisted();
+  }
+
+  async function procesarFila(fila: FilaLotePreparada, loteId: string): Promise<Severidad> {
+    if (fila.error) {
+      // Persistimos un error sin llamar a Valida
+      await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId });
+      return 'error';
+    }
+    const r = await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId });
+    return r.ok ? r.data.severidad : 'error';
+  }
+
+  async function descargarReporteCargue() {
+    if (estado.fase !== 'completado') return;
+    setPendingPDF(true);
+    setErrorPDF(null);
+    const r = await generarPDFLoteValida(estado.loteId, estado.tituloLote);
+    setPendingPDF(false);
+    if (!r.ok) {
+      setErrorPDF(r.error);
+      return;
+    }
+    const blob = base64ToBlob(r.data.base64, 'application/pdf');
+    triggerDownload(blob, r.data.filename);
+  }
+
+  function reiniciar() {
+    setArchivo(null);
+    setTitulo('');
+    setNegocioLote(null);
+    setEstado({ fase: 'inicial' });
+    setErrorPDF(null);
+    const input = document.getElementById('archivo-batch') as HTMLInputElement | null;
+    if (input) input.value = '';
+  }
+
+  const procesando = estado.fase === 'preparando' || estado.fase === 'procesando';
 
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-5">
@@ -582,7 +708,7 @@ function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
         <div>
           <h3 className="text-base font-bold text-[#1A1A1A]">Carga masiva (XLSX)</h3>
           <p className="text-sm text-[#6B7280] mt-1">
-            Sube un XLSX con la plantilla. Hasta 500 filas. Descarga el resultado con severidad por fila.
+            Sube un XLSX con la plantilla. Hasta 500 filas. Al finalizar generas un reporte PDF del cargue con marca verificable.
           </p>
         </div>
         <button
@@ -596,53 +722,227 @@ function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
         </button>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div>
-          <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
-            Asociar todo el lote a un negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
-          </label>
-          <NegocioPicker value={negocioLote} onChange={setNegocioLote} />
-          <p className="text-xs text-[#6B7280] mt-1.5">
-            Si la columna <code className="bg-[#F5F4F2] px-1 rounded">negocio_codigo</code> tiene valor en el XLSX, sobrescribe esta selección fila por fila.
-          </p>
-        </div>
+      {estado.fase === 'completado' ? (
+        <ResumenCargueCompletado
+          estado={estado}
+          pendingPDF={pendingPDF}
+          errorPDF={errorPDF}
+          onDescargar={descargarReporteCargue}
+          onReiniciar={reiniciar}
+        />
+      ) : procesando ? (
+        <ProgresoCargue estado={estado} />
+      ) : (
+        <form onSubmit={iniciarCargue} className="space-y-4">
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+              Título del cargue <span className="font-light lowercase tracking-normal">(opcional, queda en el reporte)</span>
+            </label>
+            <input
+              type="text"
+              value={titulo}
+              onChange={e => setTitulo(e.target.value)}
+              placeholder="Cargue CDA mayo 2026"
+              maxLength={200}
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+            />
+          </div>
 
-        <label
-          htmlFor="archivo-batch"
-          className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-[#E5E7EB] hover:border-[#1A1A1A] rounded-lg p-8 cursor-pointer transition-colors"
-        >
-          <Upload className="h-8 w-8 text-[#6B7280]" />
-          <div className="text-center">
-            <p className="text-sm font-semibold text-[#1A1A1A]">
-              {archivo ? archivo.name : 'Arrastra o selecciona un archivo XLSX'}
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+              Asociar todo el lote a un negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
+            </label>
+            <NegocioPicker value={negocioLote} onChange={setNegocioLote} />
+            <p className="text-xs text-[#6B7280] mt-1.5">
+              Si la columna <code className="bg-[#F5F4F2] px-1 rounded">negocio_codigo</code> tiene valor en el XLSX, sobrescribe esta selección fila por fila.
             </p>
-            <p className="text-xs text-[#6B7280] mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
           </div>
-          <input
-            id="archivo-batch"
-            type="file"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            onChange={e => setArchivo(e.target.files?.[0] ?? null)}
-            className="hidden"
+
+          <label
+            htmlFor="archivo-batch"
+            className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-[#E5E7EB] hover:border-[#1A1A1A] rounded-lg p-8 cursor-pointer transition-colors"
+          >
+            <Upload className="h-8 w-8 text-[#6B7280]" />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-[#1A1A1A]">
+                {archivo ? archivo.name : 'Arrastra o selecciona un archivo XLSX'}
+              </p>
+              <p className="text-xs text-[#6B7280] mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
+            </div>
+            <input
+              id="archivo-batch"
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={!archivo}
+            className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            Procesar cargue
+          </button>
+
+          {estado.fase === 'error' && <ErrorBox msg={estado.mensaje} />}
+        </form>
+      )}
+    </div>
+  );
+}
+
+function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
+  if (estado.fase === 'preparando') {
+    return (
+      <div className="py-10 text-center space-y-3">
+        <Dona total={1} procesadas={0} pulsante />
+        <p className="text-sm font-semibold text-[#1A1A1A]">Preparando cargue…</p>
+        <p className="text-xs text-[#6B7280]">Leyendo el archivo y validando filas.</p>
+      </div>
+    );
+  }
+  if (estado.fase !== 'procesando') return null;
+
+  const pct = estado.total === 0 ? 0 : Math.round((estado.procesadas / estado.total) * 100);
+
+  return (
+    <div className="py-6 space-y-5">
+      <div className="flex items-center justify-center">
+        <Dona total={estado.total} procesadas={estado.procesadas} />
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-[#6B7280]">
+          <span className="font-semibold">{estado.procesadas} / {estado.total} consultas</span>
+          <span className="font-mono">{pct}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
+          <div
+            className="h-full bg-[#10B981] transition-[width] duration-200 ease-out"
+            style={{ width: `${pct}%` }}
           />
-        </label>
+        </div>
+      </div>
+      <DistribucionSeveridad sev={estado.severidades} />
+      <p className="text-[11px] text-center text-[#6B7280]">
+        No cierres esta pestaña hasta que el cargue termine. Las consultas se guardan en el historial conforme avanzan.
+      </p>
+    </div>
+  );
+}
 
-        <button
-          type="submit"
-          disabled={pending || !archivo}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+function Dona({ total, procesadas, pulsante }: { total: number; procesadas: number; pulsante?: boolean }) {
+  const radio = 52;
+  const stroke = 10;
+  const circ = 2 * Math.PI * radio;
+  const pct = total === 0 ? 0 : procesadas / total;
+  const offset = circ * (1 - pct);
+  const pctTexto = total === 0 ? 0 : Math.round(pct * 100);
+
+  return (
+    <div className={`relative h-32 w-32 ${pulsante ? 'animate-pulse' : ''}`}>
+      <svg viewBox="0 0 128 128" className="h-full w-full -rotate-90">
+        <circle
+          cx="64"
+          cy="64"
+          r={radio}
+          fill="none"
+          stroke="#E5E7EB"
+          strokeWidth={stroke}
+        />
+        <circle
+          cx="64"
+          cy="64"
+          r={radio}
+          fill="none"
+          stroke="#10B981"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          style={{ transition: 'stroke-dashoffset 300ms ease-out' }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-bold text-[#1A1A1A] leading-none">{pctTexto}%</span>
+        <span className="text-[10px] uppercase tracking-wider text-[#6B7280] mt-0.5 font-semibold">
+          procesado
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function DistribucionSeveridad({ sev }: { sev: Record<Severidad, number> }) {
+  const items: Severidad[] = ['alto', 'medio', 'bajo', 'informativo', 'sin_hallazgo', 'error'];
+  const visibles = items.filter(s => (sev[s] ?? 0) > 0);
+  if (visibles.length === 0) {
+    return <p className="text-[11px] text-center text-[#6B7280]">Aún sin resultados — los primeros aparecen pronto.</p>;
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      {visibles.map(s => (
+        <span
+          key={s}
+          className={`${SEVERIDAD_CLASS[s]} text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider`}
         >
-          <Upload className="h-4 w-4" />
-          {pending ? 'Procesando…' : 'Consultar archivo'}
-        </button>
+          {SEVERIDAD_LABEL[s]} · {sev[s]}
+        </span>
+      ))}
+    </div>
+  );
+}
 
-        {error && <ErrorBox msg={error} />}
-        {info && (
-          <div className="p-3 rounded-lg bg-[#10B981]/10 border border-[#10B981]/30 text-[#065F46] text-sm flex items-center gap-2">
-            <Check className="h-4 w-4" /> {info}
-          </div>
-        )}
-      </form>
+function ResumenCargueCompletado({
+  estado,
+  pendingPDF,
+  errorPDF,
+  onDescargar,
+  onReiniciar,
+}: {
+  estado: Extract<EstadoCargue, { fase: 'completado' }>;
+  pendingPDF: boolean;
+  errorPDF: string | null;
+  onDescargar: () => void;
+  onReiniciar: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 p-5">
+        <div className="flex items-center gap-2 text-[#059669] font-semibold">
+          <Check className="h-5 w-5" />
+          Cargue completado
+        </div>
+        <p className="text-sm text-[#1A1A1A] mt-1">
+          {estado.total} consultas procesadas{estado.tituloLote ? ` · ${estado.tituloLote}` : ''}.
+        </p>
+        <div className="mt-3">
+          <DistribucionSeveridad sev={estado.severidades} />
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button
+          type="button"
+          onClick={onDescargar}
+          disabled={pendingPDF}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-[#10B981] text-white font-semibold hover:bg-[#059669] disabled:opacity-50 transition-colors"
+        >
+          <FileText className="h-4 w-4" />
+          {pendingPDF ? 'Generando reporte…' : 'Descargar reporte del cargue (PDF)'}
+        </button>
+        <button
+          type="button"
+          onClick={onReiniciar}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+        >
+          Nuevo cargue
+        </button>
+      </div>
+
+      {errorPDF && <ErrorBox msg={errorPDF} />}
     </div>
   );
 }
@@ -728,7 +1028,7 @@ function Historial({
             >
               <option value="">Todos</option>
               <option value="puntual">Puntual</option>
-              <option value="masiva_item">Masiva</option>
+              <option value="masiva_item">Cargue</option>
             </select>
           </div>
           <div>
@@ -828,10 +1128,13 @@ export function HistorialTable({
                 Tipo
               </th>
               <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
-                Matches
+                Coincidencias
               </th>
               <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Severidad
+              </th>
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Reporte
               </th>
             </tr>
           </thead>
@@ -868,7 +1171,7 @@ export function HistorialTable({
                   </td>
                 )}
                 <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-[#6B7280]">
-                  {c.tipo === 'puntual' ? 'Puntual' : 'Masiva'}
+                  {c.tipo === 'puntual' ? 'Puntual' : 'Cargue'}
                 </td>
                 <td className="px-4 py-2.5 text-center font-semibold">{c.total_matches}</td>
                 <td className="px-4 py-2.5 text-center">
@@ -877,6 +1180,13 @@ export function HistorialTable({
                   >
                     {SEVERIDAD_LABEL[c.severidad]}
                   </span>
+                </td>
+                <td className="px-4 py-2.5 text-center">
+                  {c.valida_consulta_id ? (
+                    <BotonPDFConsulta validaConsultaId={c.valida_consulta_id} />
+                  ) : (
+                    <span className="text-[10px] text-[#9CA3AF] uppercase tracking-wider">—</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -894,4 +1204,3 @@ function ErrorBox({ msg }: { msg: string }) {
     </div>
   );
 }
-
