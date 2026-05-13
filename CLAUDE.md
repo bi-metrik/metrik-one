@@ -314,7 +314,55 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-05-11 (one core: modulo Valida activable por workspace + patron config_extra para credenciales per-workspace)
+**Sesion:** 2026-05-12 (one core: tutorial in-app reusable para Valida en 3 surfaces + activacion canonica unificada)
+**Branch:** main · 3 commits (`fcfba68`, `ec6c5cf`, `17a1fb2`)
+
+### Tutorial in-app — motor reusable para futuros modulos
+
+Construido como motor (no one-off para Valida) para servir tutoriales contextuales a cualquier modulo de ONE que requiera onboarding "para dummies". Aplicable a futuros candidatos: compliance core, negocios, planes recurrentes, revision.
+
+Arquitectura 3 capas: empty state didactico (tarjeta "Comienza aqui" cuando historial vacio) + tour driver.js con boton "?" siempre visible + tooltips contextuales (Radix UI ya en stack).
+
+Capa de datos:
+- Tabla `tutorial_progress` (workspace_id + user_id + tutorial_slug UNIQUE, current_step, version, completed_at, dismissed_at) con RLS por workspace
+- Vista `v_tutorial_adopcion` para metricas: tasas de inicio, completacion, descarte, completacion% por workspace+slug
+
+Estructura codigo:
+- `src/lib/tutorials/` — registry + _shared.ts (5 steps core) + un archivo por slug + types
+- `src/components/tutorial/` — TutorialTour (driver.js wrapper) + TutorialEmptyState + TutorialButton
+- `src/lib/actions/tutorial-progress.ts` — get / markStepComplete / markCompleted / markDismissed / reset
+
+3 surfaces integradas:
+- `/valida` (slug `valida_standalone`) — 7 steps: bienvenida, puntual, lectura, asociar negocio, historial, masiva, PDF
+- `/compliance/validacion` (slug `valida_compliance`) — 5 steps core, sin masiva ni asociacion
+- `/compliance/listas` (slug `compliance_listas_dual`) — 5 steps con copy neutral, NO menciona Valida ni Informa (UX transparente ALMA)
+
+Auto-arranque condicional: primer render dispara tour si `current_step === 0 && !completed_at && !dismissed_at`. Re-trigger via boton "?" borra la row para reprogramar.
+
+Versionado: cada tutorial tiene `version`. Subir version reactiva el tour para usuarios que ya lo completaron en version anterior.
+
+Copy en TypeScript (no DB): versionable con el codigo, voz MeTRIK aplicada por Mateo en commit `ec6c5cf` (confiable, clara, sin promesas vacias, sin anglicismos).
+
+Dependencia nueva: `driver.js` v1.4.0 (~16kb, MIT, tipos incluidos).
+
+### Garantia operativa — activacion canonica de Valida
+
+El script `scripts/setup-valida-workspace.ts` ahora unifica activacion end-to-end (commit `17a1fb2`):
+1. Emite api_key con hash en metrik-valida + plana en `workspaces.config_extra.valida_api_key` (server-only)
+2. Activa flag `modules.valida_consulta=true` para mostrar item en sidebar
+3. Deja tutorial in-app listo para auto-arrancar en primer ingreso
+
+Antes: solo emitia api_key. Ahora: tres elementos garantizados en un paso, sin posibilidad de drift entre flag y credencial.
+
+**Prohibido activar `modules.valida_consulta` manualmente desde SQL.** Siempre via script. Detallado en gotcha "Activacion canonica del modulo Valida en un workspace".
+
+### Origen
+
+Reunion directiva /hana (proceso) + /noor (UX) + /max (tecnico) convocada por Mauricio. Mik sintetizo. Mauricio aprobo Opcion B (driver.js + tabla + 3-layer reusable) sobre alternativas A (reutilizar `/story-mode`) y C (mix sin libreria).
+
+---
+
+**Sesion previa:** 2026-05-11 (one core: modulo Valida activable por workspace + patron config_extra para credenciales per-workspace)
 **Branch:** main · 1 commit (`bfbe9cb`)
 
 ### Modulo Valida — activable por workspace_modules
@@ -763,6 +811,9 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 | 2026-05-11 | Tabla `valida_consultas` generica para historico local de consultas Valida en ONE | Multi-tenant via `workspace_id` + RLS. `negocio_id` nullable permite asociacion opcional consulta ↔ negocio. `lote_id` agrupa items de un mismo cargue masivo. Indices por (workspace_id, negocio_id, created_at), por lote_id, por severidad |
 | 2026-05-11 | Buscador de negocios para Valida NO filtra por estado (incluye cerrados) | Server action `buscarNegociosParaValida` retorna todos los negocios del workspace ordenados por created_at. Comportamiento distinto al listado `/negocios` que oculta completados por default. Razon: las consultas SARLAFT suelen atarse a negocios ya implementados (CDAs cerrados) |
 | 2026-05-11 | XLSX masivo Valida soporta columna `negocio_codigo` opcional que sobrescribe seleccion de lote | Plantilla descargable con headers + 3 ejemplos. Si la celda esta vacia, usa el dropdown del lote. Si tiene valor, lo resuelve via `negocios.codigo` y asocia esa fila a ese negocio. Permite mezclar varios negocios en un mismo cargue |
+| 2026-05-12 | Tutorial in-app construido como motor reusable, no one-off para Valida | Driver.js + tabla `tutorial_progress` + vista `v_tutorial_adopcion` + 5 steps core compartidos + extras por surface. 3 slugs activos (valida_standalone, valida_compliance, compliance_listas_dual). Patron extensible a compliance core, negocios, planes recurrentes, revision. Aprobado por Mauricio tras reunion /hana /noor /max sintetizada por Mik |
+| 2026-05-12 | Activacion canonica del modulo Valida en workspace ONE = correr `setup-valida-workspace.ts`, NUNCA SQL manual | Script garantiza api_key + flag + tutorial en un paso. Antes solo emitia api_key. Resuelve clase de errores de drift (workspaces con flag sin api_key o viceversa). Detalle en gotcha + cerebro `reglas/activacion-modulo-valida.md` |
+| 2026-05-12 | Copy `/compliance/listas` (slug `compliance_listas_dual`) usa lenguaje neutral — NO menciona Valida ni Informa por nombre | UX transparente para ALMA preservada. Copy: "Cada consulta cruza varias fuentes y unifica el resultado". Decision visual + de marca para no exponer arquitectura interna dual al cliente final |
 | 2026-04-27 | BloqueDatos extendido con tipos genericos `radio`, `documentos_preview`, `showIf` | Aplicable a cualquier workspace. Radio para opciones excluyentes, documentos_preview para listar archivos a generar segun seleccion en vivo, showIf para campos condicionales. Patron implementado para AFI pero util en SOENA, WMC, etc. donde haya seleccion de productos/modulos |
 | 2026-04-27 | Patron hook AFI dual en negocio-v2-actions: server action retorna flags `trigger_*` para que el cliente dispare el endpoint | Server actions no pueden export `maxDuration`, asi que motores server-heavy (>10s) viven en route handlers. Patron extensible: `trigger_afi_generation` (paquete SARLAFT 30-60s) y `trigger_afi_contrato` (contrato 15-30s). Replicar en otros workspaces con motores pesados |
 | 2026-04-27 | Image module respeta aspect ratio del logo en docx-engine AFI | Antes 300x100 px deformaba. Ahora parser inline PNG/JPEG escala dentro de bbox 130x60 manteniendo forma original. Sin nuevas dependencias (no `image-size` lib) |
