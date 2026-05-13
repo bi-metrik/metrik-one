@@ -7,7 +7,11 @@ import ValidaClient from './valida-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ValidaPage() {
+interface Props {
+  searchParams: Promise<{ negocio_id?: string }>;
+}
+
+export default async function ValidaPage({ searchParams }: Props) {
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) redirect('/');
 
@@ -21,7 +25,24 @@ export default async function ValidaPage() {
   const modules = (wsRow?.modules ?? {}) as Record<string, boolean>;
   if (!modules.valida_consulta) redirect('/');
 
-  const historial = await listarConsultasValida({ limite: 100 });
+  const { negocio_id: negocioId } = await searchParams;
+
+  // Resolver negocio si viene en query (para preset del filtro)
+  let negocioInicial: { id: string; codigo: string; nombre: string; estado: string } | null = null;
+  if (negocioId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: neg } = await (svc.from('negocios') as any)
+      .select('id, codigo, nombre, estado')
+      .eq('id', negocioId)
+      .eq('workspace_id', workspaceId)
+      .single();
+    if (neg) negocioInicial = neg;
+  }
+
+  const historial = await listarConsultasValida({
+    limite: 100,
+    ...(negocioInicial ? { negocio_id: negocioInicial.id } : {}),
+  });
   const tutorialProgress = await getTutorialProgress('valida_standalone');
 
   return (
@@ -29,6 +50,7 @@ export default async function ValidaPage() {
       historialInicial={historial.ok ? historial.consultas : []}
       errorHistorial={historial.ok ? null : historial.error}
       tutorialNuncaVisto={tutorialProgress === null}
+      negocioInicial={negocioInicial}
     />
   );
 }

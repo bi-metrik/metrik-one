@@ -92,14 +92,16 @@ type Props = {
   historialInicial: ConsultaHistorialItem[];
   errorHistorial: string | null;
   tutorialNuncaVisto?: boolean;
+  negocioInicial?: NegocioBusqueda | null;
 };
 
 export default function ValidaClient({
   historialInicial,
   errorHistorial,
   tutorialNuncaVisto = false,
+  negocioInicial = null,
 }: Props) {
-  const [tab, setTab] = useState<TabKey>('puntual');
+  const [tab, setTab] = useState<TabKey>(negocioInicial ? 'historial' : 'puntual');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
   const [tourTrigger, setTourTrigger] = useState(0);
@@ -174,6 +176,7 @@ export default function ValidaClient({
           consultas={historial}
           error={historialError}
           onFiltrar={refrescarHistorial}
+          negocioInicial={negocioInicial}
         />
       )}
 
@@ -953,12 +956,14 @@ function Historial({
   consultas,
   error,
   onFiltrar,
+  negocioInicial = null,
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   onFiltrar: (filtros: FiltrosHistorial) => Promise<void>;
+  negocioInicial?: NegocioBusqueda | null;
 }) {
-  const [negocio, setNegocio] = useState<NegocioBusqueda | null>(null);
+  const [negocio, setNegocio] = useState<NegocioBusqueda | null>(negocioInicial);
   const [severidad, setSeveridad] = useState<Severidad | ''>('');
   const [tipo, setTipo] = useState<'puntual' | 'masiva_item' | ''>('');
   const [fechaDesde, setFechaDesde] = useState('');

@@ -4,7 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { listarConsultasPorNegocio } from '@/lib/actions/valida-consultas'
 import NegocioDetailClient from './negocio-detail-client'
-import NegocioValidaSection from './negocio-valida-section'
+import BloqueValida from './bloques/BloqueValida'
 
 export const maxDuration = 60
 
@@ -57,10 +57,13 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         errorMsg={err}
       />
       {validaConsultas && (
-        <NegocioValidaSection
-          consultas={validaConsultas.ok ? validaConsultas.consultas : []}
-          error={validaConsultas.ok ? null : validaConsultas.error}
-        />
+        <div className="mx-auto max-w-2xl px-4 pb-4">
+          <BloqueValida
+            negocioId={id}
+            consultas={validaConsultas.ok ? validaConsultas.consultas : []}
+            error={validaConsultas.ok ? null : validaConsultas.error}
+          />
+        </div>
       )}
     </>
   )
