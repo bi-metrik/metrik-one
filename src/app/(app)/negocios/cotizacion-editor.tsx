@@ -12,9 +12,9 @@ import {
   addItem, updateItem, deleteItem,
   addRubro, updateRubro, deleteRubro, recalcularTotales,
   addItemFromServicio, reconciliarAjuste, aplicarAIU,
-} from '../../cotizaciones/actions-v2'
+} from '@/app/(app)/negocios/cotizacion-actions'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
-import { generateCotizacionPDF } from '@/app/(app)/pipeline/pdf-actions'
+import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
@@ -170,7 +170,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       const res = await duplicarCotizacion(cotizacion.id)
       if (res.success) {
         toast.success('Cotización duplicada')
-        router.push(backUrl ?? `/pipeline/${oportunidadId}/cotizacion/${res.id}`)
+        router.push(backUrl ?? `/negocios/${oportunidadId}/cotizacion/${res.id}`)
       } else {
         toast.error(res.error)
       }

@@ -212,7 +212,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected app routes — redirect to login if not authenticated
-  const protectedPaths = ['/numeros', '/negocios', '/pipeline', '/proyectos', '/directorio', '/nuevo', '/gastos', '/config', '/mi-negocio', '/story-mode', '/tableros', '/revision', '/equipo', '/movimientos']
+  const protectedPaths = ['/numeros', '/negocios', '/directorio', '/nuevo', '/gastos', '/config', '/mi-negocio', '/story-mode', '/tableros', '/revision', '/equipo', '/movimientos']
   if (protectedPaths.some(p => pathname.startsWith(p)) && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', pathname)

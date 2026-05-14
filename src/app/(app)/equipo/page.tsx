@@ -18,7 +18,7 @@ export default async function EquipoPage({ searchParams }: Props) {
 
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role || '')
-  if (!perms.canManageTeam) redirect('/proyectos')
+  if (!perms.canManageTeam) redirect('/negocios')
 
   const [{ horas, totales }, { staff: staffList, proyectos }] = await Promise.all([
     getHoras({ mes, staff, proyecto, estado }),

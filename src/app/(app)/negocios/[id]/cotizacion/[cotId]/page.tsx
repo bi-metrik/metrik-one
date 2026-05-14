@@ -1,8 +1,8 @@
-import { getCotizacion, getCotizacionItems } from '@/app/(app)/pipeline/[id]/cotizaciones/actions-v2'
+import { getCotizacion, getCotizacionItems } from '@/app/(app)/negocios/cotizacion-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { notFound } from 'next/navigation'
-import CotizacionEditor from '@/app/(app)/pipeline/[id]/cotizacion/[cotId]/cotizacion-editor'
+import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
 
 export default async function CotizacionNegocioPage({
   params,

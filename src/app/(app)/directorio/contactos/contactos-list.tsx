@@ -193,9 +193,9 @@ export default function ContactosList({ contactos }: Props) {
               badges={segLabel ? [{ label: segLabel, className: segChip, onClick: () => cycleSegmento(c.id, c.segmento) }] : undefined}
               timeAgo={timeAgo(c.created_at)}
               quickAction={{
-                tooltip: 'Crear oportunidad',
+                tooltip: 'Crear negocio',
                 icon: <Flame className="h-4 w-4" />,
-                onClick: () => router.push(`/nuevo/oportunidad?contacto_id=${c.id}&contacto_nombre=${encodeURIComponent(c.nombre)}`),
+                onClick: () => router.push(`/negocios/nuevo?contacto_id=${c.id}&contacto_nombre=${encodeURIComponent(c.nombre)}`),
               }}
               actions={[
                 { label: 'Editar', icon: <Pencil className="h-3 w-3" />, onClick: () => router.push(`/directorio/contacto/${c.id}`) },

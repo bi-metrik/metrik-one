@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
-import { addCobro } from '../../proyectos/actions-v2'
+import { addCobro } from '@/lib/actions/cobros-horas-rapidos'
 import { formatCOP } from '@/lib/contacts/constants'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
 

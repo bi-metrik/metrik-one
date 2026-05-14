@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 
-// Sprint F: Facturacion now lives inside Proyectos (tab Cobros)
-// This redirect preserves bookmarks
+// Facturacion vive dentro de Negocios (tab Cobros). Redirect mantiene bookmarks viejos.
 export default function FacturacionPage() {
-  redirect('/proyectos')
+  redirect('/negocios')
 }

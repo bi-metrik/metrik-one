@@ -3,7 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
-import { addHoras } from '../../proyectos/actions-v2'
+import { addHoras } from '@/lib/actions/cobros-horas-rapidos'
 
 export { addHoras }
 

@@ -125,9 +125,9 @@ export default function EmpresasList({ empresas }: Props) {
                 },
               ]}
               quickAction={{
-                tooltip: 'Crear oportunidad',
+                tooltip: 'Crear negocio',
                 icon: <Flame className="h-4 w-4" />,
-                onClick: () => router.push(`/nuevo/oportunidad?empresa_id=${e.id}&empresa_nombre=${encodeURIComponent(e.nombre)}`),
+                onClick: () => router.push(`/negocios/nuevo?empresa_id=${e.id}&empresa_nombre=${encodeURIComponent(e.nombre)}`),
               }}
               actions={[
                 { label: 'Editar', icon: <Pencil className="h-3 w-3" />, onClick: () => router.push(`/directorio/empresa/${e.id}`) },
