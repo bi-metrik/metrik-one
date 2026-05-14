@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { ArrowLeft, AlertTriangle, CheckCircle2, FileText, History, RotateCcw, Save, ShieldCheck } from 'lucide-react';
-import {
-  type ConfigPersistida,
-  type PesosContrapartes,
-  type PesosEmpleados,
-  type PresetSegmentacion,
-  type UmbralesUniverso,
-  aplicarSegmentacionConfig,
-} from '@/lib/actions/valida-segmentacion';
+import { aplicarSegmentacionConfig } from '@/lib/actions/valida-segmentacion';
+import type {
+  ConfigPersistida,
+  PesosContrapartes,
+  PesosEmpleados,
+  PresetSegmentacion,
+  UmbralesUniverso,
+} from '@/lib/valida/segmentacion-presets';
 import {
   PRESETS,
   PRESET_LABEL,

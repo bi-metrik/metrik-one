@@ -29,6 +29,26 @@ export type ConfigSegmentacion = {
   umbrales_empleados: UmbralesUniverso;
 };
 
+export type ConfigPersistida = ConfigSegmentacion & {
+  disclaimer_aceptado: boolean;
+  version: number;
+  aplicada_at: string | null;
+  aplicada_por: string | null;
+};
+
+export type EntradaBitacora = {
+  id: string;
+  version: number;
+  preset: PresetSegmentacion;
+  pesos_contrapartes: PesosContrapartes;
+  pesos_empleados: PesosEmpleados;
+  umbrales_contrapartes: UmbralesUniverso;
+  umbrales_empleados: UmbralesUniverso;
+  aplicada_at: string;
+  aplicada_por: string | null;
+  razon_cambio: string | null;
+};
+
 export const UMBRALES_DEFAULT: UmbralesUniverso = {
   alto_min: 2.5,
   medio_min: 1.5,

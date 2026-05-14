@@ -2,46 +2,19 @@
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
-import {
-  type ConfigSegmentacion,
-  type PesosContrapartes,
-  type PesosEmpleados,
-  type PresetSegmentacion,
-  type UmbralesUniverso,
-  PRESETS,
-  UMBRALES_DEFAULT,
-  pesosSumanUno,
-} from '@/lib/valida/segmentacion-presets';
-
-// ─── Types ────────────────────────────────────────────────────────────────
-
-export type {
-  ConfigSegmentacion,
+import type {
+  ConfigPersistida,
+  EntradaBitacora,
   PesosContrapartes,
   PesosEmpleados,
   PresetSegmentacion,
   UmbralesUniverso,
-};
-
-export type ConfigPersistida = ConfigSegmentacion & {
-  disclaimer_aceptado: boolean;
-  version: number;
-  aplicada_at: string | null;
-  aplicada_por: string | null;
-};
-
-export type EntradaBitacora = {
-  id: string;
-  version: number;
-  preset: PresetSegmentacion;
-  pesos_contrapartes: PesosContrapartes;
-  pesos_empleados: PesosEmpleados;
-  umbrales_contrapartes: UmbralesUniverso;
-  umbrales_empleados: UmbralesUniverso;
-  aplicada_at: string;
-  aplicada_por: string | null;
-  razon_cambio: string | null;
-};
+} from '@/lib/valida/segmentacion-presets';
+import {
+  PRESETS,
+  UMBRALES_DEFAULT,
+  pesosSumanUno,
+} from '@/lib/valida/segmentacion-presets';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
