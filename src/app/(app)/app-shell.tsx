@@ -24,6 +24,7 @@ import {
   Blocks,
   ListChecks,
   Scale,
+  Sliders,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -101,6 +102,7 @@ const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
 // Valida (extra inferior, activable por flag)
 const VALIDA_NAV_ITEMS = [
   { href: '/valida', label: 'Valida', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+  { href: '/valida/segmentacion', label: 'Segmentación SARLAFT', icon: Sliders, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
 // Compartidos (siempre visibles)
