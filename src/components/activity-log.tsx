@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition, useRef } from 'react'
 import {
   MessageSquare, Send, Trash2, Link as LinkIcon, AtSign,
   ArrowRight, X, CheckCircle2, XCircle, Shield, Banknote,
-  CheckSquare, FolderOpen,
+  CheckSquare, FolderOpen, Filter,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity } from '@/app/(app)/activity-actions'
@@ -80,6 +80,8 @@ function timeAgo(dateStr: string) {
   return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
 }
 
+const SHOW_SYSTEM_KEY = 'activity-log:show-system'
+
 export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId }: ActivityLogProps) {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -93,6 +95,22 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
   const [showLink, setShowLink] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Filtro: mostrar/ocultar eventos automaticos del sistema (persistido en localStorage)
+  // Lazy init es seguro: el toggle solo se renderiza tras cargar entries (loading=true en SSR/primer paint)
+  const [showSystem, setShowSystem] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    return window.localStorage.getItem(SHOW_SYSTEM_KEY) !== '0'
+  })
+  const toggleShowSystem = () => {
+    setShowSystem(prev => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(SHOW_SYSTEM_KEY, next ? '1' : '0')
+      }
+      return next
+    })
+  }
+
   useEffect(() => {
     async function load() {
       const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)
@@ -101,6 +119,11 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
     }
     load()
   }, [entidadTipo, entidadId, oportunidadId])
+
+  const visibleEntries = showSystem
+    ? entries
+    : entries.filter(e => e.tipo === 'comentario')
+  const systemHiddenCount = entries.length - visibleEntries.length
 
   const handleSubmit = () => {
     if (!content.trim()) return
@@ -247,17 +270,44 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
           <p className="mt-1 text-xs text-muted-foreground">Sin actividad aun. Agrega el primer comentario.</p>
         </div>
       ) : (
-        <div className="space-y-1">
-          {entries.map(entry => (
-            <div key={entry.id}>
-              {entry.tipo === 'comentario' ? (
-                <CommentEntry entry={entry} onDelete={handleDelete} />
-              ) : (
-                <ChangeEntry entry={entry} />
-              )}
+        <>
+          {/* Toggle: mostrar/ocultar eventos del sistema */}
+          <div className="flex items-center justify-end pt-1">
+            <button
+              onClick={toggleShowSystem}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title={showSystem ? 'Ocultar eventos automaticos' : 'Mostrar eventos automaticos'}
+            >
+              <Filter className="h-3 w-3" />
+              <span>
+                {showSystem
+                  ? 'Solo comentarios'
+                  : `Mostrar todo${systemHiddenCount > 0 ? ` (${systemHiddenCount})` : ''}`}
+              </span>
+            </button>
+          </div>
+
+          {visibleEntries.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-center">
+              <MessageSquare className="mx-auto h-6 w-6 text-muted-foreground/30" />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Sin comentarios aun. {systemHiddenCount} evento{systemHiddenCount !== 1 ? 's' : ''} del sistema oculto{systemHiddenCount !== 1 ? 's' : ''}.
+              </p>
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className="space-y-1">
+              {visibleEntries.map(entry => (
+                <div key={entry.id}>
+                  {entry.tipo === 'comentario' ? (
+                    <CommentEntry entry={entry} onDelete={handleDelete} />
+                  ) : (
+                    <ChangeEntry entry={entry} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
