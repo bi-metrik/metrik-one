@@ -95,11 +95,12 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
   const [showLink, setShowLink] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Filtro: mostrar/ocultar eventos automaticos del sistema (persistido en localStorage)
-  // Lazy init es seguro: el toggle solo se renderiza tras cargar entries (loading=true en SSR/primer paint)
+  // Filtro: mostrar/ocultar eventos automaticos del sistema (persistido en localStorage).
+  // Default: ocultos — solo comentarios visibles. Lazy init seguro porque el toggle
+  // solo se renderiza tras cargar entries (loading=true en SSR/primer paint).
   const [showSystem, setShowSystem] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true
-    return window.localStorage.getItem(SHOW_SYSTEM_KEY) !== '0'
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(SHOW_SYSTEM_KEY) === '1'
   })
   const toggleShowSystem = () => {
     setShowSystem(prev => {
