@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Phone, Mail, Search, Users, Trash2, Pencil, Flame } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
-import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/pipeline/constants'
+import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/catalogos/constants'
 import { deleteContacto, updateContactoSegmento } from '../actions'
 import type { Contacto } from '@/types/database'
 

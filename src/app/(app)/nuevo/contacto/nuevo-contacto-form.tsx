@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { createContacto } from '@/app/(app)/directorio/actions'
-import { FUENTES_ADQUISICION } from '@/lib/pipeline/constants'
+import { FUENTES_ADQUISICION } from '@/lib/catalogos/constants'
 
 export default function NuevoContactoForm() {
   const router = useRouter()

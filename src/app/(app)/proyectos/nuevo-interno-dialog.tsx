@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { AlertTriangle, X, Flame, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
-import { TIPOS_RUBRO } from '@/lib/pipeline/constants'
+import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { crearProyectoInterno } from './actions-v2'
 
 interface RubroLine {

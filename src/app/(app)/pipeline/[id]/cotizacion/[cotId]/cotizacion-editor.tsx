@@ -15,11 +15,11 @@ import {
 } from '../../cotizaciones/actions-v2'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/pipeline/pdf-actions'
-import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/pipeline/constants'
+import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
-import type { EstadoCotizacion } from '@/lib/pipeline/constants'
+import type { EstadoCotizacion } from '@/lib/catalogos/constants'
 import type { FiscalProfile, Client } from '@/types/database'
 
 interface RubroRow {

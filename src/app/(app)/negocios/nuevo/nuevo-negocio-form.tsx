@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } f
 import { toast } from 'sonner'
 import { crearNegocio } from '../negocio-v2-actions'
 import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
-import { SECTORES_EMPRESA } from '@/lib/pipeline/constants'
+import { SECTORES_EMPRESA } from '@/lib/catalogos/constants'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }

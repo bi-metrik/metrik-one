@@ -10,7 +10,7 @@ import {
   createServicio, updateServicio, deleteServicio, toggleServicio,
 } from './servicios-actions'
 import type { RubroTemplate } from './servicios-actions'
-import { TIPOS_RUBRO } from '@/lib/pipeline/constants'
+import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Servicio, Staff } from '@/types/database'
 

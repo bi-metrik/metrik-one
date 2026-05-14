@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { ganarOportunidad } from '../actions-v2'
-import { TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO } from '@/lib/pipeline/constants'
+import { TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, TIPOS_DOCUMENTO } from '@/lib/catalogos/constants'
 import RutUploadCard from '@/components/rut-upload-card'
 
 interface EmpresaData {

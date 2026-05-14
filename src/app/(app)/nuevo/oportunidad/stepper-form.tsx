@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { createOportunidad } from '@/app/(app)/pipeline/actions-v2'
 import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
 import { getCustomFields } from '@/app/(app)/custom-fields-actions'
-import { FUENTES_ADQUISICION, SECTORES_EMPRESA } from '@/lib/pipeline/constants'
+import { FUENTES_ADQUISICION, SECTORES_EMPRESA } from '@/lib/catalogos/constants'
 
 const STEPS = [
   { label: 'Contacto', icon: User },

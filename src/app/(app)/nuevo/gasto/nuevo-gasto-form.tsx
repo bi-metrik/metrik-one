@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Building2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
 import { toast } from 'sonner'
-import { CATEGORIAS_GASTO } from '@/lib/pipeline/constants'
+import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
 import { createGasto, getRubrosProyecto, uploadSoporteGasto } from './gasto-action'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
 

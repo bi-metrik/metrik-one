@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation'
 import { Flame, Building2, User, Search, Clock, Trophy, X, ChevronRight, AlertTriangle, Info, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
-import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS, RAZONES_PERDIDA } from '@/lib/pipeline/constants'
+import { ETAPA_CONFIG, ETAPAS_ACTIVAS, TODAS_ETAPAS, RAZONES_PERDIDA } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { moveOportunidad, ganarOportunidad, perderOportunidad, checkCotizacionExiste } from './actions-v2'
 import type { WorkspaceStageWithProceso } from './actions-v2'
-import type { EtapaPipeline } from '@/lib/pipeline/constants'
+import type { EtapaPipeline } from '@/lib/catalogos/constants'
 
 // D171: Soft gate messages por etapa destino
 const SOFT_GATE_MSGS: Partial<Record<EtapaPipeline, string>> = {
