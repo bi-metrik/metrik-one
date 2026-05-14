@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { ArrowLeft, AlertTriangle, CheckCircle2, FileText, History, RotateCcw, Save, ShieldCheck } from 'lucide-react';
 import { aplicarSegmentacionConfig } from '@/lib/actions/valida-segmentacion';
+import type { DistribucionWorkspace } from '@/lib/actions/valida-score';
 import type {
   ConfigPersistida,
   PesosContrapartes,
@@ -21,7 +22,13 @@ import {
 
 type TabKey = 'contrapartes' | 'empleados' | 'resultados';
 
-export default function SegmentacionClient({ configInicial }: { configInicial: ConfigPersistida }) {
+export default function SegmentacionClient({
+  configInicial,
+  distribucionInicial,
+}: {
+  configInicial: ConfigPersistida;
+  distribucionInicial: DistribucionWorkspace | null;
+}) {
   const [tab, setTab] = useState<TabKey>('contrapartes');
   const [preset, setPreset] = useState<PresetSegmentacion>(configInicial.preset);
   const [pesosC, setPesosC] = useState<PesosContrapartes>(configInicial.pesos_contrapartes);
@@ -177,7 +184,7 @@ export default function SegmentacionClient({ configInicial }: { configInicial: C
         />
       )}
 
-      {tab === 'resultados' && <PanelResultados />}
+      {tab === 'resultados' && <PanelResultados distribucion={distribucionInicial} />}
 
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
         <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold flex items-center gap-2">
@@ -430,18 +437,81 @@ function UmbralRow({
   );
 }
 
-function PanelResultados() {
+function PanelResultados({ distribucion }: { distribucion: DistribucionWorkspace | null }) {
+  if (!distribucion || (distribucion.contrapartes.total === 0 && distribucion.empleados.total === 0)) {
+    return (
+      <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
+        <p className="font-semibold text-[#1A1A1A] mb-1">Distribución por nivel de riesgo</p>
+        <p>
+          Aún no hay negocios con score calculado. Configura los datos SARLAFT en el detalle de cada
+          negocio (sección «Riesgo SARLAFT») para que aparezcan aquí.
+        </p>
+        <p className="text-xs mt-3">
+          <FileText className="h-3.5 w-3.5 inline mr-1 mb-0.5" />
+          El score se recalcula automáticamente cada vez que corres una consulta Valida sobre el negocio.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
-      <p className="font-semibold text-[#1A1A1A] mb-1">Distribución por nivel de riesgo</p>
-      <p>
-        Cuando empieces a ejecutar consultas Valida con esta configuración activa,
-        aquí verás la distribución de tus contrapartes y empleados por nivel de riesgo.
-      </p>
-      <p className="text-xs mt-3">
-        <FileText className="h-3.5 w-3.5 inline mr-1 mb-0.5" />
-        Próximo paso: integración automática del puntaje con cada consulta.
-      </p>
+    <div className="space-y-4">
+      <DistribucionBloque
+        titulo="Contrapartes"
+        valores={distribucion.contrapartes}
+      />
+      <DistribucionBloque
+        titulo="Empleados"
+        valores={distribucion.empleados}
+      />
+    </div>
+  );
+}
+
+function DistribucionBloque({ titulo, valores }: { titulo: string; valores: DistribucionWorkspace['contrapartes'] }) {
+  const total = valores.total || 1;
+  const colores: Record<'alto' | 'medio' | 'bajo', string> = {
+    alto: 'bg-[#EF4444]',
+    medio: 'bg-[#F59E0B]',
+    bajo: 'bg-[#10B981]',
+  };
+  const labels: Record<'alto' | 'medio' | 'bajo', string> = {
+    alto: 'Alto',
+    medio: 'Medio',
+    bajo: 'Bajo',
+  };
+  const niveles: Array<'alto' | 'medio' | 'bajo'> = ['alto', 'medio', 'bajo'];
+
+  return (
+    <div className="bg-white rounded-lg border border-[#E5E7EB] p-5">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm font-bold text-[#1A1A1A]">{titulo}</p>
+        <p className="text-xs text-[#6B7280] font-mono">{valores.total} con score</p>
+      </div>
+      {valores.total === 0 ? (
+        <p className="text-xs text-[#9CA3AF]">Sin negocios con score en este universo.</p>
+      ) : (
+        <div className="space-y-2">
+          {niveles.map(n => {
+            const v = valores[n];
+            const pct = Math.round((v / total) * 100);
+            return (
+              <div key={n} className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-[#1A1A1A] w-12">{labels[n]}</span>
+                <div className="flex-1 h-3 bg-[#F5F4F2] rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${colores[n]} transition-all`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className="text-xs font-mono text-[#6B7280] w-16 text-right">
+                  {v} ({pct}%)
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

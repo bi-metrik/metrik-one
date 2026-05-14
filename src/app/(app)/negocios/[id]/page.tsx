@@ -3,8 +3,10 @@ import { getNegocioDetalleCompleto } from '../negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { listarConsultasPorNegocio } from '@/lib/actions/valida-consultas'
+import { getDatosSarlaft, getScoreNegocio } from '@/lib/actions/valida-score'
 import NegocioDetailClient from './negocio-detail-client'
 import BloqueValida from './bloques/BloqueValida'
+import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 
 export const maxDuration = 60
 
@@ -23,6 +25,9 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // Cargar consultas Valida solo si el workspace tiene el flag activo
   const { workspaceId } = await getWorkspace()
   let validaConsultas: Awaited<ReturnType<typeof listarConsultasPorNegocio>> | null = null
+  let datosSarlaft: Awaited<ReturnType<typeof getDatosSarlaft>> | null = null
+  let scoreSarlaft: Awaited<ReturnType<typeof getScoreNegocio>> | null = null
+  let validaActivo = false
   if (workspaceId) {
     const svc = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,7 +37,10 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       .single()
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
     if (modules.valida_consulta) {
+      validaActivo = true
       validaConsultas = await listarConsultasPorNegocio(id)
+      datosSarlaft = await getDatosSarlaft(id)
+      scoreSarlaft = await getScoreNegocio(id)
     }
   }
 
@@ -56,13 +64,20 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         pausaEnabled={data.pausaEnabled}
         errorMsg={err}
       />
-      {validaConsultas && (
-        <div className="mx-auto max-w-2xl px-4 pb-4">
-          <BloqueValida
+      {validaActivo && (
+        <div className="mx-auto max-w-2xl px-4 pb-4 space-y-3">
+          <BloqueRiesgoSarlaft
             negocioId={id}
-            consultas={validaConsultas.ok ? validaConsultas.consultas : []}
-            error={validaConsultas.ok ? null : validaConsultas.error}
+            datosIniciales={datosSarlaft?.ok ? datosSarlaft.datos : null}
+            scoreInicial={scoreSarlaft?.ok ? scoreSarlaft.score : null}
           />
+          {validaConsultas && (
+            <BloqueValida
+              negocioId={id}
+              consultas={validaConsultas.ok ? validaConsultas.consultas : []}
+              error={validaConsultas.ok ? null : validaConsultas.error}
+            />
+          )}
         </div>
       )}
     </>

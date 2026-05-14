@@ -196,6 +196,33 @@ export async function consultarValida(
   if (!resultado.ok) return { ok: false, error: resultado.error };
   if (!persisted.ok) return { ok: false, error: persisted.error };
 
+  // Recalcular score SARLAFT del negocio si tiene datos configurados
+  if (opts.negocio_id) {
+    try {
+      const { calcularScoreNegocio, persistirScore } = await import('@/lib/valida/calculo-score');
+      const calc = await calcularScoreNegocio({ workspaceId, negocioId: opts.negocio_id });
+      if (calc.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const svc = createServiceClient() as any;
+        const { data: datos } = await svc
+          .from('valida_sarlaft_datos_negocio')
+          .select('universo')
+          .eq('negocio_id', opts.negocio_id)
+          .maybeSingle();
+        if (datos) {
+          await persistirScore({
+            workspaceId,
+            negocioId: opts.negocio_id,
+            universo: datos.universo,
+            resultado: calc.resultado,
+          });
+        }
+      }
+    } catch {
+      // Re-cálculo silencioso — no afecta el flujo principal de la consulta
+    }
+  }
+
   return { ok: true, data: resultado.data, consulta_local_id: persisted.id };
 }
 

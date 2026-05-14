@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { getSegmentacionConfig } from '@/lib/actions/valida-segmentacion';
+import { getDistribucionSegmentacion } from '@/lib/actions/valida-score';
 import SegmentacionClient from './segmentacion-client';
 
 export const dynamic = 'force-dynamic';
@@ -43,5 +44,12 @@ export default async function SegmentacionPage() {
     );
   }
 
-  return <SegmentacionClient configInicial={r.config} />;
+  const dist = await getDistribucionSegmentacion();
+
+  return (
+    <SegmentacionClient
+      configInicial={r.config}
+      distribucionInicial={dist.ok ? dist.distribucion : null}
+    />
+  );
 }
