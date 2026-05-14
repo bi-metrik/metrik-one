@@ -677,7 +677,7 @@ export async function crearNegocio(input: {
       const clienteNombre = neg?.empresas?.nombre ?? neg?.contactos?.nombre ?? input.nombre
       const folderName = `${codigo} - ${clienteNombre}`
 
-      const folderId = await createDriveFolder(folderName, driveFolderId)
+      const folderId = await createDriveFolder(folderName, driveFolderId, workspaceId)
       const folderUrl = `https://drive.google.com/drive/folders/${folderId}`
 
       // Guardar link en el negocio
@@ -687,8 +687,12 @@ export async function crearNegocio(input: {
         .eq('id', negocioData.id)
     }
   } catch (driveErr) {
-    // No bloquear la creación del negocio si Drive falla
-    console.error('[crearNegocio] Error creando carpeta Drive:', driveErr)
+    // No bloquear la creación del negocio si Drive falla, pero log explicito
+    const msg = driveErr instanceof Error ? driveErr.message : String(driveErr)
+    console.error(
+      `[crearNegocio] Error creando carpeta Drive (workspace=${workspaceId}, negocio=${negocioData.id}, linea=${lineaId}):`,
+      msg,
+    )
   }
 
   // Crear negocio_bloques para cada bloque_config de la primera etapa

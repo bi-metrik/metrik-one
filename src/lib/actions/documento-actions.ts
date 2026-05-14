@@ -108,13 +108,13 @@ export async function procesarDocumento(
 
       const folderName = (negocio.codigo as string) ?? negocioId
       console.log(`[documento] Step 4: creating Drive folder "${folderName}"...`)
-      const negocioFolderId = await createDriveFolder(folderName, driveFolderId)
+      const negocioFolderId = await createDriveFolder(folderName, driveFolderId, workspaceId)
       console.log(`[documento] Step 4 OK: folder=${negocioFolderId}`)
 
       // ── 4b. Eliminar archivo anterior de Drive si existe ────────────────
       if (oldDriveFileId) {
         try {
-          await deleteDriveFile(oldDriveFileId)
+          await deleteDriveFile(oldDriveFileId, workspaceId)
           console.log(`[documento] Step 4b OK: old file ${oldDriveFileId} deleted`)
         } catch (delErr) {
           console.warn('[documento] Step 4b WARN: could not delete old file:', delErr)
@@ -125,13 +125,13 @@ export async function procesarDocumento(
       // ── 5. Subir archivo a Drive ──────────────────────────────────────
       const driveFileName = `${label}.${ext}`
       console.log(`[documento] Step 5: uploading "${driveFileName}" to Drive...`)
-      const result = await uploadFileToDrive(buffer, driveFileName, mimeType, negocioFolderId)
+      const result = await uploadFileToDrive(buffer, driveFileName, mimeType, negocioFolderId, workspaceId)
       driveFileId = result.fileId
       driveUrl = result.webViewLink
       console.log(`[documento] Step 5 OK: fileId=${driveFileId}`)
 
       // ── 6. Hacer accesible por link ───────────────────────────────────
-      await setFilePublicByLink(driveFileId)
+      await setFilePublicByLink(driveFileId, workspaceId)
       console.log('[documento] Step 6 OK: permissions set')
 
       // ── 7. Borrar archivo temporal de Supabase Storage ────────────────
@@ -238,8 +238,8 @@ export async function reprocesarDocumento(
   campos?: Record<string, CampoResultado>
   error?: string
 }> {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   try {
     // 1. Leer bloque + config
@@ -272,7 +272,7 @@ export async function reprocesarDocumento(
 
     // 3. Descargar archivo de Drive
     console.log(`[reprocesar] Downloading ${driveFileId} from Drive...`)
-    const buffer = await downloadDriveFile(driveFileId)
+    const buffer = await downloadDriveFile(driveFileId, workspaceId)
     const mimeType = mimeTypeFromName(fileName)
 
     // 4. Extraer con AI

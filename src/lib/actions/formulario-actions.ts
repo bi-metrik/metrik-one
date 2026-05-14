@@ -246,11 +246,11 @@ export async function generarFormulario(
 
     if (wsDriveFolderId) {
       // Get or create negocio folder
-      const negocioFolderId = await createDriveFolder(codigoNegocio, wsDriveFolderId)
+      const negocioFolderId = await createDriveFolder(codigoNegocio, wsDriveFolderId, workspaceId)
 
       const fileName = `${label}.pdf`
-      const result = await uploadFileToDrive(buffer, fileName, 'application/pdf', negocioFolderId)
-      await setFilePublicByLink(result.fileId)
+      const result = await uploadFileToDrive(buffer, fileName, 'application/pdf', negocioFolderId, workspaceId)
+      await setFilePublicByLink(result.fileId, workspaceId)
       driveUrl = result.webViewLink
     }
 

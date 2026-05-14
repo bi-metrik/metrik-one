@@ -28,10 +28,11 @@ export async function generarContratoAFI(negocio_id: string): Promise<Result> {
 
   // 1. Cargar negocio
   const { data: negocio, error: negocioErr } = await svc.from('negocios')
-    .select('id, codigo, carpeta_url, linea_id')
+    .select('id, codigo, carpeta_url, linea_id, workspace_id')
     .eq('id', negocio_id)
     .single()
   if (negocioErr || !negocio) return { ok: false, error: 'Negocio no encontrado' }
+  const workspaceId = negocio.workspace_id as string
 
   // 2. Cargar bloques del negocio con sus configs
   const { data: instRows, error: instErr } = await svc
@@ -101,7 +102,7 @@ export async function generarContratoAFI(negocio_id: string): Promise<Result> {
       return { ok: false, error: 'Linea de negocio sin drive_folder_id configurado' }
     }
     const folderName = `${negocio.codigo} - ${cliente.empresa_nombre}`
-    driveFolderId = await createDriveFolder(folderName, linea.drive_folder_id)
+    driveFolderId = await createDriveFolder(folderName, linea.drive_folder_id, workspaceId)
     await svc.from('negocios').update({ carpeta_url: `https://drive.google.com/drive/folders/${driveFolderId}` }).eq('id', negocio_id)
   }
 
@@ -111,6 +112,7 @@ export async function generarContratoAFI(negocio_id: string): Promise<Result> {
     filename,
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     driveFolderId,
+    workspaceId,
   )
 
   // 6. Log (reusa tabla generaciones_log si existe, si no skip)

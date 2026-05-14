@@ -45,9 +45,10 @@ export async function disparararGeneracionAFI(negocio_id: string): Promise<Resul
   }
 
   const { data: negocio, error: negocioErr } = await sb.from('negocios').select(
-    'id, codigo, carpeta_url, linea_id'
+    'id, codigo, carpeta_url, linea_id, workspace_id'
   ).eq('id', negocio_id).single()
   if (negocioErr || !negocio) return { ok: false, error: 'Negocio no encontrado' }
+  const workspaceId = negocio.workspace_id as string
 
   // 2. Leer bloques: productos, RUT, logo, oficial
   // Cada bloque_instance tiene data JSONB con los campos llenados
@@ -116,7 +117,7 @@ export async function disparararGeneracionAFI(negocio_id: string): Promise<Resul
     const parentId = (linea as { drive_folder_id: string | null } | null)?.drive_folder_id
     if (!parentId) return { ok: false, error: 'Linea sin drive_folder_id' }
     const folderName = `${negocio.codigo} - GEN`
-    driveFolderId = await createDriveFolder(folderName, parentId)
+    driveFolderId = await createDriveFolder(folderName, parentId, workspaceId)
     driveFolderUrl = `https://drive.google.com/drive/folders/${driveFolderId}`
     await svc.from('negocios').update({ carpeta_url: driveFolderUrl }).eq('id', negocio_id)
   }
@@ -145,6 +146,7 @@ export async function disparararGeneracionAFI(negocio_id: string): Promise<Resul
         filename,
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         driveFolderId,
+        workspaceId,
       )
       docs_generados.push({
         codigo, filename,
