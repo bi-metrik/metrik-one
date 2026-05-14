@@ -314,7 +314,62 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-05-12 (one core: tutorial in-app reusable para Valida en 3 surfaces + activacion canonica unificada)
+**Sesion:** 2026-05-13/14 (one core: fix flujo invitaciones + activity-log toggle + extirpacion legacy pipeline/proyectos/nuevo-oportunidad)
+**Branch:** main · 5 commits (`35ed64a`, `bc6378e`, `60ca389`, `5abd9c2`, `3016d1a`)
+
+### Fix flujo invitaciones (commit `35ed64a`)
+
+Repro AFI (Yessica): la invitacion solo insertaba en `team_invitations` sin disparar email. Al autenticar via link signup nativo (token_hash+type) cae a `/onboarding` en vez de `/accept-invite`.
+
+- `team-actions.inviteTeamMember`: replica patron `staff-actions.ts` — llama a `serviceClient.auth.admin.inviteUserByEmail` con `redirectTo=/auth/callback?redirectTo=/accept-invite`. Fallback Resend con magic link cuando user ya existe en `auth.users` (422 / already registered). Upsert unifica re-invite (cambia rol + reinicia expires_at).
+- `InviteInput.role` extendido a `owner | admin | supervisor | operator | read_only`. Owner-as-invite = transfer de ownership, gated por `profile.role === 'owner'`.
+- `auth/callback/route.ts`: branch nuevo `token_hash + type` via `verifyOtp`. Helper `routeAfterAuth` deduplica routing post-auth entre PKCE y token_hash.
+- `team-section` UI: ROLE_OPTIONS agrega supervisor + read_only, toggle separado "Transferir ownership" con `confirm()` y advertencia de degradado manual. Dropdown de cambio de rol incluye supervisor + read_only.
+
+### Activity log — toggle eventos sistema (commits `bc6378e` + `60ca389`)
+
+Mauricio pidio filtrar metadata del sistema (cambios de etapa/estado/precio/checklist/aprobaciones) sin tocar comentarios humanos.
+
+- `activity-log.tsx`: boton "Solo comentarios" / "Mostrar todo (N)" alineado a la derecha del timeline con icono Filter
+- Estado persistido en localStorage (key `activity-log:show-system`)
+- **Default: eventos del sistema OCULTOS** — solo comentarios visibles al entrar
+- Lazy init seguro (toggle solo aparece tras cargar entries, sin riesgo hydration mismatch)
+- Empty state diferenciado: cuando se filtran todos, indica cuantos eventos del sistema estan ocultos
+
+Componente compartido — el toggle aplica en `/negocios/[id]` (unico modulo activo tras extirpacion).
+
+### Extirpacion legacy pipeline/proyectos/nuevo-oportunidad (commits `5abd9c2` + `3016d1a`)
+
+Mauricio confirmo que `/pipeline` y `/proyectos` no se usan y que el flujo "crear oportunidad" no esta dentro del proceso vigente — todo entra como negocio. **-8319 lineas, una sola fuente de verdad.**
+
+**Fase A.1 — rename catalogos (`5abd9c2`):** `lib/pipeline/` → `lib/catalogos/`. 16 imports actualizados via sed. El path se llamaba "pipeline" por historia pero contiene catalogos genericos (CATEGORIAS_GASTO, FUENTES_ADQUISICION, SECTORES_EMPRESA, TIPOS_PERSONA, REGIMENES_TRIBUTARIOS, ROLES_CONTACTO, ESTADO_COTIZACION_CONFIG, etc.) usados en 16 archivos fuera de las rutas legacy.
+
+**Fase A.2+B — extirpacion (`3016d1a`):**
+
+Movido a `negocios/`:
+- `pipeline/[id]/cotizaciones/actions-v2.ts` → `negocios/cotizacion-actions.ts`
+- `pipeline/[id]/cotizacion/[cotId]/cotizacion-editor.tsx` → `negocios/cotizacion-editor.tsx`
+- `pipeline/pdf-actions.ts` → `negocios/cotizacion-pdf-actions.ts`
+
+Extraido a `lib/actions/`:
+- `addCobro` + `addHoras` → `lib/actions/cobros-horas-rapidos.ts` (sin dependencia de `/proyectos`, usados desde FAB `/nuevo/cobro` y `/nuevo/horas`)
+
+Borrado:
+- `src/app/(app)/pipeline/` completo (15 archivos)
+- `src/app/(app)/proyectos/` completo (12 archivos)
+- `src/app/(app)/nuevo/oportunidad/` completo (2 archivos)
+
+Ajustes externos (todo apunta a `/negocios`):
+- `middleware.ts`: `/pipeline` y `/proyectos` fuera de `protectedPaths`
+- `facturacion/page.tsx`: redirect `/proyectos` → `/negocios`
+- `equipo/page.tsx`: redirect no-permiso `/proyectos` → `/negocios`
+- `numeros/drill-down-sheet.tsx`: "Ir a Oportunidades" `/pipeline` → "Ir a Negocios" `/negocios` (3 sitios). "Ver todas las facturas" `/proyectos` → "Ver todos los negocios" `/negocios`
+- `directorio/empresas-list` + `directorio/contactos-list`: quickAction "Crear oportunidad" → "Crear negocio" apuntando a `/negocios/nuevo?empresa_id=X` o `?contacto_id=Y` (query params conservados para futuro prefill)
+- `negocios/cotizacion-editor:173`: fallback URL `/pipeline/...` → `/negocios/...`
+
+Validacion: `npx tsc --noEmit` limpio tras `rm -rf .next`. ESLint clean en archivos tocados (un error preexistente desde feb 2026 en `contactos-list.tsx:68` por `Date.now()` en render, fuera de scope).
+
+### Sesion previa: 2026-05-12 (one core: tutorial in-app reusable para Valida en 3 surfaces + activacion canonica unificada)
 **Branch:** main · 3 commits (`fcfba68`, `ec6c5cf`, `17a1fb2`)
 
 ### Tutorial in-app — motor reusable para futuros modulos
@@ -657,6 +712,13 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 - [x] Security linter Fase 1: 4 fixes criticos (RLS, SECURITY DEFINER, bucket listing, policy permisiva) — completado 2026-04-18
 - [x] Security linter Fase 2: 46 funciones con search_path mutable fixed — completado 2026-04-18
 - [x] Docs wa-templates.md: 10 templates listos para Meta Business Manager — completado 2026-04-18
+- [x] **Fix flujo invitaciones equipo** — completado 2026-05-13 (commit 35ed64a). Email real via auth.admin.inviteUserByEmail + branch token_hash + roles owner/supervisor/read_only + toggle "Transferir ownership"
+- [x] **Activity log toggle eventos sistema** — completado 2026-05-13 (commits bc6378e + 60ca389). Default solo comentarios, localStorage persist
+- [x] **Extirpar pipeline/proyectos/nuevo-oportunidad** — completado 2026-05-14 (commits 5abd9c2 + 3016d1a). -8319 lineas, todo apunta a /negocios
+- [ ] **QA online invitaciones equipo:** 3 escenarios — (1) invitar nuevo admin → email Supabase → /accept-invite → /numeros, (2) re-invite cambiando rol antes de aceptar, (3) toggle "Transferir ownership" → confirm → invitado acepta como owner
+- [ ] **Pre-fill `/negocios/nuevo`:** leer searchParams empresa_id/contacto_id en page.tsx + pasar como initial props al form. Query params ya llegan desde Directorio empresas/contactos
+- [ ] **Verificar legacy /nuevo/cobro y /nuevo/horas (FAB):** apuntan a tablas facturas y proyectos que pueden estar dormidas. Si no hay UI activa que renderice esos registros, sumar a extirpacion
+- [ ] **Hana:** actualizar mapa de procesos — el flujo "crear oportunidad" se elimino del catalogo. Todo entra como Negocio
 - [x] **WA notificaciones:** liberar Vercel SSO en metrik.com.co/privacidad — completado 2026-04-28
 - [ ] **WA notificaciones:** validar que politica tratamiento menciona WhatsApp + telefono + opt-out (Emilio)
 - [ ] **WA notificaciones:** cargar los 10 templates a Meta Business Manager (Yuto, post bloqueadores)
