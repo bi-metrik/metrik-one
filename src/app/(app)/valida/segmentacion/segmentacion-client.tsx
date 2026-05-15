@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, useTransition } from 'react';
-import { ArrowLeft, AlertTriangle, CheckCircle2, FileText, History, RotateCcw, Save, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, CheckCircle2, Download, FileText, History, RotateCcw, Save, ShieldCheck } from 'lucide-react';
 import { aplicarSegmentacionConfig } from '@/lib/actions/valida-segmentacion';
 import type { DistribucionWorkspace } from '@/lib/actions/valida-score';
 import type {
@@ -235,6 +235,17 @@ export default function SegmentacionClient({
             <History className="h-4 w-4" />
             Ver bitácora
           </Link>
+          {configInicial.version > 0 && (
+            <a
+              href="/api/valida/segmentacion/pdf"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+            >
+              <Download className="h-4 w-4" />
+              Exportar PDF firmable
+            </a>
+          )}
         </div>
         {mensaje && (
           <div

@@ -260,9 +260,26 @@ export async function persistirScore(input: {
   negocioId: string;
   universo: 'contraparte' | 'empleado';
   resultado: ResultadoScore;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<{ ok: true; cambioNivel: boolean } | { ok: false; error: string }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+
+  // Leer score anterior para detectar cambio de nivel
+  const { data: anterior } = await svc
+    .from('valida_score_negocio')
+    .select('nivel, factores_aplicados')
+    .eq('negocio_id', input.negocioId)
+    .maybeSingle();
+
+  const nivelAnterior: 'alto' | 'medio' | 'bajo' | null = anterior?.nivel ?? null;
+  const banderaAnterior: string | null = anterior?.factores_aplicados?.pep_listas?.bandera ?? null;
+  const banderaNueva: string | null = input.resultado.factores_aplicados.pep_listas.bandera ?? null;
+
+  const cambioNivel = nivelAnterior !== null && nivelAnterior !== input.resultado.nivel;
+  const banderaCritica = banderaNueva === 'bloqueo_ros' && banderaNueva !== banderaAnterior;
+  const escalo = nivelAnterior === 'bajo' && input.resultado.nivel !== 'bajo'
+    || nivelAnterior === 'medio' && input.resultado.nivel === 'alto';
+
   const { error } = await svc.from('valida_score_negocio').upsert(
     {
       negocio_id: input.negocioId,
@@ -278,5 +295,87 @@ export async function persistirScore(input: {
     { onConflict: 'negocio_id' },
   );
   if (error) return { ok: false, error: error.message };
-  return { ok: true };
+
+  // Crear alertas si cambio nivel o aparece bandera critica
+  if (cambioNivel || banderaCritica) {
+    await crearAlertasSegmentacion(svc, {
+      workspaceId: input.workspaceId,
+      negocioId: input.negocioId,
+      nivelAnterior,
+      nivelNuevo: input.resultado.nivel,
+      escalo,
+      banderaCritica,
+      banderaNueva,
+    });
+  }
+
+  return { ok: true, cambioNivel };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function crearAlertasSegmentacion(svc: any, input: {
+  workspaceId: string;
+  negocioId: string;
+  nivelAnterior: 'alto' | 'medio' | 'bajo' | null;
+  nivelNuevo: 'alto' | 'medio' | 'bajo';
+  escalo: boolean;
+  banderaCritica: boolean;
+  banderaNueva: string | null;
+}) {
+  // Resolver datos del negocio
+  const { data: negocio } = await svc
+    .from('negocios')
+    .select('codigo, nombre, responsable_id')
+    .eq('id', input.negocioId)
+    .maybeSingle();
+
+  if (!negocio) return;
+
+  // Destinatarios: responsable del negocio + todos los owner del workspace
+  const destinatarios = new Set<string>();
+  if (negocio.responsable_id) destinatarios.add(negocio.responsable_id);
+
+  // Resolver staff con role owner del workspace
+  const { data: owners } = await svc
+    .from('profiles')
+    .select('id')
+    .eq('workspace_id', input.workspaceId)
+    .in('role', ['owner', 'admin', 'supervisor']);
+
+  for (const o of (owners ?? []) as Array<{ id: string }>) {
+    destinatarios.add(o.id);
+  }
+
+  if (destinatarios.size === 0) return;
+
+  const nivelLabel = { alto: 'Alto', medio: 'Medio', bajo: 'Bajo' };
+
+  const tipo = input.banderaCritica
+    ? 'sarlaft_bloqueo_ros'
+    : 'sarlaft_nivel_cambio';
+
+  const contenido = input.banderaCritica
+    ? `Bloqueo SARLAFT: ${negocio.codigo} ${negocio.nombre} tiene coincidencia exacta en lista vinculante. Reporte ROS a UIAF requerido.`
+    : input.escalo
+      ? `Nivel de riesgo subio: ${negocio.codigo} ${negocio.nombre} paso de ${input.nivelAnterior ? nivelLabel[input.nivelAnterior] : 'sin clasificar'} a ${nivelLabel[input.nivelNuevo]}.`
+      : `Nivel de riesgo cambio: ${negocio.codigo} ${negocio.nombre} paso de ${input.nivelAnterior ? nivelLabel[input.nivelAnterior] : 'sin clasificar'} a ${nivelLabel[input.nivelNuevo]}.`;
+
+  const filas = Array.from(destinatarios).map(uid => ({
+    workspace_id: input.workspaceId,
+    destinatario_id: uid,
+    tipo,
+    estado: 'pendiente',
+    contenido,
+    entidad_tipo: 'negocio',
+    entidad_id: input.negocioId,
+    deep_link: `/negocios/${input.negocioId}`,
+    metadata: {
+      nivel_anterior: input.nivelAnterior,
+      nivel_nuevo: input.nivelNuevo,
+      escalo: input.escalo,
+      bandera: input.banderaNueva,
+    },
+  }));
+
+  await svc.from('notificaciones').insert(filas);
 }
