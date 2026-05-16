@@ -5,6 +5,7 @@ import AppShell from './app-shell'
 import FiscalNudge from './fiscal-nudge'
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
+import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 
 export default async function AppLayout({
   children,
@@ -86,6 +87,8 @@ export default async function AppLayout({
 
   const fiscal = fiscalResult.data
 
+  const platformAdminState = await getPlatformAdminState()
+
   return (
     <>
       <AppShell
@@ -94,6 +97,7 @@ export default async function AppLayout({
         role={profile.role}
         displayRole={profile.display_role ?? null}
         isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}
+        platformAdminState={platformAdminState}
         branding={{
           colorPrimario: workspace.color_primario ?? undefined,
           colorSecundario: workspace.color_secundario ?? undefined,

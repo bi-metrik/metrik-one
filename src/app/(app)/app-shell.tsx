@@ -29,6 +29,8 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import FAB from './fab'
+import { PlatformAdminBar } from '@/components/platform-admin-bar'
+import type { PlatformAdminState } from '@/lib/actions/platform-admin'
 
 interface BrandingProps {
   colorPrimario?: string
@@ -56,6 +58,7 @@ interface AppShellProps {
   branding?: BrandingProps
   modules?: WorkspaceModules
   notificationBell?: React.ReactNode
+  platformAdminState?: PlatformAdminState | null
 }
 
 // ── Navigation items by module group ──
@@ -195,6 +198,7 @@ export default function AppShell({
   branding,
   modules,
   notificationBell,
+  platformAdminState,
 }: AppShellProps) {
   const pathname = usePathname()
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
@@ -261,7 +265,9 @@ export default function AppShell({
   const logoFont = 'var(--font-montserrat), Montserrat, sans-serif'
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-background" style={brandingStyle}>
+    <div className="flex h-dvh flex-col bg-background" style={brandingStyle}>
+      <PlatformAdminBar state={platformAdminState ?? null} />
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Desktop Sidebar ── */}
       <aside
         className={`hidden md:flex flex-col shrink-0 transition-all duration-200 ease-in-out ${
@@ -687,6 +693,7 @@ export default function AppShell({
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA) */}
       {mod.business && <FAB role={role} />}
+      </div>
     </div>
   )
 }
