@@ -8,18 +8,25 @@ import {
   type PlatformAdminState,
 } from '@/lib/actions/platform-admin'
 
-// Subdomain helper — redirige al subdomain del target workspace si estamos en prod.
-// En dev (localhost) no aplica subdomain routing.
-function redirectAfterSwitch(targetSlug: string) {
+// Redirige al subdomain target via magic link cuando se proporciona (caso normal
+// — siembra sesion en subdomain destino) o directo (fallback local/dev).
+function redirectAfterSwitch(targetSlug: string, actionLink: string | null | undefined) {
   if (typeof window === 'undefined') return
+  if (actionLink) {
+    window.location.href = actionLink
+    return
+  }
+  // Fallback (dev local sin subdomain routing real, o si generateLink falla)
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co'
-  if (window.location.hostname === 'localhost' || window.location.hostname.endsWith('.localhost')) {
+  if (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname.endsWith('.localhost')
+  ) {
     window.location.reload()
     return
   }
   const protocol = window.location.protocol
-  const path = window.location.pathname
-  window.location.href = `${protocol}//${targetSlug}.${baseDomain}${path}`
+  window.location.href = `${protocol}//${targetSlug}.${baseDomain}/`
 }
 
 export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }) {
@@ -43,7 +50,8 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
         alert(`Error: ${res.error}`)
         return
       }
-      redirectAfterSwitch(targetSlug)
+      const actionLink = 'actionLink' in res ? res.actionLink : null
+      redirectAfterSwitch(targetSlug, actionLink)
     })
   }
 
@@ -55,7 +63,8 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
         return
       }
       if ('targetSlug' in res && res.targetSlug) {
-        redirectAfterSwitch(res.targetSlug)
+        const actionLink = 'actionLink' in res ? res.actionLink : null
+        redirectAfterSwitch(res.targetSlug, actionLink)
       }
     })
   }

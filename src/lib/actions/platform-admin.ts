@@ -29,12 +29,17 @@ type ProfileExt = {
   platform_admin: boolean
 }
 
-async function getCurrentProfile(): Promise<ProfileExt | null> {
+type CurrentUserCtx = {
+  profile: ProfileExt
+  email: string
+}
+
+async function getCurrentUserCtx(): Promise<CurrentUserCtx | null> {
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) return null
+  if (!user || !user.email) return null
 
   const { data } = await supabase
     .from('profiles')
@@ -43,7 +48,35 @@ async function getCurrentProfile(): Promise<ProfileExt | null> {
     .eq('id', user.id)
     .single()
 
-  return (data as unknown as ProfileExt | null) ?? null
+  const profile = (data as unknown as ProfileExt | null) ?? null
+  if (!profile) return null
+  return { profile, email: user.email }
+}
+
+// Cookies en ONE son host-only entre subdomains (auth-js rechaza cross-subdomain).
+// Para saltar a otro subdomain del tenant necesitamos sembrar sesion alli via magic link.
+async function generateCrossSubdomainSessionLink(
+  email: string,
+  targetSlug: string,
+  pathAfter: string = '/',
+): Promise<string | null> {
+  const svc = createServiceClient()
+  const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co'
+  const targetOrigin =
+    process.env.NODE_ENV === 'development'
+      ? `http://${targetSlug}.localhost:3000`
+      : `https://${targetSlug}.${baseDomain}`
+
+  const { data, error } = await svc.auth.admin.generateLink({
+    type: 'magiclink',
+    email,
+    options: { redirectTo: `${targetOrigin}/auth/callback?redirectTo=${encodeURIComponent(pathAfter)}` },
+  })
+  if (error) {
+    console.error('[platform-admin] generateLink error:', error.message)
+    return null
+  }
+  return data?.properties?.action_link ?? null
 }
 
 // ============================================================
@@ -51,8 +84,9 @@ async function getCurrentProfile(): Promise<ProfileExt | null> {
 // ============================================================
 
 export async function getPlatformAdminState(): Promise<PlatformAdminState | null> {
-  const profile = await getCurrentProfile()
-  if (!profile?.platform_admin) return null
+  const ctx = await getCurrentUserCtx()
+  if (!ctx?.profile.platform_admin) return null
+  const profile = ctx.profile
 
   const svc = createServiceClient()
 
@@ -92,8 +126,9 @@ export async function getPlatformAdminState(): Promise<PlatformAdminState | null
 // ============================================================
 
 export async function switchWorkspace(targetWorkspaceId: string) {
-  const profile = await getCurrentProfile()
-  if (!profile?.platform_admin) return { error: 'No autorizado' }
+  const ctx = await getCurrentUserCtx()
+  if (!ctx?.profile.platform_admin) return { error: 'No autorizado' }
+  const profile = ctx.profile
   if (profile.workspace_id === targetWorkspaceId) {
     return { success: true } // no-op
   }
@@ -135,10 +170,15 @@ export async function switchWorkspace(targetWorkspaceId: string) {
     contenido: 'Platform admin de MeTRIK entró en este workspace para soporte/debugging',
   })
 
+  const targetSlug = (target as { slug: string }).slug
+  // Genera magic link al subdomain destino para sembrar sesion alli (cookies host-only)
+  const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/')
+
   revalidatePath('/', 'layout')
   return {
     success: true,
-    targetSlug: (target as { slug: string }).slug,
+    targetSlug,
+    actionLink,
   }
 }
 
@@ -147,8 +187,9 @@ export async function switchWorkspace(targetWorkspaceId: string) {
 // ============================================================
 
 export async function returnHome() {
-  const profile = await getCurrentProfile()
-  if (!profile?.platform_admin) return { error: 'No autorizado' }
+  const ctx = await getCurrentUserCtx()
+  if (!ctx?.profile.platform_admin) return { error: 'No autorizado' }
+  const profile = ctx.profile
   if (!profile.home_workspace_id) return { error: 'No hay home workspace registrado' }
   if (profile.home_workspace_id === profile.workspace_id) {
     return { success: true } // ya estamos en home
@@ -182,9 +223,13 @@ export async function returnHome() {
 
   if (updateError) return { error: updateError.message }
 
+  const targetSlug = (home as { slug: string }).slug
+  const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/')
+
   revalidatePath('/', 'layout')
   return {
     success: true,
-    targetSlug: (home as { slug: string }).slug,
+    targetSlug,
+    actionLink,
   }
 }
