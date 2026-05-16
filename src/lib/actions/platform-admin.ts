@@ -171,8 +171,9 @@ export async function switchWorkspace(targetWorkspaceId: string) {
   })
 
   const targetSlug = (target as { slug: string }).slug
-  // Genera magic link al subdomain destino para sembrar sesion alli (cookies host-only)
-  const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/')
+  // Genera magic link al subdomain destino para sembrar sesion alli (cookies host-only).
+  // Landing por defecto = /numeros (Mis Numeros) — el dashboard principal del ws.
+  const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/numeros')
 
   revalidatePath('/', 'layout')
   return {
@@ -224,7 +225,7 @@ export async function returnHome() {
   if (updateError) return { error: updateError.message }
 
   const targetSlug = (home as { slug: string }).slug
-  const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/')
+  const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/numeros')
 
   revalidatePath('/', 'layout')
   return {
