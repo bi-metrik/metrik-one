@@ -32,6 +32,17 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
   // El server action ya pobla routing/gates en cada etapa (forma WorkflowEtapa)
   const workflowEtapas = etapas as WorkflowEtapa[]
 
+  // Barra resumen del flujo (solo cliente / simplified)
+  const totalAbiertos = workflowEtapas.reduce((acc, e) => acc + (e.abiertos || 0), 0)
+  const totalVencidos = workflowEtapas.reduce((acc, e) => acc + (e.vencidos || 0), 0)
+  const slasValidos = workflowEtapas
+    .map(e => e.sla_dias)
+    .filter((v): v is number => v !== null && v > 0)
+  const slaPromedio = slasValidos.length > 0
+    ? Math.round(slasValidos.reduce((a, b) => a + b, 0) / slasValidos.length)
+    : null
+  const lineaActual = lineas.find(l => l.id === selectedLineaId)
+
   return (
     <div>
       <header className="mb-5">
@@ -59,6 +70,39 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
           </div>
         </div>
       </header>
+
+      {/* Barra resumen del flujo */}
+      {workflowEtapas.length > 0 && (
+        <div
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg px-3 py-2 text-[13px]"
+          style={{ backgroundColor: '#F5F4F2', color: '#1A1A1A' }}
+        >
+          <span className="font-semibold">
+            {lineaActual?.nombre ?? 'Flujo'}
+          </span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+            <span>
+              <span className="font-semibold">{totalAbiertos}</span>{' '}
+              <span className="text-[#6B7280]">abierto{totalAbiertos === 1 ? '' : 's'}</span>
+            </span>
+            <span>
+              <span
+                className="font-semibold"
+                style={{ color: totalVencidos > 0 ? '#B91C1C' : '#1A1A1A' }}
+              >
+                {totalVencidos}
+              </span>{' '}
+              <span className="text-[#6B7280]">vencido{totalVencidos === 1 ? '' : 's'}</span>
+            </span>
+            {slaPromedio !== null && (
+              <span className="text-[#6B7280]">
+                SLA promedio{' '}
+                <span className="font-semibold text-[#1A1A1A]">{slaPromedio}d</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <WorkflowDiagram
         etapas={workflowEtapas}
