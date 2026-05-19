@@ -25,7 +25,6 @@ import {
   ListChecks,
   Scale,
   Sliders,
-  Waypoints,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -117,9 +116,11 @@ const SHARED_NAV_ITEMS = [
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
 ]
 
-// Flujo (visible si workspace tiene lineas activas — controlado por hasLineas prop)
-const FLUJO_NAV_ITEMS = [
-  { href: '/flujo', label: 'Flujo', icon: Waypoints, roles: ['owner', 'admin', 'supervisor'] },
+// Workflows (visible si workspace tiene lineas activas — controlado por hasLineas prop)
+// Posicion: zona inferior del sidebar, en seccion propia "Workflows" antes de Admin.
+// Coherente con /admin/workflows del workspace metrik (vista interna del mismo modulo).
+const WORKFLOWS_NAV_ITEMS = [
+  { href: '/flujo', label: 'Workflows', icon: Workflow, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
 // Admin section — solo owner.
@@ -233,9 +234,8 @@ export default function AppShell({
     ? filterCompliance(COMPLIANCE_NAV_ITEMS, role, mod)
     : []
   const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
-  const flujoItems = hasLineas ? filterByRole(FLUJO_NAV_ITEMS, role) : []
-  // Merge Flujo en sharedItems para que aparezca en la misma seccion
-  const sharedWithFlujo = flujoItems.length > 0 ? [...flujoItems, ...sharedItems] : sharedItems
+  // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
+  const workflowsItems = hasLineas ? filterByRole(WORKFLOWS_NAV_ITEMS, role) : []
   const validaItems = mod.valida_consulta ? filterByRole(VALIDA_NAV_ITEMS, role) : []
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 
@@ -243,7 +243,7 @@ export default function AppShell({
   const homeHref = mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio')
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedWithFlujo, ...validaItems]
+  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems, ...workflowsItems]
   const primaryHrefs = (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
@@ -462,10 +462,46 @@ export default function AppShell({
             </div>
           )}
 
-          {/* Compartidos — siempre visibles (incluye Flujo si workspace tiene lineas) */}
-          {sharedWithFlujo.length > 0 && (
+          {/* Compartidos — siempre visibles */}
+          {sharedItems.length > 0 && (
             <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
-              {sharedWithFlujo.map((item) => {
+              {sharedItems.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={!sidebarExpanded ? item.label : undefined}
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${
+                      isActive
+                        ? 'shadow-sm'
+                        : 'hover:opacity-90'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>{item.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Workflows — al final del nav, antes de Admin */}
+          {workflowsItems.length > 0 && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
+              {sidebarExpanded && (
+                <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
+                  Workflows
+                </p>
+              )}
+              {workflowsItems.map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (
