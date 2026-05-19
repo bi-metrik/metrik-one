@@ -37,7 +37,7 @@ export interface FlujoEtapa {
   nombre: string
   stage: 'venta' | 'ejecucion' | 'cobro'
   orden: number
-  sla_dias: number | null
+  sla_horas: number | null
   bloques: FlujoBloque[]
   abiertos: number
   vencidos: number
@@ -50,6 +50,17 @@ export interface FlujoData {
   selectedLineaId: string | null
   etapas: FlujoEtapa[]
   canConfigSla: boolean
+  canViewSlaLog: boolean
+}
+
+export interface SlaLogEntry {
+  id: string
+  changed_at: string
+  user_name: string | null
+  etapa_nombre: string
+  etapa_orden: number
+  old_sla_horas: number | null
+  new_sla_horas: number | null
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -68,7 +79,7 @@ interface EtapaRow {
   orden: number
   config_extra:
     | {
-        sla_dias?: number | null
+        sla_horas?: number | null
         routing?: FlujoRouting | null
         gates?: string[]
       }
@@ -107,7 +118,6 @@ const BLOQUE_LABELS: Record<string, string> = {
 }
 
 function labelFor(tipo: string, nombreConfig: string | undefined): string {
-  // Prefer custom config name if it has been set, else fall back to tipo label
   if (nombreConfig && nombreConfig.trim().length > 0) return nombreConfig
   return BLOQUE_LABELS[tipo] ?? tipo
 }
@@ -115,7 +125,13 @@ function labelFor(tipo: string, nombreConfig: string | undefined): string {
 // ── Server actions ─────────────────────────────────────────────────────────
 
 export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoData> {
-  const empty: FlujoData = { lineas: [], selectedLineaId: null, etapas: [], canConfigSla: false }
+  const empty: FlujoData = {
+    lineas: [],
+    selectedLineaId: null,
+    etapas: [],
+    canConfigSla: false,
+    canViewSlaLog: false,
+  }
   const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId || !role) return empty
 
@@ -132,7 +148,11 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
 
   const lineas = (lineasRaw ?? []) as LineaRow[]
   if (lineas.length === 0) {
-    return { ...empty, canConfigSla: Boolean(perms.canConfigSlaEtapas) }
+    return {
+      ...empty,
+      canConfigSla: Boolean(perms.canConfigSlaEtapas),
+      canViewSlaLog: Boolean(perms.canViewSlaLog),
+    }
   }
 
   const selected = lineas.find(l => l.id === lineaIdParam) ?? lineas[0]
@@ -148,12 +168,18 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
 
   const etapas = (etapasRaw ?? []) as EtapaRow[]
   if (etapas.length === 0) {
-    return { lineas, selectedLineaId, etapas: [], canConfigSla: Boolean(perms.canConfigSlaEtapas) }
+    return {
+      lineas,
+      selectedLineaId,
+      etapas: [],
+      canConfigSla: Boolean(perms.canConfigSlaEtapas),
+      canViewSlaLog: Boolean(perms.canViewSlaLog),
+    }
   }
 
   const etapaIds = etapas.map(e => e.id)
 
-  // 3) Bloques activos (config_extra.cliente_view !== false)
+  // 3) Bloques activos
   const { data: bloquesRaw } = await supabase
     .from('bloque_configs')
     .select('id, etapa_id, orden, es_gate, config_extra, bloque_definitions(tipo, nombre)')
@@ -163,7 +189,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
 
   const bloques = (bloquesRaw ?? []) as unknown as BloqueConfigRow[]
 
-  // 4) Vencimientos — vista creada en migration 20260518000001, aun no en types generados
+  // 4) Vencimientos
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: vencRaw } = await (supabase as any)
     .from('v_negocios_etapa_vencimiento')
@@ -179,7 +205,6 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
 
   const bloquesByEtapa = new Map<string, FlujoBloque[]>()
   for (const b of bloques) {
-    // Filtro: si cliente_view === false explicit, ocultar en vista cliente
     const cv = (b.config_extra as { cliente_view?: boolean } | null)?.cliente_view
     if (cv === false) continue
     const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
@@ -202,7 +227,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       nombre: e.nombre,
       stage: e.stage,
       orden: e.orden,
-      sla_dias: e.config_extra?.sla_dias ?? null,
+      sla_horas: e.config_extra?.sla_horas ?? null,
       bloques: (bloquesByEtapa.get(e.id) ?? []).sort((a, b) => a.orden - b.orden),
       abiertos: venc.abiertos,
       vencidos: venc.vencidos,
@@ -216,29 +241,30 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
     selectedLineaId,
     etapas: result,
     canConfigSla: Boolean(perms.canConfigSlaEtapas),
+    canViewSlaLog: Boolean(perms.canViewSlaLog),
   }
 }
 
-// ── Update SLA dias (owner only) ──────────────────────────────────────────
+// ── Update SLA horas (owner only) ─────────────────────────────────────────
 
 export async function updateEtapaSla(
   etapaId: string,
-  slaDias: number | null
+  slaHoras: number | null
 ): Promise<{ ok: boolean; error?: string }> {
-  const { supabase, workspaceId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !role) return { ok: false, error: 'No autenticado' }
 
   const perms = getRolePermissions(role)
   if (!perms.canConfigSlaEtapas) return { ok: false, error: 'Sin permisos' }
 
   // Validar entrada
-  if (slaDias !== null) {
-    if (!Number.isFinite(slaDias) || slaDias < 0 || !Number.isInteger(slaDias) || slaDias > 3650) {
+  if (slaHoras !== null) {
+    if (!Number.isFinite(slaHoras) || slaHoras < 0 || !Number.isInteger(slaHoras) || slaHoras > 9999) {
       return { ok: false, error: 'SLA inválido' }
     }
   }
 
-  // Validar que la etapa pertenece al workspace (via linea_negocio.workspace_id)
+  // Validar que la etapa pertenece al workspace
   const { data: etapaRaw } = await supabase
     .from('etapas_negocio')
     .select('id, linea_id, config_extra, lineas_negocio!inner(workspace_id)')
@@ -258,11 +284,19 @@ export async function updateEtapaSla(
     return { ok: false, error: 'Etapa fuera de workspace' }
   }
 
-  const newConfig: Record<string, unknown> = { ...(etapa.config_extra ?? {}) }
-  if (slaDias === null) {
-    delete newConfig.sla_dias
+  const oldConfig = (etapa.config_extra ?? {}) as Record<string, unknown>
+  const oldSlaHoras = typeof oldConfig.sla_horas === 'number' ? (oldConfig.sla_horas as number) : null
+
+  const newConfig: Record<string, unknown> = { ...oldConfig }
+  if (slaHoras === null) {
+    delete newConfig.sla_horas
   } else {
-    newConfig.sla_dias = slaDias
+    newConfig.sla_horas = slaHoras
+  }
+
+  // No-op: no escribir log si no cambio
+  if (oldSlaHoras === slaHoras) {
+    return { ok: true }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -273,6 +307,72 @@ export async function updateEtapaSla(
 
   if (updErr) return { ok: false, error: (updErr as { message: string }).message }
 
+  // Log de auditoria
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (supabase as any).from('etapa_sla_log').insert({
+    etapa_id: etapaId,
+    workspace_id: workspaceId,
+    changed_by: userId,
+    old_sla_horas: oldSlaHoras,
+    new_sla_horas: slaHoras,
+  })
+
   revalidatePath('/flujo')
+  revalidatePath('/admin/workflows')
   return { ok: true }
+}
+
+// ── Historial de cambios SLA ──────────────────────────────────────────────
+
+export async function getSlaChangeLog(
+  lineaId?: string | null,
+  limit: number = 50
+): Promise<SlaLogEntry[]> {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !role) return []
+
+  const perms = getRolePermissions(role)
+  if (!perms.canViewSlaLog) return []
+
+  const safeLimit = Math.min(Math.max(limit, 1), 200)
+
+  // Query: log + etapa + profile
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q = (supabase as any)
+    .from('etapa_sla_log')
+    .select(
+      'id, changed_at, old_sla_horas, new_sla_horas, changed_by, ' +
+        'etapas_negocio!inner(id, nombre, orden, linea_id), ' +
+        'profiles(full_name)'
+    )
+    .eq('workspace_id', workspaceId)
+    .order('changed_at', { ascending: false })
+    .limit(safeLimit)
+
+  if (lineaId) {
+    q = q.eq('etapas_negocio.linea_id', lineaId)
+  }
+
+  const { data: rows } = await q
+
+  type Row = {
+    id: string
+    changed_at: string
+    old_sla_horas: number | null
+    new_sla_horas: number | null
+    changed_by: string | null
+    etapas_negocio: { id: string; nombre: string; orden: number; linea_id: string } | null
+    profiles: { full_name: string | null } | null
+  }
+
+  const entries = (rows ?? []) as Row[]
+  return entries.map(r => ({
+    id: r.id,
+    changed_at: r.changed_at,
+    user_name: r.profiles?.full_name ?? null,
+    etapa_nombre: r.etapas_negocio?.nombre ?? '—',
+    etapa_orden: r.etapas_negocio?.orden ?? 0,
+    old_sla_horas: r.old_sla_horas,
+    new_sla_horas: r.new_sla_horas,
+  }))
 }
