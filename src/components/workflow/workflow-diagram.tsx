@@ -44,7 +44,7 @@ interface Props {
   mode: 'simplified' | 'detailed'
   // simplified mode
   canConfigSla?: boolean
-  onUpdateSla?: (etapaId: string, slaDias: number | null) => Promise<{ ok: boolean; error?: string }>
+  onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
 }
 
 // ── Stage indicator color (borde superior) ─────────────────────────────────
@@ -481,10 +481,10 @@ function EtapaCard({
   etapa: WorkflowEtapa
   mode: 'simplified' | 'detailed'
   canConfigSla?: boolean
-  onUpdateSla?: (etapaId: string, slaDias: number | null) => Promise<{ ok: boolean; error?: string }>
+  onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
   isBranch?: boolean
 }) {
-  const tieneAlerta = etapa.sla_dias !== null && etapa.sla_dias > 0 && etapa.vencidos > 0
+  const tieneAlerta = etapa.sla_horas !== null && etapa.sla_horas > 0 && etapa.vencidos > 0
   const routing = etapa.routing ?? null
   const gates = etapa.gates ?? []
   const isDesktop = useIsDesktop()
@@ -500,8 +500,8 @@ function EtapaCard({
   // Bloques summary line (simplified, colapsado)
   const totalBloques = etapa.bloques.length
   const totalGates = etapa.bloques.filter(b => b.es_gate).length
-  const slaText = etapa.sla_dias !== null && etapa.sla_dias > 0
-    ? `SLA ${etapa.sla_dias} día${etapa.sla_dias === 1 ? '' : 's'}`
+  const slaText = etapa.sla_horas !== null && etapa.sla_horas > 0
+    ? formatSlaShort(etapa.sla_horas)
     : null
 
   const summaryParts: string[] = []
@@ -581,7 +581,7 @@ function EtapaCard({
             <span
               className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
               style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}
-              title={`${etapa.vencidos} vencido(s) (SLA ${etapa.sla_dias} días)`}
+              title={`${etapa.vencidos} vencido(s) (SLA ${etapa.sla_horas} horas hábiles)`}
             >
               <AlertTriangle className="h-3 w-3" />
               {etapa.vencidos}
@@ -593,7 +593,7 @@ function EtapaCard({
       {/* SLA config */}
       <SlaConfig
         etapaId={etapa.id}
-        slaDias={etapa.sla_dias}
+        slaHoras={etapa.sla_horas}
         canEdit={Boolean(canConfigSla)}
         onUpdateSla={onUpdateSla}
       />
@@ -757,26 +757,44 @@ function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
   )
 }
 
+// ── SLA helpers (horas hábiles Colombia) ──────────────────────────────────
+
+export function formatSlaShort(slaHoras: number): string {
+  if (slaHoras >= 24 && slaHoras % 24 === 0) {
+    const dias = slaHoras / 24
+    return `SLA ${slaHoras}h (${dias} día${dias === 1 ? '' : 's'} hábil${dias === 1 ? '' : 'es'})`
+  }
+  return `SLA ${slaHoras} hora${slaHoras === 1 ? '' : 's'} hábil${slaHoras === 1 ? '' : 'es'}`
+}
+
+export function formatSlaLong(slaHoras: number): string {
+  if (slaHoras >= 24 && slaHoras % 24 === 0) {
+    const dias = slaHoras / 24
+    return `${slaHoras}h (${dias} día${dias === 1 ? '' : 's'} hábil${dias === 1 ? '' : 'es'})`
+  }
+  return `${slaHoras} hora${slaHoras === 1 ? '' : 's'} hábil${slaHoras === 1 ? '' : 'es'}`
+}
+
 // ── SLA config inline (compartido ambos modos) ────────────────────────────
 
 function SlaConfig({
   etapaId,
-  slaDias,
+  slaHoras,
   canEdit,
   onUpdateSla,
 }: {
   etapaId: string
-  slaDias: number | null
+  slaHoras: number | null
   canEdit: boolean
-  onUpdateSla?: (etapaId: string, slaDias: number | null) => Promise<{ ok: boolean; error?: string }>
+  onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
 }) {
   const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState(slaDias?.toString() ?? '')
+  const [value, setValue] = useState(slaHoras?.toString() ?? '')
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
   const inputId = useId()
 
-  if (!canEdit && slaDias === null) {
+  if (!canEdit && slaHoras === null) {
     return null
   }
 
@@ -788,8 +806,8 @@ function SlaConfig({
       >
         <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280]">
           <Clock className="h-3 w-3" />
-          {slaDias !== null ? (
-            <span>SLA: <span className="font-semibold text-[#1A1A1A]">{slaDias} día{slaDias === 1 ? '' : 's'}</span></span>
+          {slaHoras !== null ? (
+            <span>SLA: <span className="font-semibold text-[#1A1A1A]">{formatSlaLong(slaHoras)}</span></span>
           ) : (
             <span>Sin alerta</span>
           )}
@@ -811,14 +829,14 @@ function SlaConfig({
     if (!onUpdateSla) return
     const trimmed = value.trim()
     const parsed = trimmed === '' ? null : Number(trimmed)
-    if (parsed !== null && (!Number.isInteger(parsed) || parsed < 0 || parsed > 3650)) {
-      toast.error('Ingresa un número entero entre 0 y 3650 (o vacía para quitar la alerta)')
+    if (parsed !== null && (!Number.isInteger(parsed) || parsed < 0 || parsed > 9999)) {
+      toast.error('Ingresa un número entero entre 0 y 9999 (o vacía para quitar la alerta)')
       return
     }
     startTransition(async () => {
       const res = await onUpdateSla(etapaId, parsed)
       if (res.ok) {
-        toast.success(parsed === null ? 'Alerta desactivada' : `SLA actualizado a ${parsed} días`)
+        toast.success(parsed === null ? 'Alerta desactivada' : `SLA actualizado a ${formatSlaLong(parsed)}`)
         setEditing(false)
         router.refresh()
       } else {
@@ -830,7 +848,7 @@ function SlaConfig({
   return (
     <div className="border-b bg-[#F5F4F2] px-3 py-2" style={{ borderColor: '#E5E7EB' }}>
       <label htmlFor={inputId} className="block text-[10px] font-medium text-[#6B7280]">
-        Días esperados en esta etapa
+        Horas hábiles esperadas en esta etapa (L-V Colombia)
       </label>
       <div className="mt-1 flex items-center gap-1.5">
         <input
@@ -838,7 +856,7 @@ function SlaConfig({
           type="number"
           inputMode="numeric"
           min={0}
-          max={3650}
+          max={9999}
           step={1}
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -855,7 +873,7 @@ function SlaConfig({
           <Check className="h-3 w-3" />
         </button>
         <button
-          onClick={() => { setEditing(false); setValue(slaDias?.toString() ?? '') }}
+          onClick={() => { setEditing(false); setValue(slaHoras?.toString() ?? '') }}
           disabled={isPending}
           className="rounded-md bg-white p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] disabled:opacity-50"
           style={{ border: '1px solid #E5E7EB' }}
@@ -864,7 +882,7 @@ function SlaConfig({
           <X className="h-3 w-3" />
         </button>
       </div>
-      <p className="mt-1 text-[10px] text-[#6B7280]">Vacía el campo para desactivar la alerta.</p>
+      <p className="mt-1 text-[10px] text-[#6B7280]">Excluye sábados, domingos y festivos. Vacía el campo para desactivar la alerta.</p>
     </div>
   )
 }

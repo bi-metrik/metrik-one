@@ -18,13 +18,13 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
     const ce = (e.config_extra ?? {}) as Record<string, unknown>
     const routing = (ce.routing ?? null) as WorkflowRouting | null
     const gates = Array.isArray(ce.gates) ? (ce.gates as string[]) : []
-    const slaDias = typeof ce.sla_dias === 'number' ? ce.sla_dias : null
+    const slaHoras = typeof ce.sla_horas === 'number' ? ce.sla_horas : null
     return {
       id: e.id,
       nombre: e.nombre,
       stage: e.stage,
       orden: e.orden,
-      sla_dias: slaDias,
+      sla_horas: slaHoras,
       bloques: e.bloques.map(b => ({
         config_id: b.config_id,
         tipo: b.tipo,

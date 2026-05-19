@@ -42,6 +42,7 @@ export const ROLE_PERMISSIONS = {
     // ── Flujo (vista de proceso del workspace) ──────────────
     canViewFlujo: true,
     canConfigSlaEtapas: true,         // Solo owner configura SLA
+    canViewSlaLog: true,              // owner/admin/supervisor ven historial de SLA
   },
   admin: {
     label: 'Admin',
@@ -74,6 +75,7 @@ export const ROLE_PERMISSIONS = {
     canConfigReglasValidacion: true,
     canViewFlujo: true,
     canConfigSlaEtapas: false,        // Solo owner configura SLA
+    canViewSlaLog: true,
   },
   supervisor: {
     label: 'Supervisor',
@@ -106,6 +108,7 @@ export const ROLE_PERMISSIONS = {
     canConfigReglasValidacion: false, // Reglas vinculantes solo owner/admin
     canViewFlujo: true,
     canConfigSlaEtapas: false,
+    canViewSlaLog: true,
   },
   operator: {
     label: 'Ejecutor',
@@ -138,6 +141,7 @@ export const ROLE_PERMISSIONS = {
     canConfigReglasValidacion: false,
     canViewFlujo: false,              // Operador ve negocios directamente, no necesita vista de proceso
     canConfigSlaEtapas: false,
+    canViewSlaLog: false,
   },
   contador: {
     label: 'Contador',
@@ -170,6 +174,7 @@ export const ROLE_PERMISSIONS = {
     canConfigReglasValidacion: false,
     canViewFlujo: false,
     canConfigSlaEtapas: false,
+    canViewSlaLog: false,
   },
   read_only: {
     label: 'Lectura',
@@ -202,6 +207,7 @@ export const ROLE_PERMISSIONS = {
     canConfigReglasValidacion: false,
     canViewFlujo: false,
     canConfigSlaEtapas: false,
+    canViewSlaLog: false,
   },
 } as const
 

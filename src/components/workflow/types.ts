@@ -30,7 +30,7 @@ export interface WorkflowEtapa {
   nombre: string
   stage: WorkflowStage
   orden: number
-  sla_dias: number | null
+  sla_horas: number | null
   bloques: WorkflowBloque[]
   abiertos: number
   vencidos: number

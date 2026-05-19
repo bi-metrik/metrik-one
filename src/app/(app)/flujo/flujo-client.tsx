@@ -6,10 +6,11 @@ import type { FlujoData } from './actions'
 import { updateEtapaSla } from './actions'
 import { WorkflowDiagram } from '@/components/workflow/workflow-diagram'
 import type { WorkflowEtapa } from '@/components/workflow/types'
+import { SlaChangeLogSection } from './sla-change-log-section'
 
 export default function FlujoClient({ data }: { data: FlujoData }) {
   const router = useRouter()
-  const { lineas, selectedLineaId, etapas, canConfigSla } = data
+  const { lineas, selectedLineaId, etapas, canConfigSla, canViewSlaLog } = data
 
   const handleLineaChange = (id: string) => {
     const params = new URLSearchParams()
@@ -36,7 +37,7 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
   const totalAbiertos = workflowEtapas.reduce((acc, e) => acc + (e.abiertos || 0), 0)
   const totalVencidos = workflowEtapas.reduce((acc, e) => acc + (e.vencidos || 0), 0)
   const slasValidos = workflowEtapas
-    .map(e => e.sla_dias)
+    .map(e => e.sla_horas)
     .filter((v): v is number => v !== null && v > 0)
   const slaPromedio = slasValidos.length > 0
     ? Math.round(slasValidos.reduce((a, b) => a + b, 0) / slasValidos.length)
@@ -97,7 +98,7 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
             {slaPromedio !== null && (
               <span className="text-[#6B7280]">
                 SLA promedio{' '}
-                <span className="font-semibold text-[#1A1A1A]">{slaPromedio}d</span>
+                <span className="font-semibold text-[#1A1A1A]">{slaPromedio}h</span>
               </span>
             )}
           </div>
@@ -110,6 +111,10 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
         canConfigSla={canConfigSla}
         onUpdateSla={updateEtapaSla}
       />
+
+      {canViewSlaLog && selectedLineaId && (
+        <SlaChangeLogSection key={selectedLineaId} lineaId={selectedLineaId} />
+      )}
     </div>
   )
 }
