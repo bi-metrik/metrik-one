@@ -21,6 +21,17 @@ export interface FlujoBloque {
   es_gate: boolean
 }
 
+export interface FlujoRoutingConditional {
+  condition: { field: string; value: string }
+  etapa_orden: number
+}
+
+export interface FlujoRouting {
+  default_etapa_orden: number
+  conditional: FlujoRoutingConditional[]
+  source_etapa_orden?: number
+}
+
 export interface FlujoEtapa {
   id: string
   nombre: string
@@ -30,6 +41,8 @@ export interface FlujoEtapa {
   bloques: FlujoBloque[]
   abiertos: number
   vencidos: number
+  routing: FlujoRouting | null
+  gates: string[]
 }
 
 export interface FlujoData {
@@ -53,7 +66,13 @@ interface EtapaRow {
   nombre: string
   stage: 'venta' | 'ejecucion' | 'cobro'
   orden: number
-  config_extra: { sla_dias?: number | null } | null
+  config_extra:
+    | {
+        sla_dias?: number | null
+        routing?: FlujoRouting | null
+        gates?: string[]
+      }
+    | null
 }
 
 interface BloqueConfigRow {
@@ -187,6 +206,8 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       bloques: (bloquesByEtapa.get(e.id) ?? []).sort((a, b) => a.orden - b.orden),
       abiertos: venc.abiertos,
       vencidos: venc.vencidos,
+      routing: e.config_extra?.routing ?? null,
+      gates: Array.isArray(e.config_extra?.gates) ? (e.config_extra.gates as string[]) : [],
     }
   })
 
