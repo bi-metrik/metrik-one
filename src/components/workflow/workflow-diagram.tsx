@@ -7,17 +7,20 @@
  * decisiones condicionales (rombos) cuando una etapa tiene routing.
  *
  * Modos:
- *  - simplified: vista cliente (/flujo). Lista de bloques por nombre, badges
- *    de cantidad + vencidos, config SLA inline si canConfigSla.
+ *  - simplified: vista cliente (/flujo). Resumen compacto colapsable por
+ *    defecto en mobile (3 bloques · 1 gate · SLA 5 días), expandido en desktop.
  *  - detailed:  vista admin (/admin/workflows). Bloques expandibles con
  *    config_extra completa, gates de etapa, routing JSON.
  *
- * Layout: grid de 2 columnas. Mainline a la izquierda (etapas alcanzables via
- * default), side-branches a la derecha (etapas alcanzables solo por
- * conditional). Conectores via SVG entre rows.
+ * Layout:
+ *  - Desktop (>=md): grid 2 columnas. Mainline izquierda, side-branch derecha.
+ *    Línea SVG curva conecta salida bottom de la rama con entrada top de la
+ *    siguiente mainline.
+ *  - Mobile (<md): timeline vertical único. La rama se renderiza indentada
+ *    debajo de la decisión con un margen visual y vuelve al flujo principal.
  */
 
-import { useMemo, useState, useTransition, useId } from 'react'
+import { useMemo, useState, useTransition, useId, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   AlertTriangle,
@@ -28,7 +31,9 @@ import {
   X,
   ChevronDown,
   ChevronRight,
-  GitFork,
+  HelpCircle,
+  ArrowDown,
+  ArrowRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
@@ -40,6 +45,14 @@ interface Props {
   // simplified mode
   canConfigSla?: boolean
   onUpdateSla?: (etapaId: string, slaDias: number | null) => Promise<{ ok: boolean; error?: string }>
+}
+
+// ── Stage indicator color (borde superior) ─────────────────────────────────
+
+const STAGE_INDICATOR_COLOR: Record<string, string> = {
+  venta: '#10B981',
+  ejecucion: '#F59E0B',
+  cobro: '#3B82F6',
 }
 
 // ── Helpers de layout ──────────────────────────────────────────────────────
@@ -58,7 +71,6 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
   const ordenIndex = new Map<number, number>()
   sorted.forEach((e, i) => ordenIndex.set(e.orden, i))
 
-  // Mainline = camino default desde la primera etapa
   const mainlineOrdens = new Set<number>()
   if (sorted.length === 0) return { mainlineOrdens, branchReturnsTo: new Map(), ordenIndex }
 
@@ -77,9 +89,6 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
     cur = sorted.find(e => e.orden === nextOrden)
   }
 
-  // Side-branches: para cada etapa con routing, las conditional targets que no
-  // estan en mainline son side-branches. Su return point = el default de la
-  // etapa que las enruta (que sera el siguiente mainline desde alli).
   const branchReturnsTo = new Map<number, number>()
   for (const e of sorted) {
     if (!e.routing) continue
@@ -91,6 +100,35 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
   }
 
   return { mainlineOrdens, branchReturnsTo, ordenIndex }
+}
+
+// ── Resolver label_pregunta para una decisión ──────────────────────────────
+
+/**
+ * Busca el bloque editable que produce el `field` evaluado en routing.
+ * Si encuentra `config_extra.label_pregunta`, lo usa. Si no, fallback al
+ * field raw con prefijo `¿`.
+ */
+function resolveDecisionLabel(
+  field: string,
+  etapas: WorkflowEtapa[]
+): string {
+  for (const etapa of etapas) {
+    for (const bloque of etapa.bloques) {
+      const ce = bloque.config_extra as
+        | { fields?: Array<{ slug?: string }>; label_pregunta?: string }
+        | undefined
+      if (!ce || !Array.isArray(ce.fields)) continue
+      const hasField = ce.fields.some(f => f?.slug === field)
+      if (hasField) {
+        if (typeof ce.label_pregunta === 'string' && ce.label_pregunta.trim().length > 0) {
+          return ce.label_pregunta
+        }
+        return `¿${field}?`
+      }
+    }
+  }
+  return `¿${field}?`
 }
 
 // ── Componente principal ───────────────────────────────────────────────────
@@ -107,35 +145,35 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
     )
   }
 
-  // Construir filas del diagrama. Cada row es uno de:
-  // - { type:'etapa', etapa, side: 'main' | 'branch', branchTargetOrden? }
-  // - { type:'decision', sourceEtapa, branches: [{label, targetOrden, isBranch}] }
-  // Side-branches: las renderizamos en la misma row del decision que las enruta.
   type Row =
     | { type: 'etapa'; etapa: WorkflowEtapa; side: 'main' }
-    | { type: 'decision-with-branch'; sourceEtapa: WorkflowEtapa; branchEtapa: WorkflowEtapa | null; branchLabel: string; defaultLabel: string }
-    | { type: 'decision'; sourceEtapa: WorkflowEtapa }
+    | {
+        type: 'decision-with-branch'
+        sourceEtapa: WorkflowEtapa
+        branchEtapa: WorkflowEtapa | null
+        branchLabel: string
+        defaultLabel: string
+        defaultTargetNombre: string | null
+      }
+    | { type: 'decision'; sourceEtapa: WorkflowEtapa; defaultLabel: string }
     | { type: 'terminal' }
 
   const rows: Row[] = []
-  const renderedBranches = new Set<number>()
 
   for (const e of sorted) {
-    if (!layout.mainlineOrdens.has(e.orden)) continue // side-branches se renderizan en la row del decision
+    if (!layout.mainlineOrdens.has(e.orden)) continue
 
     rows.push({ type: 'etapa', etapa: e, side: 'main' })
 
     if (e.routing) {
-      // Buscar primer conditional con target side-branch
       const branchRule = e.routing.conditional.find(r => layout.branchReturnsTo.has(r.etapa_orden))
       const branchEtapa = branchRule ? sorted.find(b => b.orden === branchRule.etapa_orden) ?? null : null
       const branchLabel = branchRule ? `${branchRule.condition.field} = ${branchRule.condition.value}` : ''
 
-      // Default target
       const defaultTarget = sorted.find(t => t.orden === e.routing!.default_etapa_orden)
       const defaultLabel = defaultTarget
-        ? `→ ${String(defaultTarget.orden).padStart(2, '0')} ${defaultTarget.nombre}`
-        : `→ Cierre`
+        ? `${String(defaultTarget.orden).padStart(2, '0')} ${defaultTarget.nombre}`
+        : 'Cierre'
 
       if (branchEtapa) {
         rows.push({
@@ -144,99 +182,120 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
           branchEtapa,
           branchLabel,
           defaultLabel,
+          defaultTargetNombre: defaultTarget?.nombre ?? null,
         })
-        renderedBranches.add(branchEtapa.orden)
       } else {
-        rows.push({ type: 'decision', sourceEtapa: e })
+        rows.push({ type: 'decision', sourceEtapa: e, defaultLabel })
       }
     }
   }
 
-  // Etapa terminal cuando la ultima mainline cierra (sea por routing default a
-  // un orden inexistente o por orden final).
   const lastMainline = sorted.filter(e => layout.mainlineOrdens.has(e.orden)).pop()
   if (lastMainline) {
     rows.push({ type: 'terminal' })
   }
 
   return (
-    <div className="space-y-0">
-      {rows.map((row, idx) => {
-        if (row.type === 'etapa') {
-          return (
-            <div key={`etapa-${row.etapa.id}`} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <EtapaCard
-                  etapa={row.etapa}
-                  mode={mode}
-                  canConfigSla={canConfigSla}
-                  onUpdateSla={onUpdateSla}
-                />
-                {/* connector down */}
-                <Connector />
-              </div>
-              <div />
-            </div>
-          )
-        }
-        if (row.type === 'decision') {
-          return (
-            <div key={`dec-${idx}`} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <DecisionPill
-                  field={row.sourceEtapa.routing?.conditional[0]?.condition.field ?? '—'}
-                  branchLabel={null}
-                  defaultLabel={
-                    sorted.find(t => t.orden === row.sourceEtapa.routing!.default_etapa_orden)
-                      ? `→ ${String(row.sourceEtapa.routing!.default_etapa_orden).padStart(2, '0')}`
-                      : '→ Cierre'
-                  }
-                />
-                <Connector />
-              </div>
-              <div />
-            </div>
-          )
-        }
-        if (row.type === 'decision-with-branch') {
-          return (
-            <div key={`decbr-${idx}`} className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
-              <div>
-                <DecisionPill
-                  field={row.sourceEtapa.routing?.conditional[0]?.condition.field ?? '—'}
-                  branchLabel={row.branchLabel}
-                  defaultLabel={row.defaultLabel}
-                />
-                <Connector />
-              </div>
-              {row.branchEtapa && (
-                <div className="relative">
-                  <BranchArrow direction="in" />
+    <div>
+      <div className="space-y-0">
+        {rows.map((row, idx) => {
+          if (row.type === 'etapa') {
+            return (
+              <div key={`etapa-${row.etapa.id}`} className="grid grid-cols-1 md:grid-cols-2 md:gap-3">
+                <div>
                   <EtapaCard
-                    etapa={row.branchEtapa}
+                    etapa={row.etapa}
                     mode={mode}
                     canConfigSla={canConfigSla}
                     onUpdateSla={onUpdateSla}
-                    isBranch
                   />
-                  <BranchArrow direction="out" />
+                  <Connector />
                 </div>
-              )}
-            </div>
-          )
-        }
-        if (row.type === 'terminal') {
-          return (
-            <div key={`term-${idx}`} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <TerminalNode />
+                <div className="hidden md:block" />
               </div>
-              <div />
-            </div>
-          )
-        }
-        return null
-      })}
+            )
+          }
+          if (row.type === 'decision') {
+            const field = row.sourceEtapa.routing?.conditional[0]?.condition.field ?? '—'
+            const question = resolveDecisionLabel(field, sorted)
+            return (
+              <div key={`dec-${idx}`} className="grid grid-cols-1 md:grid-cols-2 md:gap-3">
+                <div>
+                  <DecisionDiamond
+                    question={question}
+                    branchLabel={null}
+                    branchTargetNombre={null}
+                    defaultLabel={row.defaultLabel}
+                  />
+                  <Connector />
+                </div>
+                <div className="hidden md:block" />
+              </div>
+            )
+          }
+          if (row.type === 'decision-with-branch') {
+            const field = row.sourceEtapa.routing?.conditional[0]?.condition.field ?? '—'
+            const question = resolveDecisionLabel(field, sorted)
+            return (
+              <div
+                key={`decbr-${idx}`}
+                className="grid grid-cols-1 md:grid-cols-2 md:gap-3 md:items-start"
+              >
+                {/* Decision diamond (mainline) */}
+                <div>
+                  <DecisionDiamond
+                    question={question}
+                    branchLabel={row.branchLabel}
+                    branchTargetNombre={row.branchEtapa?.nombre ?? null}
+                    defaultLabel={row.defaultLabel}
+                  />
+                  <Connector />
+                </div>
+                {/* Branch card */}
+                {row.branchEtapa && (
+                  <div className="relative">
+                    {/* Mobile: render indented inside its own flow position */}
+                    <div className="md:hidden ml-6 border-l-2 border-dashed border-[#10B981] pl-4 pb-2">
+                      <BranchHeader direction="in" labelOverride="Rama: SÍ" />
+                      <EtapaCard
+                        etapa={row.branchEtapa}
+                        mode={mode}
+                        canConfigSla={canConfigSla}
+                        onUpdateSla={onUpdateSla}
+                        isBranch
+                      />
+                      <BranchHeader direction="out" />
+                    </div>
+                    {/* Desktop: render in right column */}
+                    <div className="hidden md:block">
+                      <BranchHeader direction="in" />
+                      <EtapaCard
+                        etapa={row.branchEtapa}
+                        mode={mode}
+                        canConfigSla={canConfigSla}
+                        onUpdateSla={onUpdateSla}
+                        isBranch
+                      />
+                      <BranchReturnConnector />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          }
+          if (row.type === 'terminal') {
+            return (
+              <div key={`term-${idx}`} className="grid grid-cols-1 md:grid-cols-2 md:gap-3">
+                <div>
+                  <TerminalNode />
+                </div>
+                <div className="hidden md:block" />
+              </div>
+            )
+          }
+          return null
+        })}
+      </div>
     </div>
   )
 }
@@ -254,64 +313,120 @@ function Connector() {
   )
 }
 
-// ── Branch arrows: in (decision → branch card) y out (branch card → mainline) ──
+// ── Branch header (SÍ entrada / vuelve al flujo) ──────────────────────────
 
-function BranchArrow({ direction }: { direction: 'in' | 'out' }) {
-  // 'in': flecha horizontal pequena entrando por la izquierda al top del card
-  // 'out': curva del bottom del card hacia abajo-izquierda (vuelve a mainline)
+function BranchHeader({ direction, labelOverride }: { direction: 'in' | 'out'; labelOverride?: string }) {
   if (direction === 'in') {
     return (
-      <div className="flex items-center gap-1 mb-1.5 text-[10px] text-[#6B7280]" aria-hidden>
-        <span className="h-px w-6 bg-[#6B7280]" />
-        <span className="h-0 w-0 border-t-[4px] border-t-transparent border-b-[4px] border-b-transparent border-l-[5px] border-l-[#6B7280]" />
-        <span className="font-semibold text-[#10B981]">SÍ</span>
+      <div className="flex items-center gap-1.5 mb-1.5 text-[11px]" aria-hidden>
+        <span className="font-semibold text-[#10B981] uppercase tracking-wider">
+          {labelOverride ?? 'SÍ ↓ Rama'}
+        </span>
       </div>
     )
   }
   return (
-    <div className="flex items-center justify-start gap-1 mt-1.5 text-[10px] text-[#6B7280]" aria-hidden>
-      <span className="font-semibold text-[#6B7280]">vuelve al flujo</span>
-      <span className="h-px w-6 bg-[#6B7280]" />
-      <span className="h-0 w-0 border-t-[4px] border-t-transparent border-b-[4px] border-b-transparent border-r-[5px] border-r-[#6B7280]" />
+    <div className="flex items-center gap-1.5 mt-2 text-[11px] text-[#6B7280]" aria-hidden>
+      <ArrowDown className="h-3 w-3" />
+      <span>Vuelve al flujo principal</span>
     </div>
   )
 }
 
-// ── Decision pill (rombo aplanado con etiquetas) ───────────────────────────
+// ── Branch return curve (desktop) — SVG curva del bottom del card a la siguiente mainline ──
 
-function DecisionPill({
-  field,
+function BranchReturnConnector() {
+  return (
+    <div className="relative h-10" aria-hidden>
+      <svg
+        className="absolute inset-0 h-full w-full"
+        viewBox="0 0 100 40"
+        preserveAspectRatio="none"
+      >
+        {/* Curva desde top-center (entrada del card) ya viene del header.
+            Aqui: curva del bottom-center del card hacia abajo-izquierda hasta
+            el centro de la columna izquierda (mainline). */}
+        <path
+          d="M 50 0 Q 50 25 0 35"
+          fill="none"
+          stroke="#6B7280"
+          strokeWidth="1.5"
+          strokeDasharray="0"
+        />
+        {/* Arrowhead */}
+        <polygon points="0,35 6,32 6,38" fill="#6B7280" />
+      </svg>
+    </div>
+  )
+}
+
+// ── Decision diamond ───────────────────────────────────────────────────────
+
+function DecisionDiamond({
+  question,
   branchLabel,
+  branchTargetNombre,
   defaultLabel,
 }: {
-  field: string
+  question: string
   branchLabel: string | null
+  branchTargetNombre: string | null
   defaultLabel: string
 }) {
   return (
-    <div
-      className="mx-auto max-w-[420px] rounded-lg border-2 px-4 py-2.5 text-center"
-      style={{ borderColor: '#10B981', backgroundColor: '#F0FDF4' }}
-    >
-      <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#059669]">
-        <GitFork className="h-3.5 w-3.5" />
-        <span>Decisión</span>
-      </div>
-      <p className="mt-1 text-[12px] font-bold text-[#1A1A1A]">
-        ¿{field}?
-      </p>
-      <div className="mt-1.5 flex flex-col gap-0.5 text-[11px] text-[#1A1A1A]">
-        {branchLabel && (
-          <p>
-            <span className="font-semibold text-[#10B981]">SÍ </span>
-            <span className="text-[#6B7280]">({branchLabel})</span>
-            <span className="ml-1 text-[#6B7280]">→ rama lateral</span>
-          </p>
-        )}
-        <p>
-          <span className="font-semibold text-[#6B7280]">NO </span>
-          <span className="text-[#6B7280]">{defaultLabel}</span>
-        </p>
+    <div className="my-2 flex flex-col items-center">
+      {/* Rombo: contenedor cuadrado rotado 45deg + contenido sin rotar */}
+      <div className="relative" style={{ width: '280px', maxWidth: '100%' }}>
+        <div
+          className="relative mx-auto"
+          style={{ width: '200px', height: '200px' }}
+        >
+          {/* Rombo de fondo (SVG para línea limpia + responsive) */}
+          <svg
+            className="absolute inset-0 h-full w-full"
+            viewBox="0 0 200 200"
+            aria-hidden
+          >
+            <polygon
+              points="100,4 196,100 100,196 4,100"
+              fill="#FFFFFF"
+              stroke="#10B981"
+              strokeWidth="2"
+            />
+          </svg>
+          {/* Contenido centrado */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
+            <HelpCircle className="h-4 w-4 text-[#10B981]" aria-hidden />
+            <p
+              className="mt-1 text-[12px] font-semibold leading-tight text-[#1A1A1A]"
+              style={{ maxWidth: '120px' }}
+            >
+              {question}
+            </p>
+          </div>
+        </div>
+        {/* Etiquetas de salida */}
+        <div className="mt-2 flex flex-col gap-1 text-[12px]">
+          {branchLabel && (
+            <div className="flex items-center justify-center gap-1.5">
+              <span className="font-semibold text-[#10B981]">SÍ</span>
+              <ArrowDown className="h-3.5 w-3.5 text-[#10B981]" />
+              <span className="text-[#1A1A1A]">
+                {branchTargetNombre ? `Rama: ${branchTargetNombre}` : 'Rama lateral'}
+              </span>
+              <span className="text-[#6B7280]">({branchLabel})</span>
+            </div>
+          )}
+          <div className="flex items-center justify-center gap-1.5">
+            <span className="font-semibold text-[#6B7280]">NO</span>
+            {branchLabel ? (
+              <ArrowRight className="h-3.5 w-3.5 text-[#6B7280]" />
+            ) : (
+              <ArrowDown className="h-3.5 w-3.5 text-[#6B7280]" />
+            )}
+            <span className="text-[#1A1A1A]">{defaultLabel}</span>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -330,6 +445,30 @@ function TerminalNode() {
   )
 }
 
+// ── Hook: detect desktop (md breakpoint) con SSR fallback ─────────────────
+
+const DESKTOP_QUERY = '(min-width: 768px)'
+
+function subscribeMedia(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const mql = window.matchMedia(DESKTOP_QUERY)
+  mql.addEventListener('change', callback)
+  return () => mql.removeEventListener('change', callback)
+}
+
+function getDesktopSnapshot(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia(DESKTOP_QUERY).matches
+}
+
+function getDesktopServerSnapshot(): boolean {
+  return false
+}
+
+function useIsDesktop(): boolean {
+  return useSyncExternalStore(subscribeMedia, getDesktopSnapshot, getDesktopServerSnapshot)
+}
+
 // ── Etapa card ─────────────────────────────────────────────────────────────
 
 function EtapaCard({
@@ -345,11 +484,31 @@ function EtapaCard({
   onUpdateSla?: (etapaId: string, slaDias: number | null) => Promise<{ ok: boolean; error?: string }>
   isBranch?: boolean
 }) {
-  const stageColor = STAGE_COLORS[etapa.stage]
   const tieneAlerta = etapa.sla_dias !== null && etapa.sla_dias > 0 && etapa.vencidos > 0
   const routing = etapa.routing ?? null
   const gates = etapa.gates ?? []
+  const isDesktop = useIsDesktop()
+  // Simplified mode: por default colapsado en mobile, expandido en desktop.
+  // El usuario puede sobreescribir manualmente (null = sin override).
+  const [bloquesOverride, setBloquesOverride] = useState<boolean | null>(null)
+  const defaultExpanded = mode === 'simplified' ? isDesktop : true
+  const bloquesExpanded = bloquesOverride ?? defaultExpanded
   const [detailExpanded, setDetailExpanded] = useState(mode === 'detailed')
+
+  const stageIndicator = STAGE_INDICATOR_COLOR[etapa.stage] ?? '#6B7280'
+
+  // Bloques summary line (simplified, colapsado)
+  const totalBloques = etapa.bloques.length
+  const totalGates = etapa.bloques.filter(b => b.es_gate).length
+  const slaText = etapa.sla_dias !== null && etapa.sla_dias > 0
+    ? `SLA ${etapa.sla_dias} día${etapa.sla_dias === 1 ? '' : 's'}`
+    : null
+
+  const summaryParts: string[] = []
+  if (totalBloques > 0) summaryParts.push(`${totalBloques} bloque${totalBloques === 1 ? '' : 's'}`)
+  if (totalGates > 0) summaryParts.push(`${totalGates} gate${totalGates === 1 ? '' : 's'}`)
+  if (slaText) summaryParts.push(slaText)
+  const summaryLine = summaryParts.join(' · ')
 
   return (
     <article
@@ -357,6 +516,7 @@ function EtapaCard({
       style={{
         borderColor: isBranch ? '#10B981' : '#E5E7EB',
         borderWidth: isBranch ? '1.5px' : '1px',
+        borderTop: `3px solid ${stageIndicator}`,
       }}
     >
       {/* Header */}
@@ -366,8 +526,19 @@ function EtapaCard({
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold text-[#6B7280]">
-              {String(etapa.orden).padStart(2, '0')}
+            {/* Badge circular numerado */}
+            <span
+              className="inline-flex shrink-0 items-center justify-center rounded-full bg-white text-[14px] font-semibold leading-none"
+              style={{
+                width: '28px',
+                height: '28px',
+                border: '2px solid #10B981',
+                color: '#1A1A1A',
+                fontFamily: 'var(--font-montserrat), Montserrat, sans-serif',
+              }}
+              aria-label={`Etapa ${etapa.orden}`}
+            >
+              {etapa.orden}
             </span>
             <h3 className="truncate text-sm font-bold text-[#1A1A1A]">{etapa.nombre}</h3>
             {isBranch && (
@@ -379,16 +550,19 @@ function EtapaCard({
               </span>
             )}
           </div>
-          <span
-            className="mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium"
-            style={{
-              backgroundColor: stageColor.bg,
-              color: stageColor.text,
-              borderColor: stageColor.border,
-            }}
-          >
-            {STAGE_LABELS[etapa.stage]}
-          </span>
+          {/* Stage badge: solo en detailed */}
+          {mode === 'detailed' && (
+            <span
+              className="mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium"
+              style={{
+                backgroundColor: STAGE_COLORS[etapa.stage].bg,
+                color: STAGE_COLORS[etapa.stage].text,
+                borderColor: STAGE_COLORS[etapa.stage].border,
+              }}
+            >
+              {STAGE_LABELS[etapa.stage]}
+            </span>
+          )}
           {mode === 'detailed' && etapa.is_active === false && (
             <span className="ml-2 inline-flex items-center rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500">
               inactiva
@@ -429,24 +603,53 @@ function EtapaCard({
         {etapa.bloques.length === 0 ? (
           <p className="text-[11px] italic text-[#6B7280]">Sin bloques configurados.</p>
         ) : mode === 'simplified' ? (
-          <ul className="space-y-1.5">
-            {etapa.bloques.map(b => (
-              <li
-                key={b.config_id}
-                className="flex items-center gap-2 text-[12px] text-[#1A1A1A]"
-              >
-                <span
-                  className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
-                  title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
-                />
-                <span className="flex-1 truncate">{b.nombre}</span>
-                {b.es_gate && (
-                  <ShieldCheck className="h-3 w-3 shrink-0 text-[#10B981]" />
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            {!bloquesExpanded ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12px] text-[#6B7280]">
+                  {summaryLine || `${totalBloques} bloque${totalBloques === 1 ? '' : 's'}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setBloquesOverride(true)}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-[#10B981] transition-colors hover:bg-[#F5F4F2]"
+                >
+                  Ver más
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <ul className="space-y-1.5">
+                  {etapa.bloques.map(b => (
+                    <li
+                      key={b.config_id}
+                      className="flex items-center gap-2 text-[12px] text-[#1A1A1A]"
+                    >
+                      <span
+                        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
+                        title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
+                      />
+                      <span className="flex-1 truncate">{b.nombre}</span>
+                      {b.es_gate && (
+                        <ShieldCheck className="h-3 w-3 shrink-0 text-[#10B981]" />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {/* Solo en mobile: botón colapsar */}
+                <button
+                  type="button"
+                  onClick={() => setBloquesOverride(false)}
+                  className="md:hidden mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-[#6B7280] transition-colors hover:bg-[#F5F4F2]"
+                >
+                  Ver menos
+                  <ChevronDown className="h-3 w-3 rotate-180" />
+                </button>
+              </>
+            )}
+          </>
         ) : (
           <div className="space-y-1.5">
             {etapa.bloques.map(b => (
