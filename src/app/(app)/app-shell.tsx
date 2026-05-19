@@ -25,6 +25,7 @@ import {
   ListChecks,
   Scale,
   Sliders,
+  Waypoints,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -57,6 +58,7 @@ interface AppShellProps {
   isAdminWorkspace?: boolean
   branding?: BrandingProps
   modules?: WorkspaceModules
+  hasLineas?: boolean
   notificationBell?: React.ReactNode
   platformAdminState?: PlatformAdminState | null
 }
@@ -113,6 +115,11 @@ const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
+]
+
+// Flujo (visible si workspace tiene lineas activas — controlado por hasLineas prop)
+const FLUJO_NAV_ITEMS = [
+  { href: '/flujo', label: 'Flujo', icon: Waypoints, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
 // Admin section — solo owner.
@@ -197,6 +204,7 @@ export default function AppShell({
   isAdminWorkspace,
   branding,
   modules,
+  hasLineas,
   notificationBell,
   platformAdminState,
 }: AppShellProps) {
@@ -225,6 +233,9 @@ export default function AppShell({
     ? filterCompliance(COMPLIANCE_NAV_ITEMS, role, mod)
     : []
   const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
+  const flujoItems = hasLineas ? filterByRole(FLUJO_NAV_ITEMS, role) : []
+  // Merge Flujo en sharedItems para que aparezca en la misma seccion
+  const sharedWithFlujo = flujoItems.length > 0 ? [...flujoItems, ...sharedItems] : sharedItems
   const validaItems = mod.valida_consulta ? filterByRole(VALIDA_NAV_ITEMS, role) : []
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 
@@ -232,7 +243,7 @@ export default function AppShell({
   const homeHref = mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio')
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems]
+  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedWithFlujo, ...validaItems]
   const primaryHrefs = (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
@@ -451,10 +462,10 @@ export default function AppShell({
             </div>
           )}
 
-          {/* Compartidos — siempre visibles */}
-          {sharedItems.length > 0 && (
+          {/* Compartidos — siempre visibles (incluye Flujo si workspace tiene lineas) */}
+          {sharedWithFlujo.length > 0 && (
             <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
-              {sharedItems.map((item) => {
+              {sharedWithFlujo.map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (

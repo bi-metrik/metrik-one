@@ -59,7 +59,7 @@ export default async function AppLayout({
     }
   }
 
-  const [workspaceResult, fiscalResult, modulesResult] = await Promise.all([
+  const [workspaceResult, fiscalResult, modulesResult, lineasResult] = await Promise.all([
     activeClient
       .from('workspaces')
       .select('name, slug, color_primario, color_secundario, logo_url')
@@ -76,6 +76,12 @@ export default async function AppLayout({
       .select('modules')
       .eq('id', activeWorkspaceId)
       .single() as Promise<{ data: { modules: Record<string, boolean> | null } | null; error: unknown }>,
+    // hasLineas: workspace tiene al menos una linea activa → habilita item /flujo
+    activeClient
+      .from('lineas_negocio')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', activeWorkspaceId)
+      .eq('is_active', true),
   ])
 
   const workspace = workspaceResult.data
@@ -84,6 +90,7 @@ export default async function AppLayout({
   }
 
   const workspaceModules = (modulesResult.data?.modules as Record<string, boolean> | null) ?? { business: true }
+  const hasLineas = (lineasResult.count ?? 0) > 0
 
   const fiscal = fiscalResult.data
 
@@ -104,6 +111,7 @@ export default async function AppLayout({
           logoUrl: workspace.logo_url ?? undefined,
         }}
         modules={workspaceModules}
+        hasLineas={hasLineas}
         notificationBell={<NotificationBell userId={user.id} />}
       >
         {/* D235/D236: Fiscal nudge — shows when profile incomplete, max 3 nudges. Not for contador. */}

@@ -39,6 +39,9 @@ export const ROLE_PERMISSIONS = {
     canImportRiesgos: true,           // Importar desde Excel (bulk insert)
     canExportRiesgos: true,           // Descargar plantilla + exportar datos
     canConfigReglasValidacion: true,  // Configurar listas cautelares / reglas vinculantes
+    // ── Flujo (vista de proceso del workspace) ──────────────
+    canViewFlujo: true,
+    canConfigSlaEtapas: true,         // Solo owner configura SLA
   },
   admin: {
     label: 'Admin',
@@ -69,6 +72,8 @@ export const ROLE_PERMISSIONS = {
     canImportRiesgos: true,
     canExportRiesgos: true,
     canConfigReglasValidacion: true,
+    canViewFlujo: true,
+    canConfigSlaEtapas: false,        // Solo owner configura SLA
   },
   supervisor: {
     label: 'Supervisor',
@@ -99,6 +104,8 @@ export const ROLE_PERMISSIONS = {
     canImportRiesgos: true,        // Puede subir Excel del oficial
     canExportRiesgos: true,
     canConfigReglasValidacion: false, // Reglas vinculantes solo owner/admin
+    canViewFlujo: true,
+    canConfigSlaEtapas: false,
   },
   operator: {
     label: 'Ejecutor',
@@ -129,6 +136,8 @@ export const ROLE_PERMISSIONS = {
     canImportRiesgos: false,
     canExportRiesgos: false,
     canConfigReglasValidacion: false,
+    canViewFlujo: false,              // Operador ve negocios directamente, no necesita vista de proceso
+    canConfigSlaEtapas: false,
   },
   contador: {
     label: 'Contador',
@@ -159,6 +168,8 @@ export const ROLE_PERMISSIONS = {
     canImportRiesgos: false,
     canExportRiesgos: false,
     canConfigReglasValidacion: false,
+    canViewFlujo: false,
+    canConfigSlaEtapas: false,
   },
   read_only: {
     label: 'Lectura',
@@ -189,6 +200,8 @@ export const ROLE_PERMISSIONS = {
     canImportRiesgos: false,
     canExportRiesgos: true,        // Puede descargar plantilla y exportar (auditoria)
     canConfigReglasValidacion: false,
+    canViewFlujo: false,
+    canConfigSlaEtapas: false,
   },
 } as const
 
