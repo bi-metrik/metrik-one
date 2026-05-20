@@ -5,6 +5,7 @@ import { GitFork } from 'lucide-react'
 import type { FlujoData } from './actions'
 import { updateEtapaSla } from './actions'
 import { WorkflowDiagram } from '@/components/workflow/workflow-diagram'
+import { WorkflowConventions } from '@/components/workflow/workflow-conventions'
 import type { WorkflowEtapa } from '@/components/workflow/types'
 import { SlaChangeLogSection } from './sla-change-log-section'
 
@@ -104,6 +105,8 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
           </div>
         </div>
       )}
+
+      {workflowEtapas.length > 0 && <WorkflowConventions />}
 
       <WorkflowDiagram
         etapas={workflowEtapas}

@@ -3,6 +3,7 @@
 import type { AdminFlujoDetalle } from '../../actions'
 import type { WorkflowEtapa, WorkflowRouting } from '@/components/workflow/types'
 import { WorkflowDiagram } from '@/components/workflow/workflow-diagram'
+import { WorkflowConventions } from '@/components/workflow/workflow-conventions'
 
 export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDetalle }) {
   if (detalle.etapas.length === 0) {
@@ -42,5 +43,10 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
     }
   })
 
-  return <WorkflowDiagram etapas={etapas} mode="detailed" />
+  return (
+    <>
+      <WorkflowConventions />
+      <WorkflowDiagram etapas={etapas} mode="detailed" />
+    </>
+  )
 }
