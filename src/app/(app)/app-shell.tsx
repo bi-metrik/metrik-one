@@ -70,9 +70,14 @@ interface AppShellProps {
 const BUSINESS_NAV_ITEMS = [
   { href: '/numeros', label: 'Números', icon: BarChart3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/negocios', label: 'Negocios', icon: Store, roles: ['owner', 'admin', 'supervisor', 'operator'] },
-  { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
 ]
+
+// Caja — agrupa flujos de ingreso y salida.
+// Movimientos siempre visible si business activo.
+// Cuentas de cobro condicional a modules.cobros_recurrentes.
+const CAJA_MOVIMIENTOS_ITEM = { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] }
+const CAJA_COBROS_ITEM = { href: '/cobros-recurrentes', label: 'Cuentas de cobro', icon: Receipt, roles: ['owner', 'admin'] }
 
 // 2026-04-27: Causacion → Revision (flag binario, sin formularios fiscales)
 const CONTABILIDAD_NAV_ITEMS = [
@@ -109,11 +114,6 @@ const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
 const VALIDA_NAV_ITEMS = [
   { href: '/valida', label: 'Valida', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
   { href: '/valida/segmentacion', label: 'Segmentación SARLAFT', icon: Sliders, roles: ['owner', 'admin', 'supervisor'] },
-]
-
-// Cobros recurrentes (extra inferior, activable por flag — solo workspace metrik por defecto)
-const COBROS_RECURRENTES_NAV_ITEMS = [
-  { href: '/cobros-recurrentes', label: 'Cuentas de cobro', icon: Receipt, roles: ['owner', 'admin'] },
 ]
 
 // Compartidos (siempre visibles)
@@ -244,14 +244,18 @@ export default function AppShell({
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
   const workflowsItems = hasLineas ? filterByRole(WORKFLOWS_NAV_ITEMS, role) : []
   const validaItems = mod.valida_consulta ? filterByRole(VALIDA_NAV_ITEMS, role) : []
-  const cobrosRecurrentesItems = mod.cobros_recurrentes ? filterByRole(COBROS_RECURRENTES_NAV_ITEMS, role) : []
+  // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
+  const cajaItems = [
+    ...(mod.business && CAJA_MOVIMIENTOS_ITEM.roles.includes(role) ? [CAJA_MOVIMIENTOS_ITEM] : []),
+    ...(mod.cobros_recurrentes && CAJA_COBROS_ITEM.roles.includes(role) ? [CAJA_COBROS_ITEM] : []),
+  ]
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 
   // Home href based on active modules
   const homeHref = mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio')
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems, ...cobrosRecurrentesItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems, ...workflowsItems]
   const primaryHrefs = (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
@@ -362,9 +366,45 @@ export default function AppShell({
             </div>
           )}
 
+          {/* Caja — Movimientos + Cuentas de cobro (ingresos y salidas) */}
+          {cajaItems.length > 0 && (
+            <div className="pt-1" style={{ borderTop: businessItems.length > 0 ? '1px solid var(--sidebar-border)' : 'none' }}>
+              {sidebarExpanded && (
+                <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
+                  Caja
+                </p>
+              )}
+              {cajaItems.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={!sidebarExpanded ? item.label : undefined}
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${
+                      isActive
+                        ? 'shadow-sm'
+                        : 'hover:opacity-90'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>{item.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+
           {/* D246: Contabilidad — parte del modulo business */}
           {contabilidadItems.length > 0 && (
-            <div className="pt-1" style={{ borderTop: businessItems.length > 0 ? '1px solid var(--sidebar-border)' : 'none' }}>
+            <div className="pt-1" style={{ borderTop: (businessItems.length > 0 || cajaItems.length > 0) ? '1px solid var(--sidebar-border)' : 'none' }}>
               {sidebarExpanded && (
                 <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
                   Contabilidad
@@ -435,14 +475,14 @@ export default function AppShell({
           )}
 
           {/* Valida — extra inferior activable por flag */}
-          {(validaItems.length > 0 || cobrosRecurrentesItems.length > 0) && (
+          {validaItems.length > 0 && (
             <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
               {sidebarExpanded && (
                 <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
                   Extras
                 </p>
               )}
-              {[...validaItems, ...cobrosRecurrentesItems].map((item) => {
+              {validaItems.map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (
