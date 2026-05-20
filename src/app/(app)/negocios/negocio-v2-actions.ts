@@ -140,8 +140,24 @@ export async function getNegociosV2(
   estado: 'abierto' | 'completado' | 'todos' = 'abierto',
   incluirPausados = false,
 ): Promise<NegocioResumen[]> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return []
+
+  // ── Modelo roles-areas-stages Fase 2: filtrado por operator ──
+  // Operator solo ve negocios donde es responsable (negocio_responsables N:M).
+  // Otros roles (owner/admin/supervisor/read_only) ven todos. Contador no llega aqui.
+  let negocioIdsPermitidos: string[] | null = null
+  if (role === 'operator' && staffId) {
+    const { data: nrRows } = await db(supabase)
+      .from('negocio_responsables')
+      .select('negocio_id')
+      .eq('staff_id', staffId)
+    const ids = (nrRows ?? []).map((r: { negocio_id: string }) => r.negocio_id)
+    if (ids.length === 0) return []
+    negocioIdsPermitidos = ids
+  }
+  // userId unused outside future filters
+  void userId
 
   let query = db(supabase)
     .from('negocios')
@@ -171,6 +187,9 @@ export async function getNegociosV2(
   }
   if (!incluirPausados) {
     query = query.eq('pausado', false)
+  }
+  if (negocioIdsPermitidos) {
+    query = query.in('id', negocioIdsPermitidos)
   }
 
   const { data } = await query
