@@ -9,8 +9,10 @@ export interface WorkflowBloque {
   nombre: string
   orden: number
   es_gate: boolean
-  // Solo en modo 'detailed': config completa
+  // Propagado en ambos modos. En 'simplified' se usa para distinguir
+  // visualmente bloques readonly heredados. En 'detailed' se muestra como badge.
   estado?: 'editable' | 'visible'
+  // Solo en modo 'detailed': config completa
   config_extra?: Record<string, unknown>
 }
 

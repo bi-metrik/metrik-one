@@ -17,6 +17,7 @@ import {
   ChevronRight,
   ShieldCheck,
   AlertTriangle,
+  Eye,
 } from 'lucide-react'
 
 interface Item {
@@ -184,6 +185,28 @@ const ITEMS: Item[] = [
             style={{ backgroundColor: '#10B981' }}
           />
           <ShieldCheck className="h-3.5 w-3.5" style={{ color: '#10B981' }} />
+        </div>
+      </Sample>
+    ),
+  },
+  {
+    label: 'Bloque solo lectura',
+    description:
+      'Muestra información heredada de etapas anteriores. No se edita aquí.',
+    sample: (
+      <Sample>
+        <div className="flex items-center gap-1">
+          <Eye className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+          <span
+            className="rounded-full border px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider"
+            style={{
+              backgroundColor: '#F5F4F2',
+              borderColor: '#E5E7EB',
+              color: '#6B7280',
+            }}
+          >
+            Solo lectura
+          </span>
         </div>
       </Sample>
     ),

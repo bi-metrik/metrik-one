@@ -19,6 +19,7 @@ export interface FlujoBloque {
   nombre: string
   orden: number
   es_gate: boolean
+  estado: 'editable' | 'visible'
 }
 
 export interface FlujoRoutingConditional {
@@ -91,6 +92,7 @@ interface BloqueConfigRow {
   etapa_id: string
   orden: number
   es_gate: boolean
+  estado: 'editable' | 'visible' | null
   nombre: string | null
   config_extra: Record<string, unknown> | null
   bloque_definitions: { tipo: string; nombre: string } | null
@@ -183,7 +185,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
   // 3) Bloques activos
   const { data: bloquesRaw } = await supabase
     .from('bloque_configs')
-    .select('id, etapa_id, orden, es_gate, nombre, config_extra, bloque_definitions(tipo, nombre)')
+    .select('id, etapa_id, orden, es_gate, estado, nombre, config_extra, bloque_definitions(tipo, nombre)')
     .in('etapa_id', etapaIds)
     .eq('workspace_id', workspaceId)
     .order('orden')
@@ -223,6 +225,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       ),
       orden: b.orden,
       es_gate: b.es_gate,
+      estado: b.estado ?? 'editable',
     })
     bloquesByEtapa.set(b.etapa_id, arr)
   }

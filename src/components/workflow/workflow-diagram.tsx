@@ -34,6 +34,7 @@ import {
   HelpCircle,
   ArrowDown,
   ArrowRight,
+  Eye,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
@@ -621,22 +622,45 @@ function EtapaCard({
             ) : (
               <>
                 <ul className="space-y-1.5">
-                  {etapa.bloques.map(b => (
-                    <li
-                      key={b.config_id}
-                      className="flex items-center gap-2 text-[12px] text-[#1A1A1A]"
-                    >
-                      <span
-                        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
-                        title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
-                      />
-                      <span className="flex-1 truncate">{b.nombre}</span>
-                      {b.es_gate && (
-                        <ShieldCheck className="h-3 w-3 shrink-0 text-[#10B981]" />
-                      )}
-                    </li>
-                  ))}
+                  {etapa.bloques.map(b => {
+                    const isReadonly = b.estado === 'visible'
+                    return (
+                      <li
+                        key={b.config_id}
+                        className={`flex items-center gap-2 text-[12px] ${isReadonly ? 'text-[#6B7280]' : 'text-[#1A1A1A]'}`}
+                      >
+                        {isReadonly ? (
+                          <Eye
+                            className="h-3 w-3 shrink-0 text-[#6B7280]"
+                            aria-hidden
+                          />
+                        ) : (
+                          <span
+                            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
+                            title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
+                          />
+                        )}
+                        <span className="flex-1 truncate">{b.nombre}</span>
+                        {isReadonly ? (
+                          <span
+                            className="shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider"
+                            style={{
+                              backgroundColor: '#F5F4F2',
+                              borderColor: '#E5E7EB',
+                              color: '#6B7280',
+                            }}
+                          >
+                            Solo lectura
+                          </span>
+                        ) : (
+                          b.es_gate && (
+                            <ShieldCheck className="h-3 w-3 shrink-0 text-[#10B981]" />
+                          )
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
                 {/* Solo en mobile: botón colapsar */}
                 <button
