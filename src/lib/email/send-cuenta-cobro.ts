@@ -16,6 +16,7 @@ import { formatCOP } from '@/lib/cobros/format'
 
 const FROM_FACTURACION = 'MéTRIK · Facturación <facturacion@metrikone.co>'
 const REPLY_TO_MAURICIO = 'mauricio.moreno@metrik.com.co'
+const BCC_MAURICIO = 'mauricio.moreno@metrik.com.co'
 
 type CuentaCobroParaEnvio = {
   id: string
@@ -186,6 +187,7 @@ export async function enviarCuentaCobroEmail(
     body: JSON.stringify({
       from: FROM_FACTURACION,
       to: c.email_destinatarios,
+      bcc: [BCC_MAURICIO],
       reply_to: REPLY_TO_MAURICIO,
       subject: `Cuenta de cobro ${c.numero} — ${empresaNombre}`,
       html,
