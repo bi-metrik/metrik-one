@@ -514,6 +514,52 @@ export type Database = {
           },
         ]
       }
+      bloque_locks: {
+        Row: {
+          bloque_instancia_id: string
+          expires_at: string
+          locked_at: string
+          locked_by: string
+          workspace_id: string
+        }
+        Insert: {
+          bloque_instancia_id: string
+          expires_at: string
+          locked_at?: string
+          locked_by: string
+          workspace_id: string
+        }
+        Update: {
+          bloque_instancia_id?: string
+          expires_at?: string
+          locked_at?: string
+          locked_by?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bloque_locks_bloque_instancia_id_fkey"
+            columns: ["bloque_instancia_id"]
+            isOneToOne: true
+            referencedRelation: "negocio_bloques"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bloque_locks_locked_by_fkey"
+            columns: ["locked_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bloque_locks_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bot_sessions: {
         Row: {
           context: Json | null
@@ -661,7 +707,7 @@ export type Database = {
           created_by_wa_name: string | null
           external_ref: string | null
           factura_id: string | null
-          fecha: string
+          fecha: string | null
           fecha_esperada: string | null
           id: string
           mensaje_original: string | null
@@ -688,7 +734,7 @@ export type Database = {
           created_by_wa_name?: string | null
           external_ref?: string | null
           factura_id?: string | null
-          fecha?: string
+          fecha?: string | null
           fecha_esperada?: string | null
           id?: string
           mensaje_original?: string | null
@@ -715,7 +761,7 @@ export type Database = {
           created_by_wa_name?: string | null
           external_ref?: string | null
           factura_id?: string | null
-          fecha?: string
+          fecha?: string | null
           fecha_esperada?: string | null
           id?: string
           mensaje_original?: string | null
@@ -1686,6 +1732,58 @@ export type Database = {
           },
         ]
       }
+      etapa_sla_log: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          etapa_id: string
+          id: string
+          new_sla_horas: number | null
+          old_sla_horas: number | null
+          workspace_id: string
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          etapa_id: string
+          id?: string
+          new_sla_horas?: number | null
+          old_sla_horas?: number | null
+          workspace_id: string
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          etapa_id?: string
+          id?: string
+          new_sla_horas?: number | null
+          old_sla_horas?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "etapa_sla_log_changed_by_fkey"
+            columns: ["changed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "etapa_sla_log_etapa_id_fkey"
+            columns: ["etapa_id"]
+            isOneToOne: false
+            referencedRelation: "etapas_negocio"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "etapa_sla_log_etapa_id_fkey"
+            columns: ["etapa_id"]
+            isOneToOne: false
+            referencedRelation: "v_negocios_etapa_vencimiento"
+            referencedColumns: ["etapa_id"]
+          },
+        ]
+      }
       etapas_negocio: {
         Row: {
           config_extra: Json
@@ -1895,6 +1993,21 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      festivos_colombia: {
+        Row: {
+          descripcion: string
+          fecha: string
+        }
+        Insert: {
+          descripcion: string
+          fecha: string
+        }
+        Update: {
+          descripcion?: string
+          fecha?: string
+        }
+        Relationships: []
       }
       fiscal_params: {
         Row: {
@@ -2909,10 +3022,61 @@ export type Database = {
           },
         ]
       }
+      negocio_responsables: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          negocio_id: string
+          staff_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          negocio_id: string
+          staff_id: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          negocio_id?: string
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "negocio_responsables_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocio_responsables_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocio_responsables_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "negocio_responsables_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       negocios: {
         Row: {
           balance_final: Json | null
           carpeta_url: string | null
+          cierre_motivo: string | null
           cierre_snapshot: Json | null
           closed_at: string | null
           codigo: string | null
@@ -2924,6 +3088,7 @@ export type Database = {
           etapa_actual_id: string | null
           etapa_cambiada_at: string | null
           id: string
+          is_paused: boolean
           lecciones_aprendidas: string | null
           linea_id: string | null
           motivo_cierre: string | null
@@ -2932,6 +3097,9 @@ export type Database = {
           nombre: string
           pausado: boolean
           pausado_hasta: string | null
+          paused_at: string | null
+          paused_by: string | null
+          paused_reason: string | null
           precio_aprobado: number | null
           precio_estimado: number | null
           razon_cierre: string | null
@@ -2946,6 +3114,7 @@ export type Database = {
         Insert: {
           balance_final?: Json | null
           carpeta_url?: string | null
+          cierre_motivo?: string | null
           cierre_snapshot?: Json | null
           closed_at?: string | null
           codigo?: string | null
@@ -2957,6 +3126,7 @@ export type Database = {
           etapa_actual_id?: string | null
           etapa_cambiada_at?: string | null
           id?: string
+          is_paused?: boolean
           lecciones_aprendidas?: string | null
           linea_id?: string | null
           motivo_cierre?: string | null
@@ -2965,6 +3135,9 @@ export type Database = {
           nombre: string
           pausado?: boolean
           pausado_hasta?: string | null
+          paused_at?: string | null
+          paused_by?: string | null
+          paused_reason?: string | null
           precio_aprobado?: number | null
           precio_estimado?: number | null
           razon_cierre?: string | null
@@ -2979,6 +3152,7 @@ export type Database = {
         Update: {
           balance_final?: Json | null
           carpeta_url?: string | null
+          cierre_motivo?: string | null
           cierre_snapshot?: Json | null
           closed_at?: string | null
           codigo?: string | null
@@ -2990,6 +3164,7 @@ export type Database = {
           etapa_actual_id?: string | null
           etapa_cambiada_at?: string | null
           id?: string
+          is_paused?: boolean
           lecciones_aprendidas?: string | null
           linea_id?: string | null
           motivo_cierre?: string | null
@@ -2998,6 +3173,9 @@ export type Database = {
           nombre?: string
           pausado?: boolean
           pausado_hasta?: string | null
+          paused_at?: string | null
+          paused_by?: string | null
+          paused_reason?: string | null
           precio_aprobado?: number | null
           precio_estimado?: number | null
           razon_cierre?: string | null
@@ -3057,6 +3235,13 @@ export type Database = {
             columns: ["linea_id"]
             isOneToOne: false
             referencedRelation: "lineas_negocio"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocios_paused_by_fkey"
+            columns: ["paused_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -4957,6 +5142,32 @@ export type Database = {
           },
         ]
       }
+      staff_areas: {
+        Row: {
+          area: string
+          created_at: string
+          staff_id: string
+        }
+        Insert: {
+          area: string
+          created_at?: string
+          staff_id: string
+        }
+        Update: {
+          area?: string
+          created_at?: string
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_areas_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stage_transition_rules: {
         Row: {
           activo: boolean | null
@@ -6031,6 +6242,52 @@ export type Database = {
           },
         ]
       }
+      workspace_default_responsables: {
+        Row: {
+          area: string
+          configured_by: string | null
+          staff_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          area: string
+          configured_by?: string | null
+          staff_id: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          area?: string
+          configured_by?: string | null
+          staff_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_default_responsables_configured_by_fkey"
+            columns: ["configured_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_default_responsables_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_default_responsables_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_features: {
         Row: {
           activated_at: string | null
@@ -6360,7 +6617,7 @@ export type Database = {
           etapa_nombre: string | null
           etapa_orden: number | null
           linea_id: string | null
-          sla_dias: number | null
+          sla_horas: number | null
           vencidos: number | null
           workspace_id: string | null
         }
@@ -6574,6 +6831,10 @@ export type Database = {
         Returns: string
       }
       get_user_role: { Args: never; Returns: string }
+      horas_habiles_entre: {
+        Args: { end_ts: string; start_ts: string }
+        Returns: number
+      }
       is_admin_or_owner: { Args: never; Returns: boolean }
       puede_avanzar_etapa: {
         Args: { p_etapa_id: string; p_negocio_id: string }
@@ -6782,8 +7043,6 @@ export const Constants = {
     },
   },
 } as const
-
-// Type aliases custom — preservados al regenerar
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type Client = Database['public']['Tables']['clients']['Row']
 export type Contacto = Database['public']['Tables']['contactos']['Row']
