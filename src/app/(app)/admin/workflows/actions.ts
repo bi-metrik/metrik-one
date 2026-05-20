@@ -20,6 +20,9 @@ export interface AdminLineaItem {
 export interface AdminBloque {
   config_id: string
   tipo: string
+  /** Nombre resuelto con prioridad: bloque_configs.nombre → config_extra.label → config_extra.nombre → bloque_definitions.nombre → tipo */
+  nombre: string
+  /** Nombre crudo de bloque_definitions (catalogo) — para referencia */
   nombre_definition: string
   orden: number
   estado: 'editable' | 'visible'
@@ -202,7 +205,7 @@ export async function getAdminFlujoDetalle(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: bcRaw } = await (svc as any)
     .from('bloque_configs')
-    .select('id, etapa_id, orden, estado, es_gate, config_extra, bloque_definitions(tipo, nombre)')
+    .select('id, etapa_id, orden, estado, es_gate, nombre, config_extra, bloque_definitions(tipo, nombre)')
     .in('etapa_id', etapaIds)
     .eq('workspace_id', workspaceId)
     .order('orden')
@@ -213,6 +216,7 @@ export async function getAdminFlujoDetalle(
     orden: number
     estado: 'editable' | 'visible'
     es_gate: boolean
+    nombre: string | null
     config_extra: Record<string, unknown> | null
     bloque_definitions: { tipo: string; nombre: string } | null
   }
@@ -220,11 +224,19 @@ export async function getAdminFlujoDetalle(
 
   const bloquesByEtapa = new Map<string, AdminBloque[]>()
   for (const b of bcs) {
+    const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
+    const nombreDefinition = b.bloque_definitions?.nombre ?? 'Desconocido'
+    const cfgExtra = b.config_extra as { label?: string; nombre?: string } | null
+    const bcNombre = b.nombre && b.nombre.trim().length > 0 ? b.nombre : null
+    const cfgLabel = cfgExtra?.label && cfgExtra.label.trim().length > 0 ? cfgExtra.label : null
+    const cfgNombre = cfgExtra?.nombre && cfgExtra.nombre.trim().length > 0 ? cfgExtra.nombre : null
+    const nombreResuelto = bcNombre ?? cfgLabel ?? cfgNombre ?? nombreDefinition
     const arr = bloquesByEtapa.get(b.etapa_id) ?? []
     arr.push({
       config_id: b.id,
-      tipo: b.bloque_definitions?.tipo ?? 'desconocido',
-      nombre_definition: b.bloque_definitions?.nombre ?? 'Desconocido',
+      tipo,
+      nombre: nombreResuelto,
+      nombre_definition: nombreDefinition,
       orden: b.orden,
       estado: b.estado,
       es_gate: b.es_gate,

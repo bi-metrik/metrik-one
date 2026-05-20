@@ -28,7 +28,7 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
       bloques: e.bloques.map(b => ({
         config_id: b.config_id,
         tipo: b.tipo,
-        nombre: b.nombre_definition,
+        nombre: b.nombre,
         orden: b.orden,
         es_gate: b.es_gate,
         estado: b.estado,

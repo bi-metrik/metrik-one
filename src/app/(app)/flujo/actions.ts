@@ -91,6 +91,7 @@ interface BloqueConfigRow {
   etapa_id: string
   orden: number
   es_gate: boolean
+  nombre: string | null
   config_extra: Record<string, unknown> | null
   bloque_definitions: { tipo: string; nombre: string } | null
 }
@@ -117,7 +118,7 @@ const BLOQUE_LABELS: Record<string, string> = {
   plan_recurrente: 'Plan recurrente',
 }
 
-function labelFor(tipo: string, nombreConfig: string | undefined): string {
+function labelFor(tipo: string, nombreConfig: string | null | undefined): string {
   if (nombreConfig && nombreConfig.trim().length > 0) return nombreConfig
   return BLOQUE_LABELS[tipo] ?? tipo
 }
@@ -182,7 +183,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
   // 3) Bloques activos
   const { data: bloquesRaw } = await supabase
     .from('bloque_configs')
-    .select('id, etapa_id, orden, es_gate, config_extra, bloque_definitions(tipo, nombre)')
+    .select('id, etapa_id, orden, es_gate, nombre, config_extra, bloque_definitions(tipo, nombre)')
     .in('etapa_id', etapaIds)
     .eq('workspace_id', workspaceId)
     .order('orden')
@@ -208,12 +209,18 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
     const cv = (b.config_extra as { cliente_view?: boolean } | null)?.cliente_view
     if (cv === false) continue
     const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
-    const nombreConfig = (b.config_extra as { nombre?: string } | null)?.nombre
+    const bcNombre = b.nombre
+    const cfgExtra = b.config_extra as { label?: string; nombre?: string } | null
+    const cfgLabel = cfgExtra?.label
+    const cfgNombre = cfgExtra?.nombre
     const arr = bloquesByEtapa.get(b.etapa_id) ?? []
     arr.push({
       config_id: b.id,
       tipo,
-      nombre: labelFor(tipo, nombreConfig ?? b.bloque_definitions?.nombre),
+      nombre: labelFor(
+        tipo,
+        bcNombre ?? cfgLabel ?? cfgNombre ?? b.bloque_definitions?.nombre
+      ),
       orden: b.orden,
       es_gate: b.es_gate,
     })
