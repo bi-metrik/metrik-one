@@ -314,7 +314,130 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-05-13/14 (one core: fix flujo invitaciones + activity-log toggle + extirpacion legacy pipeline/proyectos/nuevo-oportunidad)
+**Sesion:** 2026-05-19 (`metrik--cobros-recurrentes` Fases 1-7 — modulo cobros recurrentes activable por flag en workspaces de persona natural emisora)
+**Branch:** main · cambios uncommitted (16 archivos nuevos + 7 modificados)
+
+### Trayectoria de la sesion
+
+Implementacion tecnica del flujo de cuentas de cobro mensuales para workspaces ONE donde el emisor es persona natural (caso piloto: workspace `metrik`, emisor Brallan Mauricio Moreno Guzman). 7/10 fases completadas. Pendiente: deploy del nuevo endpoint metrik-pdf-render a Cloud Run (gcloud auth login bloqueado), Resend dominio `metrik.com.co` (DKIM/SPF), UI aprobacion humana antes de envio, QA end-to-end con mayo 2026 retroactivo.
+
+### Modulo `cobros_recurrentes` (activable por flag)
+
+Patron canonico para workspaces donde el titular emite cuentas de cobro como persona natural a clientes con acuerdos recurrentes. Flag en `workspaces.modules.cobros_recurrentes=true`.
+
+**Datos:**
+- `cuentas_cobro_emitidas` — espejo PDF de cuentas mensuales agrupadas por empresa pagadora. Numeracion `CC-YYYY-MM-NNN` via function `generate_cuenta_cobro_numero` con advisory lock por workspace+anio+mes. Estados: borrador → emitida_pendiente_aprobacion → aprobada_lista_envio → enviada → pagada → conciliada. Idempotencia: 1 cuenta por (workspace, anio, mes, empresa_pagadora)
+- `planillas_pila_periodo` — planilla PILA del titular (persona natural). 1 por mes por workspace. Se referencia automaticamente desde cuentas del mismo periodo
+- `planes_cobro.concepto_detalle_template` — columna nueva. Template del detalle con placeholders `{numero_cuota}` y `{total_cuotas}`
+- Migrations: `20260518000001_cuentas_cobro_emitidas` + `20260518000002_modules_cobros_recurrentes` + `planes_cobro_concepto_detalle` + `rename_año_to_anio` (4 aplicadas remoto)
+
+**Logica core:** `src/lib/cobros/generar-cuentas-cobro.ts`
+- `generarCuentasCobroPeriodo(supabase, workspaceId, anio, mes, options)` — agrupa cobros programados del periodo por `empresa_id` (no negocio_id) → arma payload → llama metrik-pdf-render → sube PDF a subcarpeta `4. Cuentas de cobro` del negocio principal → inserta cuenta → notifica owner
+- Helpers: `format.ts` (formatCOP, formatFechaLetras, numeroALetras, montoEnLetrasCOP), `emisor-mauricio.ts` (constantes verificadas), `pdf-render-client.ts` extendido con `renderCuentaCobro`
+- Idempotencia full: skip si ya existe cuenta para empresa+periodo
+
+**Cron:** `procesar-planes-cobro` extendido — el dia 15 dispara `generarCuentasCobroPeriodo` para cada workspace con flag activo, ademas de generar cobros programados normal
+
+**UI nueva (3 superficies):**
+1. `/cobros-recurrentes` — modulo en sidebar Extras (condicional a flag). Listado tipo `/movimientos` con stats + filtros por estado y anio. Drawer detalle con preview PDF
+2. `/mi-negocio` → seccion "Planilla PILA" (condicional a flag) — 12 cards por mes con upload PDF/PNG. Estados: vacio / cargado / vencido / mes_futuro
+3. Bloque embebido cuentas-cobro en negocio — **DEFERRED** (Task #22)
+
+**Template PDF:** `metrik-pdf-render/templates/metrik/cuenta-cobro.html` parametrizable + `assets/firma-brallan-mauricio.png` (firma transparente como asset local — WeasyPrint resuelve `<img src="assets/...">` con base_url). Endpoint nuevo `POST /render/cuenta-cobro` en `app.py` con `is_draft` flag para watermark
+
+**Estructura Drive (workspace.drive_folder_id como fallback de linea — fix nuevo en `crearNegocio`):**
+```
+{workspace_root}/  (ej. MéTRIK/Negocios = 1Dn2MkGAc07dO_2iNxpYUJ8bHVEji2g-5)
+└── {codigo} - {empresa} - {nombre_negocio}/
+    ├── 1. Legal/
+    ├── 2. Documentos del cliente/
+    ├── 3. Entregables/
+    ├── 4. Cuentas de cobro/    (PDFs cuentas mensuales)
+    └── 5. Soportes de pago/
+```
+
+### Bug fix: `crearNegocio` fallback workspace para drive_folder_id
+
+Antes: si la linea era plantilla-global (workspace_id NULL), `crearNegocio` no creaba carpeta Drive porque solo leia `lineas.drive_folder_id`. Workspaces como `metrik` que usan lineas-plantilla globales tenian negocios sin carpeta. **Fix (negocio-v2-actions.ts:652-672):** fallback `workspaces.drive_folder_id` cuando linea no lo tiene. Aplica a TODOS los workspaces que usen lineas-plantilla globales. Detalle: `cerebro/reglas/drive-folder-fallback-workspace.md`
+
+### Aprendizajes nuevos para ONE
+
+- `cerebro/errores/columnas-postgres-unicode-rompen-supabase-js.md` — columnas Postgres con caracteres unicode (`año`, `ñ`) rompen el TS parser de supabase-js. Convencion: ASCII puro (`anio`). Aplicado a 2 tablas nuevas
+- `cerebro/errores/postgres-rename-columna-con-function-dependiente.md` — `CREATE OR REPLACE FUNCTION` no permite cambiar parametros. Si rename columna implica rename parametro, hay que `DROP FUNCTION` primero
+
+### Estado al cierre (pendientes para proxima sesion)
+
+1. **`gcloud auth login`** (Mauricio, interactivo)
+2. Deploy metrik-pdf-render a Cloud Run con `templates/metrik/cuenta-cobro.html` nuevo
+3. Verificar env vars Resend + agregar dominio `metrik.com.co` en Resend dashboard (DKIM/SPF en DNS Vercel)
+4. UI aprobacion + envio via Resend (Fase 9)
+5. QA E2E mayo 2026 retroactivo (caso real SOENA $1.750.000 + AFI agrupada $816.667)
+6. Bloque embebido cuentas-cobro-negocio (Task #22, deferred)
+
+---
+
+### Sesion previa: 2026-05-13 → 2026-05-15 (`wmc` — template cotizacion WMC + Fase 1 metrik-pdf-render serverless + Fase 2 integracion ONE + platform_admin switcher + landing /numeros)
+**Branch:** main · 4 commits ONE (`5e5ddb0`, `930e0a8`, `caef1e5`, `6f790df`) + 1 repo nuevo (`bi-metrik/metrik-pdf-render`)
+
+### Trayectoria de la sesion
+
+Empezo construyendo template oficial WMC para cotizaciones (proyectos/wmc/_templates/cotizacion-wmc/) — formato visual aprobado por Ren, Powered by MéTRIK §10-§11 corregido. Migracion render engine de Chrome --print-to-pdf a WeasyPrint resolvio paginacion proper (running headers/footers + page counters via CSS Paged Media). Cotizacion final AR Construcciones generada y enviada por Julian.
+
+Continuo levantando el servicio Cloud Run + integrandolo a ONE — para que Julian (y cualquier workspace futuro) pueda exportar cotizaciones desde el negocio en formato propio de su marca.
+
+### Servicio metrik-pdf-render (repo nuevo `bi-metrik/metrik-pdf-render`)
+
+- Flask + WeasyPrint + Gunicorn, dockerizado para Cloud Run
+- Endpoint `POST /render/cotizacion` recibe `{template_slug, data}` y retorna PDF
+- Templates HTML versionados en repo: `templates/wmc/cotizacion.html` (validado) + `templates/metrik/` (stub, fase 3)
+- Auth dual: IAM Cloud Run (ID token via SA `one-pdf-render-client@metrik-pdf-render.iam.gserviceaccount.com`) + shared secret `X-MeTRIK-Secret` a nivel app
+- Deploy: GCP project `metrik-pdf-render` billing MéTRIK ONE, region `us-east1`, **Cloud Run free tier perpetuo** ($0/mes confirmado para nuestro volumen — 2M reqs/mes, 360K vCPU-s/mes)
+- URL: `https://metrik-pdf-render-1003919073039.us-east1.run.app`
+- Smoke test EN VIVO: HTTP 200, 183KB PDF, **1.26s** sin cold start adicional vs local
+- Override de 2 org policies a nivel proyecto: `iam.disableServiceAccountKeyCreation` (permite key json para Vercel) + Mauricio elevo `roles/orgpolicy.policyAdmin` en org `metrik.com.co`
+
+### Fase 2: integracion ONE (commit `5e5ddb0`)
+
+- Migration `20260515000001_pdf_render_serverless.sql` — agrega 6 columnas a `cotizaciones` (`lugar_entrega`, `tiempo_entrega`, `anticipo_pct`, `anticipo_terminos`, `saldo_terminos`, `observaciones_extra` JSONB) + `cotizacion_template_slug` en `workspaces`. Seedea WMC con template `'wmc'`
+- `src/lib/pdf/pdf-render-client.ts` — cliente HTTP. Mintea Google ID token via JWT bearer flow + SA key (sin SDK googleapis). Cache de token. `isPdfRenderConfigured()` para feature flag
+- `cotizacion-pdf-actions.ts` refactorizado con dos paths:
+  - **PATH A (WeasyPrint):** si env vars configuradas y workspace template_slug != 'metrik', llama servicio + auto-upload a Drive en subcarpeta `cotizaciones/` del negocio (find-or-create idempotente)
+  - **PATH B (fallback):** @react-pdf/renderer existente sin cambios. Se usa si las env vars no estan o si workspace no tiene template custom
+- Spec canonico: `docs/specs/2026-05-15_pdf-render-weasyprint-serverless.md`
+
+### Platform admin switcher (commits `930e0a8`, `caef1e5`, `6f790df`)
+
+Patron staff-MeTRIK multi-tenant — Mauricio + agentes pueden saltar a cualquier workspace para soporte sin credenciales del cliente, con audit log.
+
+- Migration `20260515000002_platform_admin.sql` — `profiles.platform_admin` (bool) + `home_workspace_id` (uuid). Seed: Mauricio = TRUE
+- `src/lib/actions/platform-admin.ts` — server actions `getPlatformAdminState`, `switchWorkspace(targetId)`, `returnHome()`. Audit log en `activity_log` tipos `platform_admin_enter` / `platform_admin_exit`
+- `src/components/platform-admin-bar.tsx` — pill discreto + dropdown searchable en home / banner amarillo en workspace ajeno con CTA "Regresar"
+- Integrado en `app-shell.tsx` (envuelve root en flex-col con bar arriba)
+- **Bug encontrado y fixeado:** cookies host-only entre subdomains rompian el redirect post-switch. Fix: `switchWorkspace` y `returnHome` ahora generan magic link via `auth.admin.generateLink({type:'magiclink', email, redirectTo: 'https://<target>.metrikone.co/auth/callback?redirectTo=/numeros'})` y el cliente sigue el `action_link` para sembrar sesion en subdomain destino
+- Landing post-switch: `/numeros` (Mis Numeros) directo, sin pasar por root con landing dinamico
+
+### Pendientes manuales (NO en commits, requieren accion de Mauricio)
+
+- Aplicar migrations `20260515000001` + `20260515000002` al remote Supabase (SQL editor o `db push`)
+- Regenerar `database.ts` post-migration + re-agregar los 26 type aliases custom
+- Set env vars en Vercel (Production scope):
+  - `METRIK_PDF_RENDER_URL=https://metrik-pdf-render-1003919073039.us-east1.run.app`
+  - `METRIK_PDF_RENDER_SECRET=<secret hex 32 bytes>` (en `/tmp/metrik-pdf-render-secret.txt`)
+  - `METRIK_PDF_RENDER_SA_KEY=<SA key JSON inline>` (en `/tmp/one-pdf-render-client-key.json`)
+- Verificar wildcard `https://**.metrikone.co/auth/callback` en Supabase Auth URL Configuration (para que magic link cross-subdomain funcione)
+- Redeploy en Vercel para que tome env vars
+- Kaori integrar credenciales metrik-pdf-render a `.credentials.md`
+
+### Casts as any temporales
+
+Hasta regenerar `database.ts` post-migration, hay casts `as unknown as` / `as any` en:
+- `cotizacion-pdf-actions.ts` — campos nuevos de cotizacion (CotizacionNuevosCampos type local)
+- `platform-admin.ts` — `platform_admin`, `home_workspace_id` en profile
+- `app-shell.tsx` — sin casts pero requiere database.ts regenerado para tipar `cotizacion_template_slug` en workspaces select
+
+---
+
+**Sesion previa:** 2026-05-13/14 (one core: fix flujo invitaciones + activity-log toggle + extirpacion legacy pipeline/proyectos/nuevo-oportunidad)
 **Branch:** main · 5 commits (`35ed64a`, `bc6378e`, `60ca389`, `5abd9c2`, `3016d1a`)
 
 ### Fix flujo invitaciones (commit `35ed64a`)

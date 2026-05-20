@@ -172,3 +172,82 @@ export async function renderCotizacion(
   const arrayBuffer = await res.arrayBuffer()
   return Buffer.from(arrayBuffer)
 }
+
+// ============================================================
+// API publica: renderCuentaCobro
+// ============================================================
+
+export type CuentaCobroConcepto = {
+  detalle: string
+  monto: string  // formato '$1.750.000'
+}
+
+export type CuentaCobroRenderPayload = {
+  numero: string
+  lugar_emision: string
+  fecha_emision_letras: string
+  fecha_vencimiento_letras: string
+  emisor_nombre: string
+  emisor_documento: string
+  emisor_documento_sin_dv: string
+  emisor_regimen: string
+  emisor_direccion: string
+  emisor_email: string
+  emisor_telefono: string
+  emisor_ciiu: string
+  pagador_nombre: string
+  pagador_nit: string
+  pagador_direccion: string
+  pagador_representante: string
+  pagador_email: string
+  pagador_telefono: string
+  concepto_titulo: string
+  concepto_parrafos: string
+  conceptos: CuentaCobroConcepto[]
+  total_label: string
+  total_formato: string
+  total_letras: string
+  nota_redondeo: string
+  banco_nombre: string
+  banco_tipo: string
+  banco_numero: string
+  banco_titular: string
+  banco_identificacion: string
+  nota_pila_html: string
+  año_gravable_declaracion: string
+}
+
+export async function renderCuentaCobro(
+  templateSlug: string,
+  data: CuentaCobroRenderPayload,
+  isDraft: boolean = false,
+): Promise<Buffer> {
+  if (!isPdfRenderConfigured()) {
+    throw new Error('PDF render service no configurado (faltan env vars)')
+  }
+
+  const url = `${RENDER_URL}/render/cuenta-cobro`
+  const token = await getIdToken(RENDER_URL!)
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-MeTRIK-Secret': RENDER_SECRET!,
+    },
+    body: JSON.stringify({
+      template_slug: templateSlug,
+      is_draft: isDraft,
+      data,
+    }),
+  })
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`PDF render cuenta-cobro falló (${res.status}): ${txt.slice(0, 300)}`)
+  }
+
+  const arrayBuffer = await res.arrayBuffer()
+  return Buffer.from(arrayBuffer)
+}

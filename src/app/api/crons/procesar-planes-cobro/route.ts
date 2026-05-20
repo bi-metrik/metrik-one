@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -202,11 +203,52 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── 4. Emitir cuentas de cobro el dia 15 ──────────────────
+  // Para workspaces con modules.cobros_recurrentes=true, agrupa cobros
+  // programados del mes por empresa pagadora y emite 1 cuenta por grupo.
+  // Idempotente: si la cuenta ya existe para ese workspace+empresa+periodo, skip.
+  let cuentasEmitidas = 0
+  let cuentasOmitidas = 0
+  const cuentasErrores: { workspace_id: string; error: string }[] = []
+
+  // hoyStr formato YYYY-MM-DD en Bogota
+  const [añoStr, mesStr, diaStr] = hoyStr.split('-')
+  const diaHoy = parseInt(diaStr, 10)
+  const añoHoy = parseInt(añoStr, 10)
+  const mesHoy = parseInt(mesStr, 10)
+
+  if (diaHoy === 15) {
+    const { data: workspacesConFlag } = await supabase
+      .from('workspaces')
+      .select('id, slug')
+      .filter('modules->cobros_recurrentes', 'eq', 'true')
+
+    for (const ws of (workspacesConFlag ?? []) as { id: string; slug: string }[]) {
+      try {
+        const r = await generarCuentasCobroPeriodo(supabase, ws.id, añoHoy, mesHoy, {
+          dryRun: false,
+          isDraft: false,
+        })
+        cuentasEmitidas += r.cuentasCreadas
+        cuentasOmitidas += r.cuentasOmitidas
+        for (const e of r.errores) {
+          cuentasErrores.push({ workspace_id: ws.id, error: `${e.empresa_id}: ${e.error}` })
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        cuentasErrores.push({ workspace_id: ws.id, error: msg })
+      }
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
     cobros_creados: cobrosCreados,
     cobros_vencidos: cobrosVencidos,
     notificaciones_creadas: notificacionesCreadas,
+    cuentas_emitidas: cuentasEmitidas,
+    cuentas_omitidas: cuentasOmitidas,
+    cuentas_errores: cuentasErrores,
   })
 }

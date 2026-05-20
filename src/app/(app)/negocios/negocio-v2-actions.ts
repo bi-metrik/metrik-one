@@ -649,7 +649,10 @@ export async function crearNegocio(input: {
 
   const negocioData = negocio as { id: string }
 
-  // ── Auto-crear carpeta en Google Drive si la línea tiene drive_folder_id ──
+  // ── Auto-crear carpeta en Google Drive ──
+  // Prioridad: linea.drive_folder_id → workspaces.drive_folder_id (fallback)
+  // El fallback workspace permite que workspaces con lineas-plantilla globales
+  // (workspace_id NULL) auto-creen carpetas sin tener que clonar la linea.
   try {
     const { data: lineaDrive } = await db(supabase)
       .from('lineas_negocio')
@@ -657,7 +660,16 @@ export async function crearNegocio(input: {
       .eq('id', lineaId)
       .single()
 
-    const driveFolderId = (lineaDrive as { drive_folder_id: string | null } | null)?.drive_folder_id
+    let driveFolderId = (lineaDrive as { drive_folder_id: string | null } | null)?.drive_folder_id
+
+    if (!driveFolderId) {
+      const { data: wsData } = await db(supabase)
+        .from('workspaces')
+        .select('drive_folder_id')
+        .eq('id', workspaceId)
+        .single()
+      driveFolderId = (wsData as { drive_folder_id: string | null } | null)?.drive_folder_id
+    }
 
     if (driveFolderId) {
       // Obtener codigo auto-generado + nombre del cliente

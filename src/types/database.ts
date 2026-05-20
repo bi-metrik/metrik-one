@@ -195,99 +195,6 @@ export type Database = {
         }
         Relationships: []
       }
-      admin_workflows: {
-        Row: {
-          autor_proceso: string | null
-          autor_tecnico: string | null
-          basado_en: string | null
-          cliente_nombre: string | null
-          cliente_slug: string
-          created_at: string | null
-          estado: string | null
-          fase_cubierta: string[] | null
-          fase_detallada: string | null
-          fecha_actualizacion: string | null
-          html_storage_path: string
-          id: string
-          linea_negocio: string
-          linea_negocio_cliente: string | null
-          metadata: Json | null
-          nombre_flujo: string
-          numero_flujo: number | null
-          owner_calidad: string | null
-          pdf_storage_path: string | null
-          proyecto_slug: string
-          tags: string[] | null
-          tiene_condicionales: boolean | null
-          tipo_proceso: string | null
-          total_bloques: number | null
-          total_etapas: number | null
-          total_fases: number | null
-          updated_at: string | null
-          version: number
-        }
-        Insert: {
-          autor_proceso?: string | null
-          autor_tecnico?: string | null
-          basado_en?: string | null
-          cliente_nombre?: string | null
-          cliente_slug: string
-          created_at?: string | null
-          estado?: string | null
-          fase_cubierta?: string[] | null
-          fase_detallada?: string | null
-          fecha_actualizacion?: string | null
-          html_storage_path: string
-          id?: string
-          linea_negocio: string
-          linea_negocio_cliente?: string | null
-          metadata?: Json | null
-          nombre_flujo: string
-          numero_flujo?: number | null
-          owner_calidad?: string | null
-          pdf_storage_path?: string | null
-          proyecto_slug: string
-          tags?: string[] | null
-          tiene_condicionales?: boolean | null
-          tipo_proceso?: string | null
-          total_bloques?: number | null
-          total_etapas?: number | null
-          total_fases?: number | null
-          updated_at?: string | null
-          version?: number
-        }
-        Update: {
-          autor_proceso?: string | null
-          autor_tecnico?: string | null
-          basado_en?: string | null
-          cliente_nombre?: string | null
-          cliente_slug?: string
-          created_at?: string | null
-          estado?: string | null
-          fase_cubierta?: string[] | null
-          fase_detallada?: string | null
-          fecha_actualizacion?: string | null
-          html_storage_path?: string
-          id?: string
-          linea_negocio?: string
-          linea_negocio_cliente?: string | null
-          metadata?: Json | null
-          nombre_flujo?: string
-          numero_flujo?: number | null
-          owner_calidad?: string | null
-          pdf_storage_path?: string | null
-          proyecto_slug?: string
-          tags?: string[] | null
-          tiene_condicionales?: boolean | null
-          tipo_proceso?: string | null
-          total_bloques?: number | null
-          total_etapas?: number | null
-          total_fases?: number | null
-          updated_at?: string | null
-          version?: number
-        }
-        Relationships: []
-      }
       audit_log: {
         Row: {
           action: string
@@ -472,6 +379,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "etapas_negocio"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bloque_configs_etapa_id_fkey"
+            columns: ["etapa_id"]
+            isOneToOne: false
+            referencedRelation: "v_negocios_etapa_vencimiento"
+            referencedColumns: ["etapa_id"]
           },
           {
             foreignKeyName: "bloque_configs_workspace_id_fkey"
@@ -1203,6 +1117,8 @@ export type Database = {
         Row: {
           aiu_admin_pct: number | null
           aiu_imprevistos_pct: number | null
+          anticipo_pct: number | null
+          anticipo_terminos: string | null
           codigo: string
           condiciones_pago: string | null
           consecutivo: string
@@ -1217,11 +1133,15 @@ export type Database = {
           fecha_envio: string | null
           fecha_validez: string | null
           id: string
+          lugar_entrega: string | null
           margen_porcentaje: number | null
           modo: string
           negocio_id: string | null
           notas: string | null
+          observaciones_extra: Json
           oportunidad_id: string | null
+          saldo_terminos: string | null
+          tiempo_entrega: string | null
           updated_at: string | null
           valor_total: number
           workspace_id: string
@@ -1229,6 +1149,8 @@ export type Database = {
         Insert: {
           aiu_admin_pct?: number | null
           aiu_imprevistos_pct?: number | null
+          anticipo_pct?: number | null
+          anticipo_terminos?: string | null
           codigo: string
           condiciones_pago?: string | null
           consecutivo: string
@@ -1243,11 +1165,15 @@ export type Database = {
           fecha_envio?: string | null
           fecha_validez?: string | null
           id?: string
+          lugar_entrega?: string | null
           margen_porcentaje?: number | null
           modo: string
           negocio_id?: string | null
           notas?: string | null
+          observaciones_extra?: Json
           oportunidad_id?: string | null
+          saldo_terminos?: string | null
+          tiempo_entrega?: string | null
           updated_at?: string | null
           valor_total?: number
           workspace_id: string
@@ -1255,6 +1181,8 @@ export type Database = {
         Update: {
           aiu_admin_pct?: number | null
           aiu_imprevistos_pct?: number | null
+          anticipo_pct?: number | null
+          anticipo_terminos?: string | null
           codigo?: string
           condiciones_pago?: string | null
           consecutivo?: string
@@ -1269,11 +1197,15 @@ export type Database = {
           fecha_envio?: string | null
           fecha_validez?: string | null
           id?: string
+          lugar_entrega?: string | null
           margen_porcentaje?: number | null
           modo?: string
           negocio_id?: string | null
           notas?: string | null
+          observaciones_extra?: Json
           oportunidad_id?: string | null
+          saldo_terminos?: string | null
+          tiempo_entrega?: string | null
           updated_at?: string | null
           valor_total?: number
           workspace_id?: string
@@ -1309,6 +1241,123 @@ export type Database = {
           },
           {
             foreignKeyName: "cotizaciones_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cuentas_cobro_emitidas: {
+        Row: {
+          anio: number
+          aprobado_at: string | null
+          aprobado_por: string | null
+          cobros_ids: string[]
+          conciliado_at: string | null
+          created_at: string
+          email_destinatarios: string[] | null
+          email_enviado_at: string | null
+          email_resend_id: string | null
+          empresa_id_pagador: string
+          estado: Database["public"]["Enums"]["cuenta_cobro_estado"]
+          fecha_emision: string
+          fecha_vencimiento: string
+          id: string
+          mes: number
+          monto_total: number
+          notas: string | null
+          numero: string
+          pagado_at: string | null
+          pdf_drive_id: string | null
+          pdf_drive_url: string | null
+          planilla_pila_id: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          anio: number
+          aprobado_at?: string | null
+          aprobado_por?: string | null
+          cobros_ids: string[]
+          conciliado_at?: string | null
+          created_at?: string
+          email_destinatarios?: string[] | null
+          email_enviado_at?: string | null
+          email_resend_id?: string | null
+          empresa_id_pagador: string
+          estado?: Database["public"]["Enums"]["cuenta_cobro_estado"]
+          fecha_emision?: string
+          fecha_vencimiento: string
+          id?: string
+          mes: number
+          monto_total: number
+          notas?: string | null
+          numero: string
+          pagado_at?: string | null
+          pdf_drive_id?: string | null
+          pdf_drive_url?: string | null
+          planilla_pila_id?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          anio?: number
+          aprobado_at?: string | null
+          aprobado_por?: string | null
+          cobros_ids?: string[]
+          conciliado_at?: string | null
+          created_at?: string
+          email_destinatarios?: string[] | null
+          email_enviado_at?: string | null
+          email_resend_id?: string | null
+          empresa_id_pagador?: string
+          estado?: Database["public"]["Enums"]["cuenta_cobro_estado"]
+          fecha_emision?: string
+          fecha_vencimiento?: string
+          id?: string
+          mes?: number
+          monto_total?: number
+          notas?: string | null
+          numero?: string
+          pagado_at?: string | null
+          pdf_drive_id?: string | null
+          pdf_drive_url?: string | null
+          planilla_pila_id?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cuentas_cobro_emitidas_aprobado_por_fkey"
+            columns: ["aprobado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cuentas_cobro_emitidas_empresa_id_pagador_fkey"
+            columns: ["empresa_id_pagador"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cuentas_cobro_emitidas_empresa_id_pagador_fkey"
+            columns: ["empresa_id_pagador"]
+            isOneToOne: false
+            referencedRelation: "v_proyecto_financiero"
+            referencedColumns: ["empresa_id"]
+          },
+          {
+            foreignKeyName: "cuentas_cobro_emitidas_planilla_pila_id_fkey"
+            columns: ["planilla_pila_id"]
+            isOneToOne: false
+            referencedRelation: "planillas_pila_periodo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cuentas_cobro_emitidas_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -2873,6 +2922,7 @@ export type Database = {
           empresa_id: string | null
           estado: string
           etapa_actual_id: string | null
+          etapa_cambiada_at: string | null
           id: string
           lecciones_aprendidas: string | null
           linea_id: string | null
@@ -2905,6 +2955,7 @@ export type Database = {
           empresa_id?: string | null
           estado?: string
           etapa_actual_id?: string | null
+          etapa_cambiada_at?: string | null
           id?: string
           lecciones_aprendidas?: string | null
           linea_id?: string | null
@@ -2937,6 +2988,7 @@ export type Database = {
           empresa_id?: string | null
           estado?: string
           etapa_actual_id?: string | null
+          etapa_cambiada_at?: string | null
           id?: string
           lecciones_aprendidas?: string | null
           linea_id?: string | null
@@ -2992,6 +3044,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "etapas_negocio"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "negocios_etapa_actual_id_fkey"
+            columns: ["etapa_actual_id"]
+            isOneToOne: false
+            referencedRelation: "v_negocios_etapa_vencimiento"
+            referencedColumns: ["etapa_id"]
           },
           {
             foreignKeyName: "negocios_linea_id_fkey"
@@ -3488,6 +3547,7 @@ export type Database = {
         Row: {
           activo: boolean
           auto_renovar: boolean
+          concepto_detalle_template: string | null
           created_at: string | null
           fecha_fin: string
           fecha_inicio: string
@@ -3505,6 +3565,7 @@ export type Database = {
         Insert: {
           activo?: boolean
           auto_renovar?: boolean
+          concepto_detalle_template?: string | null
           created_at?: string | null
           fecha_fin: string
           fecha_inicio: string
@@ -3522,6 +3583,7 @@ export type Database = {
         Update: {
           activo?: boolean
           auto_renovar?: boolean
+          concepto_detalle_template?: string | null
           created_at?: string | null
           fecha_fin?: string
           fecha_inicio?: string
@@ -3560,6 +3622,60 @@ export type Database = {
           },
         ]
       }
+      planillas_pila_periodo: {
+        Row: {
+          anio: number
+          file_drive_id: string
+          file_drive_url: string
+          id: string
+          mes: number
+          monto_aportado: number | null
+          notas: string | null
+          uploaded_at: string
+          uploaded_by: string | null
+          workspace_id: string
+        }
+        Insert: {
+          anio: number
+          file_drive_id: string
+          file_drive_url: string
+          id?: string
+          mes: number
+          monto_aportado?: number | null
+          notas?: string | null
+          uploaded_at?: string
+          uploaded_by?: string | null
+          workspace_id: string
+        }
+        Update: {
+          anio?: number
+          file_drive_id?: string
+          file_drive_url?: string
+          id?: string
+          mes?: number
+          monto_aportado?: number | null
+          notas?: string | null
+          uploaded_at?: string
+          uploaded_by?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "planillas_pila_periodo_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "planillas_pila_periodo_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           area: string | null
@@ -3567,7 +3683,9 @@ export type Database = {
           created_at: string | null
           display_role: string | null
           full_name: string | null
+          home_workspace_id: string | null
           id: string
+          platform_admin: boolean
           role: string
           updated_at: string | null
           workspace_id: string
@@ -3578,7 +3696,9 @@ export type Database = {
           created_at?: string | null
           display_role?: string | null
           full_name?: string | null
+          home_workspace_id?: string | null
           id: string
+          platform_admin?: boolean
           role?: string
           updated_at?: string | null
           workspace_id: string
@@ -3589,12 +3709,21 @@ export type Database = {
           created_at?: string | null
           display_role?: string | null
           full_name?: string | null
+          home_workspace_id?: string | null
           id?: string
+          platform_admin?: boolean
           role?: string
           updated_at?: string | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "profiles_home_workspace_id_fkey"
+            columns: ["home_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "profiles_workspace_id_fkey"
             columns: ["workspace_id"]
@@ -5395,6 +5524,375 @@ export type Database = {
           },
         ]
       }
+      valida_dict_ciiu: {
+        Row: {
+          actualizado_at: string
+          codigo: string
+          descripcion: string
+          score: number
+        }
+        Insert: {
+          actualizado_at?: string
+          codigo: string
+          descripcion: string
+          score: number
+        }
+        Update: {
+          actualizado_at?: string
+          codigo?: string
+          descripcion?: string
+          score?: number
+        }
+        Relationships: []
+      }
+      valida_dict_municipios: {
+        Row: {
+          actualizado_at: string
+          departamento: string
+          divipola: string
+          municipio: string
+          score: number
+        }
+        Insert: {
+          actualizado_at?: string
+          departamento: string
+          divipola: string
+          municipio: string
+          score: number
+        }
+        Update: {
+          actualizado_at?: string
+          departamento?: string
+          divipola?: string
+          municipio?: string
+          score?: number
+        }
+        Relationships: []
+      }
+      valida_dict_paises: {
+        Row: {
+          actualizado_at: string
+          codigo_iso: string
+          motivo: string | null
+          nombre: string
+          score: number
+        }
+        Insert: {
+          actualizado_at?: string
+          codigo_iso: string
+          motivo?: string | null
+          nombre: string
+          score: number
+        }
+        Update: {
+          actualizado_at?: string
+          codigo_iso?: string
+          motivo?: string | null
+          nombre?: string
+          score?: number
+        }
+        Relationships: []
+      }
+      valida_sarlaft_datos_negocio: {
+        Row: {
+          actualizado_at: string
+          actualizado_por: string | null
+          calidad_verificado: string | null
+          ciiu_codigo: string | null
+          criticidad_cargo: string | null
+          endeudamiento: string | null
+          forma_operacion: string | null
+          municipio_divipola: string | null
+          negocio_id: string
+          notas: string | null
+          pais_codigo_iso: string | null
+          tipo_contrato: string | null
+          universo: string
+          workspace_id: string
+        }
+        Insert: {
+          actualizado_at?: string
+          actualizado_por?: string | null
+          calidad_verificado?: string | null
+          ciiu_codigo?: string | null
+          criticidad_cargo?: string | null
+          endeudamiento?: string | null
+          forma_operacion?: string | null
+          municipio_divipola?: string | null
+          negocio_id: string
+          notas?: string | null
+          pais_codigo_iso?: string | null
+          tipo_contrato?: string | null
+          universo: string
+          workspace_id: string
+        }
+        Update: {
+          actualizado_at?: string
+          actualizado_por?: string | null
+          calidad_verificado?: string | null
+          ciiu_codigo?: string | null
+          criticidad_cargo?: string | null
+          endeudamiento?: string | null
+          forma_operacion?: string | null
+          municipio_divipola?: string | null
+          negocio_id?: string
+          notas?: string | null
+          pais_codigo_iso?: string | null
+          tipo_contrato?: string | null
+          universo?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "valida_sarlaft_datos_negocio_actualizado_por_fkey"
+            columns: ["actualizado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_sarlaft_datos_negocio_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: true
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_sarlaft_datos_negocio_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: true
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "valida_sarlaft_datos_negocio_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      valida_score_negocio: {
+        Row: {
+          actualizado_at: string
+          factores_aplicados: Json
+          negocio_id: string
+          nivel: string
+          proxima_revision: string | null
+          puntaje: number
+          universo: string
+          valida_consulta_id_ultima: string | null
+          workspace_id: string
+        }
+        Insert: {
+          actualizado_at?: string
+          factores_aplicados?: Json
+          negocio_id: string
+          nivel: string
+          proxima_revision?: string | null
+          puntaje: number
+          universo: string
+          valida_consulta_id_ultima?: string | null
+          workspace_id: string
+        }
+        Update: {
+          actualizado_at?: string
+          factores_aplicados?: Json
+          negocio_id?: string
+          nivel?: string
+          proxima_revision?: string | null
+          puntaje?: number
+          universo?: string
+          valida_consulta_id_ultima?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "valida_score_negocio_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: true
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_score_negocio_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: true
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "valida_score_negocio_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      valida_segmentacion_bitacora: {
+        Row: {
+          aplicada_at: string
+          aplicada_por: string | null
+          id: string
+          pesos_contrapartes: Json
+          pesos_empleados: Json
+          preset: string
+          razon_cambio: string | null
+          umbrales_contrapartes: Json
+          umbrales_empleados: Json
+          version: number
+          workspace_id: string
+        }
+        Insert: {
+          aplicada_at?: string
+          aplicada_por?: string | null
+          id?: string
+          pesos_contrapartes: Json
+          pesos_empleados: Json
+          preset: string
+          razon_cambio?: string | null
+          umbrales_contrapartes: Json
+          umbrales_empleados: Json
+          version: number
+          workspace_id: string
+        }
+        Update: {
+          aplicada_at?: string
+          aplicada_por?: string | null
+          id?: string
+          pesos_contrapartes?: Json
+          pesos_empleados?: Json
+          preset?: string
+          razon_cambio?: string | null
+          umbrales_contrapartes?: Json
+          umbrales_empleados?: Json
+          version?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "valida_segmentacion_bitacora_aplicada_por_fkey"
+            columns: ["aplicada_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_segmentacion_bitacora_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      valida_segmentacion_ciiu_override: {
+        Row: {
+          codigo_ciiu: string
+          creado_at: string
+          creado_por: string | null
+          razon: string | null
+          score: number
+          workspace_id: string
+        }
+        Insert: {
+          codigo_ciiu: string
+          creado_at?: string
+          creado_por?: string | null
+          razon?: string | null
+          score: number
+          workspace_id: string
+        }
+        Update: {
+          codigo_ciiu?: string
+          creado_at?: string
+          creado_por?: string | null
+          razon?: string | null
+          score?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "valida_segmentacion_ciiu_override_creado_por_fkey"
+            columns: ["creado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_segmentacion_ciiu_override_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      valida_segmentacion_config: {
+        Row: {
+          aplicada_at: string | null
+          aplicada_por: string | null
+          created_at: string
+          disclaimer_aceptado: boolean
+          id: string
+          pesos_contrapartes: Json
+          pesos_empleados: Json
+          preset: string
+          umbrales_contrapartes: Json
+          umbrales_empleados: Json
+          updated_at: string
+          version: number
+          workspace_id: string
+        }
+        Insert: {
+          aplicada_at?: string | null
+          aplicada_por?: string | null
+          created_at?: string
+          disclaimer_aceptado?: boolean
+          id?: string
+          pesos_contrapartes?: Json
+          pesos_empleados?: Json
+          preset: string
+          umbrales_contrapartes?: Json
+          umbrales_empleados?: Json
+          updated_at?: string
+          version?: number
+          workspace_id: string
+        }
+        Update: {
+          aplicada_at?: string | null
+          aplicada_por?: string | null
+          created_at?: string
+          disclaimer_aceptado?: boolean
+          id?: string
+          pesos_contrapartes?: Json
+          pesos_empleados?: Json
+          preset?: string
+          umbrales_contrapartes?: Json
+          umbrales_empleados?: Json
+          updated_at?: string
+          version?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "valida_segmentacion_config_aplicada_por_fkey"
+            columns: ["aplicada_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "valida_segmentacion_config_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ve_procesamiento_log: {
         Row: {
           campos_extraidos: Json | null
@@ -5632,6 +6130,7 @@ export type Database = {
           color_primario: string | null
           color_secundario: string | null
           config_extra: Json
+          cotizacion_template_slug: string
           created_at: string | null
           drive_folder_id: string | null
           equipo_declarado: number | null
@@ -5658,6 +6157,7 @@ export type Database = {
           color_primario?: string | null
           color_secundario?: string | null
           config_extra?: Json
+          cotizacion_template_slug?: string
           created_at?: string | null
           drive_folder_id?: string | null
           equipo_declarado?: number | null
@@ -5684,6 +6184,7 @@ export type Database = {
           color_primario?: string | null
           color_secundario?: string | null
           config_extra?: Json
+          cotizacion_template_slug?: string
           created_at?: string | null
           drive_folder_id?: string | null
           equipo_declarado?: number | null
@@ -5843,6 +6344,34 @@ export type Database = {
           workspace_id: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "negocios_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_negocios_etapa_vencimiento: {
+        Row: {
+          abiertos: number | null
+          etapa_id: string | null
+          etapa_nombre: string | null
+          etapa_orden: number | null
+          linea_id: string | null
+          sla_dias: number | null
+          vencidos: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "etapas_negocio_linea_id_fkey"
+            columns: ["linea_id"]
+            isOneToOne: false
+            referencedRelation: "lineas_negocio"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "negocios_workspace_id_fkey"
             columns: ["workspace_id"]
@@ -6016,6 +6545,10 @@ export type Database = {
         }
         Returns: string
       }
+      generate_cuenta_cobro_numero: {
+        Args: { p_anio: number; p_mes: number; p_workspace_id: string }
+        Returns: string
+      }
       generate_empresa_codigo: {
         Args: { p_nombre: string; p_workspace_id: string }
         Returns: string
@@ -6102,7 +6635,14 @@ export type Database = {
       }
     }
     Enums: {
-      [_ in never]: never
+      cuenta_cobro_estado:
+        | "borrador"
+        | "emitida_pendiente_aprobacion"
+        | "aprobada_lista_envio"
+        | "enviada"
+        | "pagada"
+        | "conciliada"
+        | "anulada"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -6229,9 +6769,20 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      cuenta_cobro_estado: [
+        "borrador",
+        "emitida_pendiente_aprobacion",
+        "aprobada_lista_envio",
+        "enviada",
+        "pagada",
+        "conciliada",
+        "anulada",
+      ],
+    },
   },
 } as const
+
 // Type aliases custom — preservados al regenerar
 export type BankAccount = Database['public']['Tables']['bank_accounts']['Row']
 export type Client = Database['public']['Tables']['clients']['Row']
@@ -6275,3 +6826,5 @@ export type WorkspaceFeature = Database['public']['Tables']['workspace_features'
 export type WorkspaceStageRow = Database['public']['Tables']['workspace_stages']['Row']
 export type ValidaConsulta = Database['public']['Tables']['valida_consultas']['Row']
 export type TutorialProgress = Database['public']['Tables']['tutorial_progress']['Row']
+export type CuentaCobroEmitida = Database['public']['Tables']['cuentas_cobro_emitidas']['Row']
+export type PlanillaPilaPeriodo = Database['public']['Tables']['planillas_pila_periodo']['Row']

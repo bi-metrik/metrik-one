@@ -25,6 +25,7 @@ import {
   ListChecks,
   Scale,
   Sliders,
+  Receipt,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -45,6 +46,7 @@ interface WorkspaceModules {
   compliance_dual_informa?: boolean
   compliance_audit?: boolean
   valida_consulta?: boolean
+  cobros_recurrentes?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -107,6 +109,11 @@ const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
 const VALIDA_NAV_ITEMS = [
   { href: '/valida', label: 'Valida', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
   { href: '/valida/segmentacion', label: 'Segmentación SARLAFT', icon: Sliders, roles: ['owner', 'admin', 'supervisor'] },
+]
+
+// Cobros recurrentes (extra inferior, activable por flag — solo workspace metrik por defecto)
+const COBROS_RECURRENTES_NAV_ITEMS = [
+  { href: '/cobros-recurrentes', label: 'Cuentas de cobro', icon: Receipt, roles: ['owner', 'admin'] },
 ]
 
 // Compartidos (siempre visibles)
@@ -237,13 +244,14 @@ export default function AppShell({
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
   const workflowsItems = hasLineas ? filterByRole(WORKFLOWS_NAV_ITEMS, role) : []
   const validaItems = mod.valida_consulta ? filterByRole(VALIDA_NAV_ITEMS, role) : []
+  const cobrosRecurrentesItems = mod.cobros_recurrentes ? filterByRole(COBROS_RECURRENTES_NAV_ITEMS, role) : []
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 
   // Home href based on active modules
   const homeHref = mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio')
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems, ...cobrosRecurrentesItems, ...workflowsItems]
   const primaryHrefs = (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
@@ -427,14 +435,14 @@ export default function AppShell({
           )}
 
           {/* Valida — extra inferior activable por flag */}
-          {validaItems.length > 0 && (
+          {(validaItems.length > 0 || cobrosRecurrentesItems.length > 0) && (
             <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
               {sidebarExpanded && (
                 <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
                   Extras
                 </p>
               )}
-              {validaItems.map((item) => {
+              {[...validaItems, ...cobrosRecurrentesItems].map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (

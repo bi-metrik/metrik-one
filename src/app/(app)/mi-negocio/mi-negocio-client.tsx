@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 
@@ -19,6 +19,7 @@ import EquipoSection from './equipo-section'
 import PlanSection from './plan-section'
 import FlujoSection from './flujo-section'
 import ReglasValidacionSection from './reglas-validacion-section'
+import PilaSection from './pila-section'
 
 // ── Types ──────────────────────────────────────────
 
@@ -75,6 +76,7 @@ const SECTIONS: SectionDef[] = [
   { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
   { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
+  { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
 
 // ── Component ──────────────────────────────────────
@@ -417,6 +419,9 @@ function renderSection(
 
     case 'reglas-validacion':
       return <ReglasValidacionSection workspaceId={props.workspace?.id} />
+
+    case 'pila-mensual':
+      return <PilaSection />
 
     default:
       return <p className="text-sm text-muted-foreground">Seccion no encontrada</p>
