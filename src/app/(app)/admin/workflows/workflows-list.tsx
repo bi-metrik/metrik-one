@@ -10,13 +10,29 @@ interface Props {
 
 export default function WorkflowsList({ items }: Props) {
   const [q, setQ] = useState('')
+  const [filterWorkspace, setFilterWorkspace] = useState<string>('todos')
   const [filterTipo, setFilterTipo] = useState<string>('todos')
   const [filterEstado, setFilterEstado] = useState<string>('todos')
 
   const tipos = useMemo(() => Array.from(new Set(items.map(i => i.linea_tipo))).sort(), [items])
+  const workspaceOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const it of items) {
+      const key = it.workspace_slug || it.workspace_id
+      const label = it.workspace_name || it.workspace_slug || it.workspace_id
+      if (!map.has(key)) map.set(key, label)
+    }
+    return Array.from(map.entries())
+      .map(([slug, name]) => ({ slug, name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [items])
 
   const filtered = useMemo(() => {
     return items.filter(it => {
+      if (filterWorkspace !== 'todos') {
+        const key = it.workspace_slug || it.workspace_id
+        if (key !== filterWorkspace) return false
+      }
       if (filterTipo !== 'todos' && it.linea_tipo !== filterTipo) return false
       if (filterEstado === 'activo' && !it.is_active) return false
       if (filterEstado === 'inactivo' && it.is_active) return false
@@ -27,7 +43,7 @@ export default function WorkflowsList({ items }: Props) {
       }
       return true
     })
-  }, [items, q, filterTipo, filterEstado])
+  }, [items, q, filterWorkspace, filterTipo, filterEstado])
 
   const grouped = useMemo(() => {
     const g: Record<string, AdminLineaItem[]> = {}
@@ -51,6 +67,14 @@ export default function WorkflowsList({ items }: Props) {
           placeholder="Buscar por línea, workspace…"
           className="flex-1 min-w-[240px] rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
         />
+        <select
+          value={filterWorkspace}
+          onChange={e => setFilterWorkspace(e.target.value)}
+          className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-[#10B981] focus:outline-none"
+        >
+          <option value="todos">Todos los workspaces</option>
+          {workspaceOptions.map(w => <option key={w.slug} value={w.slug}>{w.name}</option>)}
+        </select>
         <select
           value={filterTipo}
           onChange={e => setFilterTipo(e.target.value)}
