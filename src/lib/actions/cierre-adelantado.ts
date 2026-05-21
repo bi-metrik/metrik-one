@@ -55,19 +55,12 @@ async function getStaffAreas(supabase: any, staffId: string): Promise<Area[]> {
     .from('staff_areas')
     .select('area')
     .eq('staff_id', staffId)
-  return (
-    ((data ?? []) as Array<{ area: string }>)
-      .map((r) => r.area)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .filter((a): a is Area =>
-        (['comercial', 'operaciones', 'financiera', 'direccion'] as const).includes(
-          a as any,
-        ),
-      )
-  )
+  const VALID_AREAS: readonly string[] = ['comercial', 'operaciones', 'financiera', 'direccion']
+  return ((data ?? []) as Array<{ area: string }>)
+    .map((r) => r.area)
+    .filter((a): a is Area => VALID_AREAS.includes(a))
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getNegocioBase(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
@@ -83,7 +76,6 @@ async function getNegocioBase(
   return (data as NegocioInfo) ?? null
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function findEtapaCierre(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,

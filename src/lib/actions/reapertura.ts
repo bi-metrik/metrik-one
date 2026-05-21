@@ -28,16 +28,10 @@ async function getStaffAreas(supabase: any, staffId: string): Promise<Area[]> {
     .from('staff_areas')
     .select('area')
     .eq('staff_id', staffId)
-  return (
-    ((data ?? []) as Array<{ area: string }>)
-      .map((r) => r.area)
-      .filter((a): a is Area =>
-        (['comercial', 'operaciones', 'financiera', 'direccion'] as const).includes(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          a as any,
-        ),
-      )
-  )
+  const VALID_AREAS: readonly string[] = ['comercial', 'operaciones', 'financiera', 'direccion']
+  return ((data ?? []) as Array<{ area: string }>)
+    .map((r) => r.area)
+    .filter((a): a is Area => VALID_AREAS.includes(a))
 }
 
 // ── reabrirNegocio ───────────────────────────────────────────────────
