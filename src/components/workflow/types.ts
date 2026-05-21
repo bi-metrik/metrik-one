@@ -9,8 +9,13 @@ export interface WorkflowBloque {
   nombre: string
   orden: number
   es_gate: boolean
-  // Solo en modo 'detailed': config completa
+  // Flags visuales (ambos modos)
   estado?: 'editable' | 'visible'
+  readonly?: boolean
+  source_etapa_orden?: number | null
+  condition_field?: string | null
+  condition_value?: string | null
+  // Solo en modo 'detailed': config completa para expandir
   config_extra?: Record<string, unknown>
 }
 

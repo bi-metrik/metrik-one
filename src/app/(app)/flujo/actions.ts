@@ -19,6 +19,11 @@ export interface FlujoBloque {
   nombre: string
   orden: number
   es_gate: boolean
+  estado: 'editable' | 'visible'
+  readonly: boolean
+  source_etapa_orden: number | null
+  condition_field: string | null
+  condition_value: string | null
 }
 
 export interface FlujoRoutingConditional {
@@ -91,6 +96,7 @@ interface BloqueConfigRow {
   etapa_id: string
   orden: number
   es_gate: boolean
+  estado: 'editable' | 'visible' | null
   nombre: string | null
   config_extra: Record<string, unknown> | null
   bloque_definitions: { tipo: string; nombre: string } | null
@@ -183,7 +189,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
   // 3) Bloques activos
   const { data: bloquesRaw } = await supabase
     .from('bloque_configs')
-    .select('id, etapa_id, orden, es_gate, nombre, config_extra, bloque_definitions(tipo, nombre)')
+    .select('id, etapa_id, orden, es_gate, estado, nombre, config_extra, bloque_definitions(tipo, nombre)')
     .in('etapa_id', etapaIds)
     .eq('workspace_id', workspaceId)
     .order('orden')
@@ -206,11 +212,21 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
 
   const bloquesByEtapa = new Map<string, FlujoBloque[]>()
   for (const b of bloques) {
-    const cv = (b.config_extra as { cliente_view?: boolean } | null)?.cliente_view
-    if (cv === false) continue
+    const cfgExtra = b.config_extra as
+      | {
+          cliente_view?: boolean
+          visible?: boolean
+          readonly?: boolean
+          source_etapa_orden?: number
+          condition?: { field?: string; value?: string }
+          label?: string
+          nombre?: string
+        }
+      | null
+    if (cfgExtra?.cliente_view === false) continue
+    if (cfgExtra?.visible === false) continue
     const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
     const bcNombre = b.nombre
-    const cfgExtra = b.config_extra as { label?: string; nombre?: string } | null
     const cfgLabel = cfgExtra?.label
     const cfgNombre = cfgExtra?.nombre
     const arr = bloquesByEtapa.get(b.etapa_id) ?? []
@@ -223,6 +239,20 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       ),
       orden: b.orden,
       es_gate: b.es_gate,
+      estado: b.estado ?? 'editable',
+      readonly: cfgExtra?.readonly === true,
+      source_etapa_orden:
+        typeof cfgExtra?.source_etapa_orden === 'number'
+          ? cfgExtra.source_etapa_orden
+          : null,
+      condition_field:
+        typeof cfgExtra?.condition?.field === 'string'
+          ? cfgExtra.condition.field
+          : null,
+      condition_value:
+        typeof cfgExtra?.condition?.value === 'string'
+          ? cfgExtra.condition.value
+          : null,
     })
     bloquesByEtapa.set(b.etapa_id, arr)
   }

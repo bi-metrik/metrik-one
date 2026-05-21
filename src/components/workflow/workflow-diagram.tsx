@@ -34,6 +34,8 @@ import {
   HelpCircle,
   ArrowDown,
   ArrowRight,
+  Eye,
+  GitBranch,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
@@ -621,22 +623,61 @@ function EtapaCard({
             ) : (
               <>
                 <ul className="space-y-1.5">
-                  {etapa.bloques.map(b => (
-                    <li
-                      key={b.config_id}
-                      className="flex items-center gap-2 text-[12px] text-[#1A1A1A]"
-                    >
-                      <span
-                        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
-                        title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
-                      />
-                      <span className="flex-1 truncate">{b.nombre}</span>
-                      {b.es_gate && (
-                        <ShieldCheck className="h-3 w-3 shrink-0 text-[#10B981]" />
-                      )}
-                    </li>
-                  ))}
+                  {etapa.bloques.map(b => {
+                    const isReadOnly = b.readonly === true || b.estado === 'visible'
+                    const isCondicional = Boolean(b.condition_field)
+                    return (
+                      <li
+                        key={b.config_id}
+                        className="flex items-center gap-2 text-[12px]"
+                        style={{ color: isReadOnly ? '#6B7280' : '#1A1A1A' }}
+                      >
+                        <span
+                          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
+                          title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
+                        />
+                        <span className="flex-1 truncate">{b.nombre}</span>
+                        <span
+                          className="hidden shrink-0 rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-[#6B7280] sm:inline-block"
+                          title={`Tipo de bloque: ${b.tipo}`}
+                        >
+                          {b.tipo}
+                        </span>
+                        {isCondicional && (
+                          <span
+                            className="inline-flex shrink-0"
+                            title={`Aparece si ${b.condition_field} = ${b.condition_value}`}
+                            aria-label="Condicional"
+                          >
+                            <GitBranch className="h-3 w-3 text-[#6B7280]" />
+                          </span>
+                        )}
+                        {isReadOnly && (
+                          <span
+                            className="inline-flex shrink-0"
+                            title={
+                              b.source_etapa_orden != null
+                                ? `Solo lectura — heredado de etapa ${b.source_etapa_orden}`
+                                : 'Solo lectura'
+                            }
+                            aria-label="Solo lectura"
+                          >
+                            <Eye className="h-3 w-3 text-[#6B7280]" />
+                          </span>
+                        )}
+                        {b.es_gate && (
+                          <span
+                            className="inline-flex shrink-0"
+                            title="Gate (bloquea avance)"
+                            aria-label="Gate"
+                          >
+                            <ShieldCheck className="h-3 w-3 text-[#10B981]" />
+                          </span>
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
                 {/* Solo en mobile: botón colapsar */}
                 <button
@@ -707,6 +748,8 @@ function EtapaCard({
 function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
   const [expanded, setExpanded] = useState(false)
   const hasConfig = bloque.config_extra && Object.keys(bloque.config_extra).length > 0
+  const isReadOnly = bloque.readonly === true || bloque.estado === 'visible'
+  const isCondicional = Boolean(bloque.condition_field)
 
   return (
     <div className="overflow-hidden rounded-lg border border-[#E5E7EB] bg-white">
@@ -722,15 +765,26 @@ function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
           <span className="shrink-0 text-[10px] font-mono text-[#6B7280]">{bloque.orden}</span>
           <span className="truncate text-[12px] font-semibold text-[#1A1A1A]">{bloque.nombre}</span>
           <span className="rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-mono text-[#6B7280]">{bloque.tipo}</span>
-          {bloque.estado && (
+          {isCondicional && (
             <span
-              className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-              style={{
-                backgroundColor: bloque.estado === 'editable' ? '#DBEAFE' : '#F3F4F6',
-                color: bloque.estado === 'editable' ? '#1D4ED8' : '#6B7280',
-              }}
+              className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+              title={`Aparece si ${bloque.condition_field} = ${bloque.condition_value}`}
             >
-              {bloque.estado}
+              <GitBranch className="h-3 w-3" />
+              condicional
+            </span>
+          )}
+          {isReadOnly && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+              title={
+                bloque.source_etapa_orden != null
+                  ? `Solo lectura — heredado de etapa ${bloque.source_etapa_orden}`
+                  : 'Solo lectura'
+              }
+            >
+              <Eye className="h-3 w-3" />
+              solo lectura
             </span>
           )}
           {bloque.es_gate && (
