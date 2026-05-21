@@ -76,6 +76,10 @@ export type NegocioDetalle = {
   created_at: string | null
   updated_at: string | null
   closed_at: string | null
+  // Cierre modelo roles-areas-stages
+  cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
+  razon_cierre: string | null
+  descripcion_cierre: string | null
   responsable_id: string | null
   // Pausa
   pausado: boolean
@@ -310,6 +314,9 @@ export async function getNegocioDetalle(id: string): Promise<{
       created_at,
       updated_at,
       closed_at,
+      cierre_motivo,
+      razon_cierre,
+      descripcion_cierre,
       responsable_id,
       pausado,
       pausado_hasta,
