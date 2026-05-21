@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useMemo, useTransition } from 'react'
-import { Receipt, ExternalLink, Filter, FileCheck2, Clock, Send, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
-import { aprobarYEnviarCuentaCobro } from '@/lib/actions/cuentas-cobro-actions'
+import { Receipt, ExternalLink, Filter, FileCheck2, Clock, Send, CheckCircle2, AlertCircle, Loader2, RotateCcw } from 'lucide-react'
+import { aprobarYEnviarCuentaCobro, reenviarCuentaCobro } from '@/lib/actions/cuentas-cobro-actions'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
@@ -64,6 +64,7 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
   const [filtroEstado, setFiltroEstado] = useState<string>('todos')
   const [filtroAnio, setFiltroAño] = useState<number>(new Date().getFullYear())
   const [aprobandoId, setAprobandoId] = useState<string | null>(null)
+  const [reenviandoId, setReenviandoId] = useState<string | null>(null)
   const [, startTransition] = useTransition()
   const router = useRouter()
 
@@ -78,6 +79,24 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
       setAprobandoId(null)
       if (res.success) {
         toast.success(`Cuenta ${numero} aprobada y enviada`)
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  const handleReenviar = (cuentaId: string, numero: string, destinatarios: string[] | null) => {
+    const destLabel = destinatarios && destinatarios.length > 0
+      ? destinatarios.join(', ')
+      : 'el cliente'
+    if (!window.confirm(`Reenviar cuenta ${numero} a ${destLabel}?`)) return
+    setReenviandoId(cuentaId)
+    startTransition(async () => {
+      const res = await reenviarCuentaCobro(cuentaId)
+      setReenviandoId(null)
+      if (res.success) {
+        toast.success(`Cuenta ${numero} reenviada`)
         router.refresh()
       } else {
         toast.error(res.error)
@@ -244,6 +263,19 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
                               <><Loader2 className="h-3 w-3 animate-spin" /> Enviando…</>
                             ) : (
                               <><Send className="h-3 w-3" /> Aprobar y enviar</>
+                            )}
+                          </button>
+                        ) : role === 'owner' && (c.estado === 'enviada' || c.estado === 'aprobada_lista_envio') ? (
+                          <button
+                            type="button"
+                            onClick={() => handleReenviar(c.id, c.numero, c.email_destinatarios)}
+                            disabled={reenviandoId === c.id}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:border-[#10B981] hover:text-[#10B981] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {reenviandoId === c.id ? (
+                              <><Loader2 className="h-3 w-3 animate-spin" /> Reenviando…</>
+                            ) : (
+                              <><RotateCcw className="h-3 w-3" /> Reenviar</>
                             )}
                           </button>
                         ) : (

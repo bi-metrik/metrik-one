@@ -130,3 +130,59 @@ export async function aprobarYEnviarCuentaCobro(
   revalidatePath('/cobros-recurrentes')
   return { success: true, data: { resend_id: envio.resend_id } }
 }
+
+/**
+ * Server action: reenvía una cuenta de cobro ya aprobada al cliente.
+ *
+ * Caso de uso:
+ *   - Cuenta enviada con código viejo (sin PILA adjunta) → reenviar para que
+ *     el cliente reciba ahora con la planilla.
+ *   - Cuenta en estado 'aprobada_lista_envio' que quedó stuck por falla previa
+ *     del envío.
+ *
+ * Validaciones:
+ *   - Solo owner
+ *   - Estado en {'enviada', 'aprobada_lista_envio'}
+ *   - No re-aprueba — usa la aprobación previa
+ *
+ * Side effects:
+ *   - Sobrescribe email_resend_id + email_enviado_at (queda el del último envío)
+ *   - Si estado era 'aprobada_lista_envio', pasa a 'enviada'
+ *   - No toca aprobado_at, aprobado_por, pagado_at
+ */
+export async function reenviarCuentaCobro(
+  cuentaId: string,
+): Promise<ActionResult<{ resend_id: string }>> {
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
+
+  if (role !== 'owner') {
+    return { success: false, error: 'Solo el owner del workspace puede reenviar cuentas de cobro' }
+  }
+
+  const { data: cuenta } = await supabase
+    .from('cuentas_cobro_emitidas')
+    .select('id, numero, estado, workspace_id')
+    .eq('id', cuentaId)
+    .maybeSingle()
+
+  if (!cuenta) return { success: false, error: 'Cuenta no encontrada' }
+
+  const c = cuenta as { id: string; numero: string; estado: string; workspace_id: string }
+
+  if (c.workspace_id !== workspaceId) {
+    return { success: false, error: 'La cuenta no pertenece a este workspace' }
+  }
+
+  if (c.estado !== 'enviada' && c.estado !== 'aprobada_lista_envio') {
+    return { success: false, error: `La cuenta no se puede reenviar (estado: ${c.estado})` }
+  }
+
+  const envio = await enviarCuentaCobroEmail(supabase, cuentaId)
+  if (!envio.success) {
+    return { success: false, error: envio.error }
+  }
+
+  revalidatePath('/cobros-recurrentes')
+  return { success: true, data: { resend_id: envio.resend_id } }
+}
