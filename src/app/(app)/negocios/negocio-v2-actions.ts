@@ -114,6 +114,10 @@ export type NegocioResumen = {
   pausado: boolean
   pausado_hasta: string | null
   motivo_pausa: string | null
+  // Cierre (modelo roles-areas-stages Fase 3+)
+  cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
+  closed_at: string | null
+  razon_cierre: string | null
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -174,6 +178,9 @@ export async function getNegociosV2(
       pausado,
       pausado_hasta,
       motivo_pausa,
+      cierre_motivo,
+      closed_at,
+      razon_cierre,
       lineas_negocio(nombre),
       etapas_negocio(nombre, stage),
       empresas(nombre),
@@ -245,6 +252,9 @@ export async function getNegociosV2(
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,
       motivo_pausa: (row.motivo_pausa as string) ?? null,
+      cierre_motivo: (row.cierre_motivo as 'exitoso' | 'perdido' | 'cancelado' | null) ?? null,
+      closed_at: (row.closed_at as string) ?? null,
+      razon_cierre: (row.razon_cierre as string) ?? null,
     }
   })
 }
