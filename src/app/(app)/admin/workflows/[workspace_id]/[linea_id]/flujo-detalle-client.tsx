@@ -26,15 +26,27 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
       stage: e.stage,
       orden: e.orden,
       sla_horas: slaHoras,
-      bloques: e.bloques.map(b => ({
-        config_id: b.config_id,
-        tipo: b.tipo,
-        nombre: b.nombre,
-        orden: b.orden,
-        es_gate: b.es_gate,
-        estado: b.estado,
-        config_extra: b.config_extra ?? {},
-      })),
+      bloques: e.bloques.map(b => {
+        const ce = (b.config_extra ?? {}) as {
+          readonly?: boolean
+          source_etapa_orden?: number
+          condition?: { field?: string; value?: string }
+        }
+        return {
+          config_id: b.config_id,
+          tipo: b.tipo,
+          nombre: b.nombre,
+          orden: b.orden,
+          es_gate: b.es_gate,
+          estado: b.estado,
+          readonly: ce.readonly === true,
+          source_etapa_orden:
+            typeof ce.source_etapa_orden === 'number' ? ce.source_etapa_orden : null,
+          condition_field: typeof ce.condition?.field === 'string' ? ce.condition.field : null,
+          condition_value: typeof ce.condition?.value === 'string' ? ce.condition.value : null,
+          config_extra: b.config_extra ?? {},
+        }
+      }),
       abiertos: e.abiertos,
       vencidos: e.vencidos,
       is_active: e.is_active,
