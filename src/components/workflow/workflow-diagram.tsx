@@ -728,45 +728,53 @@ function EtapaCard({
                         className="flex items-center gap-2 text-[12px]"
                         style={{ color: isReadOnly ? '#6B7280' : '#1A1A1A' }}
                       >
-                        {isReadOnly ? (
-                          <Eye
-                            className="h-3 w-3 shrink-0 text-[#6B7280]"
-                            aria-hidden
-                          />
-                        ) : (
-                          <span
-                            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
-                            title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
-                          />
-                        )}
-                        {b.block_id && (
-                          <span
-                            className="shrink-0 rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
-                            title={`ID del bloque: ${b.block_id}`}
-                          >
-                            {b.block_id}
-                          </span>
-                        )}
+                        <span
+                          className="inline-flex w-9 shrink-0 justify-center"
+                          aria-hidden
+                        >
+                          {b.block_id && (
+                            <span
+                              className="rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+                              title={`ID del bloque: ${b.block_id}`}
+                            >
+                              {b.block_id}
+                            </span>
+                          )}
+                        </span>
+                        <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
+                          {isReadOnly ? (
+                            <Eye className="h-3 w-3 text-[#6B7280]" aria-hidden />
+                          ) : (
+                            <span
+                              className="inline-block h-1.5 w-1.5 rounded-full"
+                              style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
+                              title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
+                            />
+                          )}
+                        </span>
                         <span className="flex-1 truncate">{b.nombre}</span>
-                        {isCondicional && (
-                          <span
-                            className="inline-flex shrink-0"
-                            title={`Aparece si ${b.condition_field} = ${b.condition_value}`}
-                            aria-label="Condicional"
-                          >
-                            <GitBranch className="h-3 w-3 text-[#6B7280]" />
-                          </span>
-                        )}
-                        {!isReadOnly && b.es_gate && (
-                          <span
-                            className="inline-flex shrink-0"
-                            title="Gate (bloquea avance)"
-                            aria-label="Gate"
-                          >
-                            <ShieldCheck className="h-3 w-3 text-[#10B981]" />
-                          </span>
-                        )}
+                        <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
+                          {isCondicional && (
+                            <span
+                              className="inline-flex"
+                              title={`Aparece si ${b.condition_field} = ${b.condition_value}`}
+                              aria-label="Condicional"
+                            >
+                              <GitBranch className="h-3 w-3 text-[#6B7280]" />
+                            </span>
+                          )}
+                        </span>
+                        <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
+                          {!isReadOnly && b.es_gate && (
+                            <span
+                              className="inline-flex"
+                              title="Gate (bloquea avance)"
+                              aria-label="Gate"
+                            >
+                              <ShieldCheck className="h-3 w-3 text-[#10B981]" />
+                            </span>
+                          )}
+                        </span>
                         <span
                           className="hidden shrink-0 rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-[#6B7280] sm:inline-block"
                           title={`Tipo de bloque: ${b.tipo}`}
