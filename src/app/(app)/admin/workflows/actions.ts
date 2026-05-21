@@ -224,9 +224,13 @@ export async function getAdminFlujoDetalle(
 
   const bloquesByEtapa = new Map<string, AdminBloque[]>()
   for (const b of bcs) {
+    const cfgExtra = b.config_extra as
+      | { label?: string; nombre?: string; visible?: boolean; cliente_view?: boolean }
+      | null
+    if (cfgExtra?.visible === false) continue
+    if (cfgExtra?.cliente_view === false) continue
     const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
     const nombreDefinition = b.bloque_definitions?.nombre ?? 'Desconocido'
-    const cfgExtra = b.config_extra as { label?: string; nombre?: string } | null
     const bcNombre = b.nombre && b.nombre.trim().length > 0 ? b.nombre : null
     const cfgLabel = cfgExtra?.label && cfgExtra.label.trim().length > 0 ? cfgExtra.label : null
     const cfgNombre = cfgExtra?.nombre && cfgExtra.nombre.trim().length > 0 ? cfgExtra.nombre : null
