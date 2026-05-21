@@ -76,6 +76,10 @@ export type NegocioDetalle = {
   created_at: string | null
   updated_at: string | null
   closed_at: string | null
+  // Cierre modelo roles-areas-stages
+  cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
+  razon_cierre: string | null
+  descripcion_cierre: string | null
   responsable_id: string | null
   // Pausa
   pausado: boolean
@@ -114,6 +118,10 @@ export type NegocioResumen = {
   pausado: boolean
   pausado_hasta: string | null
   motivo_pausa: string | null
+  // Cierre (modelo roles-areas-stages Fase 3+)
+  cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
+  closed_at: string | null
+  razon_cierre: string | null
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -140,8 +148,24 @@ export async function getNegociosV2(
   estado: 'abierto' | 'completado' | 'todos' = 'abierto',
   incluirPausados = false,
 ): Promise<NegocioResumen[]> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return []
+
+  // ── Modelo roles-areas-stages Fase 2: filtrado por operator ──
+  // Operator solo ve negocios donde es responsable (negocio_responsables N:M).
+  // Otros roles (owner/admin/supervisor/read_only) ven todos. Contador no llega aqui.
+  let negocioIdsPermitidos: string[] | null = null
+  if (role === 'operator' && staffId) {
+    const { data: nrRows } = await db(supabase)
+      .from('negocio_responsables')
+      .select('negocio_id')
+      .eq('staff_id', staffId)
+    const ids = (nrRows ?? []).map((r: { negocio_id: string }) => r.negocio_id)
+    if (ids.length === 0) return []
+    negocioIdsPermitidos = ids
+  }
+  // userId unused outside future filters
+  void userId
 
   let query = db(supabase)
     .from('negocios')
@@ -158,6 +182,9 @@ export async function getNegociosV2(
       pausado,
       pausado_hasta,
       motivo_pausa,
+      cierre_motivo,
+      closed_at,
+      razon_cierre,
       lineas_negocio(nombre),
       etapas_negocio(nombre, stage),
       empresas(nombre),
@@ -171,6 +198,9 @@ export async function getNegociosV2(
   }
   if (!incluirPausados) {
     query = query.eq('pausado', false)
+  }
+  if (negocioIdsPermitidos) {
+    query = query.in('id', negocioIdsPermitidos)
   }
 
   const { data } = await query
@@ -226,6 +256,9 @@ export async function getNegociosV2(
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,
       motivo_pausa: (row.motivo_pausa as string) ?? null,
+      cierre_motivo: (row.cierre_motivo as 'exitoso' | 'perdido' | 'cancelado' | null) ?? null,
+      closed_at: (row.closed_at as string) ?? null,
+      razon_cierre: (row.razon_cierre as string) ?? null,
     }
   })
 }
@@ -281,6 +314,9 @@ export async function getNegocioDetalle(id: string): Promise<{
       created_at,
       updated_at,
       closed_at,
+      cierre_motivo,
+      razon_cierre,
+      descripcion_cierre,
       responsable_id,
       pausado,
       pausado_hasta,

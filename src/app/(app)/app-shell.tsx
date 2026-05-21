@@ -125,7 +125,9 @@ const SHARED_NAV_ITEMS = [
 
 // Workflows (visible si workspace tiene lineas activas — controlado por hasLineas prop)
 // Posicion: zona inferior del sidebar, en seccion propia "Workflows" antes de Admin.
-// Coherente con /admin/workflows del workspace metrik (vista interna del mismo modulo).
+// Una sola entrada — el href se resuelve en runtime:
+//   - owner del ADMIN_WORKSPACE_ID → /admin/workflows (biblioteca cross-workspace)
+//   - resto (owner/admin/supervisor de cualquier otro workspace) → /flujo (Kanban del workspace actual)
 const WORKFLOWS_NAV_ITEMS = [
   { href: '/flujo', label: 'Workflows', icon: Workflow, roles: ['owner', 'admin', 'supervisor'] },
 ]
@@ -134,7 +136,6 @@ const WORKFLOWS_NAV_ITEMS = [
 const ADMIN_NAV_ITEMS = [
   { href: '/admin/proceso',   label: 'Proceso',    icon: GitFork,  roles: ['owner'] },
   { href: '/admin/skills',    label: 'Skills',     icon: Blocks,   roles: ['owner'] },
-  { href: '/admin/workflows', label: 'Workflows',  icon: Workflow, roles: ['owner'] },
   { href: '/admin/mibolsillo',label: 'Mi Bolsillo',icon: Activity, roles: ['owner'] },
 ]
 
@@ -242,7 +243,12 @@ export default function AppShell({
     : []
   const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
-  const workflowsItems = hasLineas ? filterByRole(WORKFLOWS_NAV_ITEMS, role) : []
+  // Href dinamico: owner del workspace admin global ve la biblioteca cross-workspace, el resto ve el Kanban del workspace actual
+  const workflowsItems = hasLineas
+    ? filterByRole(WORKFLOWS_NAV_ITEMS, role).map(item =>
+        isAdminWorkspace && role === 'owner' ? { ...item, href: '/admin/workflows' } : item
+      )
+    : []
   const validaItems = mod.valida_consulta ? filterByRole(VALIDA_NAV_ITEMS, role) : []
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = [

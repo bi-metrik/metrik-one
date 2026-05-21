@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" role="img" aria-label="Negocio cerrado como cancelado">
+  <!-- Anillo exterior gris -->
+  <circle cx="40" cy="40" r="36" fill="none" stroke="#6B7280" stroke-width="2"/>
+  <!-- Anillo interior discontinuo -->
+  <circle cx="40" cy="40" r="30" fill="none" stroke="#6B7280" stroke-width="1" stroke-dasharray="2 3" opacity="0.5"/>
+  <!-- Centro relleno suave -->
+  <circle cx="40" cy="40" r="24" fill="#6B7280" opacity="0.08"/>
+  <!-- Icono de prohibido (ban) - circulo con linea diagonal -->
+  <g stroke="#1A1A1A" stroke-width="3" fill="none" stroke-linecap="round">
+    <circle cx="40" cy="40" r="12"/>
+    <line x1="31" y1="49" x2="49" y2="31"/>
+  </g>
+</svg>

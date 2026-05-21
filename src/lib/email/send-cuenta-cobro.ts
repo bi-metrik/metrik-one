@@ -11,7 +11,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { downloadDriveFile } from '@/lib/google-drive'
+import { downloadDriveFile, getAccessToken } from '@/lib/google-drive'
 import { formatCOP } from '@/lib/cobros/format'
 
 const FROM_FACTURACION = 'MéTRIK · Facturación <facturacion@metrikone.co>'
@@ -27,6 +27,71 @@ type CuentaCobroParaEnvio = {
   fecha_vencimiento: string
   workspace_id: string
   empresa_id_pagador: string
+  planilla_pila_id: string | null
+  anio: number
+  mes: number
+}
+
+type PlanillaPilaParaAdjunto = {
+  id: string
+  file_drive_id: string
+}
+
+/**
+ * Resuelve la planilla PILA del periodo de la cuenta.
+ * Prioridad: planilla_pila_id explícito → fallback por (workspace, anio, mes).
+ * Si se resuelve por fallback, persiste el enlace en la cuenta.
+ * Devuelve null si no hay planilla cargada (envío continúa sin adjunto).
+ */
+async function resolverPilaParaEnvio(
+  supabase: SupabaseClient,
+  cuenta: CuentaCobroParaEnvio,
+): Promise<PlanillaPilaParaAdjunto | null> {
+  if (cuenta.planilla_pila_id) {
+    const { data } = await supabase
+      .from('planillas_pila_periodo')
+      .select('id, file_drive_id')
+      .eq('id', cuenta.planilla_pila_id)
+      .maybeSingle()
+    return (data as PlanillaPilaParaAdjunto | null) ?? null
+  }
+
+  const { data } = await supabase
+    .from('planillas_pila_periodo')
+    .select('id, file_drive_id')
+    .eq('workspace_id', cuenta.workspace_id)
+    .eq('anio', cuenta.anio)
+    .eq('mes', cuenta.mes)
+    .maybeSingle()
+  const pila = (data as PlanillaPilaParaAdjunto | null) ?? null
+
+  if (pila) {
+    await supabase
+      .from('cuentas_cobro_emitidas')
+      .update({ planilla_pila_id: pila.id })
+      .eq('id', cuenta.id)
+  }
+
+  return pila
+}
+
+/**
+ * Lee metadata (name, mimeType) de un archivo en Drive — para preservar
+ * el filename real del PILA al adjuntarlo (puede ser PDF o imagen).
+ */
+async function getDriveFileMetadata(
+  fileId: string,
+  workspaceId: string,
+): Promise<{ name: string; mimeType: string }> {
+  const token = await getAccessToken(workspaceId)
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) {
+    throw new Error(`Drive metadata fetch fallo (${res.status})`)
+  }
+  return (await res.json()) as { name: string; mimeType: string }
 }
 
 type EmpresaPagadora = {
@@ -132,7 +197,7 @@ export async function enviarCuentaCobroEmail(
   // 1. Leer cuenta + empresa
   const { data: cuenta, error: cErr } = await supabase
     .from('cuentas_cobro_emitidas')
-    .select('id, numero, monto_total, pdf_drive_id, email_destinatarios, fecha_vencimiento, workspace_id, empresa_id_pagador')
+    .select('id, numero, monto_total, pdf_drive_id, email_destinatarios, fecha_vencimiento, workspace_id, empresa_id_pagador, planilla_pila_id, anio, mes')
     .eq('id', cuentaId)
     .maybeSingle()
 
@@ -171,7 +236,31 @@ export async function enviarCuentaCobroEmail(
   const pdfBase64 = pdfBytes.toString('base64')
   const filename = `${c.numero} — ${empresaNombre}.pdf`
 
-  // 3. Email HTML
+  const attachments: Array<{ filename: string; content: string }> = [
+    { filename, content: pdfBase64 },
+  ]
+
+  // 3. PILA del periodo (opcional — si no hay, se envía sin adjunto adicional)
+  const pila = await resolverPilaParaEnvio(supabase, c)
+  if (pila) {
+    try {
+      const [pilaBytes, pilaMeta] = await Promise.all([
+        downloadDriveFile(pila.file_drive_id, c.workspace_id),
+        getDriveFileMetadata(pila.file_drive_id, c.workspace_id),
+      ])
+      attachments.push({
+        filename: pilaMeta.name,
+        content: pilaBytes.toString('base64'),
+      })
+    } catch (err) {
+      console.error(
+        `[send-cuenta-cobro] No se pudo adjuntar PILA ${pila.id} de cuenta ${c.numero}:`,
+        err instanceof Error ? err.message : String(err),
+      )
+    }
+  }
+
+  // 4. Email HTML
   const html = buildClienteEmailHtml({
     empresaNombre,
     contactoNombre,
@@ -180,7 +269,7 @@ export async function enviarCuentaCobroEmail(
     fechaVencimientoLetras: formatFechaVencimientoLetras(c.fecha_vencimiento),
   })
 
-  // 4. Enviar vía Resend
+  // 5. Enviar vía Resend
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
@@ -191,12 +280,7 @@ export async function enviarCuentaCobroEmail(
       reply_to: REPLY_TO_MAURICIO,
       subject: `Cuenta de cobro ${c.numero} — ${empresaNombre}`,
       html,
-      attachments: [
-        {
-          filename,
-          content: pdfBase64,
-        },
-      ],
+      attachments,
     }),
   })
 

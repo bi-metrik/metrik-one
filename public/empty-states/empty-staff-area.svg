@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" role="img" aria-label="Mesa con sillas vacias indicando area sin miembros">
+  <!-- Mesa central (vista cenital simplificada) -->
+  <circle cx="120" cy="90" r="34" fill="none" stroke="#6B7280" stroke-width="2"/>
+  <circle cx="120" cy="90" r="4" fill="#6B7280"/>
+
+  <!-- Silla 1 - izquierda (vacia, gris) -->
+  <g stroke="#6B7280" stroke-width="2" fill="none" stroke-linejoin="round">
+    <rect x="48" y="74" width="26" height="32" rx="3"/>
+    <line x1="48" y1="84" x2="74" y2="84"/>
+  </g>
+
+  <!-- Silla 2 - derecha (vacia, gris) -->
+  <g stroke="#6B7280" stroke-width="2" fill="none" stroke-linejoin="round">
+    <rect x="166" y="74" width="26" height="32" rx="3"/>
+    <line x1="166" y1="84" x2="192" y2="84"/>
+  </g>
+
+  <!-- Silla 3 - arriba (vacia, gris) -->
+  <g stroke="#6B7280" stroke-width="2" fill="none" stroke-linejoin="round">
+    <rect x="107" y="28" width="26" height="22" rx="3"/>
+    <line x1="107" y1="40" x2="133" y2="40"/>
+  </g>
+
+  <!-- Silla 4 - abajo (silla de invitacion, acento verde) -->
+  <g stroke="#10B981" stroke-width="2.5" fill="none" stroke-linejoin="round">
+    <rect x="107" y="130" width="26" height="22" rx="3"/>
+    <line x1="107" y1="142" x2="133" y2="142"/>
+  </g>
+
+  <!-- Icono "+" pequeno sobre la silla verde indicando "agregar" -->
+  <g fill="#10B981">
+    <circle cx="120" cy="160" r="8"/>
+    <line x1="116" y1="160" x2="124" y2="160" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+    <line x1="120" y1="156" x2="120" y2="164" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</svg>

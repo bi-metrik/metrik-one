@@ -314,7 +314,94 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-05-19 (`metrik--cobros-recurrentes` Fases 1-7 — modulo cobros recurrentes activable por flag en workspaces de persona natural emisora)
+**Sesion:** 2026-05-20 (`metrik-one--core` — Modelo roles · areas · stages, Fases 0-3+ con Fase 3+ UI corriendo en background al cierre)
+**Branch:** `feat/roles-areas-stages-fase-1` · 4 commits acumulados sobre main · sin merge aun
+
+### Trayectoria de la sesion
+
+Diseno e implementacion del modelo canonico de permisos sobre negocios en MeTRIK ONE para arrancar el primer workspace multi-usuario con varios roles activos. El modelo anterior (3 tiers planos por rol global) era insuficiente — no contemplaba areas funcionales ni stages del negocio. Hana lidero 4 rondas de preguntas (19 cabos sueltos). Vera dio GO. Mauricio aprobo implementacion por 6 fases. Unifica 3 piezas: roles globales (6), areas funcionales (comercial / operaciones / financiera / direccion transversal) y stages del negocio (venta / ejecucion / cobro / cerrado).
+
+### Fases entregadas
+
+**Fase 0 — Cerebro (Kaori):**
+- `cerebro/conceptos/modelo-roles-areas-stages.md` — concepto canonico con matriz 3D + funcion central + cascadas + lock + reapertura
+- `cerebro/reglas/permisos-negocios.md` — 18 reglas operativas
+- `cerebro/decisiones/2026-05-20_modelo-roles-areas-stages.md` — 25 decisiones + refinamiento post-Fase 1
+- `cerebro/reglas/bloques-permisos-por-rol.md` deprecada con banner
+
+**Fase 1 — BD (Max, commit `63db780`):**
+- 9 migraciones aplicadas en prod (yfjqscvvxetobiidnepa)
+- Tablas nuevas: `staff_areas`, `negocio_responsables`, `workspace_default_responsables`, `bloque_locks`
+- Columnas nuevas: `negocios.cierre_motivo`, `is_paused/paused_at/by/reason`, ampliacion CHECK de `stage_actual` con `cerrado`
+- Trigger auto-stage `sync_negocio_stage_from_etapa`
+
+**Cleanup pre-Fase 2:** DELETE en transaccion de 7 negocios cerrados de pruebas + cobros/gastos/horas asociados (4+5+5 filas) + cascada 127 bloques + 4 cotizaciones. 0 cerrados restantes, 35 negocios activos.
+
+**Fase 2 — Funcion central + cascadas + locks (Max, commit `3ff32d6`):**
+- `src/lib/permissions/can-edit.ts` con expansion `direccion` → 3 areas operativas
+- 33/33 tests pasan
+- 4 migraciones nuevas (20260520000010-13): mapeo legacy D1, trigger cascada asignacion responsable area entrante, lock functions, alerta etapa sin responsable de area
+- `src/lib/actions/bloque-locks.ts` server actions
+- pg_cron cleanup locks + alerta diaria 13:00 UTC
+- Refactor `getNegociosV2` lee `negocio_responsables` N:M
+- Backfill D1: 4 staff direccion + 1 admin_finanzas → financiera
+
+**Fase 3+ specs UX (Noor, commit `4846f0b`):**
+- `docs/specs/2026-05-20_ux-roles-areas-stages.md` (810 lineas) con 6 superficies UX mobile-first 360px
+- 13 componentes Radix/shadcn + hook `useBloqueLock` + 14 server actions nuevas + 4 extensiones
+- 3 decisiones UX cerradas por Mauricio: A1 inline read-only post-cierre, A2 realtime Supabase para locks, A3 placeholder legal hasta Emilio
+
+**Fase 3+ assets (Ren, commit `9f7d9df`):**
+- 5 SVGs empty state en `public/empty-states/`: empty-staff-area, empty-cerrados, header-cerrado-{exitoso,perdido,cancelado}
+- Tokens 100% manual de marca
+- 3 SVGs separados para header (render condicional limpio en JSX)
+- Spec `docs/specs/2026-05-20_assets-empty-states.md`
+
+**Fase 3+ UI (Max, 8 commits `0f5e64d` → `cc2c387`):**
+- 6 superficies entregadas: equipo multi-area, modal cierre, lista cerrados, accordion historial, lock UX (hook + banner + indicator + endpoint /api/locks/release), reapertura con bifurcacion
+- 15 archivos nuevos + 4 modificados (`negocio-v2-actions`, `negocios-client`, `negocio-card`, `[id]/page`, `mi-negocio-client`)
+- tsc + eslint limpios en archivos nuevos
+- Tokens MeTRIK 100% canonicos en codigo nuevo
+- Realtime Supabase channel `bloque_lock:{id}` funcional
+- `navigator.sendBeacon` para release en unload
+- Drawer bottom mobile <600px / modal centrado desktop
+
+**Wiring pendiente para iteracion siguiente** (tasks #11-14):
+- ConfirmCierreModal aun no enchufado al header (CierreNegocioDialog legacy sigue activo)
+- useBloqueLock listo pero falta integrar en cada BloqueXxx.tsx (17 archivos)
+- EtapasHistorialAccordion muestra placeholder — falta BloqueRenderer con `forceReadOnly`
+- Tipo `bloque_cierre` configurable en catalogo bloque_definitions queda como abstraccion futura
+
+### Decisiones clave
+
+- **3 areas canonicas + 1 transversal:** comercial / operaciones / financiera / direccion
+- **Sin limite cardinal por rol** (D3). Si un WS necesita limitar → overlay propio
+- **Supervisor de un area NO manda sobre otra area.** Disciplina de mando lateral
+- **Ser responsable NO sobrepasa filtro de area.** Area persona debe coincidir con area del stage
+- **Cierre estructurado:** exitoso (auto), perdido (solo venta, cero cobros, reabre supervisor), cancelado (cualquier stage, notif owner, reabre admin)
+- **Pausa flag ortogonal** (no es cierre). Solo admin/owner. Timers congelados, continuan al reactivar
+- **Lock pesimista** TTL 5 min + heartbeat + realtime sync + force unlock owner/admin
+- **MeTRIK configura todos los WS por ahora** (no self-service workflows)
+- **Bloque cierre adelantado parametrizable** por etapa (habilitar_perdido_en_etapas, habilitar_cancelado_en_etapas)
+
+### Estado al cierre
+
+- 7 tasks cerradas (Kaori Fase 0, Max Fase 1+2 + arranque limpio, Vera GO, Noor specs UX, Ren assets)
+- 3 tasks vivas: Max Fase 3+ UI (en background), Emilio disclaimer legal cancelacion, parking lot notificaciones
+
+### Pendientes para proxima sesion
+
+1. **Revisar reporte de Max Fase 3+** corriendo en background — ver commits posteriores a `9f7d9df` y resultado de tasks/a28f5f91e720eb519
+2. **Emilio entrega copy legal disclaimer cancelacion con cobros** (Ley 1581 + manejo dinero + constancia escrita) → reemplazar placeholder en modal cierre
+3. **QA E2E del flujo completo** en workspace metrik antes de merge a main
+4. **Resolver 12 staff con `staff.area=NULL`** workspace-por-workspace (sin bulk-assign)
+5. **Merge `feat/roles-areas-stages-fase-1` a main** cuando Fase 3+ este validada
+6. **Sesion dedicada de notificaciones** (P5 + P14 parking lot): definir modelo cross-modulo in-app + email + WA con Yuto + Mateo + Hana
+7. **Deuda tecnica Fase 2:** regenerar `database.ts` para tipar RPCs nuevas + quitar `as any` casts en `bloque-locks.ts`
+
+---
+
+**Sesion previa:** 2026-05-19 (`metrik--cobros-recurrentes` Fases 1-7 — modulo cobros recurrentes activable por flag en workspaces de persona natural emisora)
 **Branch:** main · cambios uncommitted (16 archivos nuevos + 7 modificados)
 
 ### Trayectoria de la sesion
