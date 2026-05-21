@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
 import { createDriveFolder } from '@/lib/google-drive'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
+import { bloqueTipoCode } from '@/components/workflow/types'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -45,6 +46,8 @@ export type BloqueConfig = {
   es_gate: boolean
   nombre: string | null
   bloque_definitions: BloqueDefinition | null
+  /** ID corto unico dentro de la linea (ej: DC1, DA2, CB1). Calculado en runtime */
+  block_id?: string
 }
 
 export type NegocioBloque = {
@@ -500,6 +503,90 @@ export async function getNegocioDetalle(id: string): Promise<{
       // ── Fin herencia ──────────────────────────────────────────────────────────
     }
 
+    // Calcular block_id por linea con herencia: los bloques readonly
+    // que tienen source_etapa_orden mantienen el ID del bloque origen
+    // (matching por nombre + tipo en la etapa source).
+    const blockIdByConfigId = new Map<string, string>()
+    if (negocioTyped.linea_id) {
+      const { data: allLineaBlocks } = await db(supabase)
+        .from('bloque_configs')
+        .select(`
+          id,
+          etapa_id,
+          orden,
+          nombre,
+          config_extra,
+          bloque_definitions(tipo, nombre)
+        `)
+        .eq('workspace_id', workspaceId)
+
+      type AllRow = {
+        id: string
+        etapa_id: string
+        orden: number
+        nombre: string | null
+        config_extra: Record<string, unknown> | null
+        bloque_definitions: { tipo: string; nombre: string } | null
+      }
+      const allRows = (allLineaBlocks ?? []) as unknown as AllRow[]
+      const etapaIdsLinea = new Set(etapasLinea.map(e => e.id))
+      const filtered = allRows.filter(r => etapaIdsLinea.has(r.etapa_id))
+      const etapaOrdenById = new Map(etapasLinea.map(e => [e.id, e.orden]))
+      const etapaIdByOrden = new Map(etapasLinea.map(e => [e.orden, e.id]))
+      filtered.sort((a, b) => {
+        const ea = etapaOrdenById.get(a.etapa_id) ?? 0
+        const eb = etapaOrdenById.get(b.etapa_id) ?? 0
+        if (ea !== eb) return ea - eb
+        return a.orden - b.orden
+      })
+
+      // Primera pasada: asignar ID a bloques originales (sin source_etapa_orden).
+      // Segunda pasada: heredar ID en bloques readonly que apuntan a un origen.
+      const counters = new Map<string, number>()
+      const nombreOf = (r: AllRow): string =>
+        (r.nombre && r.nombre.trim().length > 0 ? r.nombre : r.bloque_definitions?.nombre ?? '').trim().toLowerCase()
+      const tipoOf = (r: AllRow): string => r.bloque_definitions?.tipo ?? 'desconocido'
+
+      // Indice por (etapa_id, nombre_lower, tipo) → row, para matching de herencia
+      const indexByEtapaNombreTipo = new Map<string, AllRow>()
+      const keyFor = (etapaId: string, nombre: string, tipo: string): string =>
+        `${etapaId}::${nombre}::${tipo}`
+      for (const row of filtered) {
+        indexByEtapaNombreTipo.set(keyFor(row.etapa_id, nombreOf(row), tipoOf(row)), row)
+      }
+
+      // Pasada 1: originales (sin source_etapa_orden)
+      for (const row of filtered) {
+        const srcOrden = (row.config_extra as { source_etapa_orden?: number } | null)?.source_etapa_orden
+        if (typeof srcOrden === 'number') continue
+        const code = bloqueTipoCode(tipoOf(row))
+        const n = (counters.get(code) ?? 0) + 1
+        counters.set(code, n)
+        blockIdByConfigId.set(row.id, `${code}${n}`)
+      }
+
+      // Pasada 2: heredados — buscar origen por (etapa source, nombre, tipo)
+      for (const row of filtered) {
+        const srcOrden = (row.config_extra as { source_etapa_orden?: number } | null)?.source_etapa_orden
+        if (typeof srcOrden !== 'number') continue
+        const srcEtapaId = etapaIdByOrden.get(srcOrden)
+        let originId: string | undefined
+        if (srcEtapaId) {
+          const match = indexByEtapaNombreTipo.get(keyFor(srcEtapaId, nombreOf(row), tipoOf(row)))
+          if (match) originId = blockIdByConfigId.get(match.id)
+        }
+        if (originId) {
+          blockIdByConfigId.set(row.id, originId)
+        } else {
+          // Fallback: no se encontro origen — asignar nuevo ID para no romper
+          const code = bloqueTipoCode(tipoOf(row))
+          const n = (counters.get(code) ?? 0) + 1
+          counters.set(code, n)
+          blockIdByConfigId.set(row.id, `${code}${n}`)
+        }
+      }
+    }
+
     bloques = ((bloqueConfigs ?? []) as Record<string, unknown>[]).map(bc => ({
       id: bc.id as string,
       etapa_id: bc.etapa_id as string,
@@ -511,6 +598,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       nombre: (bc.nombre as string | null) ?? null,
       bloque_definitions: bc.bloque_definitions as BloqueDefinition | null,
       instancia: instanciasMap[bc.id as string] ?? null,
+      block_id: blockIdByConfigId.get(bc.id as string),
     }))
   }
 

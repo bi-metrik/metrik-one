@@ -1308,8 +1308,16 @@ function BloqueCard({
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium leading-tight ${isCompleto && !isVisualization ? 'text-muted-foreground' : 'text-foreground'}`}>
-            {bloque.nombre ?? def?.nombre ?? 'Bloque'}
+          <p className={`flex items-center gap-2 text-sm font-medium leading-tight ${isCompleto && !isVisualization ? 'text-muted-foreground' : 'text-foreground'}`}>
+            {bloque.block_id && (
+              <span
+                className="inline-block shrink-0 rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+                title={`ID del bloque: ${bloque.block_id}`}
+              >
+                {bloque.block_id}
+              </span>
+            )}
+            <span className="truncate">{bloque.nombre ?? def?.nombre ?? 'Bloque'}</span>
           </p>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {def?.tipo && (

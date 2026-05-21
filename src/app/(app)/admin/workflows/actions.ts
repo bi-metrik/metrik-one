@@ -225,8 +225,10 @@ export async function getAdminFlujoDetalle(
   }
   const bcs = (bcRaw ?? []) as BcRow[]
 
-  // Asignar block_id por linea ordenando todos los bloques por (etapa.orden, bloque.orden)
+  // Asignar block_id con herencia: bloques readonly heredados mantienen el
+  // ID del bloque origen (matching por etapa source + nombre + tipo).
   const etapaOrdenById = new Map(etapas.map(e => [e.id, e.orden]))
+  const etapaIdByOrden = new Map(etapas.map(e => [e.orden, e.id]))
   const bcsOrdenados = [...bcs].sort((a, b) => {
     const ea = etapaOrdenById.get(a.etapa_id) ?? 0
     const eb = etapaOrdenById.get(b.etapa_id) ?? 0
@@ -235,12 +237,42 @@ export async function getAdminFlujoDetalle(
   })
   const counters = new Map<string, number>()
   const blockIdByConfigId = new Map<string, string>()
+  const nombreOf = (b: BcRow): string =>
+    ((b.nombre && b.nombre.trim().length > 0
+      ? b.nombre
+      : b.bloque_definitions?.nombre ?? '') as string)
+      .trim()
+      .toLowerCase()
+  const tipoOf = (b: BcRow): string => b.bloque_definitions?.tipo ?? 'desconocido'
+  const indexByEtapaNombreTipo = new Map<string, BcRow>()
   for (const b of bcsOrdenados) {
-    const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
-    const code = bloqueTipoCode(tipo)
+    indexByEtapaNombreTipo.set(`${b.etapa_id}::${nombreOf(b)}::${tipoOf(b)}`, b)
+  }
+  for (const b of bcsOrdenados) {
+    const srcOrden = (b.config_extra as { source_etapa_orden?: number } | null)?.source_etapa_orden
+    if (typeof srcOrden === 'number') continue
+    const code = bloqueTipoCode(tipoOf(b))
     const n = (counters.get(code) ?? 0) + 1
     counters.set(code, n)
     blockIdByConfigId.set(b.id, `${code}${n}`)
+  }
+  for (const b of bcsOrdenados) {
+    const srcOrden = (b.config_extra as { source_etapa_orden?: number } | null)?.source_etapa_orden
+    if (typeof srcOrden !== 'number') continue
+    const srcEtapaId = etapaIdByOrden.get(srcOrden)
+    let originId: string | undefined
+    if (srcEtapaId) {
+      const match = indexByEtapaNombreTipo.get(`${srcEtapaId}::${nombreOf(b)}::${tipoOf(b)}`)
+      if (match) originId = blockIdByConfigId.get(match.id)
+    }
+    if (originId) {
+      blockIdByConfigId.set(b.id, originId)
+    } else {
+      const code = bloqueTipoCode(tipoOf(b))
+      const n = (counters.get(code) ?? 0) + 1
+      counters.set(code, n)
+      blockIdByConfigId.set(b.id, `${code}${n}`)
+    }
   }
 
   const bloquesByEtapa = new Map<string, AdminBloque[]>()

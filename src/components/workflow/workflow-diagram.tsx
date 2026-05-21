@@ -729,17 +729,10 @@ function EtapaCard({
                         style={{ color: isReadOnly ? '#6B7280' : '#1A1A1A' }}
                       >
                         <span
-                          className="inline-flex w-9 shrink-0 justify-center"
-                          aria-hidden
+                          className="inline-block w-10 shrink-0 truncate rounded-md bg-[#1A1A1A] px-1 py-[1px] text-center text-[9px] font-mono font-semibold tracking-wider text-white"
+                          title={b.block_id ? `ID del bloque: ${b.block_id}` : undefined}
                         >
-                          {b.block_id && (
-                            <span
-                              className="rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
-                              title={`ID del bloque: ${b.block_id}`}
-                            >
-                              {b.block_id}
-                            </span>
-                          )}
+                          {b.block_id ?? ''}
                         </span>
                         <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
                           {isReadOnly ? (

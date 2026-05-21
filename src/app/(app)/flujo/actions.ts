@@ -212,10 +212,11 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
     vencByEtapa.set(v.etapa_id, { abiertos: Number(v.abiertos) || 0, vencidos: Number(v.vencidos) || 0 })
   }
 
-  // Asignacion de block_id: ordenar todos los bloques de la linea por
-  // (etapa.orden, bloque.orden) y contar apariciones por tipo. Incluye
-  // bloques ocultos para que el ID sea estable aunque cambie visibility.
+  // Asignacion de block_id: bloques readonly heredados (con source_etapa_orden)
+  // mantienen el ID del bloque origen en la etapa source — matching por
+  // (etapa source, nombre, tipo). Origenes reciben ID nuevo por (tipo, secuencia).
   const etapaOrdenById = new Map(etapas.map(e => [e.id, e.orden]))
+  const etapaIdByOrden = new Map(etapas.map(e => [e.orden, e.id]))
   const bloquesOrdenados = [...bloques].sort((a, b) => {
     const ea = etapaOrdenById.get(a.etapa_id) ?? 0
     const eb = etapaOrdenById.get(b.etapa_id) ?? 0
@@ -224,12 +225,44 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
   })
   const counters = new Map<string, number>()
   const blockIdByConfigId = new Map<string, string>()
+  const nombreOf = (b: BloqueConfigRow): string =>
+    ((b.nombre && b.nombre.trim().length > 0
+      ? b.nombre
+      : b.bloque_definitions?.nombre ?? '') as string)
+      .trim()
+      .toLowerCase()
+  const tipoOf = (b: BloqueConfigRow): string => b.bloque_definitions?.tipo ?? 'desconocido'
+  const indexByEtapaNombreTipo = new Map<string, BloqueConfigRow>()
   for (const b of bloquesOrdenados) {
-    const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
-    const code = bloqueTipoCode(tipo)
+    indexByEtapaNombreTipo.set(`${b.etapa_id}::${nombreOf(b)}::${tipoOf(b)}`, b)
+  }
+  // Pasada 1: bloques sin source_etapa_orden (originales)
+  for (const b of bloquesOrdenados) {
+    const srcOrden = (b.config_extra as { source_etapa_orden?: number } | null)?.source_etapa_orden
+    if (typeof srcOrden === 'number') continue
+    const code = bloqueTipoCode(tipoOf(b))
     const n = (counters.get(code) ?? 0) + 1
     counters.set(code, n)
     blockIdByConfigId.set(b.id, `${code}${n}`)
+  }
+  // Pasada 2: heredados — buscan origen por (etapa source, nombre, tipo)
+  for (const b of bloquesOrdenados) {
+    const srcOrden = (b.config_extra as { source_etapa_orden?: number } | null)?.source_etapa_orden
+    if (typeof srcOrden !== 'number') continue
+    const srcEtapaId = etapaIdByOrden.get(srcOrden)
+    let originId: string | undefined
+    if (srcEtapaId) {
+      const match = indexByEtapaNombreTipo.get(`${srcEtapaId}::${nombreOf(b)}::${tipoOf(b)}`)
+      if (match) originId = blockIdByConfigId.get(match.id)
+    }
+    if (originId) {
+      blockIdByConfigId.set(b.id, originId)
+    } else {
+      const code = bloqueTipoCode(tipoOf(b))
+      const n = (counters.get(code) ?? 0) + 1
+      counters.set(code, n)
+      blockIdByConfigId.set(b.id, `${code}${n}`)
+    }
   }
 
   const bloquesByEtapa = new Map<string, FlujoBloque[]>()
