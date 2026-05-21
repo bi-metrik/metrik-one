@@ -737,27 +737,14 @@ function EtapaCard({
                             <GitBranch className="h-3 w-3 text-[#6B7280]" />
                           </span>
                         )}
-                        {isReadOnly ? (
+                        {!isReadOnly && b.es_gate && (
                           <span
-                            className="shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider"
-                            style={{
-                              backgroundColor: '#F5F4F2',
-                              borderColor: '#E5E7EB',
-                              color: '#6B7280',
-                            }}
+                            className="inline-flex shrink-0"
+                            title="Gate (bloquea avance)"
+                            aria-label="Gate"
                           >
-                            Solo lectura
+                            <ShieldCheck className="h-3 w-3 text-[#10B981]" />
                           </span>
-                        ) : (
-                          b.es_gate && (
-                            <span
-                              className="inline-flex shrink-0"
-                              title="Gate (bloquea avance)"
-                              aria-label="Gate"
-                            >
-                              <ShieldCheck className="h-3 w-3 text-[#10B981]" />
-                            </span>
-                          )
                         )}
                       </li>
                     )
