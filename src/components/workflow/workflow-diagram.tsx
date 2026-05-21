@@ -57,6 +57,22 @@ const STAGE_INDICATOR_COLOR: Record<string, string> = {
   cobro: '#3B82F6',
 }
 
+// ── Tipos de bloque inherentemente readonly ────────────────────────────────
+// Bloques cuyo catalogo los define como vista de solo lectura por naturaleza,
+// independientemente de su estado o config_extra. Muestran siempre icono Eye.
+
+const READONLY_BLOQUE_TIPOS = new Set([
+  'cobros',
+  'historial',
+  'historial_valida',
+  'resumen_financiero',
+  'ejecucion',
+])
+
+function isReadonlyTipo(tipo: string): boolean {
+  return READONLY_BLOQUE_TIPOS.has(tipo)
+}
+
 // ── Helpers de layout ──────────────────────────────────────────────────────
 
 interface BranchChain {
@@ -701,7 +717,10 @@ function EtapaCard({
               <>
                 <ul className="space-y-1.5">
                   {etapa.bloques.map(b => {
-                    const isReadOnly = b.readonly === true || b.estado === 'visible'
+                    const isReadOnly =
+                      b.readonly === true ||
+                      b.estado === 'visible' ||
+                      isReadonlyTipo(b.tipo)
                     const isCondicional = Boolean(b.condition_field)
                     return (
                       <li
@@ -819,7 +838,10 @@ function EtapaCard({
 function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
   const [expanded, setExpanded] = useState(false)
   const hasConfig = bloque.config_extra && Object.keys(bloque.config_extra).length > 0
-  const isReadOnly = bloque.readonly === true || bloque.estado === 'visible'
+  const isReadOnly =
+    bloque.readonly === true ||
+    bloque.estado === 'visible' ||
+    isReadonlyTipo(bloque.tipo)
   const isCondicional = Boolean(bloque.condition_field)
 
   return (
