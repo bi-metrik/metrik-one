@@ -776,7 +776,7 @@ function EtapaCard({
                           )}
                         </span>
                         <span
-                          className="hidden shrink-0 rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-[#6B7280] sm:inline-block"
+                          className="hidden w-[88px] shrink-0 truncate rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-center text-[9px] font-mono uppercase tracking-wider text-[#6B7280] sm:inline-block"
                           title={`Tipo de bloque: ${b.tipo}`}
                         >
                           {b.tipo}
