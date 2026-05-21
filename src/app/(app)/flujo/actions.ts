@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { bloqueTipoCode } from '@/components/workflow/types'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ export interface FlujoBloque {
   source_etapa_orden: number | null
   condition_field: string | null
   condition_value: string | null
+  block_id: string
 }
 
 export interface FlujoRoutingConditional {
@@ -210,6 +212,26 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
     vencByEtapa.set(v.etapa_id, { abiertos: Number(v.abiertos) || 0, vencidos: Number(v.vencidos) || 0 })
   }
 
+  // Asignacion de block_id: ordenar todos los bloques de la linea por
+  // (etapa.orden, bloque.orden) y contar apariciones por tipo. Incluye
+  // bloques ocultos para que el ID sea estable aunque cambie visibility.
+  const etapaOrdenById = new Map(etapas.map(e => [e.id, e.orden]))
+  const bloquesOrdenados = [...bloques].sort((a, b) => {
+    const ea = etapaOrdenById.get(a.etapa_id) ?? 0
+    const eb = etapaOrdenById.get(b.etapa_id) ?? 0
+    if (ea !== eb) return ea - eb
+    return a.orden - b.orden
+  })
+  const counters = new Map<string, number>()
+  const blockIdByConfigId = new Map<string, string>()
+  for (const b of bloquesOrdenados) {
+    const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
+    const code = bloqueTipoCode(tipo)
+    const n = (counters.get(code) ?? 0) + 1
+    counters.set(code, n)
+    blockIdByConfigId.set(b.id, `${code}${n}`)
+  }
+
   const bloquesByEtapa = new Map<string, FlujoBloque[]>()
   for (const b of bloques) {
     const cfgExtra = b.config_extra as
@@ -253,6 +275,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
         typeof cfgExtra?.condition?.value === 'string'
           ? cfgExtra.condition.value
           : null,
+      block_id: blockIdByConfigId.get(b.id) ?? '',
     })
     bloquesByEtapa.set(b.etapa_id, arr)
   }

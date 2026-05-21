@@ -44,6 +44,7 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
             typeof ce.source_etapa_orden === 'number' ? ce.source_etapa_orden : null,
           condition_field: typeof ce.condition?.field === 'string' ? ce.condition.field : null,
           condition_value: typeof ce.condition?.value === 'string' ? ce.condition.value : null,
+          block_id: b.block_id,
           config_extra: b.config_extra ?? {},
         }
       }),

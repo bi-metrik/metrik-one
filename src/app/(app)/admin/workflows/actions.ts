@@ -2,6 +2,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { bloqueTipoCode } from '@/components/workflow/types'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ export interface AdminBloque {
   estado: 'editable' | 'visible'
   es_gate: boolean
   config_extra: Record<string, unknown>
+  /** ID corto unico dentro de la linea (ej: DC1, DA2, CB1) */
+  block_id: string
 }
 
 export interface AdminEtapa {
@@ -222,6 +225,24 @@ export async function getAdminFlujoDetalle(
   }
   const bcs = (bcRaw ?? []) as BcRow[]
 
+  // Asignar block_id por linea ordenando todos los bloques por (etapa.orden, bloque.orden)
+  const etapaOrdenById = new Map(etapas.map(e => [e.id, e.orden]))
+  const bcsOrdenados = [...bcs].sort((a, b) => {
+    const ea = etapaOrdenById.get(a.etapa_id) ?? 0
+    const eb = etapaOrdenById.get(b.etapa_id) ?? 0
+    if (ea !== eb) return ea - eb
+    return a.orden - b.orden
+  })
+  const counters = new Map<string, number>()
+  const blockIdByConfigId = new Map<string, string>()
+  for (const b of bcsOrdenados) {
+    const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
+    const code = bloqueTipoCode(tipo)
+    const n = (counters.get(code) ?? 0) + 1
+    counters.set(code, n)
+    blockIdByConfigId.set(b.id, `${code}${n}`)
+  }
+
   const bloquesByEtapa = new Map<string, AdminBloque[]>()
   for (const b of bcs) {
     const cfgExtra = b.config_extra as
@@ -245,6 +266,7 @@ export async function getAdminFlujoDetalle(
       estado: b.estado,
       es_gate: b.es_gate,
       config_extra: b.config_extra ?? {},
+      block_id: blockIdByConfigId.get(b.id) ?? '',
     })
     bloquesByEtapa.set(b.etapa_id, arr)
   }

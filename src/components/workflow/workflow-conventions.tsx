@@ -224,6 +224,20 @@ const ITEMS: Item[] = [
       </Sample>
     ),
   },
+  {
+    label: 'ID del bloque',
+    description:
+      'Etiqueta negra junto al nombre. 2 letras del tipo + número consecutivo por línea (DA=datos, DC=documento, CT=cotización, CB=cobros, FO=formulario, etc.). Útil para referirse al bloque sin confusión.',
+    sample: (
+      <Sample>
+        <span
+          className="rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+        >
+          DC1
+        </span>
+      </Sample>
+    ),
+  },
   // ── Badges por etapa ────────────────────────────────────────────────
   {
     label: 'Cantidad abiertos',

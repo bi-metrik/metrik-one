@@ -740,6 +740,14 @@ function EtapaCard({
                             title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
                           />
                         )}
+                        {b.block_id && (
+                          <span
+                            className="shrink-0 rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+                            title={`ID del bloque: ${b.block_id}`}
+                          >
+                            {b.block_id}
+                          </span>
+                        )}
                         <span className="flex-1 truncate">{b.nombre}</span>
                         {isCondicional && (
                           <span
@@ -856,6 +864,14 @@ function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
             style={{ backgroundColor: bloque.es_gate ? '#10B981' : '#6B7280' }}
           />
           <span className="shrink-0 text-[10px] font-mono text-[#6B7280]">{bloque.orden}</span>
+          {bloque.block_id && (
+            <span
+              className="shrink-0 rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+              title={`ID del bloque: ${bloque.block_id}`}
+            >
+              {bloque.block_id}
+            </span>
+          )}
           <span className="truncate text-[12px] font-semibold text-[#1A1A1A]">{bloque.nombre}</span>
           <span className="rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-mono text-[#6B7280]">{bloque.tipo}</span>
           {isCondicional && (
