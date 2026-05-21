@@ -722,12 +722,6 @@ function EtapaCard({
                           />
                         )}
                         <span className="flex-1 truncate">{b.nombre}</span>
-                        <span
-                          className="hidden shrink-0 rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-[#6B7280] sm:inline-block"
-                          title={`Tipo de bloque: ${b.tipo}`}
-                        >
-                          {b.tipo}
-                        </span>
                         {isCondicional && (
                           <span
                             className="inline-flex shrink-0"
@@ -746,6 +740,12 @@ function EtapaCard({
                             <ShieldCheck className="h-3 w-3 text-[#10B981]" />
                           </span>
                         )}
+                        <span
+                          className="hidden shrink-0 rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-[#6B7280] sm:inline-block"
+                          title={`Tipo de bloque: ${b.tipo}`}
+                        >
+                          {b.tipo}
+                        </span>
                       </li>
                     )
                   })}
