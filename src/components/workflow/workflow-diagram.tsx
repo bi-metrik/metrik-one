@@ -58,11 +58,21 @@ const STAGE_INDICATOR_COLOR: Record<string, string> = {
 
 // ── Helpers de layout ──────────────────────────────────────────────────────
 
+interface BranchChain {
+  // Ordenes de las etapas que componen la rama, en orden de ejecucion.
+  // La primera es la etapa apuntada por el conditional. Las siguientes son
+  // etapas alcanzadas secuencialmente (o via routing default) hasta tocar
+  // mainline, terminar o ciclar.
+  etapas: number[]
+  // Orden de la etapa mainline a la que la rama retorna (null si termina sin
+  // volver al main).
+  returnsTo: number | null
+}
+
 interface LayoutInfo {
   mainlineOrdens: Set<number>
-  // Mapeo de orden de etapa side-branch → orden de etapa mainline a la que
-  // retorna (siguiente mainline despues del decision que la enruta).
-  branchReturnsTo: Map<number, number>
+  // Mapeo: orden de la primera etapa de cada rama → cadena completa.
+  branchChains: Map<number, BranchChain>
   // Orden -> indice en el array (sorted)
   ordenIndex: Map<number, number>
 }
@@ -73,8 +83,11 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
   sorted.forEach((e, i) => ordenIndex.set(e.orden, i))
 
   const mainlineOrdens = new Set<number>()
-  if (sorted.length === 0) return { mainlineOrdens, branchReturnsTo: new Map(), ordenIndex }
+  if (sorted.length === 0) return { mainlineOrdens, branchChains: new Map(), ordenIndex }
 
+  // Paso 1 — Mainline: arranca en la primera etapa y sigue default_etapa_orden
+  // (o orden+1 si la etapa no tiene routing). Un default que apunta a la misma
+  // etapa significa "cierra aqui".
   let cur: WorkflowEtapa | undefined = sorted[0]
   const visited = new Set<number>()
   while (cur && !visited.has(cur.orden)) {
@@ -83,6 +96,7 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
     const routing = cur.routing
     let nextOrden: number
     if (routing) {
+      if (routing.default_etapa_orden === cur.orden) break
       nextOrden = routing.default_etapa_orden
     } else {
       nextOrden = cur.orden + 1
@@ -90,17 +104,47 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
     cur = sorted.find(e => e.orden === nextOrden)
   }
 
-  const branchReturnsTo = new Map<number, number>()
+  // Paso 2 — Branches: para cada conditional que apunta fuera del mainline,
+  // construir la cadena completa de etapas hasta tocar mainline, terminar o
+  // detectar ciclo.
+  const branchChains = new Map<number, BranchChain>()
   for (const e of sorted) {
     if (!e.routing) continue
     for (const rule of e.routing.conditional) {
-      if (!mainlineOrdens.has(rule.etapa_orden)) {
-        branchReturnsTo.set(rule.etapa_orden, e.routing.default_etapa_orden)
+      if (mainlineOrdens.has(rule.etapa_orden)) continue
+      if (branchChains.has(rule.etapa_orden)) continue
+
+      const chain: number[] = []
+      const chainVisited = new Set<number>()
+      let cur2: WorkflowEtapa | undefined = sorted.find(s => s.orden === rule.etapa_orden)
+      let returnsTo: number | null = null
+
+      while (cur2 && !chainVisited.has(cur2.orden)) {
+        if (mainlineOrdens.has(cur2.orden)) {
+          returnsTo = cur2.orden
+          break
+        }
+        chainVisited.add(cur2.orden)
+        chain.push(cur2.orden)
+        const r = cur2.routing
+        let nextOrden: number
+        if (r) {
+          if (r.default_etapa_orden === cur2.orden) {
+            cur2 = undefined
+            break
+          }
+          nextOrden = r.default_etapa_orden
+        } else {
+          nextOrden = cur2.orden + 1
+        }
+        cur2 = sorted.find(s => s.orden === nextOrden)
       }
+
+      branchChains.set(rule.etapa_orden, { etapas: chain, returnsTo })
     }
   }
 
-  return { mainlineOrdens, branchReturnsTo, ordenIndex }
+  return { mainlineOrdens, branchChains, ordenIndex }
 }
 
 // ── Resolver label_pregunta para una decisión ──────────────────────────────
@@ -151,7 +195,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
     | {
         type: 'decision-with-branch'
         sourceEtapa: WorkflowEtapa
-        branchEtapa: WorkflowEtapa | null
+        branchEtapas: WorkflowEtapa[]
         branchLabel: string
         defaultLabel: string
         defaultTargetNombre: string | null
@@ -167,20 +211,27 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
     rows.push({ type: 'etapa', etapa: e, side: 'main' })
 
     if (e.routing) {
-      const branchRule = e.routing.conditional.find(r => layout.branchReturnsTo.has(r.etapa_orden))
-      const branchEtapa = branchRule ? sorted.find(b => b.orden === branchRule.etapa_orden) ?? null : null
-      const branchLabel = branchRule ? `${branchRule.condition.field} = ${branchRule.condition.value}` : ''
+      const branchRule = e.routing.conditional.find(r => layout.branchChains.has(r.etapa_orden))
+      const branchChain = branchRule ? layout.branchChains.get(branchRule.etapa_orden) : undefined
+      const branchEtapas: WorkflowEtapa[] = branchChain
+        ? branchChain.etapas
+            .map(o => sorted.find(s => s.orden === o))
+            .filter((x): x is WorkflowEtapa => Boolean(x))
+        : []
+      const branchLabel = branchRule
+        ? `${branchRule.condition.field} = ${branchRule.condition.value}`
+        : ''
 
       const defaultTarget = sorted.find(t => t.orden === e.routing!.default_etapa_orden)
       const defaultLabel = defaultTarget
         ? `${String(defaultTarget.orden).padStart(2, '0')} ${defaultTarget.nombre}`
         : 'Cierre'
 
-      if (branchEtapa) {
+      if (branchEtapas.length > 0) {
         rows.push({
           type: 'decision-with-branch',
           sourceEtapa: e,
-          branchEtapa,
+          branchEtapas,
           branchLabel,
           defaultLabel,
           defaultTargetNombre: defaultTarget?.nombre ?? null,
@@ -237,6 +288,8 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
           if (row.type === 'decision-with-branch') {
             const field = row.sourceEtapa.routing?.conditional[0]?.condition.field ?? '—'
             const question = resolveDecisionLabel(field, sorted)
+            const firstBranch = row.branchEtapas[0]
+            const restBranch = row.branchEtapas.slice(1)
             return (
               <div
                 key={`decbr-${idx}`}
@@ -247,36 +300,60 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
                   <DecisionDiamond
                     question={question}
                     branchLabel={row.branchLabel}
-                    branchTargetNombre={row.branchEtapa?.nombre ?? null}
+                    branchTargetNombre={firstBranch?.nombre ?? null}
                     defaultLabel={row.defaultLabel}
                   />
                   <Connector />
                 </div>
-                {/* Branch card */}
-                {row.branchEtapa && (
+                {/* Branch chain (1+ etapas en orden) */}
+                {firstBranch && (
                   <div className="relative">
-                    {/* Mobile: render indented inside its own flow position */}
+                    {/* Mobile: timeline indentado */}
                     <div className="md:hidden ml-6 border-l-2 border-dashed border-[#10B981] pl-4 pb-2">
                       <BranchHeader direction="in" labelOverride="Rama: SÍ" />
                       <EtapaCard
-                        etapa={row.branchEtapa}
+                        etapa={firstBranch}
                         mode={mode}
                         canConfigSla={canConfigSla}
                         onUpdateSla={onUpdateSla}
                         isBranch
                       />
+                      {restBranch.map(etapa => (
+                        <div key={`m-br-${etapa.id}`}>
+                          <Connector />
+                          <EtapaCard
+                            etapa={etapa}
+                            mode={mode}
+                            canConfigSla={canConfigSla}
+                            onUpdateSla={onUpdateSla}
+                            isBranch
+                          />
+                        </div>
+                      ))}
                       <BranchHeader direction="out" />
                     </div>
-                    {/* Desktop: render in right column */}
+                    {/* Desktop: columna derecha */}
                     <div className="hidden md:block">
                       <BranchHeader direction="in" />
                       <EtapaCard
-                        etapa={row.branchEtapa}
+                        etapa={firstBranch}
                         mode={mode}
                         canConfigSla={canConfigSla}
                         onUpdateSla={onUpdateSla}
                         isBranch
                       />
+                      {restBranch.map(etapa => (
+                        <div key={`d-br-${etapa.id}`}>
+                          <Connector />
+                          <EtapaCard
+                            etapa={etapa}
+                            mode={mode}
+                            canConfigSla={canConfigSla}
+                            onUpdateSla={onUpdateSla}
+                            isBranch
+                          />
+                        </div>
+                      ))}
                       <BranchReturnConnector />
                     </div>
                   </div>
