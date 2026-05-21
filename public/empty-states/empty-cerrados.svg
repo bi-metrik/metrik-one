@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" role="img" aria-label="Caja de archivo cerrada vacia">
+  <!-- Sombra sutil base -->
+  <ellipse cx="120" cy="148" rx="58" ry="4" fill="#E5E7EB"/>
+
+  <!-- Cuerpo de la caja (perspectiva isometrica simple) -->
+  <g stroke="#1A1A1A" stroke-width="2" stroke-linejoin="round">
+    <!-- Cara frontal -->
+    <rect x="68" y="70" width="104" height="72" fill="#FFFFFF"/>
+    <!-- Linea horizontal divisoria (tapa simulada) -->
+    <line x1="68" y1="88" x2="172" y2="88"/>
+  </g>
+
+  <!-- Asa/recorte de la tapa -->
+  <path d="M 108 76 Q 120 70 132 76" fill="none" stroke="#6B7280" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Etiqueta lateral con acento verde (sello discreto) -->
+  <g>
+    <rect x="92" y="104" width="56" height="20" rx="2" fill="none" stroke="#6B7280" stroke-width="1.5"/>
+    <line x1="100" y1="114" x2="140" y2="114" stroke="#6B7280" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Acento verde: pequena marca de cinta en esquina -->
+    <rect x="142" y="104" width="6" height="20" fill="#10B981"/>
+  </g>
+
+  <!-- Lineas sutiles indicando vacio en el interior -->
+  <g stroke="#E5E7EB" stroke-width="1" stroke-dasharray="3 3">
+    <line x1="78" y1="46" x2="86" y2="58"/>
+    <line x1="120" y1="40" x2="120" y2="52"/>
+    <line x1="162" y1="46" x2="154" y2="58"/>
+  </g>
+</svg>
