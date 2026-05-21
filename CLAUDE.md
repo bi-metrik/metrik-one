@@ -357,11 +357,20 @@ Diseno e implementacion del modelo canonico de permisos sobre negocios en MeTRIK
 - 3 SVGs separados para header (render condicional limpio en JSX)
 - Spec `docs/specs/2026-05-20_assets-empty-states.md`
 
-**Fase 3+ UI (Max — corriendo en background al cierre):**
-- Implementacion 6 superficies sobre canEditBloque + bloque-locks
-- Realtime Supabase para sync locks entre tabs (decision A2)
-- Tokens MeTRIK puros, mobile-first 360px
-- Reporte queda en branch — revisar commits posteriores a `9f7d9df` en proxima sesion
+**Fase 3+ UI (Max, 8 commits `0f5e64d` → `cc2c387`):**
+- 6 superficies entregadas: equipo multi-area, modal cierre, lista cerrados, accordion historial, lock UX (hook + banner + indicator + endpoint /api/locks/release), reapertura con bifurcacion
+- 15 archivos nuevos + 4 modificados (`negocio-v2-actions`, `negocios-client`, `negocio-card`, `[id]/page`, `mi-negocio-client`)
+- tsc + eslint limpios en archivos nuevos
+- Tokens MeTRIK 100% canonicos en codigo nuevo
+- Realtime Supabase channel `bloque_lock:{id}` funcional
+- `navigator.sendBeacon` para release en unload
+- Drawer bottom mobile <600px / modal centrado desktop
+
+**Wiring pendiente para iteracion siguiente** (tasks #11-14):
+- ConfirmCierreModal aun no enchufado al header (CierreNegocioDialog legacy sigue activo)
+- useBloqueLock listo pero falta integrar en cada BloqueXxx.tsx (17 archivos)
+- EtapasHistorialAccordion muestra placeholder — falta BloqueRenderer con `forceReadOnly`
+- Tipo `bloque_cierre` configurable en catalogo bloque_definitions queda como abstraccion futura
 
 ### Decisiones clave
 
