@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   Eye,
+  GitBranch,
 } from 'lucide-react'
 
 interface Item {
@@ -195,19 +196,31 @@ const ITEMS: Item[] = [
       'Muestra información heredada de etapas anteriores. No se edita aquí.',
     sample: (
       <Sample>
-        <div className="flex items-center gap-1">
-          <Eye className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
-          <span
-            className="rounded-full border px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider"
-            style={{
-              backgroundColor: '#F5F4F2',
-              borderColor: '#E5E7EB',
-              color: '#6B7280',
-            }}
-          >
-            Solo lectura
-          </span>
-        </div>
+        <Eye className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+      </Sample>
+    ),
+  },
+  {
+    label: 'Bloque condicional',
+    description:
+      'Solo aparece si se cumple una condición de otro bloque (ej: respuesta de un toggle).',
+    sample: (
+      <Sample>
+        <GitBranch className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+      </Sample>
+    ),
+  },
+  {
+    label: 'Tipo de bloque',
+    description:
+      'Etiqueta gris al extremo derecho. Identifica el tipo técnico del bloque (datos, documento, cotización, cobros, formulario, cronograma, etc.).',
+    sample: (
+      <Sample>
+        <span
+          className="rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-[#6B7280]"
+        >
+          datos
+        </span>
       </Sample>
     ),
   },
