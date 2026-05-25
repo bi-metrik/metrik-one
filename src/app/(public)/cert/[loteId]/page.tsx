@@ -73,7 +73,8 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
     lote.serie_desde != null && lote.serie_hasta != null
       ? { rango: `${pad(lote.serie_desde)} – ${pad(lote.serie_hasta)}`, cantidad: lote.serie_hasta - lote.serie_desde + 1 }
       : null
-  const idCompuesto = [negocioCodigo, lote.sku, lote.numero_lote].filter(Boolean).join('  ·  ')
+  // numero_lote ya incluye el SKU (formato {SKU}-{NNN}); no repetir el SKU.
+  const idCompuesto = [negocioCodigo, lote.numero_lote].filter(Boolean).join('  ·  ')
   const ficha = producto?.ficha ?? null
   const accent = vigente ? C.green : C.red
   const accentSoft = vigente ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.07)'
@@ -164,7 +165,7 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
               </div>
             ) : null}
             <div style={{ fontSize: 11, color: C.grayLt, marginTop: 8 }}>
-              Proyecto · Producto · Lote
+              Proyecto · Lote
             </div>
           </Section>
 

@@ -222,7 +222,7 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: C.black }}>
-                      {l.numero_lote} · {l.sku}{l.opcion_material ? ` · ${l.opcion_material}` : ''}
+                      {l.numero_lote}{l.opcion_material ? ` · Opción ${l.opcion_material}` : ''}
                     </div>
                     <div style={{ fontSize: 12, color: C.gray, marginTop: 3 }}>
                       {l.negocios?.codigo ?? '—'}
