@@ -89,7 +89,7 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 24px', borderBottom: `1px solid ${C.hair}` }}>
           {fabricante?.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={fabricante.logo_url} alt={fabricante.nombre} style={{ height: 50, width: 'auto', maxWidth: 260, objectFit: 'contain' }} />
+            <img src={fabricante.logo_url} alt={fabricante.nombre} style={{ height: 75, width: 'auto', maxWidth: 360, objectFit: 'contain' }} />
           ) : <span style={{ fontSize: 14, fontWeight: 700, color: C.black }}>{fabricante?.nombre}</span>}
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: C.grayLt, textAlign: 'right' }}>
             Certificado<br />de producto
