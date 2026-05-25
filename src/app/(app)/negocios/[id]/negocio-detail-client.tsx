@@ -55,6 +55,7 @@ import BloqueHistorial from './bloques/BloqueHistorial'
 import type { HistorialData } from './bloques/BloqueHistorial'
 import BloqueFormulario from './bloques/BloqueFormulario'
 import BloquePagosEpayco from './bloques/BloquePagosEpayco'
+import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -179,14 +180,11 @@ const STAGE_LABELS: Record<string, string> = {
   cobro: 'COBRO',
 }
 
-const STAGE_CLASSES: Record<string, string> = {
-  venta: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  ejecucion: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-  cobro: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-}
-
 function StageBadge({ stage }: { stage: string | null }) {
-  const cls = STAGE_CLASSES[stage ?? ''] ?? 'bg-slate-100 text-slate-600'
+  const key = stage as WorkflowStage | null
+  const cls = key && key in STAGE_BADGE_CLASSES
+    ? STAGE_BADGE_CLASSES[key]
+    : 'bg-slate-100 text-slate-600'
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${cls}`}>
       {STAGE_LABELS[stage ?? ''] ?? (stage?.toUpperCase() ?? 'ACTIVO')}
@@ -1639,13 +1637,16 @@ export default function NegocioDetailClient({
           {/* Fila A — estado: [STAGE] › [E{N} ETAPA] */}
           <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
             <StageBadge stage={negocio.stage_actual} />
-            {negocio.etapas_negocio?.nombre && (
+            {negocio.etapas_negocio?.nombre && (() => {
+              const stageKey = negocio.stage_actual as WorkflowStage | null
+              const etapaCls = stageKey && stageKey in STAGE_BADGE_CLASSES
+                ? STAGE_BADGE_CLASSES[stageKey]
+                : 'bg-slate-100 text-slate-600'
+              return (
               <>
                 <span className="text-[11px] text-muted-foreground/40">›</span>
                 <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${
-                    STAGE_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-slate-100 text-slate-600'
-                  }`}
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${etapaCls}`}
                 >
                   {negocio.etapas_negocio.numero !== null && negocio.etapas_negocio.numero !== undefined && (
                     <span className="mr-1 font-mono opacity-70">E{negocio.etapas_negocio.numero}</span>
@@ -1653,7 +1654,8 @@ export default function NegocioDetailClient({
                   <span className="truncate uppercase">{negocio.etapas_negocio.nombre}</span>
                 </span>
               </>
-            )}
+              )
+            })()}
             {negocio.lineas_negocio?.nombre && (
               <span className="truncate text-[11px] text-muted-foreground">
                 {negocio.lineas_negocio.numero !== null && negocio.lineas_negocio.numero !== undefined && (

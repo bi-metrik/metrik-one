@@ -55,10 +55,24 @@ export const STAGE_LABELS: Record<WorkflowStage, string> = {
   cobro: 'Cobro',
 }
 
+// Paleta canonica de stages (orden cronologico del workflow):
+//   venta     → verde   (oportunidad)
+//   ejecucion → naranja (work-in-progress)
+//   cobro     → azul    (cierre financiero)
+// Aplica en /flujo, /admin/workflows, listados de negocios y detalle de negocio.
+
 export const STAGE_COLORS: Record<WorkflowStage, { bg: string; text: string; border: string }> = {
   venta:     { bg: '#ECFDF5', text: '#059669', border: '#A7F3D0' },
-  ejecucion: { bg: '#EFF6FF', text: '#2563EB', border: '#BFDBFE' },
-  cobro:     { bg: '#FFFBEB', text: '#B45309', border: '#FDE68A' },
+  ejecucion: { bg: '#FFF7ED', text: '#C2410C', border: '#FED7AA' },
+  cobro:     { bg: '#EFF6FF', text: '#2563EB', border: '#BFDBFE' },
+}
+
+// Clases Tailwind reutilizables para badges/pills que usan tokens de stage.
+// Incluyen variante dark para no perder contraste en modo oscuro.
+export const STAGE_BADGE_CLASSES: Record<WorkflowStage, string> = {
+  venta:     'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+  ejecucion: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  cobro:     'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
 }
 
 // ── ID corto por bloque ────────────────────────────────────────────────────

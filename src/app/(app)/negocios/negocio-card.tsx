@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { FolderOpen, Pause, CheckCircle2, XCircle, Ban } from 'lucide-react'
 import type { NegocioResumen } from './negocio-v2-actions'
+import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -15,13 +16,6 @@ const fmtShort = (v: number) => {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(0)}M`
   if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
   return fmt(v)
-}
-
-// Tokens MeTRIK puros por stage
-const STAGE_CLASSES: Record<string, string> = {
-  venta: 'bg-[#10B981]/10 text-[#059669]',
-  ejecucion: 'bg-[#1A1A1A]/[0.08] text-[#1A1A1A]',
-  cobro: 'bg-[#6B7280]/[0.12] text-[#6B7280]',
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -66,9 +60,12 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
   const isCerrado = negocio.cierre_motivo !== null
   const motivoCierre = negocio.cierre_motivo
 
+  const stageKey = negocio.stage_actual as WorkflowStage | null
   const pillClass = isCerrado
     ? 'bg-[#F5F4F2] text-[#6B7280]'
-    : STAGE_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-[#F5F4F2] text-[#6B7280]'
+    : stageKey && stageKey in STAGE_BADGE_CLASSES
+      ? STAGE_BADGE_CLASSES[stageKey]
+      : 'bg-[#F5F4F2] text-[#6B7280]'
 
   const stageLabel = isCerrado
     ? motivoCierre
@@ -109,9 +106,7 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               <>
                 <span className="text-[11px] text-[#6B7280]/40">›</span>
                 <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${
-                    STAGE_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-[#F5F4F2] text-[#6B7280]'
-                  }`}
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${pillClass}`}
                 >
                   {negocio.etapa_numero !== null && (
                     <span className="mr-1 font-mono opacity-70">E{negocio.etapa_numero}</span>
