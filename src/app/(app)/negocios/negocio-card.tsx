@@ -24,14 +24,6 @@ const STAGE_CLASSES: Record<string, string> = {
   cobro: 'bg-[#6B7280]/[0.12] text-[#6B7280]',
 }
 
-// Chip de etapa actual: hereda el color del stage pero a opacidad 5%
-// para subordinarlo visualmente al stage badge. Texto en Negro Carbón.
-const STAGE_ETAPA_CLASSES: Record<string, string> = {
-  venta: 'bg-[#10B981]/[0.05] text-[#1A1A1A]',
-  ejecucion: 'bg-[#1A1A1A]/[0.04] text-[#1A1A1A]',
-  cobro: 'bg-[#6B7280]/[0.06] text-[#1A1A1A]',
-}
-
 const STAGE_LABELS: Record<string, string> = {
   venta: 'VENTA',
   ejecucion: 'EJECUCION',
@@ -117,14 +109,14 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               <>
                 <span className="text-[11px] text-[#6B7280]/40">›</span>
                 <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                    STAGE_ETAPA_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-[#F5F4F2] text-[#1A1A1A]'
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${
+                    STAGE_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-[#F5F4F2] text-[#6B7280]'
                   }`}
                 >
                   {negocio.etapa_numero !== null && (
-                    <span className="mr-1 font-mono text-[9px] text-[#6B7280]">E{negocio.etapa_numero}</span>
+                    <span className="mr-1 font-mono opacity-70">E{negocio.etapa_numero}</span>
                   )}
-                  <span className="truncate">{negocio.etapa_nombre}</span>
+                  <span className="truncate uppercase">{negocio.etapa_nombre}</span>
                 </span>
               </>
             )}

@@ -44,7 +44,7 @@ import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
 import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
-// BloquePropuestaEconomica: en desarrollo por sesion paralela — temporalmente deshabilitado
+import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
 import type { MultiPagoField } from './bloques/BloqueDatosMultiPago'
 import BloqueAprobacion from './bloques/BloqueAprobacion'
@@ -1163,11 +1163,18 @@ function BloqueRenderer({
       )
 
     case 'propuesta_economica':
-      // Renderer en desarrollo por sesion paralela — placeholder mientras tanto
       return (
-        <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          Bloque <strong>propuesta economica</strong> en desarrollo. Disponible proximamente.
-        </div>
+        <BloquePropuestaEconomica
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia ? {
+            id: bloque.instancia.id,
+            completado: bloque.instancia.estado === 'completo',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            data: bloque.instancia.data as any,
+          } : null}
+          modo={modo}
+          configExtra={configExtra as Parameters<typeof BloquePropuestaEconomica>[0]['configExtra']}
+        />
       )
 
     case 'aprobacion':
@@ -1514,17 +1521,21 @@ export default function NegocioDetailClient({
       {/* Fila 2 — STICKY titulo + accion */}
       <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          {/* Fila A — estado: [STAGE] › [E{N} Etapa] */}
+          {/* Fila A — estado: [STAGE] › [E{N} ETAPA] */}
           <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
             <StageBadge stage={negocio.stage_actual} />
             {negocio.etapas_negocio?.nombre && (
               <>
                 <span className="text-[11px] text-muted-foreground/40">›</span>
-                <span className="inline-flex items-center rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-foreground">
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${
+                    STAGE_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-slate-100 text-slate-600'
+                  }`}
+                >
                   {negocio.etapas_negocio.numero !== null && negocio.etapas_negocio.numero !== undefined && (
-                    <span className="mr-1 font-mono text-[9px] text-muted-foreground">E{negocio.etapas_negocio.numero}</span>
+                    <span className="mr-1 font-mono opacity-70">E{negocio.etapas_negocio.numero}</span>
                   )}
-                  <span className="truncate">{negocio.etapas_negocio.nombre}</span>
+                  <span className="truncate uppercase">{negocio.etapas_negocio.nombre}</span>
                 </span>
               </>
             )}
@@ -1637,21 +1648,10 @@ export default function NegocioDetailClient({
         />
       </div>
 
-      {/* ── BODY: Etapa actual + Bloques ── */}
+      {/* ── BODY: Bloques ── */}
       <div className="space-y-4">
         <div>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-foreground">
-                Etapa actual:{' '}
-                <span className="text-primary">
-                  {etapaActual?.nombre ?? '—'}
-                </span>
-              </h2>
-              {etapaActual?.stage && (
-                <StageBadge stage={etapaActual.stage} />
-              )}
-            </div>
+          <div className="mb-3 flex items-center justify-end gap-2">
             <ResponsableSelector
               negocioId={negocio.id}
               responsable={negocio.responsable}
