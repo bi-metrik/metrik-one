@@ -2656,9 +2656,51 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  // ── Cargar data de bloques propuesta_economica del negocio (para herencia readonly)
+  // Indexado por etapa_orden — usado mas abajo para que bloques readonly heredados
+  // en etapas posteriores muestren el data (versiones, descuento, valor) del bloque
+  // origen.
+  const propuestaDataPorEtapa: Record<number, Record<string, unknown>> = {}
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: propuestaBlocks } = await (db(supabase) as any)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo), etapas_negocio!inner(orden))')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+    if (propuestaBlocks) {
+      for (const pb of (propuestaBlocks as Record<string, unknown>[])) {
+        const cfg = pb.bloque_configs as Record<string, unknown>
+        const etapa = cfg.etapas_negocio as { orden: number } | undefined
+        if (etapa && pb.data) {
+          propuestaDataPorEtapa[etapa.orden] = pb.data as Record<string, unknown>
+        }
+      }
+    }
+  }
+
   // ── Build enriched bloques with auto_fill values ──────────────────────────
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
+
+    // Herencia readonly de propuesta_economica: si este bloque es readonly y
+    // tiene source_etapa_orden, reemplazar data por la del bloque source (E1)
+    // para que el componente renderice el historial de versiones completo.
+    const tipoBloque = (b as { _tipo?: string })._tipo
+      ?? (bloqueConfigsExtra[b.id] as { _tipo?: string } | undefined)?._tipo
+    const isReadonlyPropuesta =
+      configExtra.readonly === true
+      && typeof configExtra.source_etapa_orden === 'number'
+    if (isReadonlyPropuesta && b.instancia) {
+      const srcData = propuestaDataPorEtapa[configExtra.source_etapa_orden as number]
+      if (srcData) {
+        b = { ...b, instancia: { ...b.instancia, data: srcData } }
+      }
+    }
+    // Si el tipo no se infirio, usamos detector indirecto: si hay srcData
+    // disponible Y el config_extra del bloque indica readonly+source, lo
+    // tratamos como heredado de propuesta_economica (caso canonico SOENA).
+    void tipoBloque
 
     // Compute auto_fill defaults for datos fields
     const autoFill: Record<string, unknown> = {}
