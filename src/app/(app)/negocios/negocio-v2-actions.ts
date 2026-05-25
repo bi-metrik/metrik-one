@@ -296,6 +296,7 @@ export async function getNegocioDetalle(id: string): Promise<{
   negocio: NegocioDetalle
   bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }>
   etapasLinea: EtapaNegocio[]
+  blockIdByConfigId: Record<string, string>
 } | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -374,6 +375,7 @@ export async function getNegocioDetalle(id: string): Promise<{
 
   // Cargar bloque_configs de la etapa actual + negocio_bloques correspondientes
   let bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }> = []
+  const blockIdByConfigId = new Map<string, string>()
   if (negocioTyped.etapa_actual_id) {
     const { data: bloqueConfigs } = await db(supabase)
       .from('bloque_configs')
@@ -513,7 +515,6 @@ export async function getNegocioDetalle(id: string): Promise<{
     // Calcular block_id por linea con herencia: los bloques readonly
     // que tienen source_etapa_orden mantienen el ID del bloque origen
     // (matching por nombre + tipo en la etapa source).
-    const blockIdByConfigId = new Map<string, string>()
     if (negocioTyped.linea_id) {
       const { data: allLineaBlocks } = await db(supabase)
         .from('bloque_configs')
@@ -609,7 +610,12 @@ export async function getNegocioDetalle(id: string): Promise<{
     }))
   }
 
-  return { negocio: negocioTyped, bloques, etapasLinea }
+  return {
+    negocio: negocioTyped,
+    bloques,
+    etapasLinea,
+    blockIdByConfigId: Object.fromEntries(blockIdByConfigId),
+  }
 }
 
 // ── Datos para formulario de creación ────────────────────────────────────────
@@ -2370,6 +2376,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
+    block_id: string | null
     id: string
     etapa_id: string
     workspace_id: string
@@ -2761,6 +2768,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   type BloqueHistorialPlano = BloqueHistorialFull & {
     etapa_orden: number
     etapa_nombre: string
+    block_id: string | null
   }
   const bloquesEtapasPrevias: BloqueHistorialPlano[] = []
   {
@@ -2864,6 +2872,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         bloquesEtapasPrevias.push({
           etapa_orden: etapaInfo.orden,
           etapa_nombre: etapaInfo.nombre,
+          block_id: base.blockIdByConfigId[cfg.id as string] ?? null,
           id: cfg.id as string,
           etapa_id: cfg.etapa_id as string,
           workspace_id: cfg.workspace_id as string,

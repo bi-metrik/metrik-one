@@ -896,6 +896,7 @@ function PausaNegocioDialog({
 type BloqueHistorialItem = BloqueExtendido & {
   etapa_orden: number
   etapa_nombre: string
+  block_id: string | null
 }
 
 interface EtapaHistorialProps {
@@ -950,13 +951,11 @@ function HistorialEtapasPrevias({
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <ChevronRight className={`h-3 w-3 text-muted-foreground/60 transition-transform shrink-0 ${bloqueAbierto === b.id ? 'rotate-90' : ''}`} />
-                    <span
-                      className="inline-flex items-center justify-center rounded-md bg-muted px-1.5 py-[1px] text-[10px] font-mono font-semibold text-muted-foreground shrink-0"
-                      title={b.etapa_nombre}
-                    >
-                      E{b.etapa_orden}
-                    </span>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">{tipo}</span>
+                    {b.block_id && (
+                      <span className="inline-flex items-center justify-center rounded-md bg-foreground text-background px-1.5 py-[1px] text-[10px] font-mono font-semibold shrink-0">
+                        {b.block_id}
+                      </span>
+                    )}
                     <span className="text-sm font-medium truncate">{b.nombre ?? def?.nombre ?? 'Bloque'}</span>
                     <span className="text-[10px] text-muted-foreground/60 shrink-0 hidden sm:inline">· {b.etapa_nombre}</span>
                   </div>
