@@ -54,11 +54,18 @@ async function getCurrentUserCtx(): Promise<CurrentUserCtx | null> {
 }
 
 // Cookies en ONE son host-only entre subdomains (auth-js rechaza cross-subdomain).
-// Para saltar a otro subdomain del tenant necesitamos sembrar sesion alli via magic link.
+// Para saltar a otro subdomain del tenant necesitamos sembrar sesion alli.
+//
+// Usamos token_hash directo al /auth/callback (flow OTP server-side via verifyOtp)
+// en vez del action_link de Supabase. action_link dispara /auth/v1/verify, que retorna
+// el flow implicit con tokens en hash (#access_token=...) — los hashes no llegan al
+// server, asi que el callback server-side no podia procesarlos y la sesion no se
+// sembraba. Con token_hash en query, el callback corre verifyOtp server-side y la
+// cookie de sesion queda set en la response de redirect.
 async function generateCrossSubdomainSessionLink(
   email: string,
   targetSlug: string,
-  pathAfter: string = '/',
+  pathAfter: string = '/numeros',
 ): Promise<string | null> {
   const svc = createServiceClient()
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co'
@@ -76,7 +83,18 @@ async function generateCrossSubdomainSessionLink(
     console.error('[platform-admin] generateLink error:', error.message)
     return null
   }
-  return data?.properties?.action_link ?? null
+
+  const tokenHash = data?.properties?.hashed_token
+  if (!tokenHash) {
+    console.error('[platform-admin] generateLink sin hashed_token en properties')
+    return null
+  }
+
+  const callbackUrl = new URL(`${targetOrigin}/auth/callback`)
+  callbackUrl.searchParams.set('token_hash', tokenHash)
+  callbackUrl.searchParams.set('type', 'magiclink')
+  callbackUrl.searchParams.set('redirectTo', pathAfter)
+  return callbackUrl.toString()
 }
 
 // ============================================================
