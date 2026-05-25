@@ -2367,6 +2367,19 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   etapasLinea: EtapaNegocio[]
   datosOtrasEtapas: Record<number, Record<string, unknown>>
+  bloquesEtapasPrevias: Array<{
+    etapa_id: string
+    etapa_orden: number
+    etapa_nombre: string
+    bloques: Array<{
+      bloque_config_id: string
+      nombre: string
+      tipo: string
+      instancia_id: string
+      data: Record<string, unknown> | null
+      estado: string
+    }>
+  }>
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   currentUserId: string | null
   userRole: string
@@ -2679,6 +2692,78 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  // ── Historial: bloques con data de etapas previas (con orden < etapa actual)
+  // Sirve para que el usuario revise rapidamente que paso en bloques de etapas
+  // anteriores sin tener que retroceder de etapa. Agrupados por etapa.
+  type BloqueHistorial = {
+    bloque_config_id: string
+    nombre: string
+    tipo: string
+    instancia_id: string
+    data: Record<string, unknown> | null
+    estado: string
+  }
+  type EtapaHistorial = {
+    etapa_id: string
+    etapa_orden: number
+    etapa_nombre: string
+    bloques: BloqueHistorial[]
+  }
+  const bloquesEtapasPrevias: EtapaHistorial[] = []
+  {
+    const etapaActualOrden = base.etapasLinea.find(
+      e => e.id === base.negocio.etapa_actual_id,
+    )?.orden ?? 0
+    const etapasPrevias = base.etapasLinea
+      .filter(e => e.orden < etapaActualOrden)
+      .sort((a, b) => b.orden - a.orden) // mas reciente primero
+    if (etapasPrevias.length > 0) {
+      const etapaIdsPrevias = etapasPrevias.map(e => e.id)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: prevBlocks } = await (db(supabase) as any)
+        .from('negocio_bloques')
+        .select(`
+          id, estado, data,
+          bloque_configs!inner(
+            id, etapa_id, nombre,
+            bloque_definitions(tipo)
+          )
+        `)
+        .eq('negocio_id', id)
+        .in('bloque_configs.etapa_id', etapaIdsPrevias)
+      if (prevBlocks) {
+        const byEtapa = new Map<string, BloqueHistorial[]>()
+        for (const row of (prevBlocks as Record<string, unknown>[])) {
+          const cfg = row.bloque_configs as Record<string, unknown>
+          if (!cfg) continue
+          const data = row.data as Record<string, unknown> | null
+          // Skip bloques sin data trabajada (vacios o que solo se autocrearon)
+          if (!data || Object.keys(data).length === 0) continue
+          const etapaId = cfg.etapa_id as string
+          if (!byEtapa.has(etapaId)) byEtapa.set(etapaId, [])
+          byEtapa.get(etapaId)!.push({
+            bloque_config_id: cfg.id as string,
+            nombre: (cfg.nombre as string) ?? 'Bloque',
+            tipo: ((cfg.bloque_definitions as { tipo?: string } | null)?.tipo) ?? 'datos',
+            instancia_id: row.id as string,
+            data,
+            estado: (row.estado as string) ?? 'pendiente',
+          })
+        }
+        for (const etapa of etapasPrevias) {
+          const bloques = byEtapa.get(etapa.id) ?? []
+          if (bloques.length === 0) continue
+          bloquesEtapasPrevias.push({
+            etapa_id: etapa.id,
+            etapa_orden: etapa.orden,
+            etapa_nombre: etapa.nombre,
+            bloques,
+          })
+        }
+      }
+    }
+  }
+
   // ── Build enriched bloques with auto_fill values ──────────────────────────
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
@@ -2746,6 +2831,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
     datosOtrasEtapas,
+    bloquesEtapasPrevias,
     profiles: (profilesData ?? []).map(p => ({
       id: p.id,
       full_name: p.full_name,
