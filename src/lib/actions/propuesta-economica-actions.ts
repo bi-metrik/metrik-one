@@ -142,7 +142,10 @@ async function loadBloqueContext(
   const data = (b.data ?? {}) as Partial<PropuestaData>
   const configExtra = (b.bloque_configs?.config_extra ?? {}) as Record<string, unknown>
   const capDescuento = Number(configExtra.cap_descuento_pct ?? 50)
-  const servicioId = configExtra.servicio_id as string | undefined
+  // servicio_id puede venir directo o anidado en auto_propuesta (config canonica)
+  const autoPropuesta = (configExtra.auto_propuesta ?? null) as { servicio_id?: string } | null
+  const servicioId = (configExtra.servicio_id as string | undefined)
+    ?? autoPropuesta?.servicio_id
   const templateSlug = (configExtra.template_slug as string) ?? 'soena/propuesta-economica'
 
   // Si data esta vacio o no tiene precio_base, lo derivamos del servicio
