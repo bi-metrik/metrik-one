@@ -575,22 +575,30 @@ export default function BloqueDocumento({
               onClick={handleConfirm}
               className="rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
             >
-              Procesar
+              {camposConfig.length > 0 ? 'Procesar' : 'Confirmar'}
             </button>
           </div>
         </div>
       )}
 
       {uploadState === 'processing' && (
-        <div className="flex w-full items-center gap-3 rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 p-4">
-          <Sparkles className="h-5 w-5 animate-pulse text-primary shrink-0" />
-          <div>
-            <span className="text-sm font-medium text-primary">{label}</span>
-            <p className="text-[11px] text-primary/70">
-              {camposConfig.length > 0 ? 'Procesando con IA...' : 'Guardando en Drive...'}
-            </p>
+        camposConfig.length > 0 ? (
+          <div className="flex w-full items-center gap-3 rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 p-4">
+            <Sparkles className="h-5 w-5 animate-pulse text-primary shrink-0" />
+            <div>
+              <span className="text-sm font-medium text-primary">{label}</span>
+              <p className="text-[11px] text-primary/70">Procesando con IA...</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex w-full items-center gap-3 rounded-lg border-2 border-dashed border-blue-200 bg-blue-50/30 p-4">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-500 shrink-0" />
+            <div>
+              <span className="text-sm font-medium text-blue-700">{label}</span>
+              <p className="text-[11px] text-blue-500">Guardando en Drive...</p>
+            </div>
+          </div>
+        )
       )}
 
       {uploadState === 'uploaded' && (
