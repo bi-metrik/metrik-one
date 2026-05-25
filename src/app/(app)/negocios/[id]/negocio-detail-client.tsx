@@ -44,7 +44,7 @@ import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
 import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
-import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
+// BloquePropuestaEconomica: en desarrollo por sesion paralela — temporalmente deshabilitado
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
 import type { MultiPagoField } from './bloques/BloqueDatosMultiPago'
 import BloqueAprobacion from './bloques/BloqueAprobacion'
@@ -1163,18 +1163,11 @@ function BloqueRenderer({
       )
 
     case 'propuesta_economica':
+      // Renderer en desarrollo por sesion paralela — placeholder mientras tanto
       return (
-        <BloquePropuestaEconomica
-          negocioBloqueId={instanciaId}
-          instancia={bloque.instancia ? {
-            id: bloque.instancia.id,
-            completado: bloque.instancia.estado === 'completo',
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            data: bloque.instancia.data as any,
-          } : null}
-          modo={modo}
-          configExtra={configExtra as Parameters<typeof BloquePropuestaEconomica>[0]['configExtra']}
-        />
+        <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Bloque <strong>propuesta economica</strong> en desarrollo. Disponible proximamente.
+        </div>
       )
 
     case 'aprobacion':
