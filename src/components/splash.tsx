@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { usePathname } from 'next/navigation'
 
 const K_REVEALED = 0.60
 
 export default function Splash() {
+  const pathname = usePathname()
   const [visible, setVisible] = useState(true)
   const [fadeOut, setFadeOut] = useState(false)
 
@@ -63,6 +65,8 @@ export default function Splash() {
     return () => t.forEach(clearTimeout)
   }, [runBeam])
 
+  // El splash no aplica en paginas publicas de certificacion (acceso via QR).
+  if (pathname?.startsWith('/cert') || pathname?.startsWith('/c/')) return null
   if (!visible) return null
 
   const metrikChars = [

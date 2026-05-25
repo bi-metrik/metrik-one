@@ -1,55 +1,60 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { ShieldCheck, ShieldAlert } from 'lucide-react'
 import { getCertPublica } from '@/lib/cert/data'
 import type { CertPublica } from '@/lib/cert/types'
 
 export const metadata: Metadata = {
-  title: 'Certificación de producto — MéTRIK',
-  // Las paginas de certificacion no se indexan (acceso via QR fisico).
+  title: 'Certificación de producto',
   robots: { index: false, follow: false },
 }
 
 const C = {
   black: '#1A1A1A',
   gray: '#6B7280',
+  grayLt: '#9CA3AF',
   green: '#10B981',
   greenDark: '#059669',
   red: '#EF4444',
-  amber: '#F59E0B',
+  redDark: '#B91C1C',
+  amber: '#B45309',
   white: '#FFFFFF',
   line: '#E5E7EB',
+  hair: '#F0EFEC',
   bg: '#F5F4F2',
 }
 
 function fmtFecha(iso: string | null): string {
   if (!iso) return '—'
-  const d = new Date(iso + 'T00:00:00')
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })
+  return new Date(iso + 'T00:00:00').toLocaleDateString('es-CO', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  })
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: '20px 18px', marginBottom: 14 }}>
+    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: C.green, marginBottom: 14 }}>
       {children}
     </div>
   )
 }
 
-function CardLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: C.green, marginBottom: 12 }}>
-      {children}
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Spec({ label, value }: { label: string; value: React.ReactNode }) {
   if (value === null || value === undefined || value === '') return null
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '7px 0', borderBottom: `1px solid #F1F1F0` }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '11px 0', borderTop: `1px solid ${C.hair}` }}>
       <span style={{ fontSize: 13, color: C.gray }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: C.black, textAlign: 'right' }}>{value}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: C.black, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
     </div>
+  )
+}
+
+function Section({ label, children, first }: { label: string; children: React.ReactNode; first?: boolean }) {
+  return (
+    <section style={{ padding: '26px 0', borderTop: first ? 'none' : `1px solid ${C.line}` }}>
+      <Eyebrow>{label}</Eyebrow>
+      {children}
+    </section>
   )
 }
 
@@ -59,160 +64,156 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
   if (!cert) notFound()
 
   const { lote, producto, vigente, diasParaVencer, fabricante, ingeniero } = cert
+  const accent = vigente ? C.green : C.red
+  const accentSoft = vigente ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.07)'
   const rango =
     producto?.rango_min_mm && producto?.rango_max_mm
       ? `${producto.rango_min_mm} – ${producto.rango_max_mm} mm`
       : null
+  const titulo = producto?.producto_tipo || producto?.nombre || lote.sku
+  const subtitulo = [producto?.nombre ? `Modelo ${producto.nombre}` : null, `Ref. ${lote.sku}`]
+    .filter(Boolean).join(' · ')
 
   return (
-    <main style={{ maxWidth: 560, margin: '0 auto', padding: '28px 18px 56px' }}>
-      {/* Header — fabricante (WMC) */}
-      <header style={{ marginBottom: 16 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: C.gray }}>
-          Certificado de producto
-        </span>
-        {fabricante?.logo_url ? (
-          <div style={{ marginTop: 12 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={fabricante.logo_url}
-              alt={fabricante.nombre}
-              style={{ height: 56, width: 'auto', maxWidth: '100%', objectFit: 'contain' }}
-            />
+    <main style={{ maxWidth: 520, margin: '0 auto', padding: '24px 16px 48px' }}>
+      <div
+        style={{
+          background: C.white,
+          border: `1px solid ${C.line}`,
+          borderRadius: 18,
+          boxShadow: '0 1px 2px rgba(16,24,40,0.04), 0 12px 32px rgba(16,24,40,0.05)',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Barra superior — fabricante (WMC manda en el co-branding) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 24px', borderBottom: `1px solid ${C.hair}` }}>
+          {fabricante?.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={fabricante.logo_url} alt={fabricante.nombre} style={{ height: 38, width: 'auto', maxWidth: 200, objectFit: 'contain' }} />
+          ) : <span style={{ fontSize: 14, fontWeight: 700, color: C.black }}>{fabricante?.nombre}</span>}
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: C.grayLt, textAlign: 'right' }}>
+            Certificado<br />de producto
+          </span>
+        </div>
+
+        {/* Hero — el momento de confianza */}
+        <div style={{ padding: '36px 24px 30px', textAlign: 'center' }}>
+          <div
+            style={{
+              width: 72, height: 72, borderRadius: '50%', margin: '0 auto 18px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: accentSoft, border: `1.5px solid ${accent}`,
+            }}
+          >
+            {vigente
+              ? <ShieldCheck size={34} color={C.greenDark} strokeWidth={1.6} />
+              : <ShieldAlert size={34} color={C.red} strokeWidth={1.6} />}
           </div>
-        ) : null}
-      </header>
-      <p style={{ fontSize: 13, color: C.gray, marginBottom: 20, lineHeight: 1.6 }}>
-        Producto fabricado por <strong style={{ color: C.black }}>{fabricante?.nombre ?? lote.certificado_para ?? 'el fabricante'}</strong>.
-        Certificación de seguridad estructural{ingeniero?.nombre ? <> emitida por <strong style={{ color: C.black }}>{ingeniero.nombre}</strong></> : null}.
-      </p>
 
-      {/* Estado de vigencia */}
-      <div
-        style={{
-          background: vigente ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.07)',
-          border: `1px solid ${vigente ? C.green : C.red}`,
-          borderRadius: 12, padding: '16px 18px', marginBottom: 14,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
+          <h1 style={{ fontSize: 26, fontWeight: 300, letterSpacing: '-0.02em', color: C.black, lineHeight: 1.18, margin: 0 }}>
+            {titulo}
+          </h1>
+          {subtitulo ? (
+            <p style={{ fontSize: 13, color: C.gray, marginTop: 8 }}>{subtitulo}</p>
+          ) : null}
+
+          {/* Estado de vigencia */}
+          <div
             style={{
-              fontSize: 13, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase',
-              color: vigente ? C.greenDark : C.red,
+              display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 18,
+              padding: '7px 16px', borderRadius: 100, background: accentSoft,
             }}
           >
-            {vigente ? '● Certificación vigente' : '● Certificación vencida'}
-          </span>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} />
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: vigente ? C.greenDark : C.redDark }}>
+              {vigente ? 'Certificación vigente' : 'Certificación vencida'}
+            </span>
+          </div>
+          <p style={{ fontSize: 12.5, color: C.gray, marginTop: 12, lineHeight: 1.55 }}>
+            {vigente ? (
+              <>Válida hasta el <strong style={{ color: C.black, fontWeight: 600 }}>{fmtFecha(lote.fecha_vencimiento)}</strong>
+                {typeof diasParaVencer === 'number' && diasParaVencer <= 60
+                  ? <span style={{ color: C.amber, fontWeight: 600 }}> · vence en {diasParaVencer} días</span> : null}
+              </>
+            ) : (
+              <>Venció el <strong style={{ color: C.black, fontWeight: 600 }}>{fmtFecha(lote.fecha_vencimiento)}</strong>. Solicita la recertificación de seguridad
+                {fabricante?.nombre ? ` a ${fabricante.nombre}` : ''}.</>
+            )}
+          </p>
         </div>
-        <div style={{ fontSize: 13, color: C.gray, marginTop: 6 }}>
-          {vigente ? (
-            <>Válida hasta el <strong style={{ color: C.black }}>{fmtFecha(lote.fecha_vencimiento)}</strong>
-              {typeof diasParaVencer === 'number' && diasParaVencer <= 60 ? (
-                <span style={{ color: C.amber, fontWeight: 600 }}> · vence en {diasParaVencer} días</span>
-              ) : null}
-            </>
-          ) : (
-            <>Venció el <strong style={{ color: C.black }}>{fmtFecha(lote.fecha_vencimiento)}</strong>. Solicita la recertificación de seguridad
-              {lote.certificado_para ? ` a ${lote.certificado_para}` : ''}.</>
-          )}
-        </div>
-      </div>
 
-      {/* Cumplimiento */}
-      <Card>
-        <CardLabel>Cumplimiento normativo</CardLabel>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <span
-            style={{
-              fontSize: 12, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase',
-              color: C.white, background: lote.cumple ? C.green : C.red,
-              padding: '4px 12px', borderRadius: 100,
-            }}
-          >
-            {lote.cumple ? 'Cumple' : 'No cumple'}
-          </span>
-        </div>
-        <Row label="Norma" value={producto?.norma} />
-        <Row label="Criterio" value={producto?.criterio} />
-        <Row
-          label="Carga de diseño"
-          value={producto?.carga_lb ? `${producto.carga_lb} lb${producto.carga_n ? ` (${producto.carga_n} N)` : ''}` : null}
-        />
-        <Row label="Factor de seguridad" value={producto?.factor_seguridad} />
-      </Card>
-
-      {/* Producto */}
-      <Card>
-        <CardLabel>Producto</CardLabel>
-        <Row label="Referencia (SKU)" value={lote.sku} />
-        <Row label="Modelo" value={producto?.nombre} />
-        <Row label="Tipo" value={producto?.producto_tipo} />
-        <Row label="Rango telescópico" value={rango} />
-        <Row label="Altura" value={producto?.altura_mm ? `${producto.altura_mm} mm` : null} />
-      </Card>
-
-      {/* Fabricante */}
-      {fabricante ? (
-        <Card>
-          <CardLabel>Fabricante</CardLabel>
-          <Row label="Razón social" value={fabricante.nombre} />
-          <Row label="NIT" value={fabricante.nit} />
-          <Row label="Teléfono" value={fabricante.telefono} />
-          <Row label="Correo" value={fabricante.email} />
-          <Row label="Ciudad" value={fabricante.ciudad} />
-          <Row label="Lote de fabricación" value={lote.numero_lote} />
-        </Card>
-      ) : null}
-
-      {/* Certificación — firma del ingeniero (lado MéTRIK de la alianza) */}
-      <div
-        style={{
-          background: C.white, border: `1px solid ${C.line}`, borderRadius: 12,
-          padding: '22px 18px', marginBottom: 14, borderTop: `3px solid ${C.green}`,
-        }}
-      >
-        <CardLabel>Certificación de seguridad estructural</CardLabel>
-        <Row label="Fecha de certificación" value={fmtFecha(lote.fecha_certificacion)} />
-        <Row label="Vigencia" value={`${lote.vigencia_meses} meses`} />
-        <Row label="Válida hasta" value={fmtFecha(lote.fecha_vencimiento)} />
-
-        <p style={{ fontSize: 13, color: C.gray, margin: '18px 0 14px', lineHeight: 1.6 }}>
-          Documento original firmado y certificado por:
-        </p>
-
-        {ingeniero ? (
-          <div style={{ paddingLeft: 14, borderLeft: `2px solid ${C.green}` }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: C.black }}>{ingeniero.nombre}</div>
-            <div style={{ fontSize: 13, color: C.gray, marginTop: 2 }}>
-              {ingeniero.titulo ?? 'Ingeniero Mecánico'}
-              {ingeniero.matricula ? ` · Matrícula Profesional ${ingeniero.matricula}` : ''}
+        {/* Cuerpo */}
+        <div style={{ padding: '0 24px 8px' }}>
+          <Section label="Cumplimiento normativo" first>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
+              <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.01em', color: lote.cumple ? C.greenDark : C.red }}>
+                {lote.cumple ? 'Cumple' : 'No cumple'}
+              </span>
+              <span style={{ fontSize: 13, color: C.gray }}>{producto?.norma}</span>
             </div>
-            {ingeniero.email ? (
-              <div style={{ fontSize: 12, color: C.gray, marginTop: 2 }}>{ingeniero.email}</div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+            <div style={{ marginTop: 12 }}>
+              <Spec label="Criterio" value={producto?.criterio} />
+              <Spec label="Carga de diseño" value={producto?.carga_lb ? `${producto.carga_lb} lb${producto.carga_n ? ` · ${producto.carga_n} N` : ''}` : null} />
+              <Spec label="Factor de seguridad" value={producto?.factor_seguridad} />
+            </div>
+          </Section>
 
-      {/* Footer — Powered by MéTRIK */}
-      <footer style={{ marginTop: 28, textAlign: 'center' }}>
-        <a
-          href="https://metrik.com.co"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, textDecoration: 'none' }}
-        >
-          <span style={{ fontSize: 12, fontWeight: 400, color: C.gray }}>Powered by</span>
-          <span style={{ position: 'relative', display: 'inline-flex', paddingBottom: 4 }}>
-            <span style={{ fontWeight: 700, fontSize: 14, color: C.black, lineHeight: 1 }}>MéTRIK</span>
-            <span style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: 1.5, background: C.green, borderRadius: 1 }} />
-          </span>
-        </a>
-        <div style={{ fontSize: 11, color: C.gray, marginTop: 10 }}>
-          Verificación de autenticidad · metrik.com.co
+          <Section label="Producto">
+            <Spec label="Referencia" value={lote.sku} />
+            <Spec label="Rango telescópico" value={rango} />
+            <Spec label="Altura" value={producto?.altura_mm ? `${producto.altura_mm} mm` : null} />
+            <Spec label="Lote de fabricación" value={lote.numero_lote} />
+          </Section>
+
+          {/* Certificación — firma del ingeniero matriculado */}
+          <Section label="Certificación de seguridad estructural">
+            <Spec label="Fecha de certificación" value={fmtFecha(lote.fecha_certificacion)} />
+            <Spec label="Vigencia" value={`${lote.vigencia_meses} meses`} />
+
+            {ingeniero ? (
+              <div style={{ marginTop: 22 }}>
+                <div style={{ fontSize: 11, color: C.grayLt, marginBottom: 12 }}>
+                  Documento original firmado y certificado por
+                </div>
+                <div style={{ paddingTop: 14, borderTop: `1.5px solid ${C.black}` }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.black, letterSpacing: '-0.01em' }}>{ingeniero.nombre}</div>
+                  <div style={{ fontSize: 13, color: C.gray, marginTop: 3 }}>{ingeniero.titulo ?? 'Ingeniero Mecánico'}</div>
+                  {ingeniero.matricula ? (
+                    <div style={{ fontSize: 13, color: C.black, fontWeight: 600, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+                      Matrícula Profesional {ingeniero.matricula}
+                    </div>
+                  ) : null}
+                  {ingeniero.email ? (
+                    <div style={{ fontSize: 12, color: C.grayLt, marginTop: 4 }}>{ingeniero.email}</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </Section>
+
+          {fabricante ? (
+            <Section label="Fabricante">
+              <Spec label="Razón social" value={fabricante.nombre} />
+              <Spec label="NIT" value={fabricante.nit} />
+              <Spec label="Teléfono" value={fabricante.telefono} />
+              <Spec label="Correo" value={fabricante.email} />
+            </Section>
+          ) : null}
         </div>
-      </footer>
+
+        {/* Footer — Powered by MéTRIK (única presencia de MéTRIK) */}
+        <div style={{ borderTop: `1px solid ${C.hair}`, background: C.bg, padding: '18px 24px', textAlign: 'center' }}>
+          <a href="https://metrik.com.co" target="_blank" rel="noopener noreferrer"
+            style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, textDecoration: 'none' }}>
+            <span style={{ fontSize: 12, color: C.gray }}>Powered by</span>
+            <span style={{ position: 'relative', display: 'inline-flex', paddingBottom: 4 }}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: C.black, lineHeight: 1 }}>MéTRIK</span>
+              <span style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: 1.5, background: C.green, borderRadius: 1 }} />
+            </span>
+          </a>
+          <div style={{ fontSize: 10.5, color: C.grayLt, marginTop: 8 }}>Verificación de autenticidad · metrik.com.co</div>
+        </div>
+      </div>
     </main>
   )
 }
