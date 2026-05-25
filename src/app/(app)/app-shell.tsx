@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
   BarChart3,
+  QrCode,
   LayoutDashboard,
   Briefcase,
   Store,
@@ -47,6 +48,7 @@ interface WorkspaceModules {
   compliance_audit?: boolean
   valida_consulta?: boolean
   cobros_recurrentes?: boolean
+  cert_qr?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -114,6 +116,11 @@ const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
 const VALIDA_NAV_ITEMS = [
   { href: '/valida', label: 'Valida', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
   { href: '/valida/segmentacion', label: 'Segmentación SARLAFT', icon: Sliders, roles: ['owner', 'admin', 'supervisor'] },
+]
+
+// Certificaciones con QR (extra inferior, activable por flag cert_qr)
+const CERT_NAV_ITEMS = [
+  { href: '/certificaciones', label: 'Certificaciones', icon: QrCode, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
 // Compartidos (siempre visibles)
@@ -250,6 +257,8 @@ export default function AppShell({
       )
     : []
   const validaItems = mod.valida_consulta ? filterByRole(VALIDA_NAV_ITEMS, role) : []
+  const certItems = mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []
+  const extrasItems = [...validaItems, ...certItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = [
     ...(mod.business && CAJA_MOVIMIENTOS_ITEM.roles.includes(role) ? [CAJA_MOVIMIENTOS_ITEM] : []),
@@ -261,7 +270,7 @@ export default function AppShell({
   const homeHref = mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio')
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...sharedItems, ...validaItems, ...certItems, ...workflowsItems]
   const primaryHrefs = (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
@@ -480,15 +489,15 @@ export default function AppShell({
             </div>
           )}
 
-          {/* Valida — extra inferior activable por flag */}
-          {validaItems.length > 0 && (
+          {/* Extras — Valida + Certificaciones, activables por flag */}
+          {extrasItems.length > 0 && (
             <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
               {sidebarExpanded && (
                 <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
                   Extras
                 </p>
               )}
-              {validaItems.map((item) => {
+              {extrasItems.map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (
