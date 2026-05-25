@@ -453,6 +453,11 @@ export default function NuevoNegocioForm({
                   {lineas.find(l => l.id === lineaId)?.descripcion}
                 </p>
               )}
+              {lineas.length === 1 && (
+                <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+                  Esta es la única línea activa de tu negocio en MeTRIK ONE.
+                </p>
+              )}
             </div>
           )}
 
