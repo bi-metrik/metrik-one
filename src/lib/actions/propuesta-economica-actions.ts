@@ -57,7 +57,11 @@ export type CalculoPropuesta = {
   valor_final: number       // = plan2_valor
 }
 
-export function calcularPropuesta(
+// NOTA: no exportada — Next.js exige que TODOS los exports de archivos
+// `'use server'` sean async. Como calcularPropuesta es pura (sync), queda
+// como helper interno del modulo. Si fuera necesario consumirla externamente,
+// moverla a un archivo aparte sin `'use server'`.
+function calcularPropuesta(
   precioBaseConIva: number,
   descuentoPct: number,
 ): CalculoPropuesta {
