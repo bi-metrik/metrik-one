@@ -70,6 +70,7 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
       ? { rango: `${pad(lote.serie_desde)} – ${pad(lote.serie_hasta)}`, cantidad: lote.serie_hasta - lote.serie_desde + 1 }
       : null
   const idCompuesto = [negocioCodigo, lote.sku, lote.numero_lote].filter(Boolean).join('  ·  ')
+  const ficha = producto?.ficha ?? null
   const accent = vigente ? C.green : C.red
   const accentSoft = vigente ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.07)'
   const rango =
@@ -178,10 +179,36 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
             </div>
           </Section>
 
-          <Section label="Producto">
-            <Spec label="Rango telescópico" value={rango} />
-            <Spec label="Altura" value={producto?.altura_mm ? `${producto.altura_mm} mm` : null} />
-          </Section>
+          {ficha ? (
+            <Section label="Especificaciones técnicas">
+              {ficha.descripcion ? (
+                <p style={{ fontSize: 13, color: C.gray, lineHeight: 1.6, margin: '0 0 18px' }}>{ficha.descripcion}</p>
+              ) : null}
+
+              {ficha.nomenclatura && ficha.nomenclatura.length > 0 ? (
+                <div style={{ background: C.bg, borderRadius: 12, padding: '14px 16px', marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.black, marginBottom: 10 }}>
+                    Qué significa <span style={{ fontVariantNumeric: 'tabular-nums' }}>{lote.sku}</span>
+                  </div>
+                  {ficha.nomenclatura.map((n, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'baseline', padding: '5px 0' }}>
+                      <span style={{ minWidth: 46, fontSize: 13, fontWeight: 700, color: C.greenDark, fontVariantNumeric: 'tabular-nums' }}>{n.sigla}</span>
+                      <span style={{ fontSize: 13, color: C.gray }}>{n.significado}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {ficha.especificaciones && ficha.especificaciones.length > 0
+                ? ficha.especificaciones.map((e, i) => <Spec key={i} label={e.label} value={e.value} />)
+                : null}
+            </Section>
+          ) : (
+            <Section label="Producto">
+              <Spec label="Rango telescópico" value={rango} />
+              <Spec label="Altura" value={producto?.altura_mm ? `${producto.altura_mm} mm` : null} />
+            </Section>
+          )}
 
           {/* Certificación — firma del ingeniero matriculado */}
           <Section label="Certificación de seguridad estructural">

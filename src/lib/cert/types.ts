@@ -32,6 +32,12 @@ export interface CertLoteRow {
   updated_at: string
 }
 
+export interface CertFicha {
+  descripcion?: string
+  nomenclatura?: { sigla: string; significado: string }[]
+  especificaciones?: { label: string; value: string }[]
+}
+
 export interface CertProductoRow {
   id: string
   workspace_id: string
@@ -47,6 +53,7 @@ export interface CertProductoRow {
   carga_lb: number | null
   criterio: string | null
   factor_seguridad: number | null
+  ficha: CertFicha | null
 }
 
 export interface CertDocumentoRow {
