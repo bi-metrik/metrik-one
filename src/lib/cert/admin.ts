@@ -77,9 +77,9 @@ export async function listCertData() {
 export interface CrearBorradorInput {
   negocio_id: string
   cert_producto_id: string
-  opcion_material: 'A' | 'C' | null
   cantidad: number
-  fecha_certificacion?: string | null
+  ubicacion?: string | null
+  numero_contrato?: string | null
 }
 
 export async function crearBorrador(input: CrearBorradorInput) {
@@ -90,16 +90,14 @@ export async function crearBorrador(input: CrearBorradorInput) {
     .from('negocios').select('id').eq('id', input.negocio_id).eq('workspace_id', workspaceId).maybeSingle()
   if (!neg) throw new Error('Negocio inválido para este workspace')
 
-  // Producto + opcion validada (guardrail: solo combinaciones que CUMPLEN)
+  // El producto YA es la variante validada (su material está en ficha.material).
   const { data: prod } = await db
-    .from('cert_productos').select('id, sku, serie, ficha').eq('id', input.cert_producto_id).eq('workspace_id', workspaceId).maybeSingle()
+    .from('cert_productos').select('id, sku, ficha').eq('id', input.cert_producto_id).eq('workspace_id', workspaceId).maybeSingle()
   if (!prod) throw new Error('Producto inválido')
-  const ficha = (prod.ficha ?? {}) as { opciones?: Record<string, { ratio?: number; cumple?: boolean; perfil?: string; calibre?: string; orientacion?: string | null }> }
-  const opciones = ficha.opciones ?? {}
-  const opKey = input.opcion_material ?? ''
-  const opData = opciones[opKey]
-  if (!opData || opData.cumple !== true) {
-    throw new Error('Combinación SKU + opción de material no validada. No se puede certificar.')
+  const ficha = (prod.ficha ?? {}) as { material?: { ratio?: number; cumple?: boolean; perfil?: string; calibre?: string; orientacion?: string | null } }
+  const mat = ficha.material
+  if (!mat || mat.cumple !== true) {
+    throw new Error('El producto no tiene un material validado (CUMPLE). No se puede certificar.')
   }
 
   const cantidad = Math.max(1, Math.floor(input.cantidad || 1))
@@ -108,16 +106,17 @@ export async function crearBorrador(input: CrearBorradorInput) {
     negocio_id: input.negocio_id,
     cert_producto_id: input.cert_producto_id,
     sku: prod.sku,
-    opcion_material: input.opcion_material,
     // numero_lote lo asigna el trigger cert_lote_set_numero (consecutivo por producto)
     serie_desde: 1,
     serie_hasta: cantidad,
-    material_perfil: opData.perfil ?? null,
-    material_calibre: opData.calibre ?? null,
-    orientacion_instalacion: opData.orientacion ?? null,
-    cumple: opData.cumple,
-    ratio_critico: opData.ratio ?? null,
+    material_perfil: mat.perfil ?? null,
+    material_calibre: mat.calibre ?? null,
+    orientacion_instalacion: mat.orientacion ?? null,
+    cumple: mat.cumple,
+    ratio_critico: mat.ratio ?? null,
     ratio_descripcion: 'Ratio gobernante validado',
+    ubicacion: input.ubicacion?.trim() || null,
+    numero_contrato: input.numero_contrato?.trim() || null,
     estado: 'borrador',
     certificado_para: 'WMC Soluciones Metálicas',
     vigencia_meses: 12,

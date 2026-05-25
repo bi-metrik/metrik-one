@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import {
   crearBorrador, enviarAprobacion, aprobarPublicar, devolverBorrador,
@@ -61,12 +61,13 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
 
   // form
   const [productoId, setProductoId] = useState('')
-  const [opcion, setOpcion] = useState<string>('')
   const [negocioId, setNegocioId] = useState('')
   const [cantidad, setCantidad] = useState('')
+  const [ubicacion, setUbicacion] = useState('')
+  const [numeroContrato, setNumeroContrato] = useState('')
 
   const productoSel = productos.find((p) => p.id === productoId)
-  const opciones = useMemo(() => Object.keys(productoSel?.ficha?.opciones ?? {}), [productoSel])
+  const material = productoSel?.ficha?.material as { perfil?: string; calibre?: string; ratio?: number } | undefined
 
   const conVis = lotes.map((l) => ({ ...l, _vis: estadoVis(l) }))
   const visibles = filtro === 'todas' ? conVis : conVis.filter((l) => l._vis.key === filtro)
@@ -82,19 +83,19 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
 
   function submitBorrador() {
     if (!productoId || !negocioId || !cantidad) {
-      toast.error('Completa producto, opción, negocio y cantidad'); return
+      toast.error('Completa producto, negocio y cantidad'); return
     }
-    if (opciones.length > 0 && !opcion) { toast.error('Selecciona la opción de material'); return }
     start(async () => {
       try {
         await crearBorrador({
           negocio_id: negocioId,
           cert_producto_id: productoId,
-          opcion_material: (opcion || null) as 'A' | 'C' | null,
           cantidad: Number(cantidad),
+          ubicacion: ubicacion || null,
+          numero_contrato: numeroContrato || null,
         })
         toast.success('Borrador guardado')
-        setShowForm(false); setProductoId(''); setOpcion(''); setNegocioId(''); setCantidad('')
+        setShowForm(false); setProductoId(''); setNegocioId(''); setCantidad(''); setUbicacion(''); setNumeroContrato('')
       } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') }
     })
   }
@@ -147,32 +148,17 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
           <div style={{ display: 'grid', gap: 14 }}>
             <div>
               <label style={lbl}>Producto</label>
-              <select value={productoId} onChange={(e) => { setProductoId(e.target.value); setOpcion('') }} style={inp}>
+              <select value={productoId} onChange={(e) => setProductoId(e.target.value)} style={inp}>
                 <option value="">Selecciona…</option>
                 {productos.map((p) => <option key={p.id} value={p.id}>{p.sku} — {p.nombre}</option>)}
               </select>
             </div>
-            {opciones.length > 0 && (
-              <div>
-                <label style={lbl}>Material usado (opción)</label>
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {opciones.map((o) => {
-                    const od = productoSel?.ficha?.opciones?.[o] ?? {}
-                    const sel = opcion === o
-                    return (
-                      <button key={o} onClick={() => setOpcion(o)} type="button"
-                        style={{ textAlign: 'left', padding: '11px 13px', borderRadius: 10, cursor: 'pointer',
-                          border: `1.5px solid ${sel ? C.green : C.line}`, background: sel ? 'rgba(16,185,129,0.06)' : C.white }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: sel ? C.greenDark : C.black }}>Opción {o}</span>
-                          {od.ratio != null && <span style={{ fontSize: 11, fontWeight: 600, color: C.gray }}>CUMPLE · ratio {od.ratio}</span>}
-                        </div>
-                        {od.perfil && <div style={{ fontSize: 12, color: C.gray, marginTop: 4, lineHeight: 1.4 }}>{od.perfil}</div>}
-                        {od.calibre && <div style={{ fontSize: 11, color: C.grayLt, marginTop: 2 }}>Calibre {od.calibre}</div>}
-                      </button>
-                    )
-                  })}
-                </div>
+            {material && (
+              <div style={{ fontSize: 12, color: C.gray, background: C.bg, borderRadius: 10, padding: '11px 13px' }}>
+                <div style={{ fontWeight: 700, color: C.black, marginBottom: 3 }}>Material del producto</div>
+                {material.perfil && <div style={{ lineHeight: 1.4 }}>{material.perfil}</div>}
+                {material.calibre && <div style={{ color: C.grayLt, marginTop: 2 }}>Calibre {material.calibre}</div>}
+                {material.ratio != null && <div style={{ color: C.greenDark, fontWeight: 600, marginTop: 3 }}>CUMPLE · ratio {material.ratio}</div>}
               </div>
             )}
             <div>
@@ -188,6 +174,14 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
               <div style={{ fontSize: 11, color: C.grayLt, marginTop: 6 }}>
                 El número de lote se asigna automáticamente por producto (ej. {productoSel?.sku ? `${productoSel.sku}-00X` : 'SKU-00X'}).
               </div>
+            </div>
+            <div>
+              <label style={lbl}>Ubicación / obra (opcional)</label>
+              <input value={ubicacion} onChange={(e) => setUbicacion(e.target.value)} placeholder="Ej. Torre Norte · Bogotá" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>N° de contrato</label>
+              <input value={numeroContrato} onChange={(e) => setNumeroContrato(e.target.value)} placeholder="Contraseña para descargar el DataBook" style={inp} />
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button onClick={() => submitBorrador()} disabled={pending}
@@ -222,7 +216,7 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: C.black }}>
-                      {l.numero_lote}{l.opcion_material ? ` · Opción ${l.opcion_material}` : ''}
+                      {l.numero_lote}
                     </div>
                     <div style={{ fontSize: 12, color: C.gray, marginTop: 3 }}>
                       {l.negocios?.codigo ?? '—'}

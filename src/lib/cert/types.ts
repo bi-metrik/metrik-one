@@ -28,6 +28,8 @@ export interface CertLoteRow {
   fecha_vencimiento: string | null
   serie_desde: number | null
   serie_hasta: number | null
+  ubicacion: string | null
+  numero_contrato: string | null
   created_at: string
   updated_at: string
 }
@@ -54,6 +56,8 @@ export interface CertProductoRow {
   criterio: string | null
   factor_seguridad: number | null
   ficha: CertFicha | null
+  databook_path: string | null
+  databook_nombre: string | null
 }
 
 export interface CertDocumentoRow {
@@ -92,6 +96,7 @@ export interface CertPublica {
   diasParaVencer: number | null
   workspaceNombre: string | null
   negocioCodigo: string | null
+  databookDisponible: boolean
   fabricante: CertFabricante | null
   ingeniero: CertIngeniero | null
 }

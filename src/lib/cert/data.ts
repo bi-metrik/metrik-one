@@ -107,6 +107,7 @@ export async function getCertPublica(loteId: string): Promise<CertPublica | null
     diasParaVencer,
     workspaceNombre: (ws?.name as string | undefined) ?? null,
     negocioCodigo,
+    databookDisponible: !!producto?.databook_path,
     fabricante: certCfg.fabricante ?? null,
     ingeniero: certCfg.ingeniero ?? null,
   }

@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { ShieldCheck, ShieldAlert } from 'lucide-react'
 import { getCertPublica } from '@/lib/cert/data'
 import type { CertPublica } from '@/lib/cert/types'
+import DatabookDownload from './databook-download'
 
 export const metadata: Metadata = {
   title: 'Certificación de producto',
@@ -67,7 +68,7 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
   const cert: CertPublica | null = await getCertPublica(loteId)
   if (!cert) notFound()
 
-  const { lote, producto, vigente, diasParaVencer, fabricante, ingeniero, negocioCodigo } = cert
+  const { lote, producto, vigente, diasParaVencer, fabricante, ingeniero, negocioCodigo, databookDisponible } = cert
   const pad = (n: number) => String(n).padStart(4, '0')
   const serie =
     lote.serie_desde != null && lote.serie_hasta != null
@@ -164,8 +165,13 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
                 Serie {serie.rango} · {serie.cantidad} unidades
               </div>
             ) : null}
+            {lote.ubicacion ? (
+              <div style={{ fontSize: 13, color: C.gray, marginTop: 6 }}>
+                Obra: <strong style={{ color: C.black, fontWeight: 600 }}>{lote.ubicacion}</strong>
+              </div>
+            ) : null}
             <div style={{ fontSize: 11, color: C.grayLt, marginTop: 8 }}>
-              Proyecto · Lote
+              Proyecto · Lote{lote.ubicacion ? ' · Obra' : ''}
             </div>
           </Section>
 
@@ -246,6 +252,12 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
               <Spec label="NIT" value={fabricante.nit} />
               <Spec label="Teléfono" value={fabricante.telefono} />
               <Spec label="Correo" value={fabricante.email} />
+            </Section>
+          ) : null}
+
+          {databookDisponible ? (
+            <Section label="Documentación técnica">
+              <DatabookDownload loteId={lote.id} />
             </Section>
           ) : null}
         </div>
