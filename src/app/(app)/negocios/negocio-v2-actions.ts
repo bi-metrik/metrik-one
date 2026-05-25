@@ -18,6 +18,7 @@ export type LineaNegocio = {
   workspace_id: string | null
   nombre: string
   tipo: 'plantilla' | 'clarity'
+  numero: number
 }
 
 export type EtapaNegocio = {
@@ -26,6 +27,7 @@ export type EtapaNegocio = {
   stage: 'venta' | 'ejecucion' | 'cobro'
   nombre: string
   orden: number
+  numero: number
 }
 
 export type BloqueDefinition = {
@@ -92,8 +94,8 @@ export type NegocioDetalle = {
   veces_pausado: number
   ultimo_pausado_at: string | null
   // Joins — usando columnas reales de las tablas existentes (empresas.nombre, contactos.nombre)
-  lineas_negocio: { nombre: string } | null
-  etapas_negocio: { nombre: string; stage: string } | null
+  lineas_negocio: { nombre: string; numero: number } | null
+  etapas_negocio: { nombre: string; stage: string; numero: number } | null
   empresas: { id: string; nombre: string } | null
   contactos: { id: string; nombre: string } | null
   responsable: { id: string; full_name: string } | null
@@ -111,7 +113,9 @@ export type NegocioResumen = {
   created_at: string | null
   // Joins
   linea_nombre: string | null
+  linea_numero: number | null
   etapa_nombre: string | null
+  etapa_numero: number | null
   etapa_stage: string | null
   empresa_nombre: string | null
   contacto_nombre: string | null
@@ -188,8 +192,8 @@ export async function getNegociosV2(
       cierre_motivo,
       closed_at,
       razon_cierre,
-      lineas_negocio(nombre),
-      etapas_negocio(nombre, stage),
+      lineas_negocio(nombre, numero),
+      etapas_negocio(nombre, stage, numero),
       empresas(nombre),
       contactos(nombre)
     `)
@@ -250,9 +254,11 @@ export async function getNegociosV2(
       stage_actual: row.stage_actual as 'venta' | 'ejecucion' | 'cobro' | null,
       estado: row.estado as string | null,
       created_at: row.created_at as string | null,
-      linea_nombre: (row.lineas_negocio as { nombre: string } | null)?.nombre ?? null,
-      etapa_nombre: (row.etapas_negocio as { nombre: string; stage: string } | null)?.nombre ?? null,
-      etapa_stage: (row.etapas_negocio as { nombre: string; stage: string } | null)?.stage ?? null,
+      linea_nombre: (row.lineas_negocio as { nombre: string; numero: number } | null)?.nombre ?? null,
+      linea_numero: (row.lineas_negocio as { nombre: string; numero: number } | null)?.numero ?? null,
+      etapa_nombre: (row.etapas_negocio as { nombre: string; stage: string; numero: number } | null)?.nombre ?? null,
+      etapa_numero: (row.etapas_negocio as { nombre: string; stage: string; numero: number } | null)?.numero ?? null,
+      etapa_stage: (row.etapas_negocio as { nombre: string; stage: string; numero: number } | null)?.stage ?? null,
       empresa_nombre: (row.empresas as { nombre: string } | null)?.nombre ?? null,
       contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
       costos_ejecutados: Math.round((gastosPorNeg[id] ?? 0) + (horasCostoPorNeg[id] ?? 0)),
@@ -327,8 +333,8 @@ export async function getNegocioDetalle(id: string): Promise<{
       motivo_pausa_detalle,
       veces_pausado,
       ultimo_pausado_at,
-      lineas_negocio(nombre),
-      etapas_negocio(nombre, stage),
+      lineas_negocio(nombre, numero),
+      etapas_negocio(nombre, stage, numero),
       empresas(id, nombre),
       contactos(id, nombre),
       staff!negocios_responsable_id_fkey(id, full_name)
@@ -352,7 +358,7 @@ export async function getNegocioDetalle(id: string): Promise<{
   if (negocioTyped.linea_id) {
     const { data: etapas } = await db(supabase)
       .from('etapas_negocio')
-      .select('id, linea_id, stage, nombre, orden')
+      .select('id, linea_id, stage, nombre, orden, numero')
       .eq('linea_id', negocioTyped.linea_id)
       .order('orden', { ascending: true })
 
@@ -362,6 +368,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       stage: e.stage as 'venta' | 'ejecucion' | 'cobro',
       nombre: e.nombre as string,
       orden: e.orden as number,
+      numero: e.numero as number,
     }))
   }
 
@@ -628,9 +635,9 @@ export async function getDatosNuevoNegocio(): Promise<{
       .order('nombre', { ascending: true }),
     db(supabase)
       .from('lineas_negocio')
-      .select('id, workspace_id, nombre, tipo')
+      .select('id, workspace_id, nombre, tipo, numero')
       .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
-      .order('nombre', { ascending: true }),
+      .order('numero', { ascending: true }),
   ])
 
   return {
@@ -641,6 +648,7 @@ export async function getDatosNuevoNegocio(): Promise<{
       workspace_id: l.workspace_id as string | null,
       nombre: l.nombre as string,
       tipo: l.tipo as 'plantilla' | 'clarity',
+      numero: l.numero as number,
     })),
   }
 }
@@ -824,11 +832,26 @@ export async function crearNegocio(input: {
     }
   } catch (driveErr) {
     // No bloquear la creación del negocio si Drive falla, pero log explicito
+    // + registro en activity_log para que sea visible al owner sin tener que
+    // mirar logs de Vercel. Detectado tras incidente SOENA 2026-05-24 donde
+    // las carpetas dejaron de crearse silenciosamente al revocarse el OAuth.
     const msg = driveErr instanceof Error ? driveErr.message : String(driveErr)
     console.error(
       `[crearNegocio] Error creando carpeta Drive (workspace=${workspaceId}, negocio=${negocioData.id}, linea=${lineaId}):`,
       msg,
     )
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any).from('activity_log').insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioData.id,
+        tipo: 'drive_folder_failed',
+        contenido: `Error creando carpeta en Drive: ${msg.slice(0, 500)}`,
+      })
+    } catch (logErr) {
+      console.error('[crearNegocio] No se pudo registrar drive_folder_failed en activity_log:', logErr)
+    }
   }
 
   // Crear negocio_bloques para cada bloque_config de la primera etapa
@@ -853,6 +876,7 @@ export async function crearNegocio(input: {
       await db(supabase).from('negocio_bloques').insert(instancias)
 
       // ── Auto-cotización: si algún bloque cotización tiene config auto_cotizacion ──
+      // Prioridad de lookup: servicio_id (estable a renames) > servicio_nombre (legacy)
       for (const bc of bloqueConfigs as Array<{
         id: string
         config_extra: Record<string, unknown> | null
@@ -860,18 +884,46 @@ export async function crearNegocio(input: {
       }>) {
         const tipoBd = bc.bloque_definitions?.tipo
         const autoCot = (bc.config_extra?.auto_cotizacion ?? null) as {
-          servicio_nombre: string
+          servicio_id?: string
+          servicio_nombre?: string
           usar_precio_estimado?: boolean
         } | null
 
-        if (tipoBd === 'cotizacion' && autoCot) {
+        if (tipoBd === 'cotizacion' && autoCot && (autoCot.servicio_id || autoCot.servicio_nombre)) {
           await crearCotizacionAutomatica(
             supabase,
             workspaceId,
             negocioData.id,
-            autoCot.servicio_nombre,
+            { servicio_id: autoCot.servicio_id, servicio_nombre: autoCot.servicio_nombre },
             autoCot.usar_precio_estimado ? (input.precio_estimado ?? 0) : 0
           )
+        }
+
+        // ── Auto-init propuesta_economica con precio base del servicio ──
+        const autoProp = (bc.config_extra?.auto_propuesta ?? null) as {
+          servicio_id?: string
+        } | null
+        if (tipoBd === 'propuesta_economica' && autoProp?.servicio_id) {
+          try {
+            // Lookup de la instancia recién creada para este bloque_config
+            const { data: instanciaRow } = await db(supabase)
+              .from('negocio_bloques')
+              .select('id')
+              .eq('negocio_id', negocioData.id)
+              .eq('bloque_config_id', bc.id)
+              .single()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const inst = instanciaRow as any
+            if (inst?.id) {
+              const { crearV1Automatica } = await import('@/lib/actions/propuesta-economica-actions')
+              await crearV1Automatica(inst.id, autoProp.servicio_id)
+            }
+          } catch (e) {
+            console.error(
+              `[crearNegocio] Error auto-init propuesta_economica (bloque_config=${bc.id}):`,
+              e instanceof Error ? e.message : String(e),
+            )
+          }
         }
       }
     }
@@ -892,7 +944,7 @@ async function crearCotizacionAutomatica(
   supabase: SupabaseClient,
   workspaceId: string,
   negocioId: string,
-  servicioNombre: string,
+  lookup: { servicio_id?: string; servicio_nombre?: string },
   precioEstimado: number
 ) {
   // 1. Obtener consecutivo
@@ -920,15 +972,21 @@ async function crearCotizacionAutomatica(
 
   const cotizacionId = cotData.id
 
-  // 3. Buscar servicio por nombre en el workspace
-  const { data: servicio } = await supabase
+  // 3. Buscar servicio por ID (preferido) o por nombre (legacy)
+  let servicioQuery = supabase
     .from('servicios')
     .select('id, nombre, precio_estandar, rubros_template')
     .eq('workspace_id', workspaceId)
-    .ilike('nombre', servicioNombre)
     .eq('activo', true)
     .limit(1)
-    .single()
+  if (lookup.servicio_id) {
+    servicioQuery = servicioQuery.eq('id', lookup.servicio_id)
+  } else if (lookup.servicio_nombre) {
+    servicioQuery = servicioQuery.ilike('nombre', lookup.servicio_nombre)
+  } else {
+    return
+  }
+  const { data: servicio } = await servicioQuery.single()
 
   if (!servicio) return
 

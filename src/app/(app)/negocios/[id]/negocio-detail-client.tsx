@@ -44,6 +44,7 @@ import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
 import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
+import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
 import type { MultiPagoField } from './bloques/BloqueDatosMultiPago'
 import BloqueAprobacion from './bloques/BloqueAprobacion'
@@ -1161,6 +1162,21 @@ function BloqueRenderer({
         />
       )
 
+    case 'propuesta_economica':
+      return (
+        <BloquePropuestaEconomica
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia ? {
+            id: bloque.instancia.id,
+            completado: bloque.instancia.estado === 'completo',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            data: bloque.instancia.data as any,
+          } : null}
+          modo={modo}
+          configExtra={configExtra as Parameters<typeof BloquePropuestaEconomica>[0]['configExtra']}
+        />
+      )
+
     case 'aprobacion':
       return (
         <BloqueAprobacion
@@ -1505,10 +1521,25 @@ export default function NegocioDetailClient({
       {/* Fila 2 — STICKY titulo + accion */}
       <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="mb-0.5 flex items-center gap-2">
+          {/* Fila A — estado: [STAGE] › [E{N} Etapa] */}
+          <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
             <StageBadge stage={negocio.stage_actual} />
+            {negocio.etapas_negocio?.nombre && (
+              <>
+                <span className="text-[11px] text-muted-foreground/40">›</span>
+                <span className="inline-flex items-center rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-foreground">
+                  {negocio.etapas_negocio.numero !== null && negocio.etapas_negocio.numero !== undefined && (
+                    <span className="mr-1 font-mono text-[9px] text-muted-foreground">E{negocio.etapas_negocio.numero}</span>
+                  )}
+                  <span className="truncate">{negocio.etapas_negocio.nombre}</span>
+                </span>
+              </>
+            )}
             {negocio.lineas_negocio?.nombre && (
               <span className="truncate text-[11px] text-muted-foreground">
+                {negocio.lineas_negocio.numero !== null && negocio.lineas_negocio.numero !== undefined && (
+                  <span className="mr-1 font-mono text-muted-foreground/70">L{negocio.lineas_negocio.numero}</span>
+                )}
                 {negocio.lineas_negocio.nombre}
               </span>
             )}

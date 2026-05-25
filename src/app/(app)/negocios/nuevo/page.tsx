@@ -19,11 +19,11 @@ export default async function NuevoNegocioPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: lineasData } = await (supabase as any)
     .from('lineas_negocio')
-    .select('id, nombre, descripcion')
+    .select('id, nombre, descripcion, numero')
     .eq('workspace_id', profile.workspace_id)
     .eq('is_active', true)
-    .order('nombre')
-  const lineas = (lineasData ?? []) as { id: string; nombre: string; descripcion: string | null }[]
+    .order('numero')
+  const lineas = (lineasData ?? []) as { id: string; nombre: string; descripcion: string | null; numero: number }[]
 
   return <NuevoNegocioForm lineas={lineas} />
 }

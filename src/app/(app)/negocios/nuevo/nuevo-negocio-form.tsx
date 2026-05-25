@@ -10,7 +10,7 @@ import { SECTORES_EMPRESA } from '@/lib/catalogos/constants'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }
-type Linea = { id: string; nombre: string; descripcion: string | null }
+type Linea = { id: string; nombre: string; descripcion: string | null; numero: number }
 
 const STEPS = [
   { label: 'Contacto', icon: User },
@@ -445,7 +445,7 @@ export default function NuevoNegocioForm({
               >
                 {lineas.length > 1 && <option value="">Seleccionar línea...</option>}
                 {lineas.map(l => (
-                  <option key={l.id} value={l.id}>{l.nombre}</option>
+                  <option key={l.id} value={l.id}>L{l.numero} — {l.nombre}</option>
                 ))}
               </select>
               {lineaId && lineas.find(l => l.id === lineaId)?.descripcion && (

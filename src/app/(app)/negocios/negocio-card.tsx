@@ -24,6 +24,14 @@ const STAGE_CLASSES: Record<string, string> = {
   cobro: 'bg-[#6B7280]/[0.12] text-[#6B7280]',
 }
 
+// Chip de etapa actual: hereda el color del stage pero a opacidad 5%
+// para subordinarlo visualmente al stage badge. Texto en Negro Carbón.
+const STAGE_ETAPA_CLASSES: Record<string, string> = {
+  venta: 'bg-[#10B981]/[0.05] text-[#1A1A1A]',
+  ejecucion: 'bg-[#1A1A1A]/[0.04] text-[#1A1A1A]',
+  cobro: 'bg-[#6B7280]/[0.06] text-[#1A1A1A]',
+}
+
 const STAGE_LABELS: Record<string, string> = {
   venta: 'VENTA',
   ejecucion: 'EJECUCION',
@@ -97,35 +105,45 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="mb-1 flex flex-wrap items-center gap-2">
+          {/* Fila 1: estado actual — [STAGE] › [E{N} Etapa] */}
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${pillClass}`}
             >
               {CierreIcon && <CierreIcon className={`h-2.5 w-2.5 ${cierreColor}`} />}
               {stageLabel}
             </span>
+            {negocio.etapa_nombre && !isCerrado && (
+              <>
+                <span className="text-[11px] text-[#6B7280]/40">›</span>
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    STAGE_ETAPA_CLASSES[negocio.stage_actual ?? ''] ?? 'bg-[#F5F4F2] text-[#1A1A1A]'
+                  }`}
+                >
+                  {negocio.etapa_numero !== null && (
+                    <span className="mr-1 font-mono text-[9px] text-[#6B7280]">E{negocio.etapa_numero}</span>
+                  )}
+                  <span className="truncate">{negocio.etapa_nombre}</span>
+                </span>
+              </>
+            )}
             {negocio.pausado && !isCerrado && (
               <span className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]">
                 <Pause className="h-2.5 w-2.5" />
                 Pausado
               </span>
             )}
-            {negocio.linea_nombre && (
-              <span className="truncate text-[11px] text-[#6B7280]">
-                {negocio.linea_nombre}
-              </span>
-            )}
-            {negocio.etapa_nombre && !isCerrado && (
-              <>
-                {negocio.linea_nombre && (
-                  <span className="text-[11px] text-[#6B7280]/40">·</span>
-                )}
-                <span className="truncate text-[11px] text-[#6B7280]">
-                  {negocio.etapa_nombre}
-                </span>
-              </>
-            )}
           </div>
+          {/* Fila 2: contexto — L{N} Linea */}
+          {negocio.linea_nombre && (
+            <p className="mb-0.5 truncate text-[11px] text-[#6B7280]">
+              {negocio.linea_numero !== null && (
+                <span className="mr-1 font-mono text-[#6B7280]/70">L{negocio.linea_numero}</span>
+              )}
+              {negocio.linea_nombre}
+            </p>
+          )}
           <p className="text-sm font-semibold leading-tight text-[#1A1A1A]">
             {negocio.codigo && (
               <span className="shrink-0 font-mono">{negocio.codigo}{' — '}</span>
