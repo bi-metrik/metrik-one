@@ -314,8 +314,33 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-05-24 (`metrik-one--core` — fix routing platform admin cross-subdomain)
-**Branch:** `main` · PR #4 mergeado y branch borrada · commit `3874390`
+**Sesion:** 2026-05-24 → 25 (`metrik-one--core` — fix routing platform admin + form negocios + IDs fijos L/E + paridad stage/etapa)
+**Branch:** `main` · 8 commits acumulados sobre 3a40aa8 (PR #4 + fixes + features sin PR)
+
+### Cambios de producto deployados a Vercel prod
+
+- **Fix routing platform admin cross-subdomain** (PR #4, commit `3874390`): magic link usa `token_hash` directo al `/auth/callback` en vez de `action_link` (que aterrizaba con tokens en `#hash` que el server no procesa). Subdomain sin sesion → `/login` del MISMO subdomain (no marketing). Callback auto-switchea workspace cuando platform_admin entra a un subdomain ajeno. `getLanding` siempre `/numeros` para roles con acceso. Validado en prod por Mauricio en 4 escenarios.
+- **Form `/negocios/nuevo` simplificado** (commits `7af5122`, `1b4f7be`, `86705b6`): eliminado campo `precio_estimado` del wizard. Solo nombre + (empresa/persona natural) + contacto. Server action `crearNegocio` ya aceptaba undefined → guarda NULL. Precio entra despues por cotizacion, bloques o edicion en header.
+- **Selector linea de negocio en todo workspace** (commit `1b4f7be`): query `lineas_negocio` ya no esta gateada por `tipo='clarity'`. Selector visible en cualquier ws con >=1 linea activa. Pre-selecciona la unica cuando hay 1. Obligatorio si hay lineas. Workspaces sin lineas no muestran el campo.
+- **Microtext sobrio "una sola linea"** (commit `86705b6`): cuando el ws tiene 1 sola linea, debajo del selector aparece "Esta es la única línea activa de tu negocio en MeTRIK ONE." en `text-[10px] text-muted-foreground/70`. Sin link, sin CTA. Invita a "reclamar" otras lineas sin empujar.
+- **Linea de negocio en card y header del detalle** (commit `6d6d272`): `linea_nombre` se muestra cerca del StageBadge. Datos ya estaban en `NegocioResumen.linea_nombre` y `NegocioDetalle.lineas_negocio.nombre` — solo render faltaba.
+- **IDs fijos L/E** (commit `8d4119e`, migration `20260524_lineas_etapas_numero_fijo`): columna `numero` agregada en `lineas_negocio` y `etapas_negocio`. UNIQUE (workspace_id, numero) y UNIQUE (linea_id, numero). Trigger BEFORE INSERT asigna `MAX + 1` entre todas (activas + inactivas) — preserva historial sin reusar numeros. `etapas_negocio.numero` INDEPENDIENTE de `orden` (orden = visual reordenable, numero = evolucion historica). Backfill: 9 lineas + 50 etapas numeradas. `NegocioResumen` y `NegocioDetalle` exponen `linea_numero` y `etapa_numero`.
+- **Paridad visual stage/etapa + remover redundancia** (commit `e9ed289`): card y header muestran `[STAGE] › [E{N} ETAPA]` con MISMO `STAGE_CLASSES` (mismo bg, mismo text color, mismo padding, mismo `font-bold tracking-wider uppercase`). Stage y etapa quedan visualmente equivalentes — son par primario. Removido h2 redundante "Etapa actual: X" debajo del header sticky. Refuta propuesta original Noor de subordinar la etapa con stage color @5%.
+
+### Bonus tecnicos fuera del scope original
+
+- **`UPDATE profiles SET workspace_id = home_workspace_id` para Mauricio** via SQL: resetea workspace activo a metrik para entrada fluida.
+- **Auth config Supabase verificada** via Management API (PAT `sbp_*`): Site URL `https://metrikone.co` + URI allow list `https://*.metrikone.co/**` correctos. No requirio cambios.
+- **Saneamiento build sesion paralela** (commits `e17c2fd`, `b21e817`, `640ff0e`): 3 deploys fallaron en cascada porque arrastre imports a archivos untracked de la sesion paralela (`BloquePropuestaEconomica.tsx`, `propuesta-economica-actions.ts`). Resuelto deshabilitando el case `propuesta_economica` con placeholder + quitando `export` de `calcularPropuesta` (era sync en archivo `'use server'`). Sesion paralela ya commited sus archivos y restauro imports — todo funcional al cierre.
+
+### Gotchas detectados / aprendizajes
+
+- **Imports arrastrados de sesion paralela en working tree compartido**: cuando hago `git add` de un archivo que la sesion paralela edito, arrastro sus cambios sin querer. Patron de QA: `git diff --cached` antes de commit para detectar lineas ajenas. Captura `cerebro/errores/imports-arrastrados-sesion-paralela.md`.
+- **`'use server'` exige TODOS los exports async**: si exportas una funcion pura sync (calculo, formateo) desde un archivo `'use server'`, Next.js falla el build con "Server Actions must be async functions". Fix: quitar `export` si es helper interno, o mover a archivo aparte sin la directive. Captura `cerebro/errores/use-server-exports-async-only.md`.
+- **Stage y etapa son par primario, no jerarquia** (correccion a propuesta Noor inicial): cuando una entidad esta en un proceso multi-stage con sub-etapas, ambos niveles deben verse visualmente equivalentes. Subordinar la etapa visualmente (stage color @5%) escondio info operativa critica. Captura `cerebro/decisiones/2026-05-24_stage-etapa-par-primario.md`.
+
+**Sesion previa:** 2026-05-21 (`metrik-one--core` — PR #2 mergeado, sidebar Workflows unificado, boton Reenviar cuenta de cobro, cleanup completo de branches)
+**Branch:** `main` · branch del PR borrado · repo en estado "solo main"
 
 ### Cambios de producto deployados a Vercel prod
 
