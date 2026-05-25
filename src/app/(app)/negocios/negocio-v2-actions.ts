@@ -899,9 +899,31 @@ export async function crearNegocio(input: {
           )
         }
 
-        // ── Auto-init propuesta_economica: en desarrollo por sesion paralela ──
-        // Cuando el modulo `propuesta-economica-actions` este listo y mergeado,
-        // restaurar el bloque dinamic import + crearV1Automatica aqui.
+        // ── Auto-init propuesta_economica con precio base del servicio ──
+        const autoProp = (bc.config_extra?.auto_propuesta ?? null) as {
+          servicio_id?: string
+        } | null
+        if (tipoBd === 'propuesta_economica' && autoProp?.servicio_id) {
+          try {
+            const { data: instanciaRow } = await db(supabase)
+              .from('negocio_bloques')
+              .select('id')
+              .eq('negocio_id', negocioData.id)
+              .eq('bloque_config_id', bc.id)
+              .single()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const inst = instanciaRow as any
+            if (inst?.id) {
+              const { crearV1Automatica } = await import('@/lib/actions/propuesta-economica-actions')
+              await crearV1Automatica(inst.id, autoProp.servicio_id)
+            }
+          } catch (e) {
+            console.error(
+              `[crearNegocio] Error auto-init propuesta_economica (bloque_config=${bc.id}):`,
+              e instanceof Error ? e.message : String(e),
+            )
+          }
+        }
       }
     }
   }
