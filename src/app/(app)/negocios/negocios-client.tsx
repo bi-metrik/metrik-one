@@ -29,12 +29,12 @@ const ALL_FILTROS: FiltroSpec[] = [
   {
     key: 'ejecucion',
     label: 'Ejecucion',
-    active: { bg: 'bg-[#1A1A1A]/[0.08]', text: 'text-[#1A1A1A]', border: 'border-[#1A1A1A]/30' },
+    active: { bg: 'bg-[#FFF7ED]', text: 'text-[#C2410C]', border: 'border-[#FED7AA]' },
   },
   {
     key: 'cobro',
     label: 'Cobro',
-    active: { bg: 'bg-[#6B7280]/[0.12]', text: 'text-[#6B7280]', border: 'border-[#6B7280]/40' },
+    active: { bg: 'bg-[#EFF6FF]', text: 'text-[#2563EB]', border: 'border-[#BFDBFE]' },
   },
   {
     key: 'cerrados',
