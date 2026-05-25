@@ -78,7 +78,6 @@ export interface CrearBorradorInput {
   negocio_id: string
   cert_producto_id: string
   opcion_material: 'A' | 'C' | null
-  numero_lote: string
   cantidad: number
   fecha_certificacion?: string | null
 }
@@ -110,7 +109,7 @@ export async function crearBorrador(input: CrearBorradorInput) {
     cert_producto_id: input.cert_producto_id,
     sku: prod.sku,
     opcion_material: input.opcion_material,
-    numero_lote: input.numero_lote.trim(),
+    // numero_lote lo asigna el trigger cert_lote_set_numero (consecutivo por producto)
     serie_desde: 1,
     serie_hasta: cantidad,
     material_perfil: opData.perfil ?? null,

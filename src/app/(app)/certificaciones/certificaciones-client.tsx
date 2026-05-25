@@ -63,7 +63,6 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
   const [productoId, setProductoId] = useState('')
   const [opcion, setOpcion] = useState<string>('')
   const [negocioId, setNegocioId] = useState('')
-  const [numeroLote, setNumeroLote] = useState('')
   const [cantidad, setCantidad] = useState('')
 
   const productoSel = productos.find((p) => p.id === productoId)
@@ -81,9 +80,9 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
     })
   }
 
-  function submitBorrador(enviar: boolean) {
-    if (!productoId || !negocioId || !numeroLote.trim() || !cantidad) {
-      toast.error('Completa producto, opción, negocio, lote y cantidad'); return
+  function submitBorrador() {
+    if (!productoId || !negocioId || !cantidad) {
+      toast.error('Completa producto, opción, negocio y cantidad'); return
     }
     if (opciones.length > 0 && !opcion) { toast.error('Selecciona la opción de material'); return }
     start(async () => {
@@ -92,11 +91,10 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
           negocio_id: negocioId,
           cert_producto_id: productoId,
           opcion_material: (opcion || null) as 'A' | 'C' | null,
-          numero_lote: numeroLote,
           cantidad: Number(cantidad),
         })
-        toast.success(enviar ? 'Borrador creado' : 'Borrador guardado')
-        setShowForm(false); setProductoId(''); setOpcion(''); setNegocioId(''); setNumeroLote(''); setCantidad('')
+        toast.success('Borrador guardado')
+        setShowForm(false); setProductoId(''); setOpcion(''); setNegocioId(''); setCantidad('')
       } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') }
     })
   }
@@ -184,18 +182,15 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
                 {negocios.map((n) => <option key={n.id} value={n.id}>{n.codigo} — {n.nombre}</option>)}
               </select>
             </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <div style={{ flex: 2 }}>
-                <label style={lbl}>N° de lote</label>
-                <input value={numeroLote} onChange={(e) => setNumeroLote(e.target.value)} placeholder="LOTE-2026-00X" style={inp} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={lbl}>Cantidad</label>
-                <input value={cantidad} onChange={(e) => setCantidad(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="180" style={inp} />
+            <div>
+              <label style={lbl}>Cantidad de unidades</label>
+              <input value={cantidad} onChange={(e) => setCantidad(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="180" style={inp} />
+              <div style={{ fontSize: 11, color: C.grayLt, marginTop: 6 }}>
+                El número de lote se asigna automáticamente por producto (ej. {productoSel?.sku ? `${productoSel.sku}-00X` : 'SKU-00X'}).
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button onClick={() => submitBorrador(false)} disabled={pending}
+              <button onClick={() => submitBorrador()} disabled={pending}
                 style={{ padding: '9px 16px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.line}`, background: C.white, color: C.black }}>
                 Guardar borrador
               </button>
