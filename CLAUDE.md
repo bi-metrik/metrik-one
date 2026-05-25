@@ -314,7 +314,61 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-05-20 (`metrik-one--core` — Modelo roles · areas · stages, Fases 0-3+ con Fase 3+ UI corriendo en background al cierre)
+**Sesion:** 2026-05-24 (`metrik-one--core` — fix routing platform admin cross-subdomain)
+**Branch:** `main` · PR #4 mergeado y branch borrada · commit `3874390`
+
+### Cambios de producto deployados a Vercel prod
+
+- **Fix magic link cross-subdomain** (`src/lib/actions/platform-admin.ts`): `generateCrossSubdomainSessionLink` ahora usa `properties.hashed_token` y construye URL directo a `/auth/callback?token_hash=...&type=magiclink&redirectTo=...`. Antes retornaba el `action_link` de Supabase que dispara `/auth/v1/verify` y aterriza con tokens en `#hash` — los hashes no llegan al server, asi que el callback nunca podia sembrar la sesion y el flow caia en `/login?redirectTo=/mi-negocio` con tokens colgando. Con `token_hash` en query, el server hace `verifyOtp` y la cookie de sesion se setea en la response del redirect.
+- **Middleware: subdomain sin sesion -> /login del mismo subdomain** (`src/middleware.ts`): antes redirigia a `metrikone.co/login`, donde la sesion de marketing tomaba el `profile.workspace_id` actual y mandaba al subdomain de ESE ws — ignorando el subdomain que el user habia tecleado. Ahora el login se hace local al subdomain via magic link; la cookie se siembra alli y el callback decide destino con contexto del host correcto. Se agregaron `/login` y `/registro` a las rutas publicas permitidas para subdomain sin sesion.
+- **Middleware: `getLanding` siempre `/numeros`** para roles con acceso (`owner`, `admin`, `supervisor`, `read_only`). Antes caia a `/mi-negocio` si `config_metas` estaba vacio — la pagina ya maneja empty state asi que el check de count era ruido. Esto confundia el switch de workspace de platform admin porque cada switch a un ws sin metas aterrizaba en `/mi-negocio` en lugar de Numeros.
+- **Callback: auto-switch para platform admin via subdomain** (`src/app/auth/callback/route.ts`): si el callback aterriza en `subdomain.metrikone.co` y user es `platform_admin` con `profile.workspace_id` apuntando a otro workspace, `routeAfterAuth` ahora hace UPDATE del `workspace_id` al ws del host + audit log en `activity_log` (`tipo: platform_admin_enter`). Materializa "metrik por defecto cuando entro a metrik.metrikone.co" sin pasar por el dropdown Admin. Si `home_workspace_id` no estaba seteado, lo registra como side-effect del primer switch.
+
+### Bonus aplicado fuera del PR
+
+- **Reset workspace_id Mauricio** via SQL: `UPDATE profiles SET workspace_id = home_workspace_id` para `cc6f6100-4eb7-4eed-9a7c-096729f5cedf`. Estaba activo en SOENA (`7dea141d-d4da-483d-a78d-b14ef35500c5`) por el ultimo switch, `home_workspace_id` ya era metrik (`a21bfc88-1a60-48c3-afcd-144226aa2392`). Sin esto, la proxima entrada igual habria funcionado (el fix del callback hace auto-switch), pero evita un viaje extra por `/login` del subdomain metrik.
+- **Auth config Supabase verificada via Management API** (PAT `sbp_...`): Site URL = `https://metrikone.co`, URI allow list incluye `https://*.metrikone.co/**`. Correcto, no requirio cambios — el bug era de codigo, no de config.
+
+### Validacion en prod
+
+QA manual por Mauricio confirmando los 4 escenarios:
+1. `metrik.metrikone.co` directo -> login subdomain -> magic link -> `/numeros` correcto
+2. Dropdown Admin -> SOENA -> aterriza directo en `soena.metrikone.co/numeros` con sesion sembrada (sin pasar por `/login`)
+3. Banner "Platform Admin viendo SOENA" + host coincide con subdomain de la URL
+4. "Regresar a metrik" -> `metrik.metrikone.co/numeros`
+
+### Gotchas detectados / aprendizajes
+
+- **`auth.admin.generateLink` retorna `action_link` que usa flow implicit (hash)** — patron incorrecto para sembrar sesion server-side cross-subdomain. El patron correcto es ignorar `action_link` y construir URL directo al callback con `properties.hashed_token` + `type=magiclink`. El callback procesa via `verifyOtp` que setea cookie en la response. Documentado al cerebro como `cerebro/errores/supabase-action-link-hash-flow.md`.
+- **Bug invisible hasta que se prueba el flow real**: el flow cross-subdomain via dropdown Admin nunca se habia validado end-to-end despues de la decision Vercel SSO 2026-04-28. Los magic links de invitacion estandar (`auth.admin.inviteUserByEmail`) usan token_hash en query y funcionan bien — solo `generateLink` con magic link callback custom estaba roto. Reglas de QA pendiente: agregar al checklist de Hana "validar cross-subdomain switch de Platform Admin" tras cualquier cambio en middleware/callback/platform-admin.
+
+**Sesion previa:** 2026-05-21 (`metrik-one--core` — PR #2 mergeado, sidebar Workflows unificado, boton Reenviar cuenta de cobro, cleanup completo de branches)
+**Branch:** `main` · branch del PR borrado · repo en estado "solo main"
+
+### Cambios de producto deployados a Vercel prod
+
+- **Sidebar Workflows unificado** (commit `aee3541`): una sola entrada `Workflows` en `src/app/(app)/app-shell.tsx`. `href` se resuelve en runtime: owner del `ADMIN_WORKSPACE_ID` → `/admin/workflows` (biblioteca cross-workspace), resto → `/flujo` (Kanban del workspace). Item duplicado eliminado de `ADMIN_NAV_ITEMS`. Dropdown nuevo "Todos los workspaces" en `WorkflowsList`.
+- **Boton Reenviar cuentas de cobro** (commit `3dfabd1`): server action `reenviarCuentaCobro` en `src/lib/actions/cuentas-cobro-actions.ts` (owner-only, estados `enviada`/`aprobada_lista_envio`). Reusa `enviarCuentaCobroEmail` sin re-aprobar. Boton variante secundaria en `src/app/(app)/cobros-recurrentes/cobros-recurrentes-client.tsx`.
+- **Modelo roles-areas-stages Fases 1-3+ en produccion** (PR #2 merge commit `be1fb46`): 13 migrations aplicadas en Supabase prod via MCP **antes** del merge para evitar ventana de inconsistencia. Vercel auto-deploy en Ready.
+- **Render workflow extendido**: bloques readonly + condicionales se distinguen visualmente. ID corto por bloque (2 letras + numero por linea) en simplified y detailed. `config_extra.visible=false` filtra el bloque del diagrama tanto en `/flujo` como en `/admin/workflows`. Tipos inherentemente readonly (cobros, historial, resumen, ejecucion) muestran icono Eye automaticamente.
+- **ID corto por bloque con herencia** (commit `3a40aa8`): `block_id` formato `XX{N}` (2 letras del tipo + N consecutivo por linea). Bloques readonly heredados (con `config_extra.source_etapa_orden`) **conservan el ID del bloque origen** via matching `(etapa source, nombre, tipo)`. Calculado runtime en 3 server actions: `/flujo`, `/admin/workflows`, `/negocios/[id]`. NO se persiste en DB. Helper `bloqueTipoCode(tipo)` + `BLOQUE_TIPO_CODE` en `src/components/workflow/types.ts`.
+- **ID visible en `/negocios/[id]`** (commit `3a40aa8`): badge negro junto al nombre en el header de cada bloque. Mismo estilo que `/flujo`. Permite referirse a bloques sin ambigüedad operacional.
+- **Esquema visual WorkflowDiagram queda como ESTANDAR canonico** para todos los workflows MeTRIK ONE. NO modificable por cliente. Cualquier cambio futuro al esquema debe ser propuesto por Noor (UX/UI), validado por Vera + Hana, ejecutado por Max, y aplicado a TODOS los workflows existentes simultaneamente. Detalle en `cerebro/reglas/esquema-visual-workflow-estandar.md`.
+- **`/flujo` y `/negocios/[id]` son espejos**: ambas superficies leen de `bloque_configs` (DB), cero drift permitido. Disenar un workflow ES disenar simultaneamente como se ve y opera dentro de cada negocio activo. Auto-instanciacion (`getNegocioDetalle` auto-crea instancias faltantes al entrar a etapa) preserva el espejo. Detalle en `cerebro/reglas/workflow-y-ejecucion-son-espejos.md`.
+
+### Cleanup de repo
+
+- 4 feature branches borrados (local + remoto): `feat/roles-areas-stages-fase-1`, `feat/tenant-rules-motor`, `fix/workflow-diagram-branch-chains`, `feat/workflow-render-readonly` (temporal).
+- 18 branches `worktree-agent-*` huerfanos borrados.
+- 6 worktrees fisicos desbloqueados y removidos en `.claude/worktrees/`.
+- Estado actual: solo `main` en local, remoto, y worktree list. `.claude/worktrees/` vacio.
+
+### Gotchas detectados
+
+- **Colision sesiones paralelas (2026-05-20)**: tres sesiones Claude Code activas sobre el mismo working directory `metrik-one/`. Una hizo `git reset` + `git checkout feat/roles-areas-stages-fase-1` y descarto edits sin commit de otra sesion. Documentado al cerebro como `cerebro/errores/colision-sesiones-paralelas-git.md`. Solucion estable: una sesion = un worktree git. Blindaje hook pendiente (Hana propone, Vera valida).
+- **Commits gemelos en merge paralelo**: cuando dos sesiones empujan el mismo commit a paths distintos (branch + main directo), git los conserva como SHAs distintos pero contenido identico. Detectable comparando timestamp + autor + diff stat. En PR #2 vs PR #3 paso con `69472b0`↔`fa8f897` y `806483c`↔`97f266b`.
+
+**Sesion previa:** 2026-05-20 (`metrik-one--core` — Modelo roles · areas · stages, Fases 0-3+ con Fase 3+ UI corriendo en background al cierre)
 **Branch:** `feat/roles-areas-stages-fase-1` · 4 commits acumulados sobre main · sin merge aun
 
 ### Trayectoria de la sesion
