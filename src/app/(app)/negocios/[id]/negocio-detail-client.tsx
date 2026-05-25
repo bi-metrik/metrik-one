@@ -55,6 +55,7 @@ import BloqueHistorial from './bloques/BloqueHistorial'
 import type { HistorialData } from './bloques/BloqueHistorial'
 import BloqueFormulario from './bloques/BloqueFormulario'
 import BloquePagosEpayco from './bloques/BloquePagosEpayco'
+import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
@@ -1001,6 +1002,7 @@ interface BloqueExtendido extends BloqueConfig {
   instancia: NegocioBloque | null
   config_extra: Record<string, unknown>
   _currentUserId?: string | null
+  _responsableId?: string | null
   _forceReadOnly?: boolean
   items: Array<{
     id: string
@@ -1122,6 +1124,21 @@ function BloqueRenderer({
 
     case 'datos': {
       const fields = (configExtra.fields ?? []) as DatosField[]
+      if (configExtra.completion_stamp) {
+        return (
+          <BloqueCompletionStamp
+            negocioBloqueId={instanciaId}
+            instancia={bloque.instancia}
+            modo={modo}
+            labelBoton={configExtra.label_boton as string | undefined}
+            restrictToOperatorOrResponsable={!!configExtra.restrict_to_operator_or_responsable}
+            userRole={userRole}
+            currentUserId={bloque._currentUserId ?? null}
+            responsableId={bloque._responsableId ?? null}
+            profiles={profiles.map(p => ({ id: p.id, full_name: p.full_name }))}
+          />
+        )
+      }
       if (configExtra.es_pagos_epayco) {
         return (
           <BloquePagosEpayco
@@ -1598,6 +1615,7 @@ export default function NegocioDetailClient({
   const allBloques = (bloques as BloqueExtendido[]).map(b => ({
     ...b,
     _currentUserId: currentUserId,
+    _responsableId: negocio.responsable?.id ?? null,
   }))
 
   // Recopilar datos de todos los bloques de esta etapa para evaluar condiciones

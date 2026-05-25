@@ -58,6 +58,8 @@ export type NegocioBloque = {
   bloque_config_id: string
   estado: 'pendiente' | 'completo'
   data: Record<string, unknown> | null
+  completado_at?: string | null
+  completado_por?: string | null
 }
 
 export type NegocioDetalle = {
@@ -401,7 +403,7 @@ export async function getNegocioDetalle(id: string): Promise<{
     if (configIds.length > 0) {
       const { data: instancias } = await db(supabase)
         .from('negocio_bloques')
-        .select('id, negocio_id, bloque_config_id, estado, data')
+        .select('id, negocio_id, bloque_config_id, estado, data, completado_at, completado_por')
         .eq('negocio_id', id)
         .in('bloque_config_id', configIds)
 
@@ -1588,6 +1590,7 @@ export async function marcarBloqueCompleto(
       estado: 'completo',
       data: mergedData,
       completado_at: new Date().toISOString(),
+      completado_por: staffId ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', negocioBloqueId)
@@ -2920,27 +2923,59 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const autoFill: Record<string, unknown> = {}
     const fields = (configExtra.fields ?? []) as Array<{
       slug: string
+      tipo?: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      auto_fill?: { field: string; source: string; mapping: Record<string, any>; source_etapa_orden: number }
+      auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number }
+      doc_link?: { source_bloque_nombre: string; source_etapa_orden: number }
     }>
     for (const f of fields) {
       if (f.auto_fill) {
         const srcData = datosOtrasEtapas[f.auto_fill.source_etapa_orden]
         if (srcData) {
-          const srcVal = String(srcData[f.auto_fill.field] ?? '').toLowerCase().trim()
-            .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents: eléctrico → electrico
-          if (srcVal && f.auto_fill.mapping[srcVal] !== undefined) {
-            autoFill[f.slug] = f.auto_fill.mapping[srcVal]
+          const rawVal = srcData[f.auto_fill.field]
+          if (f.auto_fill.mapping) {
+            const srcVal = String(rawVal ?? '').toLowerCase().trim()
+              .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents: eléctrico → electrico
+            if (srcVal && f.auto_fill.mapping[srcVal] !== undefined) {
+              autoFill[f.slug] = f.auto_fill.mapping[srcVal]
+            }
+          } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+            // Valor directo sin mapping: copiar tal cual
+            autoFill[f.slug] = rawVal
           }
         }
       }
     }
 
+    // Resolver doc_link: buscar el bloque documento origen en etapas previas y
+    // exponer drive_url + file_name del archivo cargado.
+    const fieldsConDocLink = fields.filter(f => f.tipo === 'doc_link' && f.doc_link)
+    let resolvedFields: typeof fields | null = null
+    if (fieldsConDocLink.length > 0) {
+      resolvedFields = fields.map(f => {
+        if (f.tipo !== 'doc_link' || !f.doc_link) return f
+        const target = bloquesEtapasPrevias.find(bp =>
+          bp.etapa_orden === f.doc_link!.source_etapa_orden
+          && (bp.nombre ?? bp.bloque_definitions?.nombre ?? '').trim().toLowerCase()
+             === f.doc_link!.source_bloque_nombre.trim().toLowerCase()
+        )
+        const data = (target?.instancia?.data ?? null) as Record<string, unknown> | null
+        const drive_url = (data?.drive_url as string | null) ?? null
+        const file_name = (data?.file_name as string | null) ?? null
+        return {
+          ...f,
+          doc_link: { ...f.doc_link, _resolved: { drive_url, file_name } },
+        }
+      })
+    }
+
+    const enrichedConfigExtra: Record<string, unknown> = { ...configExtra }
+    if (Object.keys(autoFill).length > 0) enrichedConfigExtra._auto_fill = autoFill
+    if (resolvedFields) enrichedConfigExtra.fields = resolvedFields
+
     return {
       ...b,
-      config_extra: Object.keys(autoFill).length > 0
-        ? { ...configExtra, _auto_fill: autoFill }
-        : configExtra,
+      config_extra: enrichedConfigExtra,
       items: (itemsByBloqueId[b.instancia?.id ?? ''] ?? []) as Array<{
         id: string
         label: string

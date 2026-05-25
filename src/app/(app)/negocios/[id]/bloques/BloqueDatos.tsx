@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef, useCallback } from 'react'
-import { ImageIcon, Search, FileText } from 'lucide-react'
+import { ImageIcon, Search, FileText, ExternalLink, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
@@ -12,13 +12,19 @@ import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/
 export interface DatosField {
   slug: string
   label: string
-  tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview'
-  required: boolean
+  tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'checkbox' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview' | 'doc_link'
+  required?: boolean
   options?: string[]
   opciones?: Array<{ value: string; label: string }>
   default?: unknown
   // Solo renderizar si el field referenciado cumple la condicion
   showIf?: { field: string; equals: unknown }
+  // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
+  doc_link?: {
+    source_bloque_nombre: string
+    source_etapa_orden: number
+    _resolved?: { drive_url: string | null; file_name: string | null }
+  }
 }
 
 interface BloqueDatosProps {
@@ -113,7 +119,9 @@ export default function BloqueDatos({
     return fields.filter(f => f.required && visible(f, vals)).every(f => {
       const v = vals[f.slug]
       if (f.tipo === 'toggle') return true
+      if (f.tipo === 'checkbox') return true
       if (f.tipo === 'documentos_preview') return true
+      if (f.tipo === 'doc_link') return true
       return v !== '' && v !== null && v !== undefined
     })
   }
@@ -220,6 +228,33 @@ export default function BloqueDatos({
               </div>
             )
           }
+          if (f.tipo === 'doc_link') {
+            const resolved = f.doc_link?._resolved
+            return (
+              <div key={f.slug} className="flex flex-col gap-0.5">
+                <span className="text-[10px] font-medium text-[#6B7280] uppercase tracking-wide">{f.label}</span>
+                {resolved?.drive_url ? (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-[#E5E7EB] bg-white px-2 py-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <FileText className="h-3.5 w-3.5 text-[#6B7280] shrink-0" />
+                      <span className="text-xs text-[#1A1A1A] truncate">{resolved.file_name ?? f.label}</span>
+                    </div>
+                    <a
+                      href={resolved.drive_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[10px] text-[#059669] hover:underline shrink-0"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Ver
+                    </a>
+                  </div>
+                ) : (
+                  <span className="text-xs text-[#6B7280] italic">Aún no cargado</span>
+                )}
+              </div>
+            )
+          }
           return (
             <div key={f.slug} className="flex flex-col gap-0.5">
               <div className="flex items-center gap-1.5">
@@ -230,7 +265,7 @@ export default function BloqueDatos({
                   </span>
                 )}
               </div>
-              {f.tipo === 'toggle' ? (
+              {(f.tipo === 'toggle' || f.tipo === 'checkbox') ? (
                 <span className={`text-xs font-medium ${v ? 'text-[#10B981]' : 'text-[#6B7280]'}`}>
                   {v ? 'Sí' : 'No'}
                 </span>
@@ -362,6 +397,61 @@ export default function BloqueDatos({
               <span className="text-xs text-[#1A1A1A]">{values[f.slug] ? 'Sí' : 'No'}</span>
             </label>
           )}
+
+          {f.tipo === 'checkbox' && (
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!!values[f.slug]}
+                onChange={e => handleChange(f.slug, e.target.checked)}
+                disabled={isPending}
+                className="h-4 w-4 accent-[#10B981] disabled:opacity-60"
+              />
+              <span className="text-xs text-[#1A1A1A]">{values[f.slug] ? 'Sí' : 'No'}</span>
+            </label>
+          )}
+
+          {f.tipo === 'doc_link' && (() => {
+            const resolved = f.doc_link?._resolved
+            if (!resolved?.drive_url) {
+              return (
+                <div className="rounded-lg border border-dashed border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2">
+                  <p className="text-[11px] text-[#6B7280] italic">
+                    {f.doc_link?.source_bloque_nombre ?? 'Documento'} aún no cargado
+                  </p>
+                </div>
+              )
+            }
+            return (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="h-4 w-4 text-[#6B7280] shrink-0" />
+                  <span className="text-xs text-[#1A1A1A] truncate">
+                    {resolved.file_name ?? f.doc_link?.source_bloque_nombre ?? 'Documento'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <a
+                    href={resolved.drive_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-[#1A1A1A] hover:border-[#10B981]/40 hover:text-[#059669]"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Ver
+                  </a>
+                  <a
+                    href={resolved.drive_url}
+                    download
+                    className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-[#1A1A1A] hover:border-[#10B981]/40 hover:text-[#059669]"
+                  >
+                    <Download className="h-3 w-3" />
+                    Descargar
+                  </a>
+                </div>
+              </div>
+            )
+          })()}
 
           {f.tipo === 'select' && (f.options || f.opciones) && (
             <select

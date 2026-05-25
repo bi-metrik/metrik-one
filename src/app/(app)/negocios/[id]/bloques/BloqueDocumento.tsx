@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   Sparkles,
   ExternalLink,
+  Download,
   Copy,
   Check,
 } from 'lucide-react'
@@ -438,18 +439,34 @@ export default function BloqueDocumento({
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />
+          {driveUrl ? (
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />
+          ) : (
+            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
           <span className="text-xs font-medium">{label}</span>
-          {driveUrl && (
-            <a
-              href={driveUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline"
-            >
-              <ExternalLink className="h-3 w-3" />
-              Ver en Drive
-            </a>
+          {driveUrl ? (
+            <div className="ml-auto flex items-center gap-1.5">
+              <a
+                href={driveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Ver
+              </a>
+              <a
+                href={driveUrl}
+                download
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5"
+              >
+                <Download className="h-3 w-3" />
+                Descargar
+              </a>
+            </div>
+          ) : (
+            <span className="ml-auto text-[11px] text-muted-foreground italic">Sin archivo</span>
           )}
         </div>
         {camposConfig.length > 0 && Object.keys(campos).length > 0 && (
