@@ -889,16 +889,17 @@ function PausaNegocioDialog({
 }
 
 // ── Historial de etapas anteriores ────────────────────────────────────────────
-// Muestra bloques con data trabajada en etapas previas, agrupados por etapa.
-// Renderiza cada bloque con su componente nativo en modo 'visible' (read-only).
+// Muestra los bloques trabajados en etapas previas en orden de aparicion (sin
+// agrupar por etapa, sin duplicar los heredados readonly). Cada item es
+// expandible y renderiza el bloque con su componente nativo en modo visible.
+
+type BloqueHistorialItem = BloqueExtendido & {
+  etapa_orden: number
+  etapa_nombre: string
+}
 
 interface EtapaHistorialProps {
-  etapas: Array<{
-    etapa_id: string
-    etapa_orden: number
-    etapa_nombre: string
-    bloques: BloqueExtendido[]
-  }>
+  bloques: BloqueHistorialItem[]
   negocioId: string
   workspaceId: string
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
@@ -916,13 +917,11 @@ interface EtapaHistorialProps {
 }
 
 function HistorialEtapasPrevias({
-  etapas, negocioId, workspaceId, profiles, cobros, cotizacionesNegocio,
+  bloques, negocioId, workspaceId, profiles, cobros, cotizacionesNegocio,
   resumenFinanciero, ejecucionData, historialData, precioTotal, userRole,
 }: EtapaHistorialProps) {
   const [open, setOpen] = useState(false)
-  const [etapaAbierta, setEtapaAbierta] = useState<string | null>(null)
   const [bloqueAbierto, setBloqueAbierto] = useState<string | null>(null)
-  const totalBloques = etapas.reduce((s, e) => s + e.bloques.length, 0)
 
   return (
     <div className="rounded-xl border border-border bg-card">
@@ -935,80 +934,64 @@ function HistorialEtapasPrevias({
           <h3 className="text-sm font-semibold text-foreground">Historial de etapas anteriores</h3>
         </div>
         <span className="text-xs text-muted-foreground">
-          {etapas.length} etapa{etapas.length !== 1 ? 's' : ''} · {totalBloques} bloque{totalBloques !== 1 ? 's' : ''}
+          {bloques.length} bloque{bloques.length !== 1 ? 's' : ''}
         </span>
       </button>
       {open && (
         <div className="divide-y divide-border">
-          {etapas.map(etapa => (
-            <div key={etapa.etapa_id}>
-              <button
-                onClick={() => setEtapaAbierta(etapaAbierta === etapa.etapa_id ? null : etapa.etapa_id)}
-                className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-accent/30 transition-colors"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <ChevronRight className={`h-3 w-3 text-muted-foreground/60 transition-transform shrink-0 ${etapaAbierta === etapa.etapa_id ? 'rotate-90' : ''}`} />
-                  <span className="inline-flex items-center justify-center rounded-md bg-muted px-1.5 py-[1px] text-[10px] font-mono font-semibold text-muted-foreground shrink-0">
-                    E{etapa.etapa_orden}
+          {bloques.map(b => {
+            const def = b.bloque_definitions
+            const tipo = def?.tipo ?? ''
+            return (
+              <div key={b.id} className="bg-card">
+                <button
+                  onClick={() => setBloqueAbierto(bloqueAbierto === b.id ? null : b.id)}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left hover:bg-accent/30 transition-colors"
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <ChevronRight className={`h-3 w-3 text-muted-foreground/60 transition-transform shrink-0 ${bloqueAbierto === b.id ? 'rotate-90' : ''}`} />
+                    <span
+                      className="inline-flex items-center justify-center rounded-md bg-muted px-1.5 py-[1px] text-[10px] font-mono font-semibold text-muted-foreground shrink-0"
+                      title={b.etapa_nombre}
+                    >
+                      E{b.etapa_orden}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">{tipo}</span>
+                    <span className="text-sm font-medium truncate">{b.nombre ?? def?.nombre ?? 'Bloque'}</span>
+                    <span className="text-[10px] text-muted-foreground/60 shrink-0 hidden sm:inline">· {b.etapa_nombre}</span>
+                  </div>
+                  <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
+                    b.instancia?.estado === 'completo'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                      : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {b.instancia?.estado === 'completo' ? 'Completo' : 'Pendiente'}
                   </span>
-                  <span className="text-sm font-medium truncate">{etapa.etapa_nombre}</span>
-                </div>
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  {etapa.bloques.length} bloque{etapa.bloques.length !== 1 ? 's' : ''}
-                </span>
-              </button>
-              {etapaAbierta === etapa.etapa_id && (
-                <div className="bg-muted/20 px-4 py-2 space-y-2">
-                  {etapa.bloques.map(b => {
-                    const def = b.bloque_definitions
-                    const tipo = def?.tipo ?? ''
-                    return (
-                      <div key={b.id} className="rounded-md border border-border/60 bg-card">
-                        <button
-                          onClick={() => setBloqueAbierto(bloqueAbierto === b.id ? null : b.id)}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
-                        >
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <ChevronRight className={`h-3 w-3 text-muted-foreground/50 transition-transform shrink-0 ${bloqueAbierto === b.id ? 'rotate-90' : ''}`} />
-                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">{tipo}</span>
-                            <span className="text-xs font-medium truncate">{b.nombre ?? def?.nombre ?? 'Bloque'}</span>
-                          </div>
-                          <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
-                            b.instancia?.estado === 'completo'
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                              : 'bg-muted text-muted-foreground'
-                          }`}>
-                            {b.instancia?.estado === 'completo' ? 'Completo' : 'Pendiente'}
-                          </span>
-                        </button>
-                        {bloqueAbierto === b.id && (
-                          <div className="border-t border-border/40 px-3 py-3">
-                            {b.instancia ? (
-                              <BloqueRenderer
-                                bloque={{ ...b, _forceReadOnly: true }}
-                                negocioId={negocioId}
-                                workspaceId={workspaceId}
-                                profiles={profiles}
-                                cobros={cobros}
-                                cotizacionesNegocio={cotizacionesNegocio}
-                                resumenFinanciero={resumenFinanciero}
-                                ejecucionData={ejecucionData}
-                                historialData={historialData}
-                                precioTotal={precioTotal}
-                                userRole={userRole}
-                              />
-                            ) : (
-                              <p className="text-xs text-muted-foreground italic">Sin instancia creada.</p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
+                </button>
+                {bloqueAbierto === b.id && (
+                  <div className="border-t border-border/40 bg-muted/20 px-4 py-3">
+                    {b.instancia ? (
+                      <BloqueRenderer
+                        bloque={{ ...b, _forceReadOnly: true }}
+                        negocioId={negocioId}
+                        workspaceId={workspaceId}
+                        profiles={profiles}
+                        cobros={cobros}
+                        cotizacionesNegocio={cotizacionesNegocio}
+                        resumenFinanciero={resumenFinanciero}
+                        ejecucionData={ejecucionData}
+                        historialData={historialData}
+                        precioTotal={precioTotal}
+                        userRole={userRole}
+                      />
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">Sin instancia creada.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -1581,12 +1564,7 @@ interface Props {
   }>
   staffList: Array<{ id: string; full_name: string }>
   datosOtrasEtapas: Record<number, Record<string, unknown>>
-  bloquesEtapasPrevias?: Array<{
-    etapa_id: string
-    etapa_orden: number
-    etapa_nombre: string
-    bloques: BloqueExtendido[]
-  }>
+  bloquesEtapasPrevias?: BloqueHistorialItem[]
   pausaEnabled: boolean
   errorMsg?: string
 }
@@ -1823,7 +1801,7 @@ export default function NegocioDetailClient({
         {/* ── Historial de etapas anteriores ── */}
         {bloquesEtapasPrevias.length > 0 && (
           <HistorialEtapasPrevias
-            etapas={bloquesEtapasPrevias}
+            bloques={bloquesEtapasPrevias}
             negocioId={negocio.id}
             workspaceId={negocio.workspace_id}
             profiles={profiles}

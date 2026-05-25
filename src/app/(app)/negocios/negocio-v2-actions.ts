@@ -2368,44 +2368,41 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   etapasLinea: EtapaNegocio[]
   datosOtrasEtapas: Record<number, Record<string, unknown>>
   bloquesEtapasPrevias: Array<{
-    etapa_id: string
     etapa_orden: number
     etapa_nombre: string
-    bloques: Array<{
+    id: string
+    etapa_id: string
+    workspace_id: string
+    bloque_definition_id: string
+    estado: string
+    orden: number
+    es_gate: boolean
+    nombre: string | null
+    bloque_definitions: {
       id: string
-      etapa_id: string
-      workspace_id: string
-      bloque_definition_id: string
+      tipo: string
+      nombre: string
+      is_visualization: boolean
+      can_be_gate: boolean
+    } | null
+    instancia: {
+      id: string
+      negocio_id: string
+      bloque_config_id: string
       estado: string
+      data: Record<string, unknown> | null
+    } | null
+    config_extra: Record<string, unknown>
+    items: Array<{
+      id: string
+      label: string
+      tipo: string
+      completado: boolean
+      completado_por: string | null
+      completado_at: string | null
+      link_url: string | null
+      imagen_data: string | null
       orden: number
-      es_gate: boolean
-      nombre: string | null
-      bloque_definitions: {
-        id: string
-        tipo: string
-        nombre: string
-        is_visualization: boolean
-        can_be_gate: boolean
-      } | null
-      instancia: {
-        id: string
-        negocio_id: string
-        bloque_config_id: string
-        estado: string
-        data: Record<string, unknown> | null
-      } | null
-      config_extra: Record<string, unknown>
-      items: Array<{
-        id: string
-        label: string
-        tipo: string
-        completado: boolean
-        completado_por: string | null
-        completado_at: string | null
-        link_url: string | null
-        imagen_data: string | null
-        orden: number
-      }>
     }>
   }>
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
@@ -2761,20 +2758,18 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       orden: number
     }>
   }
-  type EtapaHistorial = {
-    etapa_id: string
+  type BloqueHistorialPlano = BloqueHistorialFull & {
     etapa_orden: number
     etapa_nombre: string
-    bloques: BloqueHistorialFull[]
   }
-  const bloquesEtapasPrevias: EtapaHistorial[] = []
+  const bloquesEtapasPrevias: BloqueHistorialPlano[] = []
   {
     const etapaActualOrden = base.etapasLinea.find(
       e => e.id === base.negocio.etapa_actual_id,
     )?.orden ?? 0
     const etapasPrevias = base.etapasLinea
       .filter(e => e.orden < etapaActualOrden)
-      .sort((a, b) => b.orden - a.orden) // mas reciente primero
+      .sort((a, b) => a.orden - b.orden) // orden de aparicion en el flujo
     if (etapasPrevias.length > 0) {
       const etapaIdsPrevias = etapasPrevias.map(e => e.id)
       // Cargar bloque_configs + bloque_definitions de etapas previas
@@ -2848,42 +2843,44 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           })
         }
       }
-      // Ensamblar bloques con todo
-      const byEtapa = new Map<string, BloqueHistorialFull[]>()
+      // Ensamblar bloques planos: una fila por bloque-origen, sin duplicar
+      // los readonly heredados (cualquier config con source_etapa_orden) ni
+      // los tipos de visualizacion agregada (resumen_financiero, ejecucion,
+      // historial). El componente HistorialEtapasPrevias los muestra en
+      // orden de aparicion (etapa_orden ASC, bloque.orden ASC).
+      const etapaInfoById = new Map(etapasPrevias.map(e => [e.id, { orden: e.orden, nombre: e.nombre }]))
+      const HIDDEN_TYPES = new Set(['resumen_financiero', 'ejecucion', 'historial', 'historial_valida'])
       for (const cfg of ((prevConfigs ?? []) as Record<string, unknown>[])) {
         const inst = instanciasMap.get(cfg.id as string) ?? null
-        // Skip si no hay instancia o si la instancia tiene data vacia y estado pendiente
         if (!inst) continue
         if ((!inst.data || Object.keys(inst.data).length === 0) && inst.estado === 'pendiente') continue
-        // Si el bloque tiene config visible:false en su etapa, lo dejamos igualmente
-        // (es el caso de uso principal de la seccion historial)
-        const etapaId = cfg.etapa_id as string
-        if (!byEtapa.has(etapaId)) byEtapa.set(etapaId, [])
-        byEtapa.get(etapaId)!.push({
+        const ce = ceMap.get(cfg.id as string) ?? {}
+        // Filtrar readonly heredados: la version origen ya esta en la lista
+        if (typeof (ce as { source_etapa_orden?: unknown }).source_etapa_orden === 'number') continue
+        const def = cfg.bloque_definitions as BloqueHistorialFull['bloque_definitions']
+        if (def && HIDDEN_TYPES.has(def.tipo)) continue
+        const etapaInfo = etapaInfoById.get(cfg.etapa_id as string)
+        if (!etapaInfo) continue
+        bloquesEtapasPrevias.push({
+          etapa_orden: etapaInfo.orden,
+          etapa_nombre: etapaInfo.nombre,
           id: cfg.id as string,
-          etapa_id: etapaId,
+          etapa_id: cfg.etapa_id as string,
           workspace_id: cfg.workspace_id as string,
           bloque_definition_id: cfg.bloque_definition_id as string,
           estado: (cfg.estado as string) ?? 'editable',
           orden: (cfg.orden as number) ?? 0,
           es_gate: (cfg.es_gate as boolean) ?? false,
           nombre: (cfg.nombre as string | null) ?? null,
-          bloque_definitions: cfg.bloque_definitions as BloqueHistorialFull['bloque_definitions'],
+          bloque_definitions: def,
           instancia: inst,
-          config_extra: ceMap.get(cfg.id as string) ?? {},
+          config_extra: ce,
           items: itemsByInst.get(inst.id) ?? [],
         })
       }
-      for (const etapa of etapasPrevias) {
-        const bloques = byEtapa.get(etapa.id) ?? []
-        if (bloques.length === 0) continue
-        bloquesEtapasPrevias.push({
-          etapa_id: etapa.id,
-          etapa_orden: etapa.orden,
-          etapa_nombre: etapa.nombre,
-          bloques,
-        })
-      }
+      bloquesEtapasPrevias.sort((a, b) =>
+        a.etapa_orden !== b.etapa_orden ? a.etapa_orden - b.etapa_orden : a.orden - b.orden,
+      )
     }
   }
 
