@@ -128,7 +128,14 @@ export default function BloquePropuestaEconomica({
         descuento_pct: calc.descuento_pct,
       })
       if (res.ok) {
-        toast.success(`Versión v${res.version?.n} generada`)
+        if (res.warning) {
+          toast.warning(`Versión v${res.version?.n} guardada (sin PDF)`, {
+            description: res.warning,
+            duration: 6000,
+          })
+        } else {
+          toast.success(`Versión v${res.version?.n} generada`)
+        }
       } else {
         toast.error(res.error ?? 'Error generando PDF')
       }

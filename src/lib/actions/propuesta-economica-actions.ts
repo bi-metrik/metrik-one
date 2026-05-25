@@ -184,7 +184,7 @@ async function loadBloqueContext(
 export async function generarVersionPropuesta(
   bloqueId: string,
   input: { descuento_pct?: number; valor_final?: number },
-): Promise<{ ok: boolean; error?: string; version?: PropuestaVersion }> {
+): Promise<{ ok: boolean; error?: string; version?: PropuestaVersion; warning?: string }> {
   const { supabase, workspaceId, staffId, error: errWs } = await getWorkspace()
   if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
 
@@ -239,8 +239,9 @@ export async function generarVersionPropuesta(
   const validezDesde = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
   const validezHasta = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0)
 
-  // Renderizar PDF
-  let pdfBuffer: Buffer
+  // Renderizar PDF (graceful: si falla, version queda registrada sin PDF)
+  let pdfBuffer: Buffer | null = null
+  let renderError: string | null = null
   try {
     pdfBuffer = await renderPropuestaEconomica(ctx.templateSlug, {
       cliente_nombre: clienteNombre,
@@ -257,38 +258,39 @@ export async function generarVersionPropuesta(
       version: nuevaN,
     })
   } catch (e) {
-    return { ok: false, error: `Error generando PDF: ${e instanceof Error ? e.message : String(e)}` }
+    renderError = e instanceof Error ? e.message : String(e)
+    console.warn(`[propuesta] render PDF fallo (continuando sin PDF):`, renderError)
   }
 
   // Subir a Drive: subcarpeta "1. Legal/Propuestas" del folder del negocio
+  // Solo si hay PDF generado Y carpeta del negocio
   let pdfDriveId: string | null = null
   let pdfUrl: string | null = null
-  try {
-    if (!negocio?.carpeta_url) {
-      // Sin folder del negocio aun (drive fallo al crear negocio). PDF queda solo en memoria.
-      console.warn(`[propuesta] negocio ${ctx.negocioId} sin carpeta_url — PDF no se sube a Drive`)
-    } else {
-      const folderIdMatch = (negocio.carpeta_url as string).match(/folders\/([-\w]+)/)
-      const negocioFolderId = folderIdMatch?.[1]
-      if (negocioFolderId) {
-        // Crear/encontrar subcarpeta "1. Legal" + "Propuestas"
-        const legalFolder = await createDriveFolder('1. Legal', negocioFolderId, workspaceId)
-        const propuestasFolder = await createDriveFolder('Propuestas', legalFolder, workspaceId)
-        const fileName = `Propuesta Economica v${nuevaN} - ${fechaCorta(ahora)}.pdf`
-        const up = await uploadFileToDrive(
-          pdfBuffer,
-          fileName,
-          'application/pdf',
-          propuestasFolder,
-          workspaceId,
-        )
-        pdfDriveId = up.fileId
-        pdfUrl = up.webViewLink
+  if (pdfBuffer) {
+    try {
+      if (!negocio?.carpeta_url) {
+        console.warn(`[propuesta] negocio ${ctx.negocioId} sin carpeta_url — PDF no se sube a Drive`)
+      } else {
+        const folderIdMatch = (negocio.carpeta_url as string).match(/folders\/([-\w]+)/)
+        const negocioFolderId = folderIdMatch?.[1]
+        if (negocioFolderId) {
+          const legalFolder = await createDriveFolder('1. Legal', negocioFolderId, workspaceId)
+          const propuestasFolder = await createDriveFolder('Propuestas', legalFolder, workspaceId)
+          const fileName = `Propuesta Economica v${nuevaN} - ${fechaCorta(ahora)}.pdf`
+          const up = await uploadFileToDrive(
+            pdfBuffer,
+            fileName,
+            'application/pdf',
+            propuestasFolder,
+            workspaceId,
+          )
+          pdfDriveId = up.fileId
+          pdfUrl = up.webViewLink
+        }
       }
+    } catch (e) {
+      console.error(`[propuesta] error subiendo PDF a Drive:`, e)
     }
-  } catch (e) {
-    console.error(`[propuesta] error subiendo PDF a Drive:`, e)
-    // No bloquear — el PDF se generó OK, el upload es best-effort
   }
 
   const nuevaVersion: PropuestaVersion = {
@@ -322,7 +324,12 @@ export async function generarVersionPropuesta(
   if (errUpd) return { ok: false, error: errUpd.message }
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
-  return { ok: true, version: nuevaVersion }
+  // Si render fallo, devolvemos ok=true pero con warning para que el UI lo muestre
+  return {
+    ok: true,
+    version: nuevaVersion,
+    ...(renderError ? { warning: `Versión guardada sin PDF — ${renderError.slice(0, 200)}` } : {}),
+  }
 }
 
 // ── Action: aprobar version activa ──────────────────────────────────────────
