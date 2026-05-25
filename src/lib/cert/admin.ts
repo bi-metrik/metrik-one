@@ -58,7 +58,7 @@ export async function listCertData() {
     .order('created_at', { ascending: false })
   const { data: productos } = await db
     .from('cert_productos')
-    .select('id, sku, nombre, serie, ficha')
+    .select('id, sku, nombre, serie, ficha, databook_path, databook_nombre')
     .eq('workspace_id', workspaceId)
     .order('sku')
   const { data: negocios } = await db
@@ -66,12 +66,37 @@ export async function listCertData() {
     .select('id, codigo, nombre')
     .eq('workspace_id', workspaceId)
     .order('codigo')
+  const conDb = (productos ?? []).find((p: { databook_path?: string }) => p.databook_path)
   return {
     lotes: lotes ?? [],
     productos: productos ?? [],
     negocios: negocios ?? [],
     esCertificador,
+    databookActual: (conDb?.databook_nombre as string | undefined) ?? null,
   }
+}
+
+// Sube el DataBook de línea (un PDF que aplica a TODAS las referencias del ws).
+export async function subirDatabookLinea(formData: FormData) {
+  const { db, workspaceId, esCertificador } = await ctx()
+  requireCertificador(esCertificador)
+  const file = formData.get('file') as File | null
+  if (!file) throw new Error('Selecciona un archivo PDF')
+  if (file.type !== 'application/pdf') throw new Error('El DataBook debe ser PDF')
+  if (file.size > 50 * 1024 * 1024) throw new Error('Máximo 50 MB')
+
+  const svc = createServiceClient()
+  const buf = Buffer.from(await file.arrayBuffer())
+  const path = `${workspaceId}/databook-linea.pdf`
+  const { error: upErr } = await svc.storage.from('cert-databooks').upload(path, buf, { contentType: 'application/pdf', upsert: true })
+  if (upErr) throw new Error(upErr.message)
+
+  // Aplica a todas las referencias de la línea (databook único).
+  const { error } = await db.from('cert_productos')
+    .update({ databook_path: path, databook_nombre: file.name })
+    .eq('workspace_id', workspaceId)
+  if (error) throw new Error(error.message)
+  revalidatePath('/certificaciones')
 }
 
 export interface CrearBorradorInput {

@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import {
   crearBorrador, enviarAprobacion, aprobarPublicar, devolverBorrador,
-  revocar, recertificar, getQr,
+  revocar, recertificar, getQr, subirDatabookLinea,
 } from '@/lib/cert/admin'
 
 const C = {
@@ -20,6 +20,7 @@ interface Props {
   productos: any[]
   negocios: any[]
   esCertificador: boolean
+  databookActual: string | null
 }
 
 function fmtFecha(iso: string | null) {
@@ -53,11 +54,21 @@ const FILTROS = [
   { k: 'vencida', label: 'Vencida' },
 ]
 
-export default function CertificacionesClient({ lotes, productos, negocios, esCertificador }: Props) {
+export default function CertificacionesClient({ lotes, productos, negocios, esCertificador, databookActual }: Props) {
   const [filtro, setFiltro] = useState('todas')
   const [showForm, setShowForm] = useState(false)
   const [pending, start] = useTransition()
   const [qr, setQr] = useState<{ svg: string; png: string; url: string; lote: string } | null>(null)
+  const [dbFile, setDbFile] = useState<File | null>(null)
+
+  function subirDb() {
+    if (!dbFile) { toast.error('Selecciona un PDF'); return }
+    const fd = new FormData(); fd.append('file', dbFile)
+    start(async () => {
+      try { await subirDatabookLinea(fd); toast.success('DataBook actualizado'); setDbFile(null) }
+      catch (e) { toast.error(e instanceof Error ? e.message : 'Error') }
+    })
+  }
 
   // form
   const [productoId, setProductoId] = useState('')
@@ -138,6 +149,24 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
         <div style={{ background: 'rgba(245,158,11,0.06)', border: `1px solid ${C.line}`, borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
           <span style={{ fontSize: 13, color: C.gray }}>🕒 {porVencer.length} certificación(es) por vencer o vencida(s)</span>
           <button onClick={() => setFiltro('por_vencer')} style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: C.amber, background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer' }}>ver</button>
+        </div>
+      )}
+
+      {/* DataBook de línea — carga (solo certificador) */}
+      {esCertificador && (
+        <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 16px', marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: C.gray, marginBottom: 8 }}>DataBook de línea</div>
+          <div style={{ fontSize: 13, color: C.black, marginBottom: 10 }}>
+            {databookActual ? <>Actual: <strong>{databookActual}</strong></> : <span style={{ color: C.grayLt }}>No cargado todavía</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input type="file" accept="application/pdf" onChange={(e) => setDbFile(e.target.files?.[0] ?? null)} style={{ fontSize: 12 }} />
+            <button onClick={subirDb} disabled={pending || !dbFile}
+              style={{ padding: '7px 14px', borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', background: C.black, color: C.white, opacity: pending || !dbFile ? 0.6 : 1 }}>
+              {pending ? 'Subiendo…' : 'Subir / reemplazar'}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: C.grayLt, marginTop: 8 }}>Un solo PDF que aplica a todas las referencias. Se descarga desde el certificado con el número de contrato.</div>
         </div>
       )}
 
