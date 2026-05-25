@@ -110,10 +110,20 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
                 Pausado
               </span>
             )}
-            {negocio.etapa_nombre && !isCerrado && (
+            {negocio.linea_nombre && (
               <span className="truncate text-[11px] text-[#6B7280]">
-                {negocio.etapa_nombre}
+                {negocio.linea_nombre}
               </span>
+            )}
+            {negocio.etapa_nombre && !isCerrado && (
+              <>
+                {negocio.linea_nombre && (
+                  <span className="text-[11px] text-[#6B7280]/40">·</span>
+                )}
+                <span className="truncate text-[11px] text-[#6B7280]">
+                  {negocio.etapa_nombre}
+                </span>
+              </>
             )}
           </div>
           <p className="text-sm font-semibold leading-tight text-[#1A1A1A]">

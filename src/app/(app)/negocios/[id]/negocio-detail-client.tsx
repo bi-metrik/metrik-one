@@ -1505,8 +1505,13 @@ export default function NegocioDetailClient({
       {/* Fila 2 — STICKY titulo + accion */}
       <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="mb-0.5">
+          <div className="mb-0.5 flex items-center gap-2">
             <StageBadge stage={negocio.stage_actual} />
+            {negocio.lineas_negocio?.nombre && (
+              <span className="truncate text-[11px] text-muted-foreground">
+                {negocio.lineas_negocio.nombre}
+              </span>
+            )}
           </div>
           <h1 className="flex items-baseline gap-1.5 text-lg font-bold leading-tight">
             {negocio.codigo && (
