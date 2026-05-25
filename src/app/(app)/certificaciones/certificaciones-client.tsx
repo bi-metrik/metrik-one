@@ -156,15 +156,24 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
             </div>
             {opciones.length > 0 && (
               <div>
-                <label style={lbl}>Opción de material usada</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {opciones.map((o) => (
-                    <button key={o} onClick={() => setOpcion(o)} type="button"
-                      style={{ flex: 1, padding: '9px 0', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                        border: `1.5px solid ${opcion === o ? C.green : C.line}`, background: opcion === o ? 'rgba(16,185,129,0.08)' : C.white, color: opcion === o ? C.greenDark : C.gray }}>
-                      {o}
-                    </button>
-                  ))}
+                <label style={lbl}>Material usado (opción)</label>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {opciones.map((o) => {
+                    const od = productoSel?.ficha?.opciones?.[o] ?? {}
+                    const sel = opcion === o
+                    return (
+                      <button key={o} onClick={() => setOpcion(o)} type="button"
+                        style={{ textAlign: 'left', padding: '11px 13px', borderRadius: 10, cursor: 'pointer',
+                          border: `1.5px solid ${sel ? C.green : C.line}`, background: sel ? 'rgba(16,185,129,0.06)' : C.white }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: sel ? C.greenDark : C.black }}>Opción {o}</span>
+                          {od.ratio != null && <span style={{ fontSize: 11, fontWeight: 600, color: C.gray }}>CUMPLE · ratio {od.ratio}</span>}
+                        </div>
+                        {od.perfil && <div style={{ fontSize: 12, color: C.gray, marginTop: 4, lineHeight: 1.4 }}>{od.perfil}</div>}
+                        {od.calibre && <div style={{ fontSize: 11, color: C.grayLt, marginTop: 2 }}>Calibre {od.calibre}</div>}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -185,11 +194,6 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
                 <input value={cantidad} onChange={(e) => setCantidad(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="180" style={inp} />
               </div>
             </div>
-            {productoSel && opcion && productoSel.ficha?.opciones?.[opcion] && (
-              <div style={{ fontSize: 12, color: C.gray, background: C.bg, borderRadius: 8, padding: '8px 10px' }}>
-                Resultado validado: <strong style={{ color: C.greenDark }}>CUMPLE</strong> · ratio {productoSel.ficha.opciones[opcion].ratio}
-              </div>
-            )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button onClick={() => submitBorrador(false)} disabled={pending}
                 style={{ padding: '9px 16px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.line}`, background: C.white, color: C.black }}>
