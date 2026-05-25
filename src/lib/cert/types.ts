@@ -26,6 +26,8 @@ export interface CertLoteRow {
   fecha_certificacion: string | null
   vigencia_meses: number
   fecha_vencimiento: string | null
+  serie_desde: number | null
+  serie_hasta: number | null
   created_at: string
   updated_at: string
 }
@@ -82,6 +84,7 @@ export interface CertPublica {
   vigente: boolean
   diasParaVencer: number | null
   workspaceNombre: string | null
+  negocioCodigo: string | null
   fabricante: CertFabricante | null
   ingeniero: CertIngeniero | null
 }

@@ -79,6 +79,17 @@ export async function getCertPublica(loteId: string): Promise<CertPublica | null
     .eq('cert_lote_id', loteId)
   const documentos = (docs as CertDocumentoRow[]) ?? []
 
+  // Codigo del negocio (proyecto) en el ws — para la trazabilidad del certificado
+  let negocioCodigo: string | null = null
+  if (lote.negocio_id) {
+    const { data: neg } = await db
+      .from('negocios')
+      .select('codigo')
+      .eq('id', lote.negocio_id)
+      .maybeSingle()
+    negocioCodigo = (neg?.codigo as string | undefined) ?? null
+  }
+
   const hoyMs = new Date().setHours(0, 0, 0, 0)
   let vigente = false
   let diasParaVencer: number | null = null
@@ -95,6 +106,7 @@ export async function getCertPublica(loteId: string): Promise<CertPublica | null
     vigente,
     diasParaVencer,
     workspaceNombre: (ws?.name as string | undefined) ?? null,
+    negocioCodigo,
     fabricante: certCfg.fabricante ?? null,
     ingeniero: certCfg.ingeniero ?? null,
   }

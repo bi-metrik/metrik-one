@@ -63,7 +63,13 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
   const cert: CertPublica | null = await getCertPublica(loteId)
   if (!cert) notFound()
 
-  const { lote, producto, vigente, diasParaVencer, fabricante, ingeniero } = cert
+  const { lote, producto, vigente, diasParaVencer, fabricante, ingeniero, negocioCodigo } = cert
+  const pad = (n: number) => String(n).padStart(4, '0')
+  const serie =
+    lote.serie_desde != null && lote.serie_hasta != null
+      ? { rango: `${pad(lote.serie_desde)} – ${pad(lote.serie_hasta)}`, cantidad: lote.serie_hasta - lote.serie_desde + 1 }
+      : null
+  const idCompuesto = [negocioCodigo, lote.sku, lote.numero_lote].filter(Boolean).join('  ·  ')
   const accent = vigente ? C.green : C.red
   const accentSoft = vigente ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.07)'
   const rango =
@@ -144,7 +150,21 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
 
         {/* Cuerpo */}
         <div style={{ padding: '0 24px 8px' }}>
-          <Section label="Cumplimiento normativo" first>
+          <Section label="Identificación" first>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.black, letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums', lineHeight: 1.4 }}>
+              {idCompuesto}
+            </div>
+            {serie ? (
+              <div style={{ fontSize: 13, color: C.gray, marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
+                Serie {serie.rango} · {serie.cantidad} unidades
+              </div>
+            ) : null}
+            <div style={{ fontSize: 11, color: C.grayLt, marginTop: 8 }}>
+              Proyecto · Producto · Lote
+            </div>
+          </Section>
+
+          <Section label="Cumplimiento normativo">
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
               <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.01em', color: lote.cumple ? C.greenDark : C.red }}>
                 {lote.cumple ? 'Cumple' : 'No cumple'}
@@ -159,10 +179,8 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
           </Section>
 
           <Section label="Producto">
-            <Spec label="Referencia" value={lote.sku} />
             <Spec label="Rango telescópico" value={rango} />
             <Spec label="Altura" value={producto?.altura_mm ? `${producto.altura_mm} mm` : null} />
-            <Spec label="Lote de fabricación" value={lote.numero_lote} />
           </Section>
 
           {/* Certificación — firma del ingeniero matriculado */}
