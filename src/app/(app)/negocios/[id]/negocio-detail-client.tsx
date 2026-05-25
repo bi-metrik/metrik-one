@@ -890,25 +890,35 @@ function PausaNegocioDialog({
 
 // ── Historial de etapas anteriores ────────────────────────────────────────────
 // Muestra bloques con data trabajada en etapas previas, agrupados por etapa.
-// Cada etapa colapsable, cada bloque expandible muestra su data en read-only.
+// Renderiza cada bloque con su componente nativo en modo 'visible' (read-only).
 
 interface EtapaHistorialProps {
   etapas: Array<{
     etapa_id: string
     etapa_orden: number
     etapa_nombre: string
-    bloques: Array<{
-      bloque_config_id: string
-      nombre: string
-      tipo: string
-      instancia_id: string
-      data: Record<string, unknown> | null
-      estado: string
-    }>
+    bloques: BloqueExtendido[]
   }>
+  negocioId: string
+  workspaceId: string
+  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  cobros: Array<{
+    id: string; concepto: string | null; monto: number; revisado: boolean
+    tipo_cobro: string | null; fecha: string | null; fecha_esperada: string | null
+    numero_cuota: number | null; vencido: boolean; notas: string | null; external_ref: string | null
+  }>
+  cotizacionesNegocio: CotizacionResumen[]
+  resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
+  ejecucionData: EjecucionData
+  historialData: HistorialData
+  precioTotal: number
+  userRole: string
 }
 
-function HistorialEtapasPrevias({ etapas }: EtapaHistorialProps) {
+function HistorialEtapasPrevias({
+  etapas, negocioId, workspaceId, profiles, cobros, cotizacionesNegocio,
+  resumenFinanciero, ejecucionData, historialData, precioTotal, userRole,
+}: EtapaHistorialProps) {
   const [open, setOpen] = useState(false)
   const [etapaAbierta, setEtapaAbierta] = useState<string | null>(null)
   const [bloqueAbierto, setBloqueAbierto] = useState<string | null>(null)
@@ -948,39 +958,53 @@ function HistorialEtapasPrevias({ etapas }: EtapaHistorialProps) {
                 </span>
               </button>
               {etapaAbierta === etapa.etapa_id && (
-                <div className="bg-muted/20 px-4 py-2 space-y-1.5">
-                  {etapa.bloques.map(b => (
-                    <div key={b.instancia_id} className="rounded-md border border-border/60 bg-card">
-                      <button
-                        onClick={() => setBloqueAbierto(bloqueAbierto === b.instancia_id ? null : b.instancia_id)}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <ChevronRight className={`h-3 w-3 text-muted-foreground/50 transition-transform shrink-0 ${bloqueAbierto === b.instancia_id ? 'rotate-90' : ''}`} />
-                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">{b.tipo}</span>
-                          <span className="text-xs font-medium truncate">{b.nombre}</span>
-                        </div>
-                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
-                          b.estado === 'completo'
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                            : 'bg-muted text-muted-foreground'
-                        }`}>
-                          {b.estado === 'completo' ? 'Completo' : 'Pendiente'}
-                        </span>
-                      </button>
-                      {bloqueAbierto === b.instancia_id && (
-                        <div className="border-t border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
-                          {b.data && Object.keys(b.data).length > 0 ? (
-                            <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed">
-{JSON.stringify(b.data, null, 2)}
-                            </pre>
-                          ) : (
-                            <p className="italic">Sin datos guardados.</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                <div className="bg-muted/20 px-4 py-2 space-y-2">
+                  {etapa.bloques.map(b => {
+                    const def = b.bloque_definitions
+                    const tipo = def?.tipo ?? ''
+                    return (
+                      <div key={b.id} className="rounded-md border border-border/60 bg-card">
+                        <button
+                          onClick={() => setBloqueAbierto(bloqueAbierto === b.id ? null : b.id)}
+                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <ChevronRight className={`h-3 w-3 text-muted-foreground/50 transition-transform shrink-0 ${bloqueAbierto === b.id ? 'rotate-90' : ''}`} />
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">{tipo}</span>
+                            <span className="text-xs font-medium truncate">{b.nombre ?? def?.nombre ?? 'Bloque'}</span>
+                          </div>
+                          <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
+                            b.instancia?.estado === 'completo'
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : 'bg-muted text-muted-foreground'
+                          }`}>
+                            {b.instancia?.estado === 'completo' ? 'Completo' : 'Pendiente'}
+                          </span>
+                        </button>
+                        {bloqueAbierto === b.id && (
+                          <div className="border-t border-border/40 px-3 py-3">
+                            {b.instancia ? (
+                              <BloqueRenderer
+                                bloque={{ ...b, _forceReadOnly: true }}
+                                negocioId={negocioId}
+                                workspaceId={workspaceId}
+                                profiles={profiles}
+                                cobros={cobros}
+                                cotizacionesNegocio={cotizacionesNegocio}
+                                resumenFinanciero={resumenFinanciero}
+                                ejecucionData={ejecucionData}
+                                historialData={historialData}
+                                precioTotal={precioTotal}
+                                userRole={userRole}
+                              />
+                            ) : (
+                              <p className="text-xs text-muted-foreground italic">Sin instancia creada.</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -997,6 +1021,7 @@ interface BloqueExtendido extends BloqueConfig {
   instancia: NegocioBloque | null
   config_extra: Record<string, unknown>
   _currentUserId?: string | null
+  _forceReadOnly?: boolean
   items: Array<{
     id: string
     label: string
@@ -1097,7 +1122,10 @@ function BloqueRenderer({
     }
   }
 
-  const modo = getBloqueMode()
+  // _forceReadOnly: usado por HistorialEtapasPrevias para forzar todos los
+  // bloques a modo visible (read-only nativo de cada componente).
+  const modo: 'editable' | 'visible' =
+    (bloque as { _forceReadOnly?: boolean })._forceReadOnly ? 'visible' : getBloqueMode()
 
   switch (tipo) {
     case 'equipo':
@@ -1557,14 +1585,7 @@ interface Props {
     etapa_id: string
     etapa_orden: number
     etapa_nombre: string
-    bloques: Array<{
-      bloque_config_id: string
-      nombre: string
-      tipo: string
-      instancia_id: string
-      data: Record<string, unknown> | null
-      estado: string
-    }>
+    bloques: BloqueExtendido[]
   }>
   pausaEnabled: boolean
   errorMsg?: string
@@ -1801,7 +1822,19 @@ export default function NegocioDetailClient({
 
         {/* ── Historial de etapas anteriores ── */}
         {bloquesEtapasPrevias.length > 0 && (
-          <HistorialEtapasPrevias etapas={bloquesEtapasPrevias} />
+          <HistorialEtapasPrevias
+            etapas={bloquesEtapasPrevias}
+            negocioId={negocio.id}
+            workspaceId={negocio.workspace_id}
+            profiles={profiles}
+            cobros={cobros}
+            cotizacionesNegocio={cotizacionesNegocio}
+            resumenFinanciero={resumenFinanciero}
+            ejecucionData={ejecucionData}
+            historialData={historialData}
+            precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
+            userRole={userRole}
+          />
         )}
 
         {/* ── Activity log ── */}

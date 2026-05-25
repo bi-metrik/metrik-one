@@ -2372,12 +2372,40 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     etapa_orden: number
     etapa_nombre: string
     bloques: Array<{
-      bloque_config_id: string
-      nombre: string
-      tipo: string
-      instancia_id: string
-      data: Record<string, unknown> | null
+      id: string
+      etapa_id: string
+      workspace_id: string
+      bloque_definition_id: string
       estado: string
+      orden: number
+      es_gate: boolean
+      nombre: string | null
+      bloque_definitions: {
+        id: string
+        tipo: string
+        nombre: string
+        is_visualization: boolean
+        can_be_gate: boolean
+      } | null
+      instancia: {
+        id: string
+        negocio_id: string
+        bloque_config_id: string
+        estado: string
+        data: Record<string, unknown> | null
+      } | null
+      config_extra: Record<string, unknown>
+      items: Array<{
+        id: string
+        label: string
+        tipo: string
+        completado: boolean
+        completado_por: string | null
+        completado_at: string | null
+        link_url: string | null
+        imagen_data: string | null
+        orden: number
+      }>
     }>
   }>
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
@@ -2693,21 +2721,51 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }
 
   // ── Historial: bloques con data de etapas previas (con orden < etapa actual)
-  // Sirve para que el usuario revise rapidamente que paso en bloques de etapas
-  // anteriores sin tener que retroceder de etapa. Agrupados por etapa.
-  type BloqueHistorial = {
-    bloque_config_id: string
-    nombre: string
-    tipo: string
-    instancia_id: string
-    data: Record<string, unknown> | null
+  // Estructura completa para que el cliente los renderice con BloqueRenderer
+  // en modo 'visible' (read-only nativo de cada tipo).
+  type BloqueHistorialFull = {
+    // BloqueConfig fields
+    id: string
+    etapa_id: string
+    workspace_id: string
+    bloque_definition_id: string
     estado: string
+    orden: number
+    es_gate: boolean
+    nombre: string | null
+    bloque_definitions: {
+      id: string
+      tipo: string
+      nombre: string
+      is_visualization: boolean
+      can_be_gate: boolean
+    } | null
+    // Custom enrichments
+    instancia: {
+      id: string
+      negocio_id: string
+      bloque_config_id: string
+      estado: string
+      data: Record<string, unknown> | null
+    } | null
+    config_extra: Record<string, unknown>
+    items: Array<{
+      id: string
+      label: string
+      tipo: string
+      completado: boolean
+      completado_por: string | null
+      completado_at: string | null
+      link_url: string | null
+      imagen_data: string | null
+      orden: number
+    }>
   }
   type EtapaHistorial = {
     etapa_id: string
     etapa_orden: number
     etapa_nombre: string
-    bloques: BloqueHistorial[]
+    bloques: BloqueHistorialFull[]
   }
   const bloquesEtapasPrevias: EtapaHistorial[] = []
   {
@@ -2719,47 +2777,112 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .sort((a, b) => b.orden - a.orden) // mas reciente primero
     if (etapasPrevias.length > 0) {
       const etapaIdsPrevias = etapasPrevias.map(e => e.id)
+      // Cargar bloque_configs + bloque_definitions de etapas previas
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: prevBlocks } = await (db(supabase) as any)
-        .from('negocio_bloques')
+      const { data: prevConfigs } = await (db(supabase) as any)
+        .from('bloque_configs')
         .select(`
-          id, estado, data,
-          bloque_configs!inner(
-            id, etapa_id, nombre,
-            bloque_definitions(tipo)
-          )
+          id, etapa_id, workspace_id, bloque_definition_id, estado, orden, es_gate, nombre,
+          bloque_definitions(id, tipo, nombre, is_visualization, can_be_gate)
         `)
-        .eq('negocio_id', id)
-        .in('bloque_configs.etapa_id', etapaIdsPrevias)
-      if (prevBlocks) {
-        const byEtapa = new Map<string, BloqueHistorial[]>()
-        for (const row of (prevBlocks as Record<string, unknown>[])) {
-          const cfg = row.bloque_configs as Record<string, unknown>
-          if (!cfg) continue
-          const data = row.data as Record<string, unknown> | null
-          // Skip bloques sin data trabajada (vacios o que solo se autocrearon)
-          if (!data || Object.keys(data).length === 0) continue
-          const etapaId = cfg.etapa_id as string
-          if (!byEtapa.has(etapaId)) byEtapa.set(etapaId, [])
-          byEtapa.get(etapaId)!.push({
-            bloque_config_id: cfg.id as string,
-            nombre: (cfg.nombre as string) ?? 'Bloque',
-            tipo: ((cfg.bloque_definitions as { tipo?: string } | null)?.tipo) ?? 'datos',
-            instancia_id: row.id as string,
-            data,
-            estado: (row.estado as string) ?? 'pendiente',
+        .in('etapa_id', etapaIdsPrevias)
+        .eq('workspace_id', workspaceId)
+        .order('orden', { ascending: true })
+      // Cargar instancias del negocio para esos bloque_configs
+      const configIds = (prevConfigs as Record<string, unknown>[] | null)?.map(c => c.id as string) ?? []
+      const instanciasMap = new Map<string, {
+        id: string; negocio_id: string; bloque_config_id: string; estado: string; data: Record<string, unknown> | null
+      }>()
+      if (configIds.length > 0) {
+        const { data: prevInsts } = await db(supabase)
+          .from('negocio_bloques')
+          .select('id, negocio_id, bloque_config_id, estado, data')
+          .eq('negocio_id', id)
+          .in('bloque_config_id', configIds)
+        for (const inst of ((prevInsts ?? []) as Record<string, unknown>[])) {
+          instanciasMap.set(inst.bloque_config_id as string, {
+            id: inst.id as string,
+            negocio_id: inst.negocio_id as string,
+            bloque_config_id: inst.bloque_config_id as string,
+            estado: (inst.estado as string) ?? 'pendiente',
+            data: inst.data as Record<string, unknown> | null,
           })
         }
-        for (const etapa of etapasPrevias) {
-          const bloques = byEtapa.get(etapa.id) ?? []
-          if (bloques.length === 0) continue
-          bloquesEtapasPrevias.push({
-            etapa_id: etapa.id,
-            etapa_orden: etapa.orden,
-            etapa_nombre: etapa.nombre,
-            bloques,
+      }
+      // Cargar config_extra desde bloqueConfigsExtra ya construido arriba o consultar
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: prevConfigsExtra } = await (db(supabase) as any)
+        .from('bloque_configs')
+        .select('id, config_extra')
+        .in('id', configIds.length > 0 ? configIds : ['00000000-0000-0000-0000-000000000000'])
+      const ceMap = new Map<string, Record<string, unknown>>()
+      for (const row of ((prevConfigsExtra ?? []) as Record<string, unknown>[])) {
+        ceMap.set(row.id as string, (row.config_extra as Record<string, unknown>) ?? {})
+      }
+      // Cargar bloque_items (cronograma, checklist, etc.)
+      const instIds = Array.from(instanciasMap.values()).map(i => i.id)
+      const itemsByInst = new Map<string, Array<{
+        id: string; label: string; tipo: string; completado: boolean
+        completado_por: string | null; completado_at: string | null
+        link_url: string | null; imagen_data: string | null; orden: number
+      }>>()
+      if (instIds.length > 0) {
+        const { data: prevItems } = await db(supabase)
+          .from('bloque_items')
+          .select('id, bloque_instancia_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden')
+          .in('bloque_instancia_id', instIds)
+          .order('orden', { ascending: true })
+        for (const it of ((prevItems ?? []) as Record<string, unknown>[])) {
+          const bid = it.bloque_instancia_id as string
+          if (!itemsByInst.has(bid)) itemsByInst.set(bid, [])
+          itemsByInst.get(bid)!.push({
+            id: it.id as string,
+            label: it.label as string,
+            tipo: it.tipo as string,
+            completado: (it.completado as boolean) ?? false,
+            completado_por: (it.completado_por as string | null) ?? null,
+            completado_at: (it.completado_at as string | null) ?? null,
+            link_url: (it.link_url as string | null) ?? null,
+            imagen_data: (it.imagen_data as string | null) ?? null,
+            orden: (it.orden as number) ?? 0,
           })
         }
+      }
+      // Ensamblar bloques con todo
+      const byEtapa = new Map<string, BloqueHistorialFull[]>()
+      for (const cfg of ((prevConfigs ?? []) as Record<string, unknown>[])) {
+        const inst = instanciasMap.get(cfg.id as string) ?? null
+        // Skip si no hay instancia o si la instancia tiene data vacia y estado pendiente
+        if (!inst) continue
+        if ((!inst.data || Object.keys(inst.data).length === 0) && inst.estado === 'pendiente') continue
+        // Si el bloque tiene config visible:false en su etapa, lo dejamos igualmente
+        // (es el caso de uso principal de la seccion historial)
+        const etapaId = cfg.etapa_id as string
+        if (!byEtapa.has(etapaId)) byEtapa.set(etapaId, [])
+        byEtapa.get(etapaId)!.push({
+          id: cfg.id as string,
+          etapa_id: etapaId,
+          workspace_id: cfg.workspace_id as string,
+          bloque_definition_id: cfg.bloque_definition_id as string,
+          estado: (cfg.estado as string) ?? 'editable',
+          orden: (cfg.orden as number) ?? 0,
+          es_gate: (cfg.es_gate as boolean) ?? false,
+          nombre: (cfg.nombre as string | null) ?? null,
+          bloque_definitions: cfg.bloque_definitions as BloqueHistorialFull['bloque_definitions'],
+          instancia: inst,
+          config_extra: ceMap.get(cfg.id as string) ?? {},
+          items: itemsByInst.get(inst.id) ?? [],
+        })
+      }
+      for (const etapa of etapasPrevias) {
+        const bloques = byEtapa.get(etapa.id) ?? []
+        if (bloques.length === 0) continue
+        bloquesEtapasPrevias.push({
+          etapa_id: etapa.id,
+          etapa_orden: etapa.orden,
+          etapa_nombre: etapa.nombre,
+          bloques,
+        })
       }
     }
   }

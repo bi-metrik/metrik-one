@@ -88,7 +88,8 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         actividad={data.actividad}
         staffList={data.staffList}
         datosOtrasEtapas={data.datosOtrasEtapas}
-        bloquesEtapasPrevias={data.bloquesEtapasPrevias}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        bloquesEtapasPrevias={data.bloquesEtapasPrevias as any}
         pausaEnabled={data.pausaEnabled}
         errorMsg={err}
       />
