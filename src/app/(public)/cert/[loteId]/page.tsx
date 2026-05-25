@@ -74,7 +74,7 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
   const cert: CertPublica | null = await getCertPublica(loteId)
   if (!cert) notFound()
 
-  const { lote, producto, vigente, diasParaVencer } = cert
+  const { lote, producto, vigente, diasParaVencer, fabricante, ingeniero } = cert
   const rango =
     producto?.rango_min_mm && producto?.rango_max_mm
       ? `${producto.rango_min_mm} – ${producto.rango_max_mm} mm`
@@ -82,16 +82,25 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
 
   return (
     <main style={{ maxWidth: 560, margin: '0 auto', padding: '28px 18px 56px' }}>
-      {/* Header */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-        <Lockup />
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: C.gray }}>
-          Certificación
+      {/* Header — fabricante (WMC) */}
+      <header style={{ marginBottom: 16 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: C.gray }}>
+          Certificado de producto
         </span>
+        {fabricante?.logo_url ? (
+          <div style={{ marginTop: 12 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={fabricante.logo_url}
+              alt={fabricante.nombre}
+              style={{ height: 56, width: 'auto', maxWidth: '100%', objectFit: 'contain' }}
+            />
+          </div>
+        ) : null}
       </header>
-      <p style={{ fontSize: 13, color: C.gray, marginBottom: 20 }}>
-        Certificación de producto elaborada por MéTRIK
-        {lote.certificado_para ? ` para ${lote.certificado_para}` : ''}.
+      <p style={{ fontSize: 13, color: C.gray, marginBottom: 20, lineHeight: 1.6 }}>
+        Producto fabricado por <strong style={{ color: C.black }}>{fabricante?.nombre ?? lote.certificado_para ?? 'el fabricante'}</strong>,
+        con certificación de seguridad estructural emitida por MéTRIK.
       </p>
 
       {/* Estado de vigencia */}
@@ -139,12 +148,6 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
           >
             {lote.cumple ? 'Cumple' : 'No cumple'}
           </span>
-          {lote.ratio_critico !== null ? (
-            <span style={{ fontSize: 13, color: C.gray }}>
-              Ratio crítico <strong style={{ color: C.black }}>{lote.ratio_critico}</strong>
-              {lote.ratio_descripcion ? ` · ${lote.ratio_descripcion}` : ''}
-            </span>
-          ) : null}
         </div>
         <Row label="Norma" value={producto?.norma} />
         <Row label="Criterio" value={producto?.criterio} />
@@ -165,32 +168,57 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
         <Row label="Altura" value={producto?.altura_mm ? `${producto.altura_mm} mm` : null} />
       </Card>
 
-      {/* Material del lote */}
-      <Card>
-        <CardLabel>Material del lote</CardLabel>
-        <Row label="Lote de fabricación" value={lote.numero_lote} />
-        <Row label="Opción de material" value={lote.opcion_material} />
-        <Row label="Perfil" value={lote.material_perfil} />
-        <Row label="Calibre" value={lote.material_calibre} />
-        <Row label="Norma de material" value={lote.material_norma} />
-        {lote.orientacion_instalacion ? (
-          <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(245,158,11,0.08)', border: `1px solid ${C.amber}`, borderRadius: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: '#B45309', marginBottom: 4 }}>
-              Orientación de instalación
-            </div>
-            <div style={{ fontSize: 13, color: C.black }}>{lote.orientacion_instalacion}</div>
-          </div>
-        ) : null}
-      </Card>
+      {/* Fabricante */}
+      {fabricante ? (
+        <Card>
+          <CardLabel>Fabricante</CardLabel>
+          <Row label="Razón social" value={fabricante.nombre} />
+          <Row label="NIT" value={fabricante.nit} />
+          <Row label="Teléfono" value={fabricante.telefono} />
+          <Row label="Correo" value={fabricante.email} />
+          <Row label="Ciudad" value={fabricante.ciudad} />
+          <Row label="Lote de fabricación" value={lote.numero_lote} />
+        </Card>
+      ) : null}
 
-      {/* Emisión */}
-      <Card>
-        <CardLabel>Emisión</CardLabel>
-        <Row label="Certificado por" value={lote.certificado_por} />
-        <Row label="Certificado para" value={lote.certificado_para} />
+      {/* Certificación — firma del ingeniero (lado MéTRIK de la alianza) */}
+      <div
+        style={{
+          background: C.white, border: `1px solid ${C.line}`, borderRadius: 12,
+          padding: '22px 18px', marginBottom: 14, borderTop: `3px solid ${C.green}`,
+        }}
+      >
+        <CardLabel>Certificación de seguridad estructural</CardLabel>
         <Row label="Fecha de certificación" value={fmtFecha(lote.fecha_certificacion)} />
         <Row label="Vigencia" value={`${lote.vigencia_meses} meses`} />
-      </Card>
+        <Row label="Válida hasta" value={fmtFecha(lote.fecha_vencimiento)} />
+
+        <p style={{ fontSize: 13, color: C.gray, margin: '18px 0 14px', lineHeight: 1.6 }}>
+          Documento original firmado y certificado por:
+        </p>
+
+        {ingeniero ? (
+          <div style={{ paddingLeft: 14, borderLeft: `2px solid ${C.green}` }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.black }}>{ingeniero.nombre}</div>
+            <div style={{ fontSize: 13, color: C.gray, marginTop: 2 }}>
+              {ingeniero.titulo ?? 'Ingeniero Mecánico'}
+              {ingeniero.matricula ? ` · Matrícula Profesional ${ingeniero.matricula}` : ''}
+            </div>
+            {ingeniero.email ? (
+              <div style={{ fontSize: 12, color: C.gray, marginTop: 2 }}>{ingeniero.email}</div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
+          <span style={{ fontSize: 12, color: C.gray }}>Certificado por</span>
+          <Lockup />
+        </div>
+        <p style={{ fontSize: 11, color: C.gray, marginTop: 8, lineHeight: 1.5 }}>
+          MéTRIK certifica la seguridad estructural; {fabricante?.nombre ?? 'el fabricante'} fabrica el producto.
+          Alianza técnica conjunta.
+        </p>
+      </div>
 
       {/* Footer — Powered by MéTRIK */}
       <footer style={{ marginTop: 28, textAlign: 'center' }}>

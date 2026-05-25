@@ -53,6 +53,28 @@ export interface CertDocumentoRow {
   public_url: string | null
 }
 
+// Config por workspace (workspaces.config_extra.cert) — server-only.
+export interface CertFabricante {
+  nombre: string
+  nit?: string
+  telefono?: string
+  email?: string
+  ciudad?: string
+  logo_url?: string
+}
+
+export interface CertIngeniero {
+  nombre: string          // "Mauricio Moreno Guzmán"
+  titulo?: string         // "Ingeniero Mecánico"
+  matricula?: string      // Matrícula profesional (COPNIA)
+  email?: string
+}
+
+export interface CertConfig {
+  fabricante?: CertFabricante
+  ingeniero?: CertIngeniero
+}
+
 export interface CertPublica {
   lote: CertLoteRow
   producto: CertProductoRow | null
@@ -60,4 +82,6 @@ export interface CertPublica {
   vigente: boolean
   diasParaVencer: number | null
   workspaceNombre: string | null
+  fabricante: CertFabricante | null
+  ingeniero: CertIngeniero | null
 }

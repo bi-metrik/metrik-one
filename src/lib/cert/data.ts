@@ -5,6 +5,7 @@ import type {
   CertLoteRow,
   CertProductoRow,
   CertDocumentoRow,
+  CertConfig,
 } from './types'
 
 // Cliente service-role SIN tipado de Database (las tablas cert_* aun no estan en
@@ -54,11 +55,13 @@ export async function getCertPublica(loteId: string): Promise<CertPublica | null
   // El workspace debe tener el modulo activo (defensa por si se desactiva)
   const { data: ws } = await db
     .from('workspaces')
-    .select('modules, name')
+    .select('modules, name, config_extra')
     .eq('id', lote.workspace_id)
     .maybeSingle()
   const modules = (ws?.modules ?? {}) as Record<string, boolean>
   if (!modules.cert_qr) return null
+
+  const certCfg = ((ws?.config_extra as Record<string, unknown> | null)?.cert ?? {}) as CertConfig
 
   let producto: CertProductoRow | null = null
   if (lote.cert_producto_id) {
@@ -92,5 +95,7 @@ export async function getCertPublica(loteId: string): Promise<CertPublica | null
     vigente,
     diasParaVencer,
     workspaceNombre: (ws?.name as string | undefined) ?? null,
+    fabricante: certCfg.fabricante ?? null,
+    ingeniero: certCfg.ingeniero ?? null,
   }
 }
