@@ -219,15 +219,17 @@ export async function generarVersionPropuesta(
 
   // Datos cliente desde negocio
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: negocio } = await (supabase as any)
+  const { data: negocio, error: errNeg } = await (supabase as any)
     .from('negocios')
-    .select('codigo, carpeta_url, empresas(nombre, numero_documento), contactos(nombre, cedula)')
+    .select('codigo, carpeta_url, empresas(nombre, numero_documento), contactos(nombre)')
     .eq('id', ctx.negocioId)
     .single()
+  if (errNeg) {
+    console.error(`[propuesta] error lookup negocio ${ctx.negocioId}:`, errNeg.message)
+  }
   const clienteNombre =
     negocio?.empresas?.nombre ?? negocio?.contactos?.nombre ?? 'Cliente'
-  const clienteDoc =
-    negocio?.empresas?.numero_documento ?? negocio?.contactos?.cedula ?? ''
+  const clienteDoc = negocio?.empresas?.numero_documento ?? ''
 
   // Versionado
   const versionesActuales = (ctx.data.versiones ?? []) as PropuestaVersion[]
