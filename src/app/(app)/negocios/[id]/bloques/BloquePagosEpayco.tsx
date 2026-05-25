@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { consultarEpayco, registrarPagoEpayco } from '@/lib/actions/epayco-actions'
@@ -38,6 +38,16 @@ export default function BloquePagosEpayco({
   const [pagos, setPagos] = useState<PagoRegistrado[]>(
     () => ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
   )
+
+  // Re-sincronizar pagos cuando la prop instancia.data cambia (tras revalidatePath).
+  // Sin esto, registrar pago actualiza state local pero al re-render del padre
+  // con nueva data del server, el state queda desincronizado en algunos browsers
+  // y el pago "desaparece" hasta que el usuario refresca manualmente.
+  useEffect(() => {
+    const dbPagos = ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
+    setPagos(dbPagos)
+  }, [instancia?.data])
+
   const [newRef, setNewRef] = useState('')
   const [previewDesglose, setPreviewDesglose] = useState<EpaycoDesglose | null>(null)
   const [consultando, setConsultando] = useState(false)
