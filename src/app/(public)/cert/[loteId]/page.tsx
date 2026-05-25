@@ -27,22 +27,6 @@ function fmtFecha(iso: string | null): string {
   return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
-function Lockup() {
-  return (
-    <span style={{ display: 'inline-flex', position: 'relative', paddingBottom: 8 }}>
-      <span style={{ fontWeight: 700, fontSize: 22, letterSpacing: '-0.01em', color: C.black, lineHeight: 1 }}>
-        MéTRIK
-      </span>
-      <span
-        style={{
-          position: 'absolute', bottom: 0, left: 0, width: '100%',
-          height: 2.5, background: C.green, borderRadius: 1,
-        }}
-      />
-    </span>
-  )
-}
-
 function Card({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: '20px 18px', marginBottom: 14 }}>
@@ -99,8 +83,8 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
         ) : null}
       </header>
       <p style={{ fontSize: 13, color: C.gray, marginBottom: 20, lineHeight: 1.6 }}>
-        Producto fabricado por <strong style={{ color: C.black }}>{fabricante?.nombre ?? lote.certificado_para ?? 'el fabricante'}</strong>,
-        con certificación de seguridad estructural emitida por MéTRIK.
+        Producto fabricado por <strong style={{ color: C.black }}>{fabricante?.nombre ?? lote.certificado_para ?? 'el fabricante'}</strong>.
+        Certificación de seguridad estructural{ingeniero?.nombre ? <> emitida por <strong style={{ color: C.black }}>{ingeniero.nombre}</strong></> : null}.
       </p>
 
       {/* Estado de vigencia */}
@@ -209,15 +193,6 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
             ) : null}
           </div>
         ) : null}
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
-          <span style={{ fontSize: 12, color: C.gray }}>Certificado por</span>
-          <Lockup />
-        </div>
-        <p style={{ fontSize: 11, color: C.gray, marginTop: 8, lineHeight: 1.5 }}>
-          MéTRIK certifica la seguridad estructural; {fabricante?.nombre ?? 'el fabricante'} fabrica el producto.
-          Alianza técnica conjunta.
-        </p>
       </div>
 
       {/* Footer — Powered by MéTRIK */}
