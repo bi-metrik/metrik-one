@@ -80,6 +80,10 @@ export async function middleware(request: NextRequest) {
     if (pathname === '/accept-invite') return supabaseResponse
     if (pathname === '/login') return supabaseResponse
     if (pathname === '/registro') return supabaseResponse
+    // Certificacion publica via QR (read-only, sin login). La pagina valida el
+    // flag del workspace y solo expone lotes estado='publicado' via service-role.
+    if (pathname.startsWith('/cert/')) return supabaseResponse
+    if (pathname.startsWith('/c/')) return supabaseResponse
 
     // No autenticado → login DEL MISMO SUBDOMAIN (no marketing). Asi el magic link
     // siembra sesion en este subdomain via /auth/callback, en lugar de pasar por
