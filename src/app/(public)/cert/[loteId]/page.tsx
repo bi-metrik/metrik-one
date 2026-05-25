@@ -9,6 +9,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
+// La vigencia se evalua contra la fecha actual en cada request: nunca cachear,
+// para que la certificacion pase a "vencida" en el instante en que expira.
+export const dynamic = 'force-dynamic'
+
 const C = {
   black: '#1A1A1A',
   gray: '#6B7280',
@@ -143,8 +147,7 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
                   ? <span style={{ color: C.amber, fontWeight: 600 }}> · vence en {diasParaVencer} días</span> : null}
               </>
             ) : (
-              <>Venció el <strong style={{ color: C.black, fontWeight: 600 }}>{fmtFecha(lote.fecha_vencimiento)}</strong>. Solicita la recertificación de seguridad
-                {fabricante?.nombre ? ` a ${fabricante.nombre}` : ''}.</>
+              <>Venció el <strong style={{ color: C.black, fontWeight: 600 }}>{fmtFecha(lote.fecha_vencimiento)}</strong>. Requiere recertificación de seguridad.</>
             )}
           </p>
         </div>
