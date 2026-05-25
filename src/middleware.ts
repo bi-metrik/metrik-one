@@ -57,10 +57,10 @@ async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['s
   if (role && !ROLES_WITH_NUMBERS.includes(role)) {
     return '/negocios'
   }
-  const { count } = await supabase
-    .from('config_metas')
-    .select('*', { count: 'exact', head: true })
-  return (count && count > 0) ? '/numeros' : '/mi-negocio'
+  // Roles con acceso a /numeros aterrizan ahi siempre — la pagina maneja el empty
+  // state cuando no hay config_metas. Antes redirigia a /mi-negocio si no habia
+  // metas, lo que confundia el flow de switch de workspace de platform admin.
+  return '/numeros'
 }
 
 export async function middleware(request: NextRequest) {
@@ -75,15 +75,18 @@ export async function middleware(request: NextRequest) {
   if (slug) {
     supabaseResponse.headers.set('x-tenant-slug', slug)
 
-    // Always allow auth callback and accept-invite
+    // Rutas publicas permitidas en el subdomain sin sesion
     if (pathname.startsWith('/auth/callback')) return supabaseResponse
     if (pathname === '/accept-invite') return supabaseResponse
+    if (pathname === '/login') return supabaseResponse
+    if (pathname === '/registro') return supabaseResponse
 
-    // Not authenticated → login on marketing domain
+    // No autenticado → login DEL MISMO SUBDOMAIN (no marketing). Asi el magic link
+    // siembra sesion en este subdomain via /auth/callback, en lugar de pasar por
+    // marketing/login que redirigiria al subdomain del profile.workspace_id actual
+    // (rompia el caso platform_admin tecleando un subdomain distinto al activo).
     if (!user) {
-      const loginUrl = IS_DEV
-        ? new URL('/login', request.url)
-        : new URL(`https://${BASE_DOMAIN}/login`)
+      const loginUrl = new URL('/login', request.url)
       loginUrl.searchParams.set('redirectTo', pathname)
       return NextResponse.redirect(loginUrl)
     }
