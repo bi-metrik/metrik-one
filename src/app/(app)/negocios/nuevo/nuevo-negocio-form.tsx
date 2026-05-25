@@ -50,7 +50,6 @@ export default function NuevoNegocioForm({
 
   // Step 3 — Negocio
   const [nombre, setNombre] = useState('')
-  const [precioEstimado, setPrecioEstimado] = useState('')
 
   // Clarity: selector de línea/flujo (auto-select si solo 1)
   const [lineaId, setLineaId] = useState<string | null>(
@@ -153,10 +152,6 @@ export default function NuevoNegocioForm({
       toast.error('La empresa es requerida'); return
     }
 
-    const precioNum = precioEstimado.trim()
-      ? Number(precioEstimado.replace(/\D/g, ''))
-      : undefined
-
     startTransition(async () => {
       const result = await crearNegocio({
         nombre: nombre.trim(),
@@ -168,7 +163,6 @@ export default function NuevoNegocioForm({
         empresa_nombre: (esPersonaNatural || empresaId) ? undefined : empresaNombre.trim(),
         empresa_sector: (esPersonaNatural || empresaId) ? undefined : (empresaSector || undefined),
         es_persona_natural: esPersonaNatural,
-        precio_estimado: precioNum,
       })
 
       if (result.error) {
@@ -474,27 +468,6 @@ export default function NuevoNegocioForm({
             />
           </div>
 
-          {/* Precio estimado */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Precio estimado <span className="text-muted-foreground/60">(opcional)</span>
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={precioEstimado}
-                onChange={e => {
-                  const raw = e.target.value.replace(/\D/g, '')
-                  setPrecioEstimado(raw ? Number(raw).toLocaleString('es-CO') : '')
-                }}
-                placeholder="0"
-                className="w-full rounded-md border bg-background pl-7 pr-3 py-2.5 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-              />
-            </div>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">COP — sin IVA</p>
-          </div>
         </div>
       )}
 
