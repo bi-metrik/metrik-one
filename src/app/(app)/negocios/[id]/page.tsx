@@ -8,7 +8,6 @@ import NegocioDetailClient from './negocio-detail-client'
 import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
-import EtapasHistorialAccordion from '@/components/etapas-historial-accordion'
 
 export const maxDuration = 60
 
@@ -93,9 +92,6 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         pausaEnabled={data.pausaEnabled}
         errorMsg={err}
       />
-      <div className="mx-auto max-w-2xl px-4 pb-4">
-        <EtapasHistorialAccordion negocioId={id} />
-      </div>
       {validaActivo && (
         <div className="mx-auto max-w-2xl px-4 pb-4 space-y-3">
           <BloqueRiesgoSarlaft
