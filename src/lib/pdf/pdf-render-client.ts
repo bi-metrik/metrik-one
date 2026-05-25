@@ -251,3 +251,52 @@ export async function renderCuentaCobro(
   const arrayBuffer = await res.arrayBuffer()
   return Buffer.from(arrayBuffer)
 }
+
+// ============================================================
+// API publica: renderPropuestaEconomica
+// ============================================================
+
+export type PropuestaEconomicaRenderPayload = {
+  cliente_nombre: string
+  cliente_documento: string
+  fecha_emision: string         // "11/03/2026"
+  validez_desde: string         // "1 de marzo de 2026"
+  validez_hasta: string         // "31 de marzo de 2026"
+  plan1_valor: string           // "$850.000"
+  plan1_anticipo: string        // "$425.000"
+  plan1_exito_iva: string       // "$425.000"
+  plan2_valor: string           // "$637.500"
+  descuento_pct: string         // "25%"
+  ahorro: string                // "$212.500"
+  version: number               // 1, 2, 3...
+}
+
+export async function renderPropuestaEconomica(
+  templateSlug: string,
+  data: PropuestaEconomicaRenderPayload,
+): Promise<Buffer> {
+  if (!isPdfRenderConfigured()) {
+    throw new Error('PDF render service no configurado (faltan env vars)')
+  }
+
+  const url = `${RENDER_URL}/render/propuesta-economica`
+  const token = await getIdToken(RENDER_URL!)
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-MeTRIK-Secret': RENDER_SECRET!,
+    },
+    body: JSON.stringify({ template_slug: templateSlug, data }),
+  })
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`PDF render propuesta-economica falló (${res.status}): ${txt.slice(0, 300)}`)
+  }
+
+  const arrayBuffer = await res.arrayBuffer()
+  return Buffer.from(arrayBuffer)
+}

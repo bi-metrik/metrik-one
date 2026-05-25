@@ -45,13 +45,15 @@ export default async function CotizacionNegocioPage({
   let empresaData = opp?.empresas as Record<string, unknown> | null
 
   // 2. Si no hay oportunidad, buscar empresa desde el negocio
+  // Tambien capturamos linea_id para filtrar catalogo de servicios por linea
+  let negocioLineaId: string | null = null
   if (!empresaData) {
     try {
       const { supabase: sb } = await getWorkspace()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: negocio } = await (sb as any)
         .from('negocios')
-        .select('empresa_id')
+        .select('empresa_id, linea_id')
         .eq('id', id)
         .single()
 
@@ -63,9 +65,19 @@ export default async function CotizacionNegocioPage({
           .single()
         empresaData = emp as Record<string, unknown> | null
       }
+      negocioLineaId = negocio?.linea_id ?? null
     } catch {
       // Datos fiscales del cliente no son críticos para el editor
     }
+  } else {
+    // Si vino por oportunidad, igual buscamos linea_id del negocio para filtrar catalogo
+    try {
+      const { supabase: sb } = await getWorkspace()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: negocio } = await (sb as any)
+        .from('negocios').select('linea_id').eq('id', id).single()
+      negocioLineaId = negocio?.linea_id ?? null
+    } catch {}
   }
 
   const clientFiscal = empresaData
@@ -110,6 +122,7 @@ export default async function CotizacionNegocioPage({
       backUrl={`/negocios/${id}`}
       staffMembers={staffMembers}
       frozen={frozen}
+      lineaId={negocioLineaId}
     />
   )
 }

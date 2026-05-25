@@ -28,17 +28,37 @@ export async function getServicios() {
   return data ?? []
 }
 
-export async function getServiciosActivos() {
+export async function getServiciosActivos(lineaId?: string | null) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
-  const { data } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query: any = supabase
     .from('servicios')
     .select('*')
     .eq('workspace_id', workspaceId)
     .eq('activo', true)
-    .order('nombre', { ascending: true })
 
+  // Si llega lineaId: muestra servicios de esa linea + globales (linea_id NULL)
+  // Si no llega: muestra todos (backwards compat)
+  if (lineaId) {
+    query = query.or(`linea_id.eq.${lineaId},linea_id.is.null`)
+  }
+
+  const { data } = await query.order('nombre', { ascending: true })
+  return data ?? []
+}
+
+// Helper para selectores UI de lineas en form de servicio
+export async function getLineasNegocioWorkspace() {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+  const { data } = await supabase
+    .from('lineas_negocio')
+    .select('id, nombre')
+    .eq('workspace_id', workspaceId)
+    .eq('is_active', true)
+    .order('nombre', { ascending: true })
   return data ?? []
 }
 
@@ -47,6 +67,7 @@ export async function createServicio(input: {
   precio_estandar: number
   costo_estimado?: number
   rubros_template?: RubroTemplate[]
+  linea_id?: string | null
 }) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -61,8 +82,10 @@ export async function createServicio(input: {
       precio_estandar: input.precio_estandar,
       costo_estimado: input.costo_estimado ?? 0,
       rubros_template: (input.rubros_template ?? null) as unknown as Json,
+      linea_id: input.linea_id ?? null,
       activo: true,
-    })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
     .select('*')
     .single()
 
@@ -79,6 +102,7 @@ export async function updateServicio(id: string, input: {
   costo_estimado?: number
   rubros_template?: RubroTemplate[] | null
   activo?: boolean
+  linea_id?: string | null
 }) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
@@ -89,6 +113,7 @@ export async function updateServicio(id: string, input: {
   if (input.costo_estimado !== undefined) updates.costo_estimado = input.costo_estimado
   if (input.rubros_template !== undefined) updates.rubros_template = input.rubros_template
   if (input.activo !== undefined) updates.activo = input.activo
+  if (input.linea_id !== undefined) updates.linea_id = input.linea_id
 
   const { data, error: dbError } = await supabase
     .from('servicios')

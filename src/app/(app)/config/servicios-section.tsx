@@ -14,12 +14,18 @@ import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Servicio, Staff } from '@/types/database'
 
+interface LineaOption {
+  id: string
+  nombre: string
+}
+
 interface Props {
   initialData: Servicio[]
   staffMembers?: Staff[]
+  lineas?: LineaOption[]
 }
 
-export default function ServiciosSection({ initialData, staffMembers = [] }: Props) {
+export default function ServiciosSection({ initialData, staffMembers = [], lineas = [] }: Props) {
   const [isPending, startTransition] = useTransition()
   const [servicios, setServicios] = useState(initialData)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -30,6 +36,7 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
   const [nombre, setNombre] = useState('')
   const [precio, setPrecio] = useState('')
   const [costoEstimado, setCostoEstimado] = useState('')
+  const [lineaId, setLineaId] = useState<string>('')  // '' = global (linea_id NULL en DB)
   const [rubros, setRubros] = useState<RubroTemplate[]>([])
   const [showRubroForm, setShowRubroForm] = useState(false)
   const [newRubro, setNewRubro] = useState<RubroTemplate>({
@@ -54,6 +61,7 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
     setNombre('')
     setPrecio('')
     setCostoEstimado('')
+    setLineaId('')
     setRubros([])
     setShowRubroForm(false)
     setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: 1, unidad: 'horas', valor_unitario: 0 })
@@ -99,6 +107,7 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
           precio_estandar: precioVal,
           costo_estimado: costoVal,
           rubros_template: rubrosToUse.length > 0 ? rubrosToUse : null,
+          linea_id: lineaId || null,
         })
         if (res.success && 'servicio' in res && res.servicio) {
           setServicios(prev => prev.map(s => s.id === draftIdRef.current ? res.servicio! : s))
@@ -111,6 +120,7 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
           precio_estandar: precioVal,
           costo_estimado: costoVal,
           rubros_template: rubrosToUse.length > 0 ? rubrosToUse : undefined,
+          linea_id: lineaId || null,
         })
         if (res.success && 'servicio' in res && res.servicio) {
           draftIdRef.current = res.servicio.id
@@ -152,6 +162,7 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
         precio_estandar: precioVal,
         costo_estimado: costoVal,
         rubros_template: rubros.length > 0 ? rubros : undefined,
+        linea_id: lineaId || null,
       })
       if (res.success && 'servicio' in res && res.servicio) {
         setServicios(prev => [...prev, res.servicio!])
@@ -175,6 +186,7 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
         precio_estandar: precioVal,
         costo_estimado: costoVal,
         rubros_template: rubros.length > 0 ? rubros : null,
+        linea_id: lineaId || null,
       })
       if (res.success && 'servicio' in res && res.servicio) {
         setServicios(prev => prev.map(s => s.id === id ? res.servicio! : s))
@@ -221,6 +233,8 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
     setNombre(s.nombre)
     setPrecio(s.precio_estandar?.toString() ?? '')
     setCostoEstimado(s.costo_estimado?.toString() ?? '')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setLineaId(((s as any).linea_id as string | null) ?? '')
     const tpl = s.rubros_template as RubroTemplate[] | null
     setRubros(tpl ?? [])
     setShowAddForm(true)
@@ -299,6 +313,27 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
                 />
               </div>
             </div>
+            {lineas.length > 0 && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Linea de negocio</label>
+                <select
+                  value={lineaId}
+                  onChange={e => {
+                    setLineaId(e.target.value)
+                    scheduleAutoSave(nombre, precio)
+                  }}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Todas las lineas (global)</option>
+                  {lineas.map(l => (
+                    <option key={l.id} value={l.id}>{l.nombre}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Si seleccionas una linea, el servicio solo aparecera en cotizaciones de negocios de esa linea.
+                </p>
+              </div>
+            )}
             {rubros.length === 0 ? (
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">Costo estimado</label>
@@ -545,9 +580,18 @@ export default function ServiciosSection({ initialData, staffMembers = [] }: Pro
                     )}
                     <div className="min-w-0">
                       <span className="text-sm font-medium truncate block">{s.nombre}</span>
-                      {tpl && tpl.length > 0 && (
-                        <span className="text-[10px] text-muted-foreground">{tpl.length} rubro{tpl.length !== 1 ? 's' : ''}</span>
-                      )}
+                      <span className="text-[10px] text-muted-foreground">
+                        {(() => {
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          const lid = (s as any).linea_id as string | null | undefined
+                          const lineaNombre = lid ? lineas.find(l => l.id === lid)?.nombre : null
+                          const parts: string[] = []
+                          if (lineaNombre) parts.push(lineaNombre)
+                          else if (lineas.length > 0) parts.push('Global')
+                          if (tpl && tpl.length > 0) parts.push(`${tpl.length} rubro${tpl.length !== 1 ? 's' : ''}`)
+                          return parts.join(' · ')
+                        })()}
+                      </span>
                     </div>
                   </button>
 

@@ -85,9 +85,10 @@ interface Props {
   backUrl?: string
   staffMembers?: StaffMember[]
   frozen?: boolean
+  lineaId?: string | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -111,7 +112,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     if (catalogItems.length > 0) { setShowCatalog(true); return }
     setCatalogLoading(true)
     try {
-      const data = await getServiciosActivos()
+      const data = await getServiciosActivos(lineaId)
       setCatalogItems(data as { id: string; nombre: string; precio_estandar: number | null; rubros_template: unknown }[])
       setShowCatalog(true)
     } finally {

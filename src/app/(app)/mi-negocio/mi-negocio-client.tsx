@@ -382,7 +382,11 @@ function renderSection(
 
     case 'mis-servicios':
       return (
-        <ServiciosSection initialData={props.servicios} />
+        <ServiciosSection
+          initialData={props.servicios}
+          staffMembers={props.staffMembers}
+          lineas={props.lineasDisponibles.map(l => ({ id: l.id, nombre: l.nombre }))}
+        />
       )
 
     case 'gastos-fijos':

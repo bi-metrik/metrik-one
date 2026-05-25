@@ -35,6 +35,7 @@ interface ConfigClientProps {
   staffMembers?: Staff[]
   monthlyTargets?: MonthlyTarget[]
   servicios?: Servicio[]
+  lineas?: { id: string; nombre: string }[]
   licenseUsed?: number
   licenseMax?: number
 }
@@ -51,6 +52,7 @@ export default function ConfigClient({
   staffMembers = [],
   monthlyTargets = [],
   servicios = [],
+  lineas = [],
   licenseUsed = 0,
   licenseMax = 1,
 }: ConfigClientProps) {
@@ -453,7 +455,7 @@ export default function ConfigClient({
       {/* ── Mis Servicios Section ── */}
       {activeSection === 'mis-servicios' && (
         <div className="space-y-4 rounded-xl border bg-card p-6">
-          <ServiciosSection initialData={servicios} staffMembers={staffMembers} />
+          <ServiciosSection initialData={servicios} staffMembers={staffMembers} lineas={lineas} />
         </div>
       )}
     </div>
