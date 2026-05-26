@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { CheckCircle2, ExternalLink, FileText, Loader2, Sparkles, AlertTriangle, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { generarVersionGuia, aprobarVersionGuia } from '@/lib/actions/guia-devolucion-actions'
@@ -40,7 +41,19 @@ export default function BloqueGuiaDevolucion({
   modo,
   preview,
 }: Props) {
-  const saved = (instancia?.data ?? {}) as GuiaData
+  const router = useRouter()
+  const savedRaw = (instancia?.data ?? {}) as GuiaData
+  // Optimistic state: cuando aprobamos localmente, no esperamos al refetch del
+  // server para reflejarlo en UI.
+  const [optimisticAprobado, setOptimisticAprobado] = useState<{ n: number; at: string } | null>(null)
+  const saved: GuiaData = optimisticAprobado
+    ? {
+        ...savedRaw,
+        aprobado_at: optimisticAprobado.at,
+        aprobado_version: optimisticAprobado.n,
+        version_activa: optimisticAprobado.n,
+      }
+    : savedRaw
   const versiones = saved.versiones ?? []
   const versionActiva = versiones.find(v => v.n === saved.version_activa) ?? versiones[versiones.length - 1]
   const aprobado = !!saved.aprobado_at
@@ -69,6 +82,7 @@ export default function BloqueGuiaDevolucion({
         toast.warning(res.warning)
       } else {
         toast.success(`Guía v${(versiones.at(-1)?.n ?? 0) + 1} generada`)
+        router.refresh()
       }
       setGenerating(false)
     })
@@ -78,8 +92,13 @@ export default function BloqueGuiaDevolucion({
     setApproving(true)
     startTransition(async () => {
       const res = await aprobarVersionGuia(negocioBloqueId, n)
-      if (!res.ok) toast.error(res.error)
-      else toast.success(`Guía v${n} aprobada`)
+      if (!res.ok) {
+        toast.error(res.error)
+      } else {
+        setOptimisticAprobado({ n, at: new Date().toISOString() })
+        toast.success(`Guía v${n} aprobada`)
+        router.refresh()
+      }
       setApproving(false)
     })
   }
