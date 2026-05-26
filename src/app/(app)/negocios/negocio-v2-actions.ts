@@ -2891,7 +2891,6 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       for (const cfg of ((prevConfigs ?? []) as Record<string, unknown>[])) {
         const inst = instanciasMap.get(cfg.id as string) ?? null
         if (!inst) continue
-        if ((!inst.data || Object.keys(inst.data).length === 0) && inst.estado === 'pendiente') continue
         const ce = ceMap.get(cfg.id as string) ?? {}
         // Filtrar readonly heredados: la version origen ya esta en la lista
         if (typeof (ce as { source_etapa_orden?: unknown }).source_etapa_orden === 'number') continue
@@ -2899,6 +2898,40 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         if (def && HIDDEN_TYPES.has(def.tipo)) continue
         const etapaInfo = etapaInfoById.get(cfg.etapa_id as string)
         if (!etapaInfo) continue
+
+        // Calcular auto_fill resuelto contra datosOtrasEtapas (para bloques tipo
+        // datos con campos derivados de etapas anteriores que nunca persisten
+        // data propia — ej. DA6/DA7 en SOENA, readonly desde el config).
+        const ceFields = (ce as { fields?: Array<{
+          slug: string
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number }
+        }> }).fields ?? []
+        const autoFillHist: Record<string, unknown> = {}
+        for (const f of ceFields) {
+          if (!f.auto_fill) continue
+          const srcData = datosOtrasEtapas[f.auto_fill.source_etapa_orden]
+          if (!srcData) continue
+          const rawVal = srcData[f.auto_fill.field]
+          if (f.auto_fill.mapping) {
+            const srcVal = String(rawVal ?? '').toLowerCase().trim()
+              .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            if (srcVal && f.auto_fill.mapping[srcVal] !== undefined) {
+              autoFillHist[f.slug] = f.auto_fill.mapping[srcVal]
+            }
+          } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+            autoFillHist[f.slug] = rawVal
+          }
+        }
+
+        // Excluir solo si todo esta vacio: sin data persistida, sin auto_fill
+        // resuelto, y la instancia esta pendiente.
+        const dataEmpty = !inst.data || Object.keys(inst.data).length === 0
+        const autoFillEmpty = Object.keys(autoFillHist).length === 0
+        if (dataEmpty && autoFillEmpty && inst.estado === 'pendiente') continue
+
+        const ceEnriched = autoFillEmpty ? ce : { ...ce, _auto_fill: autoFillHist }
+
         bloquesEtapasPrevias.push({
           etapa_orden: etapaInfo.orden,
           etapa_nombre: etapaInfo.nombre,
@@ -2913,7 +2946,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           nombre: (cfg.nombre as string | null) ?? null,
           bloque_definitions: def,
           instancia: inst,
-          config_extra: ce,
+          config_extra: ceEnriched,
           items: itemsByInst.get(inst.id) ?? [],
         })
       }

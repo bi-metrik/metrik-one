@@ -217,10 +217,13 @@ export default function BloqueDatos({
   }, [values, negocioBloqueId])
 
   if (modo === 'visible') {
+    // Para readonly, los campos sin data persistida deben mostrar el valor
+    // de autoFillDefaults (bloques readonly nunca persisten data propia).
+    const effective: Record<string, unknown> = { ...autoFillDefaults, ...saved }
     return (
       <div className="space-y-2">
-        {fields.filter(f => visible(f, saved)).map(f => {
-          const v = saved[f.slug]
+        {fields.filter(f => visible(f, effective)).map(f => {
+          const v = saved[f.slug] ?? autoFillDefaults?.[f.slug]
           if (f.tipo === 'documentos_preview') {
             return (
               <div key={f.slug}>
