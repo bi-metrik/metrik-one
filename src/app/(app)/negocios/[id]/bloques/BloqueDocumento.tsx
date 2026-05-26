@@ -708,6 +708,79 @@ export default function BloqueDocumento({
           onUpdate={handleCampoUpdate}
         />
       )}
+
+      {/* Cross-check: validacion contra datos de otros bloques */}
+      {uploadState === 'uploaded' && saved._cross_check ? (
+        <CrossCheckPanel cross_check={saved._cross_check as CrossCheckPanelData} />
+      ) : null}
+    </div>
+  )
+}
+
+// ── Cross-check panel ────────────────────────────────────────────────────────
+
+type CrossCheckPanelData = {
+  passed: boolean
+  results: Array<{
+    slug: string
+    label: string
+    expected: string
+    extracted: string
+    ok: boolean
+  }>
+}
+
+function CrossCheckPanel({ cross_check }: { cross_check: CrossCheckPanelData }) {
+  const fallos = cross_check.results.filter(r => !r.ok)
+  return (
+    <div
+      className={`rounded-lg border p-3 space-y-2 ${
+        cross_check.passed
+          ? 'border-green-200 bg-green-50/40'
+          : 'border-red-200 bg-red-50/40'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        {cross_check.passed ? (
+          <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+        ) : (
+          <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+        )}
+        <p className={`text-xs font-semibold ${cross_check.passed ? 'text-green-700' : 'text-red-700'}`}>
+          {cross_check.passed
+            ? 'Certificado validado: los datos coinciden con el negocio.'
+            : `Discrepancia detectada (${fallos.length} de ${cross_check.results.length}). Sube un nuevo certificado o resuelve con UPME.`}
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        {cross_check.results.map(r => (
+          <div
+            key={r.slug}
+            className="flex items-start gap-2 rounded-md border border-border/50 bg-white px-2 py-1.5"
+          >
+            {r.ok ? (
+              <Check className="h-3.5 w-3.5 text-green-600 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 min-w-0 text-[11px]">
+              <p className="font-medium text-foreground">{r.label}</p>
+              <div className="grid grid-cols-2 gap-2 mt-0.5">
+                <div>
+                  <span className="text-muted-foreground">Esperado: </span>
+                  <span className="text-foreground break-words">{r.expected || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Certificado: </span>
+                  <span className={r.ok ? 'text-foreground' : 'text-red-700 font-medium'}>
+                    {r.extracted || '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

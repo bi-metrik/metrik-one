@@ -24,6 +24,110 @@ function mimeTypeFromName(fileName: string): string {
   return map[ext] ?? 'application/pdf'
 }
 
+// ── Cross-check: validacion cruzada contra datos extraidos de otros bloques ──
+// Cuando config_extra.cross_check.checks esta definido, despues de la extraccion
+// AI comparamos los campos extraidos del documento contra los datos persistidos
+// en bloques de etapas anteriores (RUT, Factura, etc). Devolvemos un detalle de
+// cada match. El gate del bloque solo se cumple si todas las comparaciones pasan.
+
+export type CrossCheckSpec = {
+  slug: string
+  label: string
+  source_etapa_orden: number
+  source_bloque_nombre: string
+  source_field?: string
+  source_fields?: string[]
+  join?: string
+}
+
+export type CrossCheckResult = {
+  slug: string
+  label: string
+  expected: string
+  extracted: string
+  ok: boolean
+}
+
+function normalizeText(v: unknown): string {
+  return String(v ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeId(v: unknown): string {
+  return String(v ?? '').replace(/\D/g, '')
+}
+
+async function runCrossCheck(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioId: string,
+  checks: CrossCheckSpec[],
+  camposExtraidos: Record<string, CampoResultado>,
+): Promise<{ passed: boolean; results: CrossCheckResult[] }> {
+  if (checks.length === 0) return { passed: true, results: [] }
+
+  // Cargar bloques de etapas previas relevantes (solo las que aparecen en checks)
+  const ordenesNecesarias = Array.from(new Set(checks.map(c => c.source_etapa_orden)))
+  const { data: srcBloques } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(nombre, etapas_negocio!inner(orden))')
+    .eq('negocio_id', negocioId)
+
+  // Mapear por (etapa_orden::nombre_lower) -> data
+  const dataPorBloque = new Map<string, Record<string, unknown>>()
+  for (const row of ((srcBloques ?? []) as Record<string, unknown>[])) {
+    const cfg = row.bloque_configs as { nombre?: string; etapas_negocio?: { orden?: number } } | undefined
+    const orden = cfg?.etapas_negocio?.orden
+    const nombre = cfg?.nombre
+    if (typeof orden !== 'number' || !nombre || !ordenesNecesarias.includes(orden)) continue
+    const key = `${orden}::${nombre.trim().toLowerCase()}`
+    const data = (row.data as Record<string, unknown>) ?? {}
+    // Algunos bloques (documento) anidan campos extraidos en data.campos[slug].value
+    const flat: Record<string, unknown> = { ...data }
+    const camposAnidados = (data.campos as Record<string, { value?: unknown }>) ?? null
+    if (camposAnidados) {
+      for (const [slug, c] of Object.entries(camposAnidados)) {
+        if (flat[slug] === undefined) flat[slug] = c?.value
+      }
+    }
+    dataPorBloque.set(key, flat)
+  }
+
+  const results: CrossCheckResult[] = []
+  for (const check of checks) {
+    const key = `${check.source_etapa_orden}::${check.source_bloque_nombre.trim().toLowerCase()}`
+    const srcData = dataPorBloque.get(key) ?? {}
+    let expectedRaw = ''
+    if (check.source_fields && check.source_fields.length > 0) {
+      const join = check.join ?? ' '
+      expectedRaw = check.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
+    } else if (check.source_field) {
+      expectedRaw = String(srcData[check.source_field] ?? '')
+    }
+    const extractedRaw = String(camposExtraidos[check.slug]?.value ?? '')
+
+    const isIdField = /identifica|nit|cedula|documento/i.test(check.slug + ' ' + check.label)
+    const normExpected = isIdField ? normalizeId(expectedRaw) : normalizeText(expectedRaw)
+    const normExtracted = isIdField ? normalizeId(extractedRaw) : normalizeText(extractedRaw)
+
+    const ok = normExpected.length > 0 && normExtracted.length > 0 && normExpected === normExtracted
+    results.push({
+      slug: check.slug,
+      label: check.label,
+      expected: expectedRaw,
+      extracted: extractedRaw,
+      ok,
+    })
+  }
+
+  return { passed: results.every(r => r.ok), results }
+}
+
 // ── 1. Procesar documento ya subido a Storage ─────────────────────────────────
 
 /**
@@ -174,6 +278,14 @@ export async function procesarDocumento(
       }
     }
 
+    // ── 9b. Cross-check contra datos de otros bloques ───────────────────
+    const crossCheckSpec = configExtra.cross_check as { checks?: CrossCheckSpec[] } | undefined
+    if (crossCheckSpec?.checks && crossCheckSpec.checks.length > 0 && camposResult) {
+      const cc = await runCrossCheck(supabase, negocioId, crossCheckSpec.checks, camposResult)
+      newData._cross_check = cc
+      console.log(`[documento] Step 9b cross_check: passed=${cc.passed} (${cc.results.filter(r => !r.ok).map(r => r.slug).join(',')})`)
+    }
+
     // ── 10. Determinar si el bloque está completo ───────────────────────
     let isComplete = true
 
@@ -186,6 +298,12 @@ export async function procesarDocumento(
         const requiredCampos = camposExtraccion.filter(c => c.required)
         isComplete = requiredCampos.every(c => camposResult![c.slug]?.value !== null)
       }
+    }
+
+    // Cross-check bloquea gate si no pasa
+    const ccData = newData._cross_check as { passed: boolean } | undefined
+    if (ccData && !ccData.passed) {
+      isComplete = false
     }
 
     if (isComplete) {
@@ -293,10 +411,19 @@ export async function reprocesarDocumento(
 
     // 6. Determinar completitud
     const requiredCampos = camposExtraccion.filter(c => c.required)
-    const isComplete = requiredCampos.every(c => mergedCampos[c.slug]?.value !== null && mergedCampos[c.slug]?.value !== undefined)
+    let isComplete = requiredCampos.every(c => mergedCampos[c.slug]?.value !== null && mergedCampos[c.slug]?.value !== undefined)
+
+    // 6b. Cross-check contra datos de otros bloques
+    const crossCheckSpec = configExtra.cross_check as { checks?: CrossCheckSpec[] } | undefined
+    let ccResult: { passed: boolean; results: CrossCheckResult[] } | null = null
+    if (crossCheckSpec?.checks && crossCheckSpec.checks.length > 0) {
+      ccResult = await runCrossCheck(supabase, negocioId, crossCheckSpec.checks, mergedCampos)
+      if (!ccResult.passed) isComplete = false
+    }
 
     const now = new Date().toISOString()
-    const newData = { ...currentData, campos: mergedCampos }
+    const newData: Record<string, unknown> = { ...currentData, campos: mergedCampos }
+    if (ccResult) newData._cross_check = ccResult
 
     await db(supabase)
       .from('negocio_bloques')
