@@ -56,6 +56,7 @@ import type { HistorialData } from './bloques/BloqueHistorial'
 import BloqueFormulario from './bloques/BloqueFormulario'
 import BloquePagosEpayco from './bloques/BloquePagosEpayco'
 import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
+import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
@@ -1302,6 +1303,17 @@ function BloqueRenderer({
           } : null}
           modo={modo}
           configExtra={configExtra as Parameters<typeof BloquePropuestaEconomica>[0]['configExtra']}
+        />
+      )
+
+    case 'guia_devolucion':
+      return (
+        <BloqueGuiaDevolucion
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia}
+          modo={modo}
+          configExtra={configExtra}
+          preview={configExtra._guia_preview as Parameters<typeof BloqueGuiaDevolucion>[0]['preview']}
         />
       )
 

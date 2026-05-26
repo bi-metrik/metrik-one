@@ -6,6 +6,7 @@ import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS
 import { createDriveFolder } from '@/lib/google-drive'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
+import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -2663,6 +2664,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  // Si hay un bloque tipo guia_devolucion en la etapa actual, sus datos preview
+  // dependen de RUT (E5), Factura (E2) y Fecha cita DIAN (E10). Pre-cargar.
+  const tieneGuia = base.bloques.some(b =>
+    (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'guia_devolucion'
+  )
+  if (tieneGuia) {
+    sourceEtapaOrdens.add(2)
+    sourceEtapaOrdens.add(5)
+    sourceEtapaOrdens.add(10)
+  }
+
   // Tambien recolectar source_etapa_orden de bloques de etapas previas: cuando
   // el negocio avanza de etapa, el historial necesita resolver auto_fill de
   // bloques de etapas previas (ej. DA6/DA7 en E6 con auto_fill desde E2/E5).
@@ -3067,6 +3079,29 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const enrichedConfigExtra: Record<string, unknown> = { ...configExtra }
     if (Object.keys(autoFill).length > 0) enrichedConfigExtra._auto_fill = autoFill
     if (resolvedFields) enrichedConfigExtra.fields = resolvedFields
+
+    // Preview para BloqueGuiaDevolucion: resuelve nombre, NIT, ciudad, fecha cita
+    // y seccional sugerida desde otros bloques del negocio.
+    if (defTipo === 'guia_devolucion') {
+      const rutData = datosOtrasEtapas[5] ?? {}
+      const facturaData = datosOtrasEtapas[2] ?? {}
+      const razonSocial = (rutData.razon_social as string) ?? ''
+      const nit = (rutData.nit as string) ?? ''
+      const dv = (rutData.dv as string) ?? ''
+      const tipoPersona = (rutData.tipo_persona as string) ?? ''
+      const ciudadVenta = (facturaData.ciudad_venta as string) ?? ''
+      // Fecha cita: data del bloque "Fecha cita DIAN" (E10) si existe
+      const fechaCitaData = datosOtrasEtapas[10] ?? {}
+      const fechaCita = (fechaCitaData.fecha_cita_dian as string) ?? null
+      const seccional = mapCiudadASeccional(ciudadVenta, tipoPersona)
+      enrichedConfigExtra._guia_preview = {
+        nombre: razonSocial || null,
+        nit: nit ? (dv ? `${nit}-${dv}` : nit) : null,
+        ciudad_venta: ciudadVenta || null,
+        fecha_cita: fechaCita,
+        seccional_sugerida_slug: seccional?.slug ?? null,
+      }
+    }
 
     return {
       ...b,

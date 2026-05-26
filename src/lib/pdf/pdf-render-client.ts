@@ -300,3 +300,54 @@ export async function renderPropuestaEconomica(
   const arrayBuffer = await res.arrayBuffer()
   return Buffer.from(arrayBuffer)
 }
+
+// ============================================================
+// API publica: renderGuiaDevolucion
+// ============================================================
+
+export type GuiaDevolucionRenderPayload = {
+  body_class: 'con-cita' | 'sin-cita'
+  ciudad_label: string
+  ciudad_email: string
+  nombre: string
+  nit: string
+  fecha_cita_humano: string         // "Martes 4 de junio de 2026, 10:00 a. m." o ""
+  num_paso_radicar: string          // "3" si con cita, "2" sin
+  num_paso_seguimiento: string
+  num_paso_respuesta: string
+  titulo_radicar: string
+  desc_radicar: string
+  fecha_envio_label: string         // "[día y hora exacta de tu cita]" o "[fecha del envío]"
+  fecha_generacion: string          // "Generada el 25 de mayo de 2026"
+  version: number
+}
+
+export async function renderGuiaDevolucion(
+  templateSlug: string,
+  data: GuiaDevolucionRenderPayload,
+): Promise<Buffer> {
+  if (!isPdfRenderConfigured()) {
+    throw new Error('PDF render service no configurado (faltan env vars)')
+  }
+
+  const url = `${RENDER_URL}/render/guia-devolucion`
+  const token = await getIdToken(RENDER_URL!)
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-MeTRIK-Secret': RENDER_SECRET!,
+    },
+    body: JSON.stringify({ template_slug: templateSlug, data }),
+  })
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`PDF render guia-devolucion falló (${res.status}): ${txt.slice(0, 300)}`)
+  }
+
+  const arrayBuffer = await res.arrayBuffer()
+  return Buffer.from(arrayBuffer)
+}

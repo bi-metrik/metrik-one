@@ -95,9 +95,11 @@ export const BLOQUE_TIPO_CODE: Record<string, string> = {
   ejecucion: 'EJ',
   equipo: 'EQ',
   formulario: 'FO',
+  guia_devolucion: 'GD',
   historial: 'HI',
   historial_valida: 'HV',
   plan_recurrente: 'PR',
+  propuesta_economica: 'PE',
   resumen_financiero: 'RF',
 }
 
