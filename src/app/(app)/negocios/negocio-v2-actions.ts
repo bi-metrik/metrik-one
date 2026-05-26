@@ -2727,6 +2727,33 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  // ── Cargar data de bloques documento del negocio (para herencia readonly)
+  // Indexado por (etapa_orden + nombre normalizado) porque hay multiples documentos
+  // por etapa (Factura, RUT, Cedula, Comprobante, etc.) y el matching para herencia
+  // se hace por (etapa source, nombre, tipo) en otros sitios. Cuando un bloque tipo
+  // 'documento' tiene source_etapa_orden en su config_extra, leemos drive_url +
+  // file_name + campos extraidos del bloque origen.
+  const documentoDataPorEtapaNombre = new Map<string, Record<string, unknown>>()
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: docBlocks } = await (db(supabase) as any)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(nombre, etapa_id, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.bloque_definitions.tipo', 'documento')
+    if (docBlocks) {
+      for (const db_ of (docBlocks as Record<string, unknown>[])) {
+        const cfg = db_.bloque_configs as Record<string, unknown>
+        const etapa = cfg.etapas_negocio as { orden: number } | undefined
+        if (!etapa || !db_.data) continue
+        const defNombre = (cfg.bloque_definitions as { nombre?: string } | undefined)?.nombre ?? ''
+        const cfgNombre = (cfg.nombre as string | null) ?? defNombre
+        const key = `${etapa.orden}::${cfgNombre.trim().toLowerCase()}`
+        documentoDataPorEtapaNombre.set(key, db_.data as Record<string, unknown>)
+      }
+    }
+  }
+
   // ── Historial: bloques con data de etapas previas (con orden < etapa actual)
   // Estructura completa para que el cliente los renderice con BloqueRenderer
   // en modo 'visible' (read-only nativo de cada tipo).
@@ -2910,6 +2937,19 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       && typeof configExtra.source_etapa_orden === 'number'
     if (isReadonlyPropuesta && b.instancia) {
       const srcData = propuestaDataPorEtapa[configExtra.source_etapa_orden as number]
+      if (srcData) {
+        b = { ...b, instancia: { ...b.instancia, data: srcData } }
+      }
+    }
+
+    // Herencia readonly de documento: si este bloque es de tipo documento y tiene
+    // source_etapa_orden, leer la data del bloque origen (drive_url, file_name,
+    // campos extraidos) para que el render readonly tenga acceso al archivo.
+    const defTipo = (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo
+    const srcOrden = configExtra.source_etapa_orden as number | undefined
+    if (defTipo === 'documento' && typeof srcOrden === 'number' && b.instancia) {
+      const bNombre = (b.nombre ?? (b as { bloque_definitions?: { nombre?: string } | null }).bloque_definitions?.nombre ?? '').trim().toLowerCase()
+      const srcData = documentoDataPorEtapaNombre.get(`${srcOrden}::${bNombre}`)
       if (srcData) {
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
       }
