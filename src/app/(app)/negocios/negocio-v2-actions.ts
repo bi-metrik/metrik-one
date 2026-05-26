@@ -2663,6 +2663,28 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  // Tambien recolectar source_etapa_orden de bloques de etapas previas: cuando
+  // el negocio avanza de etapa, el historial necesita resolver auto_fill de
+  // bloques de etapas previas (ej. DA6/DA7 en E6 con auto_fill desde E2/E5).
+  // Sin esto, datosOtrasEtapas queda vacio para los rangos que el historial
+  // necesita y los bloques readonly quedan filtrados del historial.
+  if (base.negocio.linea_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: allConfigs } = await (db(supabase) as any)
+      .from('bloque_configs')
+      .select('config_extra, etapas_negocio!inner(linea_id, orden)')
+      .eq('etapas_negocio.linea_id', base.negocio.linea_id)
+    for (const c of ((allConfigs ?? []) as Record<string, unknown>[])) {
+      const ce = c.config_extra as { fields?: Array<{ auto_fill?: { source_etapa_orden?: number } }> } | null
+      const fields = ce?.fields ?? []
+      for (const f of fields) {
+        if (f.auto_fill?.source_etapa_orden !== undefined) {
+          sourceEtapaOrdens.add(f.auto_fill.source_etapa_orden)
+        }
+      }
+    }
+  }
+
   const datosOtrasEtapas: Record<number, Record<string, unknown>> = {}
   if (sourceEtapaOrdens.size > 0 && base.negocio.linea_id) {
     const { data: etapasSource } = await db(supabase)
