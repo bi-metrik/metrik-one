@@ -3,7 +3,8 @@
 import { useState, useTransition } from 'react'
 import { CheckCircle2, ExternalLink, FileText, Loader2, Sparkles, AlertTriangle, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
-import { generarVersionGuia, aprobarVersionGuia, type GuiaData } from '@/lib/actions/guia-devolucion-actions'
+import { generarVersionGuia, aprobarVersionGuia } from '@/lib/actions/guia-devolucion-actions'
+import type { GuiaData } from '@/lib/actions/guia-devolucion-types'
 import { SECCIONALES_DIAN, type SeccionalDIAN } from '@/lib/dian/seccionales'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 

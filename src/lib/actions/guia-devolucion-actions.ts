@@ -17,27 +17,7 @@ import {
   getSeccionalBySlug,
   type SeccionalDIAN,
 } from '@/lib/dian/seccionales'
-
-// ── Tipos ────────────────────────────────────────────────────────────────────
-
-export type GuiaVersion = {
-  n: number
-  seccional_slug: string
-  seccional_label: string
-  fecha_cita: string | null
-  pdf_drive_id: string | null
-  pdf_url: string | null
-  generated_at: string
-  generated_by: string | null
-}
-
-export type GuiaData = {
-  versiones: GuiaVersion[]
-  version_activa: number | null
-  aprobado_at: string | null
-  aprobado_por: string | null
-  aprobado_version: number | null
-}
+import type { GuiaVersion, GuiaData, GenerarGuiaInput } from './guia-devolucion-types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,11 +38,6 @@ function fechaGeneracion(d: Date): string {
 }
 
 // ── Acciones ─────────────────────────────────────────────────────────────────
-
-export type GenerarGuiaInput = {
-  bloqueId: string
-  seccional_slug_override?: string
-}
 
 export async function generarVersionGuia(
   input: GenerarGuiaInput,
