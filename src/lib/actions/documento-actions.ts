@@ -30,6 +30,8 @@ function mimeTypeFromName(fileName: string): string {
 // en bloques de etapas anteriores (RUT, Factura, etc). Devolvemos un detalle de
 // cada match. El gate del bloque solo se cumple si todas las comparaciones pasan.
 
+export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix'
+
 export type CrossCheckSpec = {
   slug: string
   label: string
@@ -37,7 +39,9 @@ export type CrossCheckSpec = {
   source_bloque_nombre: string
   source_field?: string
   source_fields?: string[]
+  source_field_alternatives?: string[]
   join?: string
+  match_mode?: CrossCheckMatchMode
 }
 
 export type CrossCheckResult = {
@@ -46,6 +50,7 @@ export type CrossCheckResult = {
   expected: string
   extracted: string
   ok: boolean
+  mode?: CrossCheckMatchMode
 }
 
 function normalizeText(v: unknown): string {
@@ -60,6 +65,34 @@ function normalizeText(v: unknown): string {
 
 function normalizeId(v: unknown): string {
   return String(v ?? '').replace(/\D/g, '')
+}
+
+function tokensOf(s: string): string[] {
+  return normalizeText(s).split(/\s+/).filter(Boolean)
+}
+
+function compareValues(expected: string, extracted: string, mode: CrossCheckMatchMode = 'exact'): boolean {
+  if (!expected || !extracted) return false
+  if (mode === 'tokens') {
+    const a = tokensOf(expected).sort()
+    const b = tokensOf(extracted).sort()
+    return a.length > 0 && a.length === b.length && a.every((t, i) => t === b[i])
+  }
+  if (mode === 'subset') {
+    const a = new Set(tokensOf(expected))
+    const b = new Set(tokensOf(extracted))
+    if (a.size === 0 || b.size === 0) return false
+    const bInA = [...b].every(t => a.has(t))
+    const aInB = [...a].every(t => b.has(t))
+    return bInA || aInB
+  }
+  if (mode === 'id_prefix') {
+    const a = normalizeId(expected)
+    const b = normalizeId(extracted)
+    if (a.length < 6 || b.length < 6) return false
+    return a === b || a.startsWith(b) || b.startsWith(a)
+  }
+  return normalizeText(expected) === normalizeText(extracted)
 }
 
 async function runCrossCheck(
@@ -102,26 +135,39 @@ async function runCrossCheck(
   for (const check of checks) {
     const key = `${check.source_etapa_orden}::${check.source_bloque_nombre.trim().toLowerCase()}`
     const srcData = dataPorBloque.get(key) ?? {}
+    const extractedRaw = String(camposExtraidos[check.slug]?.value ?? '')
+
+    // Resolver expected: source_fields (concat), source_field_alternatives
+    // (probar cada uno y elegir el primero que de match, o el primero no vacio),
+    // o source_field.
     let expectedRaw = ''
+    let ok = false
+    const mode: CrossCheckMatchMode = check.match_mode ?? 'exact'
+
     if (check.source_fields && check.source_fields.length > 0) {
       const join = check.join ?? ' '
       expectedRaw = check.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
+      ok = compareValues(expectedRaw, extractedRaw, mode)
+    } else if (check.source_field_alternatives && check.source_field_alternatives.length > 0) {
+      // Probar cada alternativa; pasar si CUALQUIERA matchea
+      const candidates = check.source_field_alternatives
+        .map(f => String(srcData[f] ?? ''))
+        .filter(s => s)
+      const matched = candidates.find(c => compareValues(c, extractedRaw, mode))
+      expectedRaw = matched ?? candidates[0] ?? ''
+      ok = !!matched
     } else if (check.source_field) {
       expectedRaw = String(srcData[check.source_field] ?? '')
+      ok = compareValues(expectedRaw, extractedRaw, mode)
     }
-    const extractedRaw = String(camposExtraidos[check.slug]?.value ?? '')
 
-    const isIdField = /identifica|nit|cedula|documento/i.test(check.slug + ' ' + check.label)
-    const normExpected = isIdField ? normalizeId(expectedRaw) : normalizeText(expectedRaw)
-    const normExtracted = isIdField ? normalizeId(extractedRaw) : normalizeText(extractedRaw)
-
-    const ok = normExpected.length > 0 && normExtracted.length > 0 && normExpected === normExtracted
     results.push({
       slug: check.slug,
       label: check.label,
       expected: expectedRaw,
       extracted: extractedRaw,
       ok,
+      mode,
     })
   }
 
