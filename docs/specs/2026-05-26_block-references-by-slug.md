@@ -122,3 +122,27 @@ Reescribir todas las references existentes en `bloque_configs.config_extra` de l
 - Migrar líneas de otros clientes que se agreguen — se hace cuando arranca cada cliente.
 - Refactor del UI admin `/admin/workflows` para mostrar/editar slugs.
 - Validación en runtime de slugs faltantes al crear/editar `bloque_configs`.
+
+## Apéndice — segundo escenario de rotura (rename de campo AI)
+
+Detectado en la misma sesión 2026-05-26: cuando se refactoreó DC9 Concepto UPME
+para agregar `cross_check`, los slugs de los `campos_extraccion` cambiaron
+(`valor_solicitado` → `valor_total_certificado`, etc.). El Formulario DIAN F01
+seguía buscando `valor_solicitado` y devolvía "faltan datos" aunque la data
+estaba extraída con otro slug en el mismo bloque.
+
+Implicación para este spec: el problema no es solo de **ubicación** del bloque
+(que `bloque_slug` resuelve), sino también de **identidad del campo AI** dentro
+del bloque. Cuando se renombra un `campos_extraccion[].slug`, todas las
+references a ese slug rompen silenciosamente.
+
+Posibles mitigaciones (a discutir antes de ejecutar el spec):
+
+1. **Aliases en `campos_extraccion`** — un campo puede tener `slug` actual +
+   `legacy_slugs: ['valor_solicitado']` que el resolver acepta como fallback.
+2. **Constraint de no-rename** — convención dura: una vez creado un slug, no
+   se renombra; deprecación con flag `deprecated: true`.
+3. **Validación pre-merge** — al modificar `campos_extraccion[].slug` de un
+   bloque, scan de todas las references y advertencia / bloqueo.
+
+Recomendación inicial: opción 1 (aliases) por flexibilidad. Decidir en sesión.
