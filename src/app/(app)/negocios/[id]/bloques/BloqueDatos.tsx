@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef, useCallback } from 'react'
-import { ImageIcon, Search, FileText, ExternalLink, Download } from 'lucide-react'
+import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
@@ -41,6 +41,33 @@ interface BloqueDatosProps {
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+
+function CopyValueButton({ value }: { value: string | number | null | undefined }) {
+  const [copied, setCopied] = useState(false)
+  const text = value === null || value === undefined || value === '' ? null : String(value)
+  const canCopy = text !== null
+  const handleCopy = async () => {
+    if (!canCopy) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      toast.error('No se pudo copiar')
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      disabled={!canCopy}
+      title={canCopy ? 'Copiar' : 'Sin valor'}
+      className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F4F2] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-[#10B981]" /> : <Copy className="h-3 w-3" />}
+    </button>
+  )
+}
 
 export default function BloqueDatos({
   negocioBloqueId,
@@ -258,6 +285,10 @@ export default function BloqueDatos({
               </div>
             )
           }
+          const isCopyable = ['texto', 'numero', 'fecha', 'select', 'radio'].includes(f.tipo)
+          const copyValue = f.tipo === 'select' || f.tipo === 'radio'
+            ? (f.opciones?.find(o => o.value === v)?.label ?? (v as string | null))
+            : (v as string | number | null | undefined)
           return (
             <div key={f.slug} className="flex flex-col gap-0.5">
               <div className="flex items-center gap-1.5">
@@ -275,14 +306,17 @@ export default function BloqueDatos({
               ) : f.tipo === 'imagen_clipboard' && v ? (
                 // eslint-disable-next-line @next/next/no-img-element -- data URL desde clipboard paste, no optimizable por next/image
                 <img src={v as string} alt={f.label} className="max-h-40 rounded-lg border border-[#E5E7EB] object-contain" />
-              ) : f.tipo === 'numero' && v ? (
-                <span className="text-xs text-[#1A1A1A] tabular-nums">{fmt(Number(v))}</span>
               ) : (
-                <span className="text-xs text-[#1A1A1A]">{
-                (f.tipo === 'select' || f.tipo === 'radio') && f.opciones
-                  ? f.opciones.find(o => o.value === v)?.label ?? (v as string) ?? '—'
-                  : (v as string) ?? '—'
-              }</span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`flex-1 min-w-0 text-xs text-[#1A1A1A] break-words ${f.tipo === 'numero' ? 'tabular-nums' : ''}`}>{
+                    f.tipo === 'numero' && v
+                      ? fmt(Number(v))
+                      : (f.tipo === 'select' || f.tipo === 'radio') && f.opciones
+                        ? f.opciones.find(o => o.value === v)?.label ?? (v as string) ?? '—'
+                        : (v as string) ?? '—'
+                  }</span>
+                  {isCopyable && copyValue && <CopyValueButton value={copyValue} />}
+                </div>
               )}
             </div>
           )
