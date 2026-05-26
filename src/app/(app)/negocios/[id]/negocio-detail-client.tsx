@@ -1626,13 +1626,25 @@ export default function NegocioDetailClient({
   }
 
   const bloquesExtendidos = allBloques.filter(b => {
-    const cond = b.config_extra?.condition as { field: string; value: string; source_etapa_orden?: number } | undefined
+    const cond = b.config_extra?.condition as
+      | { field: string; value?: string; value_in?: unknown[]; source_etapa_orden?: number }
+      | undefined
     if (!cond) return true
     // Cross-etapa condition: read from another etapa's data
     const source = cond.source_etapa_orden
       ? (datosOtrasEtapas[cond.source_etapa_orden] ?? {})
       : datosEtapa
-    return String(source[cond.field] ?? '') === cond.value
+    const raw = String(source[cond.field] ?? '')
+    const norm = (s: unknown) => String(s ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+    if (Array.isArray(cond.value_in)) {
+      const target = norm(raw)
+      return cond.value_in.some(v => norm(v) === target)
+    }
+    return raw === cond.value
   })
 
   return (
