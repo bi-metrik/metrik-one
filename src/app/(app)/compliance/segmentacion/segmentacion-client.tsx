@@ -100,18 +100,18 @@ export default function SegmentacionClient({
     <div className="space-y-6 max-w-5xl">
       <div>
         <Link
-          href="/valida"
+          href="/riesgos"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#6B7280] hover:text-[#1A1A1A] mb-2"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Volver a Valida
+          Volver a Cumplimiento
         </Link>
         <div className="flex items-center gap-3">
           <ShieldCheck className="h-6 w-6 text-[#10B981]" />
           <div className="flex-1">
             <h1 className="text-xl font-bold text-[#1A1A1A]">Segmentación SARLAFT</h1>
             <p className="text-sm text-[#6B7280]">
-              Parametriza cómo Valida alimenta tu matriz de segmentación de riesgo. Versión actual:{' '}
+              Parametriza la metodología de segmentación de riesgo del workspace. Versión actual:{' '}
               <strong>{configInicial.version}</strong>
               {configInicial.aplicada_at && (
                 <> · Aplicada {new Date(configInicial.aplicada_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}</>
@@ -229,7 +229,7 @@ export default function SegmentacionClient({
             {pending ? 'Aplicando…' : 'Aplicar configuración'}
           </button>
           <Link
-            href="/valida/segmentacion/bitacora"
+            href="/compliance/segmentacion/bitacora"
             className="inline-flex items-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
           >
             <History className="h-4 w-4" />
@@ -237,7 +237,7 @@ export default function SegmentacionClient({
           </Link>
           {configInicial.version > 0 && (
             <a
-              href="/api/valida/segmentacion/pdf"
+              href="/api/compliance/segmentacion/pdf"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
@@ -459,7 +459,7 @@ function PanelResultados({ distribucion }: { distribucion: DistribucionWorkspace
         </p>
         <p className="text-xs mt-3">
           <FileText className="h-3.5 w-3.5 inline mr-1 mb-0.5" />
-          El score se recalcula automáticamente cada vez que corres una consulta Valida sobre el negocio.
+          El score se recalcula automáticamente al actualizar los factores SARLAFT del negocio.
         </p>
       </div>
     );

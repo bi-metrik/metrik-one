@@ -261,7 +261,7 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
               </button>
             )}
             <Link
-              href="/valida/segmentacion"
+              href="/compliance/segmentacion"
               className="ml-2 inline-flex items-center gap-1 text-xs font-semibold text-[#10B981] hover:text-[#059669]"
             >
               Configurar segmentación

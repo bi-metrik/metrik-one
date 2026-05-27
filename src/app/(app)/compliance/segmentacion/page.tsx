@@ -28,13 +28,13 @@ export default async function SegmentacionPage() {
     .single();
 
   const modules = (ws?.modules as Record<string, boolean>) ?? {};
-  if (!modules.valida_consulta) {
-    redirect('/valida');
+  if (!modules.compliance) {
+    redirect('/');
   }
 
   // Solo owner/admin/supervisor pueden configurar segmentación
   if (!['owner', 'admin', 'supervisor'].includes(profile.role)) {
-    redirect('/valida');
+    redirect('/');
   }
 
   const r = await getSegmentacionConfig();

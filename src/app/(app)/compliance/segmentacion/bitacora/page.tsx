@@ -22,8 +22,18 @@ export default async function BitacoraPage() {
     .single();
 
   if (!profile?.workspace_id) redirect('/onboarding');
+
+  const { data: ws } = await svc
+    .from('workspaces')
+    .select('modules')
+    .eq('id', profile.workspace_id)
+    .single();
+
+  const modules = (ws?.modules as Record<string, boolean>) ?? {};
+  if (!modules.compliance) redirect('/');
+
   if (!['owner', 'admin', 'supervisor'].includes(profile.role)) {
-    redirect('/valida');
+    redirect('/');
   }
 
   const r = await listarBitacoraSegmentacion();
@@ -46,7 +56,7 @@ export default async function BitacoraPage() {
     <div className="space-y-6 max-w-5xl">
       <div>
         <Link
-          href="/valida/segmentacion"
+          href="/compliance/segmentacion"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#6B7280] hover:text-[#1A1A1A] mb-2"
         >
           <ArrowLeft className="h-3.5 w-3.5" />

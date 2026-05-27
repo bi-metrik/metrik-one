@@ -28,6 +28,17 @@ export async function GET(_req: NextRequest) {
     return Response.json({ error: 'permiso_denegado' }, { status: 403 });
   }
 
+  const { data: ws } = await svc
+    .from('workspaces')
+    .select('name, slug, modules')
+    .eq('id', profile.workspace_id)
+    .single();
+
+  const modules = (ws?.modules as Record<string, boolean>) ?? {};
+  if (!modules.compliance) {
+    return Response.json({ error: 'modulo_no_activo' }, { status: 403 });
+  }
+
   const r = await getSegmentacionConfig();
   if (!r.ok) {
     return Response.json({ error: r.error }, { status: 500 });
@@ -37,13 +48,7 @@ export async function GET(_req: NextRequest) {
     return Response.json({ error: 'sin_configuracion_aplicada' }, { status: 400 });
   }
 
-  const { data: ws } = await svc
-    .from('workspaces')
-    .select('nombre, slug')
-    .eq('id', profile.workspace_id)
-    .single();
-
-  const workspaceNombre = ws?.nombre ?? ws?.slug ?? 'Workspace sin nombre';
+  const workspaceNombre = ws?.name ?? ws?.slug ?? 'Workspace sin nombre';
 
   let aplicadaPorNombre: string | null = null;
   if (r.config.aplicada_por) {
