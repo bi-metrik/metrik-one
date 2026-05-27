@@ -220,6 +220,28 @@ export async function createDriveFolder(
   return folder.id
 }
 
+/**
+ * Crea (o reusa) una cadena de subcarpetas anidadas dentro de un parent.
+ *
+ * Acepta paths tipo "A/B/C" — divide por "/" y crea cada nivel con
+ * createDriveFolder (find-or-create). Devuelve el id del folder mas anidado.
+ *
+ * Si path es vacio/null devuelve el parentId (no crea nada).
+ */
+export async function createSubfolderPath(
+  path: string | null | undefined,
+  parentId: string,
+  workspaceId?: string,
+): Promise<string> {
+  if (!path) return parentId
+  const parts = path.split('/').map(p => p.trim()).filter(Boolean)
+  let current = parentId
+  for (const part of parts) {
+    current = await createDriveFolder(part, current, workspaceId)
+  }
+  return current
+}
+
 // ── File upload ──────────────────────────────────────────────────────────────
 
 /** Upload file to Drive using multipart upload (Shared Drive friendly) */

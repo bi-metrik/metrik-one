@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
 import { parseRut } from '@/lib/rut/parse-rut'
+import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink } from '@/lib/google-drive'
 
 const BUCKET = 've-documentos'
 
@@ -70,21 +71,73 @@ export async function confirmarUploadDocumentoNegocio(
   slug: string,
   filePath: string,
 ): Promise<{ success: boolean; url?: string; error?: string }> {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const admin = createServiceClient()
-  const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(filePath)
-  const url = publicData.publicUrl
 
-  const { data: bloque } = await db(supabase)
+  // Cargar bloque + config + negocio para resolver Drive destino
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: bloqueRaw } = await (db(supabase) as any)
     .from('negocio_bloques')
-    .select('data')
+    .select(`
+      data, negocio_id,
+      bloque_configs!inner(config_extra),
+      negocios!inner(codigo, carpeta_url)
+    `)
     .eq('id', negocioBloqueId)
     .single()
 
-  const currentData = (bloque?.data as Record<string, unknown>) ?? {}
+  if (!bloqueRaw) return { success: false, error: 'Bloque no encontrado' }
+
+  const currentData = (bloqueRaw.data as Record<string, unknown>) ?? {}
   const currentDocs = (currentData.docs as Record<string, string>) ?? {}
+  const configExtra = ((bloqueRaw.bloque_configs as { config_extra?: Record<string, unknown> }).config_extra ?? {}) as Record<string, unknown>
+  const driveSubfolder = configExtra.drive_subfolder as string | undefined
+
+  // Si el bloque tiene drive_subfolder definido → mover archivo a Drive y borrar de Storage.
+  // Si no → comportamiento legacy (URL publica de Supabase Storage).
+  let url: string
+
+  if (driveSubfolder) {
+    const negocio = bloqueRaw.negocios as { codigo: string | null; carpeta_url: string | null }
+    const folderIdMatch = negocio.carpeta_url?.match(/folders\/([-\w]+)/)
+    const negocioFolderId = folderIdMatch?.[1]
+    if (!negocioFolderId) {
+      return { success: false, error: 'Negocio sin carpeta Drive — no se puede mover archivo' }
+    }
+
+    // Resolver label del slot desde configExtra.documentos[slug]
+    const docsConfig = (configExtra.documentos ?? []) as Array<{ slug: string; label: string }>
+    const slotConfig = docsConfig.find(d => d.slug === slug)
+    const slotLabel = slotConfig?.label ?? slug
+
+    // Descargar archivo del bucket
+    const { data: fileData, error: dlError } = await admin.storage.from(BUCKET).download(filePath)
+    if (dlError || !fileData) {
+      return { success: false, error: `Error descargando archivo temporal: ${dlError?.message ?? 'no data'}` }
+    }
+    const arrayBuf = await fileData.arrayBuffer()
+    const buffer = Buffer.from(arrayBuf)
+    const mimeType = fileData.type || mimeTypeFromUrl(filePath)
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? 'pdf'
+
+    // Crear cadena de subcarpetas y subir
+    const targetFolderId = await createSubfolderPath(driveSubfolder, negocioFolderId, workspaceId)
+    const fileName = `${slotLabel}.${ext}`
+    const up = await uploadFileToDrive(buffer, fileName, mimeType, targetFolderId, workspaceId)
+    await setFilePublicByLink(up.fileId, workspaceId)
+    url = up.webViewLink
+
+    // Borrar archivo temporal de Storage
+    await admin.storage.from(BUCKET).remove([filePath]).catch(err => {
+      console.warn(`[ve-documentos] no se pudo borrar archivo temporal Storage:`, err)
+    })
+  } else {
+    // Legacy: URL publica de Supabase Storage
+    const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(filePath)
+    url = publicData.publicUrl
+  }
 
   const { error: updateError } = await db(supabase)
     .from('negocio_bloques')

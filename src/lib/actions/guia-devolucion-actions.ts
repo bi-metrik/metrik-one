@@ -11,7 +11,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { renderGuiaDevolucion } from '@/lib/pdf/pdf-render-client'
-import { createDriveFolder, uploadFileToDrive } from '@/lib/google-drive'
+import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import {
   mapCiudadASeccional,
   getSeccionalBySlug,
@@ -185,14 +185,15 @@ export async function generarVersionGuia(
       const folderIdMatch = (negocio?.carpeta_url as string | null)?.match(/folders\/([-\w]+)/)
       const negocioFolderId = folderIdMatch?.[1]
       if (negocioFolderId) {
-        const dianFolder = await createDriveFolder('3. DIAN', negocioFolderId, workspaceId)
-        const guiaFolder = await createDriveFolder('Guía Devolución', dianFolder, workspaceId)
+        // Subfolder canónico (config_extra.drive_subfolder en SOENA: "4. DIAN/Guía Devolución")
+        const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? '4. DIAN/Guía Devolución'
+        const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
         const fileName = `Guia Devolucion v${nuevaN} - ${seccional.label}.pdf`
         const up = await uploadFileToDrive(
           pdfBuffer,
           fileName,
           'application/pdf',
-          guiaFolder,
+          targetFolderId,
           workspaceId,
         )
         pdfDriveId = up.fileId

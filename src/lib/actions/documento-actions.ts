@@ -5,7 +5,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
-import { createDriveFolder, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
+import { createDriveFolder, createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 
 const BUCKET = 've-documentos'
 
@@ -261,6 +261,11 @@ export async function procesarDocumento(
       const negocioFolderId = await createDriveFolder(folderName, driveFolderId, workspaceId)
       console.log(`[documento] Step 4 OK: folder=${negocioFolderId}`)
 
+      // ── 4a. Resolver subfolder canonico segun config_extra.drive_subfolder ──
+      const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? null
+      const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
+      if (subfolderPath) console.log(`[documento] Step 4a OK: subfolder "${subfolderPath}" -> ${targetFolderId}`)
+
       // ── 4b. Eliminar archivo anterior de Drive si existe ────────────────
       if (oldDriveFileId) {
         try {
@@ -275,7 +280,7 @@ export async function procesarDocumento(
       // ── 5. Subir archivo a Drive ──────────────────────────────────────
       const driveFileName = `${label}.${ext}`
       console.log(`[documento] Step 5: uploading "${driveFileName}" to Drive...`)
-      const result = await uploadFileToDrive(buffer, driveFileName, mimeType, negocioFolderId, workspaceId)
+      const result = await uploadFileToDrive(buffer, driveFileName, mimeType, targetFolderId, workspaceId)
       driveFileId = result.fileId
       driveUrl = result.webViewLink
       console.log(`[documento] Step 5 OK: fileId=${driveFileId}`)

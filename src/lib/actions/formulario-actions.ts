@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
-import { uploadFileToDrive, setFilePublicByLink, createDriveFolder } from '@/lib/google-drive'
+import { uploadFileToDrive, setFilePublicByLink, createDriveFolder, createSubfolderPath } from '@/lib/google-drive'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
@@ -248,8 +248,12 @@ export async function generarFormulario(
       // Get or create negocio folder
       const negocioFolderId = await createDriveFolder(codigoNegocio, wsDriveFolderId, workspaceId)
 
+      // Resolver subfolder canonico (config_extra.drive_subfolder, ej. "4. DIAN/Formularios")
+      const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? null
+      const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
+
       const fileName = `${label}.pdf`
-      const result = await uploadFileToDrive(buffer, fileName, 'application/pdf', negocioFolderId, workspaceId)
+      const result = await uploadFileToDrive(buffer, fileName, 'application/pdf', targetFolderId, workspaceId)
       await setFilePublicByLink(result.fileId, workspaceId)
       driveUrl = result.webViewLink
     }

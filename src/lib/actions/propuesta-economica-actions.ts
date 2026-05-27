@@ -18,7 +18,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
-import { createDriveFolder, uploadFileToDrive } from '@/lib/google-drive'
+import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { createServiceClient } from '@/lib/supabase/server'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -147,6 +147,7 @@ async function loadBloqueContext(
   const servicioId = (configExtra.servicio_id as string | undefined)
     ?? autoPropuesta?.servicio_id
   const templateSlug = (configExtra.template_slug as string) ?? 'soena/propuesta-economica'
+  const driveSubfolder = (configExtra.drive_subfolder as string | undefined) ?? null
 
   // Si data esta vacio o no tiene precio_base, lo derivamos del servicio
   let precioBase = data.precio_base_con_iva ?? 0
@@ -176,6 +177,7 @@ async function loadBloqueContext(
     ivaPct,
     capDescuento,
     templateSlug,
+    driveSubfolder,
   }
 }
 
@@ -264,8 +266,9 @@ export async function generarVersionPropuesta(
     console.warn(`[propuesta] render PDF fallo (continuando sin PDF):`, renderError)
   }
 
-  // Subir a Drive: subcarpeta "1. Legal/Propuestas" del folder del negocio
-  // Solo si hay PDF generado Y carpeta del negocio
+  // Subir a Drive: subcarpeta declarada en config_extra.drive_subfolder
+  // (canonico "1. Legal/Propuestas" en SOENA). Si no esta seteada, fallback
+  // al path historico para compat.
   let pdfDriveId: string | null = null
   let pdfUrl: string | null = null
   if (pdfBuffer) {
@@ -276,14 +279,14 @@ export async function generarVersionPropuesta(
         const folderIdMatch = (negocio.carpeta_url as string).match(/folders\/([-\w]+)/)
         const negocioFolderId = folderIdMatch?.[1]
         if (negocioFolderId) {
-          const legalFolder = await createDriveFolder('1. Legal', negocioFolderId, workspaceId)
-          const propuestasFolder = await createDriveFolder('Propuestas', legalFolder, workspaceId)
+          const subfolderPath = (ctx.driveSubfolder ?? '1. Legal/Propuestas') as string
+          const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
           const fileName = `Propuesta Economica v${nuevaN} - ${fechaCorta(ahora)}.pdf`
           const up = await uploadFileToDrive(
             pdfBuffer,
             fileName,
             'application/pdf',
-            propuestasFolder,
+            targetFolderId,
             workspaceId,
           )
           pdfDriveId = up.fileId

@@ -833,6 +833,24 @@ export async function crearNegocio(input: {
       const folderId = await createDriveFolder(folderName, driveFolderId, workspaceId)
       const folderUrl = `https://drive.google.com/drive/folders/${folderId}`
 
+      // Pre-crear estructura canonica de subcarpetas — el operador y el cliente
+      // ven los compartimentos desde el primer dia, aunque no haya archivos.
+      const CARPETAS_INICIALES = [
+        '1. Legal',
+        '2. Comercial',
+        '3. UPME',
+        '4. DIAN',
+        '5. Otros',
+      ]
+      for (const carpeta of CARPETAS_INICIALES) {
+        try {
+          await createDriveFolder(carpeta, folderId, workspaceId)
+        } catch (err) {
+          // No bloquea creacion del negocio si una subcarpeta falla
+          console.warn(`[crearNegocio] no se pudo pre-crear "${carpeta}":`, err instanceof Error ? err.message : err)
+        }
+      }
+
       // Guardar link en el negocio
       await db(supabase)
         .from('negocios')
