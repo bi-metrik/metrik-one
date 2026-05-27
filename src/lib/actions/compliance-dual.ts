@@ -187,7 +187,7 @@ export async function consultaDual(
   if (nombre) body.nombre = nombre;
 
   try {
-    const res = await fetch(`${VALIDA_API_BASE}/v1/compliance/dual`, {
+    const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -224,7 +224,7 @@ export async function consultaDualBatch(formData: FormData): Promise<
   out.append('workspace_origen', slug);
 
   try {
-    const res = await fetch(`${VALIDA_API_BASE}/v1/compliance/dual/batch`, {
+    const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual/batch`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${getApiKey()}` },
       body: out,
@@ -252,7 +252,7 @@ export async function descargarPlantillaBatch(): Promise<
   Result<{ base64: string; filename: string }>
 > {
   try {
-    const res = await fetch(`${VALIDA_API_BASE}/v1/compliance/dual/batch`, {
+    const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual/batch`, {
       headers: { Authorization: `Bearer ${getApiKey()}` },
       cache: 'no-store',
     });
@@ -294,7 +294,7 @@ export async function listarConsultasDuales(
   if (!guard.ok) return guard;
 
   try {
-    const url = new URL(`${VALIDA_API_BASE}/v1/compliance/dual/list`);
+    const url = new URL(`${VALIDA_API_BASE}/api/v1/compliance/dual/list`);
     url.searchParams.set('workspace', filters.workspace ?? 'all');
     url.searchParams.set('page', String(filters.page ?? 1));
     url.searchParams.set('page_size', String(filters.pageSize ?? 50));
@@ -325,7 +325,7 @@ export async function obtenerConsultaDual(dualId: string): Promise<Result<DualDe
   if (!guard.ok) return guard;
 
   try {
-    const res = await fetch(`${VALIDA_API_BASE}/v1/compliance/dual/${dualId}`, {
+    const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual/${dualId}`, {
       headers: {
         Authorization: `Bearer ${getApiKey()}`,
         'x-metrik-audit': getAuditSecret(),
@@ -348,7 +348,7 @@ export async function registrarVeredicto(input: {
 
   try {
     const res = await fetch(
-      `${VALIDA_API_BASE}/v1/compliance/dual/${input.dualId}/audit`,
+      `${VALIDA_API_BASE}/api/v1/compliance/dual/${input.dualId}/audit`,
       {
         method: 'POST',
         headers: {
@@ -371,7 +371,7 @@ export async function obtenerMetricsDuales(): Promise<Result<DualMetrics>> {
   if (!guard.ok) return guard;
 
   try {
-    const res = await fetch(`${VALIDA_API_BASE}/v1/compliance/dual/metrics`, {
+    const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual/metrics`, {
       headers: {
         Authorization: `Bearer ${getApiKey()}`,
         'x-metrik-audit': getAuditSecret(),
