@@ -5,6 +5,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { ShieldAlert, Plus } from 'lucide-react'
 import { redirect } from 'next/navigation'
 import RiesgosExcelActions from './riesgos-excel-actions'
+import RiesgosFilters from './riesgos-filters'
 import RiesgosList from './riesgos-list'
 
 const NIVEL_COLORS: Record<string, string> = {
@@ -66,17 +67,6 @@ export default async function RiesgosPage({ searchParams }: Props) {
     countByNivel[r.nivel_riesgo] = (countByNivel[r.nivel_riesgo] || 0) + n
   }
 
-  function buildFilterUrl(key: string, value: string) {
-    const p = new URLSearchParams()
-    const current = { categoria, nivel, estado, factor }
-    const updated = { ...current, [key]: value }
-    Object.entries(updated).forEach(([k, v]) => {
-      if (v !== 'todos') p.set(k, v)
-    })
-    const qs = p.toString()
-    return `/riesgos${qs ? `?${qs}` : ''}`
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -123,41 +113,12 @@ export default async function RiesgosPage({ searchParams }: Props) {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <FilterSelect label="Categoria" value={categoria} paramKey="categoria" options={[
-          { value: 'todos', label: 'Todas' },
-          { value: 'LA', label: 'LA' },
-          { value: 'FT', label: 'FT' },
-          { value: 'FPADM', label: 'FPADM' },
-          { value: 'PTEE', label: 'PTEE' },
-        ]} buildUrl={buildFilterUrl} />
-        <FilterSelect label="Nivel" value={nivel} paramKey="nivel" options={[
-          { value: 'todos', label: 'Todos' },
-          { value: 'EXTREMO', label: 'Extremo' },
-          { value: 'ALTO', label: 'Alto' },
-          { value: 'MODERADO', label: 'Moderado' },
-          { value: 'BAJO', label: 'Bajo' },
-        ]} buildUrl={buildFilterUrl} />
-        <FilterSelect label="Estado" value={estado} paramKey="estado" options={[
-          { value: 'todos', label: 'Todos' },
-          { value: 'ABIERTO', label: 'Abierto' },
-          { value: 'BAJO_CONTROL', label: 'Bajo control' },
-          { value: 'MONITOREADO', label: 'Monitoreado' },
-          { value: 'MITIGADO', label: 'Mitigado' },
-          { value: 'REPORTADO', label: 'Reportado' },
-          { value: 'CERRADO', label: 'Cerrado' },
-        ]} buildUrl={buildFilterUrl} />
-        <FilterSelect label="Factor" value={factor} paramKey="factor" options={[
-          { value: 'todos', label: 'Todos' },
-          { value: 'clientes', label: 'Clientes' },
-          { value: 'proveedores', label: 'Proveedores' },
-          { value: 'empleados', label: 'Empleados' },
-          { value: 'canales', label: 'Canales' },
-          { value: 'jurisdicciones', label: 'Jurisdicciones' },
-          { value: 'productos', label: 'Productos' },
-          { value: 'operaciones', label: 'Operaciones' },
-        ]} buildUrl={buildFilterUrl} />
-      </div>
+      <RiesgosFilters
+        categoria={categoria}
+        nivel={nivel}
+        estado={estado}
+        factor={factor}
+      />
 
       {/* Collapsible causas list */}
       <RiesgosList
@@ -175,31 +136,3 @@ export default async function RiesgosPage({ searchParams }: Props) {
   )
 }
 
-function FilterSelect({ label, value, paramKey, options, buildUrl }: {
-  label: string
-  value: string
-  paramKey: string
-  options: { value: string; label: string }[]
-  buildUrl: (key: string, value: string) => string
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <label className="text-xs font-medium text-[#6B7280]">{label}:</label>
-      <div className="flex gap-1">
-        {options.map(opt => (
-          <Link
-            key={opt.value}
-            href={buildUrl(paramKey, opt.value)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-              value === opt.value
-                ? 'bg-[#10B981] text-white'
-                : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
-            }`}
-          >
-            {opt.label}
-          </Link>
-        ))}
-      </div>
-    </div>
-  )
-}
