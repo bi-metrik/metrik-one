@@ -19,10 +19,11 @@ import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import {
   consultaDualPersistente,
-  consultaDualBatch,
   descargarPlantillaBatch,
   listarHistorialDual,
+  prepararLoteDual,
   type DualConsultaPersistida,
+  type DualFilaPreparada,
   type DualHistorialFiltros,
   type DualHistorialItem,
   type DualSeveridad,
@@ -276,57 +277,122 @@ function ConsultaPuntualForm() {
 
 // ─── Tab: Masiva (XLSX) ────────────────────────────────────────────────────
 
+type EstadoCargue =
+  | { fase: 'inicial' }
+  | { fase: 'preparando' }
+  | {
+      fase: 'procesando';
+      loteId: string;
+      total: number;
+      procesadas: number;
+      severidades: Record<DualSeveridad, number>;
+      tituloLote: string | null;
+    }
+  | {
+      fase: 'completado';
+      loteId: string;
+      total: number;
+      severidades: Record<DualSeveridad, number>;
+      tituloLote: string | null;
+    }
+  | { fase: 'error'; mensaje: string };
+
+function severidadesIniciales(): Record<DualSeveridad, number> {
+  return { alto: 0, sin_hallazgo: 0, error: 0 };
+}
+
 function ConsultaMasivaForm() {
   const [archivo, setArchivo] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [titulo, setTitulo] = useState('');
+  const [estado, setEstado] = useState<EstadoCargue>({ fase: 'inicial' });
   const [pendingTpl, startTplTransition] = useTransition();
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setInfo(null);
-    if (!archivo) {
-      setError('Selecciona un archivo XLSX');
-      return;
-    }
-    const fd = new FormData();
-    fd.append('archivo', archivo);
-    startTransition(async () => {
-      const r = await consultaDualBatch(fd);
-      if (!r.ok) {
-        setError(r.error);
-        return;
-      }
-      const blob = base64ToBlob(
-        r.data.base64,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      );
-      triggerDownload(blob, r.data.filename);
-      setInfo(`Resultado descargado: ${r.data.filename}`);
-      setArchivo(null);
-      const input = document.getElementById('archivo-batch') as HTMLInputElement | null;
-      if (input) input.value = '';
-    });
-  }
-
   function descargarPlantilla() {
-    setError(null);
-    setInfo(null);
     startTplTransition(async () => {
       const r = await descargarPlantillaBatch();
       if (!r.ok) {
-        setError(r.error);
+        setEstado({ fase: 'error', mensaje: r.error });
         return;
       }
       const blob = base64ToBlob(
         r.data.base64,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       );
       triggerDownload(blob, r.data.filename);
     });
   }
+
+  async function iniciarCargue(e: React.FormEvent) {
+    e.preventDefault();
+    if (!archivo) {
+      setEstado({ fase: 'error', mensaje: 'Selecciona un archivo XLSX' });
+      return;
+    }
+    setEstado({ fase: 'preparando' });
+
+    const fd = new FormData();
+    fd.append('archivo', archivo);
+    const prep = await prepararLoteDual(fd);
+
+    if (!prep.ok) {
+      setEstado({ fase: 'error', mensaje: prep.error });
+      return;
+    }
+
+    const { lote_id, total, filas } = prep.data;
+    const tituloLote = titulo.trim().length > 0 ? titulo.trim() : null;
+    const severidades = severidadesIniciales();
+
+    setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas: 0, severidades, tituloLote });
+
+    let procesadas = 0;
+    for (const fila of filas) {
+      const sev = await procesarFila(fila, lote_id, tituloLote);
+      procesadas += 1;
+      severidades[sev] = (severidades[sev] ?? 0) + 1;
+      setEstado({
+        fase: 'procesando',
+        loteId: lote_id,
+        total,
+        procesadas,
+        severidades: { ...severidades },
+        tituloLote,
+      });
+    }
+
+    setEstado({ fase: 'completado', loteId: lote_id, total, severidades, tituloLote });
+  }
+
+  async function procesarFila(
+    fila: DualFilaPreparada,
+    loteId: string,
+    tituloLote: string | null,
+  ): Promise<DualSeveridad> {
+    if (fila.error) {
+      await consultaDualPersistente(fila.input, {
+        lote_id: loteId,
+        titulo_lote: tituloLote,
+        tipo: 'masiva_item',
+      });
+      return 'error';
+    }
+    const r = await consultaDualPersistente(fila.input, {
+      lote_id: loteId,
+      titulo_lote: tituloLote,
+      tipo: 'masiva_item',
+    });
+    return r.ok ? r.data.severidad : 'error';
+  }
+
+  function reiniciar() {
+    setArchivo(null);
+    setTitulo('');
+    setEstado({ fase: 'inicial' });
+    const input = document.getElementById('archivo-batch') as HTMLInputElement | null;
+    if (input) input.value = '';
+  }
+
+  const procesando = estado.fase === 'preparando' || estado.fase === 'procesando';
 
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-5">
@@ -334,7 +400,8 @@ function ConsultaMasivaForm() {
         <div>
           <h3 className="text-base font-bold text-[#1A1A1A]">Carga masiva (XLSX)</h3>
           <p className="text-sm text-[#6B7280] mt-1">
-            Sube un XLSX con la plantilla y descarga el resultado con las coincidencias anexadas.
+            Sube un XLSX con la plantilla. Hasta 500 filas. Cada fila se procesa y queda
+            registrada en el historial.
           </p>
         </div>
         <button
@@ -348,45 +415,196 @@ function ConsultaMasivaForm() {
         </button>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-4">
-        <label
-          htmlFor="archivo-batch"
-          className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-[#E5E7EB] hover:border-[#1A1A1A] rounded-lg p-8 cursor-pointer transition-colors"
-        >
-          <Upload className="h-8 w-8 text-[#6B7280]" />
-          <div className="text-center">
-            <p className="text-sm font-semibold text-[#1A1A1A]">
-              {archivo ? archivo.name : 'Arrastra o selecciona un archivo XLSX'}
-            </p>
-            <p className="text-xs text-[#6B7280] mt-1">
-              Solo .xlsx — hasta 5 MB
-            </p>
+      {estado.fase === 'completado' ? (
+        <ResumenCargueCompletado estado={estado} onReiniciar={reiniciar} />
+      ) : procesando ? (
+        <ProgresoCargue estado={estado} />
+      ) : (
+        <form onSubmit={iniciarCargue} className="space-y-4">
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+              Título del cargue{' '}
+              <span className="font-light lowercase tracking-normal">
+                (opcional, queda en el historial)
+              </span>
+            </label>
+            <input
+              type="text"
+              value={titulo}
+              onChange={e => setTitulo(e.target.value)}
+              placeholder="Cargue contrapartes mayo 2026"
+              maxLength={200}
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+            />
           </div>
-          <input
-            id="archivo-batch"
-            type="file"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            onChange={e => setArchivo(e.target.files?.[0] ?? null)}
-            className="hidden"
+
+          <label
+            htmlFor="archivo-batch"
+            className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-[#E5E7EB] hover:border-[#1A1A1A] rounded-lg p-8 cursor-pointer transition-colors"
+          >
+            <Upload className="h-8 w-8 text-[#6B7280]" />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-[#1A1A1A]">
+                {archivo ? archivo.name : 'Arrastra o selecciona un archivo XLSX'}
+              </p>
+              <p className="text-xs text-[#6B7280] mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
+            </div>
+            <input
+              id="archivo-batch"
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={!archivo}
+            className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            Procesar cargue
+          </button>
+
+          {estado.fase === 'error' && <ErrorBox msg={estado.mensaje} />}
+        </form>
+      )}
+    </div>
+  );
+}
+
+function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
+  if (estado.fase === 'preparando') {
+    return (
+      <div className="py-10 text-center space-y-3">
+        <Dona total={1} procesadas={0} pulsante />
+        <p className="text-sm font-semibold text-[#1A1A1A]">Preparando cargue…</p>
+        <p className="text-xs text-[#6B7280]">Leyendo el archivo y validando filas.</p>
+      </div>
+    );
+  }
+  if (estado.fase !== 'procesando') return null;
+
+  const pct = estado.total === 0 ? 0 : Math.round((estado.procesadas / estado.total) * 100);
+
+  return (
+    <div className="py-6 space-y-5">
+      <div className="flex items-center justify-center">
+        <Dona total={estado.total} procesadas={estado.procesadas} />
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-[#6B7280]">
+          <span className="font-semibold">
+            {estado.procesadas} / {estado.total} consultas
+          </span>
+          <span className="font-mono">{pct}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
+          <div
+            className="h-full bg-[#10B981] transition-[width] duration-200 ease-out"
+            style={{ width: `${pct}%` }}
           />
-        </label>
+        </div>
+      </div>
+      <DistribucionSeveridadDual sev={estado.severidades} />
+      <p className="text-[11px] text-center text-[#6B7280]">
+        No cierres esta pestaña hasta que el cargue termine. Las consultas se guardan en el
+        historial conforme avanzan.
+      </p>
+    </div>
+  );
+}
 
-        <button
-          type="submit"
-          disabled={pending || !archivo}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+function Dona({ total, procesadas, pulsante }: { total: number; procesadas: number; pulsante?: boolean }) {
+  const radio = 52;
+  const stroke = 10;
+  const circ = 2 * Math.PI * radio;
+  const pct = total === 0 ? 0 : procesadas / total;
+  const offset = circ * (1 - pct);
+  const pctTexto = total === 0 ? 0 : Math.round(pct * 100);
+
+  return (
+    <div className={`relative h-32 w-32 ${pulsante ? 'animate-pulse' : ''}`}>
+      <svg viewBox="0 0 128 128" className="h-full w-full -rotate-90">
+        <circle cx="64" cy="64" r={radio} fill="none" stroke="#E5E7EB" strokeWidth={stroke} />
+        <circle
+          cx="64"
+          cy="64"
+          r={radio}
+          fill="none"
+          stroke="#10B981"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          style={{ transition: 'stroke-dashoffset 300ms ease-out' }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-bold text-[#1A1A1A] leading-none">{pctTexto}%</span>
+        <span className="text-[10px] uppercase tracking-wider text-[#6B7280] mt-0.5 font-semibold">
+          procesado
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function DistribucionSeveridadDual({ sev }: { sev: Record<DualSeveridad, number> }) {
+  const items: DualSeveridad[] = ['alto', 'sin_hallazgo', 'error'];
+  const visibles = items.filter(s => (sev[s] ?? 0) > 0);
+  if (visibles.length === 0) {
+    return (
+      <p className="text-[11px] text-center text-[#6B7280]">
+        Aún sin resultados — los primeros aparecen pronto.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      {visibles.map(s => (
+        <span
+          key={s}
+          className={`${SEVERIDAD_CLASS[s]} text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider`}
         >
-          <Upload className="h-4 w-4" />
-          {pending ? 'Procesando…' : 'Consultar archivo'}
-        </button>
+          {SEVERIDAD_LABEL[s]} · {sev[s]}
+        </span>
+      ))}
+    </div>
+  );
+}
 
-        {error && <ErrorBox msg={error} />}
-        {info && (
-          <div className="p-3 rounded-lg bg-[#10B981]/10 border border-[#10B981]/30 text-[#065F46] text-sm flex items-center gap-2">
-            <Check className="h-4 w-4" /> {info}
-          </div>
-        )}
-      </form>
+function ResumenCargueCompletado({
+  estado,
+  onReiniciar,
+}: {
+  estado: Extract<EstadoCargue, { fase: 'completado' }>;
+  onReiniciar: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 p-5">
+        <div className="flex items-center gap-2 text-[#059669] font-semibold">
+          <Check className="h-5 w-5" />
+          Cargue completado
+        </div>
+        <p className="text-sm text-[#1A1A1A] mt-1">
+          {estado.total} consultas procesadas{estado.tituloLote ? ` · ${estado.tituloLote}` : ''}.
+          Las puedes revisar en el tab Historial.
+        </p>
+        <div className="mt-3">
+          <DistribucionSeveridadDual sev={estado.severidades} />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onReiniciar}
+        className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+      >
+        Nuevo cargue
+      </button>
     </div>
   );
 }

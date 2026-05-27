@@ -2,6 +2,8 @@
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
+import * as XLSX from 'xlsx';
+import { randomUUID } from 'crypto';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
@@ -532,4 +534,122 @@ export async function listarHistorialDual(
   if (error) return { ok: false, error: error.message };
 
   return { ok: true, data: (data ?? []) as DualHistorialItem[] };
+}
+
+// ─── Carga masiva fila por fila: preparacion local del XLSX ───────────────
+
+export type DualFilaPreparada = {
+  posicion: number;
+  input: DualConsultaInput;
+  error: string | null;
+};
+
+export type DualLotePreparado = {
+  lote_id: string;
+  total: number;
+  filas: DualFilaPreparada[];
+};
+
+const LOTE_LIMITE = 500;
+
+function normalizarTipo(v: unknown): DualTipo | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim().toLowerCase();
+  if (t === 'natural' || t === 'persona natural') return 'natural';
+  if (t === 'juridica' || t === 'jurídica' || t === 'persona juridica' || t === 'persona jurídica')
+    return 'juridica';
+  return null;
+}
+
+function asStr(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  return String(v).trim();
+}
+
+/**
+ * Lee el XLSX subido por el usuario y devuelve filas validadas listas para
+ * consultar fila por fila. NO golpea metrik-valida — solo parsea.
+ *
+ * Formato esperado de la plantilla (1ra hoja):
+ *   columna A: tipo            (natural | juridica)
+ *   columna B: identificacion  (opcional)
+ *   columna C: nombre          (opcional)
+ * Al menos uno de los dos (identificacion o nombre) es obligatorio.
+ */
+export async function prepararLoteDual(
+  formData: FormData,
+): Promise<Result<DualLotePreparado>> {
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+
+  const file = formData.get('archivo');
+  if (!(file instanceof File)) return { ok: false, error: 'archivo_requerido' };
+  if (file.size > 5 * 1024 * 1024) return { ok: false, error: 'archivo_muy_grande' };
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(buffer, { type: 'buffer' });
+  } catch {
+    return { ok: false, error: 'xlsx_invalido' };
+  }
+
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return { ok: false, error: 'xlsx_sin_hojas' };
+
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: null,
+    raw: false,
+  });
+
+  if (rows.length === 0) return { ok: false, error: 'xlsx_vacio' };
+  if (rows.length > LOTE_LIMITE) {
+    return { ok: false, error: `xlsx_excede_limite_${LOTE_LIMITE}` };
+  }
+
+  const filas: DualFilaPreparada[] = rows.map((row, i) => {
+    const posicion = i + 2; // fila 1 = header
+
+    // Acepta keys 'tipo'/'Tipo'/'TIPO' (sheet_to_json usa el header tal cual)
+    const tipoRaw = row.tipo ?? row.Tipo ?? row.TIPO;
+    const identificacion = asStr(row.identificacion ?? row.Identificacion ?? row.IDENTIFICACION);
+    const nombre = asStr(row.nombre ?? row.Nombre ?? row.NOMBRE);
+
+    const tipo = normalizarTipo(tipoRaw);
+    if (!tipo) {
+      return {
+        posicion,
+        input: { tipo: 'natural' },
+        error: 'tipo_invalido (esperado: natural | juridica)',
+      };
+    }
+    if (!identificacion && !nombre) {
+      return {
+        posicion,
+        input: { tipo },
+        error: 'fila_sin_identificacion_ni_nombre',
+      };
+    }
+
+    return {
+      posicion,
+      input: {
+        tipo,
+        ...(identificacion ? { identificacion } : {}),
+        ...(nombre ? { nombre } : {}),
+      },
+      error: null,
+    };
+  });
+
+  return {
+    ok: true,
+    data: {
+      lote_id: randomUUID(),
+      total: filas.length,
+      filas,
+    },
+  };
 }
