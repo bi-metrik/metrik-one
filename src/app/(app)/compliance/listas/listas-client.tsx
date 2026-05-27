@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { Fragment, useEffect, useState, useTransition } from 'react';
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
+  ChevronRight,
   Download,
   FileSpreadsheet,
+  History,
   ListChecks,
   Search,
   Upload,
@@ -18,7 +21,10 @@ import {
   consultaDualPersistente,
   consultaDualBatch,
   descargarPlantillaBatch,
+  listarHistorialDual,
   type DualConsultaPersistida,
+  type DualHistorialFiltros,
+  type DualHistorialItem,
   type DualSeveridad,
   type DualTipo,
   type InformaMatch,
@@ -36,7 +42,7 @@ const SEVERIDAD_LABEL: Record<DualSeveridad, string> = {
   error: 'Error',
 };
 
-type TabKey = 'puntual' | 'masiva';
+type TabKey = 'puntual' | 'masiva' | 'historial';
 
 function base64ToBlob(b64: string, mime: string): Blob {
   const bytes = atob(b64);
@@ -98,10 +104,19 @@ export default function ListasClient({ tutorialNuncaVisto = false }: ListasClien
         >
           Carga masiva (XLSX)
         </TabButton>
+        <TabButton
+          active={tab === 'historial'}
+          onClick={() => setTab('historial')}
+          icon={<History className="h-4 w-4" />}
+          dataTutorialTarget="tab-historial"
+        >
+          Historial
+        </TabButton>
       </div>
 
       {tab === 'puntual' && <ConsultaPuntualForm />}
       {tab === 'masiva' && <ConsultaMasivaForm />}
+      {tab === 'historial' && <HistorialPanel />}
 
       {(tutorialNuncaVisto || tourTrigger > 0) && (
         <TutorialTour slug="compliance_listas_dual" forceStart={tourTrigger} />
@@ -490,6 +505,259 @@ function ErrorBox({ msg }: { msg: string }) {
   return (
     <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-center gap-2">
       <AlertTriangle className="h-4 w-4" /> {msg}
+    </div>
+  );
+}
+
+// ─── Tab: Historial ────────────────────────────────────────────────────────
+
+function HistorialPanel() {
+  const [consultas, setConsultas] = useState<DualHistorialItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pending, startTransition] = useTransition();
+  const [severidad, setSeveridad] = useState<DualSeveridad | ''>('');
+  const [tipo, setTipo] = useState<'puntual' | 'masiva_item' | ''>('');
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
+
+  async function cargar(filtros: DualHistorialFiltros = {}) {
+    const r = await listarHistorialDual(filtros);
+    if (r.ok) {
+      setConsultas(r.data);
+      setError(null);
+    } else {
+      setError(r.error);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    startTransition(() => {
+      cargar();
+    });
+  }, []);
+
+  function aplicarFiltros() {
+    startTransition(async () => {
+      await cargar({
+        severidad: severidad || undefined,
+        tipo: tipo || undefined,
+        fecha_desde: fechaDesde || undefined,
+        fecha_hasta: fechaHasta || undefined,
+      });
+    });
+  }
+
+  function limpiarFiltros() {
+    setSeveridad('');
+    setTipo('');
+    setFechaDesde('');
+    setFechaHasta('');
+    startTransition(() => cargar({}));
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
+        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Filtros</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              Severidad
+            </label>
+            <select
+              value={severidad}
+              onChange={e => setSeveridad(e.target.value as DualSeveridad | '')}
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+            >
+              <option value="">Todas</option>
+              <option value="alto">Alto</option>
+              <option value="sin_hallazgo">Sin hallazgo</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              Tipo
+            </label>
+            <select
+              value={tipo}
+              onChange={e => setTipo(e.target.value as 'puntual' | 'masiva_item' | '')}
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+            >
+              <option value="">Todos</option>
+              <option value="puntual">Puntual</option>
+              <option value="masiva_item">Cargue</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              Desde
+            </label>
+            <input
+              type="date"
+              value={fechaDesde}
+              onChange={e => setFechaDesde(e.target.value)}
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              Hasta
+            </label>
+            <input
+              type="date"
+              value={fechaHasta}
+              onChange={e => setFechaHasta(e.target.value)}
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={aplicarFiltros}
+            disabled={pending}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] transition-colors"
+          >
+            <Search className="h-4 w-4" />
+            {pending ? 'Aplicando…' : 'Aplicar'}
+          </button>
+          <button
+            type="button"
+            onClick={limpiarFiltros}
+            disabled={pending}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+          >
+            Limpiar
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
+          Cargando historial…
+        </div>
+      ) : error ? (
+        <ErrorBox msg={`Error cargando historial: ${error}`} />
+      ) : consultas.length === 0 ? (
+        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
+          Sin consultas con los filtros aplicados.
+        </div>
+      ) : (
+        <HistorialTablaDual consultas={consultas} />
+      )}
+    </div>
+  );
+}
+
+function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  function toggle(id: string) {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
+              <th className="w-8" />
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Fecha
+              </th>
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Nombre
+              </th>
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Documento
+              </th>
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Tipo
+              </th>
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Coincidencias
+              </th>
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Severidad
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {consultas.map(c => {
+              const isOpen = expanded.has(c.id);
+              const canExpand = c.total_matches > 0 || c.error_mensaje;
+              return (
+                <Fragment key={c.id}>
+                  <tr
+                    className={`border-b border-[#E5E7EB] last:border-0 ${canExpand ? 'hover:bg-[#F5F4F2]/60 cursor-pointer' : ''}`}
+                    onClick={() => canExpand && toggle(c.id)}
+                  >
+                    <td className="px-2 py-2.5 text-[#6B7280] text-center">
+                      {canExpand ? (
+                        isOpen ? (
+                          <ChevronDown className="h-4 w-4 inline" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 inline" />
+                        )
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap text-xs">
+                      {new Date(c.created_at).toLocaleDateString('es-CO', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </td>
+                    <td className="px-4 py-2.5 font-medium text-[#1A1A1A]">
+                      {c.nombre_consultado ?? '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-[#6B7280] font-mono text-xs">
+                      {c.documento_tipo && c.documento_numero
+                        ? `${c.documento_tipo} ${c.documento_numero}`
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-[#6B7280]">
+                      {c.tipo === 'puntual' ? 'Puntual' : 'Cargue'}
+                    </td>
+                    <td className="px-4 py-2.5 text-center font-semibold">{c.total_matches}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span
+                        className={`${SEVERIDAD_CLASS[c.severidad]} text-[10px] font-bold px-2 py-0.5 rounded uppercase`}
+                      >
+                        {SEVERIDAD_LABEL[c.severidad]}
+                      </span>
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="border-b border-[#E5E7EB] bg-[#F5F4F2]/40">
+                      <td />
+                      <td colSpan={6} className="px-4 py-4">
+                        {c.error_mensaje && (
+                          <div className="mb-3 text-xs text-[#B91C1C]">
+                            Error: {c.error_mensaje}
+                          </div>
+                        )}
+                        {c.matches.length > 0 && <ListaCoincidencias matches={c.matches} />}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
