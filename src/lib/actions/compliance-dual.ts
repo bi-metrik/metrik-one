@@ -1,6 +1,6 @@
 'use server';
 
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
@@ -382,4 +382,154 @@ export async function obtenerMetricsDuales(): Promise<Result<DualMetrics>> {
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
   }
+}
+
+// ─── Historial local: persistencia + listado + filtros ────────────────────
+
+export type DualSeveridad = 'alto' | 'sin_hallazgo' | 'error';
+
+export type DualHistorialItem = {
+  id: string;
+  dual_id: string | null;
+  tipo: 'puntual' | 'masiva_item';
+  tipo_persona: DualTipo;
+  nombre_consultado: string | null;
+  documento_tipo: string | null;
+  documento_numero: string | null;
+  severidad: DualSeveridad;
+  total_matches: number;
+  matches: InformaMatch[];
+  titulo_lote: string | null;
+  lote_id: string | null;
+  error_mensaje: string | null;
+  created_at: string;
+};
+
+export type DualHistorialFiltros = {
+  severidad?: DualSeveridad;
+  tipo?: 'puntual' | 'masiva_item';
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  lote_id?: string;
+  limite?: number;
+};
+
+export type DualConsultaPersistida = DualConsultaPublica & {
+  consulta_local_id: string;
+  severidad: DualSeveridad;
+};
+
+/**
+ * Consulta puntual que persiste el resultado en consultas_listas_dual.
+ * Reemplazo recomendado para consultaDual() cuando se quiere historial local.
+ */
+export async function consultaDualPersistente(
+  input: DualConsultaInput,
+  meta: { lote_id?: string | null; titulo_lote?: string | null; tipo?: 'puntual' | 'masiva_item' } = {},
+): Promise<Result<DualConsultaPersistida>> {
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id ?? null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+
+  const tipoRow = meta.tipo ?? 'puntual';
+  const idTrim = input.identificacion?.trim() ?? null;
+  const nombreTrim = input.nombre?.trim() ?? null;
+  const tipoPersona: DualTipo = input.tipo ?? 'natural';
+
+  const r = await consultaDual(input);
+
+  // Caso error: persistimos un registro con severidad='error' (solo si es masiva_item para no ensuciar el historial con errores ad-hoc del usuario en puntual)
+  if (!r.ok) {
+    if (tipoRow === 'masiva_item') {
+      await svc.from('consultas_listas_dual').insert({
+        workspace_id: workspaceId,
+        lote_id: meta.lote_id ?? null,
+        tipo: tipoRow,
+        tipo_persona: tipoPersona,
+        nombre_consultado: nombreTrim,
+        documento_tipo: idTrim ? (tipoPersona === 'juridica' ? 'NIT' : 'CC') : null,
+        documento_numero: idTrim,
+        dual_id: null,
+        severidad: 'error',
+        total_matches: 0,
+        matches: [],
+        titulo_lote: meta.titulo_lote ?? null,
+        error_mensaje: r.error,
+        created_by: userId,
+      });
+    }
+    return { ok: false, error: r.error };
+  }
+
+  const severidad: DualSeveridad = r.data.total_matches > 0 ? 'alto' : 'sin_hallazgo';
+
+  const { data: row, error: errIns } = await svc
+    .from('consultas_listas_dual')
+    .insert({
+      workspace_id: workspaceId,
+      lote_id: meta.lote_id ?? null,
+      tipo: tipoRow,
+      tipo_persona: tipoPersona,
+      nombre_consultado: nombreTrim,
+      documento_tipo: idTrim ? (tipoPersona === 'juridica' ? 'NIT' : 'CC') : null,
+      documento_numero: idTrim,
+      dual_id: r.data.dual_id,
+      severidad,
+      total_matches: r.data.total_matches,
+      matches: r.data.matches,
+      titulo_lote: meta.titulo_lote ?? null,
+      created_by: userId,
+    })
+    .select('id')
+    .single();
+
+  if (errIns || !row) {
+    return { ok: false, error: errIns?.message ?? 'persistencia_fallo' };
+  }
+
+  return {
+    ok: true,
+    data: {
+      ...r.data,
+      consulta_local_id: row.id,
+      severidad,
+    },
+  };
+}
+
+export async function listarHistorialDual(
+  filtros: DualHistorialFiltros = {},
+): Promise<Result<DualHistorialItem[]>> {
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q: any = svc
+    .from('consultas_listas_dual')
+    .select(
+      'id, dual_id, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, titulo_lote, lote_id, error_mensaje, created_at',
+    )
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: false })
+    .limit(filtros.limite ?? 200);
+
+  if (filtros.severidad) q = q.eq('severidad', filtros.severidad);
+  if (filtros.tipo) q = q.eq('tipo', filtros.tipo);
+  if (filtros.lote_id) q = q.eq('lote_id', filtros.lote_id);
+  if (filtros.fecha_desde) q = q.gte('created_at', filtros.fecha_desde);
+  if (filtros.fecha_hasta) q = q.lte('created_at', `${filtros.fecha_hasta}T23:59:59.999Z`);
+
+  const { data, error } = await q;
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true, data: (data ?? []) as DualHistorialItem[] };
 }

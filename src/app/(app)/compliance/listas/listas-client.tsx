@@ -15,13 +15,26 @@ import {
 import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import {
-  consultaDual,
+  consultaDualPersistente,
   consultaDualBatch,
   descargarPlantillaBatch,
-  type DualConsultaPublica,
+  type DualConsultaPersistida,
+  type DualSeveridad,
   type DualTipo,
   type InformaMatch,
 } from '@/lib/actions/compliance-dual';
+
+const SEVERIDAD_CLASS: Record<DualSeveridad, string> = {
+  alto: 'bg-[#EF4444] text-white',
+  sin_hallazgo: 'bg-[#10B981] text-white',
+  error: 'bg-[#1A1A1A] text-white',
+};
+
+const SEVERIDAD_LABEL: Record<DualSeveridad, string> = {
+  alto: 'Alto',
+  sin_hallazgo: 'Sin hallazgo',
+  error: 'Error',
+};
 
 type TabKey = 'puntual' | 'masiva';
 
@@ -133,7 +146,7 @@ function ConsultaPuntualForm() {
   const [tipo, setTipo] = useState<DualTipo>('natural');
   const [identificacion, setIdentificacion] = useState('');
   const [nombre, setNombre] = useState('');
-  const [resultado, setResultado] = useState<DualConsultaPublica | null>(null);
+  const [resultado, setResultado] = useState<DualConsultaPersistida | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -160,7 +173,7 @@ function ConsultaPuntualForm() {
     }
 
     startTransition(async () => {
-      const r = await consultaDual({
+      const r = await consultaDualPersistente({
         tipo,
         ...(idTrim ? { identificacion: idTrim } : {}),
         ...(nombreTrim ? { nombre: nombreTrim } : {}),
@@ -239,7 +252,7 @@ function ConsultaPuntualForm() {
 
       {resultado && (
         <div data-tutorial-target="resultado-zona">
-          <ResultadoConsulta data={resultado} />
+          <ResultadoConsulta data={resultado} nombreConsultado={nombreTrim || idTrim} />
         </div>
       )}
     </div>
@@ -401,87 +414,75 @@ function SelectorTipoPersona({
   );
 }
 
-function ResultadoConsulta({ data }: { data: DualConsultaPublica }) {
-  if (data.total_matches === 0) return <SinCoincidencias />;
-  return <ConCoincidencias matches={data.matches} total={data.total_matches} />;
-}
-
-function SinCoincidencias() {
+function ResultadoConsulta({
+  data,
+  nombreConsultado,
+}: {
+  data: DualConsultaPersistida;
+  nombreConsultado: string;
+}) {
   return (
-    <div className="bg-white rounded-lg border border-[#E5E7EB] p-6">
-      <div className="flex items-center gap-3">
-        <div className="h-10 w-10 rounded-full bg-[#10B981]/10 flex items-center justify-center">
-          <Check className="h-5 w-5 text-[#10B981]" />
+    <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
+      <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Resultado</p>
+          <h3 className="text-lg font-bold text-[#1A1A1A] mt-1 truncate">
+            {nombreConsultado || '—'}
+          </h3>
+          <p className="text-xs text-[#6B7280] font-mono">ID: {data.consulta_local_id}</p>
         </div>
-        <div>
-          <p className="text-base font-bold text-[#1A1A1A]">Sin coincidencias en listas</p>
-          <p className="text-sm text-[#6B7280] mt-0.5">
-            La consulta no arrojó resultados en las listas restrictivas evaluadas.
+        <span
+          className={`${SEVERIDAD_CLASS[data.severidad]} text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider`}
+        >
+          {SEVERIDAD_LABEL[data.severidad]}
+        </span>
+      </div>
+
+      <div className="p-5 space-y-3">
+        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+          Coincidencias ({data.total_matches})
+        </p>
+        {data.matches.length === 0 ? (
+          <p className="text-sm text-[#10B981] font-medium flex items-center gap-1.5">
+            <Check className="h-4 w-4" />
+            La consulta no arrojó coincidencias en las listas restrictivas evaluadas.
           </p>
-        </div>
+        ) : (
+          <ListaCoincidencias matches={data.matches} />
+        )}
       </div>
     </div>
   );
 }
 
-function ConCoincidencias({
-  matches,
-  total,
-}: {
-  matches: InformaMatch[];
-  total: number;
-}) {
+function ListaCoincidencias({ matches }: { matches: InformaMatch[] }) {
   return (
-    <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
-      <div className="p-5 border-b border-[#E5E7EB] bg-[#FEF3C7]/50">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="h-5 w-5 text-[#B45309]" />
-          <div>
-            <p className="text-base font-bold text-[#1A1A1A]">
-              {total} {total === 1 ? 'coincidencia encontrada' : 'coincidencias encontradas'}
+    <ul className="divide-y divide-[#E5E7EB]">
+      {matches.slice(0, 20).map((m, i) => (
+        <li key={i} className="py-3 flex flex-col sm:flex-row sm:items-start sm:gap-4">
+          <div className="sm:w-32 shrink-0">
+            <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold">
+              Lista
             </p>
-            <p className="text-sm text-[#6B7280] mt-0.5">
-              Revisa cada coincidencia y aplica el procedimiento de debida diligencia.
-            </p>
+            <p className="text-sm font-semibold text-[#1A1A1A] mt-0.5 break-words">{m.lista}</p>
           </div>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
-                Lista
-              </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
-                Nombre encontrado
-              </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
-                Documento
-              </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
-                Fundamento
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {matches.map((m, i) => (
-              <tr key={i} className="border-b border-[#E5E7EB] last:border-0 align-top">
-                <td className="px-4 py-3 font-semibold text-[#1A1A1A]">{m.lista}</td>
-                <td className="px-4 py-3 text-[#1A1A1A]">{m.nombre}</td>
-                <td className="px-4 py-3 text-[#6B7280] font-mono text-xs">
-                  {m.documento ?? '—'}
-                </td>
-                <td className="px-4 py-3 text-[#6B7280] text-xs leading-relaxed">
-                  {m.fundamento ?? '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          <div className="flex-1 min-w-0 mt-2 sm:mt-0">
+            <p className="text-sm font-medium text-[#1A1A1A]">{m.nombre}</p>
+            {m.documento && (
+              <p className="text-xs text-[#6B7280] font-mono mt-0.5">{m.documento}</p>
+            )}
+            {m.fundamento && (
+              <p className="text-xs text-[#6B7280] mt-1.5 leading-relaxed">{m.fundamento}</p>
+            )}
+          </div>
+        </li>
+      ))}
+      {matches.length > 20 && (
+        <li className="py-3 text-xs text-[#6B7280] text-center italic">
+          Mostrando 20 de {matches.length} coincidencias.
+        </li>
+      )}
+    </ul>
   );
 }
 
