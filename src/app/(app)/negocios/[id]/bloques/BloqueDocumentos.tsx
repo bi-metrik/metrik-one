@@ -330,12 +330,14 @@ export default function BloqueDocumentos({
         ))}
       </div>
 
-      {/* Campos extraídos por AI */}
-      <CamposForm
-        negocioBloqueId={negocioBloqueId}
-        campos={campos}
-        onChange={setCampos}
-      />
+      {/* Campos extraídos por AI — solo si al menos un slot dispara AI */}
+      {documentos.some(d => SLUGS_CON_AI.includes(d.slug)) && (
+        <CamposForm
+          negocioBloqueId={negocioBloqueId}
+          campos={campos}
+          onChange={setCampos}
+        />
+      )}
     </div>
   )
 }
