@@ -102,12 +102,12 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
       .gte('fecha', range.start)
       .lt('fecha', range.end),
 
-    // Gastos fijos config
+    // Gastos fijos (fixed_expenses = fuente única, misma tabla que Mi Negocio y /numeros)
     supabase
-      .from('gastos_fijos_config')
-      .select('monto_referencia')
+      .from('fixed_expenses')
+      .select('monthly_amount')
       .eq('workspace_id', workspaceId)
-      .eq('activo', true),
+      .eq('is_active', true),
 
     // Staff for nomina
     supabase
@@ -204,7 +204,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     : 0
 
   // Costos fijos
-  const componenteOperativo = gastosFijos.reduce((s, g) => s + Number(g.monto_referencia || 0), 0)
+  const componenteOperativo = gastosFijos.reduce((s, g) => s + Number(g.monthly_amount || 0), 0)
   const componenteNomina = staff.reduce((s, s2) => s + Number(s2.salary || 0), 0)
   const costosFijos = componenteNomina + componenteOperativo
 
