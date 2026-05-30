@@ -1,33 +1,17 @@
 // ============================================================
-// WhatsApp Bot — Shared Types (Spec 98F)
+// WhatsApp Bot — Shared Types (MVP — 8 intents)
 // ============================================================
 
 // --- Gemini Parse Result ---
 
 export type Intent =
-  | 'GASTO_DIRECTO'
-  | 'GASTO_OPERATIVO'
-  | 'EDITAR_GASTO'
-  | 'HORAS'
-  | 'TIMER_INICIAR'
-  | 'TIMER_PARAR'
-  | 'TIMER_ESTADO'
-  | 'COBRO'
+  | 'GASTO'
   | 'CONTACTO_NUEVO'
-  | 'SALDO_BANCARIO'
-  | 'NOTA_NEGOCIO'
-  | 'ESTADO_PROYECTO'
-  | 'ESTADO_NEGOCIOS'
+  | 'ACTIVIDAD'
   | 'MIS_NUMEROS'
   | 'CARTERA'
-  | 'INFO_CONTACTO'
-  | 'OPP_GANADA'
-  | 'OPP_PERDIDA'
-  | 'OPP_NUEVA'
-  | 'OPP_AVANZAR'
-  | 'ACTIVIDAD'
+  | 'ESTADO_NEGOCIOS'
   | 'AYUDA'
-  | 'FOLLOWUP'
   | 'UNCLEAR';
 
 export interface ParsedFields {
@@ -36,17 +20,12 @@ export interface ParsedFields {
   entity_hint?: string;
   project_code?: string | number;  // Code: "KAE-2", "P-012", or numeric 12
   category_hint?: string;
-  hours?: number;
-  date_hint?: string;
   name?: string;
   phone?: string;
   role?: string;
-  note?: string;
   mensaje_original?: string;  // Full user message text (injected by webhook)
-  stage_hint?: string;         // Target pipeline stage for OPP_AVANZAR
   activity_text?: string;      // Activity description for ACTIVIDAD
   suggested_actions?: string[]; // AI-suggested actions for smart UNCLEAR
-  saldo_teorico?: number;      // Theoretical balance (injected by handler)
   stage_filter?: 'venta' | 'ejecucion' | 'cobro' | 'cierre' | 'all'; // For ESTADO_NEGOCIOS queries
 }
 
@@ -77,6 +56,8 @@ export interface SessionContext {
   // Resolved data from lookups
   proyecto_id?: string;
   proyecto_nombre?: string;
+  negocio_id?: string;
+  destino_tipo?: 'negocio' | 'proyecto' | 'empresa';
   factura_id?: string;
   oportunidad_id?: string;
   contacto_id?: string;
@@ -86,14 +67,11 @@ export interface SessionContext {
   options?: Array<{ id: string; label: string; extra?: Record<string, unknown> }>;
   selected_option?: number;
   disambiguation?: 'proyecto' | 'empresa';
-  borrador_id?: string;
   gasto_id?: string;
   unclear_count?: number;
-  // Session memory (persists across interactions)
+  // Session memory
   last_project_id?: string;
   last_project_name?: string;
-  // OPP_AVANZAR
-  target_stage?: string;
   // ACTIVIDAD
   activity_text?: string;
   // Timeout tracking: ISO timestamp when awaiting_selection started
@@ -115,16 +93,15 @@ export interface LastContextItem {
 
 export type LastContextType =
   | 'negocios_list'      // result of ESTADO_NEGOCIOS
-  | 'contactos_list'     // result of INFO_CONTACTO multi-match
   | 'cartera_list';      // result of CARTERA
 
 export interface LastContext {
   type: LastContextType;
   items: LastContextItem[];
-  shown: number;           // how many items were displayed to user
-  total: number;           // total items in the query result
-  query_meta?: Record<string, unknown>; // stage_filter, etc.
-  created_at: string;      // ISO timestamp — used for TTL
+  shown: number;
+  total: number;
+  query_meta?: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface BotSession {
@@ -144,11 +121,11 @@ export type UserRole = 'owner' | 'admin' | 'operator' | 'supervisor' | 'contador
 
 export interface WaUser {
   workspace_id: string;
-  user_id?: string;        // auth.users.id (only for owners/staff)
+  user_id?: string;
   phone: string;
   name: string;
   role: UserRole;
-  collaborator_id?: string; // wa_collaborators.id
+  collaborator_id?: string;
   subscription_status: string;
 }
 
@@ -160,7 +137,7 @@ export interface IncomingMessage {
   type: 'text' | 'image' | 'audio' | 'interactive' | 'button';
   image_id?: string;
   audio_id?: string;
-  interactive_reply?: string; // button/list reply ID
+  interactive_reply?: string;
   timestamp: string;
 }
 
@@ -178,11 +155,11 @@ export interface HandlerContext {
   updateSession: (state: SessionState, context?: Partial<SessionContext>) => Promise<void>;
 }
 
-// Supabase client type (avoid importing full lib in type file)
+// Supabase client type
 // deno-lint-ignore no-explicit-any
 export type SupabaseClient = any;
 
-// --- Categories mapping (spec §4 — 9 categorías) ---
+// --- Categories mapping ---
 
 export const GASTO_CATEGORIAS = [
   'materiales',
@@ -208,78 +185,31 @@ export const CATEGORIA_LABELS: Record<string, string> = {
   otros: 'Otros gastos operativos',
 };
 
-// Categories 1-5 are ambiguous (could be project or company) — D104
-export const AMBIGUOUS_CATEGORIES = [
-  'materiales',
-  'transporte',
-  'alimentacion',
-  'software',
-  'servicios_profesionales',
-];
-
-// --- Role-based intent permissions (D99) ---
-// owner + admin: all intents (no restriction needed)
-// operator + supervisor: same as previous "collaborator" — can register + consult their projects
-// contador: only read/consult intents — cannot register gastos
-// read_only: only basic consult, no modifications
+// --- Role-based intent permissions (MVP) ---
 
 export const OPERATOR_ALLOWED_INTENTS: Intent[] = [
-  'GASTO_DIRECTO',
-  'EDITAR_GASTO',
-  'TIMER_INICIAR',
-  'TIMER_PARAR',
-  'TIMER_ESTADO',
-  'NOTA_NEGOCIO',
-  'ESTADO_PROYECTO',
+  'GASTO',
   'ACTIVIDAD',
   'AYUDA',
-  'FOLLOWUP',
 ];
 
 export const CONTADOR_ALLOWED_INTENTS: Intent[] = [
   'MIS_NUMEROS',
   'CARTERA',
-  'INFO_CONTACTO',
-  'ESTADO_PROYECTO',
   'ESTADO_NEGOCIOS',
   'AYUDA',
-  'FOLLOWUP',
 ];
 
 export const READ_ONLY_ALLOWED_INTENTS: Intent[] = [
   'MIS_NUMEROS',
   'CARTERA',
-  'ESTADO_PROYECTO',
   'AYUDA',
-  'FOLLOWUP',
 ];
 
-// Legacy alias kept for backward-compat with existing imports
+// Legacy alias kept for backward-compat
 export const COLLABORATOR_ALLOWED_INTENTS: Intent[] = OPERATOR_ALLOWED_INTENTS;
 
-// --- Pipeline stages ---
-
-export const PIPELINE_STAGES = [
-  'lead_nuevo',
-  'contacto_inicial',
-  'discovery_hecha',
-  'propuesta_enviada',
-  'negociacion',
-  'ganada',
-  'perdida',
-] as const;
-
-export const PIPELINE_STAGE_LABELS: Record<string, string> = {
-  lead_nuevo: 'Lead nuevo',
-  contacto_inicial: 'Contacto inicial',
-  discovery_hecha: 'Discovery',
-  propuesta_enviada: 'Propuesta enviada',
-  negociacion: 'Negociación',
-  ganada: 'Ganada',
-  perdida: 'Perdida',
-};
-
-// --- Streak milestones (D117) ---
+// --- Streak milestones (display only) ---
 
 export const STREAK_MILESTONES: Record<number, string> = {
   4: '🥉',

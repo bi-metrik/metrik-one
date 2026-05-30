@@ -10,10 +10,9 @@ import { sendTextMessage, sendButtons } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { handleRegistro } from '../_shared/handlers/registro/index.ts';
-import { handleAccion } from '../_shared/handlers/accion.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
-import { handleNovedad } from '../_shared/handlers/novedad.ts';
-import { handleFollowup } from '../_shared/handlers/followup.ts';
+import { handleActividad } from '../_shared/handlers/actividad.ts';
+import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/handlers/ayuda.ts';
 import type { HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -152,11 +151,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   };
   const allowedIntents = restrictedRoles[user.role];
   if (allowedIntents && !allowedIntents.includes(parsed.intent)) {
-    // Special message for operator/supervisor trying manual HORAS
-    if (parsed.intent === 'HORAS' && ['operator', 'supervisor'].includes(user.role)) {
-      await sendTextMessage(message.phone,
-        'Las horas se registran con el cronómetro. Escribe *iniciar en [negocio]* para arrancar y *parar* cuando termines.');
-    } else if (user.role === 'contador') {
+    if (user.role === 'contador') {
       await sendTextMessage(message.phone,
         'Tu rol es de consulta. Para registrar movimientos pídele apoyo a tu admin.');
     } else if (user.role === 'read_only') {
@@ -164,7 +159,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
         'Tu rol es de solo lectura. Avísale a tu admin si necesitas hacer cambios.');
     } else {
       await sendTextMessage(message.phone,
-        'Con tu rol solo puedes registrar gastos, usar el cronómetro y dejar notas de tus negocios.');
+        'Con tu rol solo puedes registrar gastos y actividades de tus negocios.');
     }
     return;
   }
@@ -208,51 +203,31 @@ async function routeToHandler(ctx: HandlerContext): Promise<void> {
 
   switch (intent) {
     // Registro
-    case 'GASTO_DIRECTO':
-    case 'GASTO_OPERATIVO':
-    case 'EDITAR_GASTO':
-    case 'HORAS':
-    case 'TIMER_INICIAR':
-    case 'TIMER_PARAR':
-    case 'TIMER_ESTADO':
-    case 'COBRO':
+    case 'GASTO':
     case 'CONTACTO_NUEVO':
-    case 'SALDO_BANCARIO':
       await handleRegistro(ctx);
       break;
 
-    // Acción
-    case 'OPP_GANADA':
-    case 'OPP_PERDIDA':
-    case 'OPP_NUEVA':
-    case 'OPP_AVANZAR':
+    // Actividad (log a activity_log de un negocio)
     case 'ACTIVIDAD':
-    case 'AYUDA':
-    case 'UNCLEAR':
-      await handleAccion(ctx);
+      await handleActividad(ctx);
       break;
 
     // Consulta
-    case 'ESTADO_PROYECTO':
     case 'ESTADO_NEGOCIOS':
     case 'MIS_NUMEROS':
     case 'CARTERA':
-    case 'INFO_CONTACTO':
       await handleConsulta(ctx);
       break;
 
-    // Novedad
-    case 'NOTA_NEGOCIO':
-      await handleNovedad(ctx);
+    // Utilitarios
+    case 'AYUDA':
+      await handleAyuda(ctx);
       break;
 
-    // Followup — anáforas y continuaciones
-    case 'FOLLOWUP':
-      await handleFollowup(ctx);
-      break;
-
+    case 'UNCLEAR':
     default:
-      await handleAccion({ ...ctx, parsed: { ...ctx.parsed, intent: 'UNCLEAR' } });
+      await handleUnclear({ ...ctx, parsed: { ...ctx.parsed, intent: 'UNCLEAR' } });
   }
 }
 
@@ -290,14 +265,14 @@ async function handleSessionResponse(
   const pendingAction = (session as any).context?.pending_action;
 
   // Route to the appropriate handler based on pending action
-  if (['W01', 'W02', 'W03', 'W03T', 'W04', 'W06', 'W32', 'W33'].includes(pendingAction)) {
+  if (['W01', 'W06'].includes(pendingAction)) {
     await handleRegistro(ctx);
-  } else if (['W22', 'W23', 'W24', 'W25', 'W26', 'W27'].includes(pendingAction)) {
-    await handleAccion(ctx);
+  } else if (pendingAction === 'WAC') {
+    await handleActividad(ctx);
+  } else if (pendingAction === 'WUC') {
+    await handleUnclearResume(ctx);
   } else if (['W14', 'W15', 'W16', 'W17', 'W19'].includes(pendingAction)) {
     await handleConsulta(ctx);
-  } else if (['W09', 'W11'].includes(pendingAction)) {
-    await handleNovedad(ctx);
   } else {
     // Unknown state — ask user to start over
     await sendTextMessage(message.phone, 'Perdí el hilo. Cuéntame de nuevo qué necesitas.');
