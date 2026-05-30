@@ -4,19 +4,16 @@
 
 import type { HandlerContext } from '../types.ts';
 import { STREAK_MILESTONES } from '../types.ts';
-import { formatCOP, formatCOPShort, formatPct, bold, formatAgo, daysSince, currentMonthName, currentYear, formatProject } from '../wa-format.ts';
-import { findContacts, findActiveDestinos, findDestinos, findNegocioByCode, findProjectByCode } from '../wa-lookup.ts';
+import { formatCOP, formatCOPShort, bold, formatAgo, daysSince, currentMonthName, currentYear } from '../wa-format.ts';
 import { completeSession, saveLastContext } from '../wa-session.ts';
 
 export async function handleConsulta(ctx: HandlerContext): Promise<void> {
   const { parsed } = ctx;
 
   switch (parsed.intent) {
-    case 'ESTADO_PROYECTO': await handleEstadoProyecto(ctx); break;
     case 'ESTADO_NEGOCIOS': await handleEstadoNegocios(ctx); break;
     case 'MIS_NUMEROS': await handleMisNumeros(ctx); break;
     case 'CARTERA': await handleCartera(ctx); break;
-    case 'INFO_CONTACTO': await handleInfoContacto(ctx); break;
   }
 
   await completeSession(ctx.supabase, ctx.session.id);
@@ -25,94 +22,6 @@ export async function handleConsulta(ctx: HandlerContext): Promise<void> {
 // ============================================================
 // W14 — Estado de Proyecto (§10)
 // ============================================================
-
-/** Render a single destino (negocio o proyecto) — shared by code-path and hint-path */
-async function renderDestino(ctx: HandlerContext, d: any): Promise<void> {
-  if (d._tipo === 'negocio') {
-    const precio = Number(d.precio_aprobado || d.precio_estimado || 0);
-    let msg = `📁 ${bold(formatProject(d))}`;
-    msg += `\n📊 Etapa: ${d.stage_actual || 'venta'}`;
-    if (precio > 0) msg += `\n💰 Precio: ${formatCOP(precio)}`;
-    await ctx.sendMessage(msg);
-    return;
-  }
-
-  // Project — full financial view
-  const p = d;
-  const horasPct = Number(p.horas_estimadas) > 0
-    ? (Number(p.horas_reales) / Number(p.horas_estimadas)) * 100
-    : 0;
-
-  let msg = `📁 ${bold(formatProject(p))}`;
-  msg += `\n⏱️ ${Number(p.horas_reales) || 0}/${Number(p.horas_estimadas) || 0}h (${formatPct(horasPct)})`;
-  msg += `\n💰 ${formatCOP(Number(p.costo_acumulado))}/${formatCOP(Number(p.presupuesto_total))} (${formatPct(Number(p.presupuesto_consumido_pct))})`;
-  const facturado = Number(p.facturado);
-  const cobrado = Number(p.cobrado);
-  if (facturado > 0 || cobrado > 0) {
-    msg += `\n📄 Fact: ${formatCOPShort(facturado)} · Cobr: ${formatCOPShort(cobrado)} · Cart: ${formatCOPShort(facturado - cobrado)}`;
-  }
-
-  // Warning if hours ahead of progress
-  const { data: proyecto } = await ctx.supabase.from('proyectos').select('avance_porcentaje').eq('id', p.id).single();
-  const avance = proyecto?.avance_porcentaje || 0;
-
-  if (horasPct > avance + 20 && avance > 0) {
-    msg += `\n⚠️ Horas (${formatPct(horasPct)}) > avance (${avance}%)`;
-  }
-
-  await ctx.sendMessage(msg);
-}
-
-async function handleEstadoProyecto(ctx: HandlerContext): Promise<void> {
-  const { parsed, user, supabase } = ctx;
-  const { entity_hint, project_code } = parsed.fields;
-
-  // 1. Fast path: resolve by exact code (negocio first, then project)
-  if (project_code) {
-    const negocio = await findNegocioByCode(supabase, user.workspace_id, String(project_code));
-    if (negocio) {
-      await renderDestino(ctx, { ...negocio, _tipo: 'negocio' });
-      return;
-    }
-    const project = await findProjectByCode(supabase, user.workspace_id, project_code);
-    if (project) {
-      await renderDestino(ctx, { ...project, _tipo: 'proyecto' });
-      return;
-    }
-    // Code not found — tell the user clearly instead of falling into the list
-    await ctx.sendMessage(`No encontré ningún negocio o proyecto con código *${project_code}*.`);
-    return;
-  }
-
-  if (!entity_hint) {
-    // List active negocios + projects
-    const destinos = await findActiveDestinos(supabase, user.workspace_id);
-
-    if (destinos.all.length === 0) {
-      await ctx.sendMessage('No tienes negocios ni proyectos activos.');
-      return;
-    }
-
-    const list = destinos.all.slice(0, 5).map((d: any, i: number) => {
-      const label = formatProject(d);
-      const avance = d.avance_porcentaje ? ` — ${formatPct(Number(d.avance_porcentaje))} avance` : '';
-      return `${i + 1}️⃣ ${label}${avance}`;
-    }).join('\n');
-
-    await ctx.sendMessage(`Tus negocios y proyectos activos:\n\n${list}\n\n¿Cuál quieres consultar? Responde con el número.`);
-    return;
-  }
-
-  // Search both negocios and projects
-  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
-
-  if (destinos.all.length === 0) {
-    await ctx.sendMessage(`No encontré negocio ni proyecto con "${entity_hint}".`);
-    return;
-  }
-
-  await renderDestino(ctx, destinos.all[0]);
-}
 
 // ============================================================
 // W15 — Estado de Negocios (filtrable por stage_actual)
@@ -376,62 +285,3 @@ async function handleCartera(ctx: HandlerContext): Promise<void> {
   await ctx.sendMessage(msg);
 }
 
-// ============================================================
-// W19 — Info de Contacto (§10)
-// ============================================================
-
-async function handleInfoContacto(ctx: HandlerContext): Promise<void> {
-  const { parsed, user, supabase } = ctx;
-  const { entity_hint } = parsed.fields;
-
-  if (!entity_hint) {
-    await ctx.sendMessage('¿De quién necesitas la información?');
-    return;
-  }
-
-  const contacts = await findContacts(supabase, user.workspace_id, entity_hint);
-
-  if (contacts.length === 0) {
-    await ctx.sendMessage(`❌ No encontré contacto con "${entity_hint}".`);
-    return;
-  }
-
-  const c = contacts[0];
-  let msg = `👤 ${bold(c.nombre)}\n`;
-  if (c.telefono) msg += `\n📱 ${c.telefono}`;
-  if (c.email) msg += `\n📧 ${c.email}`;
-  if (c.rol) msg += `\n💼 ${c.rol}`;
-
-  // Check for related projects
-  const { data: projects } = await supabase
-    .from('proyectos')
-    .select('nombre, estado')
-    .eq('contacto_id', c.id)
-    .eq('workspace_id', user.workspace_id)
-    .limit(3);
-
-  if (projects && projects.length > 0) {
-    msg += '\n\n📁 Proyectos:';
-    for (const p of projects) {
-      msg += ` ${p.nombre} (${p.estado === 'en_ejecucion' ? 'activo' : p.estado})`;
-    }
-  }
-
-  // Check for related opportunities
-  const { data: opps } = await supabase
-    .from('oportunidades')
-    .select('descripcion, etapa, valor_estimado')
-    .eq('contacto_id', c.id)
-    .eq('workspace_id', user.workspace_id)
-    .not('etapa', 'in', '(ganada,perdida)')
-    .limit(3);
-
-  if (opps && opps.length > 0) {
-    msg += '\n📋 Pipeline:';
-    for (const o of opps) {
-      msg += ` ${o.descripcion} (${formatCOPShort(Number(o.valor_estimado))}, ${PIPELINE_STAGE_LABELS[o.etapa] || o.etapa})`;
-    }
-  }
-
-  await ctx.sendMessage(msg);
-}
