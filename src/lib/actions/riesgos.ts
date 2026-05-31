@@ -508,11 +508,42 @@ export async function getRiesgosParaSelector() {
   return (data ?? []) as { id: string; codigo: string; categoria: string; descripcion: string }[]
 }
 
+// ── Proxima referencia de causa (auto-gen) ──────────────────
+
+export async function getProximaReferenciaCausa(riesgoId: string): Promise<string | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !riesgoId) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: riesgo } = await (supabase as any)
+    .from('riesgos')
+    .select('categoria')
+    .eq('id', riesgoId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  if (!riesgo?.categoria) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: causas } = await (supabase as any)
+    .from('riesgo_causas')
+    .select('referencia')
+    .eq('riesgo_id', riesgoId)
+
+  const pattern = new RegExp(`^${riesgo.categoria}-C(\\d+)$`, 'i')
+  const max = (causas ?? []).reduce((acc: number, c: { referencia: string | null }) => {
+    const m = c.referencia?.match(pattern)
+    const n = m ? parseInt(m[1], 10) : 0
+    return n > acc ? n : acc
+  }, 0)
+
+  return `${riesgo.categoria}-C${String(max + 1).padStart(2, '0')}`
+}
+
 // ── Create causa ────────────────────────────────────────────
 
 export async function crearCausa(data: {
   riesgo_id: string
-  referencia?: string | null
   descripcion: string
   contexto?: string | null
   factor_riesgo?: string | null
@@ -535,12 +566,14 @@ export async function crearCausa(data: {
 
   const clamp = (v: number) => Math.max(1, Math.min(5, Math.round(v)))
 
+  const referenciaAuto = await getProximaReferenciaCausa(data.riesgo_id)
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: created, error: dbError } = await (supabase as any)
     .from('riesgo_causas')
     .insert({
       riesgo_id: data.riesgo_id,
-      referencia: data.referencia?.trim() || null,
+      referencia: referenciaAuto,
       descripcion: data.descripcion.trim(),
       contexto: data.contexto?.trim() || null,
       factor_riesgo: data.factor_riesgo || null,

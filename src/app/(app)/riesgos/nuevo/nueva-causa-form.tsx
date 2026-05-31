@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, ShieldAlert, Plus, Loader2 } from 'lucide-react'
-import { crearCausa } from '@/lib/actions/riesgos'
+import { crearCausa, getProximaReferenciaCausa } from '@/lib/actions/riesgos'
 
 const CATEGORIA_COLORS: Record<string, string> = {
   LA: 'bg-blue-100 text-blue-800',
@@ -63,6 +63,18 @@ export default function NuevaCausaForm({ riesgos }: Props) {
   const probResultante = Math.max(probOcurrencia, probFrecuencia)
   const selectedRiesgo = riesgos.find(r => r.id === riesgoId)
 
+  useEffect(() => {
+    let cancelled = false
+    if (!riesgoId) {
+      setReferencia('')
+      return
+    }
+    getProximaReferenciaCausa(riesgoId).then(ref => {
+      if (!cancelled) setReferencia(ref ?? '')
+    })
+    return () => { cancelled = true }
+  }, [riesgoId])
+
   async function handleSubmit() {
     if (!riesgoId) {
       setError('Selecciona un evento de riesgo')
@@ -78,7 +90,6 @@ export default function NuevaCausaForm({ riesgos }: Props) {
 
     const result = await crearCausa({
       riesgo_id: riesgoId,
-      referencia: referencia || null,
       descripcion,
       contexto: contexto || null,
       factor_riesgo: factorRiesgo || null,
@@ -191,13 +202,16 @@ export default function NuevaCausaForm({ riesgos }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Referencia</label>
+            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+              Referencia <span className="text-[9px] font-normal text-[#9CA3AF]">(automatica)</span>
+            </label>
             <input
               value={referencia}
-              onChange={e => setReferencia(e.target.value)}
               type="text"
-              placeholder="Ej: LA-C04"
-              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+              readOnly
+              tabIndex={-1}
+              placeholder={riesgoId ? '...' : 'Selecciona un evento de riesgo'}
+              className="w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-sm font-mono text-[#1A1A1A] cursor-not-allowed"
             />
           </div>
           <div>
