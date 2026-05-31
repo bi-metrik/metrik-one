@@ -540,6 +540,28 @@ export async function getProximaReferenciaCausa(riesgoId: string): Promise<strin
   return `${riesgo.categoria}-C${String(max + 1).padStart(2, '0')}`
 }
 
+// ── Proxima referencia de control (auto-gen) ────────────────
+
+export async function getProximaReferenciaControl(): Promise<string | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: controles } = await (supabase as any)
+    .from('riesgos_controles')
+    .select('referencia')
+    .eq('workspace_id', workspaceId)
+
+  const pattern = /^CTL-(\d+)$/i
+  const max = (controles ?? []).reduce((acc: number, c: { referencia: string | null }) => {
+    const m = c.referencia?.match(pattern)
+    const n = m ? parseInt(m[1], 10) : 0
+    return n > acc ? n : acc
+  }, 0)
+
+  return `CTL-${String(max + 1).padStart(3, '0')}`
+}
+
 // ── Create causa ────────────────────────────────────────────
 
 export async function crearCausa(data: {
@@ -660,7 +682,7 @@ export async function crearControlCausa(formData: FormData) {
   const actividad_control = (formData.get('actividad_control') as string)?.trim() || null
   const clasificacion = (formData.get('clasificacion') as string) || 'manual'
   const periodicidad = (formData.get('periodicidad') as string) || null
-  const referencia = (formData.get('referencia') as string)?.trim() || null
+  const referencia = await getProximaReferenciaControl()
 
   if (!causa_id || !riesgo_id || !nombre_control || !tipo_control) {
     return { success: false, error: 'Campos requeridos: nombre del control y tipo' }
@@ -894,7 +916,6 @@ export async function getCausasParaControlSelector() {
 // ── Create control (independent entity) + assign causas ─────
 
 export async function crearControl(data: {
-  referencia?: string | null
   nombre_control: string
   tipo_control: string
   actividad_control?: string | null
@@ -932,6 +953,8 @@ export async function crearControl(data: {
   const efSum = Object.values(efValues).reduce((a, b) => a + b, 0)
   const ponderacion = efSum / 21
 
+  const referenciaAuto = await getProximaReferenciaControl()
+
   // Insert control
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: created, error: dbError } = await (supabase as any)
@@ -944,7 +967,7 @@ export async function crearControl(data: {
       clasificacion: data.clasificacion || 'manual',
       periodicidad: data.periodicidad || null,
       responsable_id: data.responsable_id || null,
-      referencia: data.referencia?.trim() || null,
+      referencia: referenciaAuto,
       ...efValues,
       ponderacion_factores: ponderacion,
       ponderacion_efectividad: ponderacion,

@@ -99,13 +99,13 @@ export const ROLE_PERMISSIONS = {
     canViewRevision: false,
     canExportRevision: false,
     canToggleDeducible: false,
-    // Compliance — supervisor = oficial de cumplimiento operativo
+    // Compliance — supervisor: solo lectura (edicion solo owner/admin desde 2026-05-31)
     canViewRiesgos: true,
-    canEditRiesgos: true,          // Arma la matriz en el dia a dia
-    canDeleteRiesgos: false,       // No elimina — solo cambia estado (trazabilidad)
-    canImportRiesgos: true,        // Puede subir Excel del oficial
+    canEditRiesgos: false,
+    canDeleteRiesgos: false,
+    canImportRiesgos: false,
     canExportRiesgos: true,
-    canConfigReglasValidacion: false, // Reglas vinculantes solo owner/admin
+    canConfigReglasValidacion: false,
     canViewFlujo: true,
     canConfigSlaEtapas: false,
     canViewSlaLog: true,
@@ -215,19 +215,22 @@ export const ROLE_PERMISSIONS = {
 //
 // | Accion                        | owner | admin | supervisor | operator | contador | read_only |
 // |-------------------------------|:-----:|:-----:|:----------:|:--------:|:--------:|:---------:|
-// | Ver riesgos / matriz          |   ✓   |   ✓   |     ✓      |    —     |    —     |     ✓     |
-// | Crear / editar riesgo         |   ✓   |   ✓   |     ✓      |    —     |    —     |     —     |
-// | Eliminar riesgo               |   ✓   |   ✓   |     —      |    —     |    —     |     —     |
-// | Importar Excel                |   ✓   |   ✓   |     ✓      |    —     |    —     |     —     |
+// | Ver riesgos / matriz          |   ✓   |   ✓   |     ✓      |    *     |    *     |     ✓     |
+// | Crear / editar riesgo/causa/  |   ✓   |   ✓   |     —      |    —     |    —     |     —     |
+// | control                       |       |       |            |          |          |           |
+// | Eliminar                      |   ✓   |   ✓   |     —      |    —     |    —     |     —     |
+// | Importar Excel                |   ✓   |   ✓   |     —      |    —     |    —     |     —     |
 // | Exportar / descargar plantilla|   ✓   |   ✓   |     ✓      |    —     |    —     |     ✓     |
 // | Configurar reglas validacion  |   ✓   |   ✓   |     —      |    —     |    —     |     —     |
 //
-// Logica:
-// - owner/admin: control total (incluye eliminacion + reglas vinculantes)
-// - supervisor:  oficial de cumplimiento operativo — arma matriz, importa, NO elimina ni cambia reglas
-// - operator:    rol operativo de negocios — no ve compliance
-// - contador:    rol financiero — no ve compliance
-// - read_only:   auditor interno/externo — ve todo, exporta, no modifica nada
+// (*) operator/contador: lectura SOLO de controles donde son responsable (Fase C, filtro server-side)
+//
+// Logica (vigente 2026-05-31):
+// - owner/admin: control total (edicion exclusiva)
+// - supervisor:  solo lectura — antes editaba, ahora delegado a owner/admin
+// - operator:    rol operativo — ve solo controles asignados (filtro por responsable_id)
+// - contador:    rol financiero — ve solo controles asignados (filtro por responsable_id)
+// - read_only:   auditor interno/externo — ve todo, exporta, no modifica
 //
 // Cambios: editar ROLE_PERMISSIONS arriba y los guards en src/lib/actions/riesgos.ts
 

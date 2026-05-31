@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ShieldCheck, Plus, Check, X, Loader2 } from 'lucide-react'
-import { crearControlCausa } from '@/lib/actions/riesgos'
+import { crearControlCausa, getProximaReferenciaControl } from '@/lib/actions/riesgos'
 
 const EF_FACTOR_LABELS: Record<string, string> = {
   ef_certeza: 'Certeza',
@@ -43,6 +43,16 @@ export default function CausaControles({ causaId, riesgoId, controles, canEdit }
     ef_depende_otros: 1,
     ef_sujeto_actualizaciones: 1,
   })
+  const [referenciaPreview, setReferenciaPreview] = useState('')
+
+  useEffect(() => {
+    if (!showForm) return
+    let cancelled = false
+    getProximaReferenciaControl().then(ref => {
+      if (!cancelled) setReferenciaPreview(ref ?? '')
+    })
+    return () => { cancelled = true }
+  }, [showForm])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -228,12 +238,16 @@ export default function CausaControles({ causaId, riesgoId, controles, canEdit }
           {/* Row 1: Referencia + Tipo */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Referencia</label>
+              <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+                Referencia <span className="text-[9px] font-normal text-[#9CA3AF]">(automatica)</span>
+              </label>
               <input
-                name="referencia"
+                value={referenciaPreview}
                 type="text"
-                placeholder="Ej: CTL-001"
-                className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+                readOnly
+                tabIndex={-1}
+                placeholder="..."
+                className="w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-sm font-mono text-[#1A1A1A] cursor-not-allowed"
               />
             </div>
             <div>

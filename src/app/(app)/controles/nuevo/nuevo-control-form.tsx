@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Loader2, Check, X } from 'lucide-react'
-import { crearControl } from '@/lib/actions/riesgos'
+import { crearControl, getProximaReferenciaControl } from '@/lib/actions/riesgos'
 
 const EF_FACTOR_LABELS: Record<string, string> = {
   ef_certeza: 'Certeza',
@@ -76,6 +76,14 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
     ef_sujeto_actualizaciones: 1,
   })
 
+  useEffect(() => {
+    let cancelled = false
+    getProximaReferenciaControl().then(ref => {
+      if (!cancelled) setReferencia(ref ?? '')
+    })
+    return () => { cancelled = true }
+  }, [])
+
   function toggleEf(field: string) {
     setEfValues(prev => ({
       ...prev,
@@ -116,7 +124,6 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
     setError(null)
 
     const result = await crearControl({
-      referencia: referencia || null,
       nombre_control: nombreControl,
       tipo_control: tipoControl,
       actividad_control: actividadControl || null,
@@ -189,13 +196,16 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
         {/* Row 1: Referencia + Tipo */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Referencia</label>
+            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+              Referencia <span className="text-[9px] font-normal text-[#9CA3AF]">(automatica)</span>
+            </label>
             <input
               value={referencia}
-              onChange={e => setReferencia(e.target.value)}
               type="text"
-              placeholder="Ej: CTL-001"
-              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm font-mono focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+              readOnly
+              tabIndex={-1}
+              placeholder="..."
+              className="w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-sm font-mono text-[#1A1A1A] cursor-not-allowed"
             />
           </div>
           <div>
