@@ -1,7 +1,26 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeft, ShieldCheck, Check, X, User } from 'lucide-react'
+import { ArrowLeft, ShieldCheck, Check, X, User, Calendar, ClipboardCheck, Eye, FileCheck2, CheckCircle2, Sparkles, History } from 'lucide-react'
+
+const PERIODICIDAD_LABEL: Record<string, string> = {
+  continuo: 'Continuo',
+  diaria: 'Diaria',
+  semanal: 'Semanal',
+  mensual: 'Mensual',
+  trimestral: 'Trimestral',
+  semestral: 'Semestral',
+  anual: 'Anual',
+  evento: 'Por evento',
+}
+
+const WORKFLOW_ETAPAS = [
+  { key: 'programada', label: 'Programada', icon: Calendar, descripcion: 'Ejecucion creada segun periodicidad' },
+  { key: 'revision', label: 'En revision', icon: Eye, descripcion: 'Responsable ejecuta la actividad' },
+  { key: 'evidencia', label: 'Evidencia', icon: ClipboardCheck, descripcion: 'Adjuntar soportes y resultados' },
+  { key: 'validacion', label: 'Validacion', icon: FileCheck2, descripcion: 'Supervisor verifica y aprueba' },
+  { key: 'cerrada', label: 'Cerrada', icon: CheckCircle2, descripcion: 'Resultado consolidado en bitacora' },
+]
 
 const TIPO_COLORS: Record<string, string> = {
   preventivo: 'bg-blue-100 text-blue-800',
@@ -227,6 +246,80 @@ export default function ControlDetailClient({ control, causas }: Props) {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Card 4: Workflow de ejecucion (placeholder Fase 2) */}
+      <div className="rounded-lg border border-dashed border-[#10B981]/40 bg-gradient-to-br from-emerald-50/30 to-white p-5 space-y-4">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-[#10B981]" />
+            <h2 className="text-sm font-semibold text-[#1A1A1A]">Workflow de ejecucion</h2>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#10B981]/10 px-2 py-0.5 text-[10px] font-bold text-[#10B981]">
+            Proximamente
+          </span>
+        </div>
+        <p className="text-xs text-[#6B7280]">
+          Cada control sigue un flujo preestablecido. Cuando este modulo se active, cada ejecucion programada recorrera estas etapas.
+        </p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {WORKFLOW_ETAPAS.map((etapa, i) => (
+            <div key={etapa.key} className="rounded-md border border-[#E5E7EB] bg-white p-3 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#10B981]/10 text-[10px] font-bold text-[#10B981]">
+                  {i + 1}
+                </span>
+                <etapa.icon className="h-3.5 w-3.5 text-[#6B7280]" />
+              </div>
+              <p className="text-[11px] font-semibold text-[#1A1A1A]">{etapa.label}</p>
+              <p className="text-[10px] leading-tight text-[#6B7280]">{etapa.descripcion}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Card 5: Proxima ejecucion programada (placeholder) */}
+      <div className="rounded-lg border border-dashed border-[#10B981]/40 bg-white p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-[#10B981]" />
+            <h2 className="text-sm font-semibold text-[#1A1A1A]">Proxima ejecucion programada</h2>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#10B981]/10 px-2 py-0.5 text-[10px] font-bold text-[#10B981]">
+            Proximamente
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-md bg-gray-50 px-4 py-3">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-[#6B7280]">Periodicidad</span>
+          <span className="inline-flex rounded-full bg-white border border-[#E5E7EB] px-2.5 py-0.5 text-xs font-semibold text-[#1A1A1A]">
+            {control.periodicidad ? (PERIODICIDAD_LABEL[control.periodicidad] ?? control.periodicidad) : 'Sin definir'}
+          </span>
+          <span className="text-[10px] text-[#6B7280]">
+            {control.periodicidad
+              ? 'Cuando el motor se active, generaremos automaticamente cada ejecucion en su fecha.'
+              : 'Configura una periodicidad para programar ejecuciones recurrentes.'}
+          </span>
+        </div>
+      </div>
+
+      {/* Card 6: Historial de ejecuciones (placeholder) */}
+      <div className="rounded-lg border border-dashed border-[#10B981]/40 bg-white p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-[#10B981]" />
+            <h2 className="text-sm font-semibold text-[#1A1A1A]">Historial de ejecuciones</h2>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#10B981]/10 px-2 py-0.5 text-[10px] font-bold text-[#10B981]">
+            Proximamente
+          </span>
+        </div>
+        <div className="rounded-md border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center space-y-1.5">
+          <Sparkles className="mx-auto h-5 w-5 text-[#10B981]/60" />
+          <p className="text-xs font-medium text-[#1A1A1A]">Cada ejecucion quedara registrada aqui</p>
+          <p className="text-[10px] text-[#6B7280]">
+            Veras fecha programada, responsable, etapa actual, evidencias adjuntas, hallazgos y resultado de cada corrida del control.
+          </p>
+        </div>
       </div>
     </div>
   )
