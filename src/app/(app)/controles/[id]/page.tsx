@@ -12,7 +12,7 @@ export default async function ControlDetailPage({ params }: Props) {
   const { id } = await params
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canViewRiesgos) redirect('/')
+  if (!perms.canViewRiesgos && !perms.canViewControlesAsignados) redirect('/')
 
   const result = await getControl(id)
   if (!result) notFound()

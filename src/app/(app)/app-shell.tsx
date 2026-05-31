@@ -102,7 +102,7 @@ type ComplianceItem = {
 
 const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
   { href: '/riesgos', label: 'Riesgos', icon: ShieldAlert, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
-  { href: '/controles', label: 'Controles', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  { href: '/controles', label: 'Controles', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'read_only', 'operator', 'contador'] },
   { href: '/matriz', label: 'Matriz', icon: Grid3X3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/compliance/segmentacion', label: 'Segmentación SARLAFT', icon: Sliders, roles: ['owner', 'admin', 'supervisor'] },
   // Validacion pura solo cuando NO esta el modo dual_informa (UX transparente)

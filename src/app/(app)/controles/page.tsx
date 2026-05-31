@@ -9,7 +9,7 @@ import { ShieldCheck, Plus } from 'lucide-react'
 export default async function ControlesPage() {
   const { role } = await getWorkspace()
   const perms = getRolePermissions(role ?? 'read_only')
-  if (!perms.canViewRiesgos) redirect('/')
+  if (!perms.canViewRiesgos && !perms.canViewControlesAsignados) redirect('/')
 
   const controles = await getControles()
 

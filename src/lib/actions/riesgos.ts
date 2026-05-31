@@ -738,16 +738,25 @@ export async function crearControlCausa(formData: FormData) {
 // ── Get all controls for workspace ──────────────────────────
 
 export async function getControles() {
-  const { supabase, workspaceId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId) return []
-  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return []
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canViewRiesgos && !perms.canViewControlesAsignados) return []
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: controles } = await (supabase as any)
+  let query = (supabase as any)
     .from('riesgos_controles')
     .select('*, responsable:profiles!responsable_id(full_name)')
     .eq('workspace_id', workspaceId)
     .order('referencia', { ascending: true })
+
+  // operator/contador: solo controles donde son responsable
+  if (!perms.canViewRiesgos && perms.canViewControlesAsignados) {
+    if (!userId) return []
+    query = query.eq('responsable_id', userId)
+  }
+
+  const { data: controles } = await query
 
   if (!controles || controles.length === 0) return []
 
@@ -813,9 +822,10 @@ export async function getControles() {
 // ── Get single control with assigned causas ─────────────────
 
 export async function getControl(controlId: string) {
-  const { supabase, role, error } = await getWorkspace()
+  const { supabase, userId, role, error } = await getWorkspace()
   if (error) return null
-  if (!getRolePermissions(role ?? 'read_only').canViewRiesgos) return null
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canViewRiesgos && !perms.canViewControlesAsignados) return null
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: control } = await (supabase as any)
@@ -825,6 +835,11 @@ export async function getControl(controlId: string) {
     .single()
 
   if (!control) return null
+
+  // operator/contador: solo si son responsable de este control
+  if (!perms.canViewRiesgos && perms.canViewControlesAsignados) {
+    if (!userId || control.responsable_id !== userId) return null
+  }
 
   // Fetch assigned causas via junction
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

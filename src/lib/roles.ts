@@ -34,6 +34,7 @@ export const ROLE_PERMISSIONS = {
     canToggleDeducible: true,    // Marcar/desmarcar deducible fiscal en gastos
     // ── Compliance (modulo SARLAFT) ─────────────────────────
     canViewRiesgos: true,             // Ver /riesgos y /matriz
+    canViewControlesAsignados: false, // N/A — ya ve todo via canViewRiesgos
     canEditRiesgos: true,             // Crear y editar riesgos
     canDeleteRiesgos: true,           // Eliminar riesgos permanentemente
     canImportRiesgos: true,           // Importar desde Excel (bulk insert)
@@ -68,6 +69,7 @@ export const ROLE_PERMISSIONS = {
     canToggleDeducible: true,
     // Compliance
     canViewRiesgos: true,
+    canViewControlesAsignados: false,
     canEditRiesgos: true,
     canDeleteRiesgos: true,
     canImportRiesgos: true,
@@ -101,6 +103,7 @@ export const ROLE_PERMISSIONS = {
     canToggleDeducible: false,
     // Compliance — supervisor: solo lectura (edicion solo owner/admin desde 2026-05-31)
     canViewRiesgos: true,
+    canViewControlesAsignados: false,
     canEditRiesgos: false,
     canDeleteRiesgos: false,
     canImportRiesgos: false,
@@ -132,8 +135,9 @@ export const ROLE_PERMISSIONS = {
     canViewRevision: true,
     canExportRevision: false,
     canToggleDeducible: false,
-    // Compliance — operator no ve matriz (rol operativo de negocios)
+    // Compliance — operator: solo controles donde es responsable (filtro server-side)
     canViewRiesgos: false,
+    canViewControlesAsignados: true,
     canEditRiesgos: false,
     canDeleteRiesgos: false,
     canImportRiesgos: false,
@@ -165,8 +169,9 @@ export const ROLE_PERMISSIONS = {
     canViewRevision: true,
     canExportRevision: true,
     canToggleDeducible: true,     // SI puede marcar/desmarcar deducible fiscal
-    // Compliance — contador no ve compliance (rol financiero)
+    // Compliance — contador: solo controles donde es responsable (filtro server-side)
     canViewRiesgos: false,
+    canViewControlesAsignados: true,
     canEditRiesgos: false,
     canDeleteRiesgos: false,
     canImportRiesgos: false,
@@ -200,6 +205,7 @@ export const ROLE_PERMISSIONS = {
     canToggleDeducible: false,
     // Compliance — read_only = auditor (ve todo, no modifica)
     canViewRiesgos: true,
+    canViewControlesAsignados: false,
     canEditRiesgos: false,
     canDeleteRiesgos: false,
     canImportRiesgos: false,
