@@ -232,7 +232,7 @@ export default function CausaControles({ causaId, riesgoId, controles, canEdit }
               <input
                 name="referencia"
                 type="text"
-                placeholder="Ej: CAM-LAFT-01"
+                placeholder="Ej: CTL-001"
                 className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
               />
             </div>
