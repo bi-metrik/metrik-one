@@ -2562,13 +2562,69 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     .order('created_at', { ascending: true })
 
   // Cargar gastos del negocio para costosEjecutados + historial
+  //
+  // Honra centro_costos (decisión Santiago + centro-costos sprint 2026-05-30):
+  //   - Gastos con centro_costos='directa_negocio' AND negocio_id=id → SI
+  //   - Gastos legacy (centro_costos IS NULL) con negocio_id=id → SI (compat)
+  //   - Gastos centro_costos='mixta' con split parcial a este negocio → SI con prorrateo
+  //   - Gastos con centro_costos='distribuible_one' o 'distribuible_clarity' → NO
+  //
+  // Implementación: 2 queries y merge en memoria. Más simple que un OR complejo
+  // en PostgREST sobre jsonb.
 
-  const { data: gastosData } = await db(supabase)
-    .from('gastos')
-    .select('id, descripcion, monto, categoria, fecha')
-    .eq('workspace_id', workspaceId)
-    .eq('negocio_id', id)
-    .order('fecha', { ascending: false })
+  const [gastosDirectosRes, gastosMixtaRes] = await Promise.all([
+    db(supabase)
+      .from('gastos')
+      .select('id, descripcion, monto, categoria, fecha, centro_costos, split_json')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', id)
+      // Filtrar: directa_negocio o legacy (centro_costos null)
+      .or('centro_costos.eq.directa_negocio,centro_costos.is.null')
+      .order('fecha', { ascending: false }),
+    db(supabase)
+      .from('gastos')
+      .select('id, descripcion, monto, categoria, fecha, centro_costos, split_json')
+      .eq('workspace_id', workspaceId)
+      .eq('centro_costos', 'mixta')
+      .not('split_json', 'is', null),
+  ])
+
+  // Filtrar mixta que tengan split a este negocio específico
+  const splitKey = `negocio:${id}`
+  type GastoRow = {
+    id: string
+    descripcion: string | null
+    monto: number
+    categoria: string
+    fecha: string
+    centro_costos: string | null
+    split_json: Record<string, number> | null
+  }
+
+  const gastosMixtaParcial = ((gastosMixtaRes.data ?? []) as GastoRow[])
+    .filter((g) => {
+      if (!g.split_json) return false
+      const pct = Number(g.split_json[splitKey] ?? 0)
+      return pct > 0
+    })
+    .map((g) => {
+      const pct = Number(g.split_json?.[splitKey] ?? 0)
+      return {
+        ...g,
+        // Prorratear monto al porcentaje del split que toca a este negocio
+        monto: Math.round((g.monto ?? 0) * pct),
+        // Marcar la descripción con el badge de % para que la UI lo distinga
+        descripcion: g.descripcion
+          ? `${g.descripcion} (${Math.round(pct * 100)}% del gasto)`
+          : `Gasto mixto (${Math.round(pct * 100)}% del gasto)`,
+      }
+    })
+
+  // Merge: gastos directos + mixta prorrateados, orden descendente por fecha
+  const gastosData = [
+    ...((gastosDirectosRes.data ?? []) as GastoRow[]),
+    ...gastosMixtaParcial,
+  ].sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''))
 
   // Cargar horas del negocio
 
