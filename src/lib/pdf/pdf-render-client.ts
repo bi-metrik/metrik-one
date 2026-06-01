@@ -259,16 +259,20 @@ export async function renderCuentaCobro(
 export type PropuestaEconomicaRenderPayload = {
   cliente_nombre: string
   cliente_documento: string
-  fecha_emision: string         // "11/03/2026"
-  validez_desde: string         // "1 de marzo de 2026"
-  validez_hasta: string         // "31 de marzo de 2026"
-  plan1_valor: string           // "$850.000"
-  plan1_anticipo: string        // "$425.000"
-  plan1_exito_iva: string       // "$425.000"
-  plan2_valor: string           // "$637.500"
-  descuento_pct: string         // "25%"
-  ahorro: string                // "$212.500"
-  version: number               // 1, 2, 3...
+  fecha_emision: string             // "11/03/2026"
+  validez_desde: string             // "1 de marzo de 2026"
+  validez_hasta: string             // "31 de marzo de 2026"
+  base_valor: string                // "$850.000" tarifa de referencia
+  plan1_valor: string               // valor final Plan 1 con descuento aplicado
+  plan1_anticipo: string            // 50% Plan 1
+  plan1_exito_iva: string           // 50% Plan 1
+  plan1_descuento_pct: string       // "0%" o "10%"
+  plan1_descuento_linea: string     // HTML inline: "" si desc=0, sino "<p ...>Descuento aplicado: X%</p>"
+  plan1_ahorro: string              // base - plan1
+  plan2_valor: string               // valor final Plan 2 con descuento aplicado
+  plan2_descuento_pct: string       // "25%"
+  plan2_ahorro: string              // base - plan2
+  version: number                   // 1, 2, 3...
 }
 
 export async function renderPropuestaEconomica(

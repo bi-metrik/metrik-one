@@ -7,12 +7,14 @@
 // descuento variable (caso canonico: SOENA — GIT EV/HEV).
 //
 // Mecanica:
-//  - Inputs: descuento_pct o valor_final_con_iva (auto-sincronizados)
-//  - Plan 1 = servicio.precio_estandar * (1 + IVA) — snapshot al crear bloque
-//  - Plan 2 = Plan 1 * (1 - descuento_pct/100)
-//  - Cap descuento (config_extra.cap_descuento_pct, default 50)
+//  - Tarifa base = servicio.precio_estandar * (1 + IVA) — snapshot al crear bloque
+//  - Plan 1 (tarifa plena, pago 50%/50%): valor = base * (1 - descuento_pct_plan1/100)
+//  - Plan 2 (pago 100% anticipado): valor = base * (1 - descuento_pct_plan2/100)
+//  - Cap descuento (config_extra.cap_descuento_pct, default 50) — aplica
+//    individualmente a cada plan (ninguno puede superar el cap sobre la base)
 //  - Versionado: cada generacion incrementa version y persiste PDF en Drive
-//  - Aprobacion: marca bloque completo + setea negocios.precio_aprobado
+//  - Aprobacion: el operador elige plan (1 o 2) — setea negocios.precio_aprobado
+//    con el valor del plan elegido y persiste aprobado_plan
 // ============================================================
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -25,8 +27,10 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 export type PropuestaVersion = {
   n: number
-  descuento_pct: number
-  valor_final: number
+  descuento_pct_plan1: number
+  descuento_pct_plan2: number
+  valor_final_plan1: number
+  valor_final_plan2: number
   pdf_drive_id: string | null
   pdf_url: string | null
   generated_at: string
@@ -36,52 +40,54 @@ export type PropuestaVersion = {
 export type PropuestaData = {
   precio_base_con_iva: number       // snapshot al crear bloque
   iva_pct: number                   // snapshot (0.19 default)
-  descuento_pct: number             // valor actual del input
-  valor_final: number               // valor actual del input
+  descuento_pct_plan1: number       // valor actual input plan 1
+  descuento_pct_plan2: number       // valor actual input plan 2
+  valor_final_plan1: number         // valor calculado plan 1
+  valor_final_plan2: number         // valor calculado plan 2
   versiones: PropuestaVersion[]
   version_activa: number | null
   aprobado_at: string | null
   aprobado_por: string | null
   aprobado_version: number | null
+  aprobado_plan: 1 | 2 | null       // plan elegido al aprobar
 }
 
 // ── Helpers de calculo ──────────────────────────────────────────────────────
 
 export type CalculoPropuesta = {
-  plan1_valor: number       // precio base con IVA
+  base: number
+  plan1_valor: number       // base * (1 - desc1)
   plan1_anticipo: number    // 50% Plan 1
   plan1_exito_iva: number   // 50% Plan 1
-  plan2_valor: number       // Plan 1 * (1 - desc)
-  ahorro: number            // Plan 1 - Plan 2
-  descuento_pct: number
-  valor_final: number       // = plan2_valor
+  plan2_valor: number       // base * (1 - desc2)
+  ahorro_plan1: number      // base - plan1 (vs tarifa plena)
+  ahorro_plan2: number      // base - plan2 (vs tarifa plena)
+  descuento_pct_plan1: number
+  descuento_pct_plan2: number
 }
 
 // NOTA: no exportada — Next.js exige que TODOS los exports de archivos
 // `'use server'` sean async. Como calcularPropuesta es pura (sync), queda
-// como helper interno del modulo. Si fuera necesario consumirla externamente,
-// moverla a un archivo aparte sin `'use server'`.
+// como helper interno del modulo.
 function calcularPropuesta(
   precioBaseConIva: number,
-  descuentoPct: number,
+  descuentoPctPlan1: number,
+  descuentoPctPlan2: number,
 ): CalculoPropuesta {
-  const plan1 = Math.round(precioBaseConIva)
-  const plan2 = Math.round(plan1 * (1 - descuentoPct / 100))
+  const base = Math.round(precioBaseConIva)
+  const plan1 = Math.round(base * (1 - descuentoPctPlan1 / 100))
+  const plan2 = Math.round(base * (1 - descuentoPctPlan2 / 100))
   return {
+    base,
     plan1_valor: plan1,
     plan1_anticipo: Math.round(plan1 / 2),
     plan1_exito_iva: Math.round(plan1 / 2),
     plan2_valor: plan2,
-    ahorro: plan1 - plan2,
-    descuento_pct: descuentoPct,
-    valor_final: plan2,
+    ahorro_plan1: base - plan1,
+    ahorro_plan2: base - plan2,
+    descuento_pct_plan1: descuentoPctPlan1,
+    descuento_pct_plan2: descuentoPctPlan2,
   }
-}
-
-function descuentoDesdeValorFinal(precioBaseConIva: number, valorFinal: number): number {
-  if (precioBaseConIva <= 0) return 0
-  const pct = (1 - valorFinal / precioBaseConIva) * 100
-  return Math.round(pct * 100) / 100 // 2 decimales
 }
 
 // ── Helpers de formato (para PDF) ───────────────────────────────────────────
@@ -185,7 +191,7 @@ async function loadBloqueContext(
 
 export async function generarVersionPropuesta(
   bloqueId: string,
-  input: { descuento_pct?: number; valor_final?: number },
+  input: { descuento_pct_plan1: number; descuento_pct_plan2: number },
 ): Promise<{ ok: boolean; error?: string; version?: PropuestaVersion; warning?: string }> {
   const { supabase, workspaceId, staffId, error: errWs } = await getWorkspace()
   if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
@@ -200,24 +206,17 @@ export async function generarVersionPropuesta(
     return { ok: false, error: 'Precio base no disponible — verifica el servicio asociado' }
   }
 
-  // Resolver inputs
-  let descuento_pct: number
-  if (input.descuento_pct !== undefined) {
-    descuento_pct = Math.round(input.descuento_pct * 100) / 100
-  } else if (input.valor_final !== undefined) {
-    descuento_pct = descuentoDesdeValorFinal(ctx.precioBase, input.valor_final)
-  } else {
-    return { ok: false, error: 'Debe enviar descuento_pct o valor_final' }
+  const desc1 = Math.round((input.descuento_pct_plan1 ?? 0) * 100) / 100
+  const desc2 = Math.round((input.descuento_pct_plan2 ?? 0) * 100) / 100
+
+  for (const [label, pct] of [['Plan 1', desc1], ['Plan 2', desc2]] as const) {
+    if (pct < 0) return { ok: false, error: `Descuento ${label} no puede ser negativo` }
+    if (pct > ctx.capDescuento) {
+      return { ok: false, error: `Descuento ${label} excede el cap de ${ctx.capDescuento}%` }
+    }
   }
 
-  if (descuento_pct < 0) {
-    return { ok: false, error: 'El descuento no puede ser negativo' }
-  }
-  if (descuento_pct > ctx.capDescuento) {
-    return { ok: false, error: `Descuento máximo permitido: ${ctx.capDescuento}%` }
-  }
-
-  const calc = calcularPropuesta(ctx.precioBase, descuento_pct)
+  const calc = calcularPropuesta(ctx.precioBase, desc1, desc2)
 
   // Datos cliente desde negocio
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -247,18 +246,26 @@ export async function generarVersionPropuesta(
   let pdfBuffer: Buffer | null = null
   let renderError: string | null = null
   try {
+    // Linea condicional plan 1: solo si tiene descuento > 0
+    const plan1DescuentoLinea = desc1 > 0
+      ? `<p class="plan-detail">Descuento aplicado: ${desc1}%</p>`
+      : ''
     pdfBuffer = await renderPropuestaEconomica(ctx.templateSlug, {
       cliente_nombre: clienteNombre,
       cliente_documento: clienteDoc,
       fecha_emision: fechaCorta(ahora),
       validez_desde: fechaEnLetras(validezDesde),
       validez_hasta: fechaEnLetras(validezHasta),
+      base_valor: formatCOP(calc.base),
       plan1_valor: formatCOP(calc.plan1_valor),
       plan1_anticipo: formatCOP(calc.plan1_anticipo),
       plan1_exito_iva: formatCOP(calc.plan1_exito_iva),
+      plan1_descuento_pct: `${desc1}%`,
+      plan1_descuento_linea: plan1DescuentoLinea,
+      plan1_ahorro: formatCOP(calc.ahorro_plan1),
       plan2_valor: formatCOP(calc.plan2_valor),
-      descuento_pct: `${descuento_pct}%`,
-      ahorro: formatCOP(calc.ahorro),
+      plan2_descuento_pct: `${desc2}%`,
+      plan2_ahorro: formatCOP(calc.ahorro_plan2),
       version: nuevaN,
     })
   } catch (e) {
@@ -300,8 +307,10 @@ export async function generarVersionPropuesta(
 
   const nuevaVersion: PropuestaVersion = {
     n: nuevaN,
-    descuento_pct,
-    valor_final: calc.valor_final,
+    descuento_pct_plan1: desc1,
+    descuento_pct_plan2: desc2,
+    valor_final_plan1: calc.plan1_valor,
+    valor_final_plan2: calc.plan2_valor,
     pdf_drive_id: pdfDriveId,
     pdf_url: pdfUrl,
     generated_at: ahora.toISOString(),
@@ -311,13 +320,16 @@ export async function generarVersionPropuesta(
   const nuevoData: PropuestaData = {
     precio_base_con_iva: ctx.precioBase,
     iva_pct: ctx.ivaPct,
-    descuento_pct,
-    valor_final: calc.valor_final,
+    descuento_pct_plan1: desc1,
+    descuento_pct_plan2: desc2,
+    valor_final_plan1: calc.plan1_valor,
+    valor_final_plan2: calc.plan2_valor,
     versiones: [...versionesActuales, nuevaVersion],
     version_activa: nuevaN,
     aprobado_at: ctx.data.aprobado_at ?? null,
     aprobado_por: ctx.data.aprobado_por ?? null,
     aprobado_version: ctx.data.aprobado_version ?? null,
+    aprobado_plan: ctx.data.aprobado_plan ?? null,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -342,9 +354,14 @@ export async function generarVersionPropuesta(
 export async function aprobarVersionPropuesta(
   bloqueId: string,
   versionN: number,
+  plan: 1 | 2,
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, staffId, error: errWs } = await getWorkspace()
   if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  if (plan !== 1 && plan !== 2) {
+    return { ok: false, error: 'Plan invalido — debe ser 1 o 2' }
+  }
 
   const ctx = await loadBloqueContext(supabase, workspaceId, bloqueId)
   if (ctx.error) return { ok: false, error: ctx.error }
@@ -353,17 +370,22 @@ export async function aprobarVersionPropuesta(
   const version = versiones.find(v => v.n === versionN)
   if (!version) return { ok: false, error: `Versión ${versionN} no encontrada` }
 
+  const valorElegido = plan === 1 ? version.valor_final_plan1 : version.valor_final_plan2
+
   const ahora = new Date().toISOString()
   const nuevoData: PropuestaData = {
     precio_base_con_iva: ctx.precioBase,
     iva_pct: ctx.ivaPct,
-    descuento_pct: version.descuento_pct,
-    valor_final: version.valor_final,
+    descuento_pct_plan1: version.descuento_pct_plan1,
+    descuento_pct_plan2: version.descuento_pct_plan2,
+    valor_final_plan1: version.valor_final_plan1,
+    valor_final_plan2: version.valor_final_plan2,
     versiones,
     version_activa: versionN,
     aprobado_at: ahora,
     aprobado_por: staffId ?? null,
     aprobado_version: versionN,
+    aprobado_plan: plan,
   }
 
   // Marcar bloque completo + setear precio_aprobado del negocio (en transaccion ligera)
@@ -377,7 +399,7 @@ export async function aprobarVersionPropuesta(
 
   await sb
     .from('negocios')
-    .update({ precio_aprobado: version.valor_final, updated_at: ahora })
+    .update({ precio_aprobado: valorElegido, updated_at: ahora })
     .eq('id', ctx.negocioId)
 
   // Activity log
@@ -387,7 +409,7 @@ export async function aprobarVersionPropuesta(
     entidad_id: ctx.negocioId,
     tipo: 'propuesta_aprobada',
     autor_id: staffId,
-    contenido: `Propuesta económica v${versionN} aprobada — valor final ${formatCOP(version.valor_final)}`,
+    contenido: `Propuesta económica v${versionN} aprobada — Plan ${plan} ${formatCOP(valorElegido)}`,
   })
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
@@ -433,20 +455,23 @@ export async function crearV1Automatica(
 
   const ivaPct = Number(servicio.tarifa_iva ?? 0.19)
   const precioBase = Math.round(Number(servicio.precio_estandar ?? 0) * (1 + ivaPct))
-  const calc = calcularPropuesta(precioBase, 0)
+  const calc = calcularPropuesta(precioBase, 0, 0)
 
-  // Inicializar data con descuento 0 (Plan 1 — tarifa plena), SIN generar PDF
+  // Inicializar data con ambos descuentos en 0, SIN generar PDF
   // (PDF se genera cuando el usuario edite o explicitamente lo pida)
   const dataInicial: PropuestaData = {
     precio_base_con_iva: precioBase,
     iva_pct: ivaPct,
-    descuento_pct: 0,
-    valor_final: calc.valor_final,
+    descuento_pct_plan1: 0,
+    descuento_pct_plan2: 0,
+    valor_final_plan1: calc.plan1_valor,
+    valor_final_plan2: calc.plan2_valor,
     versiones: [],
     version_activa: null,
     aprobado_at: null,
     aprobado_por: null,
     aprobado_version: null,
+    aprobado_plan: null,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
