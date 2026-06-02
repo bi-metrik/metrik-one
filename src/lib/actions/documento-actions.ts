@@ -5,7 +5,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
-import { createDriveFolder, createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
+import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 
 const BUCKET = 've-documentos'
 
@@ -273,11 +273,18 @@ export async function procesarDocumento(
     let driveUrl: string | null = null
     let driveFileId: string | null = null
 
+    // ── 4. Resolver la carpeta CANONICA del negocio desde negocios.carpeta_url
+    //    (la que crea crearNegocio y usa la propuesta economica). Antes se
+    //    re-creaba una carpeta por `codigo` a secas bajo el root del workspace →
+    //    como crearNegocio la nombra "{codigo} - {cliente}", no la encontraba y
+    //    creaba una carpeta HUERFANA distinta; por eso solo la propuesta caia en
+    //    la carpeta real y los documentos quedaban dispersos. Ahora se resuelve
+    //    el folder id desde carpeta_url, igual que la propuesta. ──
+    let negocioFolderId: string | null = null
     if (driveFolderId) {
-      // ── 4. Crear carpeta del negocio en Drive ─────────────────────────
       const { data: negocio } = await db(supabase)
         .from('negocios')
-        .select('codigo')
+        .select('codigo, carpeta_url')
         .eq('id', negocioId)
         .eq('workspace_id', workspaceId)
         .single()
@@ -286,11 +293,16 @@ export async function procesarDocumento(
         return { success: false, error: 'Negocio no encontrado en este workspace' }
       }
 
-      const folderName = (negocio.codigo as string) ?? negocioId
-      console.log(`[documento] Step 4: creating Drive folder "${folderName}"...`)
-      const negocioFolderId = await createDriveFolder(folderName, driveFolderId, workspaceId)
-      console.log(`[documento] Step 4 OK: folder=${negocioFolderId}`)
+      const carpetaUrl = negocio.carpeta_url as string | null
+      if (carpetaUrl) {
+        negocioFolderId = carpetaUrl.match(/folders\/([-\w]+)/)?.[1] ?? null
+      }
+      if (!negocioFolderId) {
+        console.warn(`[documento] negocio ${negocioId} sin carpeta_url usable — se guarda en Storage, no en Drive`)
+      }
+    }
 
+    if (negocioFolderId) {
       // ── 4a. Resolver subfolder canonico segun config_extra.drive_subfolder ──
       const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? null
       const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
@@ -323,7 +335,7 @@ export async function procesarDocumento(
       await admin.storage.from(BUCKET).remove([storagePath])
       console.log('[documento] Step 7 OK: temp file removed')
     } else {
-      // Sin Drive configurado: guardar URL de Supabase Storage
+      // Sin Drive (no configurado o negocio sin carpeta_url): guardar URL de Storage
       const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
       driveUrl = publicData.publicUrl
     }

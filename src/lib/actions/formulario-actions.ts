@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
-import { uploadFileToDrive, setFilePublicByLink, createDriveFolder, createSubfolderPath } from '@/lib/google-drive'
+import { uploadFileToDrive, setFilePublicByLink, createSubfolderPath } from '@/lib/google-drive'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
@@ -212,7 +212,7 @@ export async function generarFormulario(
     // 3. Get negocio info
     const { data: negocio } = await db(supabase)
       .from('negocios')
-      .select('codigo')
+      .select('codigo, carpeta_url')
       .eq('id', negocioId)
       .single()
 
@@ -242,12 +242,13 @@ export async function generarFormulario(
       .single()
 
     const wsDriveFolderId = workspace?.drive_folder_id as string | null
+    // Carpeta CANONICA del negocio desde carpeta_url (igual que propuesta y
+    // documentos). Antes se re-creaba por `codigo` a secas bajo el root → carpeta
+    // huerfana distinta a la del resto de archivos del negocio.
+    const negocioFolderId = ((negocio?.carpeta_url as string | null)?.match(/folders\/([-\w]+)/)?.[1]) ?? null
     let driveUrl: string | null = null
 
-    if (wsDriveFolderId) {
-      // Get or create negocio folder
-      const negocioFolderId = await createDriveFolder(codigoNegocio, wsDriveFolderId, workspaceId)
-
+    if (wsDriveFolderId && negocioFolderId) {
       // Resolver subfolder canonico (config_extra.drive_subfolder, ej. "4. DIAN/Formularios")
       const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? null
       const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
