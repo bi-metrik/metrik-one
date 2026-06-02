@@ -1296,7 +1296,7 @@ export async function cambiarEtapaNegocioConGate(
     // Evaluar routing condicional (si existe) ANTES de validar orden
     const routing = (etapaActualData.config_extra?.routing ?? null) as {
       default_etapa_orden: number
-      conditional: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
+      conditional?: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
       // Opcional: leer los campos desde una etapa distinta a la actual.
       // Util cuando el flag decisorio se configura en una etapa anterior
       // (ej: flag de devolucion IVA en etapa 2, evaluado al salir de la 6).
@@ -1339,7 +1339,7 @@ export async function cambiarEtapaNegocioConGate(
 
       // Evaluar condicionales — primer match gana
       let etapaOrdenDestino = routing.default_etapa_orden
-      for (const rule of routing.conditional) {
+      for (const rule of (routing.conditional ?? [])) {
         const { field, value } = rule.condition
         if (String(camposNegocio[field] ?? '') === String(value)) {
           etapaOrdenDestino = rule.etapa_orden

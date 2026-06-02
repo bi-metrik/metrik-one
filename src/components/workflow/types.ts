@@ -30,7 +30,8 @@ export interface WorkflowRoutingConditional {
 
 export interface WorkflowRouting {
   default_etapa_orden: number
-  conditional: WorkflowRoutingConditional[]
+  // Opcional: un routing puede ser solo-default (avance lineal forzado, sin rombo).
+  conditional?: WorkflowRoutingConditional[]
   source_etapa_orden?: number
 }
 

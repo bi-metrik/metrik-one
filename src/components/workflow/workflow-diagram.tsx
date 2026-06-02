@@ -127,7 +127,7 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
   const branchChains = new Map<number, BranchChain>()
   for (const e of sorted) {
     if (!e.routing) continue
-    for (const rule of e.routing.conditional) {
+    for (const rule of (e.routing.conditional ?? [])) {
       if (mainlineOrdens.has(rule.etapa_orden)) continue
       if (branchChains.has(rule.etapa_orden)) continue
 
@@ -228,7 +228,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
     rows.push({ type: 'etapa', etapa: e, side: 'main' })
 
     if (e.routing) {
-      const branchRule = e.routing.conditional.find(r => layout.branchChains.has(r.etapa_orden))
+      const branchRule = (e.routing.conditional ?? []).find(r => layout.branchChains.has(r.etapa_orden))
       const branchChain = branchRule ? layout.branchChains.get(branchRule.etapa_orden) : undefined
       const branchEtapas: WorkflowEtapa[] = branchChain
         ? branchChain.etapas
@@ -285,7 +285,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
             )
           }
           if (row.type === 'decision') {
-            const field = row.sourceEtapa.routing?.conditional[0]?.condition.field ?? '—'
+            const field = row.sourceEtapa.routing?.conditional?.[0]?.condition.field ?? '—'
             const question = resolveDecisionLabel(field, sorted)
             return (
               <div key={`dec-${idx}`} className="grid grid-cols-1 md:grid-cols-2 md:gap-3">
@@ -303,7 +303,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
             )
           }
           if (row.type === 'decision-with-branch') {
-            const field = row.sourceEtapa.routing?.conditional[0]?.condition.field ?? '—'
+            const field = row.sourceEtapa.routing?.conditional?.[0]?.condition.field ?? '—'
             const question = resolveDecisionLabel(field, sorted)
             const firstBranch = row.branchEtapas[0]
             const restBranch = row.branchEtapas.slice(1)

@@ -35,7 +35,7 @@ export interface FlujoRoutingConditional {
 
 export interface FlujoRouting {
   default_etapa_orden: number
-  conditional: FlujoRoutingConditional[]
+  conditional?: FlujoRoutingConditional[]
   source_etapa_orden?: number
 }
 
