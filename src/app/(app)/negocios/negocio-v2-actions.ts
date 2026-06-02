@@ -1380,22 +1380,18 @@ export async function cambiarEtapaNegocioConGate(
       })
 
     if (!puedeAvanzar) {
-      // Devolver lista de bloques gate pendientes
-      const { data: bloquesPendientesRaw } = await db(supabase)
-        .from('bloque_configs')
-        .select(`
-          es_gate,
-          bloque_definitions(nombre)
-        `)
-        .eq('etapa_id', negocio.etapa_actual_id)
-        .eq('workspace_id', workspaceId)
-        .eq('es_gate', true)
-
-      const bloquesPendientes = ((bloquesPendientesRaw ?? []) as Record<string, unknown>[]).map(
-        (b: Record<string, unknown>) => ({
-          nombre: ((b.bloque_definitions as { nombre: string } | null)?.nombre ?? 'Bloque'),
-          es_gate: b.es_gate as boolean,
+      // Listar SOLO los bloques gate que realmente bloquean (pendientes +
+      // condición cumplida) — misma lógica que puede_avanzar_etapa, vía
+      // gates_pendientes_etapa. Antes se listaban TODOS los es_gate de la etapa,
+      // incluidos los ya completos, lo que confundía al usuario.
+      const { data: pendientesRaw } = await db(supabase)
+        .rpc('gates_pendientes_etapa', {
+          p_negocio_id: negocioId,
+          p_etapa_id: negocio.etapa_actual_id,
         })
+
+      const bloquesPendientes = ((pendientesRaw ?? []) as Array<{ nombre: string | null }>).map(
+        (b) => ({ nombre: b.nombre ?? 'Bloque', es_gate: true })
       )
 
       return { error: 'gate_bloqueado', bloquesPendientes }

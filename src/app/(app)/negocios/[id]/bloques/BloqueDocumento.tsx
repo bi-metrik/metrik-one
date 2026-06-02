@@ -288,6 +288,9 @@ export default function BloqueDocumento({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [pendingStoragePath, setPendingStoragePath] = useState<string | null>(null)
   const [reprocessing, setReprocessing] = useState(false)
+  const [extractionStatus, setExtractionStatus] = useState<'ok' | 'failed' | 'no_key' | null>(
+    () => (saved._extraction_status as 'ok' | 'failed' | 'no_key' | undefined) ?? null,
+  )
 
   const handleReprocesar = async () => {
     setReprocessing(true)
@@ -298,6 +301,7 @@ export default function BloqueDocumento({
         return
       }
       if (res.campos) setCampos(res.campos)
+      setExtractionStatus('ok')
       toast.success('Documento reprocesado con IA')
       router.refresh()
     } finally {
@@ -388,10 +392,13 @@ export default function BloqueDocumento({
       if (result.campos) {
         setCampos(result.campos)
       }
+      setExtractionStatus(result.extraction_status ?? null)
       setUploadState('uploaded')
       setPendingStoragePath(null)
 
-      if (camposConfig.length > 0 && result.campos) {
+      if (camposConfig.length > 0 && result.extraction_status === 'failed') {
+        toast.error('La extracción con IA falló. Reintenta o completa los campos manualmente.')
+      } else if (camposConfig.length > 0 && result.campos) {
         const hasManual = Object.values(result.campos).some(c => c.manual)
         if (hasManual) {
           toast.info('Algunos campos requieren verificación manual')
@@ -695,6 +702,30 @@ export default function BloqueDocumento({
             </p>
           </div>
         </button>
+      )}
+
+      {/* Banner: la extracción IA falló — reintentar o llenar manual.
+          Señal visible para que el bloque no quede 'pendiente' en silencio. */}
+      {camposConfig.length > 0 && uploadState === 'uploaded' && extractionStatus === 'failed' && (
+        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50/50 p-3">
+          <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-red-700">La extracción con IA falló</p>
+            <p className="mt-0.5 text-[11px] text-red-600">
+              El archivo se cargó, pero no se pudieron extraer los datos. Reintenta la extracción
+              o completa los campos requeridos manualmente para poder avanzar de etapa.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleReprocesar}
+            disabled={reprocessing}
+            className="shrink-0 inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {reprocessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            {reprocessing ? 'Reintentando…' : 'Reintentar'}
+          </button>
+        </div>
       )}
 
       {/* Campos AI — se muestran siempre que haya config + archivo,

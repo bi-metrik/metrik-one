@@ -314,7 +314,58 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-05-24 → 25 (`metrik-one--core` — fix routing platform admin + form negocios + IDs fijos L/E + paridad stage/etapa)
+**Sesion:** 2026-06-02 (`soena` — 3 fixes E5 Documentación: gate falso-negativo IA + modal de gate preciso + modal sin cortes)
+**Branch:** `main` (deployado Vercel)
+
+### Cambios de producto deployados a Vercel prod
+
+- **Bug #1 — gate falso-negativo cuando la extracción IA falla** (`documento-actions.ts`, `BloqueDocumento.tsx`). Antes: si Gemini fallaba (timeout/5xx/JSON malo) el bloque quedaba `pendiente` en silencio y bloqueaba el avance aunque el documento sí estuviera cargado. Ahora: helper `extractWithRetry` reintenta 1 vez ante fallo transitorio (no reintenta si el contenido fue bloqueado por Gemini — falla permanente); se persiste `_extraction_status` (`ok`/`failed`/`no_key`) en `negocio_bloques.data`; el bloque muestra banner rojo "La extracción con IA falló — Reintentar / completar manual" con botón prominente. `procesarDocumento` y `reprocesarDocumento` setean el flag; el llenado manual ya existente se conserva.
+- **Bug #2 — modal de gate listaba TODOS los gates de la etapa, no los pendientes** (`negocio-v2-actions.ts` + migration). Nuevo RPC `gates_pendientes_etapa` devuelve **solo** los gate que realmente bloquean (`estado='pendiente'` + condición cumplida) con su label real (`config_extra.label` ?? `bloque_definitions.nombre`). `puede_avanzar_etapa` se redefine para reusar ese RPC → **una sola fuente de verdad, cero drift** entre el booleano del gate y la lista que se muestra. El server dejó de listar todos los `es_gate` y usa el RPC.
+- **Bug #3 — modal de gate se cortaba + selección rara del header** (`negocio-detail-client.tsx`, `ModalGateBloqueado`). Agregado `max-h-[90vh]` + lista interna scrollable (`flex-1 overflow-y-auto`, header/footer `shrink-0`), lock de scroll del body mientras está abierto, `select-none` en el overlay (mata la selección residual del header sticky), cierre con Escape y por click en el backdrop.
+
+**Migration:** `20260602000001_gates_pendientes_etapa.sql` (aplicada en prod vía MCP; smoke test consistencia `puede_avanzar_etapa` ↔ `gates_pendientes_etapa` OK).
+
+---
+
+**Sesion previa:** 2026-06-02 (`soena` — gates computados reusables + fix render WorkflowDiagram + conciliación de sobrepago en Cobro)
+**Branch:** `main` · commits `a0fa738`, `dd0ec94`, `2dbf92d` (deployados Vercel)
+
+### Cambios de producto deployados a Vercel prod
+
+- **Gate computado genérico `campo:<slug>=<valor>`** (`negocio-v2-actions.ts`, en `cambiarEtapaNegocioConGate` tras `saldo_cero`). Lee los bloques `datos` de la etapa actual y bloquea el avance si un campo ≠ valor esperado. Mensaje configurable por etapa vía `config_extra.gate_messages[gate]`. Reusable por cualquier workflow sin tocar código (se configura en `etapas_negocio.config_extra.gates`). Primer uso: SOENA Inclusión (`campo:decision_incluir=si`) y Espera (`campo:inclusion_confirmada=true`).
+- **Gate computado `sobrepago_conciliado`** (mismo archivo). Si `total cobrado > precio`, bloquea avanzar hasta que el campo `accion_extra` (bloque de conciliación) tenga valor. Sin sobrepago, no exige nada.
+- **Skip-cobro condicionado por `config_extra.conciliar_sobrepago`**. La etapa `stage='cobro'` se salta automáticamente solo si el pago es exacto (`saldo===0`) cuando la etapa tiene el flag; un sobrepago entra a Cobro a conciliar. Sin el flag, comportamiento previo (`saldo<=0`). No afecta workspaces que no lo activen.
+- **Razón de pérdida "No incluido en UPME"** agregada a `RAZONES_PERDIDA_NEGOCIO` (`src/lib/negocios/constants.ts`).
+- **Fix `WorkflowDiagram` — `routing.conditional` opcional** (`workflow-diagram.tsx` + tipos `WorkflowRouting`/`FlujoRouting` + tipo local en `negocio-v2-actions.ts`). Un routing solo-`default` (sin `conditional`, p.ej. avance lineal forzado) crasheaba el render (`conditional is not iterable`) y el motor de avance. Ahora `conditional?` es opcional y todos los iteradores/accesos usan `?? []` / `?.[]`. **Cualquier** workflow con routing solo-default deja de romper. commit `dd0ec94`.
+
+**Aprendizaje:** verificar el render de workflows por trazado de código NO sustituye la verificación visual en runtime — el crash de `/flujo` se escapó de una verificación por trazado y solo lo destapó la prueba en vivo.
+
+---
+
+**Sesion previa:** 2026-05-25 (`soena` — bloque propuesta_economica end-to-end, blindaje Drive, opción C servicios↔líneas, UI historial etapas previas)
+**Branch:** `main` · 19+ commits acumulados (sesion mega con SOENA + saneamiento bugs sesion paralela)
+
+### Cambios de producto deployados a Vercel prod
+
+- **Tipo `propuesta_economica` agregado a biblioteca de bloques** (genérico, codigo `PE`). Construido para SOENA pero reutilizable. Backend: `src/lib/actions/propuesta-economica-actions.ts` con server actions `generarVersionPropuesta`, `aprobarVersionPropuesta`, `crearV1Automatica`, helper `calcularPropuesta`. UI: `BloquePropuestaEconomica.tsx` con inputs sincronizados (% descuento ↔ valor final), cap configurable (default 50%), versionado en Drive, lista versiones con link PDF, botón aprobar setea `negocios.precio_aprobado`. Cliente PDF: `renderPropuestaEconomica` en `pdf-render-client.ts`. Auto-init v1 al crear negocio via `auto_propuesta.servicio_id` config_extra. Herencia readonly cross-etapa server-side reemplaza `data` por la del source cuando es propuesta_economica readonly.
+- **Opción C — `servicios.linea_id` FK formal** (migration prod). Lookup por UUID estable a renames. `getServiciosActivos(lineaId?)` filtra automático. UI: selector línea en form servicios + badge "Global"/nombre línea en listado. `cotizacion-editor` recibe `lineaId` del negocio y filtra catálogo.
+- **Blindaje Drive 4 capas** — script canónico `setup-drive-workspace.ts` valida antes de persistir + preserva config_extra. Trigger DB `protect_workspace_drive_config` bloquea borrado destructivo de keys drive_* (escape opt-in via session var). Health check diario `/api/crons/drive-health` + tabla `drive_health_log` + cron Vercel + activity_log `drive_health_failed` cuando falla. Script `preflight-workspace.ts` end-to-end (folder + OAuth + crear+borrar test), soporta Shared Drive.
+- **`crearNegocio` registra activity_log `drive_folder_failed` al fallar Drive** — antes silencioso (solo `console.error`). Ahora visible al owner en timeline.
+- **Sección "Historial de etapas anteriores"** en detalle de negocio. Server retorna `bloquesEtapasPrevias` con estructura completa (config + def + instancia + items). Cliente: componente colapsable, cada etapa expandible, cada bloque expandible con su componente nativo en modo `visible` via flag `_forceReadOnly` en BloqueRenderer. Renderiza BloqueDocumento descargable, BloquePropuestaEconomica con historial PDF, BloqueDatos rellenado, etc.
+- **Fix BloquePagosEpayco** — `useEffect` re-sincroniza `pagos` con prop tras `revalidatePath`. Antes el pago se guardaba en DB pero la UI no reflejaba hasta refresh manual.
+- **Fix propuesta_economica lookup `auto_propuesta.servicio_id` anidado** — antes solo leía `configExtra.servicio_id` (nivel raíz) → mostraba "Sin precio base disponible" porque la config canónica anida bajo `auto_propuesta`.
+- **Fix query lookup negocio en propuesta_economica** — incluía `contactos(nombre, cedula)` pero `contactos` no tiene columna `cedula`. Query fallaba silenciosamente, `negocio=null`, "sin carpeta_url" cuando sí estaba poblada.
+- **Fallback graceful** en `generarVersionPropuesta` — si render PDF falla (endpoint no disponible), versión queda persistida sin PDF + toast warning. Server action retorna `{ok:true, warning}` en vez de `{ok:false}` para permitir iterar valores y aprobar mientras se restaura el endpoint.
+
+### Cambios en metrik-pdf-render (Cloud Run us-east1)
+
+- **Endpoint nuevo `/render/propuesta-economica`** — acepta template_slug flexible (`cliente/propuesta-economica` o `cliente`). Reemplazo simple de placeholders `{{key}}`.
+- **Template `templates/soena/propuesta-economica.html`** — 8 páginas A4, branding SOENA (Manrope, paleta `#4A6CF7`, `#1B2D4F`), assets reales extraídos del PDF original (logo SOENA, Tesla portada, carro híbrido + certificado UPME, carro eléctrico, ingeniero, foto Juan David Bruce). Placeholders dinámicos en pág 4 (planes) y pág 8 (firma).
+- **Deploy revisión `metrik-pdf-render-00004-hkg`** sirviendo 100% tráfico.
+
+### Sesión previa (no perder contexto)
+
+**Sesion previa:** 2026-05-24 (`metrik-one--core` — fix routing platform admin + form negocios + IDs fijos L/E + paridad stage/etapa)
 **Branch:** `main` · 8 commits acumulados sobre 3a40aa8 (PR #4 + fixes + features sin PR)
 
 ### Cambios de producto deployados a Vercel prod

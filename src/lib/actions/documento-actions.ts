@@ -24,6 +24,34 @@ function mimeTypeFromName(fileName: string): string {
   return map[ext] ?? 'application/pdf'
 }
 
+// ── Extracción AI con reintento ante fallo transitorio ──────────────────────
+// Gemini puede fallar transitoriamente (timeout, 429/5xx, JSON malformado). Un
+// solo intento dejaba el bloque en 'pendiente' silenciosamente y bloqueaba el
+// gate aunque el documento sí estuviera cargado. Reintentamos una vez con un
+// pequeño backoff. NO reintentamos si el contenido fue bloqueado por Gemini
+// (falla permanente, no transitoria).
+const EXTRACTION_MAX_ATTEMPTS = 2
+
+async function extractWithRetry(
+  buffer: Buffer,
+  mimeType: string,
+  campos: CampoExtraccion[],
+  apiKey: string,
+  tag: string,
+): Promise<{ data: Record<string, CampoResultado> | null; error?: string }> {
+  let last: { data: Record<string, CampoResultado> | null; error?: string } = { data: null }
+  for (let attempt = 1; attempt <= EXTRACTION_MAX_ATTEMPTS; attempt++) {
+    last = await extractFieldsFromDocument(buffer, mimeType, campos, apiKey)
+    if (last.data) return last
+    if (last.error?.startsWith('Contenido bloqueado')) return last // permanente
+    if (attempt < EXTRACTION_MAX_ATTEMPTS) {
+      console.warn(`[${tag}] Extracción AI falló (intento ${attempt}/${EXTRACTION_MAX_ATTEMPTS}): ${last.error}. Reintentando...`)
+      await new Promise(r => setTimeout(r, 600))
+    }
+  }
+  return last
+}
+
 // ── Cross-check: validacion cruzada contra datos extraidos de otros bloques ──
 // Cuando config_extra.cross_check.checks esta definido, despues de la extraccion
 // AI comparamos los campos extraidos del documento contra los datos persistidos
@@ -190,6 +218,8 @@ export async function procesarDocumento(
   success: boolean
   drive_url?: string
   campos?: Record<string, CampoResultado>
+  extraction_status?: 'ok' | 'failed' | 'no_key'
+  extraction_error?: string
   error?: string
 }> {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -311,22 +341,33 @@ export async function procesarDocumento(
 
     // ── 9. Extracción AI si hay campos configurados ─────────────────────
     let camposResult: Record<string, CampoResultado> | null = null
+    let extraccionStatus: 'ok' | 'failed' | 'no_key' | null = null
+    let extraccionError: string | null = null
 
     if (camposExtraccion.length > 0) {
       console.log(`[documento] Step 9: AI extraction (${camposExtraccion.length} campos)...`)
       const apiKey = getServerKey('gemini')
       if (apiKey) {
-        const extraction = await extractFieldsFromDocument(buffer, mimeType, camposExtraccion, apiKey)
+        const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'documento')
         if (extraction.data) {
           camposResult = extraction.data
           newData.campos = camposResult
+          extraccionStatus = 'ok'
           console.log('[documento] Step 9 OK: AI extraction done')
-        } else if (extraction.error) {
-          console.error('[documento] Step 9 WARN:', extraction.error)
+        } else {
+          extraccionStatus = 'failed'
+          extraccionError = extraction.error ?? 'Extracción AI falló'
+          console.error('[documento] Step 9 WARN:', extraccionError)
         }
       } else {
+        extraccionStatus = 'no_key'
         console.warn('[documento] Step 9 SKIP: no gemini API key')
       }
+      // Persistir estado de extracción para que la UI muestre el banner correcto
+      // (failed → reintentar/manual). Limpia errores viejos cuando vuelve a OK.
+      newData._extraction_status = extraccionStatus
+      if (extraccionError) newData._extraction_error = extraccionError
+      else delete newData._extraction_error
     }
 
     // ── 9b. Cross-check contra datos de otros bloques ───────────────────
@@ -385,6 +426,8 @@ export async function procesarDocumento(
       success: true,
       drive_url: driveUrl ?? undefined,
       campos: camposResult ?? undefined,
+      extraction_status: extraccionStatus ?? undefined,
+      extraction_error: extraccionError ?? undefined,
     }
   } catch (err) {
     console.error('[documento-actions] Error:', err)
@@ -444,9 +487,9 @@ export async function reprocesarDocumento(
     const buffer = await downloadDriveFile(driveFileId, workspaceId)
     const mimeType = mimeTypeFromName(fileName)
 
-    // 4. Extraer con AI
+    // 4. Extraer con AI (con reintento ante fallo transitorio)
     console.log(`[reprocesar] AI extraction (${camposExtraccion.length} campos)...`)
-    const extraction = await extractFieldsFromDocument(buffer, mimeType, camposExtraccion, apiKey)
+    const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'reprocesar')
     if (!extraction.data) {
       return { success: false, error: extraction.error ?? 'Error en extracción AI' }
     }
@@ -473,7 +516,8 @@ export async function reprocesarDocumento(
     }
 
     const now = new Date().toISOString()
-    const newData: Record<string, unknown> = { ...currentData, campos: mergedCampos }
+    const newData: Record<string, unknown> = { ...currentData, campos: mergedCampos, _extraction_status: 'ok' }
+    delete newData._extraction_error
     if (ccResult) newData._cross_check = ccResult
 
     await db(supabase)
