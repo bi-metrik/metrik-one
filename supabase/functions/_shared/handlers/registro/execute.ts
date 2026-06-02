@@ -7,6 +7,7 @@ import { CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP, formatPct, bold, formatProject } from '../../wa-format.ts';
 import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
+import { registrarMapeoAutomaticoWA } from '../../centro-costos.ts';
 
 export async function executeRegistro(ctx: HandlerContext): Promise<void> {
   const { session, supabase } = ctx;
@@ -62,8 +63,25 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     insertData.proyecto_id = c.proyecto_id;
   }
 
+  // Centro de costos (si el handler lo persistió en session.context)
+  if (c.centro_costos) {
+    insertData.centro_costos = c.centro_costos;
+  }
+  if (c.origen_asignacion) {
+    insertData.origen_asignacion = c.origen_asignacion;
+  }
+
   const { data: gasto, error } = await supabase.from('gastos').insert(insertData).select().single();
   if (error) throw error;
+
+  // Self-learning post-insert (best-effort)
+  if (gasto?.id && c.origen_asignacion === 'manual') {
+    try {
+      await registrarMapeoAutomaticoWA(supabase, gasto.id);
+    } catch (e) {
+      console.error('[centro-costos WA] self-learning falló:', e);
+    }
+  }
 
   let msg: string;
   if (c.destino_tipo === 'empresa') {

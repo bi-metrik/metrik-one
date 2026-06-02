@@ -5,8 +5,20 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Building2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
-import { createGasto, getRubrosProyecto, uploadSoporteGasto } from './gasto-action'
+import {
+  createGasto,
+  getRubrosProyecto,
+  uploadSoporteGasto,
+  proponerCentroCostosAction,
+} from './gasto-action'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
+import CentroCostosSelector, {
+  type CentroCostosValue,
+} from '@/components/centro-costos-selector'
+import type {
+  CentroCostos,
+  OrigenAsignacion,
+} from '@/lib/actions/centro-costos-asignar'
 
 type Clasificacion = 'variable' | 'fijo' | 'no_operativo'
 
@@ -85,6 +97,17 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
   // Rubros for selected project
   const [rubros, setRubros] = useState<{ id: string; nombre: string; tipo: string | null }[]>([])
 
+  // Centro de costos state
+  const [centroCostos, setCentroCostos] = useState<CentroCostosValue | null>(null)
+  const [sugerencia, setSugerencia] = useState<{
+    centro: CentroCostos
+    origen: OrigenAsignacion
+    confianza: number
+    sugerido_negocio_id?: string | null
+  } | null>(null)
+  // Track si el usuario tocó el selector después de la sugerencia
+  const [centroTocadoManual, setCentroTocadoManual] = useState(false)
+
   const isEmpresa = destinoKey === 'empresa'
   const isNegocio = destinoKey.startsWith('negocio:')
   const isProyecto = destinoKey.startsWith('proyecto:')
@@ -123,6 +146,65 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
     const match = rubros.find(r => r.tipo && tiposCompatibles.includes(r.tipo))
     setRubroId(match?.id ?? '')
   }, [categoria, rubros, isProyecto])
+
+  // Fetch sugerencia centro_costos con debounce sobre descripción.
+  // Si el usuario ya tocó el selector manualmente, no sobreescribimos.
+  // Diseño: todos los setState ocurren dentro de timeouts / callbacks async,
+  // no en la rama sincrónica del effect (cumple react-hooks/set-state-in-effect).
+  useEffect(() => {
+    if (centroTocadoManual) return
+    const descTrim = descripcion.trim()
+    if (!descTrim || descTrim.length < 3) {
+      // Reset diferido para no setear en el body sincrónico
+      const reset = setTimeout(() => setSugerencia(null), 0)
+      return () => clearTimeout(reset)
+    }
+    const handle = setTimeout(async () => {
+      const res = await proponerCentroCostosAction({ descripcion })
+      if (res.centro) {
+        setSugerencia({
+          centro: res.centro,
+          origen: res.origen ?? 'sugerido',
+          confianza: res.confianza,
+          sugerido_negocio_id: res.sugerido_negocio_id,
+        })
+        // Pre-aplicar si confianza ≥ 0.7 y el form no tiene aún centro_costos
+        if (res.confianza >= 0.7 && centroCostos === null) {
+          setCentroCostos({
+            centro: res.centro,
+            negocio_id: res.sugerido_negocio_id ?? null,
+          })
+        }
+      } else {
+        setSugerencia(null)
+      }
+    }, 600)
+    return () => clearTimeout(handle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [descripcion, centroTocadoManual])
+
+  const handleCentroCostosChange = (v: CentroCostosValue) => {
+    setCentroCostos(v)
+    setCentroTocadoManual(true)
+  }
+
+  // Determinar origen_asignacion al guardar
+  const computeOrigen = (): OrigenAsignacion | null => {
+    if (!centroCostos) return null
+    if (centroCostos.centro === 'mixta') return 'split'
+    // Si el usuario tocó manual, fue manual
+    if (centroTocadoManual) return 'manual'
+    // Si aceptó la sugerencia tal cual
+    if (
+      sugerencia &&
+      sugerencia.centro === centroCostos.centro &&
+      sugerencia.sugerido_negocio_id === (centroCostos.negocio_id ?? null)
+    ) {
+      // Si la sugerencia vino de whitelist (auto), respetar; si fue heurística, queda sugerido
+      return sugerencia.origen === 'auto' ? 'auto' : 'sugerido'
+    }
+    return 'manual'
+  }
 
   const compressImage = async (file: File, maxWidth = 1600, quality = 0.8): Promise<File> => {
     if (file.type === 'application/pdf') return file
@@ -201,6 +283,31 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
         soporteUrl = uploadRes.url
       }
 
+      // Resolver destino + centro_costos. El centro_costos del selector
+      // tiene precedencia sobre destino_tipo cuando hay conflicto:
+      //   - Si centro = 'directa_negocio' → forzar destino negocio
+      //   - Si centro = 'distribuible_one' o 'distribuible_clarity' → destino empresa
+      //   - Si centro = 'mixta' → destino empresa (negocio_id queda en split_json)
+      let finalDestinoId: string | null = destinoId || 'empresa'
+      let finalDestinoTipo: 'negocio' | 'proyecto' | 'empresa' =
+        isNegocio ? 'negocio' : isProyecto ? 'proyecto' : 'empresa'
+
+      if (centroCostos?.centro === 'directa_negocio') {
+        if (!centroCostos.negocio_id) {
+          toast.error('Selecciona un negocio para el centro de costos')
+          return
+        }
+        finalDestinoId = centroCostos.negocio_id
+        finalDestinoTipo = 'negocio'
+      } else if (
+        centroCostos?.centro === 'distribuible_one' ||
+        centroCostos?.centro === 'distribuible_clarity' ||
+        centroCostos?.centro === 'mixta'
+      ) {
+        finalDestinoId = 'empresa'
+        finalDestinoTipo = 'empresa'
+      }
+
       const res = await createGasto({
         monto: montoNum,
         categoria,
@@ -208,11 +315,14 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
         retencion: parseFloat(retencion) || 0,
         fecha,
         descripcion: descripcion.trim() || undefined,
-        destino_id: destinoId || 'empresa',
-        destino_tipo: isNegocio ? 'negocio' : isProyecto ? 'proyecto' : 'empresa',
+        destino_id: finalDestinoId,
+        destino_tipo: finalDestinoTipo,
         rubro_id: rubroId || null,
         estado_pago: yaPagado ? 'pagado' : 'pendiente',
         soporte_url: soporteUrl,
+        centro_costos: centroCostos?.centro ?? null,
+        split_json: centroCostos?.centro === 'mixta' ? (centroCostos.split ?? null) : null,
+        origen_asignacion: computeOrigen(),
       })
       if (res.success) {
         toast.success('Gasto registrado')
@@ -405,6 +515,14 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
           />
         </div>
+
+        {/* Centro de costos */}
+        <CentroCostosSelector
+          negocios={destinos.negocios}
+          value={centroCostos}
+          onChange={handleCentroCostosChange}
+          sugerencia={sugerencia}
+        />
 
         {/* Soporte */}
         <div>

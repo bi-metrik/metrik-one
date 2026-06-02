@@ -21,6 +21,7 @@ import {
   matchCategory,
 } from '../../wa-lookup.ts';
 import { executeRegistro } from './execute.ts';
+import { proponerCentroCostosWA, type PropuestaCC } from '../../centro-costos.ts';
 
 export async function handleGasto(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
@@ -144,6 +145,54 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
   });
 }
 
+/**
+ * Resuelve la propuesta de centro de costos para un gasto del bot WA.
+ * Si tipo='negocio' o el motor sugiere directa_negocio con el mismo negocio,
+ * aplica directa_negocio. Si motor sugiere algo con confianza ≥0.7, aplica.
+ * Sino retorna null (gasto entra sin centro_costos asignado, el usuario lo
+ * completa después en la app).
+ */
+async function resolverCentroCostos(
+  ctx: HandlerContext,
+  args: {
+    descripcion: string | undefined;
+    negocio_id_destino?: string | null;
+    tipo: string;
+  },
+): Promise<{ centro: PropuestaCC['centro']; origen: PropuestaCC['origen'] }> {
+  const { supabase, user, session } = ctx;
+
+  // Caso explícito: el gasto se ata a un negocio → directa_negocio
+  if (args.tipo === 'negocio' && args.negocio_id_destino) {
+    return { centro: 'directa_negocio', origen: 'sugerido' };
+  }
+
+  // Contexto bot: si last_context apuntaba a un negocio reciente
+  let contextoBot;
+  const lc = session.context.last_context;
+  if (
+    lc?.type === 'negocios_list' &&
+    lc.items.length === 1 &&
+    lc.items[0]?.id &&
+    lc.created_at
+  ) {
+    contextoBot = { negocio_id: lc.items[0].id, timestamp: lc.created_at };
+  }
+
+  const propuesta = await proponerCentroCostosWA({
+    supabase,
+    workspaceId: user.workspace_id,
+    descripcion: args.descripcion ?? null,
+    userId: user.user_id ?? null,
+    contextoBot,
+  });
+
+  if (propuesta.centro && propuesta.confianza >= 0.7) {
+    return { centro: propuesta.centro, origen: propuesta.origen };
+  }
+  return { centro: null, origen: null };
+}
+
 export async function showGastoConfirmation(
   ctx: HandlerContext,
   entity: any,
@@ -168,11 +217,31 @@ export async function showGastoConfirmation(
     msg += `\n⚠️ Supera presupuesto restante.`;
   }
 
+  const entityId = entity.proyecto_id || entity.id;
+  const negIdForCC = tipo === 'negocio' ? entityId : null;
+  const cc = await resolverCentroCostos(ctx, {
+    descripcion: concept,
+    negocio_id_destino: negIdForCC,
+    tipo,
+  });
+
+  // Footer descriptivo del centro si aplica
+  if (cc.centro) {
+    const ccLabel =
+      cc.centro === 'directa_negocio'
+        ? 'Negocio'
+        : cc.centro === 'distribuible_one'
+        ? 'ONE'
+        : cc.centro === 'distribuible_clarity'
+        ? 'Clarity'
+        : 'Mixto';
+    msg += `\n🏷️ Centro: ${ccLabel}`;
+  }
+
   await ctx.sendButtons(msg, [
     { id: 'btn_confirm', title: '✅ Confirmar' },
     { id: 'btn_cancel', title: '❌ Cancelar' },
   ]);
-  const entityId = entity.proyecto_id || entity.id;
   await ctx.updateSession('confirming', {
     intent: 'GASTO', pending_action: 'W01',
     proyecto_id: tipo === 'proyecto' ? entityId : undefined,
@@ -181,6 +250,8 @@ export async function showGastoConfirmation(
     destino_tipo: tipo as any,
     amount, categoria,
     parsed_fields: { ...ctx.parsed.fields, concept },
+    ...(cc.centro ? { centro_costos: cc.centro } : {}),
+    ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
   });
 }
 
@@ -194,6 +265,13 @@ async function autoRegisterGasto(
   tipo: string = 'proyecto',
 ): Promise<void> {
   const entityId = entity.proyecto_id || entity.id;
+  const negIdForCC = tipo === 'negocio' ? entityId : null;
+  const cc = await resolverCentroCostos(ctx, {
+    descripcion: concept,
+    negocio_id_destino: negIdForCC,
+    tipo,
+  });
+
   await ctx.updateSession('confirming', {
     intent: 'GASTO', pending_action: 'W01',
     proyecto_id: tipo === 'proyecto' ? entityId : undefined,
@@ -202,6 +280,8 @@ async function autoRegisterGasto(
     destino_tipo: tipo as any,
     amount, categoria,
     parsed_fields: { ...ctx.parsed.fields, concept },
+    ...(cc.centro ? { centro_costos: cc.centro } : {}),
+    ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
   });
   await executeRegistro(ctx);
 }
@@ -213,7 +293,28 @@ export async function proceedEmpresaGasto(
   concept: string,
   categoria: string,
 ): Promise<void> {
-  const msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}\n📅 Hoy`;
+  const cc = await resolverCentroCostos(ctx, {
+    descripcion: concept,
+    negocio_id_destino: null,
+    tipo: 'empresa',
+  });
+
+  let msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}\n📅 Hoy`;
+
+  if (cc.centro) {
+    const ccLabel =
+      cc.centro === 'directa_negocio'
+        ? 'Negocio'
+        : cc.centro === 'distribuible_one'
+        ? 'ONE'
+        : cc.centro === 'distribuible_clarity'
+        ? 'Clarity'
+        : 'Mixto';
+    msg += `\n🏷️ Centro: ${ccLabel}`;
+  } else {
+    msg += `\n🏷️ Centro: sin asignar (puedes asignarlo después en la app)`;
+  }
+
   await ctx.sendButtons(msg, [
     { id: 'btn_confirm', title: '✅ Confirmar' },
     { id: 'btn_cancel', title: '❌ Cancelar' },
@@ -223,5 +324,7 @@ export async function proceedEmpresaGasto(
     amount, categoria,
     destino_tipo: 'empresa',
     parsed_fields: { concept, mensaje_original: ctx.parsed.fields.mensaje_original },
+    ...(cc.centro ? { centro_costos: cc.centro } : {}),
+    ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
   });
 }

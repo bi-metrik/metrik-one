@@ -78,6 +78,11 @@ export interface SessionContext {
   awaiting_since?: string;
   // Conversational memory (loaded from last completed session of same phone)
   last_context?: LastContext;
+  // Centro de costos (set por handler de gasto, leído por execute)
+  centro_costos?: 'directa_negocio' | 'distribuible_one' | 'distribuible_clarity' | 'mixta';
+  origen_asignacion?: 'auto' | 'sugerido' | 'manual' | 'split';
+  // Para awaiting_selection de centro de costos (top-3 negocios abiertos)
+  cc_negocios_options?: Array<{ id: string; label: string }>;
 }
 
 // --- Conversational Last Context (follow-up memory) ---
