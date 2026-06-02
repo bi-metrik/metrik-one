@@ -415,12 +415,21 @@ export async function getNegocioDetalle(id: string): Promise<{
       // Auto-crear instancias faltantes (negocio creado antes de bloque_configs)
       const faltantes = configIds.filter(cid => !instanciasMap[cid])
       if (faltantes.length > 0) {
-        const nuevas = faltantes.map(cid => ({
-          negocio_id: id,
-          bloque_config_id: cid,
-          estado: 'pendiente',
-          data: {},
-        }))
+        // Bloques de solo lectura (config estado 'visible') no requieren acción
+        // del usuario → nacen completos. El resto, pendiente.
+        const configEstadoById = new Map(
+          ((bloqueConfigs ?? []) as Array<{ id: string; estado?: string }>).map(bc => [bc.id, bc.estado])
+        )
+        const nuevas = faltantes.map(cid => {
+          const esVisible = configEstadoById.get(cid) === 'visible'
+          return {
+            negocio_id: id,
+            bloque_config_id: cid,
+            estado: esVisible ? 'completo' : 'pendiente',
+            data: {},
+            ...(esVisible ? { completado_at: new Date().toISOString() } : {}),
+          }
+        })
         const { data: creadas } = await db(supabase)
           .from('negocio_bloques')
           .insert(nuevas)
@@ -885,18 +894,22 @@ export async function crearNegocio(input: {
   if (primeraEtapa?.id) {
     const { data: bloqueConfigs } = await db(supabase)
       .from('bloque_configs')
-      .select('id, config_extra, bloque_definitions(tipo)')
+      .select('id, estado, config_extra, bloque_definitions(tipo)')
       .eq('etapa_id', primeraEtapa.id)
       .eq('workspace_id', workspaceId)
 
     if (bloqueConfigs && (bloqueConfigs as Record<string, unknown>[]).length > 0) {
       const instancias = (bloqueConfigs as Record<string, unknown>[]).map(bc => {
         const defaults = computeFieldDefaults(bc.config_extra as Record<string, unknown> | null)
+        // Bloques de solo lectura (config estado 'visible') no requieren acción
+        // del usuario → nacen completos. El resto, pendiente.
+        const esVisible = bc.estado === 'visible'
         return {
           negocio_id: negocioData.id,
           bloque_config_id: bc.id as string,
-          estado: 'pendiente',
+          estado: esVisible ? 'completo' : 'pendiente',
           data: Object.keys(defaults).length > 0 ? defaults : {},
+          ...(esVisible ? { completado_at: new Date().toISOString() } : {}),
         }
       })
 
