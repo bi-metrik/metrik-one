@@ -332,7 +332,21 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-06-02 (`soena` — 3 fixes E5 Documentación: gate falso-negativo IA + modal de gate preciso + modal sin cortes)
+**Sesion:** 2026-06-02 (`metrik--valida` — Max — hardening de seguridad Supabase, gatillado por anuncio de grants públicos)
+**Branch:** `main` · commits `123b42c`, `25bbe11` (migrations aplicadas en prod vía MCP)
+
+Auditoría del Security Advisor de ONE (8 ERROR / 96 WARN) y cierre de **2 fugas reales cross-tenant**:
+
+- **`staff_areas`** estaba sin RLS y con grant a `anon` → con la anon key pública (va en el bundle del browser) se leía el equipo (`staff_id`, `area`) de **todos los workspaces** vía `/rest/v1/staff_areas`. Fix: RLS + 4 policies de aislamiento por workspace (join a `staff`, patrón `control_causa`). Migration `20260602000003`. Se accede con cliente authenticated en `equipo-areas.ts`/`cierre-adelantado.ts`/`reapertura.ts`, por eso necesita policies (no solo enable RLS).
+- **7 vistas financieras** (`v_pyl_mes`, `v_mc_negocio`, `v_mc_linea_mes`, `v_proyecto_financiero`, `v_proyecto_rubros_comparativo`, `v_negocios_etapa_vencimiento`, `v_tutorial_adopcion`) eran `SECURITY DEFINER` + grant `anon` → **EBITDA / P&L / MC de todos los workspaces leíbles sin login**. Fix: `security_invoker=on` (la vista respeta el RLS del rol consultante) + revoke `select` a `anon`. Migration `20260602000004`. La app las consume vía `getWorkspace()` filtrando por su propio workspace → sin cambio de comportamiento.
+- **Convención de base de datos** agregada arriba (toda tabla nueva → RLS + policy por workspace + GRANT explícito), anticipando el cambio Supabase de oct-2026.
+- Advisor ONE: **8 ERROR → 0 ERROR**. Backlog no crítico (96 WARN): 88 funciones `SECURITY DEFINER` ejecutables por anon/auth, 3 `search_path`, 3 `extension_in_public`, `public_bucket_listing`, `auth_leaked_password`.
+
+**QA funcional pendiente (Mauricio):** `/numeros` (EBITDA/P&L/MC), detalle proyecto/negocio, `/flujo`, Config → Equipo / cierre adelantado / reapertura. Rollback trivial si algo sale vacío (`security_invoker=off` / `disable RLS`).
+
+---
+
+**Sesion previa:** 2026-06-02 (`soena` — 3 fixes E5 Documentación: gate falso-negativo IA + modal de gate preciso + modal sin cortes)
 **Branch:** `main` (deployado Vercel)
 
 ### Cambios de producto deployados a Vercel prod
@@ -981,6 +995,7 @@ Formato estandar para IDs visibles al usuario. Generados automaticamente por tri
 
 ## Gotchas y convenciones
 
+- **Reordenar etapas (reorg) rompe referencias por `orden` — correr `audit_workflow_refs` despues.** El workflow encoda referencias cross-etapa por `etapa_orden` en `bloque_configs.config_extra` (7 clases: `source_etapa_orden` de herencia readonly, `condition.source_etapa_orden`, `fields[].auto_fill.source_etapa_orden`, `fields[].doc_link.source_etapa_orden`, `cross_check.checks[].source_etapa_orden`, `campos_fuente[].source.etapa_orden`, y `routing` en `etapas_negocio`). Insertar/reordenar etapas cambia `orden` pero **NO** recalcula esas referencias → quedan stale (apuntan a la etapa equivocada, leen datos vacios/incorrectos en silencio). **Despues de cualquier reorg:** `SELECT * FROM audit_workflow_refs('<linea_id>') WHERE NOT ok;` — devuelve cada ref stale + `donde_vive` (el orden correcto). Vacio = sano. Migration `20260602000003`. Nota: `etapas_negocio.numero` es el identificador ESTABLE (no cambia al reordenar); las referencias por orden son la deuda. **Al escribir codigo que lea datos cross-bloque, resolver por NOMBRE de bloque (ignorando heredados con `config_extra.source_etapa_orden`), no por orden de etapa** — patron en `guia-devolucion-actions.ts` y el preview `guia_devolucion` de `negocio-v2-actions.ts`.
 - **Siempre commit + push** despues de completar un task. El usuario espera deploy despues de cada cambio.
 - **Paths con parentesis** en git: quotear para zsh — `git add "src/app/(app)/..."`.
 - **Supabase CLI:** Necesita `SUPABASE_ACCESS_TOKEN=sbp_...` como env var y `2>/dev/null` para type gen.
