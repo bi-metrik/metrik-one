@@ -85,6 +85,24 @@ Subdomain routing: `ana.metrikone.co` → workspace slug `"ana"`.
 
 **Dev local**: `localhost:3000` (marketing), no hay subdomain routing en dev — todo opera en el mismo host.
 
+## Convenciones de base de datos (toda migration nueva)
+
+Cambio Supabase: desde **2026-05-30** los proyectos nuevos ya no exponen `public` al Data API por defecto, y desde **2026-10-30** se aplica también a **tablas nuevas de proyectos existentes** (ONE es existente, ref `yfjqscvvxetobiidnepa`). A partir de ahí, una tabla sin `GRANT` explícito es invisible para PostgREST/supabase-js aunque el RLS esté perfecto. Para que ONE no acumule bugs silenciosos, **toda migration que cree una tabla en `public`** debe incluir:
+
+1. **RLS habilitado siempre** (`alter table <t> enable row level security;`). Sin RLS + grant a `anon` = fuga pública (la anon key va en el bundle del browser).
+2. **Policies de aislamiento por workspace** si la tabla se lee/escribe con el cliente `authenticated` (`getWorkspace`/`createClient`). Patrón canónico vía `current_user_workspace_id()`; si la tabla no tiene `workspace_id` propio, validar por join (ver `staff_areas` / `control_causa`).
+3. **GRANT explícito al rol que la consume:**
+   ```sql
+   -- tabla accedida por el cliente authenticated (browser o SSR):
+   grant select, insert, update, delete on public.<tabla> to authenticated;
+   grant usage, select on all sequences in schema public to authenticated;  -- si usa secuencias
+   -- tabla accedida SOLO server-side (createServiceClient / crons): NO dar grant.
+   --   service_role bypasea RLS y grants; dejar la tabla sin grant a anon/authenticated es lo más seguro.
+   ```
+4. **Nunca** dar `grant ... to anon` salvo que la tabla sea deliberadamente pública sin datos sensibles.
+
+Regla de decisión: ¿quién consume la tabla? `service_role` → RLS on, sin grant, sin policy. `authenticated` → RLS on + policy por workspace + grant a `authenticated`.
+
 ## Estructura del proyecto
 
 ```
