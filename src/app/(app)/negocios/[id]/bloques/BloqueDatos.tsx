@@ -245,12 +245,17 @@ export default function BloqueDatos({
 
   if (modo === 'visible') {
     // Para readonly, los campos sin data persistida deben mostrar el valor
-    // de autoFillDefaults (bloques readonly nunca persisten data propia).
-    const effective: Record<string, unknown> = { ...autoFillDefaults, ...saved }
+    // de autoFillDefaults o, en su defecto, el `default` de config (igual que el
+    // modo editable). Sin esto, un campo con solo `default` (sin auto_fill ni
+    // data guardada) salía vacío en readonly mientras los auto_fill sí aparecían.
+    const fieldDefaults: Record<string, unknown> = Object.fromEntries(
+      fields.filter(f => f.default !== undefined).map(f => [f.slug, f.default])
+    )
+    const effective: Record<string, unknown> = { ...fieldDefaults, ...autoFillDefaults, ...saved }
     return (
       <div className="space-y-2">
         {fields.filter(f => visible(f, effective)).map(f => {
-          const v = saved[f.slug] ?? autoFillDefaults?.[f.slug]
+          const v = saved[f.slug] ?? autoFillDefaults?.[f.slug] ?? f.default
           if (f.tipo === 'documentos_preview') {
             return (
               <div key={f.slug}>
