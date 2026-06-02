@@ -1446,6 +1446,48 @@ export async function cambiarEtapaNegocioConGate(
         }
       }
     }
+
+    // Gate custom genérico: campo:<slug>=<valor> — un campo de un bloque `datos`
+    // de la etapa actual debe tener un valor específico para poder avanzar.
+    // Reusable por config de etapa (etapas_negocio.config_extra.gates), con mensaje
+    // opcional en config_extra.gate_messages[gate]. Ej: "campo:decision_incluir=si".
+    const camposGates = etapaGates.filter((g) => g.startsWith('campo:'))
+    if (camposGates.length > 0) {
+      const { data: bloquesDatosActual } = await db(supabase)
+        .from('negocio_bloques')
+        .select(`
+          data,
+          bloque_configs!inner(
+            etapa_id,
+            bloque_definitions!inner(tipo)
+          )
+        `)
+        .eq('negocio_id', negocioId)
+        .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
+
+      const camposActual: Record<string, unknown> = {}
+      for (const b of ((bloquesDatosActual ?? []) as Record<string, unknown>[])) {
+        const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
+        if (tipo === 'datos' && b.data && typeof b.data === 'object') {
+          Object.assign(camposActual, b.data)
+        }
+      }
+
+      const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+      for (const gate of camposGates) {
+        const rest = gate.slice('campo:'.length)
+        const eqIdx = rest.indexOf('=')
+        if (eqIdx === -1) continue
+        const slug = rest.slice(0, eqIdx)
+        const expected = rest.slice(eqIdx + 1)
+        const actual = camposActual[slug]
+        const actualStr = typeof actual === 'boolean' ? String(actual) : String(actual ?? '')
+        if (actualStr !== expected) {
+          const nombre = gateMessages[gate] ?? `Campo "${slug}" debe ser "${expected}"`
+          return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+        }
+      }
+    }
   }
 
   // Skip etapa cobro cuando saldo es 0 — si el destino tiene stage='cobro' y saldo<=0,

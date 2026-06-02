@@ -7,6 +7,7 @@ export const RAZONES_PERDIDA_NEGOCIO = [
   { value: 'no_responde', label: 'No respondio' },
   { value: 'desistio', label: 'El cliente desistio' },
   { value: 'no_conversion_post_pausa', label: 'No hubo conversion tras 3 pausas' },
+  { value: 'no_incluido_upme', label: 'No incluido en UPME' },
   { value: 'otro', label: 'Otro motivo' },
 ] as const
 
