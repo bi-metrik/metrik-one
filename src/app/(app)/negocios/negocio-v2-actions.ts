@@ -3259,15 +3259,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // Preview para BloqueGuiaDevolucion: resuelve nombre, NIT, ciudad, fecha cita
     // y seccional sugerida desde otros bloques del negocio.
     if (defTipo === 'guia_devolucion') {
-      const rutData = datosOtrasEtapas[5] ?? {}
+      const rutData = datosOtrasEtapas[6] ?? {}   // RUT en Documentación (orden 6)
       const facturaData = datosOtrasEtapas[2] ?? {}
       const razonSocial = (rutData.razon_social as string) ?? ''
       const nit = (rutData.nit as string) ?? ''
       const dv = (rutData.dv as string) ?? ''
       const tipoPersona = (rutData.tipo_persona as string) ?? ''
       const ciudadVenta = (facturaData.ciudad_venta as string) ?? ''
-      // Fecha cita: data del bloque "Fecha cita DIAN" (E10) si existe
-      const fechaCitaData = datosOtrasEtapas[10] ?? {}
+      // Fecha cita: data del bloque "Fecha cita DIAN" (Generación, orden 11) si existe
+      const fechaCitaData = datosOtrasEtapas[11] ?? {}
       const fechaCita = (fechaCitaData.fecha_cita_dian as string) ?? null
       const seccional = mapCiudadASeccional(ciudadVenta, tipoPersona)
       enrichedConfigExtra._guia_preview = {

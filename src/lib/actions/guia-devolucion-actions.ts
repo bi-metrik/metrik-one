@@ -82,8 +82,8 @@ export async function generarVersionGuia(
     const orden = cfg?.etapas_negocio?.orden
     const nombre = (cfg?.nombre ?? '').toLowerCase().trim()
     const bnData = (bn.data ?? {}) as Record<string, unknown>
-    // RUT en E5
-    if (orden === 5 && nombre === 'rut') {
+    // RUT en Documentación (orden 6)
+    if (orden === 6 && nombre === 'rut') {
       const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
       razonSocial = String(campos.razon_social?.value ?? '')
       nit = String(campos.nit?.value ?? '')
@@ -95,8 +95,8 @@ export async function generarVersionGuia(
       const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
       ciudadVenta = String(campos.ciudad_venta?.value ?? '')
     }
-    // Fecha cita DIAN en E10
-    if (orden === 10 && nombre === 'fecha cita dian') {
+    // Fecha cita DIAN en Generación (orden 11)
+    if (orden === 11 && nombre === 'fecha cita dian') {
       fechaCitaIso = (bnData.fecha_cita_dian as string | null) ?? null
     }
   }
