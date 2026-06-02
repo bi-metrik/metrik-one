@@ -1488,17 +1488,64 @@ export async function cambiarEtapaNegocioConGate(
         }
       }
     }
+
+    // Gate custom: sobrepago_conciliado — si el total cobrado supera el precio del
+    // negocio, exige que el sobrepago esté conciliado (campo `accion_extra` con valor).
+    // Si no hay sobrepago, no exige nada (no estorba a negocios con pago normal).
+    if (etapaGates.includes('sobrepago_conciliado')) {
+      const [negPrecioConcRes, cobrosConcRes] = await Promise.all([
+        db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
+        supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
+      ])
+      const negPrecioConc = negPrecioConcRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+      const precioConc = negPrecioConc?.precio_aprobado ?? negPrecioConc?.precio_estimado ?? 0
+      const totalCobradoConc = ((cobrosConcRes.data ?? []) as Array<{ monto: number }>)
+        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+      const extra = totalCobradoConc - precioConc
+
+      if (precioConc > 0 && extra > 0) {
+        const { data: bloquesConc } = await db(supabase)
+          .from('negocio_bloques')
+          .select(`
+            data,
+            bloque_configs!inner(
+              etapa_id,
+              bloque_definitions!inner(tipo)
+            )
+          `)
+          .eq('negocio_id', negocioId)
+          .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
+
+        const camposConc: Record<string, unknown> = {}
+        for (const b of ((bloquesConc ?? []) as Record<string, unknown>[])) {
+          const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
+          if (tipo === 'datos' && b.data && typeof b.data === 'object') {
+            Object.assign(camposConc, b.data)
+          }
+        }
+        const accion = camposConc['accion_extra']
+        if (accion == null || String(accion) === '') {
+          const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+          return {
+            error: 'gate_bloqueado',
+            bloquesPendientes: [{ nombre: `Concilia el sobrepago de ${fmt.format(extra)}`, es_gate: true }],
+          }
+        }
+      }
+    }
   }
 
-  // Skip etapa cobro cuando saldo es 0 — si el destino tiene stage='cobro' y saldo<=0,
-  // avanzar automáticamente a la siguiente etapa en orden.
+  // Skip etapa cobro cuando el pago ya está saldado — si el destino tiene stage='cobro',
+  // avanzar automáticamente a la siguiente etapa en orden. Si la etapa tiene
+  // config_extra.conciliar_sobrepago=true, solo salta con pago EXACTO (saldo===0); un
+  // sobrepago (saldo<0) NO salta y entra a Cobro para conciliar el extra.
   {
     const { data: destStageRaw } = await db(supabase)
       .from('etapas_negocio')
-      .select('stage, orden, linea_id')
+      .select('stage, orden, linea_id, config_extra')
       .eq('id', resolvedEtapaId)
       .single()
-    const destStage = destStageRaw as { stage: string | null; orden: number; linea_id: string } | null
+    const destStage = destStageRaw as { stage: string | null; orden: number; linea_id: string; config_extra: Record<string, unknown> | null } | null
 
     if (destStage?.stage === 'cobro') {
       const [negPrecioRes, cobrosSkipRes] = await Promise.all([
@@ -1509,8 +1556,12 @@ export async function cambiarEtapaNegocioConGate(
       const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
       const totalCobrado = ((cobrosSkipRes.data ?? []) as Array<{ monto: number }>)
         .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+      const saldo = precio - totalCobrado
+      const conciliarSobrepago = destStage.config_extra?.conciliar_sobrepago === true
+      // Con conciliación activa el sobrepago NO salta (entra a conciliar). Sin ella, saldo<=0 salta.
+      const debeSaltar = conciliarSobrepago ? saldo === 0 : saldo <= 0
 
-      if (precio > 0 && precio - totalCobrado <= 0) {
+      if (precio > 0 && debeSaltar) {
         const { data: nextEtapaRaw } = await db(supabase)
           .from('etapas_negocio')
           .select('id')
