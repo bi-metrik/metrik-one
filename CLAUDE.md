@@ -325,6 +325,12 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 **Migration:** `20260602000001_gates_pendientes_etapa.sql` (aplicada en prod vía MCP; smoke test consistencia `puede_avanzar_etapa` ↔ `gates_pendientes_etapa` OK).
 
+### Seguimiento (mismo día) — modal en header + gate condicional cross-etapa
+
+- **Modal de gate quedaba atrapado en el header** (`negocio-detail-client.tsx`, `ModalGateBloqueado`). `fixed inset-0` se anclaba al header sticky (que usa `backdrop-blur` → crea containing block). Fix: `createPortal` a `document.body` → el overlay vuelve a cubrir el viewport real. (El `max-h`/scroll-lock/`select-none` del fix anterior se conservan.)
+- **Gate condicional ignoraba `source_etapa_orden` → bloqueaba un bloque que NO se renderizaba.** El render del bloque (`negocio-detail-client.tsx`) lee `condition.field` desde la etapa `condition.source_etapa_orden` y soporta `value_in`; el gate solo miraba la etapa actual → divergencia (bloqueaba "Certificado bancario" condicionado a `requiere_devolucion_iva`, toggle que vive en Negociación, pero el bloque no aparecía). Fix: helper SQL `condicion_cumplida()` que replica exactamente la lógica del render (cross-etapa + `value_in` normalizado lower/unaccent/trim + `value` escalar exacto); `gates_pendientes_etapa` lo usa. **Migration `20260602000002_gates_condicion_cross_etapa.sql`** (aplicada en prod). Ahora gate ⟺ render usan la misma fuente: si el bloque se ve, el gate lo exige; si no aplica, no estorba.
+- **Dato SOENA:** la condición de "Certificado bancario" tenía `source_etapa_orden: 4` (stale tras el reorg de hoy que movió Negociación 4→5). Corregido a `5` vía SQL. Auditadas las 2 condiciones gate de la línea VE: la otra (`ciudad_venta`, orden 2) estaba correcta.
+
 ---
 
 **Sesion previa:** 2026-06-02 (`soena` — gates computados reusables + fix render WorkflowDiagram + conciliación de sobrepago en Cobro)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import {
   ChevronRight,
@@ -429,7 +430,13 @@ function ModalGateBloqueado({
     }
   }, [onClose])
 
-  return (
+  // El modal solo se renderiza tras un click (gateModal), nunca en SSR.
+  if (typeof document === 'undefined') return null
+
+  // Portal a document.body: el modal se renderiza dentro del header sticky
+  // (que usa backdrop-blur → crea un containing block), lo que atrapaba el
+  // `fixed inset-0` dentro del header. El portal lo saca al viewport real.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain select-none bg-black/40 p-4"
       onClick={onClose}
@@ -508,7 +515,8 @@ function ModalGateBloqueado({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
