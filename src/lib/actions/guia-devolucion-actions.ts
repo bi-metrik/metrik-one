@@ -63,11 +63,14 @@ export async function generarVersionGuia(
   const configExtra = ((bloqueRaw.bloque_configs as { config_extra?: Record<string, unknown> }).config_extra ?? {})
   const templateSlug = (configExtra.template_slug as string) ?? 'soena/guia-devolucion'
 
-  // 2. Resolver datos del RUT (DC5) y Factura (DC1) via lookup negocio_bloques
+  // 2. Resolver datos del RUT, Factura y Fecha cita por IDENTIDAD DE BLOQUE
+  // (nombre), NO por orden de etapa — robusto a reordenamientos del workflow.
+  // Se ignoran los bloques heredados readonly (config_extra.source_etapa_orden),
+  // que no persisten campos propios, para leer siempre del bloque origen.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: bloquesNeg } = await (supabase as any)
     .from('negocio_bloques')
-    .select('data, bloque_configs!inner(nombre, etapas_negocio!inner(orden))')
+    .select('data, bloque_configs!inner(nombre, config_extra)')
     .eq('negocio_id', negocioId)
 
   let razonSocial = ''
@@ -78,25 +81,21 @@ export async function generarVersionGuia(
   let fechaCitaIso: string | null = null
 
   for (const bn of ((bloquesNeg ?? []) as Record<string, unknown>[])) {
-    const cfg = bn.bloque_configs as { nombre?: string; etapas_negocio?: { orden?: number } }
-    const orden = cfg?.etapas_negocio?.orden
+    const cfg = bn.bloque_configs as { nombre?: string; config_extra?: Record<string, unknown> | null }
+    // Saltar heredados readonly (sin campos propios persistidos)
+    if ((cfg?.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
     const nombre = (cfg?.nombre ?? '').toLowerCase().trim()
     const bnData = (bn.data ?? {}) as Record<string, unknown>
-    // RUT en Documentación (orden 6)
-    if (orden === 6 && nombre === 'rut') {
+    if (nombre === 'rut') {
       const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
       razonSocial = String(campos.razon_social?.value ?? '')
       nit = String(campos.nit?.value ?? '')
       dv = String(campos.dv?.value ?? '')
       tipoPersona = String(campos.tipo_persona?.value ?? '')
-    }
-    // Factura de venta en E2
-    if (orden === 2 && nombre === 'factura de venta') {
+    } else if (nombre === 'factura de venta') {
       const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
       ciudadVenta = String(campos.ciudad_venta?.value ?? '')
-    }
-    // Fecha cita DIAN en Generación (orden 11)
-    if (orden === 11 && nombre === 'fecha cita dian') {
+    } else if (nombre === 'fecha cita dian') {
       fechaCitaIso = (bnData.fecha_cita_dian as string | null) ?? null
     }
   }

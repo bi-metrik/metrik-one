@@ -2840,15 +2840,34 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
-  // Si hay un bloque tipo guia_devolucion en la etapa actual, sus datos preview
-  // dependen de RUT (E5), Factura (E2) y Fecha cita DIAN (E10). Pre-cargar.
+  // Si hay un bloque tipo guia_devolucion en la etapa actual, su preview depende
+  // de RUT, Factura y Fecha cita DIAN. Se resuelven por IDENTIDAD DE BLOQUE
+  // (nombre), no por orden de etapa — robusto a reordenamientos. Mapa nombre→data
+  // (campos AI aplanados), ignorando heredados readonly (sin campos propios).
   const tieneGuia = base.bloques.some(b =>
     (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'guia_devolucion'
   )
+  const datosGuiaPorNombre: Record<string, Record<string, unknown>> = {}
   if (tieneGuia) {
-    sourceEtapaOrdens.add(2)
-    sourceEtapaOrdens.add(5)
-    sourceEtapaOrdens.add(10)
+    const { data: bloquesGuia } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(nombre, config_extra)')
+      .eq('negocio_id', id)
+    for (const b of ((bloquesGuia ?? []) as Record<string, unknown>[])) {
+      const cfg = b.bloque_configs as { nombre?: string; config_extra?: Record<string, unknown> | null }
+      if ((cfg?.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
+      const nombre = (cfg?.nombre ?? '').toLowerCase().trim()
+      if (!nombre) continue
+      const data = (b.data ?? {}) as Record<string, unknown>
+      const flat: Record<string, unknown> = { ...data }
+      const campos = data.campos as Record<string, { value?: unknown }> | undefined
+      if (campos) {
+        for (const [slug, c] of Object.entries(campos)) {
+          if (c?.value !== null && c?.value !== undefined) flat[slug] = c.value
+        }
+      }
+      datosGuiaPorNombre[nombre] = flat
+    }
   }
 
   // Tambien recolectar source_etapa_orden de bloques de etapas previas: cuando
@@ -3259,15 +3278,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // Preview para BloqueGuiaDevolucion: resuelve nombre, NIT, ciudad, fecha cita
     // y seccional sugerida desde otros bloques del negocio.
     if (defTipo === 'guia_devolucion') {
-      const rutData = datosOtrasEtapas[6] ?? {}   // RUT en Documentación (orden 6)
-      const facturaData = datosOtrasEtapas[2] ?? {}
+      // Resuelto por nombre de bloque (datosGuiaPorNombre), no por orden de etapa.
+      const rutData = datosGuiaPorNombre['rut'] ?? {}
+      const facturaData = datosGuiaPorNombre['factura de venta'] ?? {}
       const razonSocial = (rutData.razon_social as string) ?? ''
       const nit = (rutData.nit as string) ?? ''
       const dv = (rutData.dv as string) ?? ''
       const tipoPersona = (rutData.tipo_persona as string) ?? ''
       const ciudadVenta = (facturaData.ciudad_venta as string) ?? ''
-      // Fecha cita: data del bloque "Fecha cita DIAN" (Generación, orden 11) si existe
-      const fechaCitaData = datosOtrasEtapas[11] ?? {}
+      const fechaCitaData = datosGuiaPorNombre['fecha cita dian'] ?? {}
       const fechaCita = (fechaCitaData.fecha_cita_dian as string) ?? null
       const seccional = mapCiudadASeccional(ciudadVenta, tipoPersona)
       enrichedConfigExtra._guia_preview = {
