@@ -1,6 +1,10 @@
 import React from 'react';
-import { Document, Page, Text, View, StyleSheet, renderToBuffer, Svg, Line } from '@react-pdf/renderer';
+import { Document, Page, Text, View, StyleSheet, renderToBuffer, Svg, Line, Image } from '@react-pdf/renderer';
 import type { InformaMatch, DualSeveridad, DualTipo } from '@/lib/actions/compliance-dual';
+import { INFORMA_LOGO_PNG } from './informa-logo';
+
+// Azul corporativo Informa Cesce — fondo de contraste para el logo (letras blancas).
+const INFORMA_AZUL = '#003DA5';
 
 // Branding tokens — cerebro/conceptos/identidad-visual-metrik.md
 const C = {
@@ -64,6 +68,13 @@ const s = StyleSheet.create({
   sinHallazgoText: { fontSize: 9, color: C.verdeDark, fontFamily: 'Helvetica-Bold' },
 
   para: { fontSize: 8.5, color: C.gris, marginBottom: 6, lineHeight: 1.5, textAlign: 'justify' },
+
+  // Sello "Powered by Informa" — motor de la consulta. Logo blanco sobre azul de contraste.
+  informaWrap: { flexDirection: 'row', justifyContent: 'flex-start', marginTop: 2, marginBottom: 4 },
+  informaSello: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: INFORMA_AZUL, paddingVertical: 8, paddingHorizontal: 13, borderRadius: 4 },
+  informaPoweredBy: { fontSize: 7, color: C.blanco, textTransform: 'uppercase', letterSpacing: 0.7 },
+  informaDivider: { width: 0.5, height: 22, backgroundColor: 'rgba(255,255,255,0.35)' },
+  informaLogo: { width: 88, height: 36.5 },
 
   disclaimer: { marginTop: 10, padding: 8, backgroundColor: C.crema, borderLeft: `2pt solid ${C.gris}`, borderRadius: 2 },
   disclaimerTitle: { fontSize: 7, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
@@ -206,10 +217,19 @@ function DocumentoSoporte({ data, fechaGen }: { data: SoporteDualData; fechaGen:
         <View style={s.sectionDivider} />
         <Text style={s.para}>
           Esta consulta se realizó contra el universo de listas restrictivas vinculantes y de referencia
-          disponibles a través del proveedor de información Informa Colombia. El resultado refleja el estado
-          de dichas fuentes en la fecha y hora indicadas. Las novedades listadas, cuando existen, identifican
-          coincidencias que deben ser analizadas y resueltas por el oficial de cumplimiento del sujeto obligado.
+          disponibles a través del proveedor de información Informa Colombia, motor de consulta de este
+          documento. El resultado refleja el estado de dichas fuentes en la fecha y hora indicadas. Las
+          novedades listadas, cuando existen, identifican coincidencias que deben ser analizadas y resueltas
+          por el oficial de cumplimiento del sujeto obligado.
         </Text>
+
+        <View style={s.informaWrap}>
+          <View style={s.informaSello}>
+            <Text style={s.informaPoweredBy}>Powered{'\n'}by</Text>
+            <View style={s.informaDivider} />
+            <Image src={INFORMA_LOGO_PNG} style={s.informaLogo} />
+          </View>
+        </View>
 
         <View style={s.disclaimer} wrap={false}>
           <Text style={s.disclaimerTitle}>Naturaleza y responsabilidad</Text>
