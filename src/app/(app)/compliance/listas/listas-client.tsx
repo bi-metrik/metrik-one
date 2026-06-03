@@ -912,6 +912,9 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
               <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Documento
               </th>
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Consultado por
+              </th>
               <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Tipo
               </th>
@@ -962,6 +965,9 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
                         ? `${c.documento_tipo} ${c.documento_numero}`
                         : '—'}
                     </td>
+                    <td className="px-4 py-2.5 text-[#1A1A1A] text-xs">
+                      {c.consultado_por ?? '—'}
+                    </td>
                     <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-[#6B7280]">
                       {c.tipo === 'puntual' ? 'Puntual' : 'Cargue'}
                     </td>
@@ -992,7 +998,7 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
                   {isOpen && (
                     <tr className="border-b border-[#E5E7EB] bg-[#F5F4F2]/40">
                       <td />
-                      <td colSpan={7} className="px-4 py-4">
+                      <td colSpan={8} className="px-4 py-4">
                         {c.error_mensaje && (
                           <div className="mb-3 text-xs text-[#B91C1C]">
                             Error: {c.error_mensaje}

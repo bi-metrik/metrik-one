@@ -1124,6 +1124,9 @@ export function HistorialTable({
               <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Documento
               </th>
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Consultado por
+              </th>
               {mostrarNegocio && (
                 <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                   Negocio
@@ -1161,6 +1164,7 @@ export function HistorialTable({
                     ? `${c.documento_tipo} ${c.documento_numero}`
                     : '—'}
                 </td>
+                <td className="px-4 py-2.5 text-[#1A1A1A] text-xs">{c.consultado_por ?? '—'}</td>
                 {mostrarNegocio && (
                   <td className="px-4 py-2.5 text-xs">
                     {c.negocio_codigo ? (

@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { resolverNombresUsuarios } from './_usuarios';
 import { getWorkspace } from './get-workspace';
 import * as XLSX from 'xlsx';
 
@@ -53,6 +54,7 @@ export type ConsultaHistorialItem = {
   matches: ValidaMatch[] | null;
   created_at: string;
   created_by: string | null;
+  consultado_por: string | null;
   negocio_id: string | null;
   negocio_codigo: string | null;
   negocio_nombre: string | null;
@@ -504,6 +506,9 @@ export async function listarConsultasValida(
     }
   }
 
+  // Resolver usuario que realizo cada consulta (trazabilidad)
+  const userMap = await resolverNombresUsuarios(svc, (data ?? []).map((r: { created_by: string | null }) => r.created_by));
+
   const items: ConsultaHistorialItem[] = (data ?? []).map((r: Record<string, unknown>) => {
     const negId = r.negocio_id as string | null;
     const neg = negId ? negocioMap.get(negId) : null;
@@ -521,6 +526,7 @@ export async function listarConsultasValida(
       matches: r.matches as ValidaMatch[] | null,
       created_at: r.created_at as string,
       created_by: r.created_by as string | null,
+      consultado_por: r.created_by ? (userMap.get(r.created_by as string) ?? null) : null,
       negocio_id: negId,
       negocio_codigo: neg?.codigo ?? null,
       negocio_nombre: neg?.nombre ?? null,

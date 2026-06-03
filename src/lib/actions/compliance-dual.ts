@@ -2,6 +2,7 @@
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
+import { resolverNombresUsuarios } from './_usuarios';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 
@@ -407,6 +408,7 @@ export type DualHistorialItem = {
   lote_id: string | null;
   error_mensaje: string | null;
   created_at: string;
+  consultado_por: string | null;
 };
 
 export type DualHistorialFiltros = {
@@ -520,7 +522,7 @@ export async function listarHistorialDual(
   let q: any = svc
     .from('consultas_listas_dual')
     .select(
-      'id, dual_id, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, titulo_lote, lote_id, error_mensaje, created_at',
+      'id, dual_id, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, titulo_lote, lote_id, error_mensaje, created_at, created_by',
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
@@ -535,7 +537,14 @@ export async function listarHistorialDual(
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
 
-  return { ok: true, data: (data ?? []) as DualHistorialItem[] };
+  // Resolver usuario que realizo cada consulta (trazabilidad — mostrar SIEMPRE quien consulto)
+  const userMap = await resolverNombresUsuarios(svc, (data ?? []).map((r: { created_by: string | null }) => r.created_by));
+  const items: DualHistorialItem[] = (data ?? []).map((r: Record<string, unknown>) => ({
+    ...(r as unknown as DualHistorialItem),
+    consultado_por: r.created_by ? (userMap.get(r.created_by as string) ?? null) : null,
+  }));
+
+  return { ok: true, data: items };
 }
 
 // ─── Carga masiva fila por fila: preparacion local del XLSX ───────────────
