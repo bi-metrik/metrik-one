@@ -121,6 +121,18 @@ export async function extractFieldsFromDocument(
   const base64 = buffer.toString('base64')
   const systemPrompt = buildPrompt(campos)
 
+  // Forzar JSON estructurado válido vía responseSchema (evita que Gemini devuelva
+  // JSON malformado — comas faltantes, comillas sin escapar, etc. que rompían el parser).
+  const responseSchema = {
+    type: 'OBJECT',
+    properties: Object.fromEntries(campos.map(c => [c.slug, {
+      type: 'OBJECT',
+      properties: { value: { type: 'STRING' }, confidence: { type: 'NUMBER' } },
+      required: ['value', 'confidence'],
+    }])),
+    required: campos.map(c => c.slug),
+  }
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
   let debugRaw = ''
@@ -142,6 +154,7 @@ export async function extractFieldsFromDocument(
           temperature: 0.1,
           maxOutputTokens: 2048,
           responseMimeType: 'application/json',
+          responseSchema,
         },
       }),
     })
