@@ -2,13 +2,17 @@ import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { landingForWorkspace } from '@/lib/auth/landing'
 
-/** Landing page based on role permissions */
-function getLandingForRole(role: string): string {
-  if (role === 'contador') return '/revision'
-  const rolesWithNumbers = ['owner', 'admin', 'supervisor', 'read_only']
-  if (rolesWithNumbers.includes(role)) return '/numeros'
-  return '/pipeline'
+/** Landing consciente de modulos del workspace destino (fuente unica de verdad) */
+async function getLandingForInvite(role: string, workspaceId: string): Promise<string> {
+  const svc = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ws } = await (svc.from('workspaces') as any)
+    .select('modules')
+    .eq('id', workspaceId)
+    .single()
+  return landingForWorkspace(role, (ws?.modules as Record<string, boolean> | null) ?? null)
 }
 
 /**
@@ -135,7 +139,7 @@ export default async function AcceptInvitePage({
         .eq('is_active', true)
         .ilike('full_name', user.user_metadata?.full_name || user.email?.split('@')[0] || '')
 
-      redirect(getLandingForRole(invitation.role))
+      redirect(await getLandingForInvite(invitation.role, invitation.workspace_id))
     }
 
     // Different workspace
@@ -208,5 +212,5 @@ export default async function AcceptInvitePage({
     .update({ status: 'accepted', accepted_at: new Date().toISOString() })
     .eq('id', invitation.id)
 
-  redirect(getLandingForRole(invitation.role))
+  redirect(await getLandingForInvite(invitation.role, invitation.workspace_id))
 }

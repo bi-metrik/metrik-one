@@ -112,8 +112,9 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   { href: '/compliance/segmentacion', label: 'Segmentación SARLAFT', icon: Sliders, roles: ['owner', 'admin', 'supervisor'] },
   // Validacion pura solo cuando NO esta el modo dual_informa (UX transparente)
   { href: '/compliance/validacion', label: 'Validación', icon: UserCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_dual_informa', value: false } },
-  // UX transparente — solo cuando el flag esta activo (alma-afi)
-  { href: '/compliance/listas', label: 'Listas Restrictivas', icon: ListChecks, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  // UX transparente — solo cuando el flag esta activo (alma-afi). Incluye operator:
+  // en ws compliance-only la consulta de listas es funcion nuclear del equipo.
+  { href: '/compliance/listas', label: 'Listas Restrictivas', icon: ListChecks, roles: ['owner', 'admin', 'supervisor', 'read_only', 'operator'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Comparativa interna MeTRIK — solo workspace metrik
   { href: '/compliance/comparativa-informa', label: 'Comparativa Informa', icon: Scale, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_audit', value: true } },
 ]

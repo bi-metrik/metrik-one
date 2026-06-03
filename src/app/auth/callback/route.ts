@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import type { User } from '@supabase/supabase-js'
+import { landingForWorkspace } from '@/lib/auth/landing'
 
 // Slugs reservados — mismo set que middleware.ts
 const RESERVED_SLUGS = ['www', 'api', 'admin', 'app', 'test', 'demo', 'staging', 'mail', 'ftp']
@@ -82,17 +83,17 @@ export async function GET(request: Request) {
 
       const { data: ws } = await supabase
         .from('workspaces')
-        .select('slug')
+        .select('slug, modules')
         .eq('id', profile.workspace_id)
         .single()
 
       if (ws?.slug) {
         let safePath = redirectTo
         if (!searchParams.get('redirectTo') && !searchParams.get('next')) {
-          const rolesWithNumbers = ['owner', 'admin', 'read_only']
-          safePath = rolesWithNumbers.includes(profile.role || '') ? '/numeros' : '/pipeline'
+          // Fuente unica de verdad (compartida con middleware y accept-invite)
+          safePath = landingForWorkspace(profile.role || undefined, (ws.modules as Record<string, boolean> | null) ?? null)
         }
-        if (!safePath.startsWith('/')) safePath = '/pipeline'
+        if (!safePath.startsWith('/')) safePath = landingForWorkspace(profile.role || undefined, (ws.modules as Record<string, boolean> | null) ?? null)
         if (isLocalEnv) return NextResponse.redirect(`${origin}${safePath}`)
         return NextResponse.redirect(`https://${ws.slug}.${baseDomain}${safePath}`)
       }

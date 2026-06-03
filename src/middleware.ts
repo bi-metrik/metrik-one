@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
+import { landingForWorkspace } from '@/lib/auth/landing'
 
 // Base domain — dev: localhost, prod: metrikone.co
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
@@ -33,34 +34,18 @@ function extractSlug(hostname: string): string | null {
 }
 
 /** Role-aware landing: check permissions + workspace config */
-const ROLES_WITH_NUMBERS = ['owner', 'admin', 'supervisor', 'read_only']
-// Contador: acceso exclusivo a /revision (post-refactor 2026-04-27, antes /causacion)
-const CONTADOR_ONLY_ROLE = 'contador'
-
 async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string, workspaceId?: string): Promise<string> {
-  if (role === CONTADOR_ONLY_ROLE) return '/revision'
-
-  // Check workspace modules — compliance-only skips business landing
+  let modules: Record<string, boolean> | null = null
   if (workspaceId) {
     const { data: ws } = await supabase
       .from('workspaces')
       .select('modules')
       .eq('id', workspaceId)
       .single()
-    const modules = (ws?.modules as Record<string, boolean> | null) ?? { business: true }
-    if (!modules.business) {
-      if (modules.compliance) return '/riesgos'
-      return '/mi-negocio'
-    }
+    modules = (ws?.modules as Record<string, boolean> | null) ?? null
   }
-
-  if (role && !ROLES_WITH_NUMBERS.includes(role)) {
-    return '/negocios'
-  }
-  // Roles con acceso a /numeros aterrizan ahi siempre — la pagina maneja el empty
-  // state cuando no hay config_metas. Antes redirigia a /mi-negocio si no habia
-  // metas, lo que confundia el flow de switch de workspace de platform admin.
-  return '/numeros'
+  // Fuente unica de verdad (compartida con callback de auth y accept-invite)
+  return landingForWorkspace(role, modules)
 }
 
 export async function middleware(request: NextRequest) {
