@@ -332,6 +332,34 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-03 (`alma` — Max — compliance/listas: sidebar, doc de soporte PDF, landing unificado, trazabilidad por usuario)
+**Branch:** `main` · commits `0bc8242`, `70e8ac0`, `f545bac`, `14970ef`, `adbccb9`, `5b910d7` (deployados Vercel)
+
+- **Sidebar — grupo "Validación"** (`app-shell.tsx`): Riesgos/Controles/Matriz quedan en "Cumplimiento"; Segmentación + Validación + Listas + Comparativa pasan a grupo propio "Validación" (`VALIDACION_NAV_ITEMS`). Mismo gating por flags y rol; incluido en `allMobileItems`.
+- **Documento de soporte de consultas de listas** (`src/lib/compliance/pdf-soporte-dual.tsx` + route `/api/compliance/listas/soporte/[consulta_id]`): PDF generado desde `consultas_listas_dual` sin llamar a Informa/Valida. Branding MeTRIK + sello "Powered by Informa" (logo data URI en `informa-logo.ts`, azul `#003DA5`). Botón en resultado puntual + columna en historial. Guards auth/ws/módulo/rol + filtro `workspace_id`.
+- **Landing unificado** (`src/lib/auth/landing.ts` — `landingForWorkspace(role, modules)`): fuente única usada por `middleware.ts`, `auth/callback/route.ts` y `accept-invite/page.tsx`. Elimina el drift que mandaba roles no-numbers a `/pipeline` (legacy → 404). compliance+dual → `/compliance/listas`; business → `/numeros`/`/negocios`. `operator` agregado al nav de Listas (gateado por flag dual).
+- **Trazabilidad "Consultado por"** (`_usuarios.ts` → `resolverNombresUsuarios`): historiales dual (`compliance-dual.ts`) y Valida (`valida-consultas.ts`) resuelven `created_by` → nombre y lo muestran. `consultado_por` añadido a `DualHistorialItem` y `ConsultaHistorialItem`.
+- **Fix `VALIDA_API_BASE`** (`compliance-dual.ts`): `||` en vez de `??` para que env vacía (`""`, como la inyecta Vercel) caiga al default en vez de quedar URL relativa rota.
+
+**Gotcha / aprendizaje:** el hardening de Supabase (mover extensiones de `public` a `extensions`) **rompe funciones `SECURITY DEFINER` con `search_path` fijo que llaman `pgcrypto` sin schema-qualify**. Pasó en metrik-valida (`authenticate_api_key` → `digest()` no resuelto → `invalid_api_key` global, consulta de listas caída). **Auditar el mismo patrón en ONE.** Fix: qualify `extensions.digest` + `extensions` en search_path.
+
+**Sesion previa:** 2026-06-03 (`soena` — Max — fixes de workflow/propuesta/extracción + función guardián de refs)
+**Branch:** `main` · commits deployados Vercel
+
+### Cambios de producto (genéricos, deployados)
+- **`audit_workflow_refs(linea_id)`** (migración `20260602000003_audit_workflow_refs`): función SQL genérica que valida las 7 clases de referencia por orden de etapa (readonly/condition/auto_fill/doc_link/cross_check/campos_fuente/routing) contra la realidad. **Correr tras cualquier reorg de etapas.** Ver gotcha en "Gotchas y convenciones".
+- **Bloques `datos` de solo lectura (config estado='visible') nacen `completo`** (`6a3d93f`). No requieren acción del usuario → antes quedaban pendientes/atascados.
+- **BloqueDatos modo visible cae a `field.default`** cuando no hay data ni auto_fill (`03fe141`).
+- **Gate condicional honra `source_etapa_orden` + `value_in`** vía helper SQL `condicion_cumplida()` (`gates_pendientes_etapa` lo usa) — gate ⟺ render usan la misma fuente (migración `20260602000002`). `gates_pendientes_etapa`/`puede_avanzar_etapa` lista solo gates realmente pendientes (`20260602000001`).
+- **Modal de gate vía `createPortal`** a `document.body` (no quedaba atrapado en el header sticky) + scroll-lock + Escape (`913617f`).
+- **Auto-extracción AI con reintento** + flag `_extraction_status` + banner "reintentar/manual"; **`responseSchema` fuerza JSON válido en Gemini** (`4484c51`, probado contra API real) — elimina "JSON inválido de Gemini".
+- **Documentos/formularios suben a la carpeta canónica del negocio (`carpeta_url`)**, no a una carpeta huérfana por `codigo` (`86147f0`). Scripts `cleanup-orphan-drive-folders.ts` + `dedup-and-cleanup-drive.ts`.
+- **Auto-init de `propuesta_economica` al ENTRAR a su etapa** (no solo en crearNegocio) + robusto a instancias existentes sin `precio_base_con_iva` (`b307c97`, `235e8dd`). Necesario cuando el bloque propuesta no está en la 1ª etapa.
+- **Guía de devolución resuelve RUT/Factura/Fecha-cita por NOMBRE de bloque** (no por orden) (`c14ed76`).
+- **Convención:** al leer datos cross-bloque en código, resolver por **nombre de bloque** (ignorando heredados con `source_etapa_orden`), no por orden de etapa.
+
+---
+
 **Sesion:** 2026-06-02 (`metrik--valida` — Max — hardening de seguridad Supabase, gatillado por anuncio de grants públicos)
 **Branch:** `main` · commits `123b42c`, `25bbe11` (migrations aplicadas en prod vía MCP)
 
