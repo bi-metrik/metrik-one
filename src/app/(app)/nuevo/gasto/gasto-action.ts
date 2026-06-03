@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import type { Database } from '@/types/database'
 import {
   proponerCentroCostos,
   registrarMapeoAutomatico,
@@ -139,7 +140,7 @@ export async function createGasto(input: {
     }
   }
 
-  const insertData: Record<string, unknown> = {
+  const insertData: Database['public']['Tables']['gastos']['Insert'] = {
     workspace_id: workspaceId,
     fecha: input.fecha || todayBogotaISO(),
     monto: input.monto,
@@ -155,17 +156,15 @@ export async function createGasto(input: {
     soporte_url: input.soporte_url ?? null,
     canal_registro: 'app',
     created_by: userId,
-    ...(negocioId ? { negocio_id: negocioId } : {}),
-    ...(centroCostosFinal ? { centro_costos: centroCostosFinal } : {}),
-    ...(splitJsonFinal ? { split_json: splitJsonFinal } : {}),
-    ...(origenFinal ? { origen_asignacion: origenFinal } : {}),
+    negocio_id: negocioId,
+    centro_costos: centroCostosFinal,
+    split_json: splitJsonFinal,
+    origen_asignacion: origenFinal,
   }
 
-  // Cast: centro_costos, split_json y origen_asignacion son columnas nuevas
-  // (migration 20260530000001) que aún no están en database.ts hasta regenerar.
   const { data: gastoInserted, error: dbError } = await supabase
     .from('gastos')
-    .insert(insertData as never)
+    .insert(insertData)
     .select('id')
     .single()
 

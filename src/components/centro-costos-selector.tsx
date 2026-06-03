@@ -17,7 +17,7 @@
 // Tokens MeTRIK canónicos (verde #10B981, gris #6B7280, borde #E5E7EB).
 // ============================================================
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Briefcase, Building2, Layers, Sparkles, X } from 'lucide-react'
 import type { CentroCostos, OrigenAsignacion } from '@/lib/actions/centro-costos-asignar'
 
@@ -79,32 +79,17 @@ export default function CentroCostosSelector({
   sugerencia,
 }: Props) {
   const [showMixtaModal, setShowMixtaModal] = useState(false)
-  const [usadaSugerencia, setUsadaSugerencia] = useState(false)
 
-  // Auto-aplicar sugerencia ≥0.7 si no hay valor previo
-  useEffect(() => {
-    if (
-      value === null &&
-      sugerencia &&
-      sugerencia.confianza >= 0.7
-    ) {
-      onChange({
-        centro: sugerencia.centro,
-        negocio_id: sugerencia.sugerido_negocio_id ?? null,
-      })
-      setUsadaSugerencia(true)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sugerencia])
-
+  // El form (nuevo-gasto-form) pre-aplica la sugerencia ≥0.7 al setear `value`.
+  // El badge se muestra cuando el valor actual coincide con la sugerencia vigente.
   const centroActual = value?.centro ?? null
   const mostrandoSugerenciaBadge =
-    usadaSugerencia &&
-    sugerencia &&
+    sugerencia !== undefined &&
+    sugerencia !== null &&
+    sugerencia.confianza >= 0.7 &&
     value?.centro === sugerencia.centro
 
   const handleSelectPrimaria = (centro: CentroCostos) => {
-    setUsadaSugerencia(false)
     if (centro === 'directa_negocio') {
       // Mantener negocio sugerido si coincide, sino limpiar
       const negId =
