@@ -619,6 +619,337 @@ export type Database = {
         }
         Relationships: []
       }
+      cert_documentos: {
+        Row: {
+          cert_lote_id: string
+          created_at: string
+          id: string
+          mime_type: string | null
+          nombre: string | null
+          public_url: string | null
+          storage_path: string
+          tipo: string
+          workspace_id: string
+        }
+        Insert: {
+          cert_lote_id: string
+          created_at?: string
+          id?: string
+          mime_type?: string | null
+          nombre?: string | null
+          public_url?: string | null
+          storage_path: string
+          tipo: string
+          workspace_id: string
+        }
+        Update: {
+          cert_lote_id?: string
+          created_at?: string
+          id?: string
+          mime_type?: string | null
+          nombre?: string | null
+          public_url?: string | null
+          storage_path?: string
+          tipo?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cert_documentos_cert_lote_id_fkey"
+            columns: ["cert_lote_id"]
+            isOneToOne: false
+            referencedRelation: "cert_lotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cert_documentos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cert_lotes: {
+        Row: {
+          cert_producto_id: string | null
+          certificado_para: string | null
+          certificado_por: string | null
+          created_at: string
+          created_by: string | null
+          cumple: boolean
+          enviado_aprobacion_at: string | null
+          estado: string
+          fecha_certificacion: string | null
+          fecha_vencimiento: string | null
+          id: string
+          material_calibre: string | null
+          material_norma: string | null
+          material_perfil: string | null
+          negocio_id: string
+          numero_contrato: string | null
+          numero_lote: string
+          opcion_material: string | null
+          orientacion_instalacion: string | null
+          publicado_at: string | null
+          publicado_por: string | null
+          ratio_critico: number | null
+          ratio_descripcion: string | null
+          serie_desde: number | null
+          serie_hasta: number | null
+          short_code: string | null
+          sku: string
+          ubicacion: string | null
+          updated_at: string
+          vigencia_meses: number
+          workspace_id: string
+        }
+        Insert: {
+          cert_producto_id?: string | null
+          certificado_para?: string | null
+          certificado_por?: string | null
+          created_at?: string
+          created_by?: string | null
+          cumple?: boolean
+          enviado_aprobacion_at?: string | null
+          estado?: string
+          fecha_certificacion?: string | null
+          fecha_vencimiento?: string | null
+          id?: string
+          material_calibre?: string | null
+          material_norma?: string | null
+          material_perfil?: string | null
+          negocio_id: string
+          numero_contrato?: string | null
+          numero_lote: string
+          opcion_material?: string | null
+          orientacion_instalacion?: string | null
+          publicado_at?: string | null
+          publicado_por?: string | null
+          ratio_critico?: number | null
+          ratio_descripcion?: string | null
+          serie_desde?: number | null
+          serie_hasta?: number | null
+          short_code?: string | null
+          sku: string
+          ubicacion?: string | null
+          updated_at?: string
+          vigencia_meses?: number
+          workspace_id: string
+        }
+        Update: {
+          cert_producto_id?: string | null
+          certificado_para?: string | null
+          certificado_por?: string | null
+          created_at?: string
+          created_by?: string | null
+          cumple?: boolean
+          enviado_aprobacion_at?: string | null
+          estado?: string
+          fecha_certificacion?: string | null
+          fecha_vencimiento?: string | null
+          id?: string
+          material_calibre?: string | null
+          material_norma?: string | null
+          material_perfil?: string | null
+          negocio_id?: string
+          numero_contrato?: string | null
+          numero_lote?: string
+          opcion_material?: string | null
+          orientacion_instalacion?: string | null
+          publicado_at?: string | null
+          publicado_por?: string | null
+          ratio_critico?: number | null
+          ratio_descripcion?: string | null
+          serie_desde?: number | null
+          serie_hasta?: number | null
+          short_code?: string | null
+          sku?: string
+          ubicacion?: string | null
+          updated_at?: string
+          vigencia_meses?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cert_lotes_cert_producto_id_fkey"
+            columns: ["cert_producto_id"]
+            isOneToOne: false
+            referencedRelation: "cert_productos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cert_lotes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cert_lotes_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cert_lotes_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "cert_lotes_publicado_por_fkey"
+            columns: ["publicado_por"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cert_lotes_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cert_productos: {
+        Row: {
+          altura_mm: number | null
+          carga_lb: number | null
+          carga_n: number | null
+          created_at: string
+          criterio: string | null
+          databook_nombre: string | null
+          databook_path: string | null
+          factor_seguridad: number | null
+          ficha: Json | null
+          id: string
+          nombre: string | null
+          norma: string
+          producto_tipo: string | null
+          rango_max_mm: number | null
+          rango_min_mm: number | null
+          serie: string | null
+          sku: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          altura_mm?: number | null
+          carga_lb?: number | null
+          carga_n?: number | null
+          created_at?: string
+          criterio?: string | null
+          databook_nombre?: string | null
+          databook_path?: string | null
+          factor_seguridad?: number | null
+          ficha?: Json | null
+          id?: string
+          nombre?: string | null
+          norma?: string
+          producto_tipo?: string | null
+          rango_max_mm?: number | null
+          rango_min_mm?: number | null
+          serie?: string | null
+          sku: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          altura_mm?: number | null
+          carga_lb?: number | null
+          carga_n?: number | null
+          created_at?: string
+          criterio?: string | null
+          databook_nombre?: string | null
+          databook_path?: string | null
+          factor_seguridad?: number | null
+          ficha?: Json | null
+          id?: string
+          nombre?: string | null
+          norma?: string
+          producto_tipo?: string | null
+          rango_max_mm?: number | null
+          rango_min_mm?: number | null
+          serie?: string | null
+          sku?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cert_productos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cert_recertificaciones: {
+        Row: {
+          cert_lote_id: string
+          certificado_por: string | null
+          created_at: string
+          created_by: string | null
+          fecha_certificacion: string
+          fecha_vencimiento: string
+          id: string
+          notas: string | null
+          ratio_critico: number | null
+          workspace_id: string
+        }
+        Insert: {
+          cert_lote_id: string
+          certificado_por?: string | null
+          created_at?: string
+          created_by?: string | null
+          fecha_certificacion: string
+          fecha_vencimiento: string
+          id?: string
+          notas?: string | null
+          ratio_critico?: number | null
+          workspace_id: string
+        }
+        Update: {
+          cert_lote_id?: string
+          certificado_por?: string | null
+          created_at?: string
+          created_by?: string | null
+          fecha_certificacion?: string
+          fecha_vencimiento?: string
+          id?: string
+          notas?: string | null
+          ratio_critico?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cert_recertificaciones_cert_lote_id_fkey"
+            columns: ["cert_lote_id"]
+            isOneToOne: false
+            referencedRelation: "cert_lotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cert_recertificaciones_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cert_recertificaciones_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           address: string | null
@@ -907,6 +1238,78 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "config_metas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      consultas_listas_dual: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          documento_numero: string | null
+          documento_tipo: string | null
+          dual_id: string | null
+          error_mensaje: string | null
+          id: string
+          lote_id: string | null
+          matches: Json | null
+          nombre_consultado: string | null
+          severidad: string
+          tipo: string
+          tipo_persona: string
+          titulo_lote: string | null
+          total_matches: number
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          documento_numero?: string | null
+          documento_tipo?: string | null
+          dual_id?: string | null
+          error_mensaje?: string | null
+          id?: string
+          lote_id?: string | null
+          matches?: Json | null
+          nombre_consultado?: string | null
+          severidad: string
+          tipo: string
+          tipo_persona: string
+          titulo_lote?: string | null
+          total_matches?: number
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          documento_numero?: string | null
+          documento_tipo?: string | null
+          dual_id?: string | null
+          error_mensaje?: string | null
+          id?: string
+          lote_id?: string | null
+          matches?: Json | null
+          nombre_consultado?: string | null
+          severidad?: string
+          tipo?: string
+          tipo_persona?: string
+          titulo_lote?: string | null
+          total_matches?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consultas_listas_dual_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultas_listas_dual_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -1505,6 +1908,59 @@ export type Database = {
           },
         ]
       }
+      drive_health_log: {
+        Row: {
+          checked_at: string
+          drive_folder_id: string | null
+          error_code: string | null
+          error_message: string | null
+          folder_accessible: boolean
+          folder_name: string | null
+          id: string
+          latency_ms: number | null
+          oauth_mode: string
+          shared_drive_id: string | null
+          token_refresh_ok: boolean
+          workspace_id: string
+        }
+        Insert: {
+          checked_at?: string
+          drive_folder_id?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          folder_accessible: boolean
+          folder_name?: string | null
+          id?: string
+          latency_ms?: number | null
+          oauth_mode: string
+          shared_drive_id?: string | null
+          token_refresh_ok: boolean
+          workspace_id: string
+        }
+        Update: {
+          checked_at?: string
+          drive_folder_id?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          folder_accessible?: boolean
+          folder_name?: string | null
+          id?: string
+          latency_ms?: number | null
+          oauth_mode?: string
+          shared_drive_id?: string | null
+          token_refresh_ok?: boolean
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drive_health_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       empresas: {
         Row: {
           actividad_ciiu: string | null
@@ -1792,6 +2248,7 @@ export type Database = {
           is_active: boolean
           linea_id: string
           nombre: string
+          numero: number
           orden: number
           stage: string
         }
@@ -1802,6 +2259,7 @@ export type Database = {
           is_active?: boolean
           linea_id: string
           nombre: string
+          numero: number
           orden?: number
           stage: string
         }
@@ -1812,6 +2270,7 @@ export type Database = {
           is_active?: boolean
           linea_id?: string
           nombre?: string
+          numero?: number
           orden?: number
           stage?: string
         }
@@ -2210,6 +2669,7 @@ export type Database = {
         Row: {
           canal_registro: string | null
           categoria: string
+          centro_costos: string | null
           clasificacion_costo: string
           created_at: string | null
           created_by: string | null
@@ -2226,6 +2686,7 @@ export type Database = {
           mensaje_original: string | null
           monto: number
           negocio_id: string | null
+          origen_asignacion: string | null
           proyecto_id: string | null
           retencion: number | null
           revisado: boolean
@@ -2234,6 +2695,7 @@ export type Database = {
           rubro_id: string | null
           soporte_pendiente: boolean | null
           soporte_url: string | null
+          split_json: Json | null
           tercero_nit: string | null
           tipo: string | null
           workspace_id: string
@@ -2241,6 +2703,7 @@ export type Database = {
         Insert: {
           canal_registro?: string | null
           categoria: string
+          centro_costos?: string | null
           clasificacion_costo?: string
           created_at?: string | null
           created_by?: string | null
@@ -2257,6 +2720,7 @@ export type Database = {
           mensaje_original?: string | null
           monto: number
           negocio_id?: string | null
+          origen_asignacion?: string | null
           proyecto_id?: string | null
           retencion?: number | null
           revisado?: boolean
@@ -2265,6 +2729,7 @@ export type Database = {
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
+          split_json?: Json | null
           tercero_nit?: string | null
           tipo?: string | null
           workspace_id: string
@@ -2272,6 +2737,7 @@ export type Database = {
         Update: {
           canal_registro?: string | null
           categoria?: string
+          centro_costos?: string | null
           clasificacion_costo?: string
           created_at?: string | null
           created_by?: string | null
@@ -2288,6 +2754,7 @@ export type Database = {
           mensaje_original?: string | null
           monto?: number
           negocio_id?: string | null
+          origen_asignacion?: string | null
           proyecto_id?: string | null
           retencion?: number | null
           revisado?: boolean
@@ -2296,6 +2763,7 @@ export type Database = {
           rubro_id?: string | null
           soporte_pendiente?: boolean | null
           soporte_url?: string | null
+          split_json?: Json | null
           tercero_nit?: string | null
           tipo?: string | null
           workspace_id?: string
@@ -2488,6 +2956,61 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "gastos_fijos_config_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gastos_recurrentes_map: {
+        Row: {
+          centro_costos: string
+          confianza: number
+          created_at: string
+          created_by: string
+          id: string
+          negocio_id_default: string | null
+          proveedor_match: string
+          workspace_id: string
+        }
+        Insert: {
+          centro_costos: string
+          confianza?: number
+          created_at?: string
+          created_by?: string
+          id?: string
+          negocio_id_default?: string | null
+          proveedor_match: string
+          workspace_id: string
+        }
+        Update: {
+          centro_costos?: string
+          confianza?: number
+          created_at?: string
+          created_by?: string
+          id?: string
+          negocio_id_default?: string | null
+          proveedor_match?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gastos_recurrentes_map_negocio_id_default_fkey"
+            columns: ["negocio_id_default"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gastos_recurrentes_map_negocio_id_default_fkey"
+            columns: ["negocio_id_default"]
+            isOneToOne: false
+            referencedRelation: "v_mc_negocio"
+            referencedColumns: ["negocio_id"]
+          },
+          {
+            foreignKeyName: "gastos_recurrentes_map_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -2883,6 +3406,7 @@ export type Database = {
           id: string
           is_active: boolean
           nombre: string
+          numero: number
           tipo: string
           workspace_id: string | null
         }
@@ -2893,6 +3417,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           nombre: string
+          numero: number
           tipo?: string
           workspace_id?: string | null
         }
@@ -2903,6 +3428,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           nombre?: string
+          numero?: number
           tipo?: string
           workspace_id?: string | null
         }
@@ -5017,6 +5543,7 @@ export type Database = {
           costo_estimado: number | null
           created_at: string | null
           id: string
+          linea_id: string | null
           nombre: string
           precio_estandar: number | null
           rubros_template: Json | null
@@ -5030,6 +5557,7 @@ export type Database = {
           costo_estimado?: number | null
           created_at?: string | null
           id?: string
+          linea_id?: string | null
           nombre: string
           precio_estandar?: number | null
           rubros_template?: Json | null
@@ -5043,6 +5571,7 @@ export type Database = {
           costo_estimado?: number | null
           created_at?: string | null
           id?: string
+          linea_id?: string | null
           nombre?: string
           precio_estandar?: number | null
           rubros_template?: Json | null
@@ -5052,6 +5581,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "servicios_linea_id_fkey"
+            columns: ["linea_id"]
+            isOneToOne: false
+            referencedRelation: "lineas_negocio"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "servicios_workspace_id_fkey"
             columns: ["workspace_id"]
@@ -6776,8 +7312,40 @@ export type Database = {
         Args: { p_linea_id: string; p_workspace_id: string }
         Returns: undefined
       }
+      audit_workflow_refs: {
+        Args: { p_linea_id: string }
+        Returns: {
+          clase: string
+          donde_vive: string
+          host_etapa: number
+          host_nombre: string
+          ok: boolean
+          tgt_bloque: number
+          tgt_campo: string
+          tgt_etapa: number
+        }[]
+      }
       check_perfil_fiscal_completo: {
         Args: { p_empresa_id: string }
+        Returns: boolean
+      }
+      claim_bloque_lock: {
+        Args: {
+          p_bloque_instancia_id: string
+          p_profile_id: string
+          p_ttl_minutes?: number
+          p_workspace_id: string
+        }
+        Returns: Json
+      }
+      cleanup_expired_bloque_locks: { Args: never; Returns: number }
+      condicion_cumplida: {
+        Args: {
+          p_cond: Json
+          p_etapa_actual_id: string
+          p_linea_id: string
+          p_negocio_id: string
+        }
         Returns: boolean
       }
       crear_notificacion: {
@@ -6794,12 +7362,31 @@ export type Database = {
         Returns: undefined
       }
       current_user_workspace_id: { Args: never; Returns: string }
+      detectar_responsable_faltante_area: { Args: never; Returns: number }
       evaluate_stage_rules: {
         Args: {
           p_entidad_id: string
           p_entidad_tipo: string
           p_workspace_id: string
         }
+        Returns: string
+      }
+      force_unlock_bloque: {
+        Args: { p_bloque_instancia_id: string; p_forced_by: string }
+        Returns: Json
+      }
+      gates_pendientes_etapa: {
+        Args: { p_etapa_id: string; p_negocio_id: string }
+        Returns: {
+          bloque_config_id: string
+          nombre: string
+          orden: number
+          tipo: string
+        }[]
+      }
+      gen_cert_short_code: { Args: never; Returns: string }
+      generate_cert_lote_numero: {
+        Args: { p_producto: string; p_sku: string; p_workspace: string }
         Returns: string
       }
       generate_cuenta_cobro_numero: {
@@ -6831,6 +7418,14 @@ export type Database = {
         Returns: string
       }
       get_user_role: { Args: never; Returns: string }
+      heartbeat_bloque_lock: {
+        Args: {
+          p_bloque_instancia_id: string
+          p_profile_id: string
+          p_ttl_minutes?: number
+        }
+        Returns: Json
+      }
       horas_habiles_entre: {
         Args: { end_ts: string; start_ts: string }
         Returns: number
@@ -6839,6 +7434,10 @@ export type Database = {
       puede_avanzar_etapa: {
         Args: { p_etapa_id: string; p_negocio_id: string }
         Returns: boolean
+      }
+      release_bloque_lock: {
+        Args: { p_bloque_instancia_id: string; p_profile_id: string }
+        Returns: Json
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
@@ -7087,3 +7686,4 @@ export type ValidaConsulta = Database['public']['Tables']['valida_consultas']['R
 export type TutorialProgress = Database['public']['Tables']['tutorial_progress']['Row']
 export type CuentaCobroEmitida = Database['public']['Tables']['cuentas_cobro_emitidas']['Row']
 export type PlanillaPilaPeriodo = Database['public']['Tables']['planillas_pila_periodo']['Row']
+
