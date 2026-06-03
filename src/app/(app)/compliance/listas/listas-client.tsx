@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  FileText,
   FileSpreadsheet,
   History,
   ListChecks,
@@ -664,11 +665,24 @@ function ResultadoConsulta({
           </h3>
           <p className="text-xs text-[#6B7280] font-mono">ID: {data.consulta_local_id}</p>
         </div>
-        <span
-          className={`${SEVERIDAD_CLASS[data.severidad]} text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider`}
-        >
-          {SEVERIDAD_LABEL[data.severidad]}
-        </span>
+        <div className="flex items-center gap-3">
+          {data.severidad !== 'error' && (
+            <a
+              href={`/api/compliance/listas/soporte/${data.consulta_local_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#10B981] hover:text-[#059669] border border-[#10B981]/30 hover:border-[#10B981] rounded-md px-3 py-1.5 transition-colors"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Ver soporte
+            </a>
+          )}
+          <span
+            className={`${SEVERIDAD_CLASS[data.severidad]} text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider`}
+          >
+            {SEVERIDAD_LABEL[data.severidad]}
+          </span>
+        </div>
       </div>
 
       <div className="p-5 space-y-3">
@@ -907,6 +921,9 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
               <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Severidad
               </th>
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Soporte
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -956,11 +973,26 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
                         {SEVERIDAD_LABEL[c.severidad]}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 text-center">
+                      {c.severidad !== 'error' && (
+                        <a
+                          href={`/api/compliance/listas/soporte/${c.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Ver documento de soporte"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-[#10B981] hover:text-[#059669]"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          Soporte
+                        </a>
+                      )}
+                    </td>
                   </tr>
                   {isOpen && (
                     <tr className="border-b border-[#E5E7EB] bg-[#F5F4F2]/40">
                       <td />
-                      <td colSpan={6} className="px-4 py-4">
+                      <td colSpan={7} className="px-4 py-4">
                         {c.error_mensaje && (
                           <div className="mb-3 text-xs text-[#B91C1C]">
                             Error: {c.error_mensaje}
