@@ -391,6 +391,7 @@ export async function getNegocioDetalle(id: string): Promise<{
         orden,
         es_gate,
         nombre,
+        config_extra,
         bloque_definitions(id, tipo, nombre, is_visualization, can_be_gate)
       `)
       .eq('etapa_id', negocioTyped.etapa_actual_id)
@@ -436,6 +437,28 @@ export async function getNegocioDetalle(id: string): Promise<{
           .select('id, negocio_id, bloque_config_id, estado, data')
         for (const inst of ((creadas ?? []) as Record<string, unknown>[])) {
           instanciasMap[inst.bloque_config_id as string] = inst as unknown as NegocioBloque
+        }
+
+        // Auto-init de propuesta económica al ENTRAR a su etapa (no solo en la
+        // creación del negocio). Antes esto solo ocurría en crearNegocio cuando
+        // Contacto era la 1ª etapa; tras mover Contacto después de Validación,
+        // debe dispararse al alcanzar la etapa. Idempotente por construcción: solo
+        // corre sobre instancias recién creadas (faltantes).
+        type CfgRow = { id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }
+        const configById = new Map(((bloqueConfigs ?? []) as CfgRow[]).map(bc => [bc.id, bc]))
+        for (const inst of ((creadas ?? []) as Array<{ id: string; bloque_config_id: string }>)) {
+          const cfg = configById.get(inst.bloque_config_id)
+          if (cfg?.bloque_definitions?.tipo !== 'propuesta_economica') continue
+          // Saltar heredados readonly (solo el bloque origen lleva auto_propuesta)
+          if ((cfg.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
+          const autoProp = (cfg.config_extra?.auto_propuesta ?? null) as { servicio_id?: string } | null
+          if (!autoProp?.servicio_id) continue
+          try {
+            const { crearV1Automatica } = await import('@/lib/actions/propuesta-economica-actions')
+            await crearV1Automatica(inst.id, autoProp.servicio_id)
+          } catch (e) {
+            console.error('[getNegocioDetalle] auto-init propuesta económica falló:', e)
+          }
         }
       }
 
