@@ -5,7 +5,9 @@ import { getWorkspace } from './get-workspace';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 
-const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
+// `||` (no `??`): una env vacia ("") debe caer al default igual que si estuviera ausente.
+// Vercel puede inyectar VALIDA_API_BASE="" y `??` la dejaria pasar -> URL relativa rota.
+const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metrikone.co';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
