@@ -58,7 +58,7 @@ async function extractWithRetry(
 // en bloques de etapas anteriores (RUT, Factura, etc). Devolvemos un detalle de
 // cada match. El gate del bloque solo se cumple si todas las comparaciones pasan.
 
-export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix'
+export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 'overlap'
 
 export type CrossCheckSpec = {
   slug: string
@@ -119,6 +119,17 @@ function compareValues(expected: string, extracted: string, mode: CrossCheckMatc
     const b = normalizeId(extracted)
     if (a.length < 6 || b.length < 6) return false
     return a === b || a.startsWith(b) || b.startsWith(a)
+  }
+  if (mode === 'overlap') {
+    // Tolerante a palabras extra: pasa si comparten al menos un token alfabético
+    // significativo (≥3 letras, excluye años/números). Útil para línea/modelo,
+    // donde el certificado UPME replica la factura con descripción más larga
+    // (ej. "Escape 2025" vs "Escape Platinum 2025").
+    const sig = (s: string) => new Set(tokensOf(s).filter(t => t.length >= 3 && !/^\d+$/.test(t)))
+    const a = sig(expected)
+    const b = sig(extracted)
+    if (a.size === 0 || b.size === 0) return false
+    return [...a].some(t => b.has(t))
   }
   return normalizeText(expected) === normalizeText(extracted)
 }

@@ -223,7 +223,15 @@ function CamposExtraidos({
                   {config.label}
                   {config.required && <span className="text-red-500 ml-0.5">*</span>}
                 </label>
-                {campo && <ConfidenceBadge confidence={campo.confidence} />}
+                <div className="flex items-center gap-2">
+                  {config.alerta_revision && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                      <AlertTriangle className="h-3 w-3" />
+                      Revisar
+                    </span>
+                  )}
+                  {campo && <ConfidenceBadge confidence={campo.confidence} />}
+                </div>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="flex-1 min-w-0">

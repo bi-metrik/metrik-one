@@ -14,6 +14,9 @@ export interface CampoExtraccion {
   tipo: 'texto' | 'numero' | 'currency' | 'fecha' | 'boolean'
   required: boolean
   descripcion_ai: string  // le dice a Gemini qué buscar
+  /** Si true, la UI muestra una alerta "Revisar" junto al campo: la IA no es
+   *  100% confiable en este dato y debe validarse a mano (ej. ciudad de venta). */
+  alerta_revision?: boolean
 }
 
 export interface CampoResultado {

@@ -132,6 +132,9 @@ export type NegocioResumen = {
   cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
   closed_at: string | null
   razon_cierre: string | null
+  // Tarjeta config-driven (config_extra.negocio_card) — null en ws sin config
+  vehiculo_label: string | null
+  seccional_label: string | null
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -219,10 +222,11 @@ export async function getNegociosV2(
 
   // Batch: gastos por negocio
   const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
-  const [gastosRes, horasRes, staffRes] = await Promise.all([
+  const [gastosRes, horasRes, staffRes, wsRes] = await Promise.all([
     db(supabase).from('gastos').select('negocio_id, monto').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     db(supabase).from('horas').select('negocio_id, horas, staff_id').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     supabase.from('staff').select('id, salary').eq('workspace_id', workspaceId),
+    db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).single(),
   ])
 
   // Staff salary map for hour cost calculation
@@ -243,6 +247,45 @@ export async function getNegociosV2(
     const salary = h.staff_id ? (staffSalaryMap[h.staff_id] ?? 0) : 0
     const tarifa = salary > 0 ? salary / 160 : 0
     horasCostoPorNeg[h.negocio_id] = (horasCostoPorNeg[h.negocio_id] ?? 0) + ((h.horas ?? 0) * tarifa)
+  }
+
+  // ── Tarjeta config-driven: vehículo + seccional desde un bloque (ej. Factura) ──
+  // config_extra.negocio_card = { vehiculo_bloque, vehiculo_campos[], ciudad_campo }
+  // Solo workspaces con ese config (ej. SOENA) lo llenan; el resto queda null.
+  const cardCfg = ((wsRes.data as { config_extra?: Record<string, unknown> } | null)
+    ?.config_extra?.negocio_card) as
+    { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string } | undefined
+  const vehiculoPorNeg: Record<string, { label: string | null; seccional: string | null }> = {}
+  if (cardCfg?.vehiculo_bloque && negocioIds.length > 0) {
+    const getVal = (bdata: Record<string, unknown>, slug: string): string | null => {
+      const campos = (bdata.campos as Record<string, { value?: unknown }> | undefined) ?? null
+      const v = campos?.[slug]?.value ?? bdata[slug]
+      const s = v == null ? '' : String(v).trim()
+      return s || null
+    }
+    const { data: factBloques } = await db(supabase)
+      .from('negocio_bloques')
+      .select('negocio_id, data, bloque_configs!inner(nombre)')
+      .in('negocio_id', negocioIds)
+      .eq('bloque_configs.nombre', cardCfg.vehiculo_bloque)
+    for (const row of ((factBloques ?? []) as Record<string, unknown>[])) {
+      const negId = row.negocio_id as string
+      const bdata = (row.data as Record<string, unknown>) ?? {}
+      const parts = (cardCfg.vehiculo_campos ?? [])
+        .map(slug => getVal(bdata, slug))
+        .filter(Boolean) as string[]
+      const label = parts.length ? parts.join(' ') : null
+      const ciudad = cardCfg.ciudad_campo ? getVal(bdata, cardCfg.ciudad_campo) : null
+      // SOENA = 100% personas naturales; para Bogotá esto resuelve a la seccional de naturales.
+      const seccional = ciudad ? (mapCiudadASeccional(ciudad, 'natural')?.label ?? null) : null
+      // El bloque origen (Validación) es el único con data extraída; si llega una
+      // instancia heredada vacía, no se pisa un label/seccional ya resuelto.
+      const prev = vehiculoPorNeg[negId]
+      vehiculoPorNeg[negId] = {
+        label: label ?? prev?.label ?? null,
+        seccional: seccional ?? prev?.seccional ?? null,
+      }
+    }
   }
 
   return (data as Record<string, unknown>[]).map(row => {
@@ -271,6 +314,8 @@ export async function getNegociosV2(
       cierre_motivo: (row.cierre_motivo as 'exitoso' | 'perdido' | 'cancelado' | null) ?? null,
       closed_at: (row.closed_at as string) ?? null,
       razon_cierre: (row.razon_cierre as string) ?? null,
+      vehiculo_label: vehiculoPorNeg[id]?.label ?? null,
+      seccional_label: vehiculoPorNeg[id]?.seccional ?? null,
     }
   })
 }
@@ -715,10 +760,10 @@ export async function crearNegocio(input: {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
 
-  // Get workspace config: stages_activos + linea_activa_id
+  // Get workspace config: stages_activos + linea_activa_id + config_extra
   const { data: wsConfig } = await db(supabase)
     .from('workspaces')
-    .select('stages_activos, linea_activa_id')
+    .select('stages_activos, linea_activa_id, config_extra')
     .eq('id', workspaceId)
     .single()
 
@@ -803,11 +848,25 @@ export async function crearNegocio(input: {
 
   const primeraEtapa = primeraEtapaRaw as { id: string; stage: string } | null
 
+  // Auto-nombre = contacto (config-driven). Workspaces como SOENA quieren que el
+  // nombre del negocio sea el del cliente (tarjeta muestra "V0001 — {contacto}").
+  let nombreNegocio = input.nombre
+  const nombreAuto = (wsConfig as { config_extra?: Record<string, unknown> } | null)
+    ?.config_extra?.negocio_nombre_auto
+  if (nombreAuto === 'contacto' && contactoId) {
+    if (input.contacto_nombre?.trim()) {
+      nombreNegocio = input.contacto_nombre.trim()
+    } else {
+      const { data: c } = await supabase.from('contactos').select('nombre').eq('id', contactoId).single()
+      if (c?.nombre) nombreNegocio = c.nombre
+    }
+  }
+
   const { data: negocio, error: insertError } = await db(supabase)
     .from('negocios')
     .insert({
       workspace_id: workspaceId,
-      nombre: input.nombre,
+      nombre: nombreNegocio,
       linea_id: lineaId,
       empresa_id: empresaId ?? null,
       contacto_id: contactoId ?? null,

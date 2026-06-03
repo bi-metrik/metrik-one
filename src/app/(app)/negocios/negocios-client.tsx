@@ -1,5 +1,6 @@
 'use client'
 import { useState, useMemo } from 'react'
+import { Search, X } from 'lucide-react'
 import NegocioCard from './negocio-card'
 import EmptyState from '@/components/empty-state'
 import type { NegocioResumen } from './negocio-v2-actions'
@@ -54,6 +55,7 @@ export default function NegociosClient({
 }) {
   const [filtro, setFiltro] = useState<StageFilter>('todos')
   const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
+  const [q, setQ] = useState('')
 
   // Cerrados filtrados por motivo
   const cerradosFiltrados = useMemo(() => {
@@ -68,6 +70,19 @@ export default function NegociosClient({
         ? negocios
         : negocios.filter((n) => n.stage_actual === filtro)
 
+  // Búsqueda libre: código, nombre/contacto, empresa, vehículo
+  const term = q.trim().toLowerCase()
+  const currentFiltrado = useMemo(() => {
+    if (!term) return current
+    return current.filter((n) => {
+      const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(term)
+    })
+  }, [current, term])
+
   // Filtros visibles
   const filtros = ALL_FILTROS.filter((f) =>
     f.key === 'todos' || f.key === 'cerrados'
@@ -75,8 +90,9 @@ export default function NegociosClient({
       : stagesActivos.includes(f.key),
   )
 
-  const showEmpty = current.length === 0
+  const showEmpty = currentFiltrado.length === 0
   const isFilteringMotivo = filtro === 'cerrados' && motivoCierre !== 'todos'
+  const sinResultadosBusqueda = term.length > 0 && currentFiltrado.length === 0 && current.length > 0
 
   return (
     <div className="space-y-4">
@@ -116,6 +132,28 @@ export default function NegociosClient({
         })}
       </div>
 
+      {/* Barra de búsqueda */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6B7280]" />
+        <input
+          type="text"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar por código, cliente o vehículo…"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 pl-9 pr-9 text-sm text-[#1A1A1A] placeholder:text-[#6B7280] focus:border-[#1A1A1A]/30 focus:outline-none"
+        />
+        {q && (
+          <button
+            type="button"
+            onClick={() => setQ('')}
+            aria-label="Limpiar búsqueda"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
       {/* Sub-filtros Cerrados (motivo) */}
       {filtro === 'cerrados' && cerrados.length > 0 && (
         <div className="scrollbar-none flex gap-1.5 overflow-x-auto pb-1 text-xs">
@@ -145,7 +183,13 @@ export default function NegociosClient({
 
       {/* Lista o empty */}
       {showEmpty ? (
-        filtro === 'cerrados' && !isFilteringMotivo ? (
+        sinResultadosBusqueda ? (
+          <EmptyState
+            title={`Sin resultados para "${q.trim()}"`}
+            description="Prueba con otro código, cliente o vehículo."
+            primaryCta={{ label: 'Limpiar búsqueda', onClick: () => setQ('') }}
+          />
+        ) : filtro === 'cerrados' && !isFilteringMotivo ? (
           <EmptyState
             illustration="/empty-states/empty-cerrados.svg"
             illustrationAlt="Sin negocios cerrados todavia"
@@ -175,7 +219,7 @@ export default function NegociosClient({
         )
       ) : (
         <div className="space-y-3">
-          {current.map((n) => (
+          {currentFiltrado.map((n) => (
             <NegocioCard key={n.id} negocio={n} />
           ))}
         </div>

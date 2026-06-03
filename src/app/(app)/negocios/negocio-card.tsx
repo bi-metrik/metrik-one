@@ -137,9 +137,24 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
             )}
             <span className="truncate">{negocio.nombre}</span>
           </p>
-          <p className="mt-0.5 text-xs text-[#6B7280]">
-            {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
-          </p>
+          {negocio.vehiculo_label || negocio.seccional_label ? (
+            /* Variante config-driven (ej. SOENA): vehículo (izq) + seccional DIAN (der).
+               El nombre del cliente ya va en la línea de título (código — nombre). */
+            <div className="mt-0.5 flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1 truncate text-xs font-medium text-[#1A1A1A]">
+                {negocio.vehiculo_label ?? '—'}
+              </span>
+              {negocio.seccional_label && (
+                <span className="shrink-0 truncate text-[10px] text-[#6B7280]" title={negocio.seccional_label}>
+                  {negocio.seccional_label}
+                </span>
+              )}
+            </div>
+          ) : (
+            <p className="mt-0.5 text-xs text-[#6B7280]">
+              {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
+            </p>
+          )}
           {isCerrado && negocio.closed_at && (
             <p className="mt-1 text-[10px] text-[#6B7280]">
               Cerrado {formatDateShort(negocio.closed_at)}
