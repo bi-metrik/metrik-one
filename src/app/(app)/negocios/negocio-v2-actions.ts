@@ -439,26 +439,29 @@ export async function getNegocioDetalle(id: string): Promise<{
           instanciasMap[inst.bloque_config_id as string] = inst as unknown as NegocioBloque
         }
 
-        // Auto-init de propuesta económica al ENTRAR a su etapa (no solo en la
-        // creación del negocio). Antes esto solo ocurría en crearNegocio cuando
-        // Contacto era la 1ª etapa; tras mover Contacto después de Validación,
-        // debe dispararse al alcanzar la etapa. Idempotente por construcción: solo
-        // corre sobre instancias recién creadas (faltantes).
-        type CfgRow = { id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }
-        const configById = new Map(((bloqueConfigs ?? []) as CfgRow[]).map(bc => [bc.id, bc]))
-        for (const inst of ((creadas ?? []) as Array<{ id: string; bloque_config_id: string }>)) {
-          const cfg = configById.get(inst.bloque_config_id)
-          if (cfg?.bloque_definitions?.tipo !== 'propuesta_economica') continue
-          // Saltar heredados readonly (solo el bloque origen lleva auto_propuesta)
-          if ((cfg.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
-          const autoProp = (cfg.config_extra?.auto_propuesta ?? null) as { servicio_id?: string } | null
-          if (!autoProp?.servicio_id) continue
-          try {
-            const { crearV1Automatica } = await import('@/lib/actions/propuesta-economica-actions')
-            await crearV1Automatica(inst.id, autoProp.servicio_id)
-          } catch (e) {
-            console.error('[getNegocioDetalle] auto-init propuesta económica falló:', e)
-          }
+      }
+
+      // Auto-init de propuesta económica: si un bloque propuesta_economica ORIGEN
+      // (con auto_propuesta.servicio_id) no tiene `precio_base_con_iva` en su data,
+      // inicializarlo con el precio base del servicio. Cubre tanto instancias recién
+      // creadas como EXISTENTES sin inicializar — p.ej. negocios que alcanzaron la
+      // etapa antes de este fix, o si el init falló una vez. Antes esto solo ocurría
+      // en crearNegocio (cuando Contacto era la 1ª etapa); tras mover Contacto
+      // después de Validación debe poder dispararse al alcanzar la etapa.
+      for (const bc of ((bloqueConfigs ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }>)) {
+        if (bc.bloque_definitions?.tipo !== 'propuesta_economica') continue
+        if ((bc.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
+        const autoProp = (bc.config_extra?.auto_propuesta ?? null) as { servicio_id?: string } | null
+        if (!autoProp?.servicio_id) continue
+        const inst = instanciasMap[bc.id]
+        if (!inst || (inst.data as Record<string, unknown> | null)?.precio_base_con_iva !== undefined) continue
+        try {
+          const { crearV1Automatica } = await import('@/lib/actions/propuesta-economica-actions')
+          await crearV1Automatica(inst.id, autoProp.servicio_id)
+          const { data: refreshed } = await db(supabase).from('negocio_bloques').select('data').eq('id', inst.id).single()
+          if (refreshed) instanciasMap[bc.id] = { ...inst, data: (refreshed as { data: unknown }).data } as NegocioBloque
+        } catch (e) {
+          console.error('[getNegocioDetalle] auto-init propuesta económica falló:', e)
         }
       }
 
