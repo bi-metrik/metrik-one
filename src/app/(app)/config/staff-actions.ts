@@ -52,7 +52,7 @@ export async function createStaffMember(formData: {
     return { error: 'Sin permisos para gestionar personal' }
   }
 
-  const { error } = await supabase.from('staff').insert({
+  const { data: created, error } = await supabase.from('staff').insert({
     workspace_id: profile.workspace_id,
     full_name: formData.full_name,
     position: formData.position || null,
@@ -65,11 +65,13 @@ export async function createStaffMember(formData: {
     rol_plataforma: formData.rol_plataforma || 'ejecutor',
     display_role: formData.display_role || null,
   })
+    .select('id')
+    .single()
 
   if (error) return { error: error.message }
   revalidatePath('/config')
   revalidatePath('/mi-negocio')
-  return { success: true }
+  return { success: true, id: created?.id as string }
 }
 
 export async function updateStaffMember(

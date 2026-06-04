@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import MiNegocioClient from './mi-negocio-client'
 import { getLineasDisponibles } from './actions'
+import { getEquipoConAreas, getWorkspaceDefaultResponsables } from '@/lib/actions/equipo-areas'
 import { bogotaYear } from '@/lib/dates/bogota'
 
 export default async function MiNegocioPage() {
@@ -93,6 +94,12 @@ export default async function MiNegocioPage() {
 
   const { lineas: lineasDisponibles, lineaActivaId } = await getLineasDisponibles()
 
+  // Equipo: areas por miembro + responsables por defecto (fuente unica staff_areas)
+  const [equipoConAreas, equipoDefaults] = await Promise.all([
+    getEquipoConAreas(),
+    getWorkspaceDefaultResponsables(),
+  ])
+
   // Workspace tipo: nativo (default) vs clarity
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: tipoData } = await (supabase.from('workspaces') as any)
@@ -168,6 +175,8 @@ export default async function MiNegocioPage() {
       licenseUsed={licenseUsed}
       licenseMax={licenseMax}
       workspaceFeatures={workspaceFeatures}
+      equipoConAreas={equipoConAreas}
+      equipoDefaults={equipoDefaults}
       lineasDisponibles={lineasDisponibles}
       lineaActivaId={lineaActivaId}
       sectionScores={{

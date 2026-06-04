@@ -4,6 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
+import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
 
 // Existing config sections — reused via import
 import MonthlyTargetsSection from '../config/monthly-targets-section'
@@ -40,6 +41,8 @@ interface MiNegocioClientProps {
   licenseUsed: number
   licenseMax: number
   workspaceFeatures: WorkspaceFeature[]
+  equipoConAreas: StaffConAreas[]
+  equipoDefaults: DefaultResponsableMap
   workspaceTipo: 'nativo' | 'clarity'
   lineasDisponibles: { id: string; nombre: string; descripcion: string | null; tipo: string }[]
   lineaActivaId: string | null
@@ -96,6 +99,8 @@ export default function MiNegocioClient({
   licenseUsed,
   licenseMax,
   workspaceFeatures,
+  equipoConAreas,
+  equipoDefaults,
   lineasDisponibles = [],
   lineaActivaId = null,
   sectionScores,
@@ -244,6 +249,7 @@ export default function MiNegocioClient({
                     workspace, fiscalProfile, staffMembers, monthlyTargets,
                     fixedExpenses, categories, servicios, staffNomina,
                     totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
+                    equipoConAreas, equipoDefaults,
                     lineasDisponibles, lineaActivaId,
                     onClose: () => setActiveSection(null),
                   })}
@@ -309,6 +315,7 @@ export default function MiNegocioClient({
                 workspace, fiscalProfile, staffMembers, monthlyTargets,
                 fixedExpenses, categories, servicios, staffNomina,
                 totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
+                equipoConAreas, equipoDefaults,
                 lineasDisponibles, lineaActivaId,
                 onClose: () => setActiveSection(null),
               })}
@@ -342,6 +349,8 @@ function renderSection(
     licenseUsed: number
     licenseMax: number
     workspaceFeatures: WorkspaceFeature[]
+    equipoConAreas: StaffConAreas[]
+    equipoDefaults: DefaultResponsableMap
     lineasDisponibles: { id: string; nombre: string; descripcion: string | null; tipo: string }[]
     lineaActivaId: string | null
     onClose: () => void
@@ -401,28 +410,15 @@ function renderSection(
 
     case 'mi-equipo':
       return (
-        <div className="space-y-4">
-          {/* Link a vista multi-area completa (modelo roles-areas-stages) */}
-          <a
-            href="/mi-negocio/equipo"
-            className="flex items-center justify-between rounded-lg border border-[#10B981]/40 bg-[#10B981]/5 px-3 py-2 text-xs text-[#1A1A1A] hover:bg-[#10B981]/10"
-          >
-            <span>
-              <span className="font-medium">Asignar areas y responsables por defecto</span>
-              <span className="block text-[10px] text-[#6B7280]">
-                Vista nueva con multi-area + cascada automatica
-              </span>
-            </span>
-            <span className="text-[#10B981]">→</span>
-          </a>
-          <EquipoSection
-            workspace={props.workspace}
-            staffMembers={props.staffMembers}
-            licenseUsed={props.licenseUsed}
-            licenseMax={props.licenseMax}
-            currentUserRole={props.currentUserRole}
-          />
-        </div>
+        <EquipoSection
+          workspace={props.workspace}
+          staffMembers={props.staffMembers}
+          licenseUsed={props.licenseUsed}
+          licenseMax={props.licenseMax}
+          currentUserRole={props.currentUserRole}
+          equipoConAreas={props.equipoConAreas}
+          equipoDefaults={props.equipoDefaults}
+        />
       )
 
     case 'metas-mensuales':

@@ -176,10 +176,9 @@ export async function updateStaffAreas(
     return { ok: false, error: 'No autenticado' }
   }
 
-  // Permiso: owner/admin pueden editar todo. supervisor solo dentro de sus areas
-  // (implementacion estricta: por ahora exigimos owner/admin/supervisor; el
-  // filtrado fino por area-supervisor queda como TODO de Fase 7).
-  if (role !== 'owner' && role !== 'admin' && role !== 'supervisor') {
+  // Permiso: gestionar areas del equipo es decision organizacional -> owner/admin.
+  // (2026-06-04: el supervisor deja de configurar areas al unificar en "Mi equipo").
+  if (role !== 'owner' && role !== 'admin') {
     return { ok: false, error: 'Sin permisos para editar areas' }
   }
 
@@ -252,7 +251,7 @@ export async function setWorkspaceDefaultResponsable(
     return { ok: false, error: 'Direccion no es area operativa con default' }
   }
 
-  if (role !== 'owner' && role !== 'admin' && role !== 'supervisor') {
+  if (role !== 'owner' && role !== 'admin') {
     return { ok: false, error: 'Sin permisos para editar defaults' }
   }
 

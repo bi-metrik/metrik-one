@@ -2,17 +2,29 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Trash2, Phone, X, Check, ChevronDown, ChevronUp, Mail, UserPlus, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Phone, X, Check, ChevronDown, ChevronUp, Mail, UserPlus, Loader2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Staff } from '@/types/database'
+import type { Area } from '@/lib/permissions/can-edit'
+import { AreaMultiSelect } from '@/components/areas/area-multi-select'
+import { AreaBadge } from '@/components/areas/area-badge'
 import { createStaffMember, updateStaffMember, deleteStaffMember, inviteStaffToPlataform } from './staff-actions'
+import { updateStaffAreas } from '@/lib/actions/equipo-areas'
 
 interface StaffSectionProps {
   initialData: Staff[]
   licenseUsed: number
   licenseMax: number
   currentUserRole: string
+  /** Mapa staff.id -> areas asignadas (staff_areas, fuente unica). */
+  staffAreas?: Record<string, Area[]>
+  /** Mapa staff.id -> # negocios activos como responsable. */
+  negociosCount?: Record<string, number>
 }
+
+// rol_plataforma que NO entra al modelo de areas operativas.
+const ROL_SIN_AREAS = ['contador', 'campo']
+const rolUsaAreas = (rol: string) => !ROL_SIN_AREAS.includes(rol)
 
 const TIPO_VINCULO = [
   { value: 'empleado', label: 'Empleado', defaultHoras: 160 },
@@ -51,7 +63,7 @@ const ROL_COLORS: Record<string, string> = {
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-export default function StaffSection({ initialData, licenseUsed, licenseMax, currentUserRole }: StaffSectionProps) {
+export default function StaffSection({ initialData, licenseUsed, licenseMax, currentUserRole, staffAreas = {}, negociosCount = {} }: StaffSectionProps) {
   const router = useRouter()
   const [staff, setStaff] = useState<Staff[]>(initialData)
   const [showForm, setShowForm] = useState(false)
@@ -71,6 +83,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
     tipo_vinculo: '',
     rol_plataforma: 'ejecutor',
     display_role: '',
+    areas: [] as Area[],
   })
 
   // Sync state when server re-renders with new data
@@ -79,7 +92,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   }, [initialData])
 
   const resetForm = () => {
-    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', display_role: '' })
+    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', display_role: '', areas: [] as Area[] })
     setShowForm(false)
     setShowDetails(false)
     setEditingId(null)
@@ -87,12 +100,21 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
 
   const handleCreate = async () => {
     if (!form.full_name.trim()) return
+    if (rolUsaAreas(form.rol_plataforma) && form.areas.length === 0) {
+      toast.error('Selecciona al menos un area para este rol')
+      return
+    }
     setSaving(true)
+    const { areas, ...staffData } = form
     const res = await createStaffMember({
-      ...form,
-      display_role: form.display_role.trim() || undefined,
+      ...staffData,
+      display_role: staffData.display_role.trim() || undefined,
     })
     if (res.success) {
+      if (res.id && rolUsaAreas(form.rol_plataforma) && areas.length > 0) {
+        const ra = await updateStaffAreas(res.id, areas)
+        if (!ra.ok) toast.error(ra.error || 'Miembro creado, pero fallo al guardar areas')
+      }
       toast.success('Personal agregado')
       resetForm()
       router.refresh()
@@ -104,6 +126,10 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
 
   const handleUpdate = async () => {
     if (!editingId || !form.full_name.trim()) return
+    if (rolUsaAreas(form.rol_plataforma) && form.areas.length === 0) {
+      toast.error('Selecciona al menos un area para este rol')
+      return
+    }
     setSaving(true)
     const res = await updateStaffMember(editingId, {
       full_name: form.full_name,
@@ -118,6 +144,10 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       display_role: form.display_role.trim() || null,
     })
     if (res.success) {
+      // Sincronizar areas (vacio si el rol no usa areas, p.ej. contador)
+      const nextAreas = rolUsaAreas(form.rol_plataforma) ? form.areas : []
+      const ra = await updateStaffAreas(editingId, nextAreas)
+      if (!ra.ok) toast.error(ra.error || 'Personal actualizado, pero fallo al guardar areas')
       toast.success('Personal actualizado')
       resetForm()
       router.refresh()
@@ -167,6 +197,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       tipo_vinculo: s.tipo_vinculo || '',
       rol_plataforma: s.rol_plataforma || 'ejecutor',
       display_role: s.display_role || '',
+      areas: staffAreas[s.id] ?? [],
     })
     setEditingId(s.id)
     setShowForm(true)
@@ -253,7 +284,22 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
               </p>
               {/* Nota de billing para contador — pausado en ONE nativo, se activa via Clarity */}
             </div>
-            {/* El area del miembro se asigna en mi-negocio/equipo (staff_areas). */}
+            {/* Areas — de que se encarga (alimenta cascada y permisos por stage) */}
+            {rolUsaAreas(form.rol_plataforma) && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Areas</label>
+                <div className="mt-1.5">
+                  <AreaMultiSelect
+                    value={form.areas}
+                    onChange={(next) => setForm({ ...form, areas: next })}
+                    emptyHint="Selecciona al menos un area"
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  De que se encarga. Define que etapas puede gestionar y la asignacion automatica.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* display_role — nombre personalizado opcional (solo para supervisor) */}
@@ -392,9 +438,18 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                     <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${rolColor}`}>
                       {ROL_DISPLAY[rol] || rol}
                     </span>
+                    {(staffAreas[s.id] ?? []).map(a => (
+                      <AreaBadge key={a} area={a} size="sm" />
+                    ))}
                   </div>
                   {s.position && (
                     <p className="text-xs text-muted-foreground">{s.position}</p>
+                  )}
+                  {(negociosCount[s.id] ?? 0) > 0 && (
+                    <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Users className="h-3 w-3" />
+                      {negociosCount[s.id]} negocio{negociosCount[s.id] !== 1 ? 's' : ''} activo{negociosCount[s.id] !== 1 ? 's' : ''}
+                    </p>
                   )}
                   <div className="flex items-center justify-between gap-2">
                     {s.phone_whatsapp ? (
