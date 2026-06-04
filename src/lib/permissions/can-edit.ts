@@ -122,6 +122,21 @@ export function canEditBloque(
   return false
 }
 
+// ── canAdvanceStage ──────────────────────────────────────────────────
+
+/**
+ * ¿Puede el usuario avanzar/cambiar un negocio al stage destino? Mismo criterio
+ * que editar un bloque de ese stage: su área debe cubrirlo (o sin área →
+ * passthrough por rol); operator además debe ser responsable del negocio.
+ */
+export function canAdvanceStage(
+  user: UserContext,
+  stageTo: Stage,
+  negocioResponsables: string[],
+): boolean {
+  return canEditBloque(user, { stage: stageTo }, negocioResponsables)
+}
+
 // ── canEditHeader ────────────────────────────────────────────────────
 
 /**

@@ -8,6 +8,7 @@ import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
+import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -1354,19 +1355,30 @@ export async function cambiarEtapaNegocioConGate(
   error: string | null
   bloquesPendientes?: Array<{ nombre: string; es_gate: boolean }>
 }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // El override de gate (omitir gates con motivo) es exclusivo de owner/admin.
+  if (motivoOverride && role !== 'owner' && role !== 'admin') {
+    return { error: 'Solo el dueño o administrador puede omitir gates' }
+  }
 
   // Obtener etapa actual del negocio
   const { data: negocioRaw } = await db(supabase)
     .from('negocios')
-    .select('etapa_actual_id')
+    .select('etapa_actual_id, stage_actual')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
 
-  const negocio = negocioRaw as { etapa_actual_id: string | null } | null
+  const negocio = negocioRaw as { etapa_actual_id: string | null; stage_actual: string | null } | null
   if (!negocio) return { error: 'Negocio no encontrado' }
+
+  // Guard server-side: solo quien puede editar la fase actual del negocio puede
+  // avanzarla (rol+área+responsable). Permite el handoff (comercial cierra venta);
+  // bloquea a operators ajenos / supervisores de otra área.
+  const gAvance = await guardAvanzarStage(negocioId, (negocio.stage_actual ?? 'venta') as Stage)
+  if (!gAvance.ok) return { error: gAvance.error ?? 'Sin permiso' }
 
   // resolvedEtapaId puede cambiar si routing auto-corrige el destino
   let resolvedEtapaId = nuevaEtapaId
@@ -1783,6 +1795,10 @@ export async function marcarBloqueCompleto(
 ): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
+
+  // Guard server-side de permisos (rol+área+responsable). La UI es solo UX.
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
   // Leer datos actuales + negocio_id del servidor y hacer merge (evita sobreescribir campos AI)
   const { data: currentBloque } = await db(supabase)
@@ -2676,12 +2692,23 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   staffList: Array<{ id: string; full_name: string }>
   pausaEnabled: boolean
 } | null> {
-  const { supabase, workspaceId, role, areas, error } = await getWorkspace()
+  const { supabase, workspaceId, role, areas, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
   // Cargar negocio base
   const base = await getNegocioDetalle(id)
   if (!base) return null
+
+  // Visibilidad: operator solo accede al detalle de negocios donde es responsable
+  // (espejo del filtro de la lista; cierra el acceso por URL a negocios ajenos).
+  if (role === 'operator') {
+    const { data: resp } = await db(supabase)
+      .from('negocio_responsables')
+      .select('staff_id')
+      .eq('negocio_id', id)
+    const ids = ((resp ?? []) as { staff_id: string }[]).map((r) => r.staff_id)
+    if (!staffId || !ids.includes(staffId)) return null
+  }
 
   // Feature flag pausa_enabled
   const { data: wsRow } = await db(supabase)
