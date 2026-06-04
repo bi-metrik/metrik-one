@@ -6,7 +6,7 @@ import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
 //   2. Marca como vencido cobros programados pasados con 3+ dias de gracia sin confirmar
-//   3. Genera notificaciones cobro_vencido a responsable + dueno + staff area=admin_finanzas
+//   3. Genera notificaciones cobro_vencido a responsable + dueno + staff del area financiera (staff_areas)
 //   4. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
@@ -139,7 +139,7 @@ export async function GET(req: NextRequest) {
     cobrosVencidos++
 
     // ── 3. Notificaciones a 3 destinatarios ─────────────────
-    // Buscar responsable + dueno (owner) + staff area=admin_finanzas
+    // Buscar responsable + dueno (owner) + staff del area financiera (staff_areas)
     const { data: negocio } = await supabase
       .from('negocios')
       .select('responsable_id, nombre, codigo, staff:responsable_id(profile_id)')
@@ -158,12 +158,28 @@ export async function GET(req: NextRequest) {
       .eq('role', 'owner')
       .maybeSingle()
 
-    const { data: financierosStaff } = await supabase
+    // Staff del area financiera segun staff_areas (fuente canonica de areas).
+    // staff_areas no tiene workspace_id: se resuelve via los staff del workspace.
+    const { data: staffWs } = await supabase
       .from('staff')
-      .select('profile_id')
+      .select('id, profile_id')
       .eq('workspace_id', cobro.workspace_id!)
-      .eq('area', 'admin_finanzas')
       .eq('is_active', true)
+
+    const staffWsIds = (staffWs ?? []).map((s) => s.id)
+    let financierosStaff: { profile_id: string | null }[] = []
+    if (staffWsIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: areasFin } = await (supabase as any)
+        .from('staff_areas')
+        .select('staff_id')
+        .in('staff_id', staffWsIds)
+        .eq('area', 'financiera')
+      const finIds = new Set(((areasFin ?? []) as { staff_id: string }[]).map((r) => r.staff_id))
+      financierosStaff = (staffWs ?? [])
+        .filter((s) => finIds.has(s.id))
+        .map((s) => ({ profile_id: s.profile_id }))
+    }
 
     const destinatarios = new Set<string>()
     if (responsableProfile) destinatarios.add(responsableProfile)

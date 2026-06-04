@@ -45,20 +45,8 @@ const ROL_COLORS: Record<string, string> = {
   campo: 'bg-orange-100 text-orange-700',
 }
 
-const AREA_OPTIONS = [
-  { value: 'comercial', label: 'Comercial', desc: 'Ventas, atención al cliente, cotizaciones, seguimiento de oportunidades.' },
-  { value: 'operaciones', label: 'Operaciones', desc: 'Ejecución de proyectos, coordinación de campo, producción.' },
-  { value: 'admin_finanzas', label: 'Admin y Finanzas', desc: 'Contabilidad, facturación, cartera, nómina, RRHH.' },
-  { value: 'direccion', label: 'Direccion', desc: 'Gerencia general, socios, decisiones estratégicas.' },
-]
-
-// Color classes per area
-const AREA_COLORS: Record<string, string> = {
-  comercial: 'bg-emerald-50 text-emerald-600',
-  operaciones: 'bg-slate-100 text-slate-600',
-  admin_finanzas: 'bg-blue-50 text-blue-600',
-  direccion: 'bg-primary/10 text-primary',
-}
+// Las areas del miembro se gestionan en mi-negocio/equipo (staff_areas, N:M),
+// fuente unica del modelo de permisos. Config -> Equipo ya no edita area.
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
@@ -82,7 +70,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
     horas_disponibles_mes: 160,
     tipo_vinculo: '',
     rol_plataforma: 'ejecutor',
-    area: 'operaciones',
     display_role: '',
   })
 
@@ -92,7 +79,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   }, [initialData])
 
   const resetForm = () => {
-    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', area: 'operaciones', display_role: '' })
+    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', display_role: '' })
     setShowForm(false)
     setShowDetails(false)
     setEditingId(null)
@@ -128,7 +115,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       horas_disponibles_mes: form.horas_disponibles_mes,
       tipo_vinculo: form.tipo_vinculo || null,
       rol_plataforma: form.rol_plataforma,
-      area: form.area || null,
       display_role: form.display_role.trim() || null,
     })
     if (res.success) {
@@ -180,7 +166,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       horas_disponibles_mes: s.horas_disponibles_mes ?? 160,
       tipo_vinculo: s.tipo_vinculo || '',
       rol_plataforma: s.rol_plataforma || 'ejecutor',
-      area: s.area || 'operaciones',
       display_role: s.display_role || '',
     })
     setEditingId(s.id)
@@ -268,43 +253,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
               </p>
               {/* Nota de billing para contador — pausado en ONE nativo, se activa via Clarity */}
             </div>
-            {/* Area — solo visible para supervisor (afecta routing N1/N7) */}
-            {form.rol_plataforma === 'supervisor' ? (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Area del supervisor</label>
-                <select
-                  value={form.area}
-                  onChange={e => setForm({ ...form, area: e.target.value })}
-                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">Ambas areas</option>
-                  {AREA_OPTIONS.filter(a => a.value !== 'direccion').map(a => (
-                    <option key={a.value} value={a.value}>{a.label}</option>
-                  ))}
-                </select>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  {form.area
-                    ? AREA_OPTIONS.find(a => a.value === form.area)?.desc
-                    : 'Recibe alertas de oportunidades y proyectos'}
-                </p>
-              </div>
-            ) : (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Area</label>
-                <select
-                  value={form.area}
-                  onChange={e => setForm({ ...form, area: e.target.value })}
-                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  {AREA_OPTIONS.map(a => (
-                    <option key={a.value} value={a.value}>{a.label}</option>
-                  ))}
-                </select>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  {AREA_OPTIONS.find(a => a.value === form.area)?.desc}
-                </p>
-              </div>
-            )}
+            {/* El area del miembro se asigna en mi-negocio/equipo (staff_areas). */}
           </div>
 
           {/* display_role — nombre personalizado opcional (solo para supervisor) */}
@@ -422,7 +371,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
           {activeStaff.map(s => {
             const rol = s.rol_plataforma || 'ejecutor'
             const rolColor = ROL_COLORS[rol] || 'bg-sky-100 text-sky-700'
-            const areaColor = s.area ? (AREA_COLORS[s.area] || 'bg-slate-100 text-slate-600') : ''
             return (
               <div key={s.id} className="flex gap-3 rounded-lg border p-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary mt-0.5">
@@ -444,11 +392,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                     <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${rolColor}`}>
                       {ROL_DISPLAY[rol] || rol}
                     </span>
-                    {s.area && (
-                      <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${areaColor}`}>
-                        {AREA_OPTIONS.find(a => a.value === s.area)?.label || s.area}
-                      </span>
-                    )}
                   </div>
                   {s.position && (
                     <p className="text-xs text-muted-foreground">{s.position}</p>

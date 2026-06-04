@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
 
     const { data: perfiles } = await supabase
       .from('profiles')
-      .select('id, role, area')
+      .select('id, role')
       .eq('workspace_id', negocio.workspace_id)
 
     if (!perfiles) continue
@@ -93,9 +93,7 @@ export async function GET(req: NextRequest) {
 
     for (const rol of nivelActual.roles) {
       if (rol === 'supervisor') {
-        const supervisorComercial = perfiles.find(p =>
-          p.role === 'supervisor' && (p.area === 'comercial' || p.area === null)
-        )
+        const supervisorComercial = perfiles.find(p => p.role === 'supervisor')
         if (supervisorComercial) destinatarios.add(supervisorComercial.id)
       } else {
         const perfil = perfiles.find(p => p.role === rol)

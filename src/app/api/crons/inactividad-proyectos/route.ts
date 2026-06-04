@@ -78,16 +78,14 @@ export async function GET(req: NextRequest) {
 
     const { data: perfiles } = await supabase
       .from('profiles')
-      .select('id, role, area')
+      .select('id, role')
       .eq('workspace_id', negocio.workspace_id)
 
     if (!perfiles) continue
 
     const destinatarios = new Set<string>()
 
-    const supervisorOperaciones = perfiles.find(p =>
-      p.role === 'supervisor' && (p.area === 'operaciones' || p.area === null)
-    )
+    const supervisorOperaciones = perfiles.find(p => p.role === 'supervisor')
     const admin = perfiles.find(p => p.role === 'admin')
     const owner = perfiles.find(p => p.role === 'owner')
 

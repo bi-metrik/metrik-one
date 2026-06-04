@@ -34,7 +34,6 @@ export async function createStaffMember(formData: {
   horas_disponibles_mes?: number
   tipo_vinculo?: string
   rol_plataforma?: string
-  area?: string
   display_role?: string
 }) {
   const supabase = await createClient()
@@ -64,7 +63,6 @@ export async function createStaffMember(formData: {
     horas_disponibles_mes: formData.horas_disponibles_mes ?? 160,
     tipo_vinculo: formData.tipo_vinculo || null,
     rol_plataforma: formData.rol_plataforma || 'ejecutor',
-    area: formData.area || null,
     display_role: formData.display_role || null,
   })
 
@@ -87,7 +85,6 @@ export async function updateStaffMember(
     horas_disponibles_mes?: number
     tipo_vinculo?: string | null
     rol_plataforma?: string
-    area?: string | null
     display_role?: string | null
   }
 ) {
