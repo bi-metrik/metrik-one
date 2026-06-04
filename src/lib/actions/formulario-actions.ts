@@ -6,6 +6,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { uploadFileToDrive, setFilePublicByLink, createSubfolderPath } from '@/lib/google-drive'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
+import { generarFormulario1668, type Formulario1668Datos, type Formulario1668Constantes } from '@/lib/pdf/formulario-1668'
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { createElement } from 'react'
@@ -17,6 +18,10 @@ function db(client: unknown): any { return client }
 
 interface CampoFuente {
   slug: string
+  // Si `optional`, no se reporta como faltante cuando no hay valor (queda null y
+  // la casilla del overlay se dibuja vacía). Ej.: fecha de expedición del 1668,
+  // que el banco puede completar a mano.
+  optional?: boolean
   source: {
     etapa_orden: number
     bloque_orden: number
@@ -73,7 +78,7 @@ async function resolverCamposFuente(
 
     if (!bloque) {
       datos[campo.slug] = null
-      faltantes.push(campo.slug)
+      if (!campo.optional) faltantes.push(campo.slug)
       continue
     }
 
@@ -95,7 +100,7 @@ async function resolverCamposFuente(
     }
 
     datos[campo.slug] = value
-    if (!value) faltantes.push(campo.slug)
+    if (!value && !campo.optional) faltantes.push(campo.slug)
   }
 
   return { datos, faltantes }
@@ -226,6 +231,13 @@ export async function generarFormulario(
       const f010Datos = datos as unknown as Formulario010Datos
       const f010Constantes = constantes as unknown as Formulario010Constantes
       const bytes = await generarFormulario010(f010Datos, f010Constantes)
+      buffer = Buffer.from(bytes)
+    } else if (template === 'formulario-1668') {
+      // Overlay sobre el PDF oficial DIAN 1668 (Constancia de Titularidad de
+      // Cuenta Bancaria). Mismo patrón que el 010.
+      const f1668Datos = datos as unknown as Formulario1668Datos
+      const f1668Constantes = constantes as unknown as Formulario1668Constantes
+      const bytes = await generarFormulario1668(f1668Datos, f1668Constantes)
       buffer = Buffer.from(bytes)
     } else {
       const element = getTemplateComponent(template, datos, constantes, fechaGeneracion, codigoNegocio)
