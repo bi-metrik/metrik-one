@@ -332,6 +332,26 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-04 (`soena` — Max — Formato 1668 + modelo roles×áreas×stages + guards server-side + impersonación)
+**Branch:** `main` · commits `e73348e` `7cf9312` `a1d1736` `88148f0` `80b0fb2` `f461e06` `74a68bc` `e23903d` `66883ba` (deployados Vercel)
+
+### Modelo roles × áreas × stages — ahora cableado a la capa de datos
+- **`src/lib/permissions/can-edit.ts`** es la fuente única: `canEditBloque`, `canViewNegocio`, `canAdvanceStage`, `getAreasEfectivas`, `STAGE_TO_AREA` (venta→comercial, ejecucion→operaciones, cobro→financiera). **Política 2026-06-04:** si el usuario tiene área(s) en `staff_areas`, solo edita el stage de su área (incluido owner/admin con área); sin área → passthrough por rol; operator además debe ser responsable.
+- **`src/lib/permissions/guard-negocio.ts`** (NUEVO): `guardEditarBloque` / `guardVerNegocio` / `guardAvanzarStage` / `esGerencial`. **TODA server action que muta bloques/etapas DEBE invocar el guard al inicio** (marcarBloqueCompleto, marcarBloqueItem, cambiarEtapaNegocioConGate, procesarDocumento, generarFormulario, generar/aprobarVersionPropuesta, generar/aprobarVersionGuia). `getBloqueMode` (cliente) y `_areaReadonly` son **solo UX**, no seguridad.
+- **`getWorkspace`** ahora resuelve `areas` (de `staff_areas`) e **impersonación**: cookie `__impersonate` (solo platform_admin) devuelve role/areas/staffId del usuario objetivo → todo el gating lo hereda. Barra "Ver como…" en el app-shell (`impersonation-bar.tsx`).
+- **Lista de negocios:** operator filtrado por `negocio_responsables` (server); supervisor preselecciona la fase de su área. **Detalle:** operator no accede a negocios ajenos por URL.
+
+### Gotcha — `staff.id` vs `profile.id` (campo minado)
+- `completado_por` (negocio_bloques + bloque_items) es **FK → profiles(id)** y el display resuelve por profiles → debe guardarse **`userId` (profile.id), NO `staffId`**. `activity_log.autor_id` y `negocio_responsables.staff_id` SÍ usan **staff.id**. Confundirlos viola la FK. Pendiente de unificación: el modelo de equipo vive disperso en `profiles`/`staff`/`staff_areas` (bugs 8 y 10 de la auditoría son síntomas).
+
+### Formato 1668 DIAN (`src/lib/pdf/formulario-1668.ts`)
+- Overlay `pdf-lib` análogo al 010, coordenadas calibradas con `pdftotext -bbox` del PDF diligenciado real. Rama `formulario-1668` en `formulario-actions.ts` + soporte `optional` en `CampoFuente`.
+
+### Auditoría de seguridad (workflow multi-agente, 30 hallazgos)
+- Reporte completo en el handoff. 6 críticos cerrados esta sesión. Backlog medio (7, 12-18) pendiente.
+
+---
+
 **Sesion:** 2026-06-03 (`alma` — Max — compliance/listas: sidebar, doc de soporte PDF, landing unificado, trazabilidad por usuario)
 **Branch:** `main` · commits `0bc8242`, `70e8ac0`, `f545bac`, `14970ef`, `adbccb9`, `5b910d7` (deployados Vercel)
 
