@@ -103,7 +103,8 @@ export type NegocioDetalle = {
   etapas_negocio: { nombre: string; stage: string; numero: number } | null
   empresas: { id: string; nombre: string } | null
   contactos: { id: string; nombre: string } | null
-  responsable: { id: string; full_name: string } | null
+  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). */
+  responsables: Array<{ id: string; full_name: string }>
 }
 
 export type NegocioResumen = {
@@ -387,8 +388,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero),
       empresas(id, nombre),
-      contactos(id, nombre),
-      staff!negocios_responsable_id_fkey(id, full_name)
+      contactos(id, nombre)
     `)
     .eq('id', id)
     .eq('workspace_id', workspaceId)
@@ -396,12 +396,20 @@ export async function getNegocioDetalle(id: string): Promise<{
 
   if (!negocio) return null
 
-  // Map staff join to responsable field
+  // Responsables (multi) desde negocio_responsables (N:M) — fuente de verdad.
+  const { data: respRows } = await db(supabase)
+    .from('negocio_responsables')
+    .select('staff_id, assigned_at, staff!negocio_responsables_staff_id_fkey(id, full_name)')
+    .eq('negocio_id', id)
+    .order('assigned_at', { ascending: true })
+  const responsables = ((respRows ?? []) as Array<{ staff: { id: string; full_name: string } | null }>)
+    .map((r) => r.staff)
+    .filter((s): s is { id: string; full_name: string } => s !== null)
+
   const negocioRaw = negocio as Record<string, unknown>
-  const staffJoin = negocioRaw.staff as { id: string; full_name: string } | null
   const negocioTyped = {
     ...negocioRaw,
-    responsable: staffJoin ?? null,
+    responsables,
   } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
@@ -2703,6 +2711,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   staffList: Array<{ id: string; full_name: string }>
   pausaEnabled: boolean
+  /** ¿El usuario actual (por staff.id) es uno de los responsables del negocio? */
+  currentUserEsResponsable: boolean
 } | null> {
   const { supabase, workspaceId, role, areas, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -2710,6 +2720,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Cargar negocio base
   const base = await getNegocioDetalle(id)
   if (!base) return null
+
+  // ¿El usuario actual es responsable? Comparación por staff.id (no profile.id):
+  // negocio_responsables guarda staff.id, igual que staffId de getWorkspace.
+  const currentUserEsResponsable = !!staffId && base.negocio.responsables.some((r) => r.id === staffId)
 
   // Visibilidad: operator solo accede al detalle de negocios donde es responsable
   // (espejo del filtro de la lista; cierra el acceso por URL a negocios ajenos).
@@ -3469,6 +3483,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       email: null as string | null,
     })),
     currentUserId,
+    currentUserEsResponsable,
     userRole: role ?? 'read_only',
     cobros: ((cobrosData ?? []) as Record<string, unknown>[]).map(c => ({
       id: c.id as string,
@@ -4036,68 +4051,132 @@ export async function completarNegocio(
   return { error: null }
 }
 
-// ── Actualizar responsable del negocio ────────────────────────────────────────
+// ── Responsables del negocio (multi · negocio_responsables N:M) ────────────────
 
-export async function actualizarResponsable(
+// Mantiene negocios.responsable_id (legacy/display) = responsable más antiguo
+// restante, o null si no quedan. La fuente de verdad de permisos es la tabla N:M.
+async function sincronizarResponsablePrincipal(
+  supabase: unknown,
   negocioId: string,
-  responsableId: string | null
+  workspaceId: string,
+): Promise<void> {
+  const { data } = await db(supabase)
+    .from('negocio_responsables')
+    .select('staff_id')
+    .eq('negocio_id', negocioId)
+    .order('assigned_at', { ascending: true })
+    .limit(1)
+  const principal = ((data ?? []) as { staff_id: string }[])[0]?.staff_id ?? null
+  await db(supabase)
+    .from('negocios')
+    .update({ responsable_id: principal })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+}
+
+export async function agregarResponsable(
+  negocioId: string,
+  staffMiembroId: string,
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  // Solo owner, admin, supervisor pueden asignar responsable
   const allowed = ['owner', 'admin', 'supervisor']
   if (!role || !allowed.includes(role)) {
     return { error: 'Sin permisos para asignar responsable' }
   }
 
-  // Verificar que el negocio pertenece al workspace
+  // Negocio del workspace
   const { data: negocio } = await db(supabase)
     .from('negocios')
-    .select('id, responsable_id')
+    .select('id')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
-
   if (!negocio) return { error: 'Negocio no encontrado' }
 
-  // Obtener nombre del nuevo responsable para el log
-  let nombreResponsable = 'Ninguno'
-  if (responsableId) {
-    const { data: staff } = await supabase
-      .from('staff')
-      .select('full_name')
-      .eq('id', responsableId)
-      .eq('workspace_id', workspaceId)
-      .single()
-    if (!staff) return { error: 'Staff no encontrado' }
-    nombreResponsable = staff.full_name ?? 'Sin nombre'
-  }
-
-  const { error: updErr } = await db(supabase)
-    .from('negocios')
-    .update({ responsable_id: responsableId })
-    .eq('id', negocioId)
+  // Staff del workspace + nombre para el log
+  const { data: staff } = await db(supabase)
+    .from('staff')
+    .select('full_name')
+    .eq('id', staffMiembroId)
     .eq('workspace_id', workspaceId)
+    .single()
+  if (!staff) return { error: 'Staff no encontrado' }
 
-  if (updErr) return { error: (updErr as { message: string }).message }
+  const { error: insErr } = await db(supabase)
+    .from('negocio_responsables')
+    .upsert(
+      { negocio_id: negocioId, staff_id: staffMiembroId, assigned_by: staffId ?? null },
+      { onConflict: 'negocio_id,staff_id', ignoreDuplicates: true },
+    )
+  if (insErr) return { error: (insErr as { message: string }).message }
 
-  // Registrar en activity_log
+  await sincronizarResponsablePrincipal(supabase, negocioId, workspaceId)
+
   if (staffId) {
-    const descripcion = responsableId
-      ? `Responsable cambiado a ${nombreResponsable}`
-      : 'Responsable removido'
-    await supabase.from('activity_log').insert({
+    await db(supabase).from('activity_log').insert({
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'cambio_sistema',
       autor_id: staffId,
-      contenido: descripcion,
+      contenido: `Responsable agregado: ${(staff as { full_name: string | null }).full_name ?? 'Sin nombre'}`,
     })
   }
 
   revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null }
+}
+
+export async function quitarResponsable(
+  negocioId: string,
+  staffMiembroId: string,
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const allowed = ['owner', 'admin', 'supervisor']
+  if (!role || !allowed.includes(role)) {
+    return { error: 'Sin permisos para quitar responsable' }
+  }
+
+  const { data: negocio } = await db(supabase)
+    .from('negocios')
+    .select('id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  if (!negocio) return { error: 'Negocio no encontrado' }
+
+  const { error: delErr } = await db(supabase)
+    .from('negocio_responsables')
+    .delete()
+    .eq('negocio_id', negocioId)
+    .eq('staff_id', staffMiembroId)
+  if (delErr) return { error: (delErr as { message: string }).message }
+
+  await sincronizarResponsablePrincipal(supabase, negocioId, workspaceId)
+
+  if (staffId) {
+    const { data: staff } = await db(supabase)
+      .from('staff')
+      .select('full_name')
+      .eq('id', staffMiembroId)
+      .single()
+    await db(supabase).from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_sistema',
+      autor_id: staffId,
+      contenido: `Responsable removido: ${(staff as { full_name: string | null } | null)?.full_name ?? 'Sin nombre'}`,
+    })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
   return { error: null }
 }
 

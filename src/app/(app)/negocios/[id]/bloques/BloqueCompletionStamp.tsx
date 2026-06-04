@@ -13,8 +13,7 @@ interface BloqueCompletionStampProps {
   labelBoton?: string
   restrictToOperatorOrResponsable?: boolean
   userRole: string
-  currentUserId: string | null
-  responsableId: string | null
+  esResponsable: boolean
   profiles: Array<{ id: string; full_name: string | null }>
 }
 
@@ -25,8 +24,7 @@ export default function BloqueCompletionStamp({
   labelBoton,
   restrictToOperatorOrResponsable,
   userRole,
-  currentUserId,
-  responsableId,
+  esResponsable,
   profiles,
 }: BloqueCompletionStampProps) {
   const [isPending, startTransition] = useTransition()
@@ -38,13 +36,11 @@ export default function BloqueCompletionStamp({
   const completadoPorNombre = profiles.find(p => p.id === completadoPor)?.full_name ?? 'Sin asignar'
 
   const isOperator = userRole === 'operator'
-  const isResponsable = !!currentUserId && currentUserId === responsableId
+  const isResponsable = esResponsable
   const isGerencial = userRole === 'owner' || userRole === 'admin'
   const canMark = !restrictToOperatorOrResponsable || isOperator || isResponsable || isGerencial
   const reasonBlocked = restrictToOperatorOrResponsable && !canMark
-    ? (responsableId
-        ? 'Solo el ejecutor de operaciones o el responsable asignado puede marcar este cargue.'
-        : 'Asigna un responsable al negocio para habilitar este botón.')
+    ? 'Solo el ejecutor de operaciones o un responsable asignado puede marcar este cargue.'
     : null
 
   function handleClick() {

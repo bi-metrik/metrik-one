@@ -27,7 +27,7 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarResponsable } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -199,12 +199,12 @@ function StageBadge({ stage }: { stage: string | null }) {
 
 function ResponsableSelector({
   negocioId,
-  responsable,
+  responsables,
   staffList,
   canEdit,
 }: {
   negocioId: string
-  responsable: { id: string; full_name: string } | null
+  responsables: Array<{ id: string; full_name: string }>
   staffList: Array<{ id: string; full_name: string }>
   canEdit: boolean
 }) {
@@ -235,28 +235,25 @@ function ResponsableSelector({
     }
   }, [open])
 
-  function handleSelect(staffId: string) {
+  function handleAdd(staffId: string) {
     setOpen(false)
     startTransition(async () => {
-      const result = await actualizarResponsable(negocioId, staffId)
+      const result = await agregarResponsable(negocioId, staffId)
       if (result.error) {
         toast.error(result.error)
       } else {
         const nombre = staffList.find(s => s.id === staffId)?.full_name ?? ''
-        toast.success(`Responsable: ${nombre}`)
+        toast.success(`Responsable agregado: ${nombre}`)
       }
     })
   }
 
-  function handleRemove(e: React.MouseEvent) {
+  function handleRemove(e: React.MouseEvent, staffId: string) {
     e.stopPropagation()
     startTransition(async () => {
-      const result = await actualizarResponsable(negocioId, null)
-      if (result.error) {
-        toast.error(result.error)
-      } else {
-        toast.success('Responsable removido')
-      }
+      const result = await quitarResponsable(negocioId, staffId)
+      if (result.error) toast.error(result.error)
+      else toast.success('Responsable removido')
     })
   }
 
@@ -270,44 +267,45 @@ function ResponsableSelector({
       .toUpperCase()
   }
 
-  const filtered = staffList.filter(s =>
-    s.full_name.toLowerCase().includes(search.toLowerCase())
-  )
-
   // Truncate name for display
   function truncName(name: string, max = 12): string {
     if (name.length <= max) return name
     return name.slice(0, max).trimEnd() + '...'
   }
 
+  // Solo se pueden agregar quienes no son ya responsables
+  const asignadosIds = new Set(responsables.map(r => r.id))
+  const filtered = staffList.filter(
+    s => !asignadosIds.has(s.id) && s.full_name.toLowerCase().includes(search.toLowerCase()),
+  )
+
   if (!canEdit) {
-    // Read-only: show responsable or nothing
-    if (!responsable) return null
+    // Read-only: chips de responsables (o nada)
+    if (responsables.length === 0) return null
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
-          {getInitials(responsable.full_name)}
-        </span>
-        <span className="text-xs text-foreground">{truncName(responsable.full_name)}</span>
-      </span>
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {responsables.map(r => (
+          <span key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+              {getInitials(r.full_name)}
+            </span>
+            <span className="text-xs text-foreground">{truncName(r.full_name)}</span>
+          </span>
+        ))}
+      </div>
     )
   }
 
   return (
-    <div className="relative" ref={popoverRef}>
-      {responsable ? (
-        <div className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
-          <div
-            onClick={() => !isPending && setOpen(!open)}
-            className="inline-flex items-center gap-1.5 cursor-pointer transition-colors hover:opacity-80"
-          >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
-              {getInitials(responsable.full_name)}
-            </span>
-            <span className="text-foreground">{truncName(responsable.full_name)}</span>
-          </div>
+    <div className="relative flex flex-wrap items-center justify-end gap-1.5" ref={popoverRef}>
+      {responsables.map(r => (
+        <div key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+            {getInitials(r.full_name)}
+          </span>
+          <span className="text-foreground">{truncName(r.full_name)}</span>
           <button
-            onClick={handleRemove}
+            onClick={e => handleRemove(e, r.id)}
             disabled={isPending}
             className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground transition-colors disabled:opacity-60"
             title="Quitar responsable"
@@ -315,16 +313,16 @@ function ResponsableSelector({
             <X className="h-3 w-3" />
           </button>
         </div>
-      ) : (
-        <button
-          onClick={() => setOpen(!open)}
-          disabled={isPending}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-        >
-          <UserPlus className="h-3.5 w-3.5" />
-          <span>Asignar</span>
-        </button>
-      )}
+      ))}
+
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={isPending}
+        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+      >
+        <UserPlus className="h-3.5 w-3.5" />
+        <span>{responsables.length === 0 ? 'Asignar' : 'Agregar'}</span>
+      </button>
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-background shadow-lg">
@@ -344,10 +342,8 @@ function ResponsableSelector({
               filtered.map(s => (
                 <button
                   key={s.id}
-                  onClick={() => handleSelect(s.id)}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent ${
-                    s.id === responsable?.id ? 'bg-accent font-medium' : ''
-                  }`}
+                  onClick={() => handleAdd(s.id)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
                 >
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
                     {getInitials(s.full_name)}
@@ -1031,7 +1027,7 @@ interface BloqueExtendido extends BloqueConfig {
   instancia: NegocioBloque | null
   config_extra: Record<string, unknown>
   _currentUserId?: string | null
-  _responsableId?: string | null
+  _esResponsable?: boolean
   _forceReadOnly?: boolean
   items: Array<{
     id: string
@@ -1169,8 +1165,7 @@ function BloqueRenderer({
             labelBoton={configExtra.label_boton as string | undefined}
             restrictToOperatorOrResponsable={!!configExtra.restrict_to_operator_or_responsable}
             userRole={userRole}
-            currentUserId={bloque._currentUserId ?? null}
-            responsableId={bloque._responsableId ?? null}
+            esResponsable={bloque._esResponsable ?? false}
             profiles={profiles.map(p => ({ id: p.id, full_name: p.full_name }))}
           />
         )
@@ -1598,6 +1593,7 @@ interface Props {
   etapasLinea: EtapaNegocio[]
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   currentUserId: string | null
+  currentUserEsResponsable: boolean
   userRole: string
   cobros: Array<{
     id: string
@@ -1639,6 +1635,7 @@ export default function NegocioDetailClient({
   etapasLinea,
   profiles,
   currentUserId,
+  currentUserEsResponsable,
   userRole,
   cobros,
   cotizacionesNegocio,
@@ -1663,7 +1660,7 @@ export default function NegocioDetailClient({
   const allBloques = (bloques as BloqueExtendido[]).map(b => ({
     ...b,
     _currentUserId: currentUserId,
-    _responsableId: negocio.responsable?.id ?? null,
+    _esResponsable: currentUserEsResponsable,
   }))
 
   // Recopilar datos de todos los bloques de esta etapa para evaluar condiciones
@@ -1849,7 +1846,7 @@ export default function NegocioDetailClient({
           <div className="mb-3 flex items-center justify-end gap-2">
             <ResponsableSelector
               negocioId={negocio.id}
-              responsable={negocio.responsable}
+              responsables={negocio.responsables}
               staffList={staffList}
               canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
             />
