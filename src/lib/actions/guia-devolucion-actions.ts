@@ -243,7 +243,7 @@ export async function aprobarVersionGuia(
   bloqueId: string,
   n: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { supabase, staffId, error } = await getWorkspace()
+  const { supabase, userId, staffId, error } = await getWorkspace()
   if (error) return { ok: false, error: 'No autenticado' }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -274,7 +274,8 @@ export async function aprobarVersionGuia(
       data: nuevoData,
       estado: 'completo',
       completado_at: now,
-      completado_por: staffId ?? null,
+      // FK → profiles(id): debe ser profile.id (userId), no staff.id.
+      completado_por: userId ?? null,
     })
     .eq('id', bloqueId)
 

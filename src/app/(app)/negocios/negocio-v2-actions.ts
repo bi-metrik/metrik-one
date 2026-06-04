@@ -1780,7 +1780,7 @@ export async function marcarBloqueCompleto(
   negocioBloqueId: string,
   data: Record<string, unknown>
 ): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   // Leer datos actuales + negocio_id del servidor y hacer merge (evita sobreescribir campos AI)
@@ -1800,7 +1800,9 @@ export async function marcarBloqueCompleto(
       estado: 'completo',
       data: mergedData,
       completado_at: new Date().toISOString(),
-      completado_por: staffId ?? null,
+      // FK → profiles(id) y el display resuelve por profiles. Debe ser el
+      // profile.id (userId), NO staff.id. Antes usaba staffId → violaba la FK.
+      completado_por: userId ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', negocioBloqueId)
