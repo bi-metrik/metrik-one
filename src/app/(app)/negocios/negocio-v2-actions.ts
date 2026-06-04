@@ -7,6 +7,7 @@ import { createDriveFolder } from '@/lib/google-drive'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
+import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -2675,7 +2676,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   staffList: Array<{ id: string; full_name: string }>
   pausaEnabled: boolean
 } | null> {
-  const { supabase, workspaceId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
   // Cargar negocio base
@@ -3277,6 +3278,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }
 
   // ── Build enriched bloques with auto_fill values ──────────────────────────
+  // Segmentación por área: si el usuario tiene área(s) asignada(s) y NO cubren el
+  // stage de la etapa actual, todos sus bloques quedan readonly. Sin área → sin
+  // restricción (solo se activa donde staff_areas está poblado). owner/admin con
+  // área también se restringen (decisión 2026-06-04).
+  const stageActualNeg = (base.negocio.stage_actual ?? null) as Stage | null
+  const areaDuenaActual = stageActualNeg ? STAGE_TO_AREA[stageActualNeg] : null
+  const areaReadonly =
+    !!areas && areas.length > 0 && areaDuenaActual !== null
+    && !getAreasEfectivas({ id: '', role: (role ?? 'read_only') as Role, areas: areas as Area[] }).has(areaDuenaActual)
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -3365,6 +3376,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const enrichedConfigExtra: Record<string, unknown> = { ...configExtra }
     if (Object.keys(autoFill).length > 0) enrichedConfigExtra._auto_fill = autoFill
     if (resolvedFields) enrichedConfigExtra.fields = resolvedFields
+    if (areaReadonly) enrichedConfigExtra._areaReadonly = true
 
     // Preview para BloqueGuiaDevolucion: resuelve nombre, NIT, ciudad, fecha cita
     // y seccional sugerida desde otros bloques del negocio.

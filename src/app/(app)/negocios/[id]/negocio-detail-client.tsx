@@ -1140,7 +1140,10 @@ function BloqueRenderer({
   // _forceReadOnly: usado por HistorialEtapasPrevias para forzar todos los
   // bloques a modo visible (read-only nativo de cada componente).
   const modo: 'editable' | 'visible' =
-    (bloque as { _forceReadOnly?: boolean })._forceReadOnly ? 'visible' : getBloqueMode()
+    ((bloque as { _forceReadOnly?: boolean })._forceReadOnly
+      || (configExtra as { _areaReadonly?: boolean })._areaReadonly)
+      ? 'visible'
+      : getBloqueMode()
 
   switch (tipo) {
     case 'equipo':
