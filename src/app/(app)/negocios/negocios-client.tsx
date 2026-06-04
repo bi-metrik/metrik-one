@@ -48,12 +48,14 @@ export default function NegociosClient({
   negocios,
   cerrados,
   stagesActivos,
+  defaultStage = 'todos',
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
   stagesActivos: string[]
+  defaultStage?: StageFilter
 }) {
-  const [filtro, setFiltro] = useState<StageFilter>('todos')
+  const [filtro, setFiltro] = useState<StageFilter>(defaultStage)
   const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
   const [q, setQ] = useState('')
 
