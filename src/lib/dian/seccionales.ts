@@ -15,80 +15,119 @@ export type SeccionalDIAN = {
   cita: boolean
   /** Ciudad principal asociada (para auto-mapping desde factura.ciudad_venta) */
   ciudad: string
+  /** Código oficial de la seccional (Resolución 000064 del 9-ago-2021). */
+  codigo: string
+  /** Nombre oficial completo — el que exige la DIAN en la casilla 12 del Formato 010. */
+  nombre_oficial: string
   /** Solo para Bogota: 'natural' o 'juridica'. Sin valor = general. */
   tipo_persona?: 'natural' | 'juridica'
 }
 
 export const SECCIONALES_DIAN: SeccionalDIAN[] = [
-  { slug: 'bogota-naturales', label: 'Bogotá — Personas naturales',
+  { slug: 'bogota-naturales', label: 'Bogotá — Personas naturales', codigo: '32',
+    nombre_oficial: 'Dirección Seccional de Impuestos de Bogotá',
     email: 'dsi_bogota_recaudo_naturales@dian.gov.co', cita: true, ciudad: 'bogota', tipo_persona: 'natural' },
-  { slug: 'bogota-juridicas', label: 'Bogotá — Personas jurídicas',
+  { slug: 'bogota-juridicas', label: 'Bogotá — Personas jurídicas', codigo: '32',
+    nombre_oficial: 'Dirección Seccional de Impuestos de Bogotá',
     email: 'dsi_bogota_recaudo_juridicas@dian.gov.co', cita: true, ciudad: 'bogota', tipo_persona: 'juridica' },
-  { slug: 'medellin', label: 'Medellín',
+  { slug: 'medellin', label: 'Medellín', codigo: '11',
+    nombre_oficial: 'Dirección Seccional de Impuestos de Medellín',
     email: 'dsi_medellin_devoluciones@dian.gov.co', cita: true, ciudad: 'medellin' },
-  { slug: 'cali', label: 'Cali',
+  { slug: 'cali', label: 'Cali', codigo: '05',
+    nombre_oficial: 'Dirección Seccional de Impuestos de Cali',
     email: 'dsi_cali_devoluciones@dian.gov.co', cita: true, ciudad: 'cali' },
-  { slug: 'bucaramanga', label: 'Bucaramanga',
+  { slug: 'bucaramanga', label: 'Bucaramanga', codigo: '04',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Bucaramanga',
     email: 'dsia_bucaramanga_devoluciones@dian.gov.co', cita: true, ciudad: 'bucaramanga' },
-  { slug: 'barranquilla', label: 'Barranquilla',
+  { slug: 'barranquilla', label: 'Barranquilla', codigo: '02',
+    nombre_oficial: 'Dirección Seccional de Impuestos de Barranquilla',
     email: 'dsi_barranquilla_devoluciones@dian.gov.co', cita: true, ciudad: 'barranquilla' },
-  { slug: 'grandes', label: 'Grandes Contribuyentes',
+  { slug: 'grandes', label: 'Grandes Contribuyentes', codigo: '31',
+    nombre_oficial: 'Dirección Operativa de Grandes Contribuyentes',
     email: 'dsi_grandesc_devoluciones@dian.gov.co', cita: true, ciudad: '' },
-  { slug: 'armenia', label: 'Armenia',
+  { slug: 'armenia', label: 'Armenia', codigo: '01',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Armenia',
     email: 'dsia_armenia_devoluciones@dian.gov.co', cita: false, ciudad: 'armenia' },
-  { slug: 'arauca', label: 'Arauca',
+  { slug: 'arauca', label: 'Arauca', codigo: '34',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Arauca',
     email: 'dsia_arauca_devoluciones@dian.gov.co', cita: false, ciudad: 'arauca' },
-  { slug: 'barrancabermeja', label: 'Barrancabermeja',
+  { slug: 'barrancabermeja', label: 'Barrancabermeja', codigo: '29',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Barrancabermeja',
     email: 'dsia_barrancabermeja_devoluciones@dian.gov.co', cita: false, ciudad: 'barrancabermeja' },
-  { slug: 'buenaventura', label: 'Buenaventura',
+  { slug: 'buenaventura', label: 'Buenaventura', codigo: '35',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Buenaventura',
     email: 'dsia_buenaventura_devoluciones@dian.gov.co', cita: false, ciudad: 'buenaventura' },
-  { slug: 'cartagena', label: 'Cartagena',
+  { slug: 'cartagena', label: 'Cartagena', codigo: '06',
+    nombre_oficial: 'Dirección Seccional de Impuestos de Cartagena',
     email: 'dsi_cartagena_devoluciones@dian.gov.co', cita: false, ciudad: 'cartagena' },
-  { slug: 'cucuta', label: 'Cúcuta',
+  { slug: 'cucuta', label: 'Cúcuta', codigo: '07',
+    nombre_oficial: 'Dirección Seccional de Impuestos de Cúcuta',
     email: 'dsi_cucuta_devoluciones@dian.gov.co', cita: false, ciudad: 'cucuta' },
-  { slug: 'florencia', label: 'Florencia',
+  { slug: 'florencia', label: 'Florencia', codigo: '28',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Florencia',
     email: 'dsia_florencia_devoluciones@dian.gov.co', cita: false, ciudad: 'florencia' },
-  { slug: 'girardot', label: 'Girardot',
+  { slug: 'girardot', label: 'Girardot', codigo: '08',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Girardot',
     email: 'dsia_girardot_devoluciones@dian.gov.co', cita: false, ciudad: 'girardot' },
-  { slug: 'ibague', label: 'Ibagué',
+  { slug: 'ibague', label: 'Ibagué', codigo: '09',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Ibagué',
     email: 'dsia_ibague_devoluciones@dian.gov.co', cita: false, ciudad: 'ibague' },
-  { slug: 'leticia', label: 'Leticia',
+  { slug: 'leticia', label: 'Leticia', codigo: '38',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Leticia',
     email: 'dsia_leticia_devoluciones@dian.gov.co', cita: false, ciudad: 'leticia' },
-  { slug: 'manizales', label: 'Manizales',
+  { slug: 'manizales', label: 'Manizales', codigo: '10',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Manizales',
     email: 'dsia_manizales_devoluciones@dian.gov.co', cita: false, ciudad: 'manizales' },
-  { slug: 'monteria', label: 'Montería',
+  { slug: 'monteria', label: 'Montería', codigo: '12',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Montería',
     email: 'dsia_monteria_devoluciones@dian.gov.co', cita: false, ciudad: 'monteria' },
-  { slug: 'neiva', label: 'Neiva',
+  { slug: 'neiva', label: 'Neiva', codigo: '13',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Neiva',
     email: 'dsia_neiva_devoluciones@dian.gov.co', cita: false, ciudad: 'neiva' },
-  { slug: 'palmira', label: 'Palmira',
+  { slug: 'palmira', label: 'Palmira', codigo: '15',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Palmira',
     email: 'dsia_palmira_devoluciones@dian.gov.co', cita: false, ciudad: 'palmira' },
-  { slug: 'pasto', label: 'Pasto',
+  { slug: 'pasto', label: 'Pasto', codigo: '14',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Pasto',
     email: 'dsia_pasto_devoluciones@dian.gov.co', cita: false, ciudad: 'pasto' },
-  { slug: 'pereira', label: 'Pereira',
+  { slug: 'pereira', label: 'Pereira', codigo: '16',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Pereira',
     email: 'dsia_pereira_devoluciones@dian.gov.co', cita: false, ciudad: 'pereira' },
-  { slug: 'popayan', label: 'Popayán',
+  { slug: 'popayan', label: 'Popayán', codigo: '17',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Popayán',
     email: 'dsia_popayan_devoluciones@dian.gov.co', cita: false, ciudad: 'popayan' },
-  { slug: 'quibdo', label: 'Quibdó',
+  { slug: 'quibdo', label: 'Quibdó', codigo: '18',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Quibdó',
     email: 'dsia_quibdo_devoluciones@dian.gov.co', cita: false, ciudad: 'quibdo' },
-  { slug: 'riohacha', label: 'Riohacha',
+  { slug: 'riohacha', label: 'Riohacha', codigo: '25',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Riohacha',
     email: 'dsia_riohacha_devoluciones@dian.gov.co', cita: false, ciudad: 'riohacha' },
-  { slug: 'sanandres', label: 'San Andrés',
+  { slug: 'sanandres', label: 'San Andrés', codigo: '27',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de San Andrés',
     email: 'dsia_sanandres_devoluciones@dian.gov.co', cita: false, ciudad: 'san andres' },
-  { slug: 'santamarta', label: 'Santa Marta',
+  { slug: 'santamarta', label: 'Santa Marta', codigo: '19',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Santa Marta',
     email: 'dsia_stamarta_devoluciones@dian.gov.co', cita: false, ciudad: 'santa marta' },
-  { slug: 'sincelejo', label: 'Sincelejo',
+  { slug: 'sincelejo', label: 'Sincelejo', codigo: '23',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Sincelejo',
     email: 'dsia_sincelejo_devoluciones@dian.gov.co', cita: false, ciudad: 'sincelejo' },
-  { slug: 'sogamoso', label: 'Sogamoso',
+  { slug: 'sogamoso', label: 'Sogamoso', codigo: '26',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Sogamoso',
     email: 'dsia_sogamoso_devoluciones@dian.gov.co', cita: false, ciudad: 'sogamoso' },
-  { slug: 'tulua', label: 'Tuluá',
+  { slug: 'tulua', label: 'Tuluá', codigo: '21',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Tuluá',
     email: 'dsia_tulua_devoluciones@dian.gov.co', cita: false, ciudad: 'tulua' },
-  { slug: 'tunja', label: 'Tunja',
+  { slug: 'tunja', label: 'Tunja', codigo: '20',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Tunja',
     email: 'dsia_tunja_devoluciones@dian.gov.co', cita: false, ciudad: 'tunja' },
-  { slug: 'valledupar', label: 'Valledupar',
+  { slug: 'valledupar', label: 'Valledupar', codigo: '24',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Valledupar',
     email: 'dsia_valledupar_devoluciones@dian.gov.co', cita: false, ciudad: 'valledupar' },
-  { slug: 'villavicencio', label: 'Villavicencio',
+  { slug: 'villavicencio', label: 'Villavicencio', codigo: '22',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Villavicencio',
     email: 'dsia_villavicencio_devoluciones@dian.gov.co', cita: false, ciudad: 'villavicencio' },
-  { slug: 'yopal', label: 'Yopal',
+  { slug: 'yopal', label: 'Yopal', codigo: '44',
+    nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Yopal',
     email: 'dsia_yopal_devoluciones@dian.gov.co', cita: false, ciudad: 'yopal' },
 ]
 
@@ -138,4 +177,27 @@ export function mapCiudadASeccional(
 
 export function getSeccionalBySlug(slug: string): SeccionalDIAN | null {
   return SECCIONALES_DIAN.find(s => s.slug === slug) ?? null
+}
+
+/**
+ * Normaliza un texto (ej. la "Dirección seccional" extraída del RUT, que puede
+ * venir como "Tuluá", "Impuestos y Aduanas de Tuluá" o el nombre completo) al
+ * NOMBRE OFICIAL canónico que exige la DIAN en la casilla 12 del Formato 010.
+ * Si no logra mapearlo, devuelve el texto original (no rompe el render).
+ */
+export function nombreOficialSeccional(input: string | null | undefined): string | null {
+  if (!input) return null
+  const n = normalize(input)
+  if (!n) return null
+  // 1) match por nombre oficial contenido (o que contenga al input)
+  const porNombre = SECCIONALES_DIAN.find(s => {
+    const no = normalize(s.nombre_oficial)
+    return no === n || no.includes(n) || n.includes(no)
+  })
+  if (porNombre) return porNombre.nombre_oficial
+  // 2) match por ciudad (el RUT suele traer solo la ciudad de la seccional)
+  const porCiudad = SECCIONALES_DIAN.find(s => s.ciudad && (normalize(s.ciudad) === n || n.includes(normalize(s.ciudad))))
+  if (porCiudad) return porCiudad.nombre_oficial
+  // 3) sin match: devolver el original tal cual (operador puede corregir)
+  return input
 }

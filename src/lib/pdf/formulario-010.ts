@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
+import { nombreOficialSeccional } from '@/lib/dian/seccionales'
 
 // Overlay sobre el PDF oficial de la DIAN (Formato 010). El fondo no se
 // modifica: solo dibujamos texto en las coordenadas de cada casilla.
@@ -68,8 +69,9 @@ const P1 = {
   otros_nombres: { x: 510, y: 599, maxWidth: 85 },
   // Razón social (fila y = 591.4, valor ~575)
   razon_social: { x: 28, y: 575, maxWidth: 560 },
-  // Dirección seccional (fila y = 567.4, valor ~551)
-  direccion_seccional: { x: 28, y: 551, maxWidth: 280 },
+  // Dirección seccional (fila y = 567.4, valor ~551). Size 8 + maxWidth 305:
+  // los nombres oficiales son largos ("...de Barrancabermeja") y no deben truncarse.
+  direccion_seccional: { x: 28, y: 551, maxWidth: 305, size: 8 },
   correo_electronico: { x: 343, y: 551, maxWidth: 240 },
   // Dirección y Teléfono (fila y = 543.4, valor ~527)
   direccion: { x: 28, y: 527, maxWidth: 470 },
@@ -103,7 +105,7 @@ const P2 = {
   primer_nombre: { x: 409, y: 599, maxWidth: 95 },
   otros_nombres: { x: 510, y: 599, maxWidth: 85 },
   razon_social: { x: 28, y: 575, maxWidth: 560 },
-  direccion_seccional: { x: 28, y: 551, maxWidth: 560 },
+  direccion_seccional: { x: 28, y: 551, maxWidth: 560, size: 8 },
   // Titular del saldo (fila y=519.4 → valor ~503)
   titular_tipo_doc: { x: 28, y: 503, maxWidth: 100 },
   titular_nit: { x: 159, y: 503, maxWidth: 90 },
@@ -116,7 +118,9 @@ const P2 = {
   concepto_saldo_1: { x: 43, y: 455, maxWidth: 155 },
   anio_gravable_1: { x: 226, y: 455, maxWidth: 40 },
   periodo_1: { x: 270, y: 455, maxWidth: 35 },
-  // 54 No. documento (y=471.4 → 455) — opcional, vacío por defecto
+  // Casilla 55 (No. documento que origina el saldo) — la DIAN exige aquí el
+  // número de factura de venta del vehículo. La 54 (No. doc/acto, x≈308) queda
+  // vacía: solo aplica a pago en exceso aduanero.
   numero_factura_1: { x: 448, y: 458, maxWidth: 135 },
   // 56/57 No diligenciar para IVA
   // 58 Fecha documento (y=450 → 434)
@@ -190,6 +194,9 @@ export async function generarFormulario010(
 
   const fecha = parseFecha(datos.fecha_factura)
   const valorFmt = formatCurrency(datos.valor_solicitado)
+  // Casilla 12 — nombre OFICIAL de la seccional (la DIAN lo exige completo en
+  // hojas 1 y 2). Normaliza lo extraído del RUT contra el catálogo oficial.
+  const seccionalOficial = nombreOficialSeccional(datos.direccion_seccional)
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — usa Bold pequeño por estar en caja chica
@@ -204,7 +211,7 @@ export async function generarFormulario010(
   drawValue(page1, font, datos.primer_nombre, P1.primer_nombre)
   drawValue(page1, font, datos.otros_nombres, P1.otros_nombres)
   drawValue(page1, font, datos.razon_social, P1.razon_social)
-  drawValue(page1, font, datos.direccion_seccional, P1.direccion_seccional)
+  drawValue(page1, font, seccionalOficial, P1.direccion_seccional)
   drawValue(page1, font, datos.correo_electronico, P1.correo_electronico)
   drawValue(page1, font, datos.direccion, P1.direccion)
   drawValue(page1, font, datos.telefono, P1.telefono)
@@ -234,7 +241,7 @@ export async function generarFormulario010(
   drawValue(page2, font, datos.primer_nombre, P2.primer_nombre)
   drawValue(page2, font, datos.otros_nombres, P2.otros_nombres)
   drawValue(page2, font, datos.razon_social, P2.razon_social)
-  drawValue(page2, font, datos.direccion_seccional, P2.direccion_seccional)
+  drawValue(page2, font, seccionalOficial, P2.direccion_seccional)
 
   // Titular del saldo (= solicitante para SOENA: el titular es la empresa)
   drawValue(page2, font, 'NIT', P2.titular_tipo_doc)
