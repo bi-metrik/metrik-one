@@ -148,6 +148,10 @@ async function loadBloqueContext(
   const data = (b.data ?? {}) as Partial<PropuestaData>
   const configExtra = (b.bloque_configs?.config_extra ?? {}) as Record<string, unknown>
   const capDescuento = Number(configExtra.cap_descuento_pct ?? 50)
+  // Umbral sobre el cual aprobar requiere rol gerencial. null = sin gate (default).
+  const umbralAprobacion = configExtra.umbral_aprobacion_pct != null
+    ? Number(configExtra.umbral_aprobacion_pct)
+    : null
   // servicio_id puede venir directo o anidado en auto_propuesta (config canonica)
   const autoPropuesta = (configExtra.auto_propuesta ?? null) as { servicio_id?: string } | null
   const servicioId = (configExtra.servicio_id as string | undefined)
@@ -182,6 +186,7 @@ async function loadBloqueContext(
     precioBase,
     ivaPct,
     capDescuento,
+    umbralAprobacion,
     templateSlug,
     driveSubfolder,
   }
@@ -356,7 +361,7 @@ export async function aprobarVersionPropuesta(
   versionN: number,
   plan: 1 | 2,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { supabase, workspaceId, staffId, error: errWs } = await getWorkspace()
+  const { supabase, workspaceId, staffId, role, error: errWs } = await getWorkspace()
   if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
 
   if (plan !== 1 && plan !== 2) {
@@ -369,6 +374,18 @@ export async function aprobarVersionPropuesta(
   const versiones = (ctx.data.versiones ?? []) as PropuestaVersion[]
   const version = versiones.find(v => v.n === versionN)
   if (!version) return { ok: false, error: `Versión ${versionN} no encontrada` }
+
+  const descPlan = plan === 1 ? version.descuento_pct_plan1 : version.descuento_pct_plan2
+
+  // Gate de aprobación: descuentos sobre el umbral requieren rol gerencial.
+  const APRUEBAN_DESCUENTO_ALTO = ['owner', 'admin', 'supervisor']
+  if (ctx.umbralAprobacion != null && descPlan > ctx.umbralAprobacion
+      && !APRUEBAN_DESCUENTO_ALTO.includes(role ?? '')) {
+    return {
+      ok: false,
+      error: `El descuento del Plan ${plan} (${descPlan}%) supera ${ctx.umbralAprobacion}% — requiere aprobación de un supervisor, administrador o dueño.`,
+    }
+  }
 
   const valorElegido = plan === 1 ? version.valor_final_plan1 : version.valor_final_plan2
 

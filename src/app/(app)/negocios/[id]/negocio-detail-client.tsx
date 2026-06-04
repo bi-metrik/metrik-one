@@ -1331,6 +1331,7 @@ function BloqueRenderer({
           } : null}
           modo={modo}
           configExtra={configExtra as Parameters<typeof BloquePropuestaEconomica>[0]['configExtra']}
+          userRole={userRole}
         />
       )
 

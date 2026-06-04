@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useMemo } from 'react'
-import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import {
@@ -38,6 +38,8 @@ interface PropuestaData {
 
 interface ConfigExtra {
   cap_descuento_pct?: number
+  /** Descuentos sobre este % requieren aprobación de rol gerencial. */
+  umbral_aprobacion_pct?: number
   servicio_id?: string
   template_slug?: string
 }
@@ -53,6 +55,7 @@ interface Props {
   instancia: BloqueInstancia | null
   modo: 'editable' | 'visible'
   configExtra: ConfigExtra
+  userRole?: string
 }
 
 function formatFechaCorta(iso: string): string {
@@ -68,6 +71,7 @@ export default function BloquePropuestaEconomica({
   instancia,
   modo,
   configExtra,
+  userRole,
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const data = (instancia?.data ?? {}) as PropuestaData
@@ -75,6 +79,9 @@ export default function BloquePropuestaEconomica({
   const versiones = (data.versiones ?? []).slice().sort((a, b) => b.n - a.n)
   const aprobada = !!data.aprobado_at
   const cap = configExtra.cap_descuento_pct ?? 50
+  // Gate de descuento alto: sobre el umbral, aprobar requiere rol gerencial.
+  const umbralAprobacion = configExtra.umbral_aprobacion_pct ?? null
+  const puedeAprobarAlto = ['owner', 'admin', 'supervisor'].includes(userRole ?? '')
 
   // Inputs — defaults desde ultima version o desde data inicial
   const ultimaVersion = versiones[0]
@@ -85,6 +92,13 @@ export default function BloquePropuestaEconomica({
     String(ultimaVersion?.descuento_pct_plan2 ?? data.descuento_pct_plan2 ?? 0),
   )
   const [planSeleccionado, setPlanSeleccionado] = useState<1 | 2>(2)
+
+  // ¿El plan elegido supera el umbral y el usuario no es gerencial?
+  const descPlanSeleccionado = (planSeleccionado === 1
+    ? ultimaVersion?.descuento_pct_plan1
+    : ultimaVersion?.descuento_pct_plan2) ?? 0
+  const requiereAprobacionAlta = umbralAprobacion != null && descPlanSeleccionado > umbralAprobacion
+  const aprobacionBloqueada = requiereAprobacionAlta && !puedeAprobarAlto
 
   // Recalculo en vivo
   const calc = useMemo(() => {
@@ -361,13 +375,20 @@ export default function BloquePropuestaEconomica({
                 </fieldset>
                 <button
                   onClick={handleAprobar}
-                  disabled={isPending}
+                  disabled={isPending || aprobacionBloqueada}
+                  title={aprobacionBloqueada ? `Descuentos sobre ${umbralAprobacion}% requieren aprobación gerencial` : undefined}
                   className="inline-flex items-center gap-1.5 rounded-md border border-green-600 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   Aprobar v{ultimaVersion?.n} con Plan {planSeleccionado}
                 </button>
               </div>
+            )}
+            {aprobacionBloqueada && (
+              <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+                <Lock className="h-3.5 w-3.5 shrink-0" />
+                El Plan {planSeleccionado} tiene {descPlanSeleccionado}% de descuento — supera {umbralAprobacion}% y requiere aprobación de un supervisor, administrador o dueño.
+              </p>
             )}
           </div>
         </>
