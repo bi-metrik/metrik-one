@@ -20,8 +20,11 @@ const STEPS = [
 
 export default function NuevoNegocioForm({
   lineas = [],
+  lineasAutoNombre = [],
 }: {
   lineas?: Linea[]
+  /** Líneas cuyo negocio toma el nombre del contacto: se oculta el campo nombre. */
+  lineasAutoNombre?: string[]
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -61,6 +64,9 @@ export default function NuevoNegocioForm({
   // Cuando persona natural, saltamos el paso de empresa
   const totalSteps = esPersonaNatural ? 2 : 3
   const negocioStep = esPersonaNatural ? 1 : 2
+
+  // Línea con nombre automático = contacto → se oculta el campo "nombre del negocio".
+  const autoNombre = lineaId != null && lineasAutoNombre.includes(lineaId)
 
   // ── Busqueda contactos ─────────────────────────────────────────────────────
 
@@ -138,9 +144,10 @@ export default function NuevoNegocioForm({
     if (step === 0) return contactoNombre.trim().length > 0
     if (step === 1 && !esPersonaNatural) return empresaNombre.trim().length > 0
     if (step === negocioStep) {
-      if (!nombre.trim()) return false
       // Si el workspace tiene lineas, una debe estar seleccionada
       if (lineas.length > 0 && !lineaId) return false
+      // El nombre solo es obligatorio si la línea NO usa nombre automático
+      if (!autoNombre && !nombre.trim()) return false
       return true
     }
     return false
@@ -149,14 +156,16 @@ export default function NuevoNegocioForm({
   // ── Submit ─────────────────────────────────────────────────────────────────
 
   const handleSubmit = () => {
-    if (!nombre.trim()) { toast.error('El nombre es requerido'); return }
+    // Con nombre automático, el server pone nombre = contacto; aquí mandamos el
+    // contacto como fallback. Sin auto, el nombre es obligatorio.
+    if (!autoNombre && !nombre.trim()) { toast.error('El nombre es requerido'); return }
     if (!esPersonaNatural && !empresaNombre.trim()) {
       toast.error('La empresa es requerida'); return
     }
 
     startTransition(async () => {
       const result = await crearNegocio({
-        nombre: nombre.trim(),
+        nombre: autoNombre ? contactoNombre.trim() : nombre.trim(),
         linea_id: lineaId ?? undefined,
         contacto_id: contactoId ?? undefined,
         contacto_nombre: contactoId ? undefined : contactoNombre.trim(),
@@ -461,19 +470,29 @@ export default function NuevoNegocioForm({
             </div>
           )}
 
-          {/* Nombre */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Nombre del negocio *</label>
-            <input
-              type="text"
-              value={nombre}
-              onChange={e => setNombre(e.target.value)}
-              placeholder="Ej: Certificación VE Honda Civic 2023"
-              autoFocus
-              maxLength={200}
-              className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-            />
-          </div>
+          {/* Nombre — oculto cuando la línea usa nombre automático = contacto */}
+          {autoNombre ? (
+            <div className="rounded-md border border-dashed bg-muted/40 px-3 py-2.5">
+              <p className="text-xs font-medium text-muted-foreground">Nombre del negocio</p>
+              <p className="mt-0.5 text-sm font-medium">{contactoNombre || 'El nombre del cliente'}</p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+                Se asigna automáticamente el nombre del cliente.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Nombre del negocio *</label>
+              <input
+                type="text"
+                value={nombre}
+                onChange={e => setNombre(e.target.value)}
+                placeholder="Ej: Certificación VE Honda Civic 2023"
+                autoFocus
+                maxLength={200}
+                className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
+          )}
 
         </div>
       )}

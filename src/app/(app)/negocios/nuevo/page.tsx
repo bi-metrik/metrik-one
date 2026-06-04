@@ -25,5 +25,18 @@ export default async function NuevoNegocioPage() {
     .order('numero')
   const lineas = (lineasData ?? []) as { id: string; nombre: string; descripcion: string | null; numero: number }[]
 
-  return <NuevoNegocioForm lineas={lineas} />
+  // Líneas con nombre automático = contacto (config_extra.negocio_codigo_format).
+  // El form oculta el campo "nombre del negocio" para esas líneas.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ws } = await (supabase as any)
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', profile.workspace_id)
+    .single()
+  const codigoFormat = (ws?.config_extra?.negocio_codigo_format ?? []) as Array<{ linea_id?: string; nombre_auto?: string }>
+  const lineasAutoNombre = Array.isArray(codigoFormat)
+    ? codigoFormat.filter(r => r.nombre_auto === 'contacto' && r.linea_id).map(r => r.linea_id as string)
+    : []
+
+  return <NuevoNegocioForm lineas={lineas} lineasAutoNombre={lineasAutoNombre} />
 }

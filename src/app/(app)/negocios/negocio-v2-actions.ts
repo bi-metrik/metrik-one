@@ -848,12 +848,16 @@ export async function crearNegocio(input: {
 
   const primeraEtapa = primeraEtapaRaw as { id: string; stage: string } | null
 
-  // Auto-nombre = contacto (config-driven). Workspaces como SOENA quieren que el
-  // nombre del negocio sea el del cliente (tarjeta muestra "V0001 — {contacto}").
+  // Auto-nombre = contacto (config-driven POR LÍNEA). La regla vive en
+  // config_extra.negocio_codigo_format[{linea_id, nombre_auto}] — la misma que
+  // define el folio (ej. SOENA/VE → V0001 + nombre = cliente).
   let nombreNegocio = input.nombre
-  const nombreAuto = (wsConfig as { config_extra?: Record<string, unknown> } | null)
-    ?.config_extra?.negocio_nombre_auto
-  if (nombreAuto === 'contacto' && contactoId) {
+  const codigoFormat = (wsConfig as { config_extra?: Record<string, unknown> } | null)
+    ?.config_extra?.negocio_codigo_format as Array<{ linea_id?: string; nombre_auto?: string }> | undefined
+  const reglaLinea = Array.isArray(codigoFormat)
+    ? codigoFormat.find(r => r.linea_id === lineaId)
+    : undefined
+  if (reglaLinea?.nombre_auto === 'contacto' && contactoId) {
     if (input.contacto_nombre?.trim()) {
       nombreNegocio = input.contacto_nombre.trim()
     } else {
