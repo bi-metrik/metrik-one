@@ -1120,10 +1120,14 @@ function BloqueRenderer({
         // Clarity puede agregar gate de aprobación por supervisor/owner.
         return 'editable'
       case 'aprobacion':
+        // Aprobar/decidir sigue siendo gerencial (owner/admin).
+        return GERENCIAL.includes(userRole) ? 'editable' : 'visible'
       case 'cobros':
       case 'documento':
       case 'formulario':
-        return GERENCIAL.includes(userRole) ? 'editable' : 'visible'
+        // Operativo: subir documentos, generar formularios (010/1668) y registrar
+        // cobros lo hace también supervisor (coherente con roles.ts:canRegisterCobro).
+        return SUPERVISOR_UP.includes(userRole) ? 'editable' : 'visible'
       case 'resumen_financiero':
       case 'ejecucion':
       case 'historial':
