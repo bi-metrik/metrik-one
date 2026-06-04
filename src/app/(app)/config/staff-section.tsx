@@ -82,7 +82,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
     horas_disponibles_mes: 160,
     tipo_vinculo: '',
     rol_plataforma: 'ejecutor',
-    display_role: '',
     areas: [] as Area[],
   })
 
@@ -92,7 +91,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
   }, [initialData])
 
   const resetForm = () => {
-    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', display_role: '', areas: [] as Area[] })
+    setForm({ full_name: '', position: '', contract_type: 'fijo', salary: 0, phone_whatsapp: '', horas_disponibles_mes: 160, tipo_vinculo: '', rol_plataforma: 'ejecutor', areas: [] as Area[] })
     setShowForm(false)
     setShowDetails(false)
     setEditingId(null)
@@ -106,10 +105,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
     }
     setSaving(true)
     const { areas, ...staffData } = form
-    const res = await createStaffMember({
-      ...staffData,
-      display_role: staffData.display_role.trim() || undefined,
-    })
+    const res = await createStaffMember(staffData)
     if (res.success) {
       if (res.id && rolUsaAreas(form.rol_plataforma) && areas.length > 0) {
         const ra = await updateStaffAreas(res.id, areas)
@@ -141,7 +137,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       horas_disponibles_mes: form.horas_disponibles_mes,
       tipo_vinculo: form.tipo_vinculo || null,
       rol_plataforma: form.rol_plataforma,
-      display_role: form.display_role.trim() || null,
     })
     if (res.success) {
       // Sincronizar areas (vacio si el rol no usa areas, p.ej. contador)
@@ -196,7 +191,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
       horas_disponibles_mes: s.horas_disponibles_mes ?? 160,
       tipo_vinculo: s.tipo_vinculo || '',
       rol_plataforma: s.rol_plataforma || 'ejecutor',
-      display_role: s.display_role || '',
       areas: staffAreas[s.id] ?? [],
     })
     setEditingId(s.id)
@@ -265,8 +259,11 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                 value={form.position}
                 onChange={e => setForm({ ...form, position: e.target.value })}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="Disenador"
+                placeholder="Ej: Disenador, Jefe de Obra"
               />
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Se muestra en la barra del workspace. Si lo dejas vacio, se usa el rol.
+              </p>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Rol en plataforma</label>
@@ -301,24 +298,6 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
               </div>
             )}
           </div>
-
-          {/* display_role — nombre personalizado opcional (solo para supervisor) */}
-          {form.rol_plataforma === 'supervisor' && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Nombre personalizado (opcional)</label>
-              <input
-                type="text"
-                value={form.display_role}
-                onChange={e => setForm({ ...form, display_role: e.target.value })}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="Supervisor"
-                maxLength={50}
-              />
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                Ej: Supervisor Comercial, Jefe de Obra. Se muestra en vez de &quot;Supervisor&quot; en el workspace.
-              </p>
-            </div>
-          )}
 
           {/* Toggle detalles */}
           <button

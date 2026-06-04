@@ -34,7 +34,6 @@ export async function createStaffMember(formData: {
   horas_disponibles_mes?: number
   tipo_vinculo?: string
   rol_plataforma?: string
-  display_role?: string
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -63,7 +62,6 @@ export async function createStaffMember(formData: {
     horas_disponibles_mes: formData.horas_disponibles_mes ?? 160,
     tipo_vinculo: formData.tipo_vinculo || null,
     rol_plataforma: formData.rol_plataforma || 'ejecutor',
-    display_role: formData.display_role || null,
   })
     .select('id')
     .single()
@@ -87,7 +85,6 @@ export async function updateStaffMember(
     horas_disponibles_mes?: number
     tipo_vinculo?: string | null
     rol_plataforma?: string
-    display_role?: string | null
   }
 ) {
   const supabase = await createClient()

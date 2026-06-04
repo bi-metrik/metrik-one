@@ -19,10 +19,10 @@ export default async function AppLayout({
     redirect('/login')
   }
 
-  // Get user profile + workspace — includes display_role added in sprint 10
+  // Get user profile + workspace
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, role, workspace_id, display_role')
+    .select('full_name, role, workspace_id')
     .eq('id', user.id)
     .single()
 
@@ -30,6 +30,16 @@ export default async function AppLayout({
     // New user — needs onboarding
     redirect('/onboarding')
   }
+
+  // El header muestra el Cargo (staff.position) del usuario; si no tiene, cae al
+  // rol (fallback en AppShell). Fuente unica de "como se llama el puesto"
+  // (2026-06-04: se elimino el campo separado "Nombre personalizado").
+  const { data: staffSelf } = await supabase
+    .from('staff')
+    .select('position')
+    .eq('profile_id', user.id)
+    .eq('workspace_id', profile.workspace_id)
+    .maybeSingle()
 
   // Dev workspace override: cookie __dev_ws=<slug> impersona cualquier workspace
   let activeWorkspaceId: string = profile.workspace_id
@@ -102,7 +112,7 @@ export default async function AppLayout({
         fullName={profile.full_name || 'Usuario'}
         workspaceName={workspace.name}
         role={profile.role}
-        displayRole={profile.display_role ?? null}
+        displayRole={staffSelf?.position ?? null}
         isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}
         platformAdminState={platformAdminState}
         branding={{
