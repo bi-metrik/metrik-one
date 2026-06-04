@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
 import { uploadFileToDrive, setFilePublicByLink, createSubfolderPath } from '@/lib/google-drive'
 import { renderToBuffer } from '@react-pdf/renderer'
@@ -169,6 +170,9 @@ export async function generarFormulario(
 }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
 
   const admin = createServiceClient()
 

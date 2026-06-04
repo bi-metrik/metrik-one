@@ -18,6 +18,7 @@
 // ============================================================
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
@@ -201,6 +202,9 @@ export async function generarVersionPropuesta(
   const { supabase, workspaceId, staffId, error: errWs } = await getWorkspace()
   if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
 
+  const guard = await guardEditarBloque(bloqueId)
+  if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
+
   const ctx = await loadBloqueContext(supabase, workspaceId, bloqueId)
   if (ctx.error) return { ok: false, error: ctx.error }
 
@@ -363,6 +367,9 @@ export async function aprobarVersionPropuesta(
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, staffId, role, error: errWs } = await getWorkspace()
   if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(bloqueId)
+  if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
 
   if (plan !== 1 && plan !== 2) {
     return { ok: false, error: 'Plan invalido — debe ser 1 o 2' }

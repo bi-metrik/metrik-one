@@ -2042,12 +2042,24 @@ export async function marcarBloqueItem(
   completado: boolean,
   linkUrl?: string
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
+
+  // Guard: resolver el bloque del item y validar permiso (rol+área+responsable)
+  const { data: itemRow } = await db(supabase)
+    .from('bloque_items')
+    .select('negocio_bloque_id')
+    .eq('id', bloqueItemId)
+    .single()
+  if (!itemRow) return { error: 'Item no encontrado' }
+  const guard = await guardEditarBloque((itemRow as { negocio_bloque_id: string }).negocio_bloque_id)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
   const payload: Record<string, unknown> = {
     completado,
     completado_at: completado ? new Date().toISOString() : null,
+    // FK → profiles(id): profile.id (userId), no staff.id. NULL si se desmarca.
+    completado_por: completado ? (userId ?? null) : null,
   }
   if (linkUrl !== undefined) payload.link_url = linkUrl
 

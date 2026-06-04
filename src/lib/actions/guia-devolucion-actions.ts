@@ -9,6 +9,7 @@
 // ============================================================
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { renderGuiaDevolucion } from '@/lib/pdf/pdf-render-client'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
@@ -44,6 +45,9 @@ export async function generarVersionGuia(
 ): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(input.bloqueId)
+  if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
 
   // 1. Cargar bloque + config + negocio
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,6 +249,9 @@ export async function aprobarVersionGuia(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const { supabase, userId, staffId, error } = await getWorkspace()
   if (error) return { ok: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(bloqueId)
+  if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: bloque } = await (supabase as any)
