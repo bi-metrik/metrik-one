@@ -32,6 +32,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import FAB from './fab'
 import { PlatformAdminBar } from '@/components/platform-admin-bar'
+import ImpersonationBar from './impersonation-bar'
 import type { PlatformAdminState } from '@/lib/actions/platform-admin'
 
 interface BrandingProps {
@@ -315,6 +316,7 @@ export default function AppShell({
   return (
     <div className="flex h-dvh flex-col bg-background" style={brandingStyle}>
       <PlatformAdminBar state={platformAdminState ?? null} />
+      <ImpersonationBar />
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Desktop Sidebar ── */}
       <aside
