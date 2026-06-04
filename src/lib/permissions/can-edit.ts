@@ -75,37 +75,48 @@ export function getAreasEfectivas(user: UserContext): Set<Area> {
  * Determina si un usuario puede editar un bloque dado.
  *
  * Reglas (cerebro/conceptos/modelo-roles-areas-stages.md):
- *   - owner/admin: siempre true
- *   - read_only/contador: siempre false (estan fuera del modelo de areas)
- *   - cerrado: solo owner/admin (otros solo lectura)
- *   - supervisor: true si su area efectiva incluye area_duena del stage
- *   - operator: true si su area efectiva incluye area_duena Y es responsable
+ *   - read_only/contador: siempre false (fuera del modelo de areas)
+ *   - La segmentacion por area se activa SOLO si el staff tiene area(s) en
+ *     staff_areas. Sin area asignada: comportamiento por rol (owner/admin y
+ *     supervisor pueden; operator requiere ser responsable).
+ *   - Con area asignada: el staff (cualquier rol, incluido owner/admin) solo
+ *     edita el stage cuya area_duena este en sus areas efectivas (direccion
+ *     expande a las 3). Cambio 2026-06-04: owner/admin con area dejan de ser
+ *     passthrough — se restringen como el resto.
+ *   - cerrado (sin area_duena): solo owner/admin.
+ *   - operator: ademas debe ser responsable del negocio.
  */
 export function canEditBloque(
   user: UserContext,
   bloque: BloqueContext,
   negocioResponsables: string[]
 ): boolean {
-  // owner/admin: passthrough total
-  if (user.role === 'owner' || user.role === 'admin') return true
-
   // read_only / contador: fuera del modelo
   if (user.role === 'read_only' || user.role === 'contador') return false
 
-  // Stage cerrado: solo owner/admin (ya retornaron arriba)
   const areaDuena = STAGE_TO_AREA[bloque.stage]
-  if (areaDuena === null) return false
-
+  const tieneAreas = user.areas.length > 0
   const areasEfectivas = getAreasEfectivas(user)
+  // Cubre el stage si no tiene areas (sin segmentacion) o su area lo incluye.
+  const cubreStage = areaDuena !== null && (!tieneAreas || areasEfectivas.has(areaDuena))
 
-  // supervisor: debe tener area que cubra el stage
-  if (user.role === 'supervisor') {
-    return areasEfectivas.has(areaDuena)
+  // owner/admin: passthrough si no tienen area; con area, se restringen al stage.
+  if (user.role === 'owner' || user.role === 'admin') {
+    if (!tieneAreas) return true
+    return areaDuena === null ? true : areasEfectivas.has(areaDuena)
   }
 
-  // operator: area + responsable explicito
+  // Stage cerrado: solo owner/admin (ya retornaron arriba)
+  if (areaDuena === null) return false
+
+  // supervisor: cubre el stage (o no tiene areas asignadas)
+  if (user.role === 'supervisor') {
+    return cubreStage
+  }
+
+  // operator: cubre el stage + responsable explicito
   if (user.role === 'operator') {
-    return areasEfectivas.has(areaDuena) && negocioResponsables.includes(user.id)
+    return cubreStage && negocioResponsables.includes(user.id)
   }
 
   return false
