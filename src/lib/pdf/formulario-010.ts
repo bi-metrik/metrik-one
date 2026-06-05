@@ -156,8 +156,11 @@ function drawValue(page: PDFPage, font: PDFFont, value: string | null | undefine
       toDraw = toDraw.slice(0, -1)
     }
   }
-  page.drawText(toDraw, { x: cell.x, y: cell.y, size, font, color })
+  // Y_NUDGE: sube todo el texto 2pt — quedaba pegado/bajo la línea de cada casilla.
+  page.drawText(toDraw, { x: cell.x, y: cell.y + Y_NUDGE, size, font, color })
 }
+
+const Y_NUDGE = 2
 
 function formatCurrency(v: string | null): string | null {
   if (!v) return null
@@ -167,14 +170,17 @@ function formatCurrency(v: string | null): string | null {
 }
 
 // Fecha factura → "AAAA MM DD" (casillas 58) o parsear en [anio, mes].
-function parseFecha(iso: string | null): { anio: string; mes: string; dia: string; compacto: string } {
-  if (!iso) return { anio: '', mes: '', dia: '', compacto: '' }
+// bimestre (casilla 53): IVA es bimestral. Ene-Feb=1 ... Nov-Dic=6 = ceil(mes/2).
+function parseFecha(iso: string | null): { anio: string; mes: string; dia: string; bimestre: string; compacto: string } {
+  if (!iso) return { anio: '', mes: '', dia: '', bimestre: '', compacto: '' }
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return { anio: '', mes: '', dia: '', compacto: iso }
+  if (isNaN(d.getTime())) return { anio: '', mes: '', dia: '', bimestre: '', compacto: iso }
   const anio = String(d.getUTCFullYear())
-  const mes = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const mesNum = d.getUTCMonth() + 1
+  const mes = String(mesNum).padStart(2, '0')
   const dia = String(d.getUTCDate()).padStart(2, '0')
-  return { anio, mes, dia, compacto: `${anio} ${mes} ${dia}` }
+  const bimestre = String(Math.ceil(mesNum / 2))
+  return { anio, mes, dia, bimestre, compacto: `${anio} ${mes} ${dia}` }
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -212,8 +218,8 @@ export async function generarFormulario010(
   // Concepto (casilla 2) — usa Bold pequeño por estar en caja chica
   drawValue(page1, fontBold, constantes.concepto, { ...P1.concepto, size: 10 })
 
-  // Datos solicitante
-  drawValue(page1, font, datos.tipo_documento, P1.tipo_documento)
+  // Datos solicitante. Tipo de documento = "31" (NIT) por requerimiento DIAN.
+  drawValue(page1, font, '31', P1.tipo_documento)
   drawValue(page1, font, datos.nit, P1.nit)
   drawValue(page1, font, datos.dv, P1.dv)
   drawValue(page1, font, datos.primer_apellido, P1.primer_apellido)
@@ -235,15 +241,15 @@ export async function generarFormulario010(
   drawValue(page1, font, datos.tipo_cuenta, P1.tipo_cuenta)
   drawValue(page1, font, constantes.tipo_solicitud, P1.tipo_solicitud)
 
-  // Firma de quien suscribe (1001-1004). 1005 y 1006 EN BLANCO por instrucción.
-  drawValue(page1, font, datos.nombre_suscriptor, P1.firma_nombre)
-  drawValue(page1, font, datos.tipo_doc_suscriptor, P1.firma_tipo_doc)
-  drawValue(page1, font, datos.identificacion_suscriptor, P1.firma_identificacion)
-  drawValue(page1, font, datos.dv_suscriptor, P1.firma_dv)
+  // Firma de quien suscribe (1001-1004) = el solicitante. 1005/1006 EN BLANCO.
+  drawValue(page1, font, nombreTitular, P1.firma_nombre)
+  drawValue(page1, font, '31', P1.firma_tipo_doc)
+  drawValue(page1, font, datos.nit, P1.firma_identificacion)
+  drawValue(page1, font, datos.dv, P1.firma_dv)
 
   // ── PÁGINA 2 ──────────────────────────────────────────────────────────────
-  // Datos solicitante (repetir en hoja 2)
-  drawValue(page2, font, datos.tipo_documento, P2.tipo_documento)
+  // Datos solicitante (repetir en hoja 2). Casilla 20 tipo doc = "31" (NIT).
+  drawValue(page2, font, '31', P2.tipo_documento)
   drawValue(page2, font, datos.nit, P2.nit)
   drawValue(page2, font, datos.dv, P2.dv)
   drawValue(page2, font, datos.primer_apellido, P2.primer_apellido)
@@ -254,7 +260,7 @@ export async function generarFormulario010(
   drawValue(page2, font, seccionalOficial, P2.direccion_seccional)
 
   // Titular del saldo (= solicitante). Natural: nombre completo; jurídica: razón social.
-  drawValue(page2, font, 'NIT', P2.titular_tipo_doc)
+  drawValue(page2, font, '31', P2.titular_tipo_doc)
   drawValue(page2, font, datos.nit, P2.titular_nit)
   drawValue(page2, font, datos.dv, P2.titular_dv)
   drawValue(page2, font, nombreTitular, P2.titular_nombre)
@@ -266,13 +272,13 @@ export async function generarFormulario010(
   // Fila 1 origen del saldo (factura + UPME)
   drawValue(page2, font, constantes.concepto_saldo, P2.concepto_saldo_1)
   drawValue(page2, font, fecha.anio, P2.anio_gravable_1)
-  drawValue(page2, font, fecha.mes, P2.periodo_1)
+  drawValue(page2, font, fecha.bimestre, P2.periodo_1)  // casilla 53: periodo bimestral
   drawValue(page2, font, datos.numero_factura, P2.numero_factura_1)
   drawValue(page2, font, fecha.compacto, P2.fecha_factura_1)
   drawValue(page2, font, valorFmt, P2.valor_origen_1)
 
-  // Responsable de la fila 1 (mismo NIT)
-  drawValue(page2, font, 'NIT', P2.resp_tipo_doc_1)
+  // Responsable de la fila 1 (casillas 60-63): tipo doc "31" + cédula + DV + nombre
+  drawValue(page2, font, '31', P2.resp_tipo_doc_1)
   drawValue(page2, font, datos.nit, P2.resp_nit_1)
   drawValue(page2, font, datos.dv, P2.resp_dv_1)
   drawValue(page2, font, nombreTitular, P2.resp_nombre_1)
