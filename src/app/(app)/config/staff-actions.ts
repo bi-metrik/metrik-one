@@ -194,7 +194,7 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     // Validate staff belongs to this workspace and has no profile_id
     const { data: staffMember, error: staffErr } = await supabase
       .from('staff')
-      .select('id, full_name, profile_id, rol_plataforma, workspace_id, display_role')
+      .select('id, full_name, profile_id, rol_plataforma, workspace_id')
       .eq('id', staffId)
       .eq('workspace_id', profile.workspace_id)
       .maybeSingle()
@@ -260,7 +260,6 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
         full_name: staffMember.full_name,
         invited_role: inviteRole,
         workspace_id: profile.workspace_id,
-        display_role: staffMember.display_role || null,
       },
     })
 

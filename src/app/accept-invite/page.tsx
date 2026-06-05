@@ -162,9 +162,7 @@ export default async function AcceptInvitePage({
   }
 
   // Create profile in the invitation's workspace
-  // display_role may come from user_metadata (set during inviteUserByEmail)
   const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Nuevo miembro'
-  const displayRoleFromMeta = user.user_metadata?.display_role || null
   const { error: profileError } = await serviceClient
     .from('profiles')
     .insert({
@@ -172,7 +170,6 @@ export default async function AcceptInvitePage({
       workspace_id: invitation.workspace_id,
       full_name: fullName,
       role: invitation.role,
-      display_role: displayRoleFromMeta,
     })
 
   if (profileError) {

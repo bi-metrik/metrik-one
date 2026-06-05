@@ -31,7 +31,6 @@ export interface StaffConAreas {
   full_name: string
   rol_plataforma: string | null
   role: Role | null
-  display_role: string | null
   areas: Area[]
   negocios_activos_count: number
   is_active: boolean
@@ -63,7 +62,7 @@ export async function getEquipoConAreas(): Promise<StaffConAreas[]> {
   // Staff base
   const { data: staffRows } = await supabase
     .from('staff')
-    .select('id, full_name, rol_plataforma, display_role, is_active, profile_id')
+    .select('id, full_name, rol_plataforma, is_active, profile_id')
     .eq('workspace_id', workspaceId)
     .order('full_name')
 
@@ -123,7 +122,6 @@ export async function getEquipoConAreas(): Promise<StaffConAreas[]> {
       full_name: (s.full_name as string | null) ?? 'Sin nombre',
       rol_plataforma: (s.rol_plataforma as string | null) ?? null,
       role: profileId ? profileRoleMap.get(profileId) ?? null : null,
-      display_role: (s.display_role as string | null) ?? null,
       areas: areasByStaff.get(s.id as string) ?? [],
       negocios_activos_count: countByStaff.get(s.id as string) ?? 0,
       is_active: Boolean(s.is_active),
