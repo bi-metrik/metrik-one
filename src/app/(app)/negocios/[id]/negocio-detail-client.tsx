@@ -571,11 +571,12 @@ function SelectorEtapa({
 
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
-  // Solo la siguiente etapa en orden estricto
+  // La siguiente etapa por orden ascendente (robusto a huecos en 'orden',
+  // p.ej. tras fusionar etapas el orden interno puede no ser contiguo).
   const siguienteEtapa = etapaActual
     ? [...etapasLinea]
         .sort((a, b) => a.orden - b.orden)
-        .find(e => e.orden === etapaActual.orden + 1) ?? null
+        .find(e => e.orden > etapaActual.orden) ?? null
     : null
 
   // Etapa anterior en orden estricto (para retroceso)

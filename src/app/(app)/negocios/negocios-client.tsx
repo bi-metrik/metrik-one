@@ -5,7 +5,7 @@ import NegocioCard from './negocio-card'
 import EmptyState from '@/components/empty-state'
 import type { NegocioResumen } from './negocio-v2-actions'
 
-type StageFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
+type StageFilter = 'todos' | 'venta' | 'inclusion' | 'ejecucion' | 'cobro' | 'cerrados'
 type MotivoCierre = 'todos' | 'exitoso' | 'perdido' | 'cancelado'
 
 interface FiltroSpec {
@@ -26,6 +26,11 @@ const ALL_FILTROS: FiltroSpec[] = [
     key: 'venta',
     label: 'Venta',
     active: { bg: 'bg-[#10B981]/10', text: 'text-[#059669]', border: 'border-[#10B981]' },
+  },
+  {
+    key: 'inclusion',
+    label: 'Inclusión',
+    active: { bg: 'bg-[#FEF3C7]', text: 'text-[#B45309]', border: 'border-[#FCD34D]' },
   },
   {
     key: 'ejecucion',
@@ -73,12 +78,18 @@ export default function NegociosClient({
     return cerrados.filter((n) => n.cierre_motivo === motivoCierre)
   }, [cerrados, motivoCierre])
 
+  // Inclusión es una etapa dentro del stage 'venta'; se separa en su propio filtro.
+  // En 'venta' NO se muestran los de Inclusión.
   const current =
     filtro === 'cerrados'
       ? cerradosFiltrados
       : filtro === 'todos'
         ? negocios
-        : negocios.filter((n) => n.stage_actual === filtro)
+        : filtro === 'inclusion'
+          ? negocios.filter((n) => n.etapa_nombre === 'Inclusión')
+          : filtro === 'venta'
+            ? negocios.filter((n) => n.stage_actual === 'venta' && n.etapa_nombre !== 'Inclusión')
+            : negocios.filter((n) => n.stage_actual === filtro)
 
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
@@ -99,11 +110,14 @@ export default function NegociosClient({
     return res
   }, [current, term, seccional])
 
-  // Filtros visibles
+  // Filtros visibles. El pill "Inclusión" solo si hay negocios en esa etapa.
+  const hayInclusion = useMemo(() => negocios.some((n) => n.etapa_nombre === 'Inclusión'), [negocios])
   const filtros = ALL_FILTROS.filter((f) =>
-    f.key === 'todos' || f.key === 'cerrados'
-      ? f.key === 'todos' || cerrados.length > 0
-      : stagesActivos.includes(f.key),
+    f.key === 'inclusion'
+      ? hayInclusion
+      : f.key === 'todos' || f.key === 'cerrados'
+        ? f.key === 'todos' || cerrados.length > 0
+        : stagesActivos.includes(f.key),
   )
 
   const showEmpty = currentFiltrado.length === 0
@@ -120,7 +134,11 @@ export default function NegociosClient({
               ? negocios.length
               : f.key === 'cerrados'
                 ? cerrados.length
-                : negocios.filter((n) => n.stage_actual === f.key).length
+                : f.key === 'inclusion'
+                  ? negocios.filter((n) => n.etapa_nombre === 'Inclusión').length
+                  : f.key === 'venta'
+                    ? negocios.filter((n) => n.stage_actual === 'venta' && n.etapa_nombre !== 'Inclusión').length
+                    : negocios.filter((n) => n.stage_actual === f.key).length
           const active = filtro === f.key
           return (
             <button
