@@ -332,7 +332,18 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-06-04 (`soena` — Max — Formato 1668 + modelo roles×áreas×stages + guards server-side + impersonación)
+**Sesion:** 2026-06-04 (`alma`/CCBF — Max — receptor webhook CCBF en ONE)
+**Branch:** `main` · commit `0138238` (deployado Vercel 2026-06-05)
+
+- **Tabla `kyc_expediente_ref`** (migración `20260604000001`): espejo local en ONE del estado de los expedientes de Vinculación de Contrapartes (CCBF) cuya fuente de verdad vive en `metrik-valida` (`expedientes_kyc`). Columnas: `workspace_id`, `expediente_kyc_id` (unique, externo), `razon_social`, `estado_cache`, `etapa_cache`, `severidad_cache`, `decision_cache`. RLS + policy de lectura por workspace + grant `select` a `authenticated` (panel OC); escritura solo `service_role`.
+- **Endpoint `POST /api/webhooks/kyc`** (`src/app/api/webhooks/kyc/route.ts`): recibe el webhook firmado de metrik-valida. Valida **HMAC-SHA256 del cuerpo crudo** (`timingSafeEqual`, secreto `KYC_WEBHOOK_SECRET`) → upsert por `expediente_kyc_id`. 401 si firma inválida/ausente, 503 si el secreto no está configurado.
+- **Gotcha / deuda:** `kyc_expediente_ref` aún no está en `database.ts` generado → el endpoint usa cast `as any` puntual (mismo patrón que el cron `drive-health`). Pendiente: regenerar tipos + re-agregar los ~26 aliases.
+- **Env nueva requerida en Vercel ONE:** `KYC_WEBHOOK_SECRET` (compartido con metrik-valida `ONE_KYC_WEBHOOK_URL`+`KYC_WEBHOOK_SECRET`). El panel OC de CCBF en ONE (`/conocimiento-contraparte`) está pendiente (Noor/Ren).
+- Contexto completo de CCBF en `proyectos/metrik/valida/CONTEXT.md`.
+
+---
+
+**Sesion previa:** 2026-06-04 (`soena` — Max — Formato 1668 + modelo roles×áreas×stages + guards server-side + impersonación)
 **Branch:** `main` · commits `e73348e` `7cf9312` `a1d1736` `88148f0` `80b0fb2` `f461e06` `74a68bc` `e23903d` `66883ba` (deployados Vercel)
 
 ### Modelo roles × áreas × stages — ahora cableado a la capa de datos
