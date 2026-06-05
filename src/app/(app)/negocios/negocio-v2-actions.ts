@@ -4084,7 +4084,8 @@ export async function agregarResponsable(
   negocioId: string,
   staffMiembroId: string,
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
+  // userId = profile.id (para assigned_by, FK a profiles). staffId = staff.id (para activity_log.autor_id).
+  const { supabase, workspaceId, role, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   const allowed = ['owner', 'admin', 'supervisor']
@@ -4110,10 +4111,11 @@ export async function agregarResponsable(
     .single()
   if (!staff) return { error: 'Staff no encontrado' }
 
+  // assigned_by es FK → profiles(id): debe ser userId (profile.id), NO staffId.
   const { error: insErr } = await db(supabase)
     .from('negocio_responsables')
     .upsert(
-      { negocio_id: negocioId, staff_id: staffMiembroId, assigned_by: staffId ?? null },
+      { negocio_id: negocioId, staff_id: staffMiembroId, assigned_by: userId ?? null },
       { onConflict: 'negocio_id,staff_id', ignoreDuplicates: true },
     )
   if (insErr) return { error: (insErr as { message: string }).message }
