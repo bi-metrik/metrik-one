@@ -819,7 +819,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <p className="text-2xl font-bold text-green-700">{formatCOP(valor)}</p>
                   <p className="mt-1 text-[10px] text-green-600">
                     {!fiscalProfile?.is_complete
-                      ? 'Completa tu perfil fiscal en Mi Negocio para ver el desglose'
+                      ? 'Completa tu perfil fiscal en Configuración para ver el desglose'
                       : 'Completa el perfil fiscal del cliente para ver el desglose'}
                   </p>
                 </div>

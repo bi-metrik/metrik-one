@@ -179,7 +179,7 @@ export default function MiNegocioClient({
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-base font-bold">Mi Negocio</h1>
+          <h1 className="text-base font-bold">Configuración</h1>
           <p className="text-xs text-muted-foreground">Configura tu negocio para numeros mas precisos</p>
         </div>
         <div className="h-8 w-8 rounded-full border-2 border-primary flex items-center justify-center">
@@ -203,7 +203,7 @@ export default function MiNegocioClient({
       {/* ── Onboarding Welcome ── */}
       {progressPct === 0 && (
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-          <p className="text-sm font-medium">Bienvenido a <span className="font-bold">Mi Negocio</span></p>
+          <p className="text-sm font-medium">Bienvenido a <span className="font-bold">Configuración</span></p>
           <p className="mt-1 text-xs text-muted-foreground">Completa cada seccion para numeros mas precisos. Avanza a tu ritmo.</p>
         </div>
       )}

@@ -6,7 +6,7 @@ import {
   BarChart3,
   QrCode,
   LayoutDashboard,
-  Briefcase,
+  Settings,
   Store,
   LogOut,
   Users,
@@ -133,7 +133,7 @@ const CERT_NAV_ITEMS = [
 // Compartidos (siempre visibles)
 const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
-  { href: '/mi-negocio', label: 'Mi Negocio', icon: Briefcase, roles: ['owner', 'admin', 'supervisor'] },
+  { href: '/mi-negocio', label: 'Configuración', icon: Settings, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
 ]
 

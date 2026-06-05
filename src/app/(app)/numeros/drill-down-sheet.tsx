@@ -300,7 +300,7 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
         <>
           <Divider />
           <div className="flex items-center justify-between py-1">
-            <p className="text-[10px] text-muted-foreground">Configura tu regimen fiscal en Mi Negocio para ver estimaciones tributarias.</p>
+            <p className="text-[10px] text-muted-foreground">Configura tu regimen fiscal en Configuración para ver estimaciones tributarias.</p>
             <Link href="/mi-negocio" className="text-[10px] font-medium text-primary hover:underline shrink-0 ml-2">Configurar →</Link>
           </div>
         </>
