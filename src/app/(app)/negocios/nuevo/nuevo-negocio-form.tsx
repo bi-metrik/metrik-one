@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { crearNegocio } from '../negocio-v2-actions'
 import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
 import { SECTORES_EMPRESA } from '@/lib/catalogos/constants'
+import { PhoneInput } from '@/components/phone-input'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }
@@ -252,12 +253,12 @@ export default function NuevoNegocioForm({
                 <input
                   ref={contactoInputRef}
                   value={contactoNombre}
-                  onChange={e => { setContactoNombre(e.target.value); setContactoId(null) }}
+                  onChange={e => { setContactoNombre(e.target.value.toUpperCase()); setContactoId(null) }}
                   onFocus={() => setContactoFocused(true)}
                   onBlur={() => setTimeout(() => setContactoFocused(false), 200)}
-                  placeholder="Buscar o escribir nombre..."
+                  placeholder="BUSCAR O ESCRIBIR NOMBRE..."
                   autoFocus
-                  className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  className="w-full rounded-md border bg-background px-3 py-2.5 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 />
                 {contactoSearching && (
                   <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
@@ -322,13 +323,7 @@ export default function NuevoNegocioForm({
           {!contactoId && contactoNombre.trim().length >= 2 && (
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Teléfono</label>
-              <input
-                type="tel"
-                value={contactoTelefono}
-                onChange={e => setContactoTelefono(e.target.value)}
-                placeholder="+57 300 123 4567"
-                className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-              />
+              <PhoneInput value={contactoTelefono} onChange={setContactoTelefono} />
             </div>
           )}
         </div>

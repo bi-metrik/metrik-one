@@ -198,6 +198,16 @@ export async function generarFormulario010(
   // hojas 1 y 2). Normaliza lo extraído del RUT contra el catálogo oficial.
   const seccionalOficial = nombreOficialSeccional(datos.direccion_seccional)
 
+  // Persona natural vs jurídica: si hay nombres/apellidos es natural. En ese caso
+  // la casilla 11 (Razón social) va VACÍA (se llenan 7-10), y el nombre del titular
+  // del saldo / responsable es el nombre completo de la persona. En jurídica al revés.
+  const esNatural = !!(datos.primer_nombre || datos.primer_apellido)
+  const nombreCompleto = [datos.primer_nombre, datos.otros_nombres, datos.primer_apellido, datos.segundo_apellido]
+    .filter(Boolean)
+    .join(' ')
+  const razonSocialCasilla = esNatural ? null : datos.razon_social
+  const nombreTitular = esNatural ? nombreCompleto : datos.razon_social
+
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — usa Bold pequeño por estar en caja chica
   drawValue(page1, fontBold, constantes.concepto, { ...P1.concepto, size: 10 })
@@ -210,7 +220,7 @@ export async function generarFormulario010(
   drawValue(page1, font, datos.segundo_apellido, P1.segundo_apellido)
   drawValue(page1, font, datos.primer_nombre, P1.primer_nombre)
   drawValue(page1, font, datos.otros_nombres, P1.otros_nombres)
-  drawValue(page1, font, datos.razon_social, P1.razon_social)
+  drawValue(page1, font, razonSocialCasilla, P1.razon_social)
   drawValue(page1, font, seccionalOficial, P1.direccion_seccional)
   drawValue(page1, font, datos.correo_electronico, P1.correo_electronico)
   drawValue(page1, font, datos.direccion, P1.direccion)
@@ -240,14 +250,14 @@ export async function generarFormulario010(
   drawValue(page2, font, datos.segundo_apellido, P2.segundo_apellido)
   drawValue(page2, font, datos.primer_nombre, P2.primer_nombre)
   drawValue(page2, font, datos.otros_nombres, P2.otros_nombres)
-  drawValue(page2, font, datos.razon_social, P2.razon_social)
+  drawValue(page2, font, razonSocialCasilla, P2.razon_social)
   drawValue(page2, font, seccionalOficial, P2.direccion_seccional)
 
-  // Titular del saldo (= solicitante para SOENA: el titular es la empresa)
+  // Titular del saldo (= solicitante). Natural: nombre completo; jurídica: razón social.
   drawValue(page2, font, 'NIT', P2.titular_tipo_doc)
   drawValue(page2, font, datos.nit, P2.titular_nit)
   drawValue(page2, font, datos.dv, P2.titular_dv)
-  drawValue(page2, font, datos.razon_social, P2.titular_nombre)
+  drawValue(page2, font, nombreTitular, P2.titular_nombre)
 
   // Valor + Tipo obligación
   drawValue(page2, font, valorFmt, P2.valor_solicitado)
@@ -265,7 +275,7 @@ export async function generarFormulario010(
   drawValue(page2, font, 'NIT', P2.resp_tipo_doc_1)
   drawValue(page2, font, datos.nit, P2.resp_nit_1)
   drawValue(page2, font, datos.dv, P2.resp_dv_1)
-  drawValue(page2, font, datos.razon_social, P2.resp_nombre_1)
+  drawValue(page2, font, nombreTitular, P2.resp_nombre_1)
 
   // Hoja 3 se deja en blanco: no aplica para devolución IVA por UPME (VE/HEV/PHEV).
 

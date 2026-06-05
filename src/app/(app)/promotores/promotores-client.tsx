@@ -47,6 +47,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { PROMOTER_STATUSES, formatCOP } from '@/lib/contacts/constants'
 import { createPromoter, updatePromoter, deletePromoter } from './actions'
+import { PhoneInput } from '@/components/phone-input'
 
 // ── Types ─────────────────────────────────────
 
@@ -424,11 +425,9 @@ export default function PromotoresClient({ promoters }: PromotoresClientProps) {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="promoter-phone">Teléfono</Label>
-                <Input
-                  id="promoter-phone"
-                  placeholder="+57 300 000 0000"
+                <PhoneInput
                   value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  onChange={(v) => setForm({ ...form, phone: v })}
                 />
               </div>
             </div>

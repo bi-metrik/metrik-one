@@ -58,6 +58,14 @@ export default function NegociosClient({
   const [filtro, setFiltro] = useState<StageFilter>(defaultStage)
   const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
   const [q, setQ] = useState('')
+  const [seccional, setSeccional] = useState<string>('todas')
+
+  // Seccionales DIAN presentes en los negocios (para el filtro). Solo las que existen.
+  const seccionalesDisponibles = useMemo(() => {
+    const set = new Set<string>()
+    for (const n of negocios) if (n.seccional_label) set.add(n.seccional_label)
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'))
+  }, [negocios])
 
   // Cerrados filtrados por motivo
   const cerradosFiltrados = useMemo(() => {
@@ -72,18 +80,24 @@ export default function NegociosClient({
         ? negocios
         : negocios.filter((n) => n.stage_actual === filtro)
 
-  // Búsqueda libre: código, nombre/contacto, empresa, vehículo
+  // Búsqueda libre (código, nombre/contacto, empresa, vehículo) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
   const currentFiltrado = useMemo(() => {
-    if (!term) return current
-    return current.filter((n) => {
-      const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return hay.includes(term)
-    })
-  }, [current, term])
+    let res = current
+    if (seccional !== 'todas') {
+      res = res.filter((n) => n.seccional_label === seccional)
+    }
+    if (term) {
+      res = res.filter((n) => {
+        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        return hay.includes(term)
+      })
+    }
+    return res
+  }, [current, term, seccional])
 
   // Filtros visibles
   const filtros = ALL_FILTROS.filter((f) =>
@@ -155,6 +169,21 @@ export default function NegociosClient({
           </button>
         )}
       </div>
+
+      {/* Filtro por seccional DIAN (solo si hay seccionales en los negocios) */}
+      {seccionalesDisponibles.length > 0 && (
+        <select
+          value={seccional}
+          onChange={(e) => setSeccional(e.target.value)}
+          aria-label="Filtrar por seccional DIAN"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+        >
+          <option value="todas">Todas las seccionales DIAN</option>
+          {seccionalesDisponibles.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      )}
 
       {/* Sub-filtros Cerrados (motivo) */}
       {filtro === 'cerrados' && cerrados.length > 0 && (

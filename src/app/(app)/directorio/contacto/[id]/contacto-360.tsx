@@ -3,13 +3,14 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Phone, Mail, Save, Flame, Building2 } from 'lucide-react'
+import { ArrowLeft, Mail, Save, Flame, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateContacto } from '../../actions'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Contacto } from '@/types/database'
 import NotesSection from '@/components/notes-section'
+import { PhoneInput } from '@/components/phone-input'
 
 interface NegocioRow {
   id: string
@@ -107,14 +108,10 @@ export default function Contacto360({ contacto, empresaVinculada, negocios }: Pr
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Teléfono</label>
-            <div className="relative">
-              <Phone className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={form.telefono}
-                onChange={e => setForm(p => ({ ...p, telefono: e.target.value }))}
-                className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm"
-              />
-            </div>
+            <PhoneInput
+              value={form.telefono}
+              onChange={v => setForm(p => ({ ...p, telefono: v }))}
+            />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Email</label>

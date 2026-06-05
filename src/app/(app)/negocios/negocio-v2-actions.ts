@@ -435,7 +435,7 @@ export async function getNegocioDetalle(id: string): Promise<{
   let bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }> = []
   const blockIdByConfigId = new Map<string, string>()
   if (negocioTyped.etapa_actual_id) {
-    const { data: bloqueConfigs } = await db(supabase)
+    const { data: bloqueConfigsRaw } = await db(supabase)
       .from('bloque_configs')
       .select(`
         id,
@@ -452,6 +452,12 @@ export async function getNegocioDetalle(id: string): Promise<{
       .eq('etapa_id', negocioTyped.etapa_actual_id)
       .eq('workspace_id', workspaceId)
       .order('orden', { ascending: true })
+
+    // Excluir bloques desactivados (config_extra.desactivado === true): quedan fuera
+    // del flujo operativo sin borrarse (reversible desde la config del workflow).
+    const bloqueConfigs = ((bloqueConfigsRaw ?? []) as Array<Record<string, unknown>>).filter(
+      bc => (bc.config_extra as Record<string, unknown> | null)?.desactivado !== true,
+    )
 
     // Cargar instancias runtime
     const configIds = ((bloqueConfigs ?? []) as Record<string, unknown>[]).map(b => b.id as string)

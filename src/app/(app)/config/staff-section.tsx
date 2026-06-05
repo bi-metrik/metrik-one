@@ -10,6 +10,7 @@ import { AreaMultiSelect } from '@/components/areas/area-multi-select'
 import { AreaBadge } from '@/components/areas/area-badge'
 import { createStaffMember, updateStaffMember, deleteStaffMember, inviteStaffToPlataform } from './staff-actions'
 import { updateStaffAreas } from '@/lib/actions/equipo-areas'
+import { PhoneInput } from '@/components/phone-input'
 
 interface StaffSectionProps {
   initialData: Staff[]
@@ -314,12 +315,10 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
             <div className="grid grid-cols-2 gap-3 pt-1">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">WhatsApp</label>
-                <input
-                  type="text"
+                <PhoneInput
                   value={form.phone_whatsapp}
-                  onChange={e => setForm({ ...form, phone_whatsapp: e.target.value })}
-                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder="+57 300 123 4567"
+                  onChange={v => setForm({ ...form, phone_whatsapp: v })}
+                  className="mt-1"
                 />
               </div>
               <div>

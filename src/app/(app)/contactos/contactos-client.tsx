@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PhoneInput } from '@/components/phone-input'
 import {
   CONTACT_TYPES, CONTACT_SOURCES, SECTORES_EMPRESA,
   formatNit, detectarTipoCliente,
@@ -1067,11 +1068,9 @@ export default function ContactosClient({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="ct-phone">Tel\u00e9fono</Label>
-                <Input
-                  id="ct-phone"
+                <PhoneInput
                   value={contactForm.phone}
-                  onChange={e => setContactForm(prev => ({ ...prev, phone: e.target.value }))}
-                  placeholder="+57 300 123 4567"
+                  onChange={v => setContactForm(prev => ({ ...prev, phone: v }))}
                   className="mt-1.5"
                 />
               </div>
