@@ -332,7 +332,23 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
-**Sesion:** 2026-06-04 (`alma`/CCBF — Max — receptor webhook CCBF en ONE)
+**Sesion:** 2026-06-05 (producto core — Max — consolidación de equipo + auto-deploy + limpieza legacy)
+**Branch:** `main` · commits `1c94597` `625d20c` `cc6f388` `3b238bb` `9ede644` `bae1fcd` + migraciones `20260604000002`, `20260605000001` (deployados Vercel)
+
+**Modelo de equipo — consolidación completa:**
+- **`staff_areas` (N:M) es la fuente única de área.** `staff.area` y `profiles.area` deprecadas y luego **dropeadas** (migración `20260605000001`). Cron `procesar-planes-cobro` reapuntado a `staff_areas` (financiera); crons de inactividad dejaron de leer `profiles.area` (era columna muerta — siempre null → comodín).
+- **Equipo unificado en una sola pantalla** (sección "Mi equipo" de `/mi-negocio`): el form de crear/editar miembro incluye **áreas** (multi-select, `AreaMultiSelect`) + la sección **"Responsables por defecto"** (colapsable). `/mi-negocio/equipo` redirige ahí; su cliente viejo se eliminó. Gestión de áreas/responsables = **owner/admin** (el supervisor dejó de configurarla — `equipo-areas.ts`).
+- **Un solo "Cargo"** (`staff.position`): se eliminó "Nombre personalizado". El header del workspace muestra `staff.position` con fallback al rol (`layout.tsx` → `AppShell`: `displayRole || ROLE_LABELS[role]`). `display_role` retirada del código (invite, accept-invite, `StaffConAreas`) y **dropeada** de `staff` y `profiles`.
+- `database.ts`: quitadas las 4 columnas legacy de los tipos de `staff`/`profiles`. Índice `idx_profiles_role_area` recreado como `idx_profiles_workspace_role (workspace_id, role)`.
+- **Gotcha:** al crear miembro, `createStaffMember` ahora retorna `id` para luego asignar áreas vía `updateStaffAreas`. Roles `contador`/`campo` no usan áreas (form las oculta).
+
+**Nav:** sección **"Mi Negocio" → "Configuración"** (`app-shell.tsx`, evita confusión con "Negocios"); ícono Briefcase→Settings. Ruta interna sigue `/mi-negocio`. Textos de referencia en cotización/drill-down actualizados.
+
+**Infra — auto-deploy reparado:** la integración Git↔Vercel estaba desincronizada (config correcta pero sin entrega de eventos de push → no auto-deployaba). Fix: `vercel git disconnect` + `vercel git connect`. Verificado: el push gatilla deploy automático. **Ya no hace falta `vercel --prod` manual.** Procedimiento documentado en memoria de Mik.
+
+---
+
+**Sesion previa:** 2026-06-04 (`alma`/CCBF — Max — receptor webhook CCBF en ONE)
 **Branch:** `main` · commit `0138238` (deployado Vercel 2026-06-05)
 
 - **Tabla `kyc_expediente_ref`** (migración `20260604000001`): espejo local en ONE del estado de los expedientes de Vinculación de Contrapartes (CCBF) cuya fuente de verdad vive en `metrik-valida` (`expedientes_kyc`). Columnas: `workspace_id`, `expediente_kyc_id` (unique, externo), `razon_social`, `estado_cache`, `etapa_cache`, `severidad_cache`, `decision_cache`. RLS + policy de lectura por workspace + grant `select` a `authenticated` (panel OC); escritura solo `service_role`.
