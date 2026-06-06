@@ -87,7 +87,7 @@ const P1 = {
   // Códigos (sub-casilla "Cód." de cada una; misma fila que el nombre)
   codigo_pais: { x: 198, y: 503, maxWidth: 22, size: 8 },
   codigo_departamento: { x: 389, y: 503, maxWidth: 22, size: 8 },
-  codigo_municipio: { x: 575, y: 503, maxWidth: 14, size: 8 },
+  codigo_municipio: { x: 575, y: 503, maxWidth: 32, size: 8 },
   // Formas de pago
   entidad_financiera: { x: 313, y: 443, maxWidth: 250 },
   numero_cuenta: { x: 28, y: 419, maxWidth: 165 },
@@ -214,15 +214,15 @@ export async function generarFormulario010(
   // hojas 1 y 2). Normaliza lo extraído del RUT contra el catálogo oficial.
   const seccionalOficial = nombreOficialSeccional(datos.direccion_seccional)
 
-  // Persona natural vs jurídica: si hay nombres/apellidos es natural. En ese caso
-  // la casilla 11 (Razón social) va VACÍA (se llenan 7-10), y el nombre del titular
-  // del saldo / responsable es el nombre completo de la persona. En jurídica al revés.
-  const esNatural = !!(datos.primer_nombre || datos.primer_apellido)
+  // SOENA opera 100% personas naturales: la casilla 11 (Razón social) SIEMPRE va en
+  // BLANCO (determinista, sin heurística). Se llenan las casillas 7-10 (nombres). El
+  // titular del saldo / responsable llevan el nombre completo (campo "apellidos y
+  // nombres o razón social"); si faltaran los nombres, cae a razon_social como respaldo.
   const nombreCompleto = [datos.primer_nombre, datos.otros_nombres, datos.primer_apellido, datos.segundo_apellido]
     .filter(Boolean)
     .join(' ')
-  const razonSocialCasilla = esNatural ? null : datos.razon_social
-  const nombreTitular = esNatural ? nombreCompleto : datos.razon_social
+  const razonSocialCasilla = null
+  const nombreTitular = nombreCompleto || datos.razon_social
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — usa Bold pequeño por estar en caja chica
