@@ -24,6 +24,10 @@ export interface Formulario010Datos {
   pais: string | null
   departamento: string | null
   municipio: string | null
+  // Códigos DANE/DIAN de ubicación (fuente: RUT) — casillas 26/27/28 sub-casilla "Cód."
+  codigo_pais: string | null
+  codigo_departamento: string | null
+  codigo_municipio: string | null
   // Formas de pago (fuente: Certificación bancaria)
   entidad_financiera: string | null
   numero_cuenta: string | null
@@ -80,6 +84,10 @@ const P1 = {
   pais: { x: 28, y: 503, maxWidth: 160 },
   departamento: { x: 223, y: 503, maxWidth: 160 },
   municipio: { x: 414, y: 503, maxWidth: 155 },
+  // Códigos (sub-casilla "Cód." de cada una; misma fila que el nombre)
+  codigo_pais: { x: 198, y: 503, maxWidth: 22, size: 8 },
+  codigo_departamento: { x: 389, y: 503, maxWidth: 22, size: 8 },
+  codigo_municipio: { x: 575, y: 503, maxWidth: 14, size: 8 },
   // Formas de pago
   entidad_financiera: { x: 313, y: 443, maxWidth: 250 },
   numero_cuenta: { x: 28, y: 419, maxWidth: 165 },
@@ -96,6 +104,8 @@ const P1 = {
 
 // ── Página 2 (Datos solicitante repetidos + Titular saldo + Origen saldo) ────
 const P2 = {
+  // "Espacio reservado para la DIAN" (encabezado): el "06" va frente al título (~2pt).
+  concepto_reservado: { x: 118, y: 705, size: 9 },
   // Fila superior — repite datos solicitante en y=615.4 → valor ~599
   tipo_documento: { x: 28, y: 599, maxWidth: 35 },
   nit: { x: 65, y: 599, maxWidth: 100 },
@@ -234,6 +244,9 @@ export async function generarFormulario010(
   drawValue(page1, font, datos.pais, P1.pais)
   drawValue(page1, font, datos.departamento, P1.departamento)
   drawValue(page1, font, datos.municipio, P1.municipio)
+  drawValue(page1, font, datos.codigo_pais, P1.codigo_pais)
+  drawValue(page1, font, datos.codigo_departamento, P1.codigo_departamento)
+  drawValue(page1, font, datos.codigo_municipio, P1.codigo_municipio)
 
   // Formas de pago
   drawValue(page1, font, datos.entidad_financiera, P1.entidad_financiera)
@@ -248,6 +261,9 @@ export async function generarFormulario010(
   drawValue(page1, font, datos.dv, P1.firma_dv)
 
   // ── PÁGINA 2 ──────────────────────────────────────────────────────────────
+  // "06" en el espacio reservado para la DIAN (requerimiento DIAN).
+  drawValue(page2, fontBold, constantes.concepto, P2.concepto_reservado)
+
   // Datos solicitante (repetir en hoja 2). Casilla 20 tipo doc = "31" (NIT).
   drawValue(page2, font, '31', P2.tipo_documento)
   drawValue(page2, font, datos.nit, P2.nit)
