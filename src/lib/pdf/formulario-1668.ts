@@ -1,10 +1,13 @@
-import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage } from 'pdf-lib'
+import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
+import { addEditableField, drawFixed, type Cell } from './acroform'
 
 // Overlay sobre el PDF oficial de la DIAN (Formato 1668 — Información /
-// Constancia de Titularidad de Cuenta Bancaria). El fondo no se modifica:
-// solo dibujamos texto en las coordenadas de cada casilla.
+// Constancia de Titularidad de Cuenta Bancaria). El fondo no se modifica.
+// Las casillas de DATOS VARIABLES se generan como CAMPOS de formulario EDITABLES
+// (pre-llenados) para que el operador ajuste según la seccional y aplane al
+// imprimir; las DETERMINISTAS (tipo doc, cód. representación) van como texto fijo.
 // Coordenadas en puntos, origen (0,0) = esquina inferior izquierda.
 //
 // Calibradas contra el PDF diligenciado de referencia (Diego Tavera) con
@@ -35,8 +38,6 @@ export interface Formulario1668Constantes {
 }
 
 const TEMPLATE_PATH = path.join(process.cwd(), 'src/lib/pdf/templates/formulario-1668-dian.pdf')
-
-type Cell = { x: number; y: number; maxWidth?: number; size?: number }
 
 // ── Sección "Información Cuenta Bancaria" ────────────────────────────────────
 // Fila de identificación: valor baseline y ≈ 603 (label_y 614 - 11).
@@ -70,28 +71,6 @@ const FIRMA = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function sanitize(v: string | null | undefined): string {
-  if (v == null) return ''
-  // pdf-lib StandardFonts (Helvetica / WinAnsiEncoding) soporta el español.
-  return String(v).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/…/g, '...')
-}
-
-function drawValue(page: PDFPage, font: PDFFont, value: string | null | undefined, cell: Cell) {
-  const text = sanitize(value)
-  if (!text) return
-  const size = cell.size ?? 9
-  const color = rgb(0, 0, 0)
-
-  // Truncar si excede maxWidth (no pisar la casilla siguiente).
-  let toDraw = text
-  if (cell.maxWidth) {
-    while (toDraw.length > 0 && font.widthOfTextAtSize(toDraw, size) > cell.maxWidth) {
-      toDraw = toDraw.slice(0, -1)
-    }
-  }
-  page.drawText(toDraw, { x: cell.x, y: cell.y, size, font, color })
-}
-
 // Nombre completo del suscriptor: apellidos + nombres (igual que el diligenciado
 // de referencia: "TAVERA MONCALEANO DIEGO THOMAS").
 function nombreCompleto(d: Formulario1668Datos): string {
@@ -118,30 +97,44 @@ export async function generarFormulario1668(
   const templateBytes = fs.readFileSync(TEMPLATE_PATH)
   const pdfDoc = await PDFDocument.load(templateBytes)
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  const form = pdfDoc.getForm()
 
   const page = pdfDoc.getPages()[0]
 
-  // ── Información Cuenta Bancaria ─────────────────────────────────────────────
-  drawValue(page, font, constantes.tipo_documento, INFO.tipo_documento)
-  drawValue(page, font, datos.numero_identificacion, INFO.numero_identificacion)
-  drawValue(page, font, datos.dv, INFO.dv)
-  drawValue(page, font, datos.primer_apellido, INFO.primer_apellido)
-  drawValue(page, font, datos.segundo_apellido, INFO.segundo_apellido)
-  drawValue(page, font, datos.primer_nombre, INFO.primer_nombre)
-  drawValue(page, font, datos.otros_nombres, INFO.otros_nombres)
-  drawValue(page, font, datos.razon_social, INFO.razon_social)
+  // Atajos para no repetir (form, font, page) en cada casilla editable.
+  const edit = (name: string, value: string | null | undefined, cell: Cell) =>
+    addEditableField(form, font, page, name, value, cell)
+  const fixed = (value: string | null | undefined, cell: Cell) =>
+    drawFixed(page, font, value, cell)
 
-  drawValue(page, font, formatFecha(datos.fecha_expedicion), INFO.fecha_expedicion)
-  drawValue(page, font, datos.entidad_financiera, INFO.entidad_financiera)
-  drawValue(page, font, datos.numero_cuenta, INFO.numero_cuenta)
-  drawValue(page, font, datos.tipo_cuenta, INFO.tipo_cuenta)
+  // ── Información Cuenta Bancaria ─────────────────────────────────────────────
+  // Tipo de documento (casilla 20): DETERMINISTA → texto fijo, no editable.
+  fixed(constantes.tipo_documento, INFO.tipo_documento)
+  // Datos del titular (variables, editables). numero_identificacion y dv se
+  // reutilizan en la sección de firma → mismo nombre de campo, queda sincronizado.
+  edit('numero_identificacion', datos.numero_identificacion, INFO.numero_identificacion)
+  edit('dv', datos.dv, INFO.dv)
+  edit('primer_apellido', datos.primer_apellido, INFO.primer_apellido)
+  edit('segundo_apellido', datos.segundo_apellido, INFO.segundo_apellido)
+  edit('primer_nombre', datos.primer_nombre, INFO.primer_nombre)
+  edit('otros_nombres', datos.otros_nombres, INFO.otros_nombres)
+  // Razón social (casilla 11): persona natural → BLANCO determinista, sin campo.
+
+  edit('fecha_expedicion', formatFecha(datos.fecha_expedicion), INFO.fecha_expedicion)
+  edit('entidad_financiera', datos.entidad_financiera, INFO.entidad_financiera)
+  edit('numero_cuenta', datos.numero_cuenta, INFO.numero_cuenta)
+  edit('tipo_cuenta', datos.tipo_cuenta, INFO.tipo_cuenta)
 
   // ── Firma de quien suscribe (titular) ───────────────────────────────────────
-  drawValue(page, font, nombreCompleto(datos), FIRMA.nombre)
-  drawValue(page, font, constantes.tipo_documento, FIRMA.tipo_doc)
-  drawValue(page, font, datos.numero_identificacion, FIRMA.identificacion)
-  drawValue(page, font, datos.dv, FIRMA.dv)
-  drawValue(page, font, constantes.cod_representacion, FIRMA.cod_representacion)
+  edit('firma_nombre', nombreCompleto(datos), FIRMA.nombre)
+  fixed(constantes.tipo_documento, FIRMA.tipo_doc) // DETERMINISTA
+  edit('numero_identificacion', datos.numero_identificacion, FIRMA.identificacion)
+  edit('dv', datos.dv, FIRMA.dv)
+  fixed(constantes.cod_representacion, FIRMA.cod_representacion) // DETERMINISTA
+
+  // Regenera las apariencias con la fuente embebida (texto pre-llenado visible en
+  // cualquier lector, sin depender de NeedAppearances).
+  form.updateFieldAppearances(font)
 
   return pdfDoc.save()
 }

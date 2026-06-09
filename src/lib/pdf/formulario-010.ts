@@ -1,10 +1,16 @@
-import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage } from 'pdf-lib'
+import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
+import { addEditableField, drawFixed, type Cell } from './acroform'
 
-// Overlay sobre el PDF oficial de la DIAN (Formato 010). El fondo no se
-// modifica: solo dibujamos texto en las coordenadas de cada casilla.
+// Sobre el PDF oficial de la DIAN (Formato 010). El fondo no se modifica.
+// Las casillas de DATOS VARIABLES (datos del solicitante, cuenta, saldo y la
+// dirección seccional — que cambia según a qué DIAN se presente) se generan como
+// CAMPOS de formulario EDITABLES pre-llenados; el operador ajusta lo que pida la
+// seccional y aplana al imprimir. Las DETERMINISTAS (concepto 06, periodo
+// bimestral, tipo doc 31, razón social en blanco, tipo solicitud/obligación)
+// van como texto fijo no editable.
 // Coordenadas en puntos, origen (0,0) = esquina inferior izquierda.
 
 export interface Formulario010Datos {
@@ -55,8 +61,6 @@ const TEMPLATE_PATH = path.join(process.cwd(), 'src/lib/pdf/templates/formulario
 
 // Cada casilla: coord del valor (baseline del texto en puntos).
 // Regla usada: valor = label_y - 16 (caja de 24pt, label arriba, valor debajo).
-
-type Cell = { x: number; y: number; maxWidth?: number; size?: number }
 
 // ── Página 1 (Datos solicitante + Formas de pago + Firma) ────────────────────
 const P1 = {
@@ -146,30 +150,8 @@ const P2 = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function sanitize(v: string | null | undefined): string {
-  if (v == null) return ''
-  // pdf-lib StandardFonts (Helvetica) usa WinAnsiEncoding, soporta la mayoría
-  // de caracteres del español. Reemplazamos solo caracteres fuera de ese set.
-  return String(v).replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\u2026/g, '...')
-}
-
-function drawValue(page: PDFPage, font: PDFFont, value: string | null | undefined, cell: Cell) {
-  const text = sanitize(value)
-  if (!text) return
-  const size = cell.size ?? 9
-  const color = rgb(0, 0, 0)
-
-  // Truncate si excede maxWidth (no queremos pisar la siguiente casilla).
-  let toDraw = text
-  if (cell.maxWidth) {
-    while (toDraw.length > 0 && font.widthOfTextAtSize(toDraw, size) > cell.maxWidth) {
-      toDraw = toDraw.slice(0, -1)
-    }
-  }
-  // Y_NUDGE: sube todo el texto 2pt — quedaba pegado/bajo la línea de cada casilla.
-  page.drawText(toDraw, { x: cell.x, y: cell.y + Y_NUDGE, size, font, color })
-}
-
+// Las casillas del 010 se calibraron con un nudge vertical de +2pt sobre la
+// baseline; lo conservamos para que el texto fijo caiga donde la DIAN ya aprobó.
 const Y_NUDGE = 2
 
 function formatCurrency(v: string | null): string | null {
@@ -203,10 +185,23 @@ export async function generarFormulario010(
   const pdfDoc = await PDFDocument.load(templateBytes)
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+  const form = pdfDoc.getForm()
 
   const pages = pdfDoc.getPages()
   const page1 = pages[0]
   const page2 = pages[1]
+
+  // Atajos: `edit*` = campo editable pre-llenado (con el +2pt de calibración del
+  // 010); `fixed*` = texto determinista no editable (mismo nudge). Nombres de
+  // campo compartidos → un dato repetido en varias casillas queda sincronizado.
+  const edit1 = (name: string, value: string | null | undefined, cell: Cell) =>
+    addEditableField(form, font, page1, name, value, cell, Y_NUDGE)
+  const edit2 = (name: string, value: string | null | undefined, cell: Cell) =>
+    addEditableField(form, font, page2, name, value, cell, Y_NUDGE)
+  const fixed1 = (value: string | null | undefined, cell: Cell, f = font) =>
+    drawFixed(page1, f, value, cell, Y_NUDGE)
+  const fixed2 = (value: string | null | undefined, cell: Cell, f = font) =>
+    drawFixed(page2, f, value, cell, Y_NUDGE)
 
   const fecha = parseFecha(datos.fecha_factura)
   const valorFmt = formatCurrency(datos.valor_solicitado)
@@ -215,91 +210,95 @@ export async function generarFormulario010(
   const seccionalOficial = nombreOficialSeccional(datos.direccion_seccional)
 
   // SOENA opera 100% personas naturales: la casilla 11 (Razón social) SIEMPRE va en
-  // BLANCO (determinista, sin heurística). Se llenan las casillas 7-10 (nombres). El
-  // titular del saldo / responsable llevan el nombre completo (campo "apellidos y
-  // nombres o razón social"); si faltaran los nombres, cae a razon_social como respaldo.
+  // BLANCO (determinista, sin heurística → sin campo). Se llenan las casillas 7-10
+  // (nombres). El titular del saldo / responsable llevan el nombre completo (campo
+  // "apellidos y nombres o razón social"); si faltaran los nombres, cae a razon_social.
   const nombreCompleto = [datos.primer_nombre, datos.otros_nombres, datos.primer_apellido, datos.segundo_apellido]
     .filter(Boolean)
     .join(' ')
-  const razonSocialCasilla = null
   const nombreTitular = nombreCompleto || datos.razon_social
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
-  // Concepto (casilla 2) — usa Bold pequeño por estar en caja chica
-  drawValue(page1, fontBold, constantes.concepto, { ...P1.concepto, size: 10 })
+  // Concepto (casilla 2) — DETERMINISTA, Bold pequeño por estar en caja chica.
+  fixed1(constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
 
-  // Datos solicitante. Tipo de documento = "31" (NIT) por requerimiento DIAN.
-  drawValue(page1, font, '31', P1.tipo_documento)
-  drawValue(page1, font, datos.nit, P1.nit)
-  drawValue(page1, font, datos.dv, P1.dv)
-  drawValue(page1, font, datos.primer_apellido, P1.primer_apellido)
-  drawValue(page1, font, datos.segundo_apellido, P1.segundo_apellido)
-  drawValue(page1, font, datos.primer_nombre, P1.primer_nombre)
-  drawValue(page1, font, datos.otros_nombres, P1.otros_nombres)
-  drawValue(page1, font, razonSocialCasilla, P1.razon_social)
-  drawValue(page1, font, seccionalOficial, P1.direccion_seccional)
-  drawValue(page1, font, datos.correo_electronico, P1.correo_electronico)
-  drawValue(page1, font, datos.direccion, P1.direccion)
-  drawValue(page1, font, datos.telefono, P1.telefono)
-  drawValue(page1, font, datos.pais, P1.pais)
-  drawValue(page1, font, datos.departamento, P1.departamento)
-  drawValue(page1, font, datos.municipio, P1.municipio)
-  drawValue(page1, font, datos.codigo_pais, P1.codigo_pais)
-  drawValue(page1, font, datos.codigo_departamento, P1.codigo_departamento)
-  drawValue(page1, font, datos.codigo_municipio, P1.codigo_municipio)
+  // Datos solicitante. Tipo de documento = "31" (NIT): DETERMINISTA.
+  fixed1('31', P1.tipo_documento)
+  edit1('nit', datos.nit, P1.nit)
+  edit1('dv', datos.dv, P1.dv)
+  edit1('primer_apellido', datos.primer_apellido, P1.primer_apellido)
+  edit1('segundo_apellido', datos.segundo_apellido, P1.segundo_apellido)
+  edit1('primer_nombre', datos.primer_nombre, P1.primer_nombre)
+  edit1('otros_nombres', datos.otros_nombres, P1.otros_nombres)
+  // Razón social (casilla 11): BLANCO determinista, sin campo.
+  edit1('direccion_seccional', seccionalOficial, P1.direccion_seccional)
+  edit1('correo_electronico', datos.correo_electronico, P1.correo_electronico)
+  edit1('direccion', datos.direccion, P1.direccion)
+  edit1('telefono', datos.telefono, P1.telefono)
+  edit1('pais', datos.pais, P1.pais)
+  edit1('departamento', datos.departamento, P1.departamento)
+  edit1('municipio', datos.municipio, P1.municipio)
+  edit1('codigo_pais', datos.codigo_pais, P1.codigo_pais)
+  edit1('codigo_departamento', datos.codigo_departamento, P1.codigo_departamento)
+  edit1('codigo_municipio', datos.codigo_municipio, P1.codigo_municipio)
 
   // Formas de pago
-  drawValue(page1, font, datos.entidad_financiera, P1.entidad_financiera)
-  drawValue(page1, font, datos.numero_cuenta, P1.numero_cuenta)
-  drawValue(page1, font, datos.tipo_cuenta, P1.tipo_cuenta)
-  drawValue(page1, font, constantes.tipo_solicitud, P1.tipo_solicitud)
+  edit1('entidad_financiera', datos.entidad_financiera, P1.entidad_financiera)
+  edit1('numero_cuenta', datos.numero_cuenta, P1.numero_cuenta)
+  edit1('tipo_cuenta', datos.tipo_cuenta, P1.tipo_cuenta)
+  fixed1(constantes.tipo_solicitud, P1.tipo_solicitud) // DETERMINISTA
 
   // Firma de quien suscribe (1001-1004) = el solicitante. 1005/1006 EN BLANCO.
-  drawValue(page1, font, nombreTitular, P1.firma_nombre)
-  drawValue(page1, font, '31', P1.firma_tipo_doc)
-  drawValue(page1, font, datos.nit, P1.firma_identificacion)
-  drawValue(page1, font, datos.dv, P1.firma_dv)
+  edit1('nombre_completo', nombreTitular, P1.firma_nombre)
+  fixed1('31', P1.firma_tipo_doc) // DETERMINISTA
+  edit1('nit', datos.nit, P1.firma_identificacion)
+  edit1('dv', datos.dv, P1.firma_dv)
 
   // ── PÁGINA 2 ──────────────────────────────────────────────────────────────
-  // "06" en el espacio reservado para la DIAN (requerimiento DIAN).
-  drawValue(page2, fontBold, constantes.concepto, P2.concepto_reservado)
+  // "06" en el espacio reservado para la DIAN: DETERMINISTA.
+  fixed2(constantes.concepto, P2.concepto_reservado, fontBold)
 
-  // Datos solicitante (repetir en hoja 2). Casilla 20 tipo doc = "31" (NIT).
-  drawValue(page2, font, '31', P2.tipo_documento)
-  drawValue(page2, font, datos.nit, P2.nit)
-  drawValue(page2, font, datos.dv, P2.dv)
-  drawValue(page2, font, datos.primer_apellido, P2.primer_apellido)
-  drawValue(page2, font, datos.segundo_apellido, P2.segundo_apellido)
-  drawValue(page2, font, datos.primer_nombre, P2.primer_nombre)
-  drawValue(page2, font, datos.otros_nombres, P2.otros_nombres)
-  drawValue(page2, font, razonSocialCasilla, P2.razon_social)
-  drawValue(page2, font, seccionalOficial, P2.direccion_seccional)
+  // Datos solicitante (repetir en hoja 2). Casilla 20 tipo doc = "31": DETERMINISTA.
+  fixed2('31', P2.tipo_documento)
+  edit2('nit', datos.nit, P2.nit)
+  edit2('dv', datos.dv, P2.dv)
+  edit2('primer_apellido', datos.primer_apellido, P2.primer_apellido)
+  edit2('segundo_apellido', datos.segundo_apellido, P2.segundo_apellido)
+  edit2('primer_nombre', datos.primer_nombre, P2.primer_nombre)
+  edit2('otros_nombres', datos.otros_nombres, P2.otros_nombres)
+  // Razón social (casilla 11): BLANCO determinista, sin campo.
+  edit2('direccion_seccional', seccionalOficial, P2.direccion_seccional)
 
-  // Titular del saldo (= solicitante). Natural: nombre completo; jurídica: razón social.
-  drawValue(page2, font, '31', P2.titular_tipo_doc)
-  drawValue(page2, font, datos.nit, P2.titular_nit)
-  drawValue(page2, font, datos.dv, P2.titular_dv)
-  drawValue(page2, font, nombreTitular, P2.titular_nombre)
+  // Titular del saldo (= solicitante). tipo doc "31" DETERMINISTA.
+  fixed2('31', P2.titular_tipo_doc)
+  edit2('nit', datos.nit, P2.titular_nit)
+  edit2('dv', datos.dv, P2.titular_dv)
+  edit2('nombre_completo', nombreTitular, P2.titular_nombre)
 
-  // Valor + Tipo obligación
-  drawValue(page2, font, valorFmt, P2.valor_solicitado)
-  drawValue(page2, font, constantes.tipo_obligacion, P2.tipo_obligacion)
+  // Valor + Tipo obligación (constante DETERMINISTA)
+  edit2('valor', valorFmt, P2.valor_solicitado)
+  fixed2(constantes.tipo_obligacion, P2.tipo_obligacion)
 
   // Fila 1 origen del saldo (factura + UPME)
-  drawValue(page2, font, constantes.concepto_saldo, P2.concepto_saldo_1)
-  drawValue(page2, font, fecha.anio, P2.anio_gravable_1)
-  drawValue(page2, font, fecha.bimestre, P2.periodo_1)  // casilla 53: periodo bimestral
-  drawValue(page2, font, datos.numero_factura, P2.numero_factura_1)
-  drawValue(page2, font, fecha.compacto, P2.fecha_factura_1)
-  drawValue(page2, font, valorFmt, P2.valor_origen_1)
+  fixed2(constantes.concepto_saldo, P2.concepto_saldo_1) // DETERMINISTA
+  edit2('anio_gravable', fecha.anio, P2.anio_gravable_1)
+  fixed2(fecha.bimestre, P2.periodo_1) // casilla 53 periodo bimestral: BLINDADO
+  edit2('numero_factura', datos.numero_factura, P2.numero_factura_1)
+  edit2('fecha_factura', fecha.compacto, P2.fecha_factura_1)
+  edit2('valor', valorFmt, P2.valor_origen_1)
 
-  // Responsable de la fila 1 (casillas 60-63): tipo doc "31" + cédula + DV + nombre
-  drawValue(page2, font, '31', P2.resp_tipo_doc_1)
-  drawValue(page2, font, datos.nit, P2.resp_nit_1)
-  drawValue(page2, font, datos.dv, P2.resp_dv_1)
-  drawValue(page2, font, nombreTitular, P2.resp_nombre_1)
+  // Responsable de la fila 1 (casillas 60-63): tipo doc "31" DETERMINISTA + cédula
+  // + DV + nombre (hoy = el mismo solicitante; con 2º solicitante se separará).
+  fixed2('31', P2.resp_tipo_doc_1)
+  edit2('nit', datos.nit, P2.resp_nit_1)
+  edit2('dv', datos.dv, P2.resp_dv_1)
+  edit2('nombre_completo', nombreTitular, P2.resp_nombre_1)
 
   // Hoja 3 se deja en blanco: no aplica para devolución IVA por UPME (VE/HEV/PHEV).
+
+  // Regenera apariencias con la fuente embebida (texto pre-llenado visible en
+  // cualquier lector, sin depender de NeedAppearances).
+  form.updateFieldAppearances(font)
 
   return pdfDoc.save()
 }

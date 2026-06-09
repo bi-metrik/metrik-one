@@ -5,6 +5,7 @@
  * Uso:  npx tsx scripts/test-010.ts   →  escribe /tmp/test-010.pdf
  */
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '../src/lib/pdf/formulario-010'
+import { PDFDocument } from 'pdf-lib'
 import fs from 'fs'
 
 const datos: Formulario010Datos = {
@@ -50,6 +51,11 @@ async function main() {
   const out = '/tmp/test-010.pdf'
   fs.writeFileSync(out, bytes)
   console.log('✓ PDF de prueba generado en', out)
+
+  const doc = await PDFDocument.load(bytes)
+  const fields = doc.getForm().getFields().map(f => `${f.constructor.name}:${f.getName()}`)
+  console.log(`\nCampos de formulario editables (${fields.length}):`)
+  fields.forEach(f => console.log('  -', f))
 }
 
 main().catch((e) => { console.error('✗ ERROR:', e); process.exit(1) })
