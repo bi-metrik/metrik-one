@@ -155,9 +155,16 @@ export async function extractFieldsFromDocument(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 2048,
+          // Documentos con muchos campos (RUT = 20+) desbordaban el presupuesto:
+          // el "thinking" de gemini-2.5-flash consume maxOutputTokens y dejaba la
+          // respuesta SIN la parte JSON (finishReason MAX_TOKENS) → el parser caía
+          // en texto de razonamiento truncado ("position 120"). Desactivamos
+          // thinking (la extracción es determinista, no lo necesita) y subimos el
+          // límite → todo el presupuesto va al JSON estructurado.
+          maxOutputTokens: 4096,
           responseMimeType: 'application/json',
           responseSchema,
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
     })
@@ -175,15 +182,24 @@ export async function extractFieldsFromDocument(
       return { data: null, error: `Contenido bloqueado por Gemini: ${blockReason}` }
     }
 
-    // Gemini 2.5 Flash has built-in thinking — response may have multiple parts
-    const parts = data.candidates?.[0]?.content?.parts || []
-    const jsonPart = parts.find(
-      (p: { thought?: boolean; text?: string }) => !p.thought && p.text
-    ) || parts[parts.length - 1]
+    const candidate = data.candidates?.[0]
+    const finishReason = candidate?.finishReason
+    const parts = candidate?.content?.parts || []
+    // Preferir la parte de texto que parezca JSON (empieza con '{'); evita caer en
+    // una parte de "thought"/prosa si el modelo emitiera ambas.
+    const jsonPart =
+      parts.find((p: { thought?: boolean; text?: string }) => !p.thought && p.text?.trim().startsWith('{'))
+      || parts.find((p: { thought?: boolean; text?: string }) => !p.thought && p.text)
+      || parts[parts.length - 1]
 
     debugRaw = jsonPart?.text || ''
     if (!debugRaw) {
-      return { data: null, error: 'Gemini no devolvió respuesta' }
+      return {
+        data: null,
+        error: finishReason === 'MAX_TOKENS'
+          ? 'Gemini agotó el límite de tokens sin devolver JSON (documento muy grande)'
+          : 'Gemini no devolvió respuesta',
+      }
     }
 
     // Parse JSON with repair fallback
