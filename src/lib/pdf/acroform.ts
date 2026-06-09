@@ -48,8 +48,8 @@ export function drawFixed(
 // Offset vertical del rect respecto a la baseline. El texto dentro de un campo
 // se asienta con un pequeño padding; bajar el rect ~2.5pt deja el glifo sobre la
 // línea de la casilla (equivalente al Y_NUDGE=2 del overlay original).
-const RECT_Y_OFFSET = -2.5
-const RECT_PADDING_H = 4 // alto extra del rect sobre el tamaño de fuente
+const RECT_Y_OFFSET = -1.0
+const RECT_PADDING_H = 2 // alto extra del rect sobre el tamaño de fuente
 
 // Campo de formulario EDITABLE, pre-llenado. Reutiliza el campo si ya existe un
 // `name` igual (mismo dato repetido en varias casillas/páginas) agregándole otro
