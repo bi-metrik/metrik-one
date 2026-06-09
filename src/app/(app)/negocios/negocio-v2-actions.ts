@@ -3044,6 +3044,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }
 
   const datosOtrasEtapas: Record<number, Record<string, unknown>> = {}
+  // Variante indexada por (etapa_orden → nombre de bloque normalizado) para
+  // auto_fill con `source_bloque`: permite distinguir dos bloques del mismo tipo
+  // en una misma etapa (ej. "RUT" y "RUT solicitante 2" de 2 solicitantes), que el
+  // bag aplanado `datosOtrasEtapas` mezclaría por nombre de campo.
+  const datosPorEtapaBloque: Record<number, Record<string, Record<string, unknown>>> = {}
   if (sourceEtapaOrdens.size > 0 && base.negocio.linea_id) {
     const { data: etapasSource } = await db(supabase)
       .from('etapas_negocio')
@@ -3058,7 +3063,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       })
       const { data: bloquesOtras } = await db(supabase)
         .from('negocio_bloques')
-        .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo))')
+        .select('data, bloque_configs!inner(etapa_id, nombre, bloque_definitions!inner(tipo, nombre))')
         .eq('negocio_id', id)
         .in('bloque_configs.etapa_id', etapaIds)
       for (const b of ((bloquesOtras ?? []) as Record<string, unknown>[])) {
@@ -3068,17 +3073,27 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         if (orden === undefined) continue
         if (!datosOtrasEtapas[orden]) datosOtrasEtapas[orden] = {}
         const data = b.data as Record<string, unknown> | null
+        // Bag por bloque (clave: nombre normalizado) para resolver source_bloque.
+        const defNombre = (config.bloque_definitions as { nombre?: string } | undefined)?.nombre ?? ''
+        const bloqueNombre = ((config.nombre as string | null) ?? defNombre).trim().toLowerCase()
+        const perBloque: Record<string, unknown> = {}
         if (data) {
           Object.assign(datosOtrasEtapas[orden], data)
+          Object.assign(perBloque, data)
           // Flatten AI-extracted campos into top-level for condition/auto_fill lookup
           const campos = data.campos as Record<string, { value: string | null }> | undefined
           if (campos) {
             for (const [slug, campo] of Object.entries(campos)) {
               if (campo?.value !== null && campo?.value !== undefined) {
                 datosOtrasEtapas[orden][slug] = campo.value
+                perBloque[slug] = campo.value
               }
             }
           }
+        }
+        if (bloqueNombre) {
+          if (!datosPorEtapaBloque[orden]) datosPorEtapaBloque[orden] = {}
+          datosPorEtapaBloque[orden][bloqueNombre] = perBloque
         }
       }
     }
@@ -3285,12 +3300,18 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         const ceFields = (ce as { fields?: Array<{
           slug: string
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number }
+          auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string }
         }> }).fields ?? []
         const autoFillHist: Record<string, unknown> = {}
         for (const f of ceFields) {
           if (!f.auto_fill) continue
-          const srcData = datosOtrasEtapas[f.auto_fill.source_etapa_orden]
+          // source_bloque (si existe) resuelve el bloque exacto dentro de la etapa;
+          // si no, o si no hay match, cae al bag aplanado (retrocompatible).
+          const srcData =
+            (f.auto_fill.source_bloque
+              ? datosPorEtapaBloque[f.auto_fill.source_etapa_orden]?.[f.auto_fill.source_bloque.trim().toLowerCase()]
+              : undefined)
+            ?? datosOtrasEtapas[f.auto_fill.source_etapa_orden]
           if (!srcData) continue
           const rawVal = srcData[f.auto_fill.field]
           if (f.auto_fill.mapping) {
@@ -3388,12 +3409,18 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       slug: string
       tipo?: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number }
+      auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string }
       doc_link?: { source_bloque_nombre: string; source_etapa_orden: number }
     }>
     for (const f of fields) {
       if (f.auto_fill) {
-        const srcData = datosOtrasEtapas[f.auto_fill.source_etapa_orden]
+        // source_bloque (si existe) resuelve el bloque exacto dentro de la etapa;
+        // si no, o si no hay match, cae al bag aplanado (retrocompatible).
+        const srcData =
+          (f.auto_fill.source_bloque
+            ? datosPorEtapaBloque[f.auto_fill.source_etapa_orden]?.[f.auto_fill.source_bloque.trim().toLowerCase()]
+            : undefined)
+          ?? datosOtrasEtapas[f.auto_fill.source_etapa_orden]
         if (srcData) {
           const rawVal = srcData[f.auto_fill.field]
           if (f.auto_fill.mapping) {
