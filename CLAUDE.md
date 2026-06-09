@@ -332,6 +332,30 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-09 (`soena` — Max — multi-responsable, mecanismo desactivar bloque, PhoneInput, filtro por etapa, Formulario 010)
+**Branch:** `main` · commits `11d330d` `918c047` `2610086` `27808dc` `451c917` `3d24579` `5bd1125` (deployados Vercel)
+
+### Multi-responsable (genérico)
+- **`negocio_responsables` (N:M) es la fuente de verdad** de responsabilidad/permisos. `getNegocioDetalle` carga `responsables[]`; `getNegocioDetalleCompleto` expone `currentUserEsResponsable` (comparado por **staff.id**). Acciones `agregarResponsable`/`quitarResponsable` (reemplazan `actualizarResponsable`) mantienen `negocios.responsable_id` como **principal derivado** (responsable más antiguo). `ResponsableSelector` ahora es multi (chips). Backfill: migración que puebla N:M desde `responsable_id`.
+- **Gotcha staff.id vs profile.id:** `negocio_responsables.assigned_by` es FK→`profiles(id)` → usar `userId` (no `staffId`). `negocio_responsables.staff_id` y `activity_log.autor_id` sí usan `staff.id`. (Mismo campo minado del modelo de equipo disperso.)
+
+### Mecanismo "desactivar bloque" sin borrar (genérico)
+- `bloque_configs` no tenía forma de sacar un bloque del flujo (solo `editable`/`visible`, ambos lo muestran). Nuevo flag **`config_extra.desactivado === true`** → el render lo excluye (`getNegocioDetalle`) + quitarle el gate. Reversible. Usado para desactivar la Guía de devolución en SOENA.
+
+### Avance de etapa robusto a `orden` no contiguo (genérico)
+- El cliente calculaba la "siguiente etapa" con `orden + 1`; al fusionar etapas el `orden` interno puede tener huecos. Ahora usa **la siguiente por orden ascendente** (`e.orden > actual`). El motor de avance ya usaba `routing.default_etapa_orden`. Permite reorgs que dejan huecos en `orden` manteniendo `numero` (ID visible) contiguo.
+
+### PhoneInput (genérico)
+- `src/components/phone-input.tsx`: input de teléfono con selector de indicativo por país (**default +57**), emite `"{indicativo} {numero}"`. Aplicado en nuevo negocio, staff, directorio contacto, contactos, promotores. Helper `splitPhone` para parsear valores guardados.
+
+### Lista de negocios: filtro por etapa (config-driven)
+- `negocios-client.tsx`: filtro/pill "Inclusión" que separa una etapa específica del stage; "Venta" excluye los de esa etapa. Se muestra solo si hay negocios en la etapa. Filtro de seccional DIAN (deriva de `seccional_label`).
+
+### Formulario 010 (`formulario-010.ts`)
+- Periodo **bimestral** (casilla 53), tipo doc **31**, firma del solicitante, **06 en espacio reservado** (pág 2), **códigos país/depto/municipio** (casillas 26-28, extraídos del RUT, `optional` en CampoFuente), razón social en blanco para persona natural (determinista), **Y_NUDGE +2pt** global. Coordenadas calibradas con `pdftotext -bbox`. Script de prueba `scripts/test-010.ts` (genera un 010 con datos hardcoded sin tocar DB/app).
+
+---
+
 **Sesion:** 2026-06-05 (producto core — Max — consolidación de equipo + auto-deploy + limpieza legacy)
 **Branch:** `main` · commits `1c94597` `625d20c` `cc6f388` `3b238bb` `9ede644` `bae1fcd` + migraciones `20260604000002`, `20260605000001` (deployados Vercel)
 
