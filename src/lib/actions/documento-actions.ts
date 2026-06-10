@@ -61,16 +61,26 @@ async function extractWithRetry(
 
 export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 'overlap'
 
-export type CrossCheckSpec = {
-  slug: string
-  label: string
+// Fuente de datos para un check: una etapa + bloque + cómo resolver el valor
+// esperado (un campo, varios concatenados, o varias alternativas de campo).
+export type CrossCheckSource = {
   source_etapa_orden: number
   source_bloque_nombre: string
   source_field?: string
   source_fields?: string[]
   source_field_alternatives?: string[]
   join?: string
+}
+
+export type CrossCheckSpec = CrossCheckSource & {
+  slug: string
+  label: string
   match_mode?: CrossCheckMatchMode
+  // Fuentes alternativas: cuando el bloque fuente principal no aplica al negocio
+  // (p.ej. RUT en persona natural vs. Certificado de existencia en jurídica),
+  // se prueba cada alternativa. El check pasa si la principal O alguna alternativa
+  // valida; el valor esperado del reporte sale de la primera fuente con dato.
+  source_alternatives?: CrossCheckSource[]
 }
 
 export type CrossCheckResult = {
@@ -144,8 +154,10 @@ async function runCrossCheck(
 ): Promise<{ passed: boolean; results: CrossCheckResult[] }> {
   if (checks.length === 0) return { passed: true, results: [] }
 
-  // Cargar bloques de etapas previas relevantes (solo las que aparecen en checks)
-  const ordenesNecesarias = Array.from(new Set(checks.map(c => c.source_etapa_orden)))
+  // Cargar bloques de etapas previas relevantes (las de cada check + sus alternativas)
+  const ordenesNecesarias = Array.from(new Set(
+    checks.flatMap(c => [c.source_etapa_orden, ...(c.source_alternatives ?? []).map(a => a.source_etapa_orden)]),
+  ))
   const { data: srcBloques } = await db(supabase)
     .from('negocio_bloques')
     .select('data, bloque_configs!inner(nombre, etapas_negocio!inner(orden))')
@@ -171,34 +183,50 @@ async function runCrossCheck(
     dataPorBloque.set(key, flat)
   }
 
+  // Resuelve el valor esperado de UNA fuente (campo único, varios concatenados, o
+  // alternativas de campo) contra su srcData ya cargado.
+  const resolveFromSource = (
+    src: CrossCheckSource,
+    srcData: Record<string, unknown>,
+    extractedRaw: string,
+    mode: CrossCheckMatchMode,
+  ): { expected: string; ok: boolean } => {
+    if (src.source_fields && src.source_fields.length > 0) {
+      const join = src.join ?? ' '
+      const expected = src.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
+      return { expected, ok: compareValues(expected, extractedRaw, mode) }
+    }
+    if (src.source_field_alternatives && src.source_field_alternatives.length > 0) {
+      // Probar cada alternativa de campo; pasar si CUALQUIERA matchea
+      const candidates = src.source_field_alternatives.map(f => String(srcData[f] ?? '')).filter(s => s)
+      const matched = candidates.find(c => compareValues(c, extractedRaw, mode))
+      return { expected: matched ?? candidates[0] ?? '', ok: !!matched }
+    }
+    if (src.source_field) {
+      const expected = String(srcData[src.source_field] ?? '')
+      return { expected, ok: compareValues(expected, extractedRaw, mode) }
+    }
+    return { expected: '', ok: false }
+  }
+
   const results: CrossCheckResult[] = []
   for (const check of checks) {
-    const key = `${check.source_etapa_orden}::${check.source_bloque_nombre.trim().toLowerCase()}`
-    const srcData = dataPorBloque.get(key) ?? {}
     const extractedRaw = String(camposExtraidos[check.slug]?.value ?? '')
-
-    // Resolver expected: source_fields (concat), source_field_alternatives
-    // (probar cada uno y elegir el primero que de match, o el primero no vacio),
-    // o source_field.
-    let expectedRaw = ''
-    let ok = false
     const mode: CrossCheckMatchMode = check.match_mode ?? 'exact'
 
-    if (check.source_fields && check.source_fields.length > 0) {
-      const join = check.join ?? ' '
-      expectedRaw = check.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
-      ok = compareValues(expectedRaw, extractedRaw, mode)
-    } else if (check.source_field_alternatives && check.source_field_alternatives.length > 0) {
-      // Probar cada alternativa; pasar si CUALQUIERA matchea
-      const candidates = check.source_field_alternatives
-        .map(f => String(srcData[f] ?? ''))
-        .filter(s => s)
-      const matched = candidates.find(c => compareValues(c, extractedRaw, mode))
-      expectedRaw = matched ?? candidates[0] ?? ''
-      ok = !!matched
-    } else if (check.source_field) {
-      expectedRaw = String(srcData[check.source_field] ?? '')
-      ok = compareValues(expectedRaw, extractedRaw, mode)
+    // Fuente principal + alternativas: cuando el bloque fuente principal no aplica
+    // al negocio (p.ej. RUT vacío en jurídica), se prueba el Certificado de
+    // existencia. Pasa si la principal O alguna alternativa valida.
+    const sources: CrossCheckSource[] = [check, ...(check.source_alternatives ?? [])]
+    let expectedRaw = ''
+    let ok = false
+    for (const src of sources) {
+      const key = `${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`
+      const srcData = dataPorBloque.get(key) ?? {}
+      const r = resolveFromSource(src, srcData, extractedRaw, mode)
+      if (r.ok) { expectedRaw = r.expected; ok = true; break }
+      // Recordar el primer valor esperado no vacío para el reporte si nada matchea
+      if (!expectedRaw && r.expected) expectedRaw = r.expected
     }
 
     results.push({
