@@ -1672,6 +1672,9 @@ export default function NegocioDetailClient({
   }
 
   const bloquesExtendidos = allBloques.filter(b => {
+    // Bloques marcados no-visibles (ej. "Tipo de solicitante", auto-poblado en la
+    // creación) no se renderizan, pero su data ya alimentó `datosEtapa` arriba.
+    if ((b.config_extra as { visible?: boolean } | undefined)?.visible === false) return false
     const cond = b.config_extra?.condition as
       | { field: string; value?: string; value_in?: unknown[]; source_etapa_orden?: number }
       | undefined

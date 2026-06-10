@@ -845,6 +845,7 @@ export async function crearNegocio(input: {
         workspace_id: workspaceId,
         nombre: input.empresa_nombre.trim(),
         sector: input.empresa_sector?.trim() || null,
+        tipo_persona: 'juridica',
       })
       .select('id')
       .single()
@@ -995,6 +996,21 @@ export async function crearNegocio(input: {
     }
   }
 
+  // Derivar tipo_persona del solicitante desde la empresa del negocio (natural vs
+  // jurídica). Se determina en la creación → ningún bloque manual lo pregunta; los
+  // bloques cuyo `condition` mira `tipo_persona` lo leen del dato auto-poblado.
+  let tipoPersonaDerivado = 'natural'
+  if (empresaId) {
+    const { data: empTipo } = await db(supabase)
+      .from('empresas')
+      .select('tipo_persona')
+      .eq('id', empresaId)
+      .single()
+    if ((empTipo as { tipo_persona: string | null } | null)?.tipo_persona === 'juridica') {
+      tipoPersonaDerivado = 'juridica'
+    }
+  }
+
   // Crear negocio_bloques para cada bloque_config de la primera etapa
   if (primeraEtapa?.id) {
     const { data: bloqueConfigs } = await db(supabase)
@@ -1006,6 +1022,12 @@ export async function crearNegocio(input: {
     if (bloqueConfigs && (bloqueConfigs as Record<string, unknown>[]).length > 0) {
       const instancias = (bloqueConfigs as Record<string, unknown>[]).map(bc => {
         const defaults = computeFieldDefaults(bc.config_extra as Record<string, unknown> | null)
+        // Auto-poblar tipo_persona (derivado de la empresa) en el bloque que lo declara
+        // → sustituye el paso manual: el operador no elige natural/jurídica.
+        const fields = ((bc.config_extra as { fields?: Array<{ slug: string }> } | null)?.fields ?? [])
+        if (fields.some(f => f.slug === 'tipo_persona')) {
+          defaults.tipo_persona = tipoPersonaDerivado
+        }
         // Bloques de solo lectura (config estado 'visible') no requieren acción
         // del usuario → nacen completos. El resto, pendiente.
         const esVisible = bc.estado === 'visible'
