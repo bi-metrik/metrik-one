@@ -17,18 +17,24 @@ function db(client: unknown): any { return client }
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+interface FuenteCampo {
+  etapa_orden: number
+  bloque_orden: number
+  campo_slug: string
+  tipo: string // 'ai' | 'field'
+}
+
 interface CampoFuente {
   slug: string
   // Si `optional`, no se reporta como faltante cuando no hay valor (queda null y
   // la casilla del overlay se dibuja vacía). Ej.: fecha de expedición del 1668,
   // que el banco puede completar a mano.
   optional?: boolean
-  source: {
-    etapa_orden: number
-    bloque_orden: number
-    campo_slug: string
-    tipo: string // 'ai' | 'field'
-  }
+  source: FuenteCampo
+  // Fuentes alternativas: se prueban en orden si la principal no da valor. Útil
+  // cuando el dato vive en un bloque condicional (ej. el valor del IVA sale del
+  // Contrato de leasing si existe, y si no, de la Factura).
+  source_alternatives?: FuenteCampo[]
 }
 
 // ── Resolve source campos ────────────────────────────────────────────────────
@@ -70,36 +76,29 @@ async function resolverCamposFuente(
     lookup.set(key, { data: (b.data as Record<string, unknown>) ?? {} })
   }
 
+  // Resuelve el valor de UNA fuente (etapa:bloque + campo). null si no hay bloque o valor.
+  const resolverUna = (src: FuenteCampo): string | null => {
+    const bloque = lookup.get(`${src.etapa_orden}:${src.bloque_orden}`)
+    if (!bloque) return null
+    if (src.tipo === 'ai') {
+      const campos = bloque.data.campos as Record<string, { value: string | null; confidence: number }> | undefined
+      const cd = campos?.[src.campo_slug]
+      return (cd?.value && cd.confidence >= 0.70) ? cd.value : null
+    }
+    const raw = bloque.data[src.campo_slug]
+    return (raw !== null && raw !== undefined && raw !== '') ? String(raw) : null
+  }
+
   const datos: Record<string, string | null> = {}
   const faltantes: string[] = []
 
   for (const campo of camposFuente) {
-    const key = `${campo.source.etapa_orden}:${campo.source.bloque_orden}`
-    const bloque = lookup.get(key)
-
-    if (!bloque) {
-      datos[campo.slug] = null
-      if (!campo.optional) faltantes.push(campo.slug)
-      continue
-    }
-
+    // Probar la fuente principal y luego las alternativas; usar la primera con valor.
     let value: string | null = null
-
-    if (campo.source.tipo === 'ai') {
-      // Read from data.campos[slug].value
-      const campos = bloque.data.campos as Record<string, { value: string | null; confidence: number }> | undefined
-      const campo_data = campos?.[campo.source.campo_slug]
-      if (campo_data?.value && campo_data.confidence >= 0.70) {
-        value = campo_data.value
-      }
-    } else {
-      // Read from data[slug] directly (BloqueDatos)
-      const raw = bloque.data[campo.source.campo_slug]
-      if (raw !== null && raw !== undefined && raw !== '') {
-        value = String(raw)
-      }
+    for (const src of [campo.source, ...(campo.source_alternatives ?? [])]) {
+      value = resolverUna(src)
+      if (value) break
     }
-
     datos[campo.slug] = value
     if (!value && !campo.optional) faltantes.push(campo.slug)
   }
