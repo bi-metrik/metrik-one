@@ -8,6 +8,7 @@ import type { NegocioBloque } from '../../negocio-v2-actions'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/lib/afi/template-mapping'
+import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug } from '@/lib/dian/seccionales'
 
 export interface DatosField {
   slug: string
@@ -20,6 +21,9 @@ export interface DatosField {
   // plantilla: texto readonly con placeholders {{slug}} que se sustituyen por el
   // valor de otros campos del bloque (ej. cuerpo de correo a la DIAN). Con copiar.
   template?: string
+  // select con opciones del catálogo de seccionales DIAN: se auto-selecciona según
+  // la ciudad y, al cambiar, actualiza el campo `correo_seccional` con su buzón.
+  opciones_fuente?: 'seccionales_dian'
   // Solo renderizar si el field referenciado cumple la condicion
   showIf?: { field: string; equals: unknown }
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
@@ -128,7 +132,19 @@ export default function BloqueDatos({
     fields.forEach(f => {
       const fallback = f.default !== undefined ? f.default : (f.tipo === 'toggle' ? false : '')
       init[f.slug] = saved[f.slug] ?? autoFillDefaults?.[f.slug] ?? fallback
+      // Seccional DIAN: auto-seleccionar según la ciudad de venta si no hay valor guardado.
+      if (f.opciones_fuente === 'seccionales_dian' && !saved[f.slug]) {
+        const ciudad = (saved['ciudad_venta'] ?? autoFillDefaults?.['ciudad_venta']) as string | undefined
+        const sec = mapCiudadASeccional(ciudad, 'natural')
+        if (sec) init[f.slug] = sec.slug
+      }
     })
+    // Derivar el correo de la seccional inicial (si no fue editado a mano)
+    const secField = fields.find(f => f.opciones_fuente === 'seccionales_dian')
+    if (secField && init[secField.slug] && !saved['correo_seccional']) {
+      const sec = getSeccionalBySlug(init[secField.slug] as string)
+      if (sec) init['correo_seccional'] = sec.email
+    }
     return init
   })
   const [isPending, startTransition] = useTransition()
@@ -266,6 +282,11 @@ export default function BloqueDatos({
 
   function handleChange(slug: string, value: unknown) {
     const next = { ...values, [slug]: value }
+    // Seccional DIAN: al cambiarla, refrescar el correo (buzón) de esa seccional.
+    const f = fields.find(ff => ff.slug === slug)
+    if (f?.opciones_fuente === 'seccionales_dian') {
+      next['correo_seccional'] = getSeccionalBySlug(value as string)?.email ?? ''
+    }
     setValues(next)
     scheduleAutoSave(next)
   }
@@ -362,9 +383,11 @@ export default function BloqueDatos({
                   <span className={`flex-1 min-w-0 text-xs text-[#1A1A1A] break-words ${f.tipo === 'numero' ? 'tabular-nums' : ''}`}>{
                     f.tipo === 'numero' && v
                       ? fmt(Number(v))
-                      : (f.tipo === 'select' || f.tipo === 'radio') && f.opciones
-                        ? f.opciones.find(o => o.value === v)?.label ?? (v as string) ?? '—'
-                        : (v as string) ?? '—'
+                      : f.opciones_fuente === 'seccionales_dian' && v
+                        ? getSeccionalBySlug(v as string)?.label ?? (v as string)
+                        : (f.tipo === 'select' || f.tipo === 'radio') && f.opciones
+                          ? f.opciones.find(o => o.value === v)?.label ?? (v as string) ?? '—'
+                          : (v as string) ?? '—'
                   }</span>
                   {isCopyable && copyValue && <CopyValueButton value={copyValue} />}
                 </div>
@@ -545,7 +568,7 @@ export default function BloqueDatos({
             )
           })()}
 
-          {f.tipo === 'select' && (f.options || f.opciones) && (
+          {f.tipo === 'select' && (f.options || f.opciones || f.opciones_fuente === 'seccionales_dian') && (
             <select
               value={(values[f.slug] as string) ?? ''}
               onChange={e => handleChange(f.slug, e.target.value)}
@@ -553,7 +576,11 @@ export default function BloqueDatos({
               className={`${inputBaseClass} ${inputBg(f.slug)}`}
             >
               <option value="">-- Seleccionar --</option>
-              {f.opciones
+              {f.opciones_fuente === 'seccionales_dian'
+                ? SECCIONALES_DIAN.map(s => (
+                    <option key={s.slug} value={s.slug}>{s.label}</option>
+                  ))
+                : f.opciones
                 ? f.opciones.map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))
