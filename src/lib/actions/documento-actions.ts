@@ -81,6 +81,10 @@ export type CrossCheckSpec = CrossCheckSource & {
   // se prueba cada alternativa. El check pasa si la principal O alguna alternativa
   // valida; el valor esperado del reporte sale de la primera fuente con dato.
   source_alternatives?: CrossCheckSource[]
+  // Si el valor EXTRAÍDO del documento viene vacío, el check pasa (no aplica).
+  // Ej.: el 2º beneficiario del Concepto UPME — solo se valida si el certificado
+  // lista un segundo solicitante.
+  optional?: boolean
 }
 
 export type CrossCheckResult = {
@@ -213,6 +217,13 @@ async function runCrossCheck(
   for (const check of checks) {
     const extractedRaw = String(camposExtraidos[check.slug]?.value ?? '')
     const mode: CrossCheckMatchMode = check.match_mode ?? 'exact'
+
+    // Check opcional sin valor extraído (ej. 2º beneficiario ausente en el
+    // certificado) → no aplica, pasa sin comparar.
+    if (check.optional && !extractedRaw) {
+      results.push({ slug: check.slug, label: check.label, expected: '', extracted: '', ok: true, mode })
+      continue
+    }
 
     // Fuente principal + alternativas: cuando el bloque fuente principal no aplica
     // al negocio (p.ej. RUT vacío en jurídica), se prueba el Certificado de
