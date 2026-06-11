@@ -20,7 +20,9 @@ function db(client: unknown): any { return client }
 interface FuenteCampo {
   etapa_orden: number
   bloque_orden: number
-  campo_slug: string
+  campo_slug?: string // un campo
+  campos_slug?: string[] // varios campos concatenados (ej. marca + línea/modelo del certificado)
+  join?: string // separador para campos_slug (default " ")
   tipo: string // 'ai' | 'field'
 }
 
@@ -76,17 +78,24 @@ async function resolverCamposFuente(
     lookup.set(key, { data: (b.data as Record<string, unknown>) ?? {} })
   }
 
-  // Resuelve el valor de UNA fuente (etapa:bloque + campo). null si no hay bloque o valor.
+  // Resuelve el valor de UNA fuente (etapa:bloque + campo, o varios concatenados).
   const resolverUna = (src: FuenteCampo): string | null => {
     const bloque = lookup.get(`${src.etapa_orden}:${src.bloque_orden}`)
     if (!bloque) return null
-    if (src.tipo === 'ai') {
-      const campos = bloque.data.campos as Record<string, { value: string | null; confidence: number }> | undefined
-      const cd = campos?.[src.campo_slug]
-      return (cd?.value && cd.confidence >= 0.70) ? cd.value : null
+    const readOne = (slug: string): string | null => {
+      if (src.tipo === 'ai') {
+        const campos = bloque.data.campos as Record<string, { value: string | null; confidence: number }> | undefined
+        const cd = campos?.[slug]
+        return (cd?.value && cd.confidence >= 0.70) ? cd.value : null
+      }
+      const raw = bloque.data[slug]
+      return (raw !== null && raw !== undefined && raw !== '') ? String(raw) : null
     }
-    const raw = bloque.data[src.campo_slug]
-    return (raw !== null && raw !== undefined && raw !== '') ? String(raw) : null
+    if (src.campos_slug && src.campos_slug.length > 0) {
+      const parts = src.campos_slug.map(readOne).filter((v): v is string => !!v)
+      return parts.length > 0 ? parts.join(src.join ?? ' ') : null
+    }
+    return src.campo_slug ? readOne(src.campo_slug) : null
   }
 
   const datos: Record<string, string | null> = {}

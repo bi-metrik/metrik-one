@@ -42,7 +42,8 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
   const ciudad = datos.municipio ?? '[Ciudad]'
   const email = datos.email ?? '[DIRECCIÓN DE CORREO]'
   const telefono = datos.telefono ?? '[NÚMERO DE CELULAR]'
-  const tipoVehiculo = datos.tipo_vehiculo?.toLowerCase() ?? 'híbrido / eléctrico'
+  // Descripción del vehículo tal cual el Concepto UPME (marca + línea/modelo).
+  const tipoVehiculo = datos.tipo_vehiculo ?? 'híbrido / eléctrico'
 
   const d = new Date(fechaGeneracion)
   const dia = d.getUTCDate()

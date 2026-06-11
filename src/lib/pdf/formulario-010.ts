@@ -53,8 +53,9 @@ export interface Formulario010Constantes {
   // Códigos según tablas del formato 010
   concepto: string // Casilla 2 — "1" (Saldos a favor)
   tipo_solicitud: string // Casilla 44 — "A solicitud de parte"
-  tipo_obligacion: string // Casilla 50 — "Impuesto sobre las Ventas"
-  concepto_saldo: string // Casilla 51 — "Otros" o lo que aplique
+  tipo_obligacion: string // Casilla 50 — "Impuesto sobre las ventas IVA"
+  concepto_saldo: string // Casilla 51 — "Pago de lo no debido"
+  nombre_documento?: string // Casilla 57 — "Factura electrónica de ventas"
 }
 
 const TEMPLATE_PATH = path.join(process.cwd(), 'src/lib/pdf/templates/formulario-010-dian.pdf')
@@ -136,7 +137,10 @@ const P2 = {
   // número de factura de venta del vehículo. La 54 (No. doc/acto, x≈308) queda
   // vacía: solo aplica a pago en exceso aduanero.
   numero_factura_1: { x: 448, y: 458, maxWidth: 135 },
-  // 56/57 No diligenciar para IVA
+  // 56 Descripción: NO se diligencia para IVA.
+  // 57 Nombre del documento de reconocimiento (fila inferior, izq. de la fecha):
+  // la DIAN exige "Factura electrónica de ventas".
+  nombre_documento_1: { x: 245, y: 434, maxWidth: 140, size: 7 },
   // 58 Fecha documento (y=450 → 434)
   fecha_factura_1: { x: 393, y: 434, maxWidth: 70 },
   // 59 Valor solicitado por origen (y=447.4 → 431)
@@ -284,6 +288,8 @@ export async function generarFormulario010(
   edit2('anio_gravable', fecha.anio, P2.anio_gravable_1)
   fixed2(fecha.bimestre, P2.periodo_1) // casilla 53 periodo bimestral: BLINDADO
   edit2('numero_factura', datos.numero_factura, P2.numero_factura_1)
+  // Casilla 57 — nombre del documento que origina el saldo (constante DETERMINISTA)
+  if (constantes.nombre_documento) fixed2(constantes.nombre_documento, P2.nombre_documento_1)
   edit2('fecha_factura', fecha.compacto, P2.fecha_factura_1)
   edit2('valor', valorFmt, P2.valor_origen_1)
 

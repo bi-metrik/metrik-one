@@ -42,8 +42,9 @@ const datos: Formulario010Datos = {
 const constantes: Formulario010Constantes = {
   concepto: '06',
   tipo_solicitud: 'A solicitud de parte',
-  tipo_obligacion: 'IVA',
-  concepto_saldo: 'Otros',
+  tipo_obligacion: 'Impuesto sobre las ventas IVA',
+  concepto_saldo: 'Pago de lo no debido',
+  nombre_documento: 'Factura electrónica de ventas',
 }
 
 async function main() {
