@@ -1972,7 +1972,11 @@ export async function marcarBloqueCompleto(
 export async function actualizarBloqueData(
   negocioBloqueId: string,
   data: Record<string, unknown>,
-  negocioId?: string
+  negocioId?: string,
+  // Guardado de BORRADOR: con { revalidate: false } persiste sin revalidar la ruta
+  // (no re-renderiza el server component → no roba el foco mientras se escribe).
+  // Default true para compatibilidad.
+  opts?: { revalidate?: boolean }
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
@@ -1990,7 +1994,7 @@ export async function actualizarBloqueData(
   if (updateError) return { error: (updateError as { message: string }).message }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
-  if (nid) revalidatePath(`/negocios/${nid}`)
+  if (nid && opts?.revalidate !== false) revalidatePath(`/negocios/${nid}`)
 
   // No registrar en activity_log aquí — auto-save cada 800ms genera ruido.
   // Los cambios se registran al completar bloque (marcarBloqueCompleto).

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useRef, useCallback } from 'react'
+import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
@@ -24,6 +24,9 @@ export interface DatosField {
   // select con opciones del catálogo de seccionales DIAN: se auto-selecciona según
   // la ciudad y, al cambiar, actualiza el campo `correo_seccional` con su buzón.
   opciones_fuente?: 'seccionales_dian'
+  // Campo de escritura que ALIMENTA condiciones/herencia de otros bloques (ej.
+  // ciudad_venta). Al salir del campo (blur) revalida para resincronizar el resto.
+  revalida?: boolean
   // Solo renderizar si el field referenciado cumple la condicion
   showIf?: { field: string; equals: unknown }
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
@@ -150,6 +153,21 @@ export default function BloqueDatos({
   const [isPending, startTransition] = useTransition()
   const [pasteImgs, setPasteImgs] = useState<Record<string, string>>({})
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Guardado: estado pasivo + refs para flush al desmontar (cero pérdida de datos).
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const valuesRef = useRef(values)
+  valuesRef.current = values
+  const dirtyRef = useRef(false)
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      // Si quedó un borrador sin guardar (el usuario navegó sin blur), persistir ya.
+      if (dirtyRef.current) {
+        void actualizarBloqueData(negocioBloqueId, valuesRef.current, undefined, { revalidate: false })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ePayco lookup state
   const [epaycoDesglose, setEpaycoDesglose] = useState<EpaycoDesglose | null>(
@@ -186,7 +204,7 @@ export default function BloqueDatos({
       }
       next._epayco_desglose = desglose
       setValues(next)
-      scheduleAutoSave(next)
+      void persist(next, true)
     } catch {
       setEpaycoError('Error inesperado consultando ePayco')
     } finally {
@@ -212,21 +230,32 @@ export default function BloqueDatos({
     })
   }
 
-  function scheduleAutoSave(newVals: Record<string, unknown>) {
+  // Persistir los valores. `revalidate` solo cuando el cambio afecta a otros bloques
+  // (toque, campo que dispara condición, o al completar). El borrador de escritura
+  // libre va con revalidate=false → no re-renderiza ni roba el foco. NO usa
+  // startTransition (que deshabilitaría el input). Feedback pasivo vía saveStatus.
+  async function persist(vals: Record<string, unknown>, revalidate: boolean) {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+    dirtyRef.current = false
+    setSaveStatus('saving')
+    const complete = isComplete(vals)
+    let result: { error: string | null }
+    if (complete && !requireConfirm) {
+      const r = await marcarBloqueCompleto(negocioBloqueId, vals)
+      if (!r.error && onComplete) onComplete()
+      result = { error: r.error }
+    } else {
+      result = await actualizarBloqueData(negocioBloqueId, vals, undefined, { revalidate })
+    }
+    if (result.error) { toast.error(result.error); setSaveStatus('idle') }
+    else { setSaveStatus('saved'); window.setTimeout(() => setSaveStatus('idle'), 1800) }
+  }
+
+  // Escritura libre: debounce LARGO de respaldo (el guardado principal es onBlur).
+  function scheduleBorrador(vals: Record<string, unknown>) {
+    dirtyRef.current = true
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      startTransition(async () => {
-        const complete = isComplete(newVals)
-        let result
-        if (complete && !requireConfirm) {
-          result = await marcarBloqueCompleto(negocioBloqueId, newVals)
-          if (!result.error && onComplete) onComplete()
-        } else {
-          result = await actualizarBloqueData(negocioBloqueId, newVals)
-        }
-        if (result.error) toast.error(result.error)
-      })
-    }, 800)
+    saveTimer.current = setTimeout(() => { void persist(vals, false) }, 2500)
   }
 
   function handleConfirm() {
@@ -280,15 +309,31 @@ export default function BloqueDatos({
     })
   }
 
-  function handleChange(slug: string, value: unknown) {
-    const next = { ...values, [slug]: value }
-    // Seccional DIAN: al cambiarla, refrescar el correo (buzón) de esa seccional.
+  // Escritura libre (texto/número): solo estado + borrador diferido. Sin revalidate
+  // ni input deshabilitado → el foco nunca se pierde mientras se escribe.
+  function handleTextChange(slug: string, value: unknown) {
+    const next = { ...valuesRef.current, [slug]: value }
+    setValues(next)
+    scheduleBorrador(next)
+  }
+
+  // Salir de un campo de escritura → flush inmediato. Revalida solo si el campo
+  // alimenta condiciones de otros bloques (f.revalida).
+  function handleTextBlur(f: DatosField) {
+    if (!dirtyRef.current) return
+    void persist(valuesRef.current, !!f.revalida)
+  }
+
+  // Un toque (toggle/checkbox/select/radio/fecha): guardado inmediato + revalida
+  // (puede cambiar condiciones/herencia). La seccional refresca su correo.
+  function handleToggleChange(slug: string, value: unknown) {
+    const next = { ...valuesRef.current, [slug]: value }
     const f = fields.find(ff => ff.slug === slug)
     if (f?.opciones_fuente === 'seccionales_dian') {
       next['correo_seccional'] = getSeccionalBySlug(value as string)?.email ?? ''
     }
     setValues(next)
-    scheduleAutoSave(next)
+    void persist(next, true)
   }
 
   const handlePaste = useCallback((slug: string, e: React.ClipboardEvent) => {
@@ -301,7 +346,7 @@ export default function BloqueDatos({
     reader.onload = ev => {
       const dataUrl = ev.target?.result as string
       setPasteImgs(prev => ({ ...prev, [slug]: dataUrl }))
-      handleChange(slug, dataUrl)
+      handleToggleChange(slug, dataUrl)
     }
     reader.readAsDataURL(file)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -407,12 +452,23 @@ export default function BloqueDatos({
 
   return (
     <div className="space-y-3">
+      {/* Indicador de guardado pasivo (no roba atención: sin toasts por guardado) */}
+      <div className="flex h-3 items-center justify-end">
+        {saveStatus === 'saving' && <span className="text-[10px] text-[#6B7280]">Guardando…</span>}
+        {saveStatus === 'saved' && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-[#10B981]"><Check className="h-3 w-3" />Guardado</span>
+        )}
+      </div>
       {fields.filter(f => visible(f, values)).map(f => (
         <div key={f.slug}>
           {f.tipo !== 'documentos_preview' && f.tipo !== 'plantilla' && (
-            <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
+            <label className="mb-1 flex items-center gap-1 text-[11px] font-medium text-[#6B7280]">
               {f.label}
-              {f.required && <span className="ml-0.5 text-red-500">*</span>}
+              {f.required && <span className="text-red-500">*</span>}
+              {/* Dato traído de otra fuente y aún no editado a mano → badge "auto" */}
+              {autoFillDefaults?.[f.slug] != null && saved[f.slug] === undefined && values[f.slug] === autoFillDefaults[f.slug] && (
+                <span className="rounded bg-[#F5F4F2] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>
+              )}
             </label>
           )}
 
@@ -426,8 +482,8 @@ export default function BloqueDatos({
                 <input
                   type="text"
                   value={(values[f.slug] as string) ?? ''}
-                  onChange={e => handleChange(f.slug, e.target.value)}
-                  disabled={isPending}
+                  onChange={e => handleTextChange(f.slug, e.target.value)}
+                  onBlur={() => handleTextBlur(f)}
                   className={`flex-1 ${inputBaseClass} bg-white`}
                 />
                 <button
@@ -446,9 +502,9 @@ export default function BloqueDatos({
               <input
                 type="text"
                 value={(values[f.slug] as string) ?? ''}
-                onChange={e => handleChange(f.slug, e.target.value)}
+                onChange={e => handleTextChange(f.slug, e.target.value)}
+                onBlur={() => handleTextBlur(f)}
                 readOnly={isEpaycoFilled(f.slug)}
-                disabled={isPending}
                 className={`${inputBaseClass} ${inputBg(f.slug)}`}
               />
             )
@@ -460,8 +516,8 @@ export default function BloqueDatos({
                 <input
                   type="number"
                   value={(values[f.slug] as string) ?? ''}
-                  onChange={e => handleChange(f.slug, e.target.value ? Number(e.target.value) : '')}
-                  disabled={isPending}
+                  onChange={e => handleTextChange(f.slug, e.target.value ? Number(e.target.value) : '')}
+                  onBlur={() => handleTextBlur(f)}
                   className={`flex-1 ${inputBaseClass} bg-white`}
                 />
                 <button
@@ -480,9 +536,9 @@ export default function BloqueDatos({
               <input
                 type="number"
                 value={(values[f.slug] as string) ?? ''}
-                onChange={e => handleChange(f.slug, e.target.value ? Number(e.target.value) : '')}
+                onChange={e => handleTextChange(f.slug, e.target.value ? Number(e.target.value) : '')}
+                onBlur={() => handleTextBlur(f)}
                 readOnly={isEpaycoFilled(f.slug)}
-                disabled={isPending}
                 className={`${inputBaseClass} ${inputBg(f.slug)}`}
               />
             )
@@ -492,7 +548,7 @@ export default function BloqueDatos({
             <input
               type="date"
               value={(values[f.slug] as string) ?? ''}
-              onChange={e => handleChange(f.slug, e.target.value)}
+              onChange={e => handleToggleChange(f.slug, e.target.value)}
               readOnly={isEpaycoFilled(f.slug)}
               disabled={isPending}
               className={`${inputBaseClass} ${inputBg(f.slug)}`}
@@ -502,7 +558,7 @@ export default function BloqueDatos({
           {f.tipo === 'toggle' && (
             <label className="inline-flex cursor-pointer items-center gap-2">
               <div
-                onClick={() => !isPending && handleChange(f.slug, !values[f.slug])}
+                onClick={() => !isPending && handleToggleChange(f.slug, !values[f.slug])}
                 className={`relative h-5 w-9 rounded-full transition-colors ${values[f.slug] ? 'bg-[#10B981]' : 'bg-[#E5E7EB]'} ${isPending ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
               >
                 <span
@@ -518,7 +574,7 @@ export default function BloqueDatos({
               <input
                 type="checkbox"
                 checked={!!values[f.slug]}
-                onChange={e => handleChange(f.slug, e.target.checked)}
+                onChange={e => handleToggleChange(f.slug, e.target.checked)}
                 disabled={isPending}
                 className="h-4 w-4 accent-[#10B981] disabled:opacity-60"
               />
@@ -571,7 +627,7 @@ export default function BloqueDatos({
           {f.tipo === 'select' && (f.options || f.opciones || f.opciones_fuente === 'seccionales_dian') && (
             <select
               value={(values[f.slug] as string) ?? ''}
-              onChange={e => handleChange(f.slug, e.target.value)}
+              onChange={e => handleToggleChange(f.slug, e.target.value)}
               disabled={isPending || isEpaycoFilled(f.slug)}
               className={`${inputBaseClass} ${inputBg(f.slug)}`}
             >
@@ -625,7 +681,7 @@ export default function BloqueDatos({
                     name={f.slug}
                     value={opt.value}
                     checked={values[f.slug] === opt.value}
-                    onChange={() => handleChange(f.slug, opt.value)}
+                    onChange={() => handleToggleChange(f.slug, opt.value)}
                     disabled={isPending}
                     className="h-3.5 w-3.5 accent-[#10B981]"
                   />
