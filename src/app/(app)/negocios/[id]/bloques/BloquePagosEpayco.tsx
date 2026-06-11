@@ -23,6 +23,7 @@ interface BloquePagosEpaycoProps {
   instancia: NegocioBloque | null
   modo: 'editable' | 'visible'
   tipoCobro: string // 'anticipo' | 'pago'
+  nota?: string // texto guía explícito sobre qué referencia ingresar
 }
 
 const fmt = (v: number) =>
@@ -34,6 +35,7 @@ export default function BloquePagosEpayco({
   instancia,
   modo,
   tipoCobro,
+  nota,
 }: BloquePagosEpaycoProps) {
   const [pagos, setPagos] = useState<PagoRegistrado[]>(
     () => ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
@@ -159,6 +161,11 @@ export default function BloquePagosEpayco({
       {/* New payment section */}
       <div className="border-t border-[#E5E7EB] pt-3 mt-1">
         <p className="text-[11px] font-medium text-[#6B7280] mb-2">Nuevo pago</p>
+        {nota && (
+          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+            {nota}
+          </div>
+        )}
         <div className="flex gap-2">
           <div className="flex-1">
             <input

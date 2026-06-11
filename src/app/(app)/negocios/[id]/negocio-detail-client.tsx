@@ -1179,6 +1179,7 @@ function BloqueRenderer({
             instancia={bloque.instancia}
             modo={modo}
             tipoCobro={(configExtra.tipo_cobro as string) ?? 'pago'}
+            nota={configExtra.nota as string | undefined}
           />
         )
       }
