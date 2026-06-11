@@ -332,6 +332,22 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-10 (producto core — Mik + Max — borrado de 3 workspaces demo + reparacion del bot WhatsApp)
+**Branch:** `main` · commit `8ac2776` (config.toml deployado) + redeploy edge `wa-webhook` v77
+
+### Bot WhatsApp reparado (estaba caido desde 2026-05-26)
+- **Causa raiz:** `wa-webhook` quedo con `verify_jwt: true` tras el redeploy v76 (2026-06-02). Como `config.toml` nunca declaro el flag, cada deploy del webhook dependia del default de la plataforma (`true`) → el gateway respondia **401 a Meta antes de ejecutar el codigo** (Meta no manda JWT de Supabase). 0 mensajes registrados 2026-05-26 → 2026-06-10.
+- **Fix:** declarar `verify_jwt = false` en `config.toml` para `wa-webhook` + redeploy `--no-verify-jwt`. El webhook valida autenticidad por su cuenta (firma HMAC-SHA256 `x-hub-signature-256` + handshake GET con `WHATSAPP_VERIFY_TOKEN`), asi que NO abre hueco. Blindados tambien `wa-parse-test` y `wa-notify-internal` (verify_jwt=false versionado). `wa-alerts`/`evaluar-reglas` se quedan en `true` a proposito (crons internos con service key).
+- **Verificado end-to-end:** GET handshake con token invalido → 403 (antes 401); POST vacio → 200; mensaje real "10700 invitacion café cierre T1261" → intent GASTO, parser gemini-2.5-flash-lite, confianza 0.90, registrado en `wa_message_log`.
+- **Gotcha generico:** todo edge function debe declarar su `verify_jwt` en `config.toml`. Si no, un redeploy aplica el default `true` y rompe los webhooks de terceros. Diagnostico rapido: logs `edge-function` con `POST | 401` repetidos = es esto, no el codigo.
+
+### Borrado de 3 workspaces demo (danilo, estudio-creativo-lum, altavista-demo)
+- Borrado relacional en transaccion: ~33 FKs son CASCADE pero ~50 son `NO ACTION` y bloquean → hay que borrar filas hijas en orden hoja→raiz antes del row de `workspaces`. Gotchas de orden: `proyectos`→`cotizaciones`, `cotizaciones`→`oportunidades`, `gastos`/`expenses`→`expense_categories`, `staff`→`profiles`.
+- **3 capas que el DELETE relacional NO cubre:** (1) `public` (verificar con `query_to_xml` sobre `information_schema.columns`); (2) Storage — objetos `workspace-logos/{ws_id}/...` requieren Storage API REST (DELETE directo bloqueado por trigger `protect_delete()`); (3) auth/cuentas compartidas — verificar `staff.profile_id` cross-workspace antes de borrar un profile/auth.user.
+- **Caso real:** el owner de altavista-demo era Supervisor activo de `dimpro` → se conservo la cuenta y se repunto su `profile.workspace_id` a dimpro. Si esto se vuelve recurrente: montar funcion `delete_workspace(uuid)` que orqueste las 3 capas.
+
+---
+
 **Sesion:** 2026-06-09 (`soena` — Max — multi-responsable, mecanismo desactivar bloque, PhoneInput, filtro por etapa, Formulario 010)
 **Branch:** `main` · commits `11d330d` `918c047` `2610086` `27808dc` `451c917` `3d24579` `5bd1125` (deployados Vercel)
 
