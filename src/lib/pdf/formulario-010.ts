@@ -175,7 +175,7 @@ function parseFecha(iso: string | null): { anio: string; mes: string; dia: strin
   const mesNum = d.getUTCMonth() + 1
   const mes = String(mesNum).padStart(2, '0')
   const dia = String(d.getUTCDate()).padStart(2, '0')
-  const bimestre = String(Math.ceil(mesNum / 2))
+  const bimestre = String(Math.ceil(mesNum / 2)).padStart(2, '0') // casilla 53: 2 dígitos ("04")
   return { anio, mes, dia, bimestre, compacto: `${anio} ${mes} ${dia}` }
 }
 
