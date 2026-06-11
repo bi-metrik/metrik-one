@@ -12,11 +12,14 @@ import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/
 export interface DatosField {
   slug: string
   label: string
-  tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'checkbox' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview' | 'doc_link'
+  tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'checkbox' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview' | 'doc_link' | 'plantilla'
   required?: boolean
   options?: string[]
   opciones?: Array<{ value: string; label: string }>
   default?: unknown
+  // plantilla: texto readonly con placeholders {{slug}} que se sustituyen por el
+  // valor de otros campos del bloque (ej. cuerpo de correo a la DIAN). Con copiar.
+  template?: string
   // Solo renderizar si el field referenciado cumple la condicion
   showIf?: { field: string; equals: unknown }
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
@@ -66,6 +69,45 @@ function CopyValueButton({ value }: { value: string | number | null | undefined 
     >
       {copied ? <Check className="h-3.5 w-3.5 text-[#10B981]" /> : <Copy className="h-3 w-3" />}
     </button>
+  )
+}
+
+// Resuelve {{slug}} en la plantilla con el valor del campo correspondiente del bloque.
+// Si falta un valor, deja un marcador legible [slug] para que el operador lo complete.
+function resolverPlantilla(template: string, values: Record<string, unknown>): string {
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, slug: string) => {
+    const v = values[slug]
+    return v !== null && v !== undefined && v !== '' ? String(v) : `[${slug}]`
+  })
+}
+
+function PlantillaCorreo({ field, values }: { field: DatosField; values: Record<string, unknown> }) {
+  const [copied, setCopied] = useState(false)
+  const texto = resolverPlantilla(field.template ?? '', values)
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(texto)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      toast.error('No se pudo copiar')
+    }
+  }
+  return (
+    <div className="rounded-lg border border-[#E5E7EB] bg-[#F9FAFB]">
+      <div className="flex items-center justify-between border-b border-[#E5E7EB] px-3 py-1.5">
+        <span className="text-[10px] font-medium text-[#6B7280] uppercase tracking-wide">{field.label}</span>
+        <button
+          type="button"
+          onClick={copiar}
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-[#10B981] hover:bg-[#F0FDF4] transition-colors"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3 w-3" />}
+          {copied ? 'Copiado' : 'Copiar'}
+        </button>
+      </div>
+      <pre className="whitespace-pre-wrap break-words px-3 py-2 text-xs text-[#1A1A1A] font-sans leading-relaxed">{texto}</pre>
+    </div>
   )
 }
 
@@ -149,6 +191,7 @@ export default function BloqueDatos({
       if (f.tipo === 'checkbox') return true
       if (f.tipo === 'documentos_preview') return true
       if (f.tipo === 'doc_link') return true
+      if (f.tipo === 'plantilla') return true
       return v !== '' && v !== null && v !== undefined
     })
   }
@@ -263,6 +306,9 @@ export default function BloqueDatos({
               </div>
             )
           }
+          if (f.tipo === 'plantilla') {
+            return <PlantillaCorreo key={f.slug} field={f} values={effective} />
+          }
           if (f.tipo === 'doc_link') {
             const resolved = f.doc_link?._resolved
             return (
@@ -340,11 +386,15 @@ export default function BloqueDatos({
     <div className="space-y-3">
       {fields.filter(f => visible(f, values)).map(f => (
         <div key={f.slug}>
-          {f.tipo !== 'documentos_preview' && (
+          {f.tipo !== 'documentos_preview' && f.tipo !== 'plantilla' && (
             <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
               {f.label}
               {f.required && <span className="ml-0.5 text-red-500">*</span>}
             </label>
+          )}
+
+          {f.tipo === 'plantilla' && (
+            <PlantillaCorreo field={f} values={values} />
           )}
 
           {f.tipo === 'texto' && (
