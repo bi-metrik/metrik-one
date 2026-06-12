@@ -166,13 +166,15 @@ Ejecutado en sesión `/one` (Max). La capa de slug convive con la legacy: **cada
 | `doc_link` | `negocios/negocio-v2-actions.ts` + `BloqueDatos.tsx` | `doc_link.source_bloque_slug` |
 | preview `guia_devolucion` | `negocios/negocio-v2-actions.ts` | índice `datosGuiaPorSlug` |
 | generación `guia_devolucion` | `lib/actions/guia-devolucion-actions.ts` | match por slug |
+| `condition` (render + gate SQL) | `negocio-detail-client.tsx` + `condicion_cumplida()` | `condition.source_bloque_slug` |
+| herencia readonly (documento + propuesta) | `negocios/negocio-v2-actions.ts` | `source_bloque_slug` |
 
-La condición (`condition.source_etapa_orden`) y la herencia readonly siguen por etapa_orden (semántica "campo de la etapa N"); su fragilidad es por reorden, cubierta por `audit_workflow_refs`.
+**Condition** se evalúa en dos sitios que deben dar el mismo resultado (paridad gate⟺render): el render cliente (`datosPorSlug`, expuesto nuevo desde el server) y el gate SQL `condicion_cumplida()` (branch slug con flattening de campos). Backfill resuelve cada `condition` al bloque origen que DEFINE el field. **Herencia readonly de datos** ya era estable (por `bloque_definition_id`); se migraron los paths frágiles de `documento` (por etapa::nombre) y `propuesta_economica` (por orden) a slug, con `config_extra.source_bloque_slug` apuntando al origen.
 
 ### Backfill SOENA VE (`proyectos/soena/ve/migrations/20260612_refs_por_slug.sql`)
 - 51 bloques origen con slug (24 heredados → NULL). Sumideros homónimos desambiguados: `pagos_anticipo`/`pagos_cobro`, `cobros_e{N}`.
-- Referencias migradas a slug: **49 auto_fill + 6 cross_check (+ alternativas) + 53 campos_fuente**, todas validadas (0 inválidas).
-- `audit_block_slug_refs` y `audit_workflow_refs` ambos en **0 problemas**.
+- Referencias migradas a slug: **49 auto_fill + 10 cross_check (con alternativas) + 55 campos_fuente + 20 condition + 24 readonly = 158 refs**, todas validadas (0 inválidas).
+- `audit_block_slug_refs` (7 clases) y `audit_workflow_refs` ambos en **0 problemas**.
 
 ### Beneficio comprobado
 El bug DC13 (cross-check de marca/línea quedaba vacío al renombrar "Factura de venta" → "Factura Venta Vehículo") queda **estructuralmente cerrado**: la ref ahora cita `factura_venta_vehiculo` (slug), inmune a futuros renames. Igual para el preview/generación de la guía de devolución, que hardcodeaban el nombre viejo.

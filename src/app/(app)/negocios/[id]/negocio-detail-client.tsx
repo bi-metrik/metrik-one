@@ -1624,6 +1624,7 @@ interface Props {
   }>
   staffList: Array<{ id: string; full_name: string }>
   datosOtrasEtapas: Record<number, Record<string, unknown>>
+  datosPorSlug?: Record<string, Record<string, unknown>>
   bloquesEtapasPrevias?: BloqueHistorialItem[]
   pausaEnabled: boolean
   errorMsg?: string
@@ -1646,6 +1647,7 @@ export default function NegocioDetailClient({
   historialData,
   staffList,
   datosOtrasEtapas,
+  datosPorSlug = {},
   bloquesEtapasPrevias = [],
   pausaEnabled,
   errorMsg,
@@ -1677,13 +1679,16 @@ export default function NegocioDetailClient({
     // creación) no se renderizan, pero su data ya alimentó `datosEtapa` arriba.
     if ((b.config_extra as { visible?: boolean } | undefined)?.visible === false) return false
     const cond = b.config_extra?.condition as
-      | { field: string; value?: string; value_in?: unknown[]; source_etapa_orden?: number }
+      | { field: string; value?: string; value_in?: unknown[]; source_etapa_orden?: number; source_bloque_slug?: string }
       | undefined
     if (!cond) return true
-    // Cross-etapa condition: read from another etapa's data
-    const source = cond.source_etapa_orden
-      ? (datosOtrasEtapas[cond.source_etapa_orden] ?? {})
-      : datosEtapa
+    // Resolución del bloque fuente: vía preferida = slug estable (datosPorSlug),
+    // fallback legacy = bag de la etapa (source_etapa_orden) o la etapa actual.
+    const source = cond.source_bloque_slug && datosPorSlug[cond.source_bloque_slug]
+      ? datosPorSlug[cond.source_bloque_slug]
+      : cond.source_etapa_orden
+        ? (datosOtrasEtapas[cond.source_etapa_orden] ?? {})
+        : datosEtapa
     const raw = String(source[cond.field] ?? '')
     const norm = (s: unknown) => String(s ?? '')
       .normalize('NFD')

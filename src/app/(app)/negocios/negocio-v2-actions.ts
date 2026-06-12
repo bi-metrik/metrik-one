@@ -2657,6 +2657,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   etapasLinea: EtapaNegocio[]
   datosOtrasEtapas: Record<number, Record<string, unknown>>
+  datosPorSlug: Record<string, Record<string, unknown>>
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
@@ -3140,20 +3141,24 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // en etapas posteriores muestren el data (versiones, descuento, valor) del bloque
   // origen.
   const propuestaDataPorEtapa: Record<number, Record<string, unknown>> = {}
+  // Índice por slug estable del bloque origen (vía preferida de la herencia readonly).
+  const propuestaDataPorSlug: Record<string, Record<string, unknown>> = {}
   {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: propuestaBlocks } = await (db(supabase) as any)
       .from('negocio_bloques')
-      .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo), etapas_negocio!inner(orden))')
+      .select('data, bloque_configs!inner(etapa_id, slug, bloque_definitions!inner(tipo), etapas_negocio!inner(orden))')
       .eq('negocio_id', id)
       .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
     if (propuestaBlocks) {
       for (const pb of (propuestaBlocks as Record<string, unknown>[])) {
         const cfg = pb.bloque_configs as Record<string, unknown>
         const etapa = cfg.etapas_negocio as { orden: number } | undefined
+        const slug = cfg.slug as string | null
         if (etapa && pb.data) {
           propuestaDataPorEtapa[etapa.orden] = pb.data as Record<string, unknown>
         }
+        if (slug && pb.data) propuestaDataPorSlug[slug] = pb.data as Record<string, unknown>
       }
     }
   }
@@ -3165,11 +3170,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // 'documento' tiene source_etapa_orden en su config_extra, leemos drive_url +
   // file_name + campos extraidos del bloque origen.
   const documentoDataPorEtapaNombre = new Map<string, Record<string, unknown>>()
+  // Índice por slug estable del bloque documento origen (vía preferida).
+  const documentoDataPorSlug = new Map<string, Record<string, unknown>>()
   {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: docBlocks } = await (db(supabase) as any)
       .from('negocio_bloques')
-      .select('data, bloque_configs!inner(nombre, etapa_id, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
+      .select('data, bloque_configs!inner(nombre, slug, etapa_id, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
       .eq('negocio_id', id)
       .eq('bloque_configs.bloque_definitions.tipo', 'documento')
     if (docBlocks) {
@@ -3181,6 +3188,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         const cfgNombre = (cfg.nombre as string | null) ?? defNombre
         const key = `${etapa.orden}::${cfgNombre.trim().toLowerCase()}`
         documentoDataPorEtapaNombre.set(key, db_.data as Record<string, unknown>)
+        const slug = cfg.slug as string | null
+        if (slug) documentoDataPorSlug.set(slug, db_.data as Record<string, unknown>)
       }
     }
   }
@@ -3419,7 +3428,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       configExtra.readonly === true
       && typeof configExtra.source_etapa_orden === 'number'
     if (isReadonlyPropuesta && b.instancia) {
-      const srcData = propuestaDataPorEtapa[configExtra.source_etapa_orden as number]
+      // Vía preferida: slug estable del origen. Fallback legacy: por etapa_orden.
+      const srcSlug = configExtra.source_bloque_slug as string | undefined
+      const srcData =
+        (srcSlug ? propuestaDataPorSlug[srcSlug] : undefined)
+        ?? propuestaDataPorEtapa[configExtra.source_etapa_orden as number]
       if (srcData) {
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
       }
@@ -3431,8 +3444,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const defTipo = (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo
     const srcOrden = configExtra.source_etapa_orden as number | undefined
     if (defTipo === 'documento' && typeof srcOrden === 'number' && b.instancia) {
+      // Vía preferida: slug estable del origen. Fallback legacy: por (etapa::nombre).
+      const srcSlug = configExtra.source_bloque_slug as string | undefined
       const bNombre = (b.nombre ?? (b as { bloque_definitions?: { nombre?: string } | null }).bloque_definitions?.nombre ?? '').trim().toLowerCase()
-      const srcData = documentoDataPorEtapaNombre.get(`${srcOrden}::${bNombre}`)
+      const srcData =
+        (srcSlug ? documentoDataPorSlug.get(srcSlug) : undefined)
+        ?? documentoDataPorEtapaNombre.get(`${srcOrden}::${bNombre}`)
       if (srcData) {
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
       }
@@ -3558,6 +3575,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
     datosOtrasEtapas,
+    // Data de bloques fuente indexada por slug estable — para que el cliente
+    // evalúe `condition.source_bloque_slug` por identidad (no por etapa_orden).
+    datosPorSlug,
     bloquesEtapasPrevias,
     profiles: (profilesData ?? []).map(p => ({
       id: p.id,

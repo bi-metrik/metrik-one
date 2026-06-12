@@ -38,7 +38,13 @@ dups as (
   group by bc.slug having count(*) > 1
 ),
 refs as (
-  select 'cross_check' as clase, host_nombre, chk->>'source_bloque_slug' as slug_ref
+  select 'readonly' as clase, host_nombre, ce->>'source_bloque_slug' as slug_ref
+  from base where ce ? 'source_bloque_slug'
+  union all
+  select 'condition', host_nombre, ce->'condition'->>'source_bloque_slug'
+  from base where ce->'condition' ? 'source_bloque_slug'
+  union all
+  select 'cross_check', host_nombre, chk->>'source_bloque_slug'
   from base, jsonb_array_elements(coalesce(ce->'cross_check'->'checks','[]')) chk
   where chk ? 'source_bloque_slug'
   union all
