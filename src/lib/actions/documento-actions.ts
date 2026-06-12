@@ -64,6 +64,11 @@ export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 
 // Fuente de datos para un check: una etapa + bloque + cómo resolver el valor
 // esperado (un campo, varios concatenados, o varias alternativas de campo).
 export type CrossCheckSource = {
+  // Referencia ESTABLE al bloque fuente por su slug (atado a la identidad del
+  // bloque, no a su posición ni a su nombre editable). Prioritario sobre el par
+  // (source_etapa_orden, source_bloque_nombre), que queda como fallback legacy
+  // para refs aún no migradas. Ver docs/specs/2026-05-26_block-references-by-slug.md
+  source_bloque_slug?: string
   source_etapa_orden: number
   source_bloque_nombre: string
   source_field?: string
@@ -164,27 +169,35 @@ async function runCrossCheck(
   ))
   const { data: srcBloques } = await db(supabase)
     .from('negocio_bloques')
-    .select('data, bloque_configs!inner(nombre, etapas_negocio!inner(orden))')
+    .select('data, bloque_configs!inner(nombre, slug, etapas_negocio!inner(orden))')
     .eq('negocio_id', negocioId)
 
-  // Mapear por (etapa_orden::nombre_lower) -> data
+  // Dos índices sobre los mismos datos:
+  //  - dataPorBloque: por (etapa_orden::nombre_lower) — fallback legacy
+  //  - dataPorSlug:   por slug estable del bloque — vía preferida (refs migradas)
   const dataPorBloque = new Map<string, Record<string, unknown>>()
+  const dataPorSlug = new Map<string, Record<string, unknown>>()
   for (const row of ((srcBloques ?? []) as Record<string, unknown>[])) {
-    const cfg = row.bloque_configs as { nombre?: string; etapas_negocio?: { orden?: number } } | undefined
+    const cfg = row.bloque_configs as { nombre?: string; slug?: string; etapas_negocio?: { orden?: number } } | undefined
     const orden = cfg?.etapas_negocio?.orden
     const nombre = cfg?.nombre
-    if (typeof orden !== 'number' || !nombre || !ordenesNecesarias.includes(orden)) continue
-    const key = `${orden}::${nombre.trim().toLowerCase()}`
+    const slug = cfg?.slug
+    if (typeof orden !== 'number' || !nombre) continue
     const data = (row.data as Record<string, unknown>) ?? {}
     // Algunos bloques (documento) anidan campos extraidos en data.campos[slug].value
     const flat: Record<string, unknown> = { ...data }
     const camposAnidados = (data.campos as Record<string, { value?: unknown }>) ?? null
     if (camposAnidados) {
-      for (const [slug, c] of Object.entries(camposAnidados)) {
-        if (flat[slug] === undefined) flat[slug] = c?.value
+      for (const [s, c] of Object.entries(camposAnidados)) {
+        if (flat[s] === undefined) flat[s] = c?.value
       }
     }
-    dataPorBloque.set(key, flat)
+    // El slug es estable y único por línea → siempre indexable.
+    if (slug) dataPorSlug.set(slug, flat)
+    // El índice legacy solo carga los órdenes que algún check pide por nombre.
+    if (ordenesNecesarias.includes(orden)) {
+      dataPorBloque.set(`${orden}::${nombre.trim().toLowerCase()}`, flat)
+    }
   }
 
   // Resuelve el valor esperado de UNA fuente (campo único, varios concatenados, o
@@ -232,8 +245,11 @@ async function runCrossCheck(
     let expectedRaw = ''
     let ok = false
     for (const src of sources) {
-      const key = `${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`
-      const srcData = dataPorBloque.get(key) ?? {}
+      // Vía preferida: slug estable. Fallback legacy: (etapa_orden::nombre).
+      const srcData =
+        (src.source_bloque_slug ? dataPorSlug.get(src.source_bloque_slug) : undefined) ??
+        dataPorBloque.get(`${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`) ??
+        {}
       const r = resolveFromSource(src, srcData, extractedRaw, mode)
       if (r.ok) { expectedRaw = r.expected; ok = true; break }
       // Recordar el primer valor esperado no vacío para el reporte si nada matchea

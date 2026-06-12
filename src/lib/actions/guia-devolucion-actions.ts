@@ -67,14 +67,15 @@ export async function generarVersionGuia(
   const configExtra = ((bloqueRaw.bloque_configs as { config_extra?: Record<string, unknown> }).config_extra ?? {})
   const templateSlug = (configExtra.template_slug as string) ?? 'soena/guia-devolucion'
 
-  // 2. Resolver datos del RUT, Factura y Fecha cita por IDENTIDAD DE BLOQUE
-  // (nombre), NO por orden de etapa — robusto a reordenamientos del workflow.
-  // Se ignoran los bloques heredados readonly (config_extra.source_etapa_orden),
+  // 2. Resolver datos del RUT, Factura y Fecha cita por IDENTIDAD DE BLOQUE.
+  // Vía preferida: slug ESTABLE del bloque (robusto a renames — "Factura de venta"
+  // → "Factura Venta Vehículo" no rompe). Fallback: nombre normalizado, para líneas
+  // aún no migradas. Se ignoran heredados readonly (config_extra.source_etapa_orden),
   // que no persisten campos propios, para leer siempre del bloque origen.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: bloquesNeg } = await (supabase as any)
     .from('negocio_bloques')
-    .select('data, bloque_configs!inner(nombre, config_extra)')
+    .select('data, bloque_configs!inner(nombre, slug, config_extra)')
     .eq('negocio_id', negocioId)
 
   let razonSocial = ''
@@ -84,22 +85,30 @@ export async function generarVersionGuia(
   let ciudadVenta = ''
   let fechaCitaIso: string | null = null
 
+  // Identifica cada bloque fuente por slug (preferido) o nombre (fallback legacy).
+  const esRut = (slug: string, nombre: string) => slug === 'rut' || nombre === 'rut'
+  const esFactura = (slug: string, nombre: string) =>
+    slug === 'factura_venta_vehiculo' || nombre === 'factura venta vehiculo' || nombre === 'factura de venta'
+  const esFechaCita = (slug: string, nombre: string) =>
+    slug === 'fecha_cita_dian' || nombre === 'fecha cita dian'
+
   for (const bn of ((bloquesNeg ?? []) as Record<string, unknown>[])) {
-    const cfg = bn.bloque_configs as { nombre?: string; config_extra?: Record<string, unknown> | null }
+    const cfg = bn.bloque_configs as { nombre?: string; slug?: string | null; config_extra?: Record<string, unknown> | null }
     // Saltar heredados readonly (sin campos propios persistidos)
     if ((cfg?.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
     const nombre = (cfg?.nombre ?? '').toLowerCase().trim()
+    const slug = (cfg?.slug ?? '').trim()
     const bnData = (bn.data ?? {}) as Record<string, unknown>
-    if (nombre === 'rut') {
+    if (esRut(slug, nombre)) {
       const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
       razonSocial = String(campos.razon_social?.value ?? '')
       nit = String(campos.nit?.value ?? '')
       dv = String(campos.dv?.value ?? '')
       tipoPersona = String(campos.tipo_persona?.value ?? '')
-    } else if (nombre === 'factura de venta') {
+    } else if (esFactura(slug, nombre)) {
       const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
       ciudadVenta = String(campos.ciudad_venta?.value ?? '')
-    } else if (nombre === 'fecha cita dian') {
+    } else if (esFechaCita(slug, nombre)) {
       fechaCitaIso = (bnData.fecha_cita_dian as string | null) ?? null
     }
   }

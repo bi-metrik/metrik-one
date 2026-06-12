@@ -31,6 +31,7 @@ export interface DatosField {
   showIf?: { field: string; equals: unknown }
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
   doc_link?: {
+    source_bloque_slug?: string // referencia estable (preferida sobre nombre/orden)
     source_bloque_nombre: string
     source_etapa_orden: number
     _resolved?: { drive_url: string | null; file_name: string | null }

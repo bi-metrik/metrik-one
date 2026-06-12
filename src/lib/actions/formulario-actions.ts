@@ -18,6 +18,10 @@ function db(client: unknown): any { return client }
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface FuenteCampo {
+  // Referencia ESTABLE al bloque fuente por slug. Prioritaria sobre el par
+  // (etapa_orden, bloque_orden), que se rompe al reordenar etapas/bloques y queda
+  // como fallback legacy. Ver docs/specs/2026-05-26_block-references-by-slug.md
+  bloque_slug?: string
   etapa_orden: number
   bloque_orden: number
   campo_slug?: string // un campo
@@ -54,6 +58,7 @@ async function resolverCamposFuente(
       data,
       bloque_configs!inner(
         orden,
+        slug,
         config_extra,
         etapa_id,
         etapas_negocio!inner(orden, linea_id)
@@ -65,22 +70,28 @@ async function resolverCamposFuente(
     return { datos: {}, faltantes: camposFuente.map(c => c.slug) }
   }
 
-  // Build lookup: { "etapaOrden:bloqueOrden" → negocio_bloque }
+  // Dos índices: por (etapaOrden:bloqueOrden) legacy y por slug estable.
   const lookup = new Map<string, { data: Record<string, unknown> }>()
+  const lookupPorSlug = new Map<string, { data: Record<string, unknown> }>()
   for (const b of bloques) {
     const bc = b.bloque_configs as {
       orden: number
+      slug: string | null
       config_extra: Record<string, unknown>
       etapas_negocio: { orden: number; linea_id: string }
     }
     if (bc.etapas_negocio.linea_id !== lineaId) continue
-    const key = `${bc.etapas_negocio.orden}:${bc.orden}`
-    lookup.set(key, { data: (b.data as Record<string, unknown>) ?? {} })
+    const entry = { data: (b.data as Record<string, unknown>) ?? {} }
+    lookup.set(`${bc.etapas_negocio.orden}:${bc.orden}`, entry)
+    if (bc.slug) lookupPorSlug.set(bc.slug, entry)
   }
 
-  // Resuelve el valor de UNA fuente (etapa:bloque + campo, o varios concatenados).
+  // Resuelve el valor de UNA fuente (bloque + campo, o varios concatenados).
+  // Vía preferida: slug estable. Fallback legacy: (etapa_orden:bloque_orden).
   const resolverUna = (src: FuenteCampo): string | null => {
-    const bloque = lookup.get(`${src.etapa_orden}:${src.bloque_orden}`)
+    const bloque =
+      (src.bloque_slug ? lookupPorSlug.get(src.bloque_slug) : undefined) ??
+      lookup.get(`${src.etapa_orden}:${src.bloque_orden}`)
     if (!bloque) return null
     const readOne = (slug: string): string | null => {
       if (src.tipo === 'ai') {

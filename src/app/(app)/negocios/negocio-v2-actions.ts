@@ -3025,13 +3025,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'guia_devolucion'
   )
   const datosGuiaPorNombre: Record<string, Record<string, unknown>> = {}
+  // Índice por slug ESTABLE del bloque (vía preferida; robusto a renames, a
+  // diferencia de datosGuiaPorNombre que se rompió cuando "Factura de venta" pasó
+  // a "Factura Venta Vehículo"). Ver docs/specs/2026-05-26_block-references-by-slug.md
+  const datosGuiaPorSlug: Record<string, Record<string, unknown>> = {}
   if (tieneGuia) {
     const { data: bloquesGuia } = await db(supabase)
       .from('negocio_bloques')
-      .select('data, bloque_configs!inner(nombre, config_extra)')
+      .select('data, bloque_configs!inner(nombre, slug, config_extra)')
       .eq('negocio_id', id)
     for (const b of ((bloquesGuia ?? []) as Record<string, unknown>[])) {
-      const cfg = b.bloque_configs as { nombre?: string; config_extra?: Record<string, unknown> | null }
+      const cfg = b.bloque_configs as { nombre?: string; slug?: string | null; config_extra?: Record<string, unknown> | null }
       if ((cfg?.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
       const nombre = (cfg?.nombre ?? '').toLowerCase().trim()
       if (!nombre) continue
@@ -3044,6 +3048,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         }
       }
       datosGuiaPorNombre[nombre] = flat
+      if (cfg?.slug) datosGuiaPorSlug[cfg.slug] = flat
     }
   }
 
@@ -3075,6 +3080,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // en una misma etapa (ej. "RUT" y "RUT solicitante 2" de 2 solicitantes), que el
   // bag aplanado `datosOtrasEtapas` mezclaría por nombre de campo.
   const datosPorEtapaBloque: Record<number, Record<string, Record<string, unknown>>> = {}
+  // Índice por slug ESTABLE (vía preferida de auto_fill.source_bloque_slug). El
+  // slug es único por línea, así que no necesita partición por etapa.
+  const datosPorSlug: Record<string, Record<string, unknown>> = {}
   if (sourceEtapaOrdens.size > 0 && base.negocio.linea_id) {
     const { data: etapasSource } = await db(supabase)
       .from('etapas_negocio')
@@ -3089,7 +3097,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       })
       const { data: bloquesOtras } = await db(supabase)
         .from('negocio_bloques')
-        .select('data, bloque_configs!inner(etapa_id, nombre, bloque_definitions!inner(tipo, nombre))')
+        .select('data, bloque_configs!inner(etapa_id, nombre, slug, bloque_definitions!inner(tipo, nombre))')
         .eq('negocio_id', id)
         .in('bloque_configs.etapa_id', etapaIds)
       for (const b of ((bloquesOtras ?? []) as Record<string, unknown>[])) {
@@ -3102,6 +3110,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         // Bag por bloque (clave: nombre normalizado) para resolver source_bloque.
         const defNombre = (config.bloque_definitions as { nombre?: string } | undefined)?.nombre ?? ''
         const bloqueNombre = ((config.nombre as string | null) ?? defNombre).trim().toLowerCase()
+        const bloqueSlug = (config.slug as string | null) ?? null
         const perBloque: Record<string, unknown> = {}
         if (data) {
           Object.assign(datosOtrasEtapas[orden], data)
@@ -3121,6 +3130,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           if (!datosPorEtapaBloque[orden]) datosPorEtapaBloque[orden] = {}
           datosPorEtapaBloque[orden][bloqueNombre] = perBloque
         }
+        if (bloqueSlug) datosPorSlug[bloqueSlug] = perBloque
       }
     }
   }
@@ -3220,6 +3230,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     etapa_orden: number
     etapa_nombre: string
     block_id: string | null
+    slug?: string | null
   }
   const bloquesEtapasPrevias: BloqueHistorialPlano[] = []
   {
@@ -3236,7 +3247,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const { data: prevConfigs } = await (db(supabase) as any)
         .from('bloque_configs')
         .select(`
-          id, etapa_id, workspace_id, bloque_definition_id, estado, orden, es_gate, nombre,
+          id, etapa_id, workspace_id, bloque_definition_id, estado, orden, es_gate, nombre, slug,
           bloque_definitions(id, tipo, nombre, is_visualization, can_be_gate)
         `)
         .in('etapa_id', etapaIdsPrevias)
@@ -3326,15 +3337,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         const ceFields = (ce as { fields?: Array<{
           slug: string
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string }
+          auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string; source_bloque_slug?: string }
         }> }).fields ?? []
         const autoFillHist: Record<string, unknown> = {}
         for (const f of ceFields) {
           if (!f.auto_fill) continue
-          // source_bloque (si existe) resuelve el bloque exacto dentro de la etapa;
-          // si no, o si no hay match, cae al bag aplanado (retrocompatible).
+          // Vía preferida: source_bloque_slug (identidad estable). Luego source_bloque
+          // por nombre (legacy). Si no hay match, cae al bag aplanado por etapa.
           const srcData =
-            (f.auto_fill.source_bloque
+            (f.auto_fill.source_bloque_slug ? datosPorSlug[f.auto_fill.source_bloque_slug] : undefined)
+            ?? (f.auto_fill.source_bloque
               ? datosPorEtapaBloque[f.auto_fill.source_etapa_orden]?.[f.auto_fill.source_bloque.trim().toLowerCase()]
               : undefined)
             ?? datosOtrasEtapas[f.auto_fill.source_etapa_orden]
@@ -3371,6 +3383,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           orden: (cfg.orden as number) ?? 0,
           es_gate: (cfg.es_gate as boolean) ?? false,
           nombre: (cfg.nombre as string | null) ?? null,
+          slug: (cfg.slug as string | null) ?? null,
           bloque_definitions: def,
           instancia: inst,
           config_extra: ceEnriched,
@@ -3435,15 +3448,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       slug: string
       tipo?: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string }
-      doc_link?: { source_bloque_nombre: string; source_etapa_orden: number }
+      auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string; source_bloque_slug?: string }
+      doc_link?: { source_bloque_nombre: string; source_etapa_orden: number; source_bloque_slug?: string }
     }>
     for (const f of fields) {
       if (f.auto_fill) {
-        // source_bloque (si existe) resuelve el bloque exacto dentro de la etapa;
-        // si no, o si no hay match, cae al bag aplanado (retrocompatible).
+        // Vía preferida: source_bloque_slug (identidad estable). Luego source_bloque
+        // por nombre (legacy). Si no hay match, cae al bag aplanado por etapa.
         const srcData =
-          (f.auto_fill.source_bloque
+          (f.auto_fill.source_bloque_slug ? datosPorSlug[f.auto_fill.source_bloque_slug] : undefined)
+          ?? (f.auto_fill.source_bloque
             ? datosPorEtapaBloque[f.auto_fill.source_etapa_orden]?.[f.auto_fill.source_bloque.trim().toLowerCase()]
             : undefined)
           ?? datosOtrasEtapas[f.auto_fill.source_etapa_orden]
@@ -3470,11 +3484,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (fieldsConDocLink.length > 0) {
       resolvedFields = fields.map(f => {
         if (f.tipo !== 'doc_link' || !f.doc_link) return f
-        const target = bloquesEtapasPrevias.find(bp =>
-          bp.etapa_orden === f.doc_link!.source_etapa_orden
-          && (bp.nombre ?? bp.bloque_definitions?.nombre ?? '').trim().toLowerCase()
-             === f.doc_link!.source_bloque_nombre.trim().toLowerCase()
-        )
+        // Vía preferida: slug estable. Fallback legacy: (etapa_orden, nombre).
+        const wantSlug = f.doc_link!.source_bloque_slug
+        const target =
+          (wantSlug ? bloquesEtapasPrevias.find(bp => bp.slug === wantSlug) : undefined)
+          ?? bloquesEtapasPrevias.find(bp =>
+            bp.etapa_orden === f.doc_link!.source_etapa_orden
+            && (bp.nombre ?? bp.bloque_definitions?.nombre ?? '').trim().toLowerCase()
+               === f.doc_link!.source_bloque_nombre.trim().toLowerCase()
+          )
         const data = (target?.instancia?.data ?? null) as Record<string, unknown> | null
         const drive_url = (data?.drive_url as string | null) ?? null
         const file_name = (data?.file_name as string | null) ?? null
@@ -3493,15 +3511,20 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // Preview para BloqueGuiaDevolucion: resuelve nombre, NIT, ciudad, fecha cita
     // y seccional sugerida desde otros bloques del negocio.
     if (defTipo === 'guia_devolucion') {
-      // Resuelto por nombre de bloque (datosGuiaPorNombre), no por orden de etapa.
-      const rutData = datosGuiaPorNombre['rut'] ?? {}
-      const facturaData = datosGuiaPorNombre['factura de venta'] ?? {}
+      // Resuelto por SLUG estable del bloque (vía preferida), con fallback a
+      // nombre por compatibilidad con líneas aún no migradas a slug.
+      const rutData = datosGuiaPorSlug['rut'] ?? datosGuiaPorNombre['rut'] ?? {}
+      const facturaData =
+        datosGuiaPorSlug['factura_venta_vehiculo'] ??
+        datosGuiaPorNombre['factura venta vehiculo'] ??
+        datosGuiaPorNombre['factura de venta'] ??
+        {}
       const razonSocial = (rutData.razon_social as string) ?? ''
       const nit = (rutData.nit as string) ?? ''
       const dv = (rutData.dv as string) ?? ''
       const tipoPersona = (rutData.tipo_persona as string) ?? ''
       const ciudadVenta = (facturaData.ciudad_venta as string) ?? ''
-      const fechaCitaData = datosGuiaPorNombre['fecha cita dian'] ?? {}
+      const fechaCitaData = datosGuiaPorSlug['fecha_cita_dian'] ?? datosGuiaPorNombre['fecha cita dian'] ?? {}
       const fechaCita = (fechaCitaData.fecha_cita_dian as string) ?? null
       const seccional = mapCiudadASeccional(ciudadVenta, tipoPersona)
       enrichedConfigExtra._guia_preview = {

@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-05-26
 **Owner:** Max
-**Estado:** Pendiente, planificado para próxima sesión `/one`
+**Estado:** ✅ Implementado 2026-06-12 (línea SOENA VE). Ver "Implementación" al final.
 **Origen:** Sesión SOENA 2026-05-25/26 — al reordenar bloques en E2/E5/E8 los `campos_fuente` de F01/F02/F03 quedaron apuntando a `bloque_orden` viejos y los formularios fallaron con "faltan datos" aunque la data sí estaba extraída.
 
 ## Problema
@@ -146,3 +146,37 @@ Posibles mitigaciones (a discutir antes de ejecutar el spec):
    bloque, scan de todas las references y advertencia / bloqueo.
 
 Recomendación inicial: opción 1 (aliases) por flexibilidad. Decidir en sesión.
+
+---
+
+## Implementación (2026-06-12)
+
+Ejecutado en sesión `/one` (Max). La capa de slug convive con la legacy: **cada consumidor prioriza el slug y cae a nombre/orden solo si la ref aún no trae slug** → retrocompatible, cero big-bang.
+
+### DB
+- **Columna `bloque_configs.slug`** (`text`, índice parcial) — identidad estable, única por línea. NULL en heredados readonly. Migración producto `20260612000001_bloque_configs_slug.sql`.
+- **Guardián `audit_block_slug_refs(linea_id)`** — companion de `audit_workflow_refs`: valida unicidad de slug por línea + que todo slug referenciado exista. Migración `20260612000002_audit_block_slug_refs.sql`.
+
+### Código (6 consumidores migrados, todos con fallback legacy)
+| Consumidor | Archivo | Campo nuevo |
+|---|---|---|
+| `cross_check` (+ alternatives) | `lib/actions/documento-actions.ts` | `source_bloque_slug` |
+| `campos_fuente` (+ alternatives) | `lib/actions/formulario-actions.ts` | `source.bloque_slug` |
+| `auto_fill.source_bloque` (2 puntos) | `negocios/negocio-v2-actions.ts` | `auto_fill.source_bloque_slug` |
+| `doc_link` | `negocios/negocio-v2-actions.ts` + `BloqueDatos.tsx` | `doc_link.source_bloque_slug` |
+| preview `guia_devolucion` | `negocios/negocio-v2-actions.ts` | índice `datosGuiaPorSlug` |
+| generación `guia_devolucion` | `lib/actions/guia-devolucion-actions.ts` | match por slug |
+
+La condición (`condition.source_etapa_orden`) y la herencia readonly siguen por etapa_orden (semántica "campo de la etapa N"); su fragilidad es por reorden, cubierta por `audit_workflow_refs`.
+
+### Backfill SOENA VE (`proyectos/soena/ve/migrations/20260612_refs_por_slug.sql`)
+- 51 bloques origen con slug (24 heredados → NULL). Sumideros homónimos desambiguados: `pagos_anticipo`/`pagos_cobro`, `cobros_e{N}`.
+- Referencias migradas a slug: **49 auto_fill + 6 cross_check (+ alternativas) + 53 campos_fuente**, todas validadas (0 inválidas).
+- `audit_block_slug_refs` y `audit_workflow_refs` ambos en **0 problemas**.
+
+### Beneficio comprobado
+El bug DC13 (cross-check de marca/línea quedaba vacío al renombrar "Factura de venta" → "Factura Venta Vehículo") queda **estructuralmente cerrado**: la ref ahora cita `factura_venta_vehiculo` (slug), inmune a futuros renames. Igual para el preview/generación de la guía de devolución, que hardcodeaban el nombre viejo.
+
+### Pendiente / nota
+- `UNIQUE (linea_id, slug)` no se impone con índice (la tabla no tiene `linea_id`); la unicidad la vigila `audit_block_slug_refs`. Un trigger por línea es opción futura si se requiere garantía dura.
+- Otras líneas/workspaces siguen 100% en modo legacy hasta que se les corra su propio backfill — sin impacto (fallback activo).
