@@ -332,6 +332,19 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-12 (`soena` — Max — refactor del motor: referencias de workflow por slug estable)
+**Branch:** `main` · commits `40eae50` `fd1590b` `9322b53` (deployados Vercel) + migrations `20260612000001/2/3`
+
+### Referencias de bloque por `slug` estable (no por nombre/orden) — genérico
+- **Problema:** el motor encodaba refs cross-bloque por nombre editable u orden de etapa; renombrar/reordenar un bloque las rompía en silencio (bug DC13: cross-check de marca/línea vacío al renombrar "Factura de venta" → "Factura Venta Vehículo"; mismo bug latente en preview/generación de la guía de devolución).
+- **Solución:** columna `bloque_configs.slug` (identidad estable, única por línea, NULL en heredados). **7 clases de referencia migradas a slug, todas con fallback legacy** (cada consumidor prioriza slug y cae a nombre/orden si la ref no lo trae) → retrocompatible, cero big-bang. Otras líneas/workspaces siguen 100% legacy sin impacto.
+- **Clases + sitios:** cross_check (`documento-actions`), campos_fuente (`formulario-actions`), auto_fill.source_bloque + doc_link + preview/generación guía (`negocio-v2-actions` + `guia-devolucion-actions`), condition (render `negocio-detail-client` + gate SQL `condicion_cumplida`, con `datosPorSlug` expuesto desde el server y flattening de campos para **paridad gate⟺render**), herencia readonly (documento + propuesta; los `datos` readonly ya eran estables por `bloque_definition_id`).
+- **Guardián nuevo `audit_block_slug_refs(linea_id)`** (companion de `audit_workflow_refs`): valida unicidad de slug por línea + que todo slug referenciado exista. Correr tras configurar/migrar refs. Migrations `20260612000001` (columna+índice), `20260612000002` (audit, 7 clases), `20260612000003` (`condicion_cumplida` branch slug).
+- **NO migrado a propósito:** el `block_id` visual (código corto tipo "DA5") sigue por (etapa, nombre, tipo) en `/flujo` y `/admin/workflows` — cosmético (si se desincroniza solo muestra otro código, no afecta datos ni gates).
+- **SOENA VE:** 158 refs backfilleadas a slug (`proyectos/soena/ve/migrations/20260612_refs_por_slug.sql`). `audit_block_slug_refs` y `audit_workflow_refs` ambos en **0**. Pendiente: QA en vivo con un negocio real (8 casos A–H en Tana). Spec: `docs/specs/2026-05-26_block-references-by-slug.md`.
+
+---
+
 **Sesion:** 2026-06-10 (producto core — Mik + Max — borrado de 3 workspaces demo + reparacion del bot WhatsApp)
 **Branch:** `main` · commit `8ac2776` (config.toml deployado) + redeploy edge `wa-webhook` v77
 
