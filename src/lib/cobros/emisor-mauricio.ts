@@ -5,7 +5,7 @@
  * y cerebro/conceptos/cobros-recurrentes-metrik.md
  *
  * Datos verificados contra RUT (cerebro/documentos-legales/mauricio/RUT_1016044186.pdf)
- * y certificado bancario (verificado en sesión 2026-05-15).
+ * y certificado bancario (verificado en sesión 2026-06-12).
  *
  * CAMBIOS REQUIEREN:
  * - RUT actualizado: tocar campos CIIU + dirección + responsabilidades RUT
@@ -49,9 +49,9 @@ export const EMISOR_MAURICIO = {
 
   // Banco para recibir pagos
   banco: {
-    nombre: 'Banco Falabella S.A.',
+    nombre: 'Banco Caja Social',
     tipo: 'Ahorros',
-    numero: '111810431095',
+    numero: '24142103304',
     titular: 'Brallan Mauricio Moreno Guzmán',
     identificacion: 'CC 1.016.044.186',
   },
