@@ -219,10 +219,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── 4. Emitir cuentas de cobro el dia 15 ──────────────────
+  // ── 4. Emitir cuentas de cobro el dia 10 ──────────────────
   // Para workspaces con modules.cobros_recurrentes=true, agrupa cobros
   // programados del mes por empresa pagadora y emite 1 cuenta por grupo.
-  // Idempotente: si la cuenta ya existe para ese workspace+empresa+periodo, skip.
+  // Emite el dia 10 para dar margen de revision/aprobacion antes del envio (dia 13)
+  // y del vencimiento (dia 15). Idempotente: si la cuenta ya existe para ese
+  // workspace+empresa+periodo, skip.
   let cuentasEmitidas = 0
   let cuentasOmitidas = 0
   const cuentasErrores: { workspace_id: string; error: string }[] = []
@@ -233,7 +235,7 @@ export async function GET(req: NextRequest) {
   const añoHoy = parseInt(añoStr, 10)
   const mesHoy = parseInt(mesStr, 10)
 
-  if (diaHoy === 15) {
+  if (diaHoy === 10) {
     const { data: workspacesConFlag } = await supabase
       .from('workspaces')
       .select('id, slug')
@@ -244,6 +246,9 @@ export async function GET(req: NextRequest) {
         const r = await generarCuentasCobroPeriodo(supabase, ws.id, añoHoy, mesHoy, {
           dryRun: false,
           isDraft: false,
+          // Emite el dia 10 pero la cuenta se fecha el dia 13 (dia de envio al cliente);
+          // el vencimiento sigue el dia 15 (fechaEsperada interna).
+          fechaEmisionOverride: `${añoHoy}-${String(mesHoy).padStart(2, '0')}-13`,
         })
         cuentasEmitidas += r.cuentasCreadas
         cuentasOmitidas += r.cuentasOmitidas
