@@ -6,6 +6,7 @@ import FiscalNudge from './fiscal-nudge'
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
+import { getWorkspace } from '@/lib/actions/get-workspace'
 
 export default async function AppLayout({
   children,
@@ -30,6 +31,13 @@ export default async function AppLayout({
     // New user — needs onboarding
     redirect('/onboarding')
   }
+
+  // Rol EFECTIVO (respeta impersonación "Ver como" vía getWorkspace). Sin impersonar,
+  // = rol real del profile → ningún cambio para usuarios normales. Necesario para que
+  // el nav del sidebar refleje el rol impersonado (antes usaba el rol real del owner →
+  // al impersonar un operator seguía mostrando Configuración y demás items).
+  const { role: rolEfectivo } = await getWorkspace()
+  const navRole = rolEfectivo ?? profile.role
 
   // El header muestra el Cargo (staff.position) del usuario; si no tiene, cae al
   // rol (fallback en AppShell). Fuente unica de "como se llama el puesto"
@@ -116,7 +124,7 @@ export default async function AppLayout({
       <AppShell
         fullName={profile.full_name || 'Usuario'}
         workspaceName={workspace.name}
-        role={profile.role}
+        role={navRole}
         displayRole={staffSelf?.position ?? null}
         isAdminWorkspace={profile.workspace_id === process.env.ADMIN_WORKSPACE_ID}
         platformAdminState={platformAdminState}
@@ -131,7 +139,7 @@ export default async function AppLayout({
         notificationBell={<NotificationBell userId={user.id} />}
       >
         {/* D235/D236: Fiscal nudge — shows when profile incomplete, max 3 nudges. Not for contador. */}
-        {fiscal && !fiscal.is_complete && profile.role !== 'contador' && (
+        {fiscal && !fiscal.is_complete && navRole !== 'contador' && (
           <div className="mb-4">
             <FiscalNudge
               isComplete={fiscal.is_complete ?? false}

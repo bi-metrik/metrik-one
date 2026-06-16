@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import MiNegocioClient from './mi-negocio-client'
 import { getLineasDisponibles } from './actions'
 import { getEquipoConAreas, getWorkspaceDefaultResponsables } from '@/lib/actions/equipo-areas'
+import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYear } from '@/lib/dates/bogota'
 
 export default async function MiNegocioPage() {
@@ -25,6 +26,8 @@ export default async function MiNegocioPage() {
   // Config-driven: respeta workspaces.config_extra.nav_roles_override['/mi-negocio'].
   // Sin override → default global ['owner','admin','supervisor'] (comportamiento actual).
   {
+    // Rol EFECTIVO (respeta impersonación "Ver como"); sin impersonar = rol real.
+    const { role: rolEfectivo } = await getWorkspace()
     const { data: wsCfg } = await supabase
       .from('workspaces')
       .select('config_extra')
@@ -33,7 +36,7 @@ export default async function MiNegocioPage() {
     const override = (wsCfg?.config_extra as { nav_roles_override?: Record<string, string[]> } | null)
       ?.nav_roles_override?.['/mi-negocio']
     const allowed = override ?? ['owner', 'admin', 'supervisor']
-    if (!allowed.includes(profile.role)) redirect('/')
+    if (!allowed.includes(rolEfectivo ?? profile.role)) redirect('/')
   }
 
   // Parallel fetches
