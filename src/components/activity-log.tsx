@@ -96,13 +96,11 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Filtro: mostrar/ocultar eventos automaticos del sistema (persistido en localStorage).
-  // Default: VISIBLES — el registro de cambios (cambio_etapa/cambio) se ve al entrar;
-  // el toggle permite ocultarlos para reducir ruido y esa eleccion se respeta.
+  // Default: ocultos — solo comentarios visibles. El toggle los revela bajo demanda.
   // Lazy init seguro porque el toggle solo se renderiza tras cargar entries.
   const [showSystem, setShowSystem] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true
-    const v = window.localStorage.getItem(SHOW_SYSTEM_KEY)
-    return v === null ? true : v === '1'
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(SHOW_SYSTEM_KEY) === '1'
   })
   const toggleShowSystem = () => {
     setShowSystem(prev => {
