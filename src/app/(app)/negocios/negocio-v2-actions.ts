@@ -773,7 +773,7 @@ export async function crearNegocio(input: {
   empresa_sector?: string
   es_persona_natural?: boolean
 }): Promise<{ negocio_id: string | null; error: string | null }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
 
   // Get workspace config: stages_activos + linea_activa_id + config_extra
@@ -904,6 +904,26 @@ export async function crearNegocio(input: {
   }
 
   const negocioData = negocio as { id: string }
+
+  // ── Auto-asignar al creador como responsable si es operator ──
+  // Un operator solo ve los negocios donde es responsable (negocio_responsables N:M,
+  // ver getNegociosV2). Sin esto, un operator comercial/operaciones que crea un
+  // negocio lo perdería de vista al instante. Owner/admin/supervisor ven todos →
+  // no necesitan auto-asignación. assigned_by = userId (FK a profiles).
+  if (role === 'operator' && staffId) {
+    try {
+      await db(supabase)
+        .from('negocio_responsables')
+        .insert({ negocio_id: negocioData.id, staff_id: staffId, assigned_by: userId ?? null })
+      await sincronizarResponsablePrincipal(supabase, negocioData.id, workspaceId)
+    } catch (respErr) {
+      // No bloquear la creación del negocio si la auto-asignación falla.
+      console.error(
+        `[crearNegocio] No se pudo auto-asignar responsable (negocio=${negocioData.id}, staff=${staffId}):`,
+        respErr instanceof Error ? respErr.message : respErr,
+      )
+    }
+  }
 
   // ── Auto-crear carpeta en Google Drive ──
   // Prioridad: linea.drive_folder_id → workspaces.drive_folder_id (fallback)
@@ -3012,9 +3032,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const ce = bloqueConfigsExtra[bcId]
     const cond = ce?.condition as { source_etapa_orden?: number } | undefined
     if (cond?.source_etapa_orden) sourceEtapaOrdens.add(cond.source_etapa_orden)
-    const fields = (ce?.fields ?? []) as Array<{ auto_fill?: { source_etapa_orden?: number } }>
+    const fields = (ce?.fields ?? []) as Array<{ auto_fill?: { source_etapa_orden?: number }; lock_when?: { source_etapa_orden?: number } }>
     for (const f of fields) {
       if (f.auto_fill?.source_etapa_orden) sourceEtapaOrdens.add(f.auto_fill.source_etapa_orden)
+      // lock_when: el bloque fuente (ej. titularidad) debe cargarse en datosPorSlug
+      // para resolver el bloqueo cross-bloque en el render.
+      if (f.lock_when?.source_etapa_orden) sourceEtapaOrdens.add(f.lock_when.source_etapa_orden)
     }
   }
 

@@ -62,6 +62,13 @@ interface AppShellProps {
   isAdminWorkspace?: boolean
   branding?: BrandingProps
   modules?: WorkspaceModules
+  /**
+   * Override de visibilidad del nav POR WORKSPACE (config-driven, desde
+   * workspaces.config_extra.nav_roles_override). Mapa { href: roles[] } que
+   * reemplaza los roles por defecto de un item del sidebar solo en este workspace.
+   * Sin override → roles globales por defecto (resto de workspaces sin cambio).
+   */
+  navRolesOverride?: Record<string, string[]>
   hasLineas?: boolean
   notificationBell?: React.ReactNode
   platformAdminState?: PlatformAdminState | null
@@ -227,11 +234,22 @@ export default function AppShell({
   isAdminWorkspace,
   branding,
   modules,
+  navRolesOverride,
   hasLineas,
   notificationBell,
   platformAdminState,
 }: AppShellProps) {
   const pathname = usePathname()
+
+  // Aplica el override de roles por workspace a una lista de items del nav.
+  // Si el href está en el override, sus roles efectivos son los del override.
+  function applyOverride<T extends { href: string; roles: string[] }>(items: T[]): T[] {
+    if (!navRolesOverride) return items
+    return items.map(i => (navRolesOverride[i.href] ? { ...i, roles: navRolesOverride[i.href] } : i))
+  }
+  // ¿El rol actual puede ver este href? (respeta override). Para checks inline (caja).
+  const roleAllowed = (href: string, defaultRoles: string[]) =>
+    (navRolesOverride?.[href] ?? defaultRoles).includes(role)
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
 
@@ -249,8 +267,8 @@ export default function AppShell({
     .toUpperCase()
 
   const mod = modules ?? { business: true }
-  const businessItems = mod.business ? filterByRole(BUSINESS_NAV_ITEMS, role) : []
-  const contabilidadItems = mod.causacion ? filterByRole(CONTABILIDAD_NAV_ITEMS, role) : []
+  const businessItems = mod.business ? filterByRole(applyOverride(BUSINESS_NAV_ITEMS), role) : []
+  const contabilidadItems = mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : []
   // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
   const complianceItems = (mod.compliance || mod.compliance_audit)
     ? filterCompliance(COMPLIANCE_NAV_ITEMS, role, mod)
@@ -259,11 +277,11 @@ export default function AppShell({
   const validacionItems = (mod.compliance || mod.compliance_audit)
     ? filterCompliance(VALIDACION_NAV_ITEMS, role, mod)
     : []
-  const sharedItems = filterByRole(SHARED_NAV_ITEMS, role)
+  const sharedItems = filterByRole(applyOverride(SHARED_NAV_ITEMS), role)
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
   // Href dinamico: owner del workspace admin global ve la biblioteca cross-workspace, el resto ve el Kanban del workspace actual
   const workflowsItems = hasLineas
-    ? filterByRole(WORKFLOWS_NAV_ITEMS, role).map(item =>
+    ? filterByRole(applyOverride(WORKFLOWS_NAV_ITEMS), role).map(item =>
         isAdminWorkspace && role === 'owner' ? { ...item, href: '/admin/workflows' } : item
       )
     : []
@@ -272,8 +290,8 @@ export default function AppShell({
   const extrasItems = [...validaItems, ...certItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = [
-    ...(mod.business && CAJA_MOVIMIENTOS_ITEM.roles.includes(role) ? [CAJA_MOVIMIENTOS_ITEM] : []),
-    ...(mod.cobros_recurrentes && CAJA_COBROS_ITEM.roles.includes(role) ? [CAJA_COBROS_ITEM] : []),
+    ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
+    ...(mod.cobros_recurrentes && roleAllowed(CAJA_COBROS_ITEM.href, CAJA_COBROS_ITEM.roles) ? [CAJA_COBROS_ITEM] : []),
   ]
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
 

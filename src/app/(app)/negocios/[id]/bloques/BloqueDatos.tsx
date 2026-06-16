@@ -29,6 +29,20 @@ export interface DatosField {
   revalida?: boolean
   // Solo renderizar si el field referenciado cumple la condicion
   showIf?: { field: string; equals: unknown }
+  // Bloquear y forzar el valor de este campo en función de un campo de OTRO bloque
+  // (referencia cross-bloque por slug estable). Ej: si titularidad.modalidad_solicitante
+  // = 'leasing' → forzar requiere_devolucion_iva = false y deshabilitar el toggle
+  // (leasing cierra en Cobro, sin devolución de IVA). El valor forzado se PERSISTE
+  // (gate y routing leen el dato real), no es solo cosmético.
+  lock_when?: {
+    source_bloque_slug: string
+    // Etapa del bloque fuente — el server lo usa para cargar ese bloque en datosPorSlug.
+    source_etapa_orden?: number
+    field: string
+    value: unknown
+    force_value: unknown
+    hint?: string
+  }
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
   doc_link?: {
     source_bloque_slug?: string // referencia estable (preferida sobre nombre/orden)
@@ -48,6 +62,8 @@ interface BloqueDatosProps {
   onComplete?: () => void
   epaycoLookup?: { triggerField: string; fill: Record<string, string> }
   autoFillDefaults?: Record<string, unknown>
+  // Datos de otros bloques (por slug estable) para resolver lock_when cross-bloque.
+  datosPorSlug?: Record<string, Record<string, unknown>>
 }
 
 const fmt = (v: number) =>
@@ -129,6 +145,7 @@ export default function BloqueDatos({
   onComplete,
   epaycoLookup,
   autoFillDefaults,
+  datosPorSlug,
 }: BloqueDatosProps) {
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
   const [values, setValues] = useState<Record<string, unknown>>(() => {
@@ -217,6 +234,14 @@ export default function BloqueDatos({
   function visible(f: DatosField, vals: Record<string, unknown>) {
     if (!f.showIf) return true
     return vals[f.showIf.field] === f.showIf.equals
+  }
+
+  // Resolver lock_when cross-bloque: lee el campo fuente desde datosPorSlug.
+  function lockState(f: DatosField): { locked: boolean; forced: unknown; hint?: string } {
+    const lw = f.lock_when
+    if (!lw) return { locked: false, forced: undefined }
+    const sourceVal = datosPorSlug?.[lw.source_bloque_slug]?.[lw.field]
+    return { locked: sourceVal === lw.value, forced: lw.force_value, hint: lw.hint }
   }
 
   function isComplete(vals: Record<string, unknown>) {
@@ -336,6 +361,27 @@ export default function BloqueDatos({
     setValues(next)
     void persist(next, true)
   }
+
+  // Enforcement de lock_when: si un campo quedó bloqueado y su valor difiere del
+  // forzado, persistir el valor forzado (caso: el operador marcó "Sí" y luego
+  // eligió leasing en Titularidad → reseteamos a "No" en DB para que el routing de
+  // Cobro cierre el negocio). Solo en modo editable; el modo visible solo muestra.
+  const lockSignature = fields
+    .map(f => (f.lock_when ? String(datosPorSlug?.[f.lock_when.source_bloque_slug]?.[f.lock_when.field]) : ''))
+    .join('|')
+  useEffect(() => {
+    if (modo !== 'editable') return
+    const toFix = fields.filter(f => {
+      const ls = lockState(f)
+      return ls.locked && valuesRef.current[f.slug] !== ls.forced
+    })
+    if (toFix.length === 0) return
+    const next = { ...valuesRef.current }
+    for (const f of toFix) next[f.slug] = lockState(f).forced
+    setValues(next)
+    void persist(next, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockSignature, modo])
 
   const handlePaste = useCallback((slug: string, e: React.ClipboardEvent) => {
     const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'))
@@ -556,19 +602,29 @@ export default function BloqueDatos({
             />
           )}
 
-          {f.tipo === 'toggle' && (
-            <label className="inline-flex cursor-pointer items-center gap-2">
-              <div
-                onClick={() => !isPending && handleToggleChange(f.slug, !values[f.slug])}
-                className={`relative h-5 w-9 rounded-full transition-colors ${values[f.slug] ? 'bg-[#10B981]' : 'bg-[#E5E7EB]'} ${isPending ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${values[f.slug] ? 'translate-x-4' : 'translate-x-0'}`}
-                />
+          {f.tipo === 'toggle' && (() => {
+            const lk = lockState(f)
+            const shown = lk.locked ? lk.forced : values[f.slug]
+            const blocked = isPending || lk.locked
+            return (
+              <div className="flex flex-col gap-0.5">
+                <label className="inline-flex items-center gap-2">
+                  <div
+                    onClick={() => !blocked && handleToggleChange(f.slug, !values[f.slug])}
+                    className={`relative h-5 w-9 rounded-full transition-colors ${shown ? 'bg-[#10B981]' : 'bg-[#E5E7EB]'} ${blocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${shown ? 'translate-x-4' : 'translate-x-0'}`}
+                    />
+                  </div>
+                  <span className="text-xs text-[#1A1A1A]">{shown ? 'Sí' : 'No'}</span>
+                </label>
+                {lk.locked && lk.hint && (
+                  <span className="text-[10px] text-[#6B7280] italic">{lk.hint}</span>
+                )}
               </div>
-              <span className="text-xs text-[#1A1A1A]">{values[f.slug] ? 'Sí' : 'No'}</span>
-            </label>
-          )}
+            )
+          })()}
 
           {f.tipo === 'checkbox' && (
             <label className="inline-flex cursor-pointer items-center gap-2">

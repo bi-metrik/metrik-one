@@ -21,6 +21,21 @@ export default async function MiNegocioPage() {
 
   const workspaceId = profile.workspace_id
 
+  // Guard server-side de acceso a Configuración (ocultar en el nav NO es seguridad).
+  // Config-driven: respeta workspaces.config_extra.nav_roles_override['/mi-negocio'].
+  // Sin override → default global ['owner','admin','supervisor'] (comportamiento actual).
+  {
+    const { data: wsCfg } = await supabase
+      .from('workspaces')
+      .select('config_extra')
+      .eq('id', workspaceId)
+      .single()
+    const override = (wsCfg?.config_extra as { nav_roles_override?: Record<string, string[]> } | null)
+      ?.nav_roles_override?.['/mi-negocio']
+    const allowed = override ?? ['owner', 'admin', 'supervisor']
+    if (!allowed.includes(profile.role)) redirect('/')
+  }
+
   // Parallel fetches
   const [
     workspaceResult,

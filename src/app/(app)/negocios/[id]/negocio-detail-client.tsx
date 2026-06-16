@@ -1055,6 +1055,7 @@ function BloqueRenderer({
   historialData,
   precioTotal,
   userRole,
+  datosPorSlug,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1079,6 +1080,7 @@ function BloqueRenderer({
   historialData: HistorialData
   precioTotal: number
   userRole: string
+  datosPorSlug?: Record<string, Record<string, unknown>>
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1202,6 +1204,7 @@ function BloqueRenderer({
           requireConfirm={!!configExtra.require_confirm}
           confirmLabel={configExtra.confirm_label as string | undefined}
           autoFillDefaults={(configExtra._auto_fill ?? undefined) as Record<string, unknown> | undefined}
+          datosPorSlug={datosPorSlug}
         />
       )
     }
@@ -1440,6 +1443,7 @@ function BloqueCard({
   historialData,
   precioTotal,
   userRole,
+  datosPorSlug,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1464,6 +1468,7 @@ function BloqueCard({
   historialData: HistorialData
   precioTotal: number
   userRole: string
+  datosPorSlug?: Record<string, Record<string, unknown>>
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -1565,6 +1570,7 @@ function BloqueCard({
               historialData={historialData}
               precioTotal={precioTotal}
               userRole={userRole}
+              datosPorSlug={datosPorSlug}
             />
           )}
         </div>
@@ -1878,6 +1884,7 @@ export default function NegocioDetailClient({
                   historialData={historialData}
                   precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
                   userRole={userRole}
+                  datosPorSlug={datosPorSlug}
                 />
               ))}
             </div>

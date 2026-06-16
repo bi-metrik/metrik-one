@@ -83,9 +83,9 @@ export default async function AppLayout({
     // modules column added in migration 20260409300001 — not in generated types yet
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (activeClient.from('workspaces') as any)
-      .select('modules')
+      .select('modules, config_extra')
       .eq('id', activeWorkspaceId)
-      .single() as Promise<{ data: { modules: Record<string, boolean> | null } | null; error: unknown }>,
+      .single() as Promise<{ data: { modules: Record<string, boolean> | null; config_extra: Record<string, unknown> | null } | null; error: unknown }>,
     // hasLineas: workspace tiene al menos una linea activa → habilita item /flujo
     activeClient
       .from('lineas_negocio')
@@ -100,6 +100,11 @@ export default async function AppLayout({
   }
 
   const workspaceModules = (modulesResult.data?.modules as Record<string, boolean> | null) ?? { business: true }
+  // Override de visibilidad del nav por workspace (config-driven). Mapa { href: roles[] }
+  // que reemplaza los roles por defecto de cada item del sidebar para ESTE workspace.
+  // Sin override = comportamiento global intacto (resto de workspaces sin cambio).
+  const navRolesOverride = (modulesResult.data?.config_extra as { nav_roles_override?: Record<string, string[]> } | null)
+    ?.nav_roles_override ?? undefined
   const hasLineas = (lineasResult.count ?? 0) > 0
 
   const fiscal = fiscalResult.data
@@ -121,6 +126,7 @@ export default async function AppLayout({
           logoUrl: workspace.logo_url ?? undefined,
         }}
         modules={workspaceModules}
+        navRolesOverride={navRolesOverride}
         hasLineas={hasLineas}
         notificationBell={<NotificationBell userId={user.id} />}
       >

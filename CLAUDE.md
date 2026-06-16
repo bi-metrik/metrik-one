@@ -332,6 +332,43 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-16 (`soena` — Max — leasing cierra en Cobro + nav por rol config-driven + auto-asignar responsable + fix env vars PDF prod)
+**Branch:** `main` (deploy Vercel) + migraciones SOENA en `proyectos/soena/ve/migrations/20260616_*`
+
+### Primitivo nuevo `lock_when` (genérico, BloqueDatos) — bloqueo/forzado cross-bloque
+- Un campo puede bloquearse y **forzar su valor** según un campo de OTRO bloque (referencia por slug estable). Config: `fields[i].lock_when = { source_bloque_slug, source_etapa_orden, field, value, force_value, hint }`.
+- Render (`BloqueDatos.tsx`): si el campo fuente (vía `datosPorSlug`) == `value` → toggle deshabilitado, muestra `force_value` + hint, y un effect **persiste el valor forzado** (no es cosmético: gate y routing leen el dato real). `datosPorSlug` se threadea NegocioDetailClient → BloqueCard → BloqueRenderer → BloqueDatos.
+- `getNegocioDetalleCompleto`: `lock_when.source_etapa_orden` se registra en `sourceEtapaOrdens` para que el bloque fuente siempre cargue en `datosPorSlug`.
+- **SOENA:** `devolucion_de_iva` se bloquea cuando `titularidad.modalidad_solicitante = leasing` → `requiere_devolucion_iva = false` → el routing de Cobro **cierra el negocio sin devolución de IVA** (leasing se comporta como jurídica). Docs del banco y routing intactos. Solo SOENA configura `lock_when` → resto sin impacto. Audits 0.
+
+### Nav por rol config-driven por workspace (`config_extra.nav_roles_override`)
+- Mapa `{ href: roles[] }` que reemplaza los roles por defecto del sidebar SOLO en ese workspace. Lo leen `app-shell.tsx` (oculta items) y el guard server-side de `/mi-negocio/page.tsx` (acceso real, no solo visual — ambos config-driven). Sin override → roles globales intactos (AFI/ALMA/dimpro/metrik sin cambio).
+- **SOENA:** `/mi-negocio` (Configuración) → owner/admin; `/movimientos` → owner/admin/read_only (se quitó supervisor de ambos). Operator ya quedaba en Negocios+Directorio.
+
+### Auto-asignar responsable al crear negocio (`crearNegocio`)
+- Si el creador es `operator` → se inserta en `negocio_responsables` + sync `responsable_id`. Tapa bug de visibilidad: un operator solo ve negocios donde es responsable; sin esto, perdía de vista el negocio recién creado. Owner/admin/supervisor ven todo → no se auto-asignan.
+
+### Fix env vars PDF render (prod)
+- Causa de "PDF render service no configurado" en la propuesta SOENA: en Vercel prod solo estaba `METRIK_PDF_RENDER_URL`; faltaban `SECRET` y `SA_KEY` → re-subidas. Ver corrección en el handoff 2026-06-13 abajo.
+
+---
+
+**Sesion:** 2026-06-13 (`metrik--one` — Max — cobros recurrentes: cambio bancario + cron día 10 + emisión junio + redeploy pdf-render)
+**Branch:** `main` · commits `064ab5c` `2f70e80` `2dd4fae` (deployados Vercel)
+
+### Cambio de cuenta receptora (persona natural)
+- `src/lib/cobros/emisor-mauricio.ts` es la **fuente única del dato bancario impreso** en cada cuenta de cobro (hardcoded en `EMISOR_MAURICIO.banco`, no en DB). El render arma `{{banco_*}}` desde ahí. **Cambio bancario = tocar ese objeto** (la tabla `bank_accounts` es reconciliación de saldos, NO el dato impreso). Banco Falabella `111810431095` → **Banco Caja Social `24142103304`** (commit `064ab5c`).
+
+### Cron de cobros reprogramado (`procesar-planes-cobro/route.ts`)
+- El gate de emisión de cuentas pasó de `diaHoy === 15` a **`=== 10`**; la cuenta se fecha el **día 13** vía `fechaEmisionOverride` (envío al cliente) y el vencimiento sigue el **día 15** (`fechaEsperada` interna). Commit `2f70e80`. Aplica de julio en adelante. El schedule Vercel del cron NO cambió (sigue diario `0 12 * * *`); solo cambió el gate interno.
+
+### Gotcha — el servicio `metrik-pdf-render` (Cloud Run) hay que redesplegarlo al agregar endpoints
+- En prod corría una **revisión vieja SIN `/render/cuenta-cobro`** (deploy pendiente desde mayo) → el endpoint daba **404 de Flask** (auth OK, ruta inexistente). Y las 3 env vars `METRIK_PDF_RENDER_*` estaban **vacías en Vercel** → `renderCuentaCobro` no tiene fallback, habría fallado el cron en prod. Las cuentas de mayo se generaron localmente con WeasyPrint, nunca por el servicio.
+- **Reparado:** redeploy `gcloud run deploy metrik-pdf-render --source . --region us-east1` → **rev `00008-sdh`** (3 endpoints). Credenciales recuperadas vía GCP: secret leído del Cloud Run + SA key nueva de `one-pdf-render-client`, cargadas a Vercel (production) + `.env.local`. **Diagnóstico rápido:** 404 de Flask en `/render/X` = la revisión desplegada no tiene ese endpoint → redesplegar desde el repo `metrik-pdf-render`. **⚠️ Corrección 2026-06-16:** de las 3 env vars solo persistió `METRIK_PDF_RENDER_URL` en Vercel prod; `SECRET` y `SA_KEY` faltaban (la propuesta SOENA fallaba con "PDF render service no configurado") → re-subidas el 2026-06-16. Tras tocar env vars en Vercel, verificar con `vercel env ls production` que estén las **3**.
+- **Forzar emisión de un período:** `scripts/generar-cuentas-junio-metrik.ts` (modelo reusable, `--commit` para real, `fechaEmisionOverride` día 13). Junio emitido: CC-2026-06-001 AFI $916.667 + CC-2026-06-002 SOENA $1.750.000 (`cuentas_cobro_emitidas`, estado `emitida_pendiente_aprobacion`).
+
+---
+
 **Sesion:** 2026-06-12 (`soena` — Max — refactor del motor: referencias de workflow por slug estable)
 **Branch:** `main` · commits `40eae50` `fd1590b` `9322b53` (deployados Vercel) + migrations `20260612000001/2/3`
 
