@@ -1744,14 +1744,58 @@ export async function cambiarEtapaNegocioConGate(
       const debeSaltar = conciliarSobrepago ? saldo === 0 : saldo <= 0
 
       if (precio > 0 && debeSaltar) {
-        const { data: nextEtapaRaw } = await db(supabase)
-          .from('etapas_negocio')
-          .select('id')
-          .eq('linea_id', destStage.linea_id)
-          .eq('orden', destStage.orden + 1)
-          .single()
-        if (nextEtapaRaw) {
-          resolvedEtapaId = (nextEtapaRaw as { id: string }).id
+        // Al saltar Cobro (ya saldado) NO ir a ciegas a orden+1: seguir el ROUTING de
+        // Cobro. Así la rama de devolución de IVA (Generación/Envío) solo se entra si
+        // requiere_devolucion_iva=true; si no, Cobro es terminal y el negocio se queda
+        // ahí. Bug previo: saltaba a orden+1 (Generación) ignorando el flag de IVA, así
+        // que un negocio sin devolución (ej. leasing/jurídica) entraba a devolución.
+        const cobroRouting = (destStage.config_extra?.routing ?? null) as {
+          default_etapa_orden: number
+          conditional?: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
+          source_etapa_orden?: number
+        } | null
+        let destinoOrden = destStage.orden + 1 // fallback legacy si Cobro no tiene routing
+        if (cobroRouting) {
+          let srcEtapaId = resolvedEtapaId
+          if (typeof cobroRouting.source_etapa_orden === 'number') {
+            const { data: se } = await db(supabase)
+              .from('etapas_negocio')
+              .select('id')
+              .eq('linea_id', destStage.linea_id)
+              .eq('orden', cobroRouting.source_etapa_orden)
+              .single()
+            if (se) srcEtapaId = (se as { id: string }).id
+          }
+          const { data: bDatos } = await db(supabase)
+            .from('negocio_bloques')
+            .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo))')
+            .eq('negocio_id', negocioId)
+            .eq('bloque_configs.etapa_id', srcEtapaId)
+          const campos: Record<string, unknown> = {}
+          for (const b of ((bDatos ?? []) as Record<string, unknown>[])) {
+            const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
+            if (tipo === 'datos' && b.data && typeof b.data === 'object') Object.assign(campos, b.data)
+          }
+          destinoOrden = cobroRouting.default_etapa_orden
+          for (const rule of (cobroRouting.conditional ?? [])) {
+            if (String(campos[rule.condition.field] ?? '') === String(rule.condition.value)) {
+              destinoOrden = rule.etapa_orden
+              break
+            }
+          }
+        }
+        // Solo saltar si el routing manda a una etapa POSTERIOR a Cobro. Si el destino es
+        // Cobro mismo (default, sin devolución de IVA), Cobro es terminal → no saltar.
+        if (destinoOrden > destStage.orden) {
+          const { data: nextEtapaRaw } = await db(supabase)
+            .from('etapas_negocio')
+            .select('id')
+            .eq('linea_id', destStage.linea_id)
+            .eq('orden', destinoOrden)
+            .single()
+          if (nextEtapaRaw) {
+            resolvedEtapaId = (nextEtapaRaw as { id: string }).id
+          }
         }
       }
     }
