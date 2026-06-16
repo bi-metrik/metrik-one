@@ -138,6 +138,8 @@ export type NegocioResumen = {
   // Tarjeta config-driven (config_extra.negocio_card) — null en ws sin config
   vehiculo_label: string | null
   seccional_label: string | null
+  // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
+  responsables: Array<{ id: string; full_name: string }>
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -225,12 +227,24 @@ export async function getNegociosV2(
 
   // Batch: gastos por negocio
   const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
-  const [gastosRes, horasRes, staffRes, wsRes] = await Promise.all([
+  const [gastosRes, horasRes, staffRes, wsRes, respRes] = await Promise.all([
     db(supabase).from('gastos').select('negocio_id, monto').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     db(supabase).from('horas').select('negocio_id, horas, staff_id').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     supabase.from('staff').select('id, salary').eq('workspace_id', workspaceId),
     db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).single(),
+    db(supabase)
+      .from('negocio_responsables')
+      .select('negocio_id, assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name)')
+      .in('negocio_id', negocioIds)
+      .order('assigned_at', { ascending: true }),
   ])
+
+  // Responsables por negocio (orden estable por assigned_at = más antiguo primero).
+  const responsablesPorNeg: Record<string, Array<{ id: string; full_name: string }>> = {}
+  for (const r of ((respRes.data ?? []) as Array<{ negocio_id: string; staff: { id: string; full_name: string | null } | null }>)) {
+    if (!r.staff) continue
+    ;(responsablesPorNeg[r.negocio_id] ??= []).push({ id: r.staff.id, full_name: r.staff.full_name ?? '—' })
+  }
 
   // Staff salary map for hour cost calculation
   const staffSalaryMap: Record<string, number> = {}
@@ -319,6 +333,7 @@ export async function getNegociosV2(
       razon_cierre: (row.razon_cierre as string) ?? null,
       vehiculo_label: vehiculoPorNeg[id]?.label ?? null,
       seccional_label: vehiculoPorNeg[id]?.seccional ?? null,
+      responsables: responsablesPorNeg[id] ?? [],
     }
   })
 }

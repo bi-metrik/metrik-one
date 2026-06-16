@@ -64,12 +64,21 @@ export default function NegociosClient({
   const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
   const [q, setQ] = useState('')
   const [seccional, setSeccional] = useState<string>('todas')
+  const [responsable, setResponsable] = useState<string>('todos')
 
   // Seccionales DIAN presentes en los negocios (para el filtro). Solo las que existen.
   const seccionalesDisponibles = useMemo(() => {
     const set = new Set<string>()
     for (const n of negocios) if (n.seccional_label) set.add(n.seccional_label)
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'))
+  }, [negocios])
+
+  // Responsables asignados presentes en los negocios (para el filtro). Únicos por id.
+  const responsablesDisponibles = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const n of negocios) for (const r of n.responsables) map.set(r.id, r.full_name)
+    return Array.from(map, ([id, full_name]) => ({ id, full_name }))
+      .sort((a, b) => a.full_name.localeCompare(b.full_name, 'es'))
   }, [negocios])
 
   // Cerrados filtrados por motivo
@@ -98,9 +107,13 @@ export default function NegociosClient({
     if (seccional !== 'todas') {
       res = res.filter((n) => n.seccional_label === seccional)
     }
+    if (responsable !== 'todos') {
+      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
+    }
     if (term) {
       res = res.filter((n) => {
-        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label]
+        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
+          ...n.responsables.map((r) => r.full_name)]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -108,7 +121,7 @@ export default function NegociosClient({
       })
     }
     return res
-  }, [current, term, seccional])
+  }, [current, term, seccional, responsable])
 
   // Filtros visibles. El pill "Inclusión" solo si hay negocios en esa etapa.
   const hayInclusion = useMemo(() => negocios.some((n) => n.etapa_nombre === 'Inclusión'), [negocios])
@@ -199,6 +212,21 @@ export default function NegociosClient({
           <option value="todas">Todas las seccionales DIAN</option>
           {seccionalesDisponibles.map((s) => (
             <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      )}
+
+      {/* Filtro por responsable asignado (solo si hay responsables en los negocios) */}
+      {responsablesDisponibles.length > 0 && (
+        <select
+          value={responsable}
+          onChange={(e) => setResponsable(e.target.value)}
+          aria-label="Filtrar por responsable asignado"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+        >
+          <option value="todos">Todos los responsables</option>
+          {responsablesDisponibles.map((r) => (
+            <option key={r.id} value={r.id}>{r.full_name}</option>
           ))}
         </select>
       )}

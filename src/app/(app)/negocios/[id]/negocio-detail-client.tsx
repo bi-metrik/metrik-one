@@ -1666,6 +1666,10 @@ export default function NegocioDetailClient({
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
   const etapaActual = negocio.etapas_negocio
 
+  // Bloque de Actividad comprimido por defecto — se consulta bajo demanda (se expande
+  // al hacer clic en el header). El log no se monta hasta abrirlo (fetch diferido).
+  const [actividadAbierta, setActividadAbierta] = useState(false)
+
   // Evaluar condiciones: filtrar bloques cuya condition no se cumpla
   const allBloques = (bloques as BloqueExtendido[]).map(b => ({
     ...b,
@@ -1908,18 +1912,29 @@ export default function NegocioDetailClient({
           />
         )}
 
-        {/* ── Activity log ── */}
+        {/* ── Activity log (comprimido por defecto) ── */}
         <div className="rounded-xl border border-border bg-card">
-          <div className="border-b border-border px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setActividadAbierta((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-accent/40"
+            aria-expanded={actividadAbierta}
+          >
             <h3 className="text-sm font-semibold text-foreground">Actividad</h3>
-          </div>
-          <div className="p-4">
-            <ActivityLog
-              entidadTipo="negocio"
-              entidadId={negocio.id}
-              staffList={staffList}
-            />
-          </div>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {actividadAbierta ? 'Ocultar' : 'Ver registro'}
+              <ChevronRight className={`h-3.5 w-3.5 transition-transform ${actividadAbierta ? 'rotate-90' : ''}`} />
+            </span>
+          </button>
+          {actividadAbierta && (
+            <div className="border-t border-border p-4">
+              <ActivityLog
+                entidadTipo="negocio"
+                entidadId={negocio.id}
+                staffList={staffList}
+              />
+            </div>
+          )}
         </div>
       </div>
 

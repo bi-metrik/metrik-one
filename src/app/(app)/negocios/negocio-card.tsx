@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User } from 'lucide-react'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
@@ -155,6 +155,23 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
             </p>
           )}
+          {/* Responsables asignados */}
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            <User className="h-3 w-3 shrink-0 text-[#6B7280]/70" />
+            {negocio.responsables.length > 0 ? (
+              negocio.responsables.map((r) => (
+                <span
+                  key={r.id}
+                  className="inline-flex max-w-[140px] items-center truncate rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+                  title={r.full_name}
+                >
+                  {r.full_name}
+                </span>
+              ))
+            ) : (
+              <span className="text-[10px] italic text-[#6B7280]/60">Sin responsable</span>
+            )}
+          </div>
           {isCerrado && negocio.closed_at && (
             <p className="mt-1 text-[10px] text-[#6B7280]">
               Cerrado {formatDateShort(negocio.closed_at)}
