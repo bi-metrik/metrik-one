@@ -1138,9 +1138,14 @@ function BloqueRenderer({
 
   // _forceReadOnly: usado por HistorialEtapasPrevias para forzar todos los
   // bloques a modo visible (read-only nativo de cada componente).
+  // `editable_siempre`: el bloque sigue editable aunque se vea desde una etapa
+  // posterior (historial). Para el 010/1668: la DIAN devuelve requerimientos casi
+  // siempre y hay que poder re-generar el formulario aun después de avanzar de etapa.
+  const editableSiempre = (configExtra as { editable_siempre?: boolean }).editable_siempre === true
   const modo: 'editable' | 'visible' =
-    ((bloque as { _forceReadOnly?: boolean })._forceReadOnly
+    (((bloque as { _forceReadOnly?: boolean })._forceReadOnly
       || (configExtra as { _areaReadonly?: boolean })._areaReadonly)
+      && !editableSiempre)
       ? 'visible'
       : getBloqueMode()
 

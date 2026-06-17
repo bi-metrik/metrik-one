@@ -10,6 +10,7 @@ import { generarFormulario010, type Formulario010Datos, type Formulario010Consta
 import { generarFormulario1668, type Formulario1668Datos, type Formulario1668Constantes } from '@/lib/pdf/formulario-1668'
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
+import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { createElement } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -185,9 +186,10 @@ export async function generarFormulario(
   drive_url?: string
   campos_usados?: Record<string, string | null>
   faltantes?: string[]
+  version_n?: number
   error?: string
 }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const guard = await guardEditarBloque(negocioBloqueId)
@@ -228,12 +230,25 @@ export async function generarFormulario(
       supabase, negocioId, lineaId, camposFuente,
     )
 
-    if (faltantes.length > 0) {
+    // Capa editable: el operador puede sobreescribir/llenar cualquier casilla desde
+    // la plataforma (data.campos_override). Los overrides tienen prioridad sobre el
+    // autollenado y sobre las constantes, y pueden SATISFACER un faltante.
+    const overrides = ((bloqueData.data as Record<string, unknown>)?.campos_override ?? {}) as Record<string, string | null>
+    const datosFinal: Record<string, string | null> = { ...datos }
+    const constantesFinal: Record<string, string> = { ...constantes }
+    for (const [k, v] of Object.entries(overrides)) {
+      if (k in constantesFinal) constantesFinal[k] = (v ?? '') as string
+      else datosFinal[k] = v
+    }
+    const tieneValor = (v: string | null | undefined) => v !== null && v !== undefined && v !== ''
+    const faltantesReales = faltantes.filter((f) => !tieneValor(overrides[f]) && !tieneValor(datosFinal[f]))
+
+    if (faltantesReales.length > 0) {
       return {
         success: false,
-        faltantes,
-        campos_usados: datos,
-        error: `Faltan ${faltantes.length} campos: ${faltantes.join(', ')}`,
+        faltantes: faltantesReales,
+        campos_usados: datosFinal,
+        error: `Faltan ${faltantesReales.length} campos: ${faltantesReales.join(', ')}`,
       }
     }
 
@@ -251,19 +266,19 @@ export async function generarFormulario(
     let buffer: Buffer
     if (template === 'formulario-010') {
       // Overlay sobre el PDF oficial de la DIAN (no se modifica el fondo).
-      const f010Datos = datos as unknown as Formulario010Datos
-      const f010Constantes = constantes as unknown as Formulario010Constantes
+      const f010Datos = datosFinal as unknown as Formulario010Datos
+      const f010Constantes = constantesFinal as unknown as Formulario010Constantes
       const bytes = await generarFormulario010(f010Datos, f010Constantes)
       buffer = Buffer.from(bytes)
     } else if (template === 'formulario-1668') {
       // Overlay sobre el PDF oficial DIAN 1668 (Constancia de Titularidad de
       // Cuenta Bancaria). Mismo patrón que el 010.
-      const f1668Datos = datos as unknown as Formulario1668Datos
-      const f1668Constantes = constantes as unknown as Formulario1668Constantes
+      const f1668Datos = datosFinal as unknown as Formulario1668Datos
+      const f1668Constantes = constantesFinal as unknown as Formulario1668Constantes
       const bytes = await generarFormulario1668(f1668Datos, f1668Constantes)
       buffer = Buffer.from(bytes)
     } else {
-      const element = getTemplateComponent(template, datos, constantes, fechaGeneracion, codigoNegocio)
+      const element = getTemplateComponent(template, datosFinal, constantesFinal, fechaGeneracion, codigoNegocio)
       if (!element) return { success: false, error: `Template "${template}" no soportado` }
       const pdfBuffer = await renderToBuffer(element)
       buffer = Buffer.from(pdfBuffer)
@@ -294,13 +309,36 @@ export async function generarFormulario(
       driveUrl = result.webViewLink
     }
 
-    // 6. Save data and mark complete
+    // 6. Versionado: cada generación deja una versión con snapshot + fecha + autor.
+    const { data: ultimaVer } = await db(supabase)
+      .from('formulario_versiones')
+      .select('version_n')
+      .eq('negocio_bloque_id', negocioBloqueId)
+      .order('version_n', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const versionN = ((ultimaVer?.version_n as number | undefined) ?? 0) + 1
+
+    await db(supabase)
+      .from('formulario_versiones')
+      .insert({
+        workspace_id: workspaceId,
+        negocio_bloque_id: negocioBloqueId,
+        version_n: versionN,
+        drive_url: driveUrl,
+        datos_snapshot: { ...datosFinal, ...constantesFinal },
+        generated_by: userId ?? null,
+        generated_at: fechaGeneracion,
+      })
+
+    // 7. Save data and mark complete (conserva campos_override; usa los valores finales)
     const newData = {
       ...((bloqueData.data as Record<string, unknown>) ?? {}),
       drive_url: driveUrl,
-      campos_usados: datos,
+      campos_usados: datosFinal,
       template,
       generated_at: fechaGeneracion,
+      version_actual: versionN,
     }
 
     await db(supabase)
@@ -313,16 +351,159 @@ export async function generarFormulario(
       })
       .eq('id', negocioBloqueId)
 
-    // 7. Revalidate
+    // 8. Revalidate
     revalidatePath(`/negocios/${negocioId}`)
 
     return {
       success: true,
       drive_url: driveUrl ?? undefined,
-      campos_usados: datos,
+      campos_usados: datosFinal,
+      version_n: versionN,
     }
   } catch (err) {
     console.error('[formulario-actions] Error:', err)
     return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
   }
+}
+
+// ── Capa editable de casillas ────────────────────────────────────────────────
+
+export interface CasillaEditable {
+  slug: string
+  label: string
+  grupo: string
+  casilla?: string
+  value: string
+  es_constante: boolean
+  faltante: boolean
+  editado: boolean
+}
+
+export interface FormularioVersionItem {
+  version_n: number
+  drive_url: string | null
+  generated_at: string
+  autor: string | null
+}
+
+/**
+ * Resuelve TODAS las casillas de un formulario (autollenado desde campos_fuente +
+ * constantes), aplicando los overrides ya editados, para que el bloque las muestre
+ * editables ANTES de generar el PDF. Devuelve también el historial de versiones.
+ */
+export async function resolverFormularioParaEdicion(
+  negocioBloqueId: string,
+  negocioId: string,
+): Promise<{
+  casillas: CasillaEditable[]
+  versiones: FormularioVersionItem[]
+  error?: string
+}> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { casillas: [], versiones: [], error: 'No autenticado' }
+
+  const { data: bloqueData } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs(config_extra, etapas_negocio(linea_id))')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!bloqueData) return { casillas: [], versiones: [], error: 'Bloque no encontrado' }
+
+  const bc = bloqueData.bloque_configs as {
+    config_extra: Record<string, unknown>
+    etapas_negocio: { linea_id: string }
+  }
+  const configExtra = bc.config_extra
+  const template = (configExtra.template as string) ?? ''
+  const camposFuente = (configExtra.campos_fuente ?? []) as CampoFuente[]
+  const constantes = (configExtra.campos_constantes ?? {}) as Record<string, string>
+  const overrides = ((bloqueData.data as Record<string, unknown>)?.campos_override ?? {}) as Record<string, string | null>
+
+  const { datos, faltantes } = await resolverCamposFuente(
+    supabase, negocioId, bc.etapas_negocio.linea_id, camposFuente,
+  )
+
+  // Valor base por casilla: campos_fuente (autollenado) + constantes.
+  const valorBase: Record<string, string> = {}
+  const esConstante: Record<string, boolean> = {}
+  for (const c of camposFuente) { valorBase[c.slug] = datos[c.slug] ?? ''; esConstante[c.slug] = false }
+  for (const [k, v] of Object.entries(constantes)) { valorBase[k] = v ?? ''; esConstante[k] = true }
+
+  // Ordenar por el orden del mapa de metadata (lo no mapeado va al final).
+  const meta = getCasillasMeta(template)
+  const ordenMeta = new Map(meta.map((m, i) => [m.slug, i]))
+  const slugs = Object.keys(valorBase).sort(
+    (a, b) => (ordenMeta.get(a) ?? 999) - (ordenMeta.get(b) ?? 999),
+  )
+
+  const casillas: CasillaEditable[] = slugs.map((slug) => {
+    const m = metaDeCasilla(template, slug)
+    const editado = Object.prototype.hasOwnProperty.call(overrides, slug)
+    const value = editado ? (overrides[slug] ?? '') : valorBase[slug]
+    return {
+      slug,
+      label: m.label,
+      grupo: m.grupo,
+      casilla: m.casilla,
+      value,
+      es_constante: esConstante[slug],
+      faltante: !esConstante[slug] && !value && faltantes.includes(slug),
+      editado,
+    }
+  })
+
+  // Historial de versiones + nombres de autor (consulta separada de profiles para
+  // no depender de embeds frágiles).
+  const { data: vers } = await db(supabase)
+    .from('formulario_versiones')
+    .select('version_n, drive_url, generated_at, generated_by')
+    .eq('negocio_bloque_id', negocioBloqueId)
+    .order('version_n', { ascending: false })
+  const verRows = (vers ?? []) as Array<{ version_n: number; drive_url: string | null; generated_at: string; generated_by: string | null }>
+  const autorIds = [...new Set(verRows.map((v) => v.generated_by).filter(Boolean))] as string[]
+  const nombrePorId: Record<string, string> = {}
+  if (autorIds.length > 0) {
+    const { data: profs } = await db(supabase).from('profiles').select('id, full_name').in('id', autorIds)
+    for (const p of ((profs ?? []) as Array<{ id: string; full_name: string | null }>)) {
+      nombrePorId[p.id] = p.full_name ?? '—'
+    }
+  }
+  const versiones: FormularioVersionItem[] = verRows.map((v) => ({
+    version_n: v.version_n,
+    drive_url: v.drive_url,
+    generated_at: v.generated_at,
+    autor: v.generated_by ? (nombrePorId[v.generated_by] ?? null) : null,
+  }))
+
+  return { casillas, versiones }
+}
+
+/** Guarda los valores editados de las casillas (solo lo sobreescrito). */
+export async function guardarFormularioOverrides(
+  negocioBloqueId: string,
+  overrides: Record<string, string | null>,
+): Promise<{ error: string | null }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
+  const { data: row } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, negocio_id')
+    .eq('id', negocioBloqueId)
+    .single()
+  const current = (row?.data as Record<string, unknown>) ?? {}
+  const newData = { ...current, campos_override: overrides }
+
+  const { error: upErr } = await db(supabase)
+    .from('negocio_bloques')
+    .update({ data: newData, updated_at: new Date().toISOString() })
+    .eq('id', negocioBloqueId)
+  if (upErr) return { error: (upErr as { message: string }).message }
+
+  const nid = row?.negocio_id as string | undefined
+  if (nid) revalidatePath(`/negocios/${nid}`)
+  return { error: null }
 }
