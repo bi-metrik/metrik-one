@@ -7,6 +7,7 @@ import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export default async function AppLayout({
   children,
@@ -14,7 +15,9 @@ export default async function AppLayout({
   children: React.ReactNode
 }) {
   const supabase = await createClient()
-  const { data: { user }, error } = await supabase.auth.getUser()
+  // getUser deduplicado por request (React cache): layout + getWorkspace lo
+  // comparten → 1 sola llamada a Supabase Auth por render (antes 2).
+  const { user, error } = await getCachedUser()
 
   if (error || !user) {
     redirect('/login')

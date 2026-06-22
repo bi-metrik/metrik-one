@@ -2,6 +2,7 @@
 
 import { cookies } from 'next/headers'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 const VALID_AREAS = ['comercial', 'operaciones', 'financiera', 'direccion'] as const
 
@@ -36,7 +37,7 @@ async function resolverAreas(
  */
 export async function getWorkspace() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
 
   if (!user) {
     return { supabase, workspaceId: null, userId: null, role: null, staffId: null, areas: [] as string[], impersonating: false, realRole: null, error: 'No autenticado' as const }
