@@ -332,6 +332,45 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-22 (`soena` — Max — **extracción IA de campo desde pantallazo (`imagen_clipboard`)** + dedupe `auth.getUser()`)
+**Branch:** `main` (deploy Vercel) · commits `a145376` `4457d83`
+
+### `imagen_clipboard` con extracción IA (genérico) — `a145376`
+- El campo `imagen_clipboard` de `BloqueDatos` acepta `extrae: { target_slug, descripcion_ai, alerta_revision }`. Al pegar la imagen, dispara el server action `extraerCampoDesdeImagen` (`src/lib/actions/documento-actions.ts`): **lee la config server-side** (la `descripcion_ai` NO viaja del cliente), corre Gemini (`extractFieldsFromDocument` + `extractWithRetry`) sobre el pantallazo pegado y **autollena el campo de texto hermano** — editable, con badge "Revisar" (se limpia al editar a mano). **NO persiste la imagen** (a diferencia de `procesarDocumento`, que sube a Storage+Drive). Opt-in por config → cualquier ws/línea sin `extrae` se comporta igual que hoy.
+- **Gotcha:** el flag `s` (dotAll) en regex rompe el target del tsconfig (<es2018) → usar `[\s\S]` en vez de `.` con `/s`.
+
+### Dedupe `auth.getUser()` por request — `4457d83`
+- Nuevo `getCachedUser` (React `cache()`) en `src/lib/supabase/auth-user.ts`. `layout(app)` + `getWorkspace` hacían cada uno su `auth.getUser()` → 2 hits a Supabase Auth por render (presión de rate-limit por IP). Ahora **1**. Semánticamente idéntico.
+- **Gotcha:** `get-workspace.ts` es `'use server'` (solo puede exportar async functions) → el `cache()` vive en módulo aparte con `'server-only'`, no en el archivo de server actions.
+- Relacionado (no código): límites Auth subidos vía Management API — `rate_limit_token_refresh` 150→1800, `rate_limit_verify` 30→300 (por IP, oficina con NAT compartida).
+
+---
+
+**Sesion:** 2026-06-17 (`soena` — Max — **capa editable de formularios 010/1668 + versionado** · fixes nav-impersonación, activity-log, responsables, salto de Cobro)
+**Branch:** `main` (deploy Vercel) · commits `80c65e6` `40a7a4f` `e6658bf` `8eb0f4d` `8653399` `1a598d9` · migración producto `20260617000001_formulario_versiones.sql`
+
+### Formularios editables en plataforma + versionado (genérico) — `1a598d9`
+- **Problema:** el 010/1668 se generaba como PDF overlay desde `campos_fuente` y corregir exigía editar el PDF (coge mal datos, no deja cambiar razón social). Ahora se editan **las casillas en la plataforma** y el PDF se arma con esos valores; el overlay calibrado no se toca.
+- **`BloqueFormulario`**: `resolverFormularioParaEdicion` resuelve campos_fuente + constantes y arma las casillas autollenadas, agrupadas (módulo `src/lib/pdf/formulario-casillas.ts`: label + grupo + nº de casilla). Edición → `data.campos_override` vía `guardarFormularioOverrides` (guardado diferido).
+- **`generarFormulario`**: fusiona overrides sobre el autollenado (un override **satisface un faltante**), arma el PDF con los valores finales e **inserta una versión** en `formulario_versiones`.
+- **Versionado**: tabla `formulario_versiones` (workspace_id, negocio_bloque_id, version_n, drive_url, datos_snapshot, generated_by, generated_at; RLS por workspace + grant authenticated). UI con historial + "Modificar y regenerar". `data.version_actual` = última.
+- **`editable_siempre`** (config_extra): el bloque sigue editable aunque se vea desde una etapa posterior (historial) — el modo deja de forzarse a `visible`. Para 010/1668 (la DIAN devuelve requerimientos casi siempre).
+- **Retrocompat AFI:** la capa editable es **opt-in por config** (los bloques 010/1668 de SOENA la tienen); los formularios de AFI (declaración, relación de facturas) siguen auto-generando igual.
+
+### Fix routing: salto de Cobro respeta el routing — `8653399`
+- El atajo "saltar Cobro cuando saldo≤0" avanzaba a `orden+1` (Generación) **a ciegas**, ignorando el routing → un negocio sin devolución de IVA (leasing/jurídica) entraba a la rama de devolución solo por estar saldado. Ahora el salto **evalúa el routing de Cobro** (IVA=true→Generación; si no, Cobro es terminal). Fallback a `orden+1` si Cobro no tiene routing.
+
+### Nav respeta impersonación "Ver como" — `80c65e6`
+- `layout.tsx` pasaba el rol REAL del profile al `AppShell` → "Ver como [rol]" no cambiaba el nav. Ahora layout y el guard de `/mi-negocio` usan el **rol efectivo** de `getWorkspace` (impersonation-aware). Sin impersonar = rol real → sin cambio. **Gotcha/deuda:** esto agregó un segundo `auth.getUser()` por render (getWorkspace además del que ya hacía el layout) → optimizar (contribuye a presión de rate-limit por IP de Supabase).
+
+### Responsables en tarjeta + filtro · auto-asignar — `e6658bf` / `7a1db20`
+- `getNegociosV2` trae los responsables (negocio_responsables N:M) por negocio (batch); la tarjeta los muestra como chips; filtro por responsable en `/negocios`. `crearNegocio`: si el creador es `operator` se auto-asigna como responsable (sin esto perdía de vista su propio negocio — visibilidad por N:M).
+
+### Activity log: sistema oculto por defecto — `8eb0f4d`
+- El bloque queda siempre visible; `showSystem` arranca en **false** (solo comentarios), toggle revela los eventos automáticos (persistido en localStorage).
+
+---
+
 **Sesion:** 2026-06-16 (`soena` — Max — leasing cierra en Cobro + nav por rol config-driven + auto-asignar responsable + fix env vars PDF prod)
 **Branch:** `main` (deploy Vercel) + migraciones SOENA en `proyectos/soena/ve/migrations/20260616_*`
 
