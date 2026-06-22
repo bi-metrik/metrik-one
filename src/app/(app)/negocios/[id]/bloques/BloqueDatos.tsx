@@ -4,6 +4,7 @@ import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
+import { extraerCampoDesdeImagen } from '@/lib/actions/documento-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
@@ -49,6 +50,16 @@ export interface DatosField {
     source_bloque_nombre: string
     source_etapa_orden: number
     _resolved?: { drive_url: string | null; file_name: string | null }
+  }
+  // imagen_clipboard: al pegar el pantallazo, extraer un campo de texto hermano vía IA
+  // (Gemini lee la imagen). El valor extraído se escribe en `extrae.target_slug` —
+  // editable y con badge "Revisar" para que el operador lo verifique. Ej: el número de
+  // radicado de inclusión (UPME) o de certificación (DIAN). La `descripcion_ai` se usa
+  // server-side; aquí solo declara el mapeo.
+  extrae?: {
+    target_slug: string
+    descripcion_ai: string
+    alerta_revision?: boolean
   }
 }
 
@@ -170,6 +181,12 @@ export default function BloqueDatos({
   })
   const [isPending, startTransition] = useTransition()
   const [pasteImgs, setPasteImgs] = useState<Record<string, string>>({})
+  // Extracción IA desde pantallazo (imagen_clipboard con `extrae`).
+  // `extrayendo`: por slug del campo imagen, true mientras corre Gemini.
+  // `aiFilled`: por slug del campo destino, true si su valor lo puso la IA y aún no
+  // se ha verificado a mano (controla el badge "Revisar"; se limpia al editar).
+  const [extrayendo, setExtrayendo] = useState<Record<string, boolean>>({})
+  const [aiFilled, setAiFilled] = useState<Record<string, boolean>>({})
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Guardado: estado pasivo + refs para flush al desmontar (cero pérdida de datos).
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -340,6 +357,8 @@ export default function BloqueDatos({
   function handleTextChange(slug: string, value: unknown) {
     const next = { ...valuesRef.current, [slug]: value }
     setValues(next)
+    // El operador corrige el dato → ya fue verificado, quitar el badge "Revisar".
+    if (aiFilled[slug]) setAiFilled(prev => ({ ...prev, [slug]: false }))
     scheduleBorrador(next)
   }
 
@@ -383,6 +402,27 @@ export default function BloqueDatos({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockSignature, modo])
 
+  // Extrae con IA el campo de texto hermano a partir del pantallazo recién pegado.
+  // El valor extraído se autollena editable y queda marcado para revisión.
+  async function runExtraccion(imgSlug: string, dataUrl: string) {
+    setExtrayendo(prev => ({ ...prev, [imgSlug]: true }))
+    try {
+      const r = await extraerCampoDesdeImagen(negocioBloqueId, imgSlug, dataUrl)
+      if (!r.success) { toast.error(r.error); return }
+      if (!r.value) {
+        toast.message('No se pudo leer el dato del pantallazo — escríbelo a mano')
+        return
+      }
+      const next = { ...valuesRef.current, [r.targetSlug]: r.value }
+      setValues(next)
+      if (r.alertaRevision) setAiFilled(prev => ({ ...prev, [r.targetSlug]: true }))
+      void persist(next, true)
+      toast.success('Dato extraído del pantallazo — verifícalo')
+    } finally {
+      setExtrayendo(prev => ({ ...prev, [imgSlug]: false }))
+    }
+  }
+
   const handlePaste = useCallback((slug: string, e: React.ClipboardEvent) => {
     const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'))
     if (!item) return
@@ -394,10 +434,13 @@ export default function BloqueDatos({
       const dataUrl = ev.target?.result as string
       setPasteImgs(prev => ({ ...prev, [slug]: dataUrl }))
       handleToggleChange(slug, dataUrl)
+      // Si el campo de imagen declara extracción IA, dispararla con el pantallazo.
+      const field = fields.find(f => f.slug === slug)
+      if (field?.extrae) void runExtraccion(slug, dataUrl)
     }
     reader.readAsDataURL(file)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values, negocioBloqueId])
+  }, [values, negocioBloqueId, fields])
 
   if (modo === 'visible') {
     // Para readonly, los campos sin data persistida deben mostrar el valor
@@ -515,6 +558,10 @@ export default function BloqueDatos({
               {/* Dato traído de otra fuente y aún no editado a mano → badge "auto" */}
               {autoFillDefaults?.[f.slug] != null && saved[f.slug] === undefined && values[f.slug] === autoFillDefaults[f.slug] && (
                 <span className="rounded bg-[#F5F4F2] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>
+              )}
+              {/* Dato leído por IA de un pantallazo y aún sin verificar → badge "Revisar" */}
+              {aiFilled[f.slug] && (
+                <span className="rounded bg-[#FEF3C7] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#B45309]">Revisar</span>
               )}
             </label>
           )}
@@ -711,16 +758,22 @@ export default function BloqueDatos({
               className="flex min-h-[80px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-3 focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
             >
               {pasteImgs[f.slug] || (values[f.slug] as string) ? (
-                // eslint-disable-next-line @next/next/no-img-element -- data URL desde clipboard paste, no optimizable por next/image
-                <img
-                  src={(pasteImgs[f.slug] || values[f.slug]) as string}
-                  alt={f.label}
-                  className="max-h-32 rounded object-contain"
-                />
+                <div className="flex flex-col items-center gap-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- data URL desde clipboard paste, no optimizable por next/image */}
+                  <img
+                    src={(pasteImgs[f.slug] || values[f.slug]) as string}
+                    alt={f.label}
+                    className="max-h-32 rounded object-contain"
+                  />
+                  {extrayendo[f.slug] && (
+                    <span className="text-[10px] text-[#059669] font-medium">Extrayendo dato del pantallazo…</span>
+                  )}
+                </div>
               ) : (
                 <div className="flex flex-col items-center gap-1 text-[#6B7280]">
                   <ImageIcon className="h-5 w-5" />
                   <span className="text-[11px]">Pega una imagen con Ctrl+V / Cmd+V</span>
+                  {f.extrae && <span className="text-[10px] text-[#9CA3AF]">El número se leerá automáticamente</span>}
                 </div>
               )}
             </div>

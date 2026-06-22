@@ -678,3 +678,73 @@ export async function actualizarCampoDocumento(
 
   return { success: true, isComplete: !!isComplete }
 }
+
+// ── Extracción AI desde un pantallazo pegado (campo imagen_clipboard de BloqueDatos) ──
+// A diferencia de procesarDocumento (bloques tipo 'documento' que suben a Storage+Drive),
+// aquí la imagen llega como data URL pegada del portapapeles en un bloque tipo 'datos'.
+// El archivo NO se persiste: solo se extrae UN campo de texto hermano (ej. el número de
+// radicado desde el pantallazo de la UPME/DIAN) y se devuelve al cliente para autollenar
+// el campo destino — editable y con alerta de revisión. La descripción para la IA se lee
+// de la config del bloque (server-side), no del cliente, para que no sea manipulable.
+export async function extraerCampoDesdeImagen(
+  negocioBloqueId: string,
+  fieldSlug: string,
+  dataUrl: string,
+): Promise<
+  | { success: true; targetSlug: string; value: string | null; confidence: number; alertaRevision: boolean }
+  | { success: false; error: string }
+> {
+  const { workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
+
+  // La config (campos + mapeo de extracción) vive server-side: el cliente solo
+  // identifica el campo de imagen y manda el pantallazo.
+  const admin = createServiceClient()
+  const { data: bloqueData } = await db(admin)
+    .from('negocio_bloques')
+    .select('bloque_configs(config_extra)')
+    .eq('id', negocioBloqueId)
+    .single()
+
+  const configExtra = (bloqueData?.bloque_configs as Record<string, unknown>)?.config_extra as Record<string, unknown> ?? {}
+  const fields = (configExtra.fields ?? []) as Array<Record<string, unknown>>
+  const field = fields.find(f => f.slug === fieldSlug && f.tipo === 'imagen_clipboard')
+  const extrae = field?.extrae as { target_slug?: string; descripcion_ai?: string; alerta_revision?: boolean } | undefined
+
+  if (!extrae?.target_slug || !extrae?.descripcion_ai) {
+    return { success: false, error: 'Este campo no tiene extracción configurada' }
+  }
+
+  // data URL → mime + buffer
+  const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(dataUrl)
+  if (!m) return { success: false, error: 'Imagen inválida' }
+  const buffer = Buffer.from(m[2], 'base64')
+
+  const apiKey = getServerKey('gemini')
+  if (!apiKey) return { success: false, error: 'API key de Gemini no configurada' }
+
+  const targetField = fields.find(f => f.slug === extrae.target_slug)
+  const campos: CampoExtraccion[] = [{
+    slug: extrae.target_slug,
+    label: (targetField?.label as string) ?? 'Campo',
+    tipo: 'texto',
+    required: true,
+    descripcion_ai: extrae.descripcion_ai,
+  }]
+
+  const result = await extractWithRetry(buffer, m[1], campos, apiKey, 'imagen-clipboard')
+  if (!result.data) return { success: false, error: result.error ?? 'No se pudo extraer el dato' }
+
+  const campo = result.data[extrae.target_slug]
+  return {
+    success: true,
+    targetSlug: extrae.target_slug,
+    value: campo?.value ?? null,
+    confidence: campo?.confidence ?? 0,
+    // Default true: un radicado siempre conviene verificarlo antes de confiar.
+    alertaRevision: extrae.alerta_revision !== false,
+  }
+}
