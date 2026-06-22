@@ -145,8 +145,14 @@ const P2 = {
   fecha_factura_1: { x: 393, y: 434, maxWidth: 70 },
   // 59 Valor solicitado por origen (y=447.4 → 431)
   valor_origen_1: { x: 471, y: 431, maxWidth: 115 },
+  // Casilla 45 sub-casilla "Cód." del tipo de documento del titular (entre el
+  // campo "NIT" y el número de identificación). bbox: Cód. en xMin≈135, fila y≈503.
+  titular_tipo_doc_cod: { x: 136, y: 503, maxWidth: 18, size: 9 },
   // 60/61/62/63 responsable (y=426 → 407): usa el mismo NIT y razón social del titular
   resp_tipo_doc_1: { x: 43, y: 407, maxWidth: 100 },
+  // Casilla 60 sub-casilla "Cód." del tipo de documento responsable. bbox: Cód.
+  // en xMin≈147, fila y≈407.
+  resp_tipo_doc_cod_1: { x: 148, y: 407, maxWidth: 18, size: 9 },
   resp_nit_1: { x: 171, y: 407, maxWidth: 105 },
   resp_dv_1: { x: 284, y: 407, maxWidth: 20 },
   resp_nombre_1: { x: 310, y: 407, maxWidth: 280 },
@@ -226,8 +232,12 @@ export async function generarFormulario010(
   // Concepto (casilla 2) — DETERMINISTA, Bold pequeño por estar en caja chica.
   fixed1(constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
 
-  // Datos solicitante. Tipo de documento = "31" (NIT): DETERMINISTA.
-  fixed1('31', P1.tipo_documento)
+  // Datos solicitante (casilla 20). Tipo de documento = "13" (Cédula de
+  // Ciudadanía): DETERMINISTA. SOENA opera 100% personas naturales → el solicitante
+  // se identifica con cédula (13). El "31"/NIT solo aplica al TITULAR del saldo
+  // (casilla 45) y al RESPONSABLE (casilla 60), no aquí. Confirmado con el
+  // diligenciado de referencia de Deisy.
+  fixed1('13', P1.tipo_documento)
   edit1('nit', datos.nit, P1.nit)
   edit1('dv', datos.dv, P1.dv)
   edit1('primer_apellido', datos.primer_apellido, P1.primer_apellido)
@@ -253,8 +263,10 @@ export async function generarFormulario010(
   fixed1(constantes.tipo_solicitud, P1.tipo_solicitud) // DETERMINISTA
 
   // Firma de quien suscribe (1001-1004) = el solicitante. 1005/1006 EN BLANCO.
+  // Casilla 1002 = "CC" (tipo doc de la firma): el suscriptor persona natural firma
+  // con su cédula, no con el código NIT. Confirmado con el diligenciado de Deisy.
   edit1('nombre_completo', nombreTitular, P1.firma_nombre)
-  fixed1('31', P1.firma_tipo_doc) // DETERMINISTA
+  fixed1('CC', P1.firma_tipo_doc) // DETERMINISTA
   edit1('nit', datos.nit, P1.firma_identificacion)
   edit1('dv', datos.dv, P1.firma_dv)
 
@@ -262,8 +274,8 @@ export async function generarFormulario010(
   // "06" en el espacio reservado para la DIAN: DETERMINISTA.
   fixed2(constantes.concepto, P2.concepto_reservado, fontBold)
 
-  // Datos solicitante (repetir en hoja 2). Casilla 20 tipo doc = "31": DETERMINISTA.
-  fixed2('31', P2.tipo_documento)
+  // Datos solicitante (repetir en hoja 2). Casilla 20 tipo doc = "13" (CC): DETERMINISTA.
+  fixed2('13', P2.tipo_documento)
   edit2('nit', datos.nit, P2.nit)
   edit2('dv', datos.dv, P2.dv)
   edit2('primer_apellido', datos.primer_apellido, P2.primer_apellido)
@@ -273,8 +285,11 @@ export async function generarFormulario010(
   // Razón social (casilla 11): BLANCO determinista, sin campo.
   edit2('direccion_seccional', seccionalOficial, P2.direccion_seccional)
 
-  // Titular del saldo (= solicitante). tipo doc "31" DETERMINISTA.
-  fixed2('31', P2.titular_tipo_doc)
+  // Titular del saldo (= solicitante). Casilla 45: la palabra "NIT" en el campo +
+  // el código "31" en la sub-casilla "Cód." (persona natural responde por la
+  // obligación tributaria con su NIT). DETERMINISTA. Confirmado con el ejemplo de Deisy.
+  fixed2('NIT', P2.titular_tipo_doc)
+  fixed2('31', P2.titular_tipo_doc_cod)
   edit2('nit', datos.nit, P2.titular_nit)
   edit2('dv', datos.dv, P2.titular_dv)
   edit2('nombre_completo', nombreTitular, P2.titular_nombre)
@@ -293,9 +308,11 @@ export async function generarFormulario010(
   edit2('fecha_factura', fecha.compacto, P2.fecha_factura_1)
   edit2('valor', valorFmt, P2.valor_origen_1)
 
-  // Responsable de la fila 1 (casillas 60-63): tipo doc "31" DETERMINISTA + cédula
-  // + DV + nombre (hoy = el mismo solicitante; con 2º solicitante se separará).
-  fixed2('31', P2.resp_tipo_doc_1)
+  // Responsable de la fila 1 (casillas 60-63): "NIT" en el campo + "31" en la
+  // sub-casilla "Cód." DETERMINISTA + cédula + DV + nombre (hoy = el mismo
+  // solicitante; con 2º solicitante se separará).
+  fixed2('NIT', P2.resp_tipo_doc_1)
+  fixed2('31', P2.resp_tipo_doc_cod_1)
   edit2('nit', datos.nit, P2.resp_nit_1)
   edit2('dv', datos.dv, P2.resp_dv_1)
   edit2('nombre_completo', nombreTitular, P2.resp_nombre_1)

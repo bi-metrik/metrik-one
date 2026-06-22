@@ -11,7 +11,7 @@ import fs from 'fs'
 const datos: Formulario010Datos = {
   nit: '72798785',
   dv: '2',
-  tipo_documento: null, // forzado a "31" en el generador
+  tipo_documento: null, // casilla 20 forzada a "13" (CC) en el generador
   primer_apellido: 'RAMIREZ',
   segundo_apellido: 'GOMEZ',
   primer_nombre: 'OSCAR',
@@ -42,8 +42,8 @@ const datos: Formulario010Datos = {
 const constantes: Formulario010Constantes = {
   concepto: '06',
   tipo_solicitud: 'A solicitud de parte',
-  tipo_obligacion: 'Impuesto sobre las ventas IVA',
-  concepto_saldo: 'Pago de lo no debido',
+  tipo_obligacion: 'Beneficio tributario',
+  concepto_saldo: 'Pago de lo no debido. Otros: UPME',
   nombre_documento: 'Factura electrónica de ventas',
 }
 

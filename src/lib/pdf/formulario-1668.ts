@@ -127,7 +127,9 @@ export async function generarFormulario1668(
 
   // ── Firma de quien suscribe (titular) ───────────────────────────────────────
   edit('firma_nombre', nombreCompleto(datos), FIRMA.nombre)
-  fixed(constantes.tipo_documento, FIRMA.tipo_doc) // DETERMINISTA
+  // Casilla 1002 = "CC": la firma del titular persona natural usa cédula, no el
+  // código "13" de la casilla 20. Confirmado con el diligenciado de Deisy.
+  fixed('CC', FIRMA.tipo_doc) // DETERMINISTA
   edit('numero_identificacion', datos.numero_identificacion, FIRMA.identificacion)
   edit('dv', datos.dv, FIRMA.dv)
   fixed(constantes.cod_representacion, FIRMA.cod_representacion) // DETERMINISTA
