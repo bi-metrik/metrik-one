@@ -56,6 +56,7 @@ import BloqueHistorial from './bloques/BloqueHistorial'
 import type { HistorialData } from './bloques/BloqueHistorial'
 import BloqueFormulario from './bloques/BloqueFormulario'
 import BloquePagosEpayco from './bloques/BloquePagosEpayco'
+import BloquePagoExterno from './bloques/BloquePagoExterno'
 import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
 import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
@@ -1186,6 +1187,17 @@ function BloqueRenderer({
             instancia={bloque.instancia}
             modo={modo}
             tipoCobro={(configExtra.tipo_cobro as string) ?? 'pago'}
+            nota={configExtra.nota as string | undefined}
+          />
+        )
+      }
+      if (configExtra.es_pago_externo || configExtra.permite_pago_externo) {
+        return (
+          <BloquePagoExterno
+            negocioBloqueId={instanciaId}
+            negocioId={negocioId}
+            instancia={bloque.instancia}
+            modo={modo}
             nota={configExtra.nota as string | undefined}
           />
         )
