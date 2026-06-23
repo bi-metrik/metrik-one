@@ -5,17 +5,32 @@
 import type { StudySpec, ConversationState, Lang } from "./types.ts";
 
 function dimsBlock(spec: StudySpec, lang: Lang): string {
+  const ph = (n?: number) => (n ? `[fase ${n}] ` : "");
   const t = spec.triads.map((tr) => {
     const apex = lang === "es" ? tr.apex_es : tr.apex_en;
     const theme = lang === "es" ? tr.theme_es : tr.theme_en;
-    return `  - ${tr.id} (${theme}): entre [${apex.join(" / ")}]`;
+    return `  - ${tr.id} ${ph(tr.phase)}(${theme}): entre [${apex.join(" / ")}]`;
   });
   const d = spec.dyads.map((dy) => {
     const poles = lang === "es" ? dy.poles_es : dy.poles_en;
     const theme = lang === "es" ? dy.theme_es : dy.theme_en;
-    return `  - ${dy.id} (${theme}): entre [${poles[0]} <-> ${poles[1]}]`;
+    return `  - ${dy.id} ${ph(dy.phase)}(${theme}): entre [${poles[0]} <-> ${poles[1]}]`;
   });
   return [...t, ...d].join("\n");
+}
+
+// Bloque de flujo de dos narrativas (solo si el estudio lo define).
+function twoNarrativeFlow(spec: StudySpec, lang: Lang): string {
+  if (!spec.second_elicitation) return "";
+  const p1 = lang === "es" ? spec.elicitation_prompt.literal_es : spec.elicitation_prompt.literal_en;
+  const p2 = lang === "es" ? spec.second_elicitation.literal_es : spec.second_elicitation.literal_en;
+  return `
+ESTRUCTURA DE DOS NARRATIVAS (importante):
+- NARRATIVA 1 (la experiencia): ya abriste con ella. Profundizala y cubre SOLO las dimensiones [fase 1].
+- Cuando las dimensiones [fase 1] esten tocadas, PRESENTA la NARRATIVA 2 con estas palabras (o muy parecidas), como una transicion natural: "${p2}"
+- Luego profundiza la narrativa 2 y cubre las dimensiones [fase 2].
+- No mezcles: no preguntes por dimensiones de fase 2 antes de haber presentado la narrativa 2.
+`;
 }
 
 // ---------- R1: ENTREVISTADOR EN VIVO ----------
@@ -39,7 +54,7 @@ REGLAS DURAS (inviolables — vienen del marco metodologico, no son estilo):
 
 DIMENSIONES CONGELADAS A CUBRIR (Capa A — cada una debe tocarse al menos una vez en lenguaje natural antes de cerrar; jamas las modificas):
 ${dims}
-
+${twoNarrativeFlow(spec, lang)}
 COMO TRABAJAS:
 - Primer turno: invita a contar la historia con el prompt elicitador (ya se envio o lo envias tu). No interrogues; deja que narre.
 - Luego profundizas (Capa B): repreguntas abiertas que sacan el "por que" y el detalle, dimension por dimension, de forma natural y conversacional (no como formulario).

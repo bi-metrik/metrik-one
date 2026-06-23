@@ -1,50 +1,66 @@
-// Spec del estudio FEDE/GCG — Capa A CONGELADA (literal del instrumento maestro cardumen-app).
-// Inline como const (los Edge Functions no leen JSON de disco facil). La IA nunca la modifica.
+// Spec del estudio ACTIVO: La Araucania — "hacer negocios" (voz del empresario).
+// Capa A CONGELADA, literal de cardumen-app/turismo.html. Dos narrativas (experiencia + proximo paso),
+// dimensiones agrupadas por fase. La IA nunca la modifica.
 
 import type { StudySpec } from "./types.ts";
 
-export const FEDE_SPEC: StudySpec = {
-  study_id: "fede-gcg",
-  title: "FEDE / GCG — Pequena mineria",
+export const STUDY_SPEC: StudySpec = {
+  study_id: "araucania-turismo",
+  title: "La Araucania — Voz del empresario (hacer negocios en la region)",
   lang_default: "es",
   collection_mode: "study_async",
   elicitation_prompt: {
-    status: "PENDIENTE_LITERAL",
-    placeholder_es:
-      "Cuentanos una experiencia reciente en tu comunidad relacionada con la mineria y la GCG: algo que te haya pasado o que hayas visto, contado con tus propias palabras.",
-    placeholder_en:
-      "Tell us about a recent experience in your community related to mining and GCG: something that happened to you or that you saw, in your own words.",
+    status: "OK",
+    literal_es:
+      "Uno de tus amigos esta interesado en entender lo que es hacer negocios en La Araucania. ¿Que experiencia compartirias con el/ella para ayudarle a entender como es? Puede ser una experiencia para animarlo/a a montar un negocio, o para darle un consejo, o sugerir cosas a tener en cuenta.",
+    literal_en:
+      "A friend of yours wants to understand what doing business in La Araucania is like. What experience would you share to help them understand?",
+    placeholder_es: "",
+    placeholder_en: "",
   },
-  narrative_fields: ["FragmentEntry", "Title", "Utopia", "Dystopia"],
+  second_elicitation: {
+    status: "OK",
+    literal_es:
+      "¿Que oportunidades o desafios ves para La Araucania? Cuentame lo que crees que deberia ser el proximo paso para la region.",
+    literal_en:
+      "What opportunities or challenges do you see for La Araucania? Tell me what you think the next step should be.",
+    placeholder_es: "",
+    placeholder_en: "",
+  },
+  narrative_fields: ["story1", "title", "story2"],
   triads: [
-    { id: "T1", theme_es: "Principals", theme_en: "Principals",
-      apex_es: ["Las necesidades de la comunidad", "Los lideres politicos", "Las necesidades del negocio"],
-      apex_en: ["Community needs", "Political leaders", "Business needs"] },
-    { id: "T2", theme_es: "Mindset", theme_en: "Mindset",
-      apex_es: ["Construir mejores sistemas", "Mantener las cosas como estan", "Imaginar nuevas posibilidades"],
-      apex_en: ["Build better systems", "Keep things as they are", "Imagine new possibilities"] },
-    { id: "T3", theme_es: "Impact felt", theme_en: "Impact felt",
-      apex_es: ["La vida de todos", "La forma de ganarse la vida", "El entorno"],
-      apex_en: ["Everyone's life", "How people make a living", "The environment"] },
-    { id: "T4", theme_es: "Time", theme_en: "Time",
-      apex_es: ["Como siempre ha sido", "Las preocupaciones que tengo ahora", "Consideraciones futuras"],
-      apex_en: ["As it has always been", "My current concerns", "Future considerations"] },
-    { id: "T5", theme_es: "Values", theme_en: "Values",
-      apex_es: ["Lo que es correcto", "Lo mejor para todos", "Lo que dicen las normas"],
-      apex_en: ["What is right", "What is best for all", "What the rules say"] },
-    { id: "T6", theme_es: "Opportunities", theme_en: "Opportunities",
-      apex_es: ["Conseguir cosas materiales", "Mejorar su bienestar", "Mejorar el lugar donde todos vivimos"],
-      apex_en: ["Get material things", "Improve their wellbeing", "Improve where we all live"] },
-    { id: "T7", theme_es: "Contribution", theme_en: "Contribution",
-      apex_es: ["Aportan ideas y formas utiles", "Tienen un objetivo claro", "Unen y mobilizan a la gente"],
-      apex_en: ["Offer useful ideas and ways", "Have a clear goal", "Unite and mobilize people"] },
+    { id: "Q3", phase: 1, theme_es: "Sentido", theme_en: "Sensemaking",
+      apex_es: ["Le encuentra sentido a las cosas", "Trabaja y maneja las situaciones", "Encuentra lo que es significativo e importante"],
+      apex_en: ["Makes sense of things", "Works and handles situations", "Finds what is meaningful and important"] },
+    { id: "Q4", phase: 1, theme_es: "Consideraciones del negocio", theme_en: "Business considerations",
+      apex_es: ["La influencia de otras regiones", "Las necesidades de la region", "El Medio Ambiente y el contexto"],
+      apex_en: ["Influence of other regions", "Needs of the region", "Environment and context"] },
+    { id: "Q5", phase: 1, theme_es: "Influencia", theme_en: "Influence",
+      apex_es: ["Su comunidad", "Ellos mismos", "Todos los chilenos"],
+      apex_en: ["Their community", "Themselves", "All Chileans"] },
+    { id: "Q10", phase: 2, theme_es: "Enfoque del proximo paso", theme_en: "Next-step approach",
+      apex_es: ["Mantener lo que esta funcionando", "Construir nuevos sistemas", "Imaginar otras posibilidades"],
+      apex_en: ["Keep what works", "Build new systems", "Imagine other possibilities"] },
+    { id: "Q11", phase: 2, theme_es: "Agencia", theme_en: "Agency",
+      apex_es: ["La comunidad / la sociedad civil", "Las empresas / los negocios", "El gobierno"],
+      apex_en: ["Community / civil society", "Companies / businesses", "Government"] },
+    { id: "Q12", phase: 2, theme_es: "Foco", theme_en: "Focus",
+      apex_es: ["La gente y sus habilidades", "La tecnologia y la infraestructura", "Los procesos y procedimientos"],
+      apex_en: ["People and skills", "Technology and infrastructure", "Processes and procedures"] },
   ],
   dyads: [
-    { id: "D1", theme_es: "Giving people", theme_en: "Giving people",
-      poles_es: ["Lo que querian", "Lo que necesitaban"], poles_en: ["What they wanted", "What they needed"] },
-    { id: "D2", theme_es: "Control", theme_en: "Control",
-      poles_es: ["Bajo el control de la comunidad", "Liderado por GCG"], poles_en: ["Under community control", "GCG-led"] },
+    { id: "Q9", phase: 2, theme_es: "Probabilidad", theme_en: "Probability",
+      poles_es: ["Muy probable", "Muy improbable"], poles_en: ["Very likely", "Very unlikely"] },
+    { id: "Q13", phase: 2, theme_es: "Flexibilidad vs estructura", theme_en: "Flexibility vs structure",
+      poles_es: ["Flexibilidad y espacio para explorar", "Estructura y claras directrices"], poles_en: ["Flexibility and room to explore", "Structure and clear guidelines"] },
+    { id: "Q14", phase: 2, theme_es: "Horizonte", theme_en: "Time horizon",
+      poles_es: ["el corto plazo", "el largo plazo"], poles_en: ["short term", "long term"] },
+    { id: "Q15", phase: 2, theme_es: "Sector", theme_en: "Sector influence",
+      poles_es: ["El sector privado", "El sector publico"], poles_en: ["Private sector", "Public sector"] },
   ],
-  classification_metadata: ["Lugar", "Antiguedad", "Ocupacion", "Sector"],
-  closing: { turn_cap: 12, saturation_window: 2 },
+  classification_metadata: ["Rol", "Comuna", "Sector"],
+  closing: { turn_cap: 16, saturation_window: 2 },
 };
+
+// Alias para no tocar el resto del modulo (index.ts importa el spec por este nombre).
+export { STUDY_SPEC as FEDE_SPEC };

@@ -6,24 +6,28 @@ export type Lang = "es" | "en";
 // ---- Spec del estudio (Capa A congelada en pre-registro) ----
 export interface Triad {
   id: string;
+  phase?: number; // 1 = narrativa de la experiencia, 2 = narrativa del proximo paso
   theme_es: string; theme_en: string;
   apex_es: [string, string, string]; apex_en: [string, string, string];
 }
 export interface Dyad {
   id: string;
+  phase?: number;
   theme_es: string; theme_en: string;
   poles_es: [string, string]; poles_en: [string, string];
+}
+export interface ElicitationPrompt {
+  status: "OK" | "PENDIENTE_LITERAL";
+  placeholder_es: string; placeholder_en: string;
+  literal_es?: string; literal_en?: string;
 }
 export interface StudySpec {
   study_id: string;
   title: string;
   lang_default: Lang;
   collection_mode: "study_async" | "event_live" | "panel_recurrente";
-  elicitation_prompt: {
-    status: "OK" | "PENDIENTE_LITERAL";
-    placeholder_es: string; placeholder_en: string;
-    literal_es?: string; literal_en?: string;
-  };
+  elicitation_prompt: ElicitationPrompt;
+  second_elicitation?: ElicitationPrompt; // 2a narrativa opcional (estudios de dos fases)
   narrative_fields: string[];
   triads: Triad[];
   dyads: Dyad[];
