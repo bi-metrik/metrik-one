@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { uploadAndParseRUT, confirmRutData } from '@/app/(app)/directorio/actions'
 import type { RutParseResult, RutEmpresaUpdate } from '@/lib/rut/types'
 import { getConfidenceTier } from '@/lib/rut/types'
+import { useFileDrop } from '@/hooks/use-file-drop'
 
 type CardState = 'idle' | 'processing' | 'review' | 'done'
 
@@ -27,10 +28,13 @@ export default function RutUploadCard({ empresaId, currentRutUrl, currentRutVeri
   const [rutUrl, setRutUrl] = useState<string | null>(currentRutUrl || null)
   const [editedFields, setEditedFields] = useState<Record<string, string | boolean>>({})
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
+    if (file) processFile(file)
+    if (fileRef.current) fileRef.current.value = ''
+  }
 
+  const processFile = (file: File) => {
     setState('processing')
     const fd = new FormData()
     fd.append('rut', file)
@@ -108,6 +112,12 @@ export default function RutUploadCard({ empresaId, currentRutUrl, currentRutVeri
   const setField = (key: string, value: string | boolean) => {
     setEditedFields(prev => ({ ...prev, [key]: value }))
   }
+
+  // Drop de archivo en el estado idle: suelta el RUT = mismo flujo que el picker.
+  const fileDrop = useFileDrop({
+    onFiles: files => processFile(files[0]),
+    disabled: isPending || state !== 'idle',
+  })
 
   // ── Render states ────────────────────────────────────────
 
@@ -226,7 +236,12 @@ export default function RutUploadCard({ empresaId, currentRutUrl, currentRutVeri
 
   // ── idle state ───────────────────────────────────────────
   return (
-    <div className="rounded-lg border-2 border-dashed border-muted-foreground/20 p-4">
+    <div
+      {...fileDrop.dropProps}
+      className={`rounded-lg border-2 border-dashed p-4 transition-colors ${
+        fileDrop.isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/20'
+      }`}
+    >
       <input
         ref={fileRef}
         type="file"
@@ -241,8 +256,8 @@ export default function RutUploadCard({ empresaId, currentRutUrl, currentRutVeri
         className="flex w-full flex-col items-center gap-2 py-3 text-muted-foreground hover:text-foreground transition-colors"
       >
         <Upload className="h-8 w-8" />
-        <span className="text-sm font-medium">Subir RUT</span>
-        <span className="text-[10px]">PDF, JPG, PNG o WebP · Max 10MB</span>
+        <span className="text-sm font-medium">{fileDrop.isDragging ? 'Suelta el RUT aquí' : 'Subir RUT'}</span>
+        <span className="text-[10px]">Toca o arrastra · PDF, JPG, PNG o WebP · Max 10MB</span>
       </button>
     </div>
   )

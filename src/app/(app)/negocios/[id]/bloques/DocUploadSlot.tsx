@@ -2,6 +2,7 @@
 
 import { useRef } from 'react'
 import { Upload, Loader2, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react'
+import { useFileDrop } from '@/hooks/use-file-drop'
 
 export type SlotState = 'empty' | 'uploading' | 'uploaded' | 'error'
 
@@ -15,6 +16,13 @@ interface Props {
 
 export default function DocUploadSlot({ label, state, fileName, isProcessingAi, onFileSelected }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Drop de archivo: suelta sobre el slot = mismo flujo que el file picker.
+  // Inactivo mientras sube o procesa con IA para no pisar la carga en curso.
+  const fileDrop = useFileDrop({
+    onFiles: files => onFileSelected(files[0]),
+    disabled: state === 'uploading' || isProcessingAi === true,
+  })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -31,7 +39,12 @@ export default function DocUploadSlot({ label, state, fileName, isProcessingAi, 
       <button
         type="button"
         onClick={() => fileRef.current?.click()}
-        className="flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-muted-foreground/25 p-4 text-muted-foreground transition-colors hover:border-muted-foreground/50 hover:text-foreground"
+        {...fileDrop.dropProps}
+        className={`flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-dashed p-4 transition-colors ${
+          fileDrop.isDragging
+            ? 'border-primary bg-primary/5 text-foreground'
+            : 'border-muted-foreground/25 text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground'
+        }`}
       >
         <input
           ref={fileRef}
@@ -59,7 +72,14 @@ export default function DocUploadSlot({ label, state, fileName, isProcessingAi, 
   // ── uploaded ───────────────────────────────────────────────
   if (state === 'uploaded') {
     return (
-      <div className="flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-solid border-green-300 bg-green-50/30 p-4">
+      <div
+        {...fileDrop.dropProps}
+        className={`flex w-full flex-col items-center gap-1.5 rounded-lg border-2 p-4 transition-colors ${
+          fileDrop.isDragging
+            ? 'border-dashed border-primary bg-primary/5'
+            : 'border-solid border-green-300 bg-green-50/30'
+        }`}
+      >
         <input
           ref={fileRef}
           type="file"
@@ -92,7 +112,12 @@ export default function DocUploadSlot({ label, state, fileName, isProcessingAi, 
     <button
       type="button"
       onClick={() => fileRef.current?.click()}
-      className="flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-red-300 bg-red-50/30 p-4 transition-colors hover:border-red-400"
+      {...fileDrop.dropProps}
+      className={`flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-dashed p-4 transition-colors ${
+        fileDrop.isDragging
+          ? 'border-primary bg-primary/5'
+          : 'border-red-300 bg-red-50/30 hover:border-red-400'
+      }`}
     >
       <input
         ref={fileRef}

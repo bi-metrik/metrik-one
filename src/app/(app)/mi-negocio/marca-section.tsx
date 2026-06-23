@@ -5,6 +5,7 @@ import { Check, Loader2, Palette, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { updateBranding, uploadLogo } from './actions'
+import { useFileDrop } from '@/hooks/use-file-drop'
 import type { Workspace } from '@/types/database'
 
 interface Props {
@@ -21,9 +22,7 @@ export default function MarcaSection({ workspace }: Props) {
   const [colorPrimario, setColorPrimario] = useState(workspace?.color_primario || '#10B981')
   const [colorSecundario, setColorSecundario] = useState(workspace?.color_secundario || '#1A1A1A')
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const processLogoFile = async (file: File) => {
     setUploading(true)
     const fd = new FormData()
     fd.append('logo', file)
@@ -35,8 +34,16 @@ export default function MarcaSection({ workspace }: Props) {
       toast.error(res.error || 'Error al subir logo')
     }
     setUploading(false)
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) processLogoFile(file)
     if (fileRef.current) fileRef.current.value = ''
   }
+
+  // Drop del logo: suelta la imagen = mismo flujo que el botón subir.
+  const logoDrop = useFileDrop({ onFiles: files => processLogoFile(files[0]), disabled: uploading })
 
   const handleSave = () => {
     startTransition(async () => {
@@ -80,13 +87,16 @@ export default function MarcaSection({ workspace }: Props) {
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
-              className="flex items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm hover:bg-accent disabled:opacity-50"
+              {...logoDrop.dropProps}
+              className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm disabled:opacity-50 transition-colors ${
+                logoDrop.isDragging ? 'border-primary bg-primary/5' : 'bg-background hover:bg-accent'
+              }`}
             >
               <Upload className="h-4 w-4" />
-              {uploading ? 'Subiendo...' : 'Subir imagen'}
+              {uploading ? 'Subiendo...' : logoDrop.isDragging ? 'Suelta aquí' : 'Subir imagen'}
             </button>
             <span className="text-[10px] text-muted-foreground">
-              PNG, SVG, JPEG o WebP · Max 2MB
+              Toca o arrastra · PNG, SVG, JPEG o WebP · Max 2MB
             </span>
           </div>
           {/* URL paste fallback */}

@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { uploadAndParseRUTFiscal, confirmRutFiscalProfile, updateFiscalExtended } from './actions'
 import type { RutParseResult } from '@/lib/rut/types'
 import { getConfidenceTier } from '@/lib/rut/types'
+import { useFileDrop } from '@/hooks/use-file-drop'
 import type { FiscalProfile } from '@/types/database'
 
 type ViewState = 'summary' | 'upload' | 'processing' | 'review' | 'manual'
@@ -35,10 +36,19 @@ export default function PerfilFiscalExtended({ fiscalProfile }: Props) {
 
   const isConfigured = fiscalProfile?.is_complete || fiscalProfile?.is_estimated
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // Drop del RUT en la vista upload: suelta = mismo flujo que el botón.
+  const rutDrop = useFileDrop({
+    onFiles: files => processFile(files[0]),
+    disabled: isPending || view !== 'upload',
+  })
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) processFile(file)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const processFile = (file: File) => {
     setView('processing')
     const fd = new FormData()
     fd.append('rut', file)
@@ -319,11 +329,16 @@ export default function PerfilFiscalExtended({ fiscalProfile }: Props) {
         type="button"
         onClick={() => fileRef.current?.click()}
         disabled={isPending}
-        className="flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/20 py-6 text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
+        {...rutDrop.dropProps}
+        className={`flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed py-6 transition-colors ${
+          rutDrop.isDragging
+            ? 'border-primary bg-primary/5 text-foreground'
+            : 'border-muted-foreground/20 text-muted-foreground hover:text-foreground hover:border-primary/40'
+        }`}
       >
         <Upload className="h-8 w-8" />
-        <span className="text-sm font-medium">Subir RUT</span>
-        <span className="text-[10px]">PDF, JPG, PNG o WebP · Max 10MB</span>
+        <span className="text-sm font-medium">{rutDrop.isDragging ? 'Suelta el RUT aquí' : 'Subir RUT'}</span>
+        <span className="text-[10px]">Toca o arrastra · PDF, JPG, PNG o WebP · Max 10MB</span>
       </button>
 
       <button

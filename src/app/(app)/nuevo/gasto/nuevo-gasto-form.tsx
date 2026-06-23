@@ -12,6 +12,7 @@ import {
   proponerCentroCostosAction,
 } from './gasto-action'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
+import { useFileDrop } from '@/hooks/use-file-drop'
 import CentroCostosSelector, {
   type CentroCostosValue,
 } from '@/components/centro-costos-selector'
@@ -237,11 +238,14 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
     })
   }
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const processSoporteFile = async (file: File) => {
     if (file.size > 20 * 1024 * 1024) {
       toast.error('El archivo supera 20MB')
+      return
+    }
+    const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+    if (file.type && !ALLOWED.includes(file.type)) {
+      toast.error('Solo imagen o PDF')
       return
     }
     const compressed = await compressImage(file)
@@ -253,12 +257,21 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
     }
   }
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) processSoporteFile(file)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
   const clearSoporte = () => {
     setSoporteFile(null)
     if (soportePreview) URL.revokeObjectURL(soportePreview)
     setSoportePreview(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
+
+  // Drop del soporte: suelta la foto/PDF = mismo flujo que el botón adjuntar.
+  const soporteDrop = useFileDrop({ onFiles: files => processSoporteFile(files[0]) })
 
   const handleSubmit = () => {
     const montoNum = parseFloat(monto)
@@ -557,10 +570,15 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex w-full items-center gap-2 rounded-md border border-dashed bg-background px-3 py-2.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground transition-colors"
+              {...soporteDrop.dropProps}
+              className={`flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2.5 text-sm transition-colors ${
+                soporteDrop.isDragging
+                  ? 'border-primary bg-primary/5 text-foreground'
+                  : 'bg-background text-muted-foreground hover:border-primary hover:text-foreground'
+              }`}
             >
               <Paperclip className="h-4 w-4" />
-              Adjuntar foto o PDF
+              {soporteDrop.isDragging ? 'Suelta el soporte aquí' : 'Adjuntar foto o PDF'}
             </button>
           )}
         </div>

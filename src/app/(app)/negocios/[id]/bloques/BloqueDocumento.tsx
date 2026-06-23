@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
+import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado } from '@/lib/ai/extract-fields'
@@ -525,6 +526,15 @@ export default function BloqueDocumento({
     }))
   }
 
+  // Drop de archivo (modo editable): suelta sobre la zona = mismo flujo que el
+  // file picker. Inactivo mientras se sube/procesa para no pisar una carga en
+  // curso. Declarado antes de cualquier return condicional (rules-of-hooks).
+  const dropDisabled = uploadState === 'uploading' || uploadState === 'processing' || uploadState === 'pending_confirm'
+  const fileDrop = useFileDrop({
+    onFiles: files => handleFileSelected(files[0]),
+    disabled: dropDisabled,
+  })
+
   // ── Modo visible ────────────────────────────────────────────────────────
 
   if (modo === 'visible') {
@@ -652,7 +662,12 @@ export default function BloqueDocumento({
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="flex w-full items-center gap-3 rounded-lg border-2 border-dashed border-muted-foreground/25 p-4 text-muted-foreground transition-colors hover:border-muted-foreground/50 hover:text-foreground"
+          {...fileDrop.dropProps}
+          className={`flex w-full items-center gap-3 rounded-lg border-2 border-dashed p-4 transition-colors ${
+            fileDrop.isDragging
+              ? 'border-primary bg-primary/5 text-foreground'
+              : 'border-muted-foreground/25 text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground'
+          }`}
         >
           <input
             ref={fileRef}
@@ -668,7 +683,9 @@ export default function BloqueDocumento({
           <div className="text-left">
             <span className="text-sm font-medium">{label}</span>
             <p className="text-[11px] text-muted-foreground/60">
-              PDF, JPG, PNG o WebP — max {maxSizeMb}MB
+              {fileDrop.isDragging
+                ? 'Suelta el archivo aquí'
+                : `Toca o arrastra — PDF, JPG, PNG o WebP — max ${maxSizeMb}MB`}
             </p>
           </div>
         </button>
@@ -735,7 +752,14 @@ export default function BloqueDocumento({
       )}
 
       {uploadState === 'uploaded' && (
-        <div className="flex w-full items-center gap-3 rounded-lg border-2 border-solid border-green-300 bg-green-50/30 p-4">
+        <div
+          {...fileDrop.dropProps}
+          className={`flex w-full items-center gap-3 rounded-lg border-2 p-4 transition-colors ${
+            fileDrop.isDragging
+              ? 'border-dashed border-primary bg-primary/5'
+              : 'border-solid border-green-300 bg-green-50/30'
+          }`}
+        >
           <input
             ref={fileRef}
             type="file"
@@ -791,7 +815,12 @@ export default function BloqueDocumento({
         <button
           type="button"
           onClick={() => { setUploadState('empty'); fileRef.current?.click() }}
-          className="flex w-full items-center gap-3 rounded-lg border-2 border-dashed border-red-300 bg-red-50/30 p-4 transition-colors hover:border-red-400"
+          {...fileDrop.dropProps}
+          className={`flex w-full items-center gap-3 rounded-lg border-2 border-dashed p-4 transition-colors ${
+            fileDrop.isDragging
+              ? 'border-primary bg-primary/5'
+              : 'border-red-300 bg-red-50/30 hover:border-red-400'
+          }`}
         >
           <input
             ref={fileRef}
