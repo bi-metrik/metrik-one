@@ -138,6 +138,7 @@ export type NegocioResumen = {
   // Tarjeta config-driven (config_extra.negocio_card) — null en ws sin config
   vehiculo_label: string | null
   seccional_label: string | null
+  ciudad_label: string | null
   // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
   responsables: Array<{ id: string; full_name: string }>
 }
@@ -272,7 +273,7 @@ export async function getNegociosV2(
   const cardCfg = ((wsRes.data as { config_extra?: Record<string, unknown> } | null)
     ?.config_extra?.negocio_card) as
     { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string } | undefined
-  const vehiculoPorNeg: Record<string, { label: string | null; seccional: string | null }> = {}
+  const vehiculoPorNeg: Record<string, { label: string | null; seccional: string | null; ciudad: string | null }> = {}
   if (cardCfg?.vehiculo_bloque && negocioIds.length > 0) {
     const getVal = (bdata: Record<string, unknown>, slug: string): string | null => {
       const campos = (bdata.campos as Record<string, { value?: unknown }> | undefined) ?? null
@@ -301,6 +302,7 @@ export async function getNegociosV2(
       vehiculoPorNeg[negId] = {
         label: label ?? prev?.label ?? null,
         seccional: seccional ?? prev?.seccional ?? null,
+        ciudad: ciudad ?? prev?.ciudad ?? null,
       }
     }
   }
@@ -333,6 +335,7 @@ export async function getNegociosV2(
       razon_cierre: (row.razon_cierre as string) ?? null,
       vehiculo_label: vehiculoPorNeg[id]?.label ?? null,
       seccional_label: vehiculoPorNeg[id]?.seccional ?? null,
+      ciudad_label: vehiculoPorNeg[id]?.ciudad ?? null,
       responsables: responsablesPorNeg[id] ?? [],
     }
   })

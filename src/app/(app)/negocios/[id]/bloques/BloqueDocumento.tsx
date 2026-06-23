@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
+import { InfoTooltip } from '@/components/ui/info-tooltip'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado } from '@/lib/ai/extract-fields'
 
@@ -34,6 +35,11 @@ interface BloqueDocumentoProps {
     max_size_mb?: number
     campos_extraccion?: CampoExtraccion[]
     campos_visibles?: string[]
+    // Opt-in: permite editar manualmente los campos extraídos incluso en modo
+    // readonly (etapas posteriores). Necesario cuando el dato de UPME difiere del
+    // extraído y el operador debe corregirlo sin reprocesar el documento. Sin este
+    // flag, el modo visible es 100% readonly (comportamiento histórico).
+    editar_extraidos?: boolean
   }
 }
 
@@ -219,9 +225,12 @@ function CamposExtraidos({
           return (
             <div key={config.slug} className="space-y-1">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-muted-foreground">
+                <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
                   {config.label}
                   {config.required && <span className="text-red-500 ml-0.5">*</span>}
+                  {config.alerta_revision && (
+                    <InfoTooltip text="Dato extraído por IA. Verifícalo contra el documento original y corrígelo si difiere de lo registrado en UPME." />
+                  )}
                 </label>
                 <div className="flex items-center gap-2">
                   {config.alerta_revision && (
@@ -264,6 +273,73 @@ function CamposExtraidos({
   )
 }
 
+// ── Campo extraído editable en modo visible (opt-in editar_extraidos) ────────
+// Reusa actualizarCampoDocumento: persiste el valor como manual (confidence 1.0).
+// Usado cuando el operador, en una etapa posterior, debe corregir un dato que
+// difiere de UPME sin reprocesar el documento.
+
+function EditableCampoVisible({
+  negocioBloqueId,
+  negocioId,
+  config,
+  campo,
+  camposConfig,
+  onUpdate,
+}: {
+  negocioBloqueId: string
+  negocioId: string
+  config: CampoExtraccion
+  campo: CampoResultado | undefined
+  camposConfig: CampoExtraccion[]
+  onUpdate: (slug: string, value: string) => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const isCurrency = config.tipo === 'currency'
+
+  const handleCommit = async (value: string) => {
+    onUpdate(config.slug, value)
+    setSaving(true)
+    const res = await actualizarCampoDocumento(
+      negocioBloqueId,
+      negocioId,
+      config.slug,
+      value,
+      camposConfig,
+    )
+    setSaving(false)
+    if (!res.success) toast.error(res.error ?? 'Error guardando campo')
+    else toast.success('Valor actualizado')
+  }
+
+  const inputClass =
+    `w-full rounded-md border border-amber-200 bg-amber-50/30 px-3 py-2 text-base transition-all placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60 ${isCurrency ? 'tabular-nums text-right' : ''}`
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex-1 min-w-0">
+        {isCurrency ? (
+          <CurrencyField
+            rawValue={campo?.value ?? null}
+            onCommit={handleCommit}
+            disabled={saving}
+            placeholder="$0"
+            className={inputClass}
+          />
+        ) : (
+          <input
+            type="text"
+            defaultValue={campo?.value ?? ''}
+            onBlur={e => handleCommit(e.target.value)}
+            disabled={saving}
+            className={inputClass}
+          />
+        )}
+      </div>
+      <CopyButton value={campo?.value} disabled={saving} />
+    </div>
+  )
+}
+
 // ── Componente principal ─────────────────────────────────────────────────────
 
 export default function BloqueDocumento({
@@ -282,6 +358,7 @@ export default function BloqueDocumento({
   const camposConfig = configExtra.campos_extraccion ?? []
   const camposVisibles = configExtra.campos_visibles ?? null
   const maxSizeMb = configExtra.max_size_mb ?? 20
+  const editarExtraidos = configExtra.editar_extraidos === true
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
     if (saved.drive_url) return 'uploaded'
@@ -490,24 +567,48 @@ export default function BloqueDocumento({
               .filter(c => !camposVisibles || camposVisibles.includes(c.slug))
               .map(config => {
                 const campo = campos[config.slug]
-                if (!campo?.value) return null
+                // Edición manual opt-in (editar_extraidos): aunque el bloque esté en
+                // modo readonly de una etapa posterior, los campos marcados
+                // alerta_revision se vuelven editables para corregir cuando UPME
+                // difiere del extraído. El resto sigue siendo solo lectura.
+                const editable = editarExtraidos && config.alerta_revision === true
+                if (!editable && !campo?.value) return null
                 const displayValue = config.tipo === 'currency'
-                  ? formatCurrencyDisplay(campo.value)
-                  : campo.value
+                  ? formatCurrencyDisplay(campo?.value ?? null)
+                  : campo?.value
                 return (
                   <div key={config.slug} className="space-y-1">
                     <div className="flex items-center justify-between gap-2">
                       <label className="block text-xs font-medium text-muted-foreground">
                         {config.label}
                       </label>
-                      {!campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className={`flex-1 min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-base text-foreground break-words ${config.tipo === 'currency' ? 'tabular-nums' : ''}`}>
-                        {displayValue}
+                      <div className="flex items-center gap-1.5">
+                        {editable && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                            <AlertTriangle className="h-3 w-3" />
+                            Revisar
+                          </span>
+                        )}
+                        {campo && !campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
                       </div>
-                      <CopyButton value={campo.value} />
                     </div>
+                    {editable ? (
+                      <EditableCampoVisible
+                        negocioBloqueId={negocioBloqueId}
+                        negocioId={negocioId}
+                        config={config}
+                        campo={campo}
+                        camposConfig={camposConfig}
+                        onUpdate={handleCampoUpdate}
+                      />
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <div className={`flex-1 min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-base text-foreground break-words ${config.tipo === 'currency' ? 'tabular-nums' : ''}`}>
+                          {displayValue}
+                        </div>
+                        <CopyButton value={campo?.value} />
+                      </div>
+                    )}
                   </div>
                 )
               })}

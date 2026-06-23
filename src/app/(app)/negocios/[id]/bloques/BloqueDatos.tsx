@@ -10,6 +10,7 @@ import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/lib/afi/template-mapping'
 import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug } from '@/lib/dian/seccionales'
+import { InfoTooltip } from '@/components/ui/info-tooltip'
 
 export interface DatosField {
   slug: string
@@ -19,6 +20,9 @@ export interface DatosField {
   options?: string[]
   opciones?: Array<{ value: string; label: string }>
   default?: unknown
+  // Texto de ayuda opcional (ícono "i" con tooltip junto al label). Opt-in por
+  // config — solo aparece donde el equipo lo necesite. Mantener breve (1-2 frases).
+  ayuda?: string
   // plantilla: texto readonly con placeholders {{slug}} que se sustituyen por el
   // valor de otros campos del bloque (ej. cuerpo de correo a la DIAN). Con copiar.
   template?: string
@@ -555,6 +559,7 @@ export default function BloqueDatos({
             <label className="mb-1 flex items-center gap-1 text-[11px] font-medium text-[#6B7280]">
               {f.label}
               {f.required && <span className="text-red-500">*</span>}
+              {f.ayuda && <InfoTooltip text={f.ayuda} />}
               {/* Dato traído de otra fuente y aún no editado a mano → badge "auto" */}
               {autoFillDefaults?.[f.slug] != null && saved[f.slug] === undefined && values[f.slug] === autoFillDefaults[f.slug] && (
                 <span className="rounded bg-[#F5F4F2] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>

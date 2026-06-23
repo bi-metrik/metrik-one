@@ -64,12 +64,20 @@ export default function NegociosClient({
   const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
   const [q, setQ] = useState('')
   const [seccional, setSeccional] = useState<string>('todas')
+  const [ciudad, setCiudad] = useState<string>('todas')
   const [responsable, setResponsable] = useState<string>('todos')
 
   // Seccionales DIAN presentes en los negocios (para el filtro). Solo las que existen.
   const seccionalesDisponibles = useMemo(() => {
     const set = new Set<string>()
     for (const n of negocios) if (n.seccional_label) set.add(n.seccional_label)
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'))
+  }, [negocios])
+
+  // Ciudades/seccionales de venta presentes en los negocios (para el filtro). Solo las que existen.
+  const ciudadesDisponibles = useMemo(() => {
+    const set = new Set<string>()
+    for (const n of negocios) if (n.ciudad_label) set.add(n.ciudad_label)
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'))
   }, [negocios])
 
@@ -107,6 +115,9 @@ export default function NegociosClient({
     if (seccional !== 'todas') {
       res = res.filter((n) => n.seccional_label === seccional)
     }
+    if (ciudad !== 'todas') {
+      res = res.filter((n) => n.ciudad_label === ciudad)
+    }
     if (responsable !== 'todos') {
       res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
     }
@@ -121,7 +132,7 @@ export default function NegociosClient({
       })
     }
     return res
-  }, [current, term, seccional, responsable])
+  }, [current, term, seccional, ciudad, responsable])
 
   // Filtros visibles. El pill "Inclusión" solo si hay negocios en esa etapa.
   const hayInclusion = useMemo(() => negocios.some((n) => n.etapa_nombre === 'Inclusión'), [negocios])
@@ -212,6 +223,21 @@ export default function NegociosClient({
           <option value="todas">Todas las seccionales DIAN</option>
           {seccionalesDisponibles.map((s) => (
             <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      )}
+
+      {/* Filtro por ciudad de venta (solo si hay ciudades en los negocios) */}
+      {ciudadesDisponibles.length > 0 && (
+        <select
+          value={ciudad}
+          onChange={(e) => setCiudad(e.target.value)}
+          aria-label="Filtrar por ciudad"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+        >
+          <option value="todas">Todas las ciudades</option>
+          {ciudadesDisponibles.map((c) => (
+            <option key={c} value={c}>{c}</option>
           ))}
         </select>
       )}
