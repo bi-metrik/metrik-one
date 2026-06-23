@@ -8,6 +8,7 @@ import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage, sendButtons, sendCtaUrl } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
+import { isCardumenChatTrigger, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
@@ -91,6 +92,19 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   }
   if (message.type === 'text' && isTurismoTrigger(message.text)) {
     await sendTurismoLink(message.phone);
+    return;
+  }
+
+  // 0c. CardumenChat — entrevistador conversacional (R1/R2) sobre la ventana 24h.
+  //     Trigger por palabra clave; continuacion mientras haya sesion abierta para este telefono.
+  //     Va ANTES de identificar usuario (el participante NO es usuario de ONE) y es aditivo:
+  //     si no es trigger ni hay sesion abierta, el webhook sigue su flujo normal intacto.
+  if (message.type === 'text' && isCardumenChatTrigger(message.text)) {
+    await startCardumenChat(supabase, message.phone);
+    return;
+  }
+  if (message.type === 'text' && await hasOpenCardumenChat(supabase, message.phone)) {
+    await continueCardumenChat(supabase, message.phone, message.text);
     return;
   }
 
