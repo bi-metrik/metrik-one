@@ -137,6 +137,29 @@ async function buscarReferenciaDuplicada(refPayco: number): Promise<NegocioExist
   }
 }
 
+// ── gastoExiste ──────────────────────────────────────────────────────────────
+
+/**
+ * Idempotencia para los gastos de causación ePayco: true si ya existe un gasto
+ * con ese `external_ref` en el negocio. Evita duplicar comisión/impuestos al
+ * reintentar el registro de un mismo cobro.
+ */
+async function gastoExiste(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+  externalRef: string,
+): Promise<boolean> {
+  const { data } = await db(supabase)
+    .from('gastos')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+    .eq('external_ref', externalRef)
+    .limit(1)
+  return Array.isArray(data) && data.length > 0
+}
+
 // ── registrarPagoEpayco ──────────────────────────────────────────────────────
 
 /**
@@ -218,15 +241,20 @@ export async function registrarPagoEpayco(
       }
     }
 
-    // ── 1. Leer datos actuales del bloque ──────────────────────────────────
+    // ── 1. Leer datos + config del bloque ──────────────────────────────────
+    // El join a bloque_configs.config_extra trae el flag opt-in
+    // `causar_comision_epayco` (discriminado de costos ePayco, F5). Se lee
+    // server-side: ningún workspace sin el flag cambia de comportamiento.
     const { data: bloque } = await db(supabase)
       .from('negocio_bloques')
-      .select('data')
+      .select('data, bloque_configs:bloque_config_id ( config_extra )')
       .eq('id', negocioBloqueId)
       .single()
 
     const currentData = (bloque?.data as Record<string, unknown>) ?? {}
     const currentPagos = (currentData.pagos ?? []) as PagoRegistrado[]
+    const configExtra = (bloque?.bloque_configs?.config_extra as Record<string, unknown> | null) ?? {}
+    const discriminarCostos = configExtra.causar_comision_epayco === true
 
     // ── 2. Idempotencia en bloque ──────────────────────────────────────────
     if (currentPagos.some(p => p.ref_payco === desgloseFinal.ref_payco)) {
@@ -257,29 +285,82 @@ export async function registrarPagoEpayco(
       if (cobroError) return { success: false, error: (cobroError as { message: string }).message }
     }
 
-    // ── 4. Crear gasto por comision (idempotente via external_ref) ─────────
-    const gastoRef = `epayco-comision-${desgloseFinal.ref_payco}`
-    const { data: existingGasto } = await db(supabase)
-      .from('gastos')
-      .select('id')
-      .eq('workspace_id', workspaceId)
-      .eq('negocio_id', negocioId)
-      .eq('external_ref', gastoRef)
-      .limit(1)
-
-    if (!existingGasto || (existingGasto as unknown[]).length === 0) {
-      const gasto = {
-        workspace_id: workspaceId,
-        negocio_id: negocioId,
-        fecha: todayBogotaISO(),
-        monto: desgloseFinal.total_descuentos,
-        categoria: 'servicios_profesionales',
-        descripcion: `Comision ePayco — Ref ${desgloseFinal.ref_payco}`,
-        tipo: 'operativo',
-        external_ref: gastoRef,
+    // ── 4. Causar los costos de ePayco ─────────────────────────────────────
+    // ePayco descuenta comisión + IVA + retefuente + reteica y NO los discrimina
+    // en su panel. El desglose SÍ llega en `desgloseFinal`. Cómo se causa:
+    //
+    //  - Modo discriminado (opt-in `causar_comision_epayco`, F5 SOENA):
+    //      · 1 gasto categoria='comision' (clasificacion variable) = costo real
+    //        → entra a MC. external_ref `epayco-comision-{ref}`.
+    //      · 1 gasto categoria='impuestos_recuperables' (clasificacion
+    //        no_operativo) por IVA+retefuente+reteica = impuestos a favor /
+    //        recuperables. `no_operativo` queda fuera de MC y de EBITDA en
+    //        v_pyl_mes / v_mc_negocio → NO contamina el margen. El desglose
+    //        fino (iva/retefuente/reteica) se guarda en split_json para
+    //        trazabilidad por cobro. Solo se crea si hay impuestos (>0).
+    //        external_ref `epayco-impuestos-{ref}`.
+    //
+    //  - Modo legacy (flag ausente): comportamiento previo intacto — 1 gasto
+    //    con el total de descuentos. Otros workspaces sin el flag no cambian.
+    if (discriminarCostos) {
+      // 4a. Comisión real → costo variable.
+      const comisionRef = `epayco-comision-${desgloseFinal.ref_payco}`
+      if (desgloseFinal.comision > 0 && !(await gastoExiste(supabase, workspaceId, negocioId, comisionRef))) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db(supabase) as any).from('gastos').insert({
+          workspace_id: workspaceId,
+          negocio_id: negocioId,
+          fecha: todayBogotaISO(),
+          monto: desgloseFinal.comision,
+          categoria: 'comision',
+          clasificacion_costo: 'variable',
+          descripcion: `Comisión ePayco — Ref ${desgloseFinal.ref_payco}`,
+          tipo: 'operativo',
+          deducible: true,
+          external_ref: comisionRef,
+        })
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (db(supabase) as any).from('gastos').insert(gasto)
+
+      // 4b. IVA + retefuente + reteica → "otra bolsa": impuestos recuperables.
+      const impuestos = desgloseFinal.iva_comision + desgloseFinal.retefuente + desgloseFinal.reteica
+      const impuestosRef = `epayco-impuestos-${desgloseFinal.ref_payco}`
+      if (impuestos > 0 && !(await gastoExiste(supabase, workspaceId, negocioId, impuestosRef))) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db(supabase) as any).from('gastos').insert({
+          workspace_id: workspaceId,
+          negocio_id: negocioId,
+          fecha: todayBogotaISO(),
+          monto: impuestos,
+          categoria: 'impuestos_recuperables',
+          clasificacion_costo: 'no_operativo',
+          descripcion: `Impuestos ePayco (IVA + retefuente + reteica) — Ref ${desgloseFinal.ref_payco}`,
+          tipo: 'no_operativo',
+          deducible: false,
+          external_ref: impuestosRef,
+          split_json: {
+            iva_comision: desgloseFinal.iva_comision,
+            retefuente: desgloseFinal.retefuente,
+            reteica: desgloseFinal.reteica,
+            ref_payco: desgloseFinal.ref_payco,
+          },
+        })
+      }
+    } else {
+      // Modo legacy: un único gasto con el total de descuentos.
+      const gastoRef = `epayco-comision-${desgloseFinal.ref_payco}`
+      if (!(await gastoExiste(supabase, workspaceId, negocioId, gastoRef))) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db(supabase) as any).from('gastos').insert({
+          workspace_id: workspaceId,
+          negocio_id: negocioId,
+          fecha: todayBogotaISO(),
+          monto: desgloseFinal.total_descuentos,
+          categoria: 'servicios_profesionales',
+          descripcion: `Comision ePayco — Ref ${desgloseFinal.ref_payco}`,
+          tipo: 'operativo',
+          external_ref: gastoRef,
+        })
+      }
     }
 
     // ── 5. Agregar pago al bloque y marcar completo ────────────────────────
