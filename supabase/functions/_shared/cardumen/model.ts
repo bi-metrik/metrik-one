@@ -3,7 +3,7 @@
 
 import type { ModelAdapter, ModelCallOpts, ModelResult, ModelMessage } from "./types.ts";
 
-async function withRetry<T>(fn: () => Promise<T>, tries = 4, baseMs = 800): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, tries = 5, baseMs = 800): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < tries; i++) {
     try {
@@ -11,7 +11,8 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 4, baseMs = 800): Prom
     } catch (e) {
       lastErr = e;
       const msg = (e as Error).message ?? "";
-      const transient = /\b(429|503|500|overloaded|high demand)\b/i.test(msg);
+      // 529 = Anthropic overloaded (faltaba); tambien 429/500/502/503/504 y textos de sobrecarga/timeout.
+      const transient = /\b(429|500|502|503|504|529)\b/i.test(msg) || /overloaded|high demand|rate.?limit|timeout/i.test(msg);
       if (!transient || i === tries - 1) throw e;
       await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
     }
