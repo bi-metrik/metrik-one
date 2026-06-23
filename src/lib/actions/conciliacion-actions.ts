@@ -56,6 +56,8 @@ export interface FilaConciliacion {
   referencias: string[]
   conciliado: boolean
   conciliado_at: string | null
+  /** Un comercial pidió conciliación de Diana (etiqueta pendiente en activity_log). */
+  solicitado: boolean
 }
 
 /** Un negocio elegible para recibir una porción de un pago repartido. */
@@ -142,6 +144,28 @@ export async function getPanelConciliacion(): Promise<{
     concPorNegocio.set(r.negocio_id, { conciliado: r.conciliado, conciliado_at: r.conciliado_at })
   }
 
+  // Etiquetas de "solicitud de conciliación" de comerciales (activity_log). Una
+  // etiqueta vale solo si NO tiene una 'conciliacion_atendida' posterior. Resolvemos
+  // en JS sobre un solo fetch batch de ambos tipos para estos negocios.
+  const { data: tagsRaw } = await db(supabase)
+    .from('activity_log')
+    .select('entidad_id, tipo, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad_tipo', 'negocio')
+    .in('entidad_id', ids)
+    .in('tipo', ['solicitud_conciliacion', 'conciliacion_atendida'])
+    .order('created_at', { ascending: true })
+
+  // último evento por negocio: si es 'solicitud_conciliacion' → etiqueta viva.
+  const ultimoTagPorNegocio = new Map<string, string>()
+  for (const t of ((tagsRaw ?? []) as Array<{ entidad_id: string; tipo: string; created_at: string }>)) {
+    ultimoTagPorNegocio.set(t.entidad_id, t.tipo)
+  }
+  const solicitadoPorNegocio = new Set<string>()
+  for (const [negId, tipo] of ultimoTagPorNegocio) {
+    if (tipo === 'solicitud_conciliacion') solicitadoPorNegocio.add(negId)
+  }
+
   const filas: FilaConciliacion[] = conPrecio.map((n) => {
     const precio = n.precio_aprobado ?? n.precio_estimado ?? 0
     const cobrado = cobradoPorNegocio.get(n.id) ?? 0
@@ -158,6 +182,7 @@ export async function getPanelConciliacion(): Promise<{
       referencias: Array.from(refsPorNegocio.get(n.id) ?? []),
       conciliado: conc?.conciliado ?? false,
       conciliado_at: conc?.conciliado_at ?? null,
+      solicitado: solicitadoPorNegocio.has(n.id),
     }
   })
 
@@ -391,9 +416,66 @@ export async function conciliarNegocio(
           ? `Pago conciliado por el área financiera.${nota ? ` ${nota.slice(0, 300)}` : ''}`
           : 'Conciliación revertida por el área financiera.',
       })
+      // Al conciliar, Diana "atiende" cualquier etiqueta de solicitud pendiente:
+      // marca 'conciliacion_atendida' → la RPC del badge y el panel dejan de contar
+      // la solicitud del comercial para este negocio.
+      if (conciliado) {
+        await db(supabase).from('activity_log').insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'conciliacion_atendida',
+          autor_id: staffId,
+          contenido: 'Solicitud de conciliación atendida.',
+        })
+      }
     } catch {
       /* no bloquear por el log */
     }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/conciliacion')
+  return { success: true }
+}
+
+// ── solicitarConciliacionDiana — la etiqueta del comercial ───────────────────
+//
+// Un comercial (o cualquiera del equipo del workspace) marca un negocio como
+// "necesita conciliación de Diana". MVP: se registra en activity_log con
+// tipo 'solicitud_conciliacion'. Eso (a) suma al badge del nav vía la RPC
+// count_negocios_por_conciliar y (b) aparece en el panel como "Solicitado por
+// comercial". No requiere área financiera — la pide quien NO concilia.
+//
+// Diana limpia la etiqueta dando el check de conciliación (conciliarNegocio
+// registra 'conciliacion_atendida', que cancela la solicitud en la RPC y el panel).
+export async function solicitarConciliacionDiana(
+  negocioId: string,
+  nota?: string,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: error ?? 'No autenticado' }
+  if (!staffId) return { success: false, error: 'Tu usuario no está vinculado al equipo del workspace' }
+
+  // Validar que el negocio es del workspace (evita etiquetar negocios ajenos por URL)
+  const { data: neg } = await db(supabase)
+    .from('negocios')
+    .select('id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  if (!neg) return { success: false, error: 'Negocio no encontrado' }
+
+  const { error: insErr } = await db(supabase).from('activity_log').insert({
+    workspace_id: workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: negocioId,
+    tipo: 'solicitud_conciliacion',
+    autor_id: staffId,
+    contenido: `Se solicitó conciliación al área financiera.${nota ? ` ${nota.slice(0, 300)}` : ''}`,
+  })
+  if (insErr) {
+    return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar la solicitud' }
   }
 
   revalidatePath(`/negocios/${negocioId}`)

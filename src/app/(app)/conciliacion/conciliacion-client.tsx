@@ -176,10 +176,20 @@ function TablaConciliacion({
             return (
               <tr key={f.negocio_id} className="border-b last:border-0" style={{ borderColor: '#F3F4F6' }}>
                 <td className="px-3 py-2">
-                  <Link href={`/negocios/${f.negocio_id}`} className="group inline-flex items-center gap-1">
-                    <span className="font-semibold" style={{ color: '#1A1A1A' }}>{f.codigo ?? '—'}</span>
-                    <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
-                  </Link>
+                  <div className="flex items-center gap-1.5">
+                    <Link href={`/negocios/${f.negocio_id}`} className="group inline-flex items-center gap-1">
+                      <span className="font-semibold" style={{ color: '#1A1A1A' }}>{f.codigo ?? '—'}</span>
+                      <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
+                    </Link>
+                    {f.solicitado && (
+                      <span
+                        title="Un comercial solicitó esta conciliación"
+                        className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                      >
+                        Solicitado
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[11px]" style={{ color: '#6B7280' }}>
                     {f.empresa ?? f.nombre ?? ''}{f.etapa_nombre ? ` · ${f.etapa_nombre}` : ''}
                   </div>
