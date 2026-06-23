@@ -332,6 +332,31 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-23 (`soena` — Max — **conciliación v2 (5 pestañas + freeze duplicados) + FAB Registrar pago global + drag-and-drop de carga**)
+**Branch:** `main` (deploy Vercel Ready) · merges `85f2cdc` (dnd) `258bf23` (conciliación+FAB) · commits `d5d846f` `4f0dd04` `b62678f` · migración producto `20260623000001_conciliacion_v2.sql`
+
+Todo genérico/opt-in (otros workspaces sin cambio). Detalle de config SOENA en `proyectos/soena/ve/`.
+
+### Conciliación v2 (genérico, opt-in `modules.conciliacion`) — `4f0dd04`
+- Rediseño de `/conciliacion`: **panel base** de todas las referencias del ws + `agregarPago` (server action único) con selector de fuente; **5 pestañas** en `conciliacion-client.tsx` (Por conciliar=solo sobrepagos con reparto inline / Saldos=faltantes, gestión comercial, con búsqueda / Duplicados / Conciliado / Vista general).
+- **`cobros.fuente`** (text nullable, retrocompat): `'epayco' | 'davivienda' | <texto libre>`. Antes la fuente vivía en `notas`. Lectura infiere cuando es NULL.
+- **`cobros.tipo_cobro` += `'devolucion_pendiente'`**: remanente "por devolver" = cobro NEGATIVO + `split_json.por_devolver=true`. Descuenta del cobrado del negocio de origen sin destruir el cobro original; EXCLUIDO del cobrado financiero (las vistas MC/EBITDA no se tocan).
+- **`count_negocios_por_conciliar` redefinido**: "por conciliar" = sobrepagos sin conciliar ∪ duplicados sin resolver ∪ etiquetados. Ya NO cuenta el saldo faltante (es gestión comercial). El cobrado de la RPC excluye `devolucion_pendiente`.
+- **Control de fraude por duplicado** (`negocio-v2-actions.ts`): helper `negocioCongeladoPorDuplicado` + guard en `cambiarEtapaNegocioConGate` → un negocio atado a una referencia `external_ref` (no-split) presente en >1 negocio abierto NO avanza de etapa hasta resolverlo. Adicional al gate `conciliacion_diana`, respeta override owner/admin.
+- `aceptarDuplicado`: deja la ref en el negocio de etapa más avanzada y desvincula las demás; empate → desvincula todas + `activity_log` `solicitud_conciliacion` al comercial. **Desvincular ≠ borrar el cobro** (queda sin asignar).
+
+### FAB "Registrar pago" global (genérico, opt-in `modules.fab_registrar_pago`) — `b62678f`
+- **Problema:** un comercial que cobra cuando el negocio ya está en stage `ejecucion` no podía registrar el pago (la segmentación por área `can-edit.ts`/`STAGE_TO_AREA` le bloquea editar el bloque de pagos de esa etapa).
+- **Solución (Hana):** acción FAB "Registrar pago" (`fab.tsx`, prop `registrarPagoEnabled`) → modal de captura aislado (negocio + fuente + ref + valor + fecha). El núcleo de `agregarPago` se extrajo a `registrarPagoEnNegocio(supabase, wsId, staffId, input, origen)` en `conciliacion-actions.ts`; el FAB y el panel comparten esa función → **una sola vía de escritura** (no se bypasea validación ePayco ni duplicados).
+- **Guard por rol** (`fab-pago-actions.ts`, `rolHabilitadoParaPagoFab`): owner/admin siempre; supervisor/operator salvo alcance de áreas SOLO operaciones; sin áreas → habilitado; read_only/contador nunca. **No usa `guardEditarBloque`** (validaría área de etapa). Traza `origen='fab'` en activity_log.
+- **Gotcha visibilidad:** la UI muestra la acción por rol+flag; el server excluye operaciones-pura (el cliente no conoce las áreas sin fetch extra) → un operaciones-puro ve toast de rechazo. Afinable pasando áreas al cliente si molesta.
+
+### Drag-and-drop de carga de archivos (genérico) — `d5d846f`
+- **No existía** (el repo solo tenía file picker; los `@dnd-kit` son del kanban). Hook nuevo `src/hooks/use-file-drop.ts` (`useFileDrop` → `isDragging` + `dropProps`, contador de profundidad anti-parpadeo, filtro `dataTransfer.types.includes('Files')` para no chocar con el dnd del kanban, `disabled`/`multiple`).
+- Aplicado a 7 zonas: `BloqueDocumento`, `DocUploadSlot`, `rut-upload-card`, `nuevo-gasto-form`, `marca-section`, `perfil-fiscal-extended`, `pila-section` (esta inyecta via `DataTransfer` al `<input>` del form). File picker + `procesarDocumento` (extracción IA) intactos.
+
+---
+
 **Sesion:** 2026-06-22→23 (`soena` — Max — **flujo financiero (pago externo, validación/causación ePayco, conciliación)** + fix multi-pago + quick-wins UX)
 **Branch:** `main` (deploy Vercel) · commits `474f302` `5a0a494` `b08f8f5` `3505fbc` `dadf780` `02af942` `9dc59d4` `811a481`
 
