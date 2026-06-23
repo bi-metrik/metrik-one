@@ -63,6 +63,68 @@ export async function sendButtons(
   });
 }
 
+/**
+ * Send an interactive CTA URL button (free-form, dentro de ventana 24h).
+ * Es el tipo que dispara el In-App Browser de WhatsApp (abrir sin salir de la app)
+ * para números habilitados — a diferencia de un link de texto plano, que abre el navegador externo.
+ */
+export async function sendCtaUrl(
+  phone: string,
+  body: string,
+  displayText: string,
+  url: string,
+): Promise<void> {
+  await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'cta_url',
+      body: { text: body },
+      action: {
+        name: 'cta_url',
+        parameters: { display_text: displayText.slice(0, 20), url },
+      },
+    },
+  });
+}
+
+/**
+ * Send an interactive Flow message (WhatsApp Flows — se renderiza DENTRO del chat, sin navegador).
+ * Requiere un flow_id ya publicado (o draft para pruebas). flow_action 'navigate' abre en `screen`.
+ */
+export async function sendFlow(
+  phone: string,
+  body: string,
+  cta: string,
+  flowId: string,
+  flowToken: string,
+  firstScreen: string,
+  mode: 'draft' | 'published' = 'published',
+): Promise<void> {
+  await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      body: { text: body },
+      action: {
+        name: 'flow',
+        parameters: {
+          flow_message_version: '3',
+          flow_token: flowToken,
+          flow_id: flowId,
+          flow_cta: cta.slice(0, 20),
+          flow_action: 'navigate',
+          flow_action_payload: { screen: firstScreen },
+          mode,
+        },
+      },
+    },
+  });
+}
+
 /** Mark message as read */
 export async function markAsRead(messageId: string): Promise<void> {
   const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')!;

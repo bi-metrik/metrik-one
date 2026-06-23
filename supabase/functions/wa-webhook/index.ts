@@ -6,7 +6,7 @@
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
-import { sendTextMessage, sendButtons } from '../_shared/wa-respond.ts';
+import { sendTextMessage, sendButtons, sendCtaUrl } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { handleRegistro } from '../_shared/handlers/registro/index.ts';
@@ -71,6 +71,28 @@ Deno.serve(async (req) => {
 
 async function processMessage(message: IncomingMessage): Promise<void> {
   const supabase = getServiceClient();
+
+  // 0a. Cardumen — Flow completado: guardar la respuesta y agradecer. Va PRIMERO (participantes ≠ usuarios ONE).
+  if (message.type === 'flow_response') {
+    await storeCardumenFlowResponse(supabase, message.phone, message.flow_response || '');
+    await sendTextMessage(message.phone, '🐟 ¡Gracias! Tu historia ya forma parte del cardumen.');
+    return;
+  }
+
+  // 0b. Cardumen — disparadores PÚBLICOS por palabra clave (antes de identificar usuario).
+  //     El usuario escribió la palabra → ventana de servicio 24h (mensaje gratis).
+  if (message.type === 'text' && isCardumenFlowTrigger(message.text)) {
+    await sendCardumenFlow(message.phone);
+    return;
+  }
+  if (message.type === 'text' && isCardumenTrigger(message.text)) {
+    await sendCardumenLink(message.phone);
+    return;
+  }
+  if (message.type === 'text' && isTurismoTrigger(message.text)) {
+    await sendTurismoLink(message.phone);
+    return;
+  }
 
   // 1. Identify user by phone number
   const user = await identifyUser(supabase, message.phone);
@@ -192,6 +214,100 @@ async function processMessage(message: IncomingMessage): Promise<void> {
 
   // 9. Route to handler
   await routeToHandler(ctx);
+}
+
+// ============================================================
+// Cardumen — disparador de estudio conversacional (SenseMaker)
+// ============================================================
+
+// Palabras clave que abren el cuestionario Cardumen. Coincidencia exacta (normalizada),
+// para no chocar con los flujos de ONE. Ajustable sin tocar la lógica.
+const CARDUMEN_KEYWORDS = ['cardumen'];
+const CARDUMEN_APP_URL = 'https://cardumen-app-delta.vercel.app';
+const CARDUMEN_ESTUDIO = 'fede';
+
+function isCardumenTrigger(text: string): boolean {
+  const t = (text || '').trim().toLowerCase().replace(/[!¡.,]/g, '');
+  return CARDUMEN_KEYWORDS.includes(t);
+}
+
+// --- Variante Flow (in-chat, sin navegador) ---
+const CARDUMEN_FLOW_KEYWORDS = ['cardumenflow', 'cardumen flow'];
+function isCardumenFlowTrigger(text: string): boolean {
+  const t = (text || '').trim().toLowerCase().replace(/[!¡.,]/g, '');
+  return CARDUMEN_FLOW_KEYWORDS.includes(t);
+}
+
+async function sendCardumenFlow(phone: string): Promise<void> {
+  const flowId = Deno.env.get('CARDUMEN_FLOW_ID');
+  if (!flowId) {
+    await sendTextMessage(phone, 'El cuestionario por Flow todavía no está publicado. Vuelve a intentar en un momento.');
+    console.warn('[wa-webhook] CARDUMEN_FLOW_ID no configurado');
+    return;
+  }
+  const mode = (Deno.env.get('CARDUMEN_FLOW_MODE') as 'draft' | 'published') || 'published';
+  // flow_token = número del participante → liga la respuesta a esta conversación.
+  await sendFlow(
+    phone,
+    '🐟 *Cardumen*\n\nGracias por sumar tu historia. Toca el botón para responder — todo ocurre aquí dentro de WhatsApp y es confidencial.',
+    'Responder',
+    flowId,
+    `wa:${phone}`,
+    'CONSENT',
+    mode,
+  );
+  console.log(`[wa-webhook] Cardumen Flow (${mode}) enviado a ${phone}`);
+}
+
+async function storeCardumenFlowResponse(
+  supabase: ReturnType<typeof getServiceClient>,
+  phone: string,
+  responseJson: string,
+): Promise<void> {
+  let data: Record<string, unknown> = {};
+  try { data = responseJson ? JSON.parse(responseJson) : {}; } catch { /* deja vacío */ }
+  // Guardamos el payload crudo del Flow; el mapeo fino al schema FEDE (regiones→percentX/Y) lo hace el pipeline.
+  const payload = { source: 'flow', collection_mode: 'event_live', raw: data };
+  const { error } = await supabase.from('cardumen_respuestas').insert({
+    estudio: Deno.env.get('CARDUMEN_ESTUDIO') || 'fede',
+    token: phone,
+    lang: 'es',
+    payload,
+  });
+  if (error) console.error('[wa-webhook] Error guardando respuesta Flow:', error.message);
+}
+
+// --- Estudio Turismo / La Araucanía (mini-web) ---
+const TURISMO_KEYWORDS = ['turismo', 'araucania', 'araucanía'];
+function isTurismoTrigger(text: string): boolean {
+  const t = (text || '').trim().toLowerCase().replace(/[!¡.,]/g, '');
+  return TURISMO_KEYWORDS.includes(t);
+}
+async function sendTurismoLink(phone: string): Promise<void> {
+  const token = encodeURIComponent(phone);
+  const url = `${CARDUMEN_APP_URL}/turismo.html?token=${token}&estudio=turismo`;
+  await sendCtaUrl(
+    phone,
+    '🐟 *La Araucanía*\n\nGracias por sumar tu historia sobre hacer negocios en la región. Toca el botón para compartirla — toma unos minutos y es confidencial.',
+    'Compartir historia',
+    url,
+  );
+  console.log(`[wa-webhook] Turismo link enviado a ${phone}`);
+}
+
+async function sendCardumenLink(phone: string): Promise<void> {
+  // token = número del participante → liga el envío del formulario a esta conversación.
+  const token = encodeURIComponent(phone);
+  const url = `${CARDUMEN_APP_URL}/?token=${token}&estudio=${CARDUMEN_ESTUDIO}`;
+  // Botón CTA → abre el In-App Browser (sin salir de WhatsApp) en números habilitados.
+  // Un link de texto plano abriría el navegador externo.
+  await sendCtaUrl(
+    phone,
+    '🐟 *Cardumen*\n\nGracias por sumar tu historia. Toca el botón para compartirla — toma pocos minutos y es confidencial.',
+    'Abrir cuestionario',
+    url,
+  );
+  console.log(`[wa-webhook] Cardumen CTA enviado a ${phone}`);
 }
 
 // ============================================================
@@ -411,6 +527,16 @@ function extractMessage(payload: any): IncomingMessage | null {
     }
 
     if (msg.type === 'interactive') {
+      // Flow completado → llega como nfm_reply con response_json (datos del cuestionario Cardumen).
+      if (msg.interactive?.type === 'nfm_reply' || msg.interactive?.nfm_reply) {
+        return {
+          phone,
+          text: '',
+          type: 'flow_response',
+          flow_response: msg.interactive?.nfm_reply?.response_json || '',
+          timestamp: msg.timestamp,
+        };
+      }
       const reply = msg.interactive?.button_reply || msg.interactive?.list_reply;
       return {
         phone,
