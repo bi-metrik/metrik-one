@@ -93,7 +93,7 @@ export async function getPanelConciliacion(): Promise<{
   const { data: negociosRaw } = await db(supabase)
     .from('negocios')
     .select(`
-      id, codigo, nombre, precio_aprobado, precio_estimado, estado,
+      id, codigo, nombre, precio_aprobado, precio_estimado, estado, stage_actual,
       etapas_negocio:etapa_actual_id ( nombre ),
       empresas:empresa_id ( nombre )
     `)
@@ -106,11 +106,13 @@ export async function getPanelConciliacion(): Promise<{
     nombre: string | null
     precio_aprobado: number | null
     precio_estimado: number | null
+    stage_actual: string | null
     etapas_negocio: { nombre: string | null } | null
     empresas: { nombre: string | null } | null
   }>
 
   const conPrecio = negocios.filter((n) => (n.precio_aprobado ?? n.precio_estimado ?? 0) > 0)
+  const stagePorNegocio = new Map(conPrecio.map((n) => [n.id, n.stage_actual]))
   const ids = conPrecio.map((n) => n.id)
   if (ids.length === 0) return { filas: [] }
 
@@ -186,15 +188,27 @@ export async function getPanelConciliacion(): Promise<{
     }
   })
 
+  // Acotar a lo que está en la cancha de Diana: negocio en Cobro (escalado), o
+  // etiquetado por un comercial, o con sobrepago (diferencia < 0), o ya conciliado
+  // (historial). El pipeline temprano con saldo pendiente (diferencia > 0 sin estar
+  // en Cobro) es "por cobrar" — del comercial, NO "por conciliar" de Diana.
+  const filasRelevantes = filas.filter(
+    (f) =>
+      stagePorNegocio.get(f.negocio_id) === 'cobro' ||
+      f.solicitado ||
+      f.diferencia < 0 ||
+      f.conciliado,
+  )
+
   // Orden: primero los que faltan (no conciliados o con diferencia), luego conciliados.
-  filas.sort((a, b) => {
+  filasRelevantes.sort((a, b) => {
     const aPend = !a.conciliado || a.diferencia !== 0 ? 0 : 1
     const bPend = !b.conciliado || b.diferencia !== 0 ? 0 : 1
     if (aPend !== bPend) return aPend - bPend
     return (a.codigo ?? '').localeCompare(b.codigo ?? '')
   })
 
-  return { filas }
+  return { filas: filasRelevantes }
 }
 
 // ── buscarNegociosParaSplit ──────────────────────────────────────────────────
