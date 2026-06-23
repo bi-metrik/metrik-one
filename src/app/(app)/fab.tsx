@@ -2,17 +2,22 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText } from 'lucide-react'
+import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText, Loader2, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
 } from './timer-actions'
 import { FEATURES } from '@/lib/feature-flags'
+import { agregarPagoFab, getNegociosParaPagoFab, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+
+const VERDE = '#10B981'
 
 // ── Types ─────────────────────────────────────────────
 
 interface FABProps {
   role: string
+  /** Muestra la acción "Registrar pago" (opt-in por workspace, flag modules.fab_registrar_pago). */
+  registrarPagoEnabled?: boolean
 }
 
 interface FABAction {
@@ -87,9 +92,10 @@ const DEFAULT_TIMER: TimerLocal = {
 
 // ── FAB Component ─────────────────────────────────────
 
-export default function FAB({ role }: FABProps) {
+export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
   const [open, setOpen] = useState(false)
   const [timerPanel, setTimerPanel] = useState(false)
+  const [pagoModal, setPagoModal] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
   const negocioContextMatch = pathname.match(/^\/negocios\/([a-f0-9-]{36})/)
@@ -104,7 +110,19 @@ export default function FAB({ role }: FABProps) {
   const [isPending, startTransition] = useTransition()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const visibleActions = FAB_ACTIONS.filter(a =>
+  // "Registrar pago" es opt-in por workspace (flag) y se inyecta dinámicamente.
+  // Visible para roles que tocan dinero; el guard server (rolHabilitadoParaPagoFab)
+  // es la barrera real — excluye operaciones pura aunque la UI lo muestre.
+  const dynamicActions: FABAction[] = registrarPagoEnabled
+    ? [{
+        label: 'Registrar pago',
+        icon: Wallet,
+        action: 'pago',
+        roles: ['owner', 'admin', 'supervisor', 'operator'],
+      }]
+    : []
+
+  const visibleActions = [...FAB_ACTIONS, ...dynamicActions].filter(a =>
     a.roles.includes(role) &&
     (a.feature === undefined || FEATURES[a.feature]) &&
     (!a.contextOnly || contextEntityId !== null)
@@ -177,7 +195,9 @@ export default function FAB({ role }: FABProps) {
 
   const handleAction = useCallback((action: FABAction) => {
     setOpen(false)
-    if (action.action === 'saldo') {
+    if (action.action === 'pago') {
+      setPagoModal(true)
+    } else if (action.action === 'saldo') {
       router.push('/numeros?saldo=1')
     } else if (action.action === 'factura' && contextNegocioId) {
       router.push(`/negocios/${contextNegocioId}?action=factura`)
@@ -388,6 +408,181 @@ export default function FAB({ role }: FABProps) {
           <Plus className="h-6 w-6" />
         )}
       </button>
+
+      {/* ── Modal Registrar pago (FAB global, formulario aislado de captura) ── */}
+      {pagoModal && (
+        <RegistrarPagoModal
+          onClose={() => setPagoModal(false)}
+          onDone={() => { setPagoModal(false); router.refresh() }}
+        />
+      )}
     </>
+  )
+}
+
+// ── Modal "Registrar pago" ───────────────────────────
+//
+// Formulario aislado de captura: selecciona negocio + fuente + referencia + valor +
+// fecha. NO abre el editor de bloque de la etapa. Escribe por agregarPagoFab, que
+// reusa la vía única registrarPagoEnNegocio (misma validación ePayco/duplicado/saldo).
+
+function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [negocios, setNegocios] = useState<NegocioParaPagoFab[]>([])
+  const [loadingNegocios, setLoadingNegocios] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const [negocioId, setNegocioId] = useState('')
+  const [fuente, setFuente] = useState<'epayco' | 'davivienda' | 'otra'>('epayco')
+  const [fuenteNombre, setFuenteNombre] = useState('')
+  const [referencia, setReferencia] = useState('')
+  const [monto, setMonto] = useState('')
+  const [fecha, setFecha] = useState('')
+  const [justificacion, setJustificacion] = useState('')
+  const [needJust, setNeedJust] = useState(false)
+  const [pending, startTransition] = useTransition()
+
+  const esEpayco = fuente === 'epayco'
+
+  useEffect(() => {
+    let cancel = false
+    getNegociosParaPagoFab().then((res) => {
+      if (cancel) return
+      if (res.error) setLoadError(res.error)
+      else setNegocios(res.negocios)
+      setLoadingNegocios(false)
+    })
+    return () => { cancel = true }
+  }, [])
+
+  function handleSubmit() {
+    if (!negocioId) return toast.error('Elige el negocio')
+    if (!referencia.trim()) return toast.error('Ingresa la referencia del pago')
+    if (!esEpayco && (!Number(monto) || Number(monto) <= 0)) return toast.error('Ingresa el monto del pago')
+    if (fuente === 'otra' && !fuenteNombre.trim()) return toast.error('Indica el nombre de la fuente')
+
+    startTransition(async () => {
+      const res = await agregarPagoFab({
+        negocio_id: negocioId,
+        fuente,
+        fuente_nombre: fuente === 'otra' ? fuenteNombre.trim() : undefined,
+        referencia: referencia.trim(),
+        monto: esEpayco ? undefined : Number(monto),
+        fecha: fecha || undefined,
+        justificacion: needJust ? justificacion.trim() : undefined,
+      })
+      if (res.success) {
+        toast.success('Pago registrado')
+        onDone()
+      } else if (res.code === 'referencia_duplicada') {
+        setNeedJust(true)
+        toast.error(res.error)
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
+      <div className="flex max-h-[92vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
+          <div className="flex items-center gap-2">
+            <Wallet className="h-4 w-4" style={{ color: VERDE }} />
+            <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>Registrar pago</h3>
+          </div>
+          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: '#6B7280' }} /></button>
+        </div>
+
+        <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
+          <PagoField label="Negocio">
+            {loadingNegocios ? (
+              <div className="flex items-center gap-2 px-1 py-1.5 text-[13px]" style={{ color: '#6B7280' }}>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando negocios…
+              </div>
+            ) : loadError ? (
+              <p className="text-[12px]" style={{ color: '#DC2626' }}>{loadError}</p>
+            ) : (
+              <select value={negocioId} onChange={(e) => setNegocioId(e.target.value)} className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }}>
+                <option value="">Elige negocio…</option>
+                {negocios.map((n) => (
+                  <option key={n.negocio_id} value={n.negocio_id}>
+                    {(n.codigo ?? n.nombre ?? '')}{n.empresa ? ` · ${n.empresa}` : (n.nombre ? ` · ${n.nombre}` : '')}
+                  </option>
+                ))}
+              </select>
+            )}
+          </PagoField>
+
+          <PagoField label="Fuente del pago">
+            <div className="grid grid-cols-3 gap-2">
+              {(['epayco', 'davivienda', 'otra'] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => { setFuente(f); setNeedJust(false) }}
+                  className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
+                  style={fuente === f
+                    ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
+                    : { borderColor: '#E5E7EB', color: '#6B7280' }}
+                >
+                  {f === 'epayco' ? 'ePayco' : f === 'davivienda' ? 'Davivienda' : 'Otra'}
+                </button>
+              ))}
+            </div>
+          </PagoField>
+
+          {fuente === 'otra' && (
+            <PagoField label="Nombre de la fuente">
+              <input value={fuenteNombre} onChange={(e) => setFuenteNombre(e.target.value)} placeholder="ej. Bancolombia, Nequi, efectivo…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
+            </PagoField>
+          )}
+
+          <PagoField label={esEpayco ? 'Referencia ePayco (ref_payco)' : 'Referencia / comprobante'}>
+            <input
+              value={referencia}
+              onChange={(e) => setReferencia(esEpayco ? e.target.value.replace(/[^\d]/g, '') : e.target.value)}
+              inputMode={esEpayco ? 'numeric' : 'text'}
+              placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
+              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
+              style={{ borderColor: '#E5E7EB' }}
+            />
+            {esEpayco && <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Se valida con ePayco: solo se registra si está Aceptada.</p>}
+          </PagoField>
+
+          {!esEpayco && (
+            <div className="grid grid-cols-2 gap-3">
+              <PagoField label="Valor">
+                <input value={monto} onChange={(e) => setMonto(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="0" className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none" style={{ borderColor: '#E5E7EB' }} />
+              </PagoField>
+              <PagoField label="Fecha">
+                <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
+              </PagoField>
+            </div>
+          )}
+
+          {needJust && (
+            <PagoField label="Justificación (referencia duplicada)">
+              <textarea value={justificacion} onChange={(e) => setJustificacion(e.target.value)} rows={2} placeholder="Explica por qué registrar esta referencia que ya existe…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#F59E0B' }} />
+            </PagoField>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
+          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
+          <button onClick={handleSubmit} disabled={pending || loadingNegocios} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
+            Registrar pago
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PagoField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[12px] font-semibold" style={{ color: '#374151' }}>{label}</span>
+      {children}
+    </label>
   )
 }

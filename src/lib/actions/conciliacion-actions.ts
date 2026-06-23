@@ -917,13 +917,52 @@ export async function agregarPago(
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { success: false, error: ctx.error }
   const { supabase, workspaceId, staffId } = ctx
+  return registrarPagoEnNegocio(supabase, workspaceId, staffId, input, 'conciliacion')
+}
 
+/**
+ * Núcleo de registro de UN pago contra UN negocio. Fuente ÚNICA de la vía de pago:
+ * la usan tanto `agregarPago` (panel de conciliación, guard financiera) como
+ * `agregarPagoFab` (FAB global, guard por rol — `fab-pago-actions.ts`). NO duplicar
+ * esta lógica en otra vía: todas las barreras (validación ePayco real con override
+ * justificado, duplicado no-split, saldo del negocio vía cobros, des-conciliar al
+ * cambiar el cobrado) viven aquí.
+ *
+ * El guard de permisos lo aplica el CALLER antes de invocar esta función. `origen`
+ * solo etiqueta el activity_log para trazabilidad ('conciliacion' | 'fab') — cuando
+ * es 'fab' deja además un registro explícito de que el pago entró por el FAB global
+ * (un comercial pudo registrar un pago sobre un negocio fuera de su etapa/área).
+ */
+export async function registrarPagoEnNegocio(
+  supabase: unknown,
+  workspaceId: string,
+  staffId: string | null,
+  input: AgregarPagoInput,
+  origen: 'conciliacion' | 'fab' = 'conciliacion',
+): Promise<
+  | { success: true }
+  | { success: false; error: string; code?: 'epayco_no_aprobada' | 'referencia_duplicada'; negocio_existente?: { codigo: string | null } }
+> {
   const negocioId = input.negocio_id
   if (!negocioId) return { success: false, error: 'Elige el negocio al que se asigna el pago' }
 
   const { data: neg } = await db(supabase)
     .from('negocios').select('id').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
   if (!neg) return { success: false, error: 'Negocio no encontrado' }
+
+  // Traza de origen FAB (autor = staff real). Va ADEMÁS del cobro creado abajo:
+  // deja constancia de "un comercial registró un pago vía FAB sobre un negocio fuera
+  // de su etapa". Solo cuando el insert del cobro tuvo éxito (se llama al final).
+  const logFabOrigen = async (refTxt: string) => {
+    if (origen !== 'fab' || !staffId) return
+    try {
+      await db(supabase).from('activity_log').insert({
+        workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: negocioId,
+        tipo: 'comentario', autor_id: staffId,
+        contenido: `Pago registrado desde el FAB global (origen: fab) — Ref ${refTxt}, fuente ${input.fuente === 'otra' ? (input.fuente_nombre ?? 'otra') : input.fuente}.`,
+      })
+    } catch { /* no bloquear por el log */ }
+  }
 
   const referencia = (input.referencia ?? '').trim()
   if (!referencia) return { success: false, error: 'La referencia del pago es obligatoria' }
@@ -977,6 +1016,7 @@ export async function agregarPago(
       fuente: 'epayco', notas: `Pago ePayco — Ref ${refNum}`,
     })
     if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar el pago' }
+    await logFabOrigen(String(refNum))
   } else {
     const monto = Number(input.monto)
     if (!Number.isFinite(monto) || monto <= 0) return { success: false, error: 'El monto debe ser mayor a cero' }
@@ -996,6 +1036,7 @@ export async function agregarPago(
       fuente: fuenteValor, notas: `Pago ${fuenteValor} — Ref ${referencia}`,
     })
     if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar el pago' }
+    await logFabOrigen(referencia)
   }
 
   await db(supabase)
