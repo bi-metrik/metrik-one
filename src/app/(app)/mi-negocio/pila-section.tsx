@@ -4,6 +4,7 @@ import { useState, useTransition, useRef, useEffect } from 'react'
 import { Upload, FileText, AlertTriangle, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { uploadPlanillaPila, deletePlanillaPila, listPlanillasPila, type PlanillaPilaRow } from './pila-actions'
+import { useFileDrop } from '@/hooks/use-file-drop'
 
 const MESES_NOMBRES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -38,6 +39,21 @@ export default function PilaSection({ anioActual = new Date().getFullYear() }: P
   const [monto, setMonto] = useState<string>('')
   const [pending, startTransition] = useTransition()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [droppedName, setDroppedName] = useState<string | null>(null)
+
+  // Drop en el modal: escribe el archivo soltado en el <input name="file"> via
+  // DataTransfer para que el form-submit existente lo recoja igual que el picker.
+  const pilaDrop = useFileDrop({
+    onFiles: files => {
+      if (fileInputRef.current) {
+        const dt = new DataTransfer()
+        dt.items.add(files[0])
+        fileInputRef.current.files = dt.files
+        setDroppedName(files[0].name)
+      }
+    },
+    disabled: pending,
+  })
 
   // Recarga planillas cuando cambia el anio
   useEffect(() => {
@@ -63,6 +79,7 @@ export default function PilaSection({ anioActual = new Date().getFullYear() }: P
   function cerrarUpload() {
     setMesAbierto(null)
     setMonto('')
+    setDroppedName(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -221,7 +238,12 @@ export default function PilaSection({ anioActual = new Date().getFullYear() }: P
             </div>
 
             <form onSubmit={handleUpload} className="space-y-3">
-              <div>
+              <div
+                {...pilaDrop.dropProps}
+                className={`rounded-md border border-dashed p-3 transition-colors ${
+                  pilaDrop.isDragging ? 'border-primary bg-primary/5' : 'border-border'
+                }`}
+              >
                 <label className="text-xs font-medium block mb-1">Archivo (PDF o imagen)</label>
                 <input
                   ref={fileInputRef}
@@ -231,7 +253,9 @@ export default function PilaSection({ anioActual = new Date().getFullYear() }: P
                   required
                   className="text-xs w-full"
                 />
-                <div className="text-xs text-muted-foreground mt-1">Máx 10MB</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {droppedName ? `Archivo: ${droppedName}` : pilaDrop.isDragging ? 'Suelta el archivo aquí' : 'Toca o arrastra · Máx 10MB'}
+                </div>
               </div>
 
               <div>
