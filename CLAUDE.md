@@ -332,6 +332,33 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-06-22→23 (`soena` — Max — **flujo financiero (pago externo, validación/causación ePayco, conciliación)** + fix multi-pago + quick-wins UX)
+**Branch:** `main` (deploy Vercel) · commits `474f302` `5a0a494` `b08f8f5` `3505fbc` `dadf780` `02af942` `9dc59d4` `811a481`
+
+Disparado por la reunión SOENA-Diana, pero **todo genérico/opt-in** (otros workspaces sin cambio). Detalle de config SOENA en `proyectos/soena/ve/`.
+
+### Pago externo no-ePayco (genérico) — `474f302`
+- `tipo_cobro='externo'` (constraint `cobros_tipo_cobro_check` ampliado, migración `20260622000001`) para pagos que NO entran por ePayco. Server action `registrarPagoExterno` + `BloquePagoExterno.tsx`; opt-in por `config_extra.es_pago_externo` en un bloque `datos`. `cobros` no tiene retefuente/reteica separadas → suma en `retencion`, desglose en `notas`. Cuenta para el saldo (no filtra por tipo).
+
+### Validación de referencia ePayco (genérico) — `5a0a494`
+- En `epayco-actions.ts`: bloquea referencias con estado real ≠ `'Aceptada'` (no crea cobro) y **duplicadas** (mismo `external_ref` en cualquier negocio del ws) con **override por justificación** (se anota en `activity_log`). Re-consulta ePayco server-side (barrera real). Opt-in `config_extra.validar_epayco`.
+
+### Discriminado de costos ePayco en causación (genérico) — `b08f8f5`
+- El cargo ePayco (comisión + IVA + retefuente + reteica) ya llega discriminado. AHORA se registran 2 gastos: comisión → `categoria='comision'` `clasificacion='variable'` (entra a MC); IVA+retef+reteica → `categoria='impuestos_recuperables'` `clasificacion='no_operativo'` → **excluido de MC/EBITDA** por `v_pyl_mes`/`v_mc_negocio` ("otra bolsa", impuestos a favor). Constraint `gastos.categoria` ampliado (migración `20260622000002`). Desglose fino en `cobros.split_json`. Opt-in `config_extra.causar_comision_epayco`.
+
+### Panel de conciliación + badge/etiqueta (genérico, opt-in `modules.conciliacion`) — `3505fbc` `dadf780` `02af942`
+- Ruta `/conciliacion` (área financiera): tabla Referencia/Valor pagado/Valor negocio/Diferencia; **reparto de un pago entre N negocios sin duplicar** (cobros con mismo `external_ref` + `split_json.split_id`; `buscarReferenciaDuplicada` reconoce el split como legítimo, no duplicado). Gate `conciliacion_diana` (bloquea avanzar de stage `cobro` hasta diferencia=0 + check) + tabla `negocio_conciliacion`. Migración `20260622000003`.
+- **Badge** en nav + **etiqueta** del comercial (`activity_log` tipos `solicitud_conciliacion`/`conciliacion_atendida`, CHECK ampliado) via RPC `count_negocios_por_conciliar` (migración `20260622000004`). **Gotcha de scope:** "por conciliar" = negocio `stage_actual='cobro'` sin check + etiquetados + sobrepago + conciliados; NO todo abierto con diferencia≠0 (eso infla con el pipeline temprano = "por cobrar"). Aplica al badge Y al panel.
+
+### Fix multi-pago: registrar segundo pago real (genérico) — `9dc59d4`
+- `autoCrearCobrosMulti` usaba `external_ref` como Set para idempotencia → dos abonos reales con la misma referencia (o ref vacía) hacían que el filtro descartara AMBOS (`nuevos=[]`), el 2º nunca se insertaba. Ahora idempotencia por multiplicidad `(external_ref, monto_centavos)`: inserta solo el delta faltante. Preserva anti-doble-click; registra segundos pagos reales.
+
+### Quick-wins UX (genérico) — `811a481`
+- Filtro de ciudad en `/negocios` (config `negocio_card.ciudad_campo`). `BloqueDocumento`: opt-in `config_extra.editar_extraidos` → campos con `alerta_revision` editables aun en modo readonly (reusa `actualizarCampoDocumento`). Componente `src/components/ui/info-tooltip.tsx` (Radix, tokens MeTRIK) + campo `ayuda` opt-in en BloqueDatos. Tarjeta de negocio: `campos_visibles` config-driven.
+- **Nota de datos (no producto):** los bloques `documento` readonly NO deben persistir archivo propio (deben resolver por herencia del origen vía override en `getNegocioDetalleCompleto`); una ruta vieja persistió data corrupta en copias readonly — pendiente evaluar un guard que impida `procesarDocumento` escribir en instancias `estado='visible'` con `source_etapa_orden`.
+
+---
+
 **Sesion:** 2026-06-22 (`soena` — Max — **extracción IA de campo desde pantallazo (`imagen_clipboard`)** + dedupe `auth.getUser()`)
 **Branch:** `main` (deploy Vercel) · commits `a145376` `4457d83`
 
