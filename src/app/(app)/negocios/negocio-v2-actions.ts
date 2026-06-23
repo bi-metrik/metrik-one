@@ -1715,6 +1715,40 @@ export async function cambiarEtapaNegocioConGate(
         }
       }
     }
+
+    // Gate custom: conciliacion_diana — el negocio NO avanza hasta que su diferencia
+    // (precio - cobrado) sea 0 Y el área financiera (Diana) dé el check en el panel
+    // de conciliación (fila conciliada en negocio_conciliacion). Opt-in por etapa
+    // (config_extra.gates) → workspaces sin el gate no cambian. Mensaje configurable
+    // en config_extra.gate_messages['conciliacion_diana'].
+    if (etapaGates.includes('conciliacion_diana')) {
+      const [negConcRes, cobrosConcRes, checkRes] = await Promise.all([
+        db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
+        supabase.from('cobros').select('monto').eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
+        db(supabase)
+          .from('negocio_conciliacion')
+          .select('conciliado')
+          .eq('negocio_id', negocioId)
+          .eq('workspace_id', workspaceId)
+          .maybeSingle(),
+      ])
+      const negConc = negConcRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+      const precioConc = negConc?.precio_aprobado ?? negConc?.precio_estimado ?? 0
+      const totalCobradoConc = ((cobrosConcRes.data ?? []) as Array<{ monto: number }>)
+        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+      const diferenciaConc = precioConc - totalCobradoConc
+      const conciliado = (checkRes.data as { conciliado: boolean } | null)?.conciliado === true
+
+      const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+      if (Math.abs(diferenciaConc) > 1 || !conciliado) {
+        const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+        const defaultMsg = !conciliado && Math.abs(diferenciaConc) <= 1
+          ? 'Falta el check de conciliación del área financiera'
+          : `Conciliación pendiente (diferencia: ${fmt.format(diferenciaConc)})`
+        const nombre = gateMessages['conciliacion_diana'] ?? defaultMsg
+        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+      }
+    }
   }
 
   // Skip etapa cobro cuando el pago ya está saldado — si el destino tiene stage='cobro',

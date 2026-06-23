@@ -106,6 +106,13 @@ export async function consultarEpayco(
 /**
  * Busca si una referencia ePayco ya está registrada como cobro en CUALQUIER
  * negocio del workspace actual. Retorna el negocio donde existe, o null.
+ *
+ * Excluye los cobros marcados como **split deliberado** (`split_json.split_id`):
+ * el panel de conciliación (F2) reparte un mismo pago entre varios negocios y
+ * crea un cobro con el MISMO `external_ref` en cada uno. Ese reparto es la vía
+ * sancionada (caso 1 de Diana) → NO es un duplicado accidental. Sin esta
+ * exclusión, F3 bloquearía un split legítimo como si fuera una referencia
+ * repetida por error.
  */
 async function buscarReferenciaDuplicada(refPayco: number): Promise<NegocioExistente | null> {
   const { supabase, workspaceId } = await getWorkspace()
@@ -117,6 +124,10 @@ async function buscarReferenciaDuplicada(refPayco: number): Promise<NegocioExist
     .eq('workspace_id', workspaceId)
     .eq('external_ref', String(refPayco))
     .not('negocio_id', 'is', null)
+    // Un cobro que es parte de un split deliberado lleva split_json.split_id ≠ null.
+    // `split_json->>split_id IS NULL` deja pasar solo cobros NO-split como dueños
+    // legítimos de la referencia. Cobros con split_id no cuentan como duplicado.
+    .is('split_json->>split_id', null)
     .limit(1)
     .maybeSingle()
 

@@ -50,6 +50,7 @@ interface WorkspaceModules {
   valida_consulta?: boolean
   cobros_recurrentes?: boolean
   cert_qr?: boolean
+  conciliacion?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -88,6 +89,8 @@ const BUSINESS_NAV_ITEMS = [
 // Cuentas de cobro condicional a modules.cobros_recurrentes.
 const CAJA_MOVIMIENTOS_ITEM = { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] }
 const CAJA_COBROS_ITEM = { href: '/cobros-recurrentes', label: 'Cuentas de cobro', icon: Receipt, roles: ['owner', 'admin'] }
+// Conciliación condicional a modules.conciliacion (área financiera concilia).
+const CAJA_CONCILIACION_ITEM = { href: '/conciliacion', label: 'Conciliación', icon: Scale, roles: ['owner', 'admin', 'supervisor'] }
 
 // 2026-04-27: Causacion → Revision (flag binario, sin formularios fiscales)
 const CONTABILIDAD_NAV_ITEMS = [
@@ -291,6 +294,7 @@ export default function AppShell({
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = [
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
+    ...(mod.conciliacion && roleAllowed(CAJA_CONCILIACION_ITEM.href, CAJA_CONCILIACION_ITEM.roles) ? [CAJA_CONCILIACION_ITEM] : []),
     ...(mod.cobros_recurrentes && roleAllowed(CAJA_COBROS_ITEM.href, CAJA_COBROS_ITEM.roles) ? [CAJA_COBROS_ITEM] : []),
   ]
   const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
