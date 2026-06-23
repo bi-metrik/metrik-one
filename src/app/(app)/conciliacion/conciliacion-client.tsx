@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import {
   agregarPago,
-  repartirSobrepago,
+  setPorcionReferencia,
   conciliarReferencia,
   aceptarDuplicado,
   type ConciliacionV2,
@@ -308,93 +308,15 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
 // ════════════════════════════════════════════════════════════════════════════
 
 function TabPorConciliar({ data, onDone }: { data: ConciliacionV2; onDone: () => void }) {
-  const [pending, startTransition] = useTransition()
-  const [repartirRef, setRepartirRef] = useState<SobrepagoRef | null>(null)
-
-  function handleConciliar(negocioId: string) {
-    startTransition(async () => {
-      const res = await conciliarReferencia(negocioId)
-      if (res.success) { toast.success('Referencia conciliada'); onDone() }
-      else toast.error(res.error)
-    })
-  }
-
   if (data.sobrepagos.length === 0 && data.porDevolver.length === 0) {
     return <Empty>No hay referencias con sobrepago por conciliar.</Empty>
   }
 
   return (
-    <div className="space-y-6">
-      {data.sobrepagos.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border" style={{ borderColor: '#E5E7EB' }}>
-          <table className="w-full text-left text-[13px]">
-            <thead>
-              <tr className="border-b" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
-                <th className="px-3 py-2 font-semibold">Referencia / negocio</th>
-                <th className="px-3 py-2 text-right font-semibold">Pagado</th>
-                <th className="px-3 py-2 text-right font-semibold">Valor negocio</th>
-                <th className="px-3 py-2 text-right font-semibold">Remanente</th>
-                <th className="px-3 py-2 text-center font-semibold">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.sobrepagos.map((s) => {
-                const cuadrado = s.remanente <= 1
-                return (
-                  <tr key={`${s.external_ref}-${s.negocio_id}`} className="border-b last:border-0 align-top" style={{ borderColor: '#F3F4F6' }}>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{s.external_ref}</span>
-                        {s.fuente && <FuenteBadge fuente={s.fuente} />}
-                      </div>
-                      <Link href={`/negocios/${s.negocio_id}`} className="group mt-1 inline-flex items-center gap-1 text-[12px]">
-                        <span className="font-semibold" style={{ color: '#1A1A1A' }}>{s.negocio_codigo ?? '—'}</span>
-                        <span style={{ color: '#6B7280' }}>{s.negocio_nombre ?? ''}</span>
-                        <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
-                      </Link>
-                      {/* Reparto INLINE */}
-                      {!cuadrado && (
-                        <button
-                          onClick={() => setRepartirRef(s)}
-                          className="mt-2 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition hover:bg-emerald-50"
-                          style={{ borderColor: VERDE, color: VERDE }}
-                        >
-                          <ArrowRightLeft className="h-3 w-3" /> Repartir saldo
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(s.valor_pagado)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(s.precio_negocio)}</td>
-                    <td className="px-3 py-2 text-right">
-                      {cuadrado ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                          <CheckCircle2 className="h-3 w-3" /> $0
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">
-                          {fmtCOP(s.remanente)}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        disabled={pending || !cuadrado}
-                        onClick={() => handleConciliar(s.negocio_id)}
-                        title={cuadrado ? 'Dar el check de conciliación' : 'Reparte el remanente hasta $0 antes de conciliar'}
-                        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40"
-                        style={{ borderColor: cuadrado ? VERDE : '#E5E7EB', color: cuadrado ? VERDE : '#9CA3AF' }}
-                      >
-                        {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                        Conciliar
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+    <div className="space-y-4">
+      {data.sobrepagos.map((s) => (
+        <SobrepagoCard key={s.external_ref} sobrepago={s} candidatos={data.negociosConSaldo} onDone={onDone} />
+      ))}
 
       {/* Sub-listado de devoluciones pendientes */}
       {data.porDevolver.length > 0 && (
@@ -422,15 +344,177 @@ function TabPorConciliar({ data, onDone }: { data: ConciliacionV2; onDone: () =>
           </p>
         </section>
       )}
+    </div>
+  )
+}
 
-      {repartirRef && (
-        <RepartirModal
-          sobrepago={repartirRef}
-          candidatos={data.negociosConSaldo}
-          onClose={() => setRepartirRef(null)}
-          onDone={() => { setRepartirRef(null); onDone() }}
-        />
-      )}
+// ── Tarjeta de un sobrepago: reparto editable inline + conciliar ──────────────
+
+function SobrepagoCard({
+  sobrepago: s,
+  candidatos,
+  onDone,
+}: {
+  sobrepago: SobrepagoRef
+  candidatos: NegocioParaSplit[]
+  onDone: () => void
+}) {
+  const [pending, startTransition] = useTransition()
+  const [nuevoNegocio, setNuevoNegocio] = useState('')
+  const [nuevoMonto, setNuevoMonto] = useState('')
+
+  const cuadrado = s.remanente <= 1
+  const idsAsignados = new Set(s.asignaciones.map((a) => a.negocio_id))
+  // Candidatos: negocios con saldo, que no sean el origen ni ya estén asignados.
+  const disponibles = candidatos.filter((c) => c.negocio_id !== s.negocio_id && !idsAsignados.has(c.negocio_id))
+
+  function guardarPorcion(negocioId: string, monto: number) {
+    startTransition(async () => {
+      const res = await setPorcionReferencia({ external_ref: s.external_ref, negocio_id: negocioId, monto })
+      if (res.success) onDone()
+      else toast.error(res.error)
+    })
+  }
+
+  function agregar() {
+    if (!nuevoNegocio) return toast.error('Elige el negocio')
+    const monto = Number(nuevoMonto)
+    if (!monto || monto <= 0) return toast.error('Ingresa el monto a asignar')
+    if (monto > s.remanente + 1) return toast.error('No puedes asignar más que el remanente')
+    startTransition(async () => {
+      const res = await setPorcionReferencia({ external_ref: s.external_ref, negocio_id: nuevoNegocio, monto })
+      if (res.success) { setNuevoNegocio(''); setNuevoMonto(''); onDone() }
+      else toast.error(res.error)
+    })
+  }
+
+  function elegirNuevo(id: string) {
+    setNuevoNegocio(id)
+    const cand = disponibles.find((c) => c.negocio_id === id)
+    const sugerido = cand ? Math.min(cand.diferencia, s.remanente) : s.remanente
+    setNuevoMonto(sugerido > 0 ? String(sugerido) : '')
+  }
+
+  return (
+    <div className="rounded-lg border" style={{ borderColor: cuadrado ? '#A7F3D0' : '#FECACA' }}>
+      {/* Encabezado: referencia + pago + remanente */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: '#F3F4F6' }}>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{s.external_ref}</span>
+          {s.fuente && <FuenteBadge fuente={s.fuente} small />}
+          <span className="text-[12px]" style={{ color: '#6B7280' }}>
+            Pagó <span className="font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(s.valor_pagado)}</span>
+          </span>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>Remanente</div>
+          {cuadrado ? (
+            <div className="inline-flex items-center gap-1 text-[15px] font-bold text-emerald-600">
+              <CheckCircle2 className="h-4 w-4" /> $0
+            </div>
+          ) : (
+            <div className="text-[15px] font-bold tabular-nums" style={{ color: '#DC2626' }}>{fmtCOP(s.remanente)}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-3 px-4 py-3">
+        {/* Asignaciones agrupadas por negocio (editables) */}
+        <div className="space-y-1.5">
+          {s.asignaciones.map((a) => (
+            <div key={a.negocio_id ?? 'sin'} className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <Link href={`/negocios/${a.negocio_id}`} className="group inline-flex items-center gap-1 text-[13px]">
+                  <span className="font-semibold" style={{ color: '#1A1A1A' }}>{a.codigo ?? '—'}</span>
+                  <span className="truncate" style={{ color: '#6B7280' }}>{a.nombre ?? ''}</span>
+                  <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
+                </Link>
+                {a.es_origen && (
+                  <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase" style={{ color: '#6B7280' }}>Origen</span>
+                )}
+              </div>
+              <input
+                key={`${a.negocio_id}-${a.monto}`}
+                defaultValue={a.monto}
+                onBlur={(e) => {
+                  const v = Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)
+                  if (v !== a.monto) guardarPorcion(a.negocio_id as string, v)
+                }}
+                inputMode="numeric"
+                disabled={pending}
+                className="w-32 rounded-md border px-2 py-1 text-right text-[13px] tabular-nums outline-none disabled:opacity-50"
+                style={{ borderColor: '#E5E7EB' }}
+              />
+              {!a.es_origen && (
+                <button
+                  onClick={() => guardarPorcion(a.negocio_id as string, 0)}
+                  disabled={pending}
+                  title="Quitar esta asignación (el monto vuelve al remanente)"
+                  className="rounded p-1 hover:bg-gray-100 disabled:opacity-30"
+                >
+                  <Trash2 className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Agregar un negocio nuevo al reparto */}
+        {!cuadrado && (
+          <div className="flex items-center gap-2 border-t pt-3" style={{ borderColor: '#F3F4F6' }}>
+            <select
+              value={nuevoNegocio}
+              onChange={(e) => elegirNuevo(e.target.value)}
+              disabled={pending}
+              className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[12px] outline-none disabled:opacity-50"
+              style={{ borderColor: '#E5E7EB' }}
+            >
+              <option value="">Asignar remanente a otro negocio…</option>
+              {disponibles.map((c) => (
+                <option key={c.negocio_id} value={c.negocio_id}>{c.codigo ?? c.nombre} · falta {fmtCOP(c.diferencia)}</option>
+              ))}
+            </select>
+            <input
+              value={nuevoMonto}
+              onChange={(e) => setNuevoMonto(e.target.value.replace(/[^\d]/g, ''))}
+              inputMode="numeric"
+              placeholder="monto"
+              disabled={pending}
+              className="w-32 rounded-md border px-2 py-1.5 text-right text-[12px] tabular-nums outline-none disabled:opacity-50"
+              style={{ borderColor: '#E5E7EB' }}
+            />
+            <button
+              onClick={agregar}
+              disabled={pending || !nuevoNegocio}
+              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+              style={{ backgroundColor: VERDE }}
+            >
+              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Asignar
+            </button>
+          </div>
+        )}
+
+        {/* Conciliar (solo en remanente $0) */}
+        <div className="flex items-center justify-between gap-2 border-t pt-3" style={{ borderColor: '#F3F4F6' }}>
+          <span className="text-[11px]" style={{ color: '#9CA3AF' }}>
+            {cuadrado ? 'Todo el pago quedó repartido. Ya puedes conciliar.' : 'Reparte el remanente hasta $0 para poder conciliar.'}
+          </span>
+          <button
+            disabled={pending || !cuadrado}
+            onClick={() => startTransition(async () => {
+              const res = await conciliarReferencia(s.external_ref, s.negocio_id)
+              if (res.success) { toast.success('Referencia conciliada'); onDone() }
+              else toast.error(res.error)
+            })}
+            className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ borderColor: cuadrado ? VERDE : '#E5E7EB', color: cuadrado ? VERDE : '#9CA3AF' }}
+          >
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+            Conciliar
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -792,133 +876,6 @@ function AgregarPagoModal({
           <button onClick={handleSubmit} disabled={pending} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Registrar pago
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Modal — Repartir saldo (inline desde la fila del sobrepago)
-// ════════════════════════════════════════════════════════════════════════════
-
-type Linea = { negocio_id: string; monto: string }
-
-function RepartirModal({
-  sobrepago,
-  candidatos,
-  onClose,
-  onDone,
-}: {
-  sobrepago: SobrepagoRef
-  candidatos: NegocioParaSplit[]
-  onClose: () => void
-  onDone: () => void
-}) {
-  const [lineas, setLineas] = useState<Linea[]>([{ negocio_id: '', monto: '' }])
-  const [porDevolver, setPorDevolver] = useState('')
-  const [pending, startTransition] = useTransition()
-
-  const remanente = sobrepago.remanente
-  const sumaLineas = lineas.reduce((s, l) => s + (Number(l.monto) || 0), 0)
-  const devolver = Number(porDevolver) || 0
-  const asignado = sumaLineas + devolver
-  const restante = remanente - asignado
-
-  // Candidatos excluyen el negocio de origen.
-  const disponibles = candidatos.filter((c) => c.negocio_id !== sobrepago.negocio_id)
-
-  function setLinea(i: number, patch: Partial<Linea>) {
-    setLineas((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
-  }
-  function fill(i: number, negocioId: string) {
-    const cand = disponibles.find((c) => c.negocio_id === negocioId)
-    const sugerido = cand ? Math.min(cand.diferencia, Math.max(0, remanente - (sumaLineas - (Number(lineas[i].monto) || 0)) - devolver)) : 0
-    setLinea(i, { negocio_id: negocioId, monto: sugerido > 0 ? String(sugerido) : '' })
-  }
-
-  function handleSubmit() {
-    const porciones = lineas.filter((l) => l.negocio_id && Number(l.monto) > 0).map((l) => ({ negocio_id: l.negocio_id, monto: Number(l.monto) }))
-    if (porciones.length === 0 && devolver <= 0) return toast.error('Asigna una porción o un monto por devolver')
-    if (restante < -1) return toast.error('Lo asignado supera el remanente')
-    if (new Set(porciones.map((p) => p.negocio_id)).size !== porciones.length) return toast.error('No repitas el mismo negocio')
-
-    startTransition(async () => {
-      const res = await repartirSobrepago({
-        external_ref: sobrepago.external_ref,
-        negocio_origen_id: sobrepago.negocio_id,
-        porciones,
-        por_devolver: devolver > 0 ? devolver : undefined,
-      })
-      if (res.success) { toast.success('Remanente repartido'); onDone() }
-      else toast.error(res.error)
-    })
-  }
-
-  const dispParaLinea = (actualId: string) =>
-    disponibles.filter((c) => c.negocio_id === actualId || !lineas.some((l) => l.negocio_id === c.negocio_id))
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" style={FONT}>
-      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
-        <div className="flex shrink-0 items-center justify-between border-b px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
-          <div className="flex items-center gap-2">
-            <ArrowRightLeft className="h-4 w-4" style={{ color: VERDE }} />
-            <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>Repartir saldo · {sobrepago.external_ref}</h3>
-          </div>
-          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: '#6B7280' }} /></button>
-        </div>
-
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          <div className="rounded-md p-3 text-[12px]" style={{ backgroundColor: '#FEF2F2' }}>
-            Remanente por repartir: <span className="font-bold tabular-nums" style={{ color: '#DC2626' }}>{fmtCOP(remanente)}</span>
-            <span className="ml-1" style={{ color: '#9CA3AF' }}>(pagó {fmtCOP(sobrepago.valor_pagado)}, vale {fmtCOP(sobrepago.precio_negocio)})</span>
-          </div>
-
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>Asignar a otros negocios</span>
-              <button onClick={() => setLineas((ls) => [...ls, { negocio_id: '', monto: '' }])} className="inline-flex items-center gap-1 text-[12px] font-semibold" style={{ color: VERDE }}>
-                <Plus className="h-3.5 w-3.5" /> Agregar
-              </button>
-            </div>
-            <div className="space-y-2">
-              {lineas.map((l, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <select value={l.negocio_id} onChange={(e) => fill(i, e.target.value)} className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[12px] outline-none" style={{ borderColor: '#E5E7EB' }}>
-                    <option value="">Elige negocio…</option>
-                    {dispParaLinea(l.negocio_id).map((c) => (
-                      <option key={c.negocio_id} value={c.negocio_id}>{c.codigo ?? c.nombre} · falta {fmtCOP(c.diferencia)}</option>
-                    ))}
-                  </select>
-                  <input value={l.monto} onChange={(e) => setLinea(i, { monto: e.target.value.replace(/[^\d]/g, '') })} inputMode="numeric" placeholder="monto" className="w-28 rounded-md border px-2 py-1.5 text-right text-[12px] tabular-nums outline-none" style={{ borderColor: '#E5E7EB' }} />
-                  <button onClick={() => setLineas((ls) => (ls.length === 1 ? ls : ls.filter((_, idx) => idx !== i)))} disabled={lineas.length === 1} className="rounded p-1 hover:bg-gray-100 disabled:opacity-30">
-                    <Trash2 className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Field label="O marcar por devolver al cliente">
-            <input value={porDevolver} onChange={(e) => setPorDevolver(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="0" className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none" style={{ borderColor: '#E5E7EB' }} />
-          </Field>
-
-          <div className="rounded-md p-3 text-[12px]" style={{ backgroundColor: '#F9FAFB' }}>
-            <div className="flex justify-between"><span style={{ color: '#6B7280' }}>Asignado</span><span className="tabular-nums font-semibold">{fmtCOP(asignado)}</span></div>
-            <div className="mt-1 flex justify-between border-t pt-1" style={{ borderColor: '#E5E7EB' }}>
-              <span style={{ color: '#6B7280' }}>{restante < 0 ? 'Excede el remanente' : 'Sin asignar'}</span>
-              <span className={`tabular-nums font-bold ${restante < -1 ? 'text-red-600' : Math.abs(restante) <= 1 ? 'text-emerald-600' : 'text-amber-600'}`}>{fmtCOP(Math.abs(restante))}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
-          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
-          <button onClick={handleSubmit} disabled={pending || restante < -1} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
-            Repartir
           </button>
         </div>
       </div>

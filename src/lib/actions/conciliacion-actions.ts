@@ -518,6 +518,10 @@ export interface RefPorcion {
   monto: number
   /** true si es un remanente marcado "por devolver al cliente". */
   por_devolver: boolean
+  /** true si este cobro nació de repartir un sobrepago (no es el pago original). */
+  es_reparto: boolean
+  /** Valor total del pago de la referencia, persistido en el cobro de origen. */
+  ref_total: number | null
 }
 
 /** Una referencia de pago cargada al workspace, con sus porciones. */
@@ -549,6 +553,19 @@ export interface NegocioSaldo {
   conciliado: boolean
 }
 
+/** Un negocio al que se le asignó una porción del pago de una referencia. */
+export interface AsignacionRef {
+  negocio_id: string | null
+  codigo: string | null
+  nombre: string | null
+  /** Monto del pago asignado a este negocio. */
+  monto: number
+  /** true si es el negocio donde cayó el pago originalmente. */
+  es_origen: boolean
+  /** Saldo del negocio (precio - cobrado). >0 = aún le falta por cobrar. */
+  saldo: number
+}
+
 /** Una referencia con sobrepago para la pestaña POR CONCILIAR. */
 export interface SobrepagoRef {
   external_ref: string
@@ -557,13 +574,19 @@ export interface SobrepagoRef {
   negocio_id: string
   negocio_codigo: string | null
   negocio_nombre: string | null
+  /** Precio del negocio de origen (informativo). */
   precio_negocio: number
+  /** Valor total del pago de la referencia (constante). */
   valor_pagado: number
-  /** Lo ya repartido a otros negocios + marcado por devolver (valor absoluto). */
-  repartido: number
-  /** Remanente sin asignar = valor_pagado - precio_negocio - repartido. */
+  /** Suma de lo asignado a negocios. */
+  asignado: number
+  /** Lo marcado por devolver al cliente (valor absoluto). */
+  por_devolver_monto: number
+  /** Remanente sin asignar = valor_pagado - asignado - por_devolver. Conciliar requiere 0. */
   remanente: number
   conciliado: boolean
+  /** Negocios a los que está repartido el pago (incluye el de origen). */
+  asignaciones: AsignacionRef[]
 }
 
 /** Una referencia duplicada (cargada en varios negocios) para la pestaña DUPLICADOS. */
@@ -629,7 +652,7 @@ interface CobroRow {
   external_ref: string | null
   fuente: string | null
   fecha: string | null
-  split_json: { split_id?: string } | null
+  split_json: { split_id?: string; por_reparto?: boolean; ref_total?: number; por_devolver?: boolean } | null
 }
 
 async function cargarNegociosYCobros(
@@ -749,6 +772,8 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
         etapa_orden: neg?.etapa_orden ?? null,
         monto: r.monto ?? 0,
         por_devolver: r.tipo_cobro === 'devolucion_pendiente',
+        es_reparto: r.split_json?.por_reparto === true,
+        ref_total: r.split_json?.ref_total ?? null,
       }
     })
     const valorPagado = porciones.filter((p) => !p.por_devolver).reduce((s, p) => s + p.monto, 0)
@@ -765,44 +790,84 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
     })
   }
 
-  // Pestaña 1: SOBREPAGOS + por devolver
+  // Pestaña 1: SOBREPAGOS (por referencia) + por devolver (global)
+  //
+  // Una referencia es un sobrepago cuando su pago total supera el precio del
+  // negocio donde cayó (el "origen"). El pago se reparte como porciones editables
+  // entre varios negocios (anticipos parciales): el remanente = valor pagado -
+  // asignado - por devolver, y baja a medida que se asigna. Se concilia en $0.
   const sobrepagos: SobrepagoRef[] = []
   const porDevolver: RefPorcion[] = []
   for (const ref of referencias) {
-    for (const p of ref.porciones) {
-      if (p.por_devolver) porDevolver.push(p)
-    }
-  }
-  for (const [negId, neg] of negocios) {
-    if (neg.estado !== 'abierto') continue
-    const cob = cobrado.get(negId) ?? 0
-    if (cob > neg.precio + 1) {
-      const refsDelNegocio = referencias
-        .filter((r) => r.negocios_ids.includes(negId))
-        .sort((a, b) => b.valor_pagado - a.valor_pagado)
-      const refOwner = refsDelNegocio[0]
-      const valorPagado = cob
-      let repartido = 0
-      if (refOwner) {
-        for (const p of refOwner.porciones) {
-          if (p.por_devolver) repartido += Math.abs(p.monto)
-          else if (p.negocio_id && p.negocio_id !== negId) repartido += p.monto
-        }
+    for (const p of ref.porciones) if (p.por_devolver) porDevolver.push(p)
+
+    const pos = ref.porciones.filter((p) => !p.por_devolver && p.negocio_id)
+    if (pos.length === 0) continue
+    // El origen es la única porción que NO nació de un reparto (el pago original).
+    const nonReparto = pos.filter((p) => !p.es_reparto)
+    if (nonReparto.length !== 1) continue
+    const origin = nonReparto[0]
+    const negOrigin = origin.negocio_id ? negocios.get(origin.negocio_id) : null
+    if (!negOrigin || negOrigin.estado !== 'abierto') continue
+    const precioOrigen = negOrigin.precio
+
+    // ref_total: persistido en el cobro de origen una vez se materializa el reparto.
+    // Mientras está "fresco", el cobro de origen aún contiene todo el pago.
+    const materializado = origin.ref_total != null
+    const refTotal = materializado ? (origin.ref_total as number) : origin.monto
+    if (refTotal <= precioOrigen + 1) continue // no hay sobrepago
+
+    const conc = origin.negocio_id ? (conciliadoNegocio.get(origin.negocio_id) ?? false) : false
+    if (conc) continue // ya conciliado → sale de la pestaña
+
+    const devuelto = ref.porciones
+      .filter((p) => p.por_devolver)
+      .reduce((s, p) => s + Math.abs(p.monto), 0)
+
+    const asignaciones: AsignacionRef[] = []
+    if (materializado) {
+      for (const p of pos) {
+        const neg = p.negocio_id ? negocios.get(p.negocio_id) : null
+        const cob = cobrado.get(p.negocio_id ?? '') ?? 0
+        asignaciones.push({
+          negocio_id: p.negocio_id,
+          codigo: p.negocio_codigo,
+          nombre: p.negocio_nombre,
+          monto: p.monto,
+          es_origen: p.negocio_id === origin.negocio_id,
+          saldo: neg ? neg.precio - cob : 0,
+        })
       }
-      const remanente = valorPagado - neg.precio - repartido
-      sobrepagos.push({
-        external_ref: refOwner?.external_ref ?? '(sin referencia)',
-        fuente: refOwner?.fuente ?? null,
-        negocio_id: negId,
-        negocio_codigo: neg.codigo,
-        negocio_nombre: neg.nombre,
-        precio_negocio: neg.precio,
-        valor_pagado: valorPagado,
-        repartido,
-        remanente: Math.max(0, remanente),
-        conciliado: conciliadoNegocio.get(negId) ?? false,
+    } else {
+      // Fresco: por defecto el origen retiene su precio; el resto es remanente.
+      const cobOrig = cobrado.get(origin.negocio_id ?? '') ?? 0
+      asignaciones.push({
+        negocio_id: origin.negocio_id,
+        codigo: origin.negocio_codigo,
+        nombre: origin.negocio_nombre,
+        monto: Math.min(precioOrigen, refTotal),
+        es_origen: true,
+        saldo: negOrigin.precio - cobOrig,
       })
     }
+
+    const asignado = asignaciones.reduce((s, a) => s + a.monto, 0)
+    const remanente = Math.max(0, refTotal - asignado - devuelto)
+
+    sobrepagos.push({
+      external_ref: ref.external_ref,
+      fuente: ref.fuente,
+      negocio_id: origin.negocio_id as string,
+      negocio_codigo: origin.negocio_codigo,
+      negocio_nombre: origin.negocio_nombre,
+      precio_negocio: precioOrigen,
+      valor_pagado: refTotal,
+      asignado,
+      por_devolver_monto: devuelto,
+      remanente,
+      conciliado: conc,
+      asignaciones,
+    })
   }
 
   // Pestaña 2: SALDOS + Pestaña 4: CONCILIADOS (saldo 0)
@@ -1186,17 +1251,187 @@ export async function repartirSobrepago(
   return { success: true }
 }
 
-// ── conciliarReferencia — Conciliar cuando el saldo de la referencia es $0 ────
+// ── setPorcionReferencia — asignar/editar/quitar la porción de un negocio ─────
+
+export interface SetPorcionInput {
+  external_ref: string
+  /** Negocio cuya porción del pago se fija (origen o destino). */
+  negocio_id: string
+  /** Monto del pago a dejar en ese negocio. 0 = quitar (si no es el origen). */
+  monto: number
+}
 
 /**
- * Concilia el negocio de ORIGEN de un sobrepago cuando su saldo quedó en $0 (todo el
- * remanente fue repartido y/o marcado por devolver). Reusa conciliarNegocio (que ya
- * valida diferencia=0 + escribe negocio_conciliacion + activity_log).
+ * Fija cuánto del pago de una referencia queda cargado a un negocio. Modelo de
+ * TRANSFERENCIA editable, sin duplicar el dinero:
+ *
+ *   - La primera acción "materializa" el sobrepago: persiste el valor total del pago
+ *     (`split_json.ref_total`) en el cobro de origen y baja ese cobro al precio del
+ *     negocio de origen, liberando el excedente como remanente.
+ *   - Asignar a un negocio destino crea/ajusta su cobro (mismo `external_ref` +
+ *     `split_id`, marcado `por_reparto`). Editar el origen ajusta su propio cobro.
+ *   - Nunca deja asignar más que el valor pagado: la suma de porciones ≤ ref_total.
+ *
+ * Permisos: solo área financiera (Diana) vía ctxFinanciero.
+ */
+export async function setPorcionReferencia(
+  input: SetPorcionInput,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId } = ctx
+
+  const ref = (input.external_ref ?? '').trim()
+  if (!ref) return { success: false, error: 'Referencia inválida' }
+  const target = input.negocio_id
+  if (!target) return { success: false, error: 'Elige el negocio' }
+  const monto = Math.round(Number(input.monto) || 0)
+  if (monto < 0) return { success: false, error: 'El monto no puede ser negativo' }
+
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros')
+    .select('id, negocio_id, monto, tipo_cobro, split_json, negocios:negocio_id ( precio_aprobado, precio_estimado )')
+    .eq('workspace_id', workspaceId)
+    .eq('external_ref', ref)
+  const all = (cobrosRaw ?? []) as Array<{
+    id: string; negocio_id: string | null; monto: number; tipo_cobro: string | null
+    split_json: { split_id?: string; por_reparto?: boolean; ref_total?: number } | null
+    negocios: { precio_aprobado: number | null; precio_estimado: number | null } | null
+  }>
+  const rows = all.filter((c) => c.tipo_cobro !== 'devolucion_pendiente')
+  if (rows.length === 0) return { success: false, error: 'No hay un pago con esa referencia' }
+
+  // Origen = cobro NO reparto (el pago original). Si hay varios, el de mayor monto.
+  const origen = rows.filter((c) => c.split_json?.por_reparto !== true).sort((a, b) => b.monto - a.monto)[0]
+  if (!origen?.negocio_id) return { success: false, error: 'No se pudo identificar el negocio de origen del pago' }
+  const precioOrigen = origen.negocios?.precio_aprobado ?? origen.negocios?.precio_estimado ?? 0
+
+  const splitId =
+    origen.split_json?.split_id ??
+    rows.find((c) => c.split_json?.split_id)?.split_json?.split_id ??
+    randomUUID()
+  const materializado = origen.split_json?.ref_total != null
+  const refTotal = materializado ? (origen.split_json!.ref_total as number) : origen.monto
+
+  // Materializar en la primera acción: fija ref_total y baja el origen a su precio.
+  if (!materializado) {
+    const nuevoMontoOrigen = Math.min(precioOrigen, refTotal)
+    await db(supabase).from('cobros')
+      .update({ monto: nuevoMontoOrigen, split_json: { ...(origen.split_json ?? {}), split_id: splitId, ref_total: refTotal } })
+      .eq('id', origen.id)
+    origen.monto = nuevoMontoOrigen
+  }
+
+  // Por devolver de la referencia (cobros negativos en el origen).
+  const devuelto = all
+    .filter((c) => c.tipo_cobro === 'devolucion_pendiente')
+    .reduce((s, c) => s + Math.abs(c.monto), 0)
+
+  // Tope: lo que ya está en otros negocios + lo por devolver no puede superar el pago.
+  const sumOtros = rows.filter((c) => c.negocio_id !== target).reduce((s, c) => s + c.monto, 0)
+  const maxTarget = refTotal - sumOtros - devuelto
+  if (monto > maxTarget + 1) {
+    return { success: false, error: `No puedes asignar más que el remanente disponible (${fmtCOP(Math.max(0, maxTarget))}).` }
+  }
+
+  const esOrigen = target === origen.negocio_id
+  const existing = rows.find((c) => c.negocio_id === target)
+
+  if (esOrigen) {
+    await db(supabase).from('cobros').update({ monto: Math.max(0, monto) }).eq('id', origen.id)
+  } else if (existing) {
+    if (monto <= 0) {
+      await db(supabase).from('cobros').delete().eq('id', existing.id)
+    } else {
+      await db(supabase).from('cobros')
+        .update({ monto, split_json: { ...(existing.split_json ?? {}), split_id: splitId, por_reparto: true, ref_total: refTotal } })
+        .eq('id', existing.id)
+    }
+  } else if (monto > 0) {
+    const { data: negOk } = await db(supabase)
+      .from('negocios').select('id').eq('id', target).eq('workspace_id', workspaceId).maybeSingle()
+    if (!negOk) return { success: false, error: 'El negocio no pertenece al workspace' }
+    const { error: insErr } = await db(supabase).from('cobros').insert({
+      workspace_id: workspaceId, negocio_id: target, monto,
+      tipo_cobro: 'pago', fecha: todayBogotaISO(), external_ref: ref,
+      split_json: { split_id: splitId, por_reparto: true, ref_total: refTotal },
+      notas: `Asignación del pago ${ref}`,
+    })
+    if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo asignar el pago' }
+  }
+
+  const tocados = Array.from(new Set([origen.negocio_id, target].filter(Boolean))) as string[]
+  await db(supabase).from('negocio_conciliacion')
+    .update({ conciliado: false, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspaceId).in('negocio_id', tocados)
+
+  for (const id of tocados) revalidatePath(`/negocios/${id}`)
+  revalidatePath('/conciliacion')
+  return { success: true }
+}
+
+// ── conciliarReferencia — Conciliar cuando el remanente de la referencia es $0 ─
+
+/**
+ * Concilia una referencia cuando todo su pago quedó repartido (remanente = $0).
+ * Valida sobre la REFERENCIA (no sobre la diferencia del negocio de origen, que
+ * puede quedar con saldo cuando el pago fue un anticipo parcial). Marca el check
+ * de conciliación en el negocio de origen → la referencia sale de "Por conciliar".
  */
 export async function conciliarReferencia(
+  externalRef: string,
   negocioOrigenId: string,
 ): Promise<{ success: true } | { success: false; error: string }> {
-  return conciliarNegocio(negocioOrigenId, true, 'Referencia conciliada desde el panel de conciliación.')
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const ref = (externalRef ?? '').trim()
+  if (!ref) return { success: false, error: 'Referencia inválida' }
+
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros')
+    .select('id, negocio_id, monto, tipo_cobro, split_json, negocios:negocio_id ( precio_aprobado, precio_estimado )')
+    .eq('workspace_id', workspaceId)
+    .eq('external_ref', ref)
+  const all = (cobrosRaw ?? []) as Array<{
+    negocio_id: string | null; monto: number; tipo_cobro: string | null
+    split_json: { por_reparto?: boolean; ref_total?: number } | null
+  }>
+  const pos = all.filter((c) => c.tipo_cobro !== 'devolucion_pendiente')
+  if (pos.length === 0) return { success: false, error: 'No hay un pago con esa referencia' }
+
+  const origen = pos.filter((c) => c.split_json?.por_reparto !== true).sort((a, b) => b.monto - a.monto)[0]
+  const refTotal = origen?.split_json?.ref_total ?? origen?.monto ?? 0
+  const asignado = pos.reduce((s, c) => s + c.monto, 0)
+  const devuelto = all.filter((c) => c.tipo_cobro === 'devolucion_pendiente').reduce((s, c) => s + Math.abs(c.monto), 0)
+  const remanente = refTotal - asignado - devuelto
+  if (remanente > 1) {
+    return { success: false, error: `Asigna todo el pago antes de conciliar — faltan ${fmtCOP(remanente)} por repartir.` }
+  }
+
+  await db(supabase).from('negocio_conciliacion').upsert(
+    {
+      workspace_id: workspaceId, negocio_id: negocioOrigenId, conciliado: true,
+      conciliado_por: staffId, conciliado_at: new Date().toISOString(),
+      nota: `Referencia ${ref} conciliada (pago repartido).`, updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'negocio_id' },
+  )
+
+  if (staffId) {
+    try {
+      await db(supabase).from('activity_log').insert({
+        workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: negocioOrigenId,
+        tipo: 'comentario', autor_id: staffId,
+        contenido: `Referencia ${ref} conciliada por el área financiera (${fmtCOP(refTotal)} repartidos).`,
+      })
+    } catch { /* no bloquear */ }
+  }
+
+  revalidatePath(`/negocios/${negocioOrigenId}`)
+  revalidatePath('/conciliacion')
+  return { success: true }
 }
 
 // ── aceptarDuplicado — resuelve una referencia duplicada ─────────────────────
