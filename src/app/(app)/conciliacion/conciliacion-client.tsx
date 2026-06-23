@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import {
   Scale, CheckCircle2, AlertTriangle, Loader2, X, Plus, Trash2, ExternalLink,
-  Search, Copy, Wallet, LayoutGrid, ArrowRightLeft, Undo2,
+  Search, Copy, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
 } from 'lucide-react'
 import {
   agregarPago,
@@ -18,6 +18,7 @@ import {
   type NegocioSaldo,
   type DuplicadoRef,
   type NegocioParaSplit,
+  type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
 
 const fmtCOP = (n: number) =>
@@ -140,24 +141,165 @@ function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey
     { label: 'Conciliados', value: m.conciliados, tab: 'conciliado', icon: <CheckCircle2 className="h-4 w-4" /> },
   ]
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      {tiles.map((t) => (
-        <button
-          key={t.label}
-          onClick={() => onTab(t.tab)}
-          className="rounded-lg border bg-white p-4 text-left transition hover:shadow-sm"
-          style={{ borderColor: t.danger ? '#FECACA' : '#E5E7EB' }}
-        >
-          <div className="flex items-center gap-1.5" style={{ color: t.danger ? '#DC2626' : '#6B7280' }}>
-            {t.icon}
-            <span className="text-[11px] font-semibold uppercase tracking-wide">{t.label}</span>
-          </div>
-          <div className="mt-2 text-2xl font-bold tabular-nums" style={{ color: t.danger && t.value > 0 ? '#DC2626' : '#1A1A1A' }}>
-            {t.value}
-          </div>
-        </button>
-      ))}
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {tiles.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => onTab(t.tab)}
+            className="rounded-lg border bg-white p-4 text-left transition hover:shadow-sm"
+            style={{ borderColor: t.danger ? '#FECACA' : '#E5E7EB' }}
+          >
+            <div className="flex items-center gap-1.5" style={{ color: t.danger ? '#DC2626' : '#6B7280' }}>
+              {t.icon}
+              <span className="text-[11px] font-semibold uppercase tracking-wide">{t.label}</span>
+            </div>
+            <div className="mt-2 text-2xl font-bold tabular-nums" style={{ color: t.danger && t.value > 0 ? '#DC2626' : '#1A1A1A' }}>
+              {t.value}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <RegistroReferencias referencias={data.referencias} />
     </div>
+  )
+}
+
+// ── Registro general de pagos por referencia (dentro de Vista general) ────────
+
+function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] }) {
+  const [q, setQ] = useState('')
+  const [abiertas, setAbiertas] = useState<Set<string>>(new Set())
+  const query = q.trim().toLowerCase()
+
+  const filtradas = useMemo(() => {
+    if (!query) return referencias
+    return referencias.filter((r) =>
+      [r.external_ref, r.fuente, ...r.porciones.flatMap((p) => [p.negocio_codigo, p.negocio_nombre])]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(query)),
+    )
+  }, [referencias, query])
+
+  function toggle(ref: string) {
+    setAbiertas((prev) => {
+      const next = new Set(prev)
+      if (next.has(ref)) next.delete(ref)
+      else next.add(ref)
+      return next
+    })
+  }
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#6B7280' }}>
+          <LayoutGrid className="h-3.5 w-3.5" /> Registro de pagos por referencia ({referencias.length})
+        </h2>
+      </div>
+      <p className="mb-3 text-[11px]" style={{ color: '#9CA3AF' }}>
+        Cada referencia de pago cargada al workspace, con el detalle de cuánto de ese valor quedó cargado a cada negocio.
+      </p>
+
+      <div className="mb-3 flex items-center gap-2 rounded-md border px-2.5 py-1.5" style={{ borderColor: '#E5E7EB' }}>
+        <Search className="h-4 w-4" style={{ color: '#9CA3AF' }} />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Busca por referencia, fuente o negocio…"
+          className="w-full text-[13px] outline-none"
+          style={{ color: '#1A1A1A' }}
+        />
+      </div>
+
+      {filtradas.length === 0 ? (
+        <Empty>{query ? 'Sin resultados para la búsqueda.' : 'Aún no hay pagos cargados a este workspace.'}</Empty>
+      ) : (
+        <div className="space-y-2">
+          {filtradas.map((r) => {
+            const open = abiertas.has(r.external_ref)
+            const multi = r.negocios_ids.length > 1
+            const porDevolver = r.porciones.filter((p) => p.por_devolver)
+            return (
+              <div key={r.external_ref} className="rounded-lg border" style={{ borderColor: multi && !r.es_split ? '#FECACA' : '#E5E7EB' }}>
+                <button
+                  onClick={() => toggle(r.external_ref)}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {open ? <ChevronDown className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} /> : <ChevronRight className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} />}
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{r.external_ref}</span>
+                    {r.fuente && <FuenteBadge fuente={r.fuente} small />}
+                    {r.es_split ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                        <ArrowRightLeft className="h-3 w-3" /> Repartido · {r.negocios_ids.length}
+                      </span>
+                    ) : multi ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                        <Copy className="h-3 w-3" /> {r.negocios_ids.length} negocios
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.valor_pagado)}</span>
+                </button>
+
+                {open && (
+                  <div className="border-t px-3 py-2" style={{ borderColor: '#F3F4F6' }}>
+                    {!r.es_split && multi && (
+                      <p className="mb-2 flex items-center gap-1 text-[11px]" style={{ color: '#B91C1C' }}>
+                        <AlertTriangle className="h-3 w-3" /> Misma referencia en varios negocios sin reparto — posible duplicado. Resuélvelo en la pestaña Duplicados.
+                      </p>
+                    )}
+                    <table className="w-full text-left text-[12px]">
+                      <thead>
+                        <tr style={{ color: '#9CA3AF' }}>
+                          <th className="py-1 font-semibold">Negocio</th>
+                          <th className="py-1 font-semibold">Etapa</th>
+                          <th className="py-1 text-right font-semibold">Cargado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.porciones.map((p) => (
+                          <tr key={p.cobro_id} className="border-t" style={{ borderColor: '#F3F4F6' }}>
+                            <td className="py-1.5">
+                              {p.negocio_id ? (
+                                <Link href={`/negocios/${p.negocio_id}`} className="group inline-flex items-center gap-1">
+                                  <span className="font-semibold" style={{ color: '#1A1A1A' }}>{p.negocio_codigo ?? '—'}</span>
+                                  <span style={{ color: '#6B7280' }}>{p.negocio_nombre ?? ''}</span>
+                                  <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
+                                </Link>
+                              ) : (
+                                <span className="italic" style={{ color: '#9CA3AF' }}>Sin negocio</span>
+                              )}
+                            </td>
+                            <td className="py-1.5" style={{ color: '#6B7280' }}>{p.etapa_nombre ?? '—'}</td>
+                            <td className="py-1.5 text-right tabular-nums">
+                              {p.por_devolver ? (
+                                <span className="inline-flex items-center gap-1 font-semibold" style={{ color: '#B45309' }}>
+                                  <Undo2 className="h-3 w-3" /> {fmtCOP(Math.abs(p.monto))} por devolver
+                                </span>
+                              ) : (
+                                <span className="font-semibold" style={{ color: '#1A1A1A' }}>{fmtCOP(p.monto)}</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {porDevolver.length === 0 && r.porciones.length > 1 && (
+                      <p className="mt-1.5 text-right text-[11px]" style={{ color: '#9CA3AF' }}>
+                        Total cargado: <span className="font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.valor_pagado)}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 

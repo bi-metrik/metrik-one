@@ -594,6 +594,9 @@ export interface ConciliacionV2 {
   conciliados: NegocioSaldo[]
   // Negocios disponibles para asignar (saldo > 0) — usado por el reparto inline
   negociosConSaldo: NegocioParaSplit[]
+  // Pestaña 5 — Vista general: registro de TODAS las referencias de pago
+  // con su desglose por negocio (cuánto de cada pago quedó cargado a cada uno).
+  referencias: ReferenciaPago[]
   // Pestaña 5 — métricas
   metricas: {
     referencias_cargadas: number
@@ -884,6 +887,14 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
       duplicados,
       conciliados: conciliadosList.sort((a, b) => (a.codigo ?? '').localeCompare(b.codigo ?? '')),
       negociosConSaldo,
+      // Registro general: referencias con más de un negocio primero (lo que
+      // importa para "cuánto quedó en cada negocio"), luego por valor desc.
+      referencias: referencias.sort((a, b) => {
+        const am = a.negocios_ids.length > 1 ? 0 : 1
+        const bm = b.negocios_ids.length > 1 ? 0 : 1
+        if (am !== bm) return am - bm
+        return b.valor_pagado - a.valor_pagado
+      }),
       metricas: {
         referencias_cargadas: referencias.length,
         por_conciliar: sobrepagos.filter((s) => !s.conciliado).length,
