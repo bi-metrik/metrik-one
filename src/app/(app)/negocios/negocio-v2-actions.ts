@@ -149,6 +149,52 @@ function db(supabase: unknown): any {
   return supabase
 }
 
+/**
+ * ¿Este negocio comparte una referencia de pago (external_ref NO-split) con OTRO
+ * negocio abierto del workspace? Devuelve la primera referencia duplicada (string) o
+ * null. Base del control de fraude: un negocio con duplicado sin resolver queda
+ * congelado y no puede avanzar de etapa. Excluye splits deliberados (split_id) —
+ * reparto sancionado, no duplicado accidental.
+ */
+async function negocioCongeladoPorDuplicado(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+): Promise<string | null> {
+  // Referencias NO-split de este negocio
+  const { data: misCobros } = await db(supabase)
+    .from('cobros')
+    .select('external_ref, split_json')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+    .not('external_ref', 'is', null)
+
+  const misRefs = ((misCobros ?? []) as Array<{ external_ref: string | null; split_json: { split_id?: string } | null }>)
+    .filter((c) => c.external_ref && !c.split_json?.split_id)
+    .map((c) => c.external_ref as string)
+  if (misRefs.length === 0) return null
+
+  // ¿Alguna aparece en OTRO negocio abierto (NO-split)?
+  const { data: otrosCobros } = await db(supabase)
+    .from('cobros')
+    .select('external_ref, negocio_id, split_json, negocios:negocio_id ( estado )')
+    .eq('workspace_id', workspaceId)
+    .in('external_ref', misRefs)
+    .neq('negocio_id', negocioId)
+
+  for (const c of ((otrosCobros ?? []) as Array<{
+    external_ref: string | null
+    negocio_id: string
+    split_json: { split_id?: string } | null
+    negocios: { estado: string | null } | null
+  }>)) {
+    if (c.external_ref && !c.split_json?.split_id && c.negocios?.estado === 'abierto') {
+      return c.external_ref
+    }
+  }
+  return null
+}
+
 /** Compute initial data defaults from bloque_config config_extra.fields */
 function computeFieldDefaults(configExtra: Record<string, unknown> | null): Record<string, unknown> {
   const fields = ((configExtra?.fields ?? []) as Array<{ slug: string; tipo?: string; default?: unknown }>)
@@ -1750,6 +1796,36 @@ export async function cambiarEtapaNegocioConGate(
           : `Conciliación pendiente (diferencia: ${fmt.format(diferenciaConc)})`
         const nombre = gateMessages['conciliacion_diana'] ?? defaultMsg
         return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+      }
+    }
+  }
+
+  // ── Control de fraude: congelar negocio con referencia duplicada sin resolver ──
+  //
+  // Distinto y ADICIONAL al gate conciliacion_diana (que es opt-in por etapa): este
+  // guard es transversal al flujo. Mientras un negocio comparta una referencia de pago
+  // (external_ref NO-split) con OTRO negocio abierto del workspace, queda CONGELADO →
+  // no puede avanzar de etapa hasta que la pestaña Duplicados resuelva el conflicto
+  // ("Aceptar duplicado"). Server-side (no solo UI). Opt-in por módulo: solo workspaces
+  // con modules.conciliacion lo aplican; el resto no cambia. El override de owner/admin
+  // (motivoOverride) lo respeta igual que los demás gates.
+  if (!motivoOverride) {
+    const { data: wsRow } = await db(supabase)
+      .from('workspaces')
+      .select('modules')
+      .eq('id', workspaceId)
+      .single()
+    const conciliacionActivo = (wsRow?.modules as Record<string, boolean> | null)?.conciliacion === true
+    if (conciliacionActivo) {
+      const congelado = await negocioCongeladoPorDuplicado(supabase, workspaceId, negocioId)
+      if (congelado) {
+        return {
+          error: 'gate_bloqueado',
+          bloquesPendientes: [{
+            nombre: `Referencia ${congelado} duplicada en otro negocio — resuélvela en Conciliación › Duplicados antes de avanzar`,
+            es_gate: true,
+          }],
+        }
       }
     }
   }

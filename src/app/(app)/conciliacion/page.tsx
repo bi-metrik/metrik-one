@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { getPanelConciliacion } from '@/lib/actions/conciliacion-actions'
+import { getConciliacionV2 } from '@/lib/actions/conciliacion-actions'
 import ConciliacionClient from './conciliacion-client'
 
 export const runtime = 'nodejs'
@@ -31,14 +31,14 @@ export default async function ConciliacionPage() {
     redirect('/numeros')
   }
 
-  // El panel re-valida el área financiera server-side (ctxFinanciero).
-  const { filas, error } = await getPanelConciliacion()
+  // getConciliacionV2 re-valida el área financiera server-side (ctxFinanciero).
+  const { data, error } = await getConciliacionV2()
 
   // Si el usuario no es del área financiera, el action devuelve error → no mostramos
   // datos (redirigimos a Negocios).
-  if (error) {
+  if (error || !data) {
     redirect('/negocios')
   }
 
-  return <ConciliacionClient filas={filas} />
+  return <ConciliacionClient data={data} />
 }

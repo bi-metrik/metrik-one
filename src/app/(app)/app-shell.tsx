@@ -51,6 +51,8 @@ interface WorkspaceModules {
   cobros_recurrentes?: boolean
   cert_qr?: boolean
   conciliacion?: boolean
+  /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
+  fab_registrar_pago?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -888,7 +890,7 @@ export default function AppShell({
       </div>
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA) */}
-      {mod.business && <FAB role={role} />}
+      {mod.business && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} />}
       </div>
     </div>
   )
