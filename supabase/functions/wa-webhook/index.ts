@@ -80,8 +80,33 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     return;
   }
 
-  // 0b. Cardumen — disparadores PÚBLICOS por palabra clave (antes de identificar usuario).
+  // 0b. CardumenChat — AISLAMIENTO TOTAL. Si hay una conversacion Cardumen ABIERTA para este telefono,
+  //     TODO mensaje (texto o audio) va al entrevistador y retorna ANTES de cualquier logica de ONE.
+  //     Un audio (u otro mensaje) en medio de Cardumen NUNCA debe caer en el flujo de gastos/intents.
+  if (await hasOpenCardumenChat(supabase, message.phone)) {
+    let texto = message.text || '';
+    if (message.type === 'audio' && message.audio_id) {
+      const result = await transcribeAudio(message.audio_id);
+      if (!result.text) {
+        await sendTextMessage(message.phone, 'No alcancé a entender el audio. ¿Me lo puedes escribir o repetir?');
+        return;
+      }
+      texto = result.text;
+    }
+    if (!texto.trim()) {
+      await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
+      return;
+    }
+    await continueCardumenChat(supabase, message.phone, texto);
+    return;
+  }
+
+  // 0c. Cardumen — disparadores PÚBLICOS por palabra clave (solo si NO hay conversacion abierta).
   //     El usuario escribió la palabra → ventana de servicio 24h (mensaje gratis).
+  if (message.type === 'text' && isCardumenChatTrigger(message.text)) {
+    await startCardumenChat(supabase, message.phone);
+    return;
+  }
   if (message.type === 'text' && isCardumenFlowTrigger(message.text)) {
     await sendCardumenFlow(message.phone);
     return;
@@ -92,19 +117,6 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   }
   if (message.type === 'text' && isTurismoTrigger(message.text)) {
     await sendTurismoLink(message.phone);
-    return;
-  }
-
-  // 0c. CardumenChat — entrevistador conversacional (R1/R2) sobre la ventana 24h.
-  //     Trigger por palabra clave; continuacion mientras haya sesion abierta para este telefono.
-  //     Va ANTES de identificar usuario (el participante NO es usuario de ONE) y es aditivo:
-  //     si no es trigger ni hay sesion abierta, el webhook sigue su flujo normal intacto.
-  if (message.type === 'text' && isCardumenChatTrigger(message.text)) {
-    await startCardumenChat(supabase, message.phone);
-    return;
-  }
-  if (message.type === 'text' && await hasOpenCardumenChat(supabase, message.phone)) {
-    await continueCardumenChat(supabase, message.phone, message.text);
     return;
   }
 
