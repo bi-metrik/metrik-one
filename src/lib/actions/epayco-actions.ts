@@ -81,14 +81,16 @@ export async function consultarEpayco(
     }
 
     // ── Validar duplicado en el workspace (opt-in) ─────────────────────────
+    // Bloqueo DURO: una referencia es un solo pago, nunca se carga dos veces.
+    // Si ya existe, la vía correcta es que el área financiera la distribuya
+    // entre los negocios desde el panel de conciliación (no recargarla).
     if (validarDuplicado) {
       const dup = await buscarReferenciaDuplicada(ref)
       if (dup) {
         return {
           success: false,
-          code: 'referencia_duplicada',
           negocio_existente: dup,
-          error: `Esta referencia ePayco ya fue registrada en el negocio ${dup.codigo ?? dup.negocio_id}.`,
+          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
         }
       }
     }
@@ -199,7 +201,7 @@ export async function registrarPagoEpayco(
   | { success: false; error: string; code?: 'epayco_no_aprobada' | 'referencia_duplicada' | 'justificacion_requerida'; negocio_existente?: NegocioExistente }
 > {
   try {
-    const { supabase, workspaceId, staffId, error } = await getWorkspace()
+    const { supabase, workspaceId, error } = await getWorkspace()
     if (error || !workspaceId) {
       return { success: false, error: error ?? 'Sin workspace' }
     }
@@ -223,31 +225,15 @@ export async function registrarPagoEpayco(
       // no el que envió el cliente.
       desgloseFinal = fresh
 
+      // Bloqueo DURO de duplicado: la referencia ya existe en OTRO negocio del
+      // workspace → no se registra de ninguna manera (sin override). El re-envío
+      // sobre el MISMO negocio se permite (lo absorbe la idempotencia de abajo).
       const dup = await buscarReferenciaDuplicada(desgloseFinal.ref_payco)
-      if (dup) {
-        const justificacion = (opts.justificacion ?? '').trim()
-        if (!justificacion) {
-          // Bloqueo con override: el cliente debe reenviar con justificación.
-          return {
-            success: false,
-            code: 'referencia_duplicada',
-            negocio_existente: dup,
-            error: `Esta referencia ePayco ya fue registrada en el negocio ${dup.codigo ?? dup.negocio_id}. Justifica el registro para continuar.`,
-          }
-        }
-        // Override autorizado → registrar la justificación en el activity log
-        // del negocio (visible en el timeline) antes de crear el cobro.
-        try {
-          await db(supabase).from('activity_log').insert({
-            workspace_id: workspaceId,
-            entidad_tipo: 'negocio',
-            entidad_id: negocioId,
-            tipo: 'comentario',
-            ...(staffId ? { autor_id: staffId } : {}),
-            contenido: `Referencia ePayco ${desgloseFinal.ref_payco} registrada pese a estar duplicada (ya existía en ${dup.codigo ?? dup.negocio_id}). Justificación: ${justificacion.slice(0, 500)}`,
-          })
-        } catch (logErr) {
-          console.error('[ePayco registrar] No se pudo registrar justificación en activity_log:', logErr)
+      if (dup && dup.negocio_id !== negocioId) {
+        return {
+          success: false,
+          negocio_existente: dup,
+          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
         }
       }
     }

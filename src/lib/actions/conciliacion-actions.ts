@@ -1061,23 +1061,13 @@ export async function registrarPagoEnNegocio(
       }
     }
 
+    // Bloqueo DURO de duplicado (sin override): la referencia es un solo pago.
+    // Si ya existe en OTRO negocio, no se carga; el área financiera la distribuye.
     const dup = await refDuplicadaNoSplit(supabase, workspaceId, String(refNum))
-    if (dup) {
-      const just = (input.justificacion ?? '').trim()
-      if (!just) {
-        return {
-          success: false, code: 'referencia_duplicada', negocio_existente: { codigo: dup.codigo },
-          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. Justifica el registro para continuar.`,
-        }
-      }
-      if (staffId) {
-        try {
-          await db(supabase).from('activity_log').insert({
-            workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: negocioId,
-            tipo: 'comentario', autor_id: staffId,
-            contenido: `Referencia ePayco ${refNum} registrada pese a estar duplicada (ya en ${dup.codigo ?? dup.negocio_id}). Justificación: ${just.slice(0, 500)}`,
-          })
-        } catch { /* no bloquear */ }
+    if (dup && dup.negocio_id !== negocioId) {
+      return {
+        success: false,
+        error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
       }
     }
 
@@ -1100,6 +1090,15 @@ export async function registrarPagoEnNegocio(
     const fuenteValor = input.fuente === 'davivienda' ? 'davivienda' : (input.fuente_nombre ?? '').trim()
     if (input.fuente === 'otra' && !fuenteValor) return { success: false, error: 'Indica el nombre de la fuente del pago' }
     const externalRef = referencia
+
+    // Bloqueo DURO de duplicado también para pagos manuales (Davivienda/otra).
+    const dupManual = await refDuplicadaNoSplit(supabase, workspaceId, externalRef)
+    if (dupManual && dupManual.negocio_id !== negocioId) {
+      return {
+        success: false,
+        error: `Esta referencia ya está registrada en ${dupManual.codigo ?? dupManual.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+      }
+    }
 
     const { data: existing } = await db(supabase)
       .from('cobros').select('id')

@@ -5,18 +5,16 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
-  Scale, CheckCircle2, AlertTriangle, Loader2, X, Plus, Trash2, ExternalLink,
-  Search, Copy, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
+  Scale, CheckCircle2, Loader2, X, Plus, Trash2, ExternalLink,
+  Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
 } from 'lucide-react'
 import {
   agregarPago,
   setPorcionReferencia,
   conciliarReferencia,
-  aceptarDuplicado,
   type ConciliacionV2,
   type SobrepagoRef,
   type NegocioSaldo,
-  type DuplicadoRef,
   type NegocioParaSplit,
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
@@ -27,14 +25,12 @@ const fmtCOP = (n: number) =>
 const VERDE = '#10B981'
 const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
 
-type TabKey = 'por_conciliar' | 'saldos' | 'duplicados' | 'conciliado' | 'general'
+type TabKey = 'por_conciliar' | 'saldos' | 'general'
 
 export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
   const router = useRouter()
   const [tab, setTab] = useState<TabKey>('general')
   const [addOpen, setAddOpen] = useState(false)
-
-  const hayDuplicados = data.duplicados.length > 0
 
   // Negocios para el selector "Agregar pago": todos los abiertos (con o sin saldo).
   const negociosSelector = useMemo(() => {
@@ -48,12 +44,10 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
     return Array.from(map.values()).sort((a, b) => (a.codigo ?? '').localeCompare(b.codigo ?? ''))
   }, [data])
 
-  const tabs: { key: TabKey; label: string; count?: number; danger?: boolean }[] = [
+  const tabs: { key: TabKey; label: string; count?: number }[] = [
     { key: 'general', label: 'Vista general' },
     { key: 'por_conciliar', label: 'Por conciliar', count: data.metricas.por_conciliar },
     { key: 'saldos', label: 'Saldos', count: data.metricas.en_saldo },
-    { key: 'duplicados', label: 'Duplicados', count: data.metricas.duplicados, danger: hayDuplicados },
-    { key: 'conciliado', label: 'Conciliado', count: data.metricas.conciliados },
   ]
 
   return (
@@ -89,18 +83,14 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
               className="relative -mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-semibold transition"
               style={{
                 borderColor: active ? VERDE : 'transparent',
-                color: t.danger ? '#DC2626' : active ? '#1A1A1A' : '#6B7280',
+                color: active ? '#1A1A1A' : '#6B7280',
               }}
             >
               {t.label}
               {typeof t.count === 'number' && t.count > 0 && (
                 <span
                   className="inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold"
-                  style={
-                    t.danger
-                      ? { backgroundColor: '#FEE2E2', color: '#DC2626' }
-                      : { backgroundColor: active ? '#D1FAE5' : '#F3F4F6', color: active ? '#047857' : '#6B7280' }
-                  }
+                  style={{ backgroundColor: active ? '#D1FAE5' : '#F3F4F6', color: active ? '#047857' : '#6B7280' }}
                 >
                   {t.count}
                 </span>
@@ -113,8 +103,6 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'por_conciliar' && <TabPorConciliar data={data} onDone={() => router.refresh()} />}
       {tab === 'saldos' && <TabSaldos data={data} />}
-      {tab === 'duplicados' && <TabDuplicados data={data} onDone={() => router.refresh()} />}
-      {tab === 'conciliado' && <TabConciliado data={data} />}
 
       {addOpen && (
         <AgregarPagoModal
@@ -133,28 +121,26 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
 
 function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey) => void }) {
   const m = data.metricas
-  const tiles: { label: string; value: number; tab: TabKey; icon: React.ReactNode; danger?: boolean }[] = [
+  const tiles: { label: string; value: number; tab: TabKey; icon: React.ReactNode }[] = [
     { label: 'Referencias cargadas', value: m.referencias_cargadas, tab: 'general', icon: <LayoutGrid className="h-4 w-4" /> },
     { label: 'Por conciliar', value: m.por_conciliar, tab: 'por_conciliar', icon: <Scale className="h-4 w-4" /> },
     { label: 'En saldo', value: m.en_saldo, tab: 'saldos', icon: <Wallet className="h-4 w-4" /> },
-    { label: 'Duplicados', value: m.duplicados, tab: 'duplicados', icon: <Copy className="h-4 w-4" />, danger: m.duplicados > 0 },
-    { label: 'Conciliados', value: m.conciliados, tab: 'conciliado', icon: <CheckCircle2 className="h-4 w-4" /> },
   ]
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {tiles.map((t) => (
           <button
             key={t.label}
             onClick={() => onTab(t.tab)}
             className="rounded-lg border bg-white p-4 text-left transition hover:shadow-sm"
-            style={{ borderColor: t.danger ? '#FECACA' : '#E5E7EB' }}
+            style={{ borderColor: '#E5E7EB' }}
           >
-            <div className="flex items-center gap-1.5" style={{ color: t.danger ? '#DC2626' : '#6B7280' }}>
+            <div className="flex items-center gap-1.5" style={{ color: '#6B7280' }}>
               {t.icon}
               <span className="text-[11px] font-semibold uppercase tracking-wide">{t.label}</span>
             </div>
-            <div className="mt-2 text-2xl font-bold tabular-nums" style={{ color: t.danger && t.value > 0 ? '#DC2626' : '#1A1A1A' }}>
+            <div className="mt-2 text-2xl font-bold tabular-nums" style={{ color: '#1A1A1A' }}>
               {t.value}
             </div>
           </button>
@@ -222,7 +208,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
             const multi = r.negocios_ids.length > 1
             const porDevolver = r.porciones.filter((p) => p.por_devolver)
             return (
-              <div key={r.external_ref} className="rounded-lg border" style={{ borderColor: multi && !r.es_split ? '#FECACA' : '#E5E7EB' }}>
+              <div key={r.external_ref} className="rounded-lg border" style={{ borderColor: '#E5E7EB' }}>
                 <button
                   onClick={() => toggle(r.external_ref)}
                   className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
@@ -231,26 +217,17 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                     {open ? <ChevronDown className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} /> : <ChevronRight className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} />}
                     <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{r.external_ref}</span>
                     {r.fuente && <FuenteBadge fuente={r.fuente} small />}
-                    {r.es_split ? (
+                    {multi && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
                         <ArrowRightLeft className="h-3 w-3" /> Repartido · {r.negocios_ids.length}
                       </span>
-                    ) : multi ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
-                        <Copy className="h-3 w-3" /> {r.negocios_ids.length} negocios
-                      </span>
-                    ) : null}
+                    )}
                   </div>
                   <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.valor_pagado)}</span>
                 </button>
 
                 {open && (
                   <div className="border-t px-3 py-2" style={{ borderColor: '#F3F4F6' }}>
-                    {!r.es_split && multi && (
-                      <p className="mb-2 flex items-center gap-1 text-[11px]" style={{ color: '#B91C1C' }}>
-                        <AlertTriangle className="h-3 w-3" /> Misma referencia en varios negocios sin reparto — posible duplicado. Resuélvelo en la pestaña Duplicados.
-                      </p>
-                    )}
                     <table className="w-full text-left text-[12px]">
                       <thead>
                         <tr style={{ color: '#9CA3AF' }}>
@@ -523,15 +500,32 @@ function SobrepagoCard({
 // Pestaña 2 — SALDOS (con búsqueda)
 // ════════════════════════════════════════════════════════════════════════════
 
+type SaldoFiltro = 'sobrante' | 'faltante' | 'cero'
+
 function TabSaldos({ data }: { data: ConciliacionV2 }) {
   const [q, setQ] = useState('')
+  // Por defecto visibles los sobrantes; faltantes y en cero se activan al picar.
+  const [filtros, setFiltros] = useState<Record<SaldoFiltro, boolean>>({ sobrante: true, faltante: false, cero: false })
   const query = q.trim().toLowerCase()
 
-  // Por defecto: solo saldo vivo. Con búsqueda: incluye conciliados (saldo 0).
+  // Totales (siempre sobre TODO el universo, no dependen del filtro).
+  const totales = useMemo(() => {
+    let sobrante = 0
+    let faltante = 0
+    for (const n of data.saldos) {
+      if (n.saldo < -1) sobrante += Math.abs(n.saldo)
+      else if (n.saldo > 1) faltante += n.saldo
+    }
+    return { sobrante, faltante, diferencia: faltante - sobrante }
+  }, [data])
+
   const universo = useMemo<NegocioSaldo[]>(() => {
-    if (!query) return data.saldos
-    return [...data.saldos, ...data.conciliados]
-  }, [query, data])
+    const out: NegocioSaldo[] = []
+    if (filtros.sobrante) out.push(...data.saldos.filter((n) => n.saldo < -1))
+    if (filtros.faltante) out.push(...data.saldos.filter((n) => n.saldo > 1))
+    if (filtros.cero) out.push(...data.conciliados)
+    return out
+  }, [data, filtros])
 
   const filtradas = useMemo(() => {
     if (!query) return universo
@@ -542,24 +536,66 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
     )
   }, [universo, query])
 
+  const toggle = (k: SaldoFiltro) => setFiltros((f) => ({ ...f, [k]: !f[k] }))
+
+  const cards: { label: string; value: number; color: string; hint: string }[] = [
+    { label: 'Sobrante (sin definir)', value: totales.sobrante, color: '#DC2626', hint: 'Pagos de más por distribuir' },
+    { label: 'Faltante (cartera)', value: totales.faltante, color: '#B45309', hint: 'Saldo por cobrar' },
+    { label: 'Diferencia neta', value: totales.diferencia, color: '#1A1A1A', hint: 'Faltante − sobrante' },
+  ]
+
+  const chips: { key: SaldoFiltro; label: string; on: string; text: string }[] = [
+    { key: 'sobrante', label: 'Sobrantes', on: '#FEE2E2', text: '#DC2626' },
+    { key: 'faltante', label: 'Faltantes', on: '#FEF3C7', text: '#B45309' },
+    { key: 'cero', label: 'En cero', on: '#D1FAE5', text: '#047857' },
+  ]
+
   return (
     <div>
+      {/* Tarjetas de resumen */}
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        {cards.map((c) => (
+          <div key={c.label} className="rounded-lg border bg-white p-3" style={{ borderColor: '#E5E7EB' }}>
+            <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>{c.label}</div>
+            <div className="mt-1 text-[15px] font-bold tabular-nums sm:text-[18px]" style={{ color: c.color }}>{fmtCOP(c.value)}</div>
+            <div className="mt-0.5 text-[10px]" style={{ color: '#9CA3AF' }}>{c.hint}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filtros rápidos */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {chips.map((c) => {
+          const active = filtros[c.key]
+          return (
+            <button
+              key={c.key}
+              onClick={() => toggle(c.key)}
+              className="rounded-full border px-3 py-1 text-[12px] font-semibold transition"
+              style={active
+                ? { backgroundColor: c.on, color: c.text, borderColor: c.on }
+                : { backgroundColor: 'white', color: '#6B7280', borderColor: '#E5E7EB' }}
+            >
+              {c.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Búsqueda */}
       <div className="mb-3 flex items-center gap-2 rounded-md border px-2.5 py-1.5" style={{ borderColor: '#E5E7EB' }}>
         <Search className="h-4 w-4" style={{ color: '#9CA3AF' }} />
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Busca cualquier negocio (incluye saldo $0)…"
+          placeholder="Busca por negocio o referencia (dentro del filtro activo)…"
           className="w-full text-[13px] outline-none"
           style={{ color: '#1A1A1A' }}
         />
       </div>
-      <p className="mb-2 text-[11px]" style={{ color: '#9CA3AF' }}>
-        Saldo por cobrar — lo gestiona el comercial. Los negocios con saldo $0 están ocultos; búscalos por nombre o referencia.
-      </p>
 
       {filtradas.length === 0 ? (
-        <Empty>{query ? 'Sin resultados para la búsqueda.' : 'No hay negocios con saldo pendiente.'}</Empty>
+        <Empty>{query ? 'Sin resultados para la búsqueda.' : 'Nada que mostrar con los filtros activos.'}</Empty>
       ) : (
         <div className="space-y-2">
           {filtradas.map((n) => (
@@ -617,134 +653,6 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Pestaña 3 — DUPLICADOS
-// ════════════════════════════════════════════════════════════════════════════
-
-function TabDuplicados({ data, onDone }: { data: ConciliacionV2; onDone: () => void }) {
-  const [pending, startTransition] = useTransition()
-
-  function handleAceptar(ref: string) {
-    startTransition(async () => {
-      const res = await aceptarDuplicado(ref)
-      if (res.success) {
-        toast.success(`Duplicado resuelto · ${res.desvinculados} desvinculado${res.desvinculados === 1 ? '' : 's'}`)
-        onDone()
-      } else toast.error(res.error)
-    })
-  }
-
-  if (data.duplicados.length === 0) {
-    return <Empty>No hay referencias duplicadas. Todo en orden.</Empty>
-  }
-
-  return (
-    <div className="space-y-3">
-      {data.duplicados.map((d: DuplicadoRef) => (
-        <div key={d.external_ref} className="rounded-lg border p-3" style={{ borderColor: '#FECACA', backgroundColor: '#FEF2F2' }}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[12px] font-semibold" style={{ color: '#DC2626' }}>{d.external_ref}</span>
-                {d.fuente && <FuenteBadge fuente={d.fuente} />}
-                <span className="text-[12px] tabular-nums font-semibold" style={{ color: '#1A1A1A' }}>{fmtCOP(d.valor_pagado)}</span>
-              </div>
-              <p className="mt-1 text-[11px]" style={{ color: '#B91C1C' }}>
-                Cargada en {d.negocios.length} negocios. Los negocios congelan su avance hasta resolver.
-              </p>
-            </div>
-            <button
-              disabled={pending}
-              onClick={() => handleAceptar(d.external_ref)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#DC2626' }}
-            >
-              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
-              Aceptar duplicado
-            </button>
-          </div>
-          <div className="mt-2 space-y-1 border-t pt-2" style={{ borderColor: '#FECACA' }}>
-            {d.negocios
-              .slice()
-              .sort((a, b) => (b.etapa_orden ?? -1) - (a.etapa_orden ?? -1))
-              .map((n, idx) => {
-                const esMasAvanzado = !d.empate && idx === 0
-                return (
-                  <div key={n.negocio_id} className="flex items-center justify-between gap-2 text-[12px]">
-                    <Link href={`/negocios/${n.negocio_id}`} className="inline-flex items-center gap-1">
-                      <span className="font-semibold" style={{ color: '#1A1A1A' }}>{n.codigo ?? '—'}</span>
-                      <span style={{ color: '#6B7280' }}>{n.nombre ?? ''}</span>
-                    </Link>
-                    <div className="flex items-center gap-1.5">
-                      <span style={{ color: '#6B7280' }}>{n.etapa_nombre ?? 'sin etapa'}</span>
-                      {esMasAvanzado && (
-                        <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">se conserva</span>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            {d.empate && (
-              <p className="flex items-center gap-1 pt-1 text-[11px]" style={{ color: '#B45309' }}>
-                <AlertTriangle className="h-3 w-3" /> Empate en etapa → se desvincula de AMBOS y se notifica a cada comercial.
-              </p>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Pestaña 4 — CONCILIADO (solo consulta)
-// ════════════════════════════════════════════════════════════════════════════
-
-function TabConciliado({ data }: { data: ConciliacionV2 }) {
-  if (data.conciliados.length === 0) {
-    return <Empty>Aún no hay negocios cerrados financieramente.</Empty>
-  }
-  return (
-    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: '#E5E7EB' }}>
-      <table className="w-full text-left text-[13px]">
-        <thead>
-          <tr className="border-b" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
-            <th className="px-3 py-2 font-semibold">Negocio</th>
-            <th className="px-3 py-2 font-semibold">Referencias</th>
-            <th className="px-3 py-2 text-right font-semibold">Cobrado</th>
-            <th className="px-3 py-2 text-center font-semibold">Estado</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.conciliados.map((n) => (
-            <tr key={n.negocio_id} className="border-b last:border-0" style={{ borderColor: '#F3F4F6' }}>
-              <td className="px-3 py-2">
-                <Link href={`/negocios/${n.negocio_id}`} className="font-semibold" style={{ color: '#1A1A1A' }}>{n.codigo ?? '—'}</Link>
-                <div className="text-[11px]" style={{ color: '#6B7280' }}>{n.empresa ?? n.nombre ?? ''}</div>
-              </td>
-              <td className="px-3 py-2">
-                <div className="flex flex-wrap gap-1">
-                  {n.referencias.length === 0 ? (
-                    <span className="italic" style={{ color: '#9CA3AF' }}>—</span>
-                  ) : n.referencias.map((r) => (
-                    <span key={r.external_ref} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{r.external_ref}</span>
-                  ))}
-                </div>
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(n.cobrado)}</td>
-              <td className="px-3 py-2 text-center">
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                  <CheckCircle2 className="h-3 w-3" /> Cerrado
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-// ════════════════════════════════════════════════════════════════════════════
 // Modal — Agregar pago (panel base)
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -763,8 +671,6 @@ function AgregarPagoModal({
   const [referencia, setReferencia] = useState('')
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState('')
-  const [justificacion, setJustificacion] = useState('')
-  const [needJust, setNeedJust] = useState(false)
   const [pending, startTransition] = useTransition()
 
   const esEpayco = fuente === 'epayco'
@@ -783,14 +689,10 @@ function AgregarPagoModal({
         referencia: referencia.trim(),
         monto: esEpayco ? undefined : Number(monto),
         fecha: fecha || undefined,
-        justificacion: needJust ? justificacion.trim() : undefined,
       })
       if (res.success) {
         toast.success('Pago registrado')
         onDone()
-      } else if (res.code === 'referencia_duplicada') {
-        setNeedJust(true)
-        toast.error(res.error)
       } else {
         toast.error(res.error)
       }
@@ -823,7 +725,7 @@ function AgregarPagoModal({
               {(['epayco', 'davivienda', 'otra'] as const).map((f) => (
                 <button
                   key={f}
-                  onClick={() => { setFuente(f); setNeedJust(false) }}
+                  onClick={() => setFuente(f)}
                   className="rounded-md border px-2 py-1.5 text-[12px] font-semibold capitalize transition"
                   style={fuente === f
                     ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
@@ -864,11 +766,6 @@ function AgregarPagoModal({
             </div>
           )}
 
-          {needJust && (
-            <Field label="Justificación (referencia duplicada)">
-              <textarea value={justificacion} onChange={(e) => setJustificacion(e.target.value)} rows={2} placeholder="Explica por qué registrar esta referencia que ya existe…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#F59E0B' }} />
-            </Field>
-          )}
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
