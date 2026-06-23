@@ -14,6 +14,9 @@ export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS';
 export type Severidad = 'alto' | 'medio' | 'bajo' | 'informativo' | 'sin_hallazgo' | 'error';
 export type TierLista = '1_vinculante' | '2_obligatoria' | '3_referencia' | '4_kyc_nacional';
 
+export type DatoCoincidencia = { tipo: string; numero: string; pais?: string | null };
+export type DerivadoDe = { tipo: 'nombre' | 'documento'; valor: string; lista_nombre: string };
+
 export type ValidaMatch = {
   lista: string;
   lista_nombre: string;
@@ -23,6 +26,13 @@ export type ValidaMatch = {
   score: number;
   resultado: 'exacto' | 'posible';
   fundamento_legal: string | null;
+  match_por?: string | null;
+  // Dato complementario que aporta la coincidencia (el "dato faltante"), como dato DE LA
+  // coincidencia — no identidad confirmada del consultado.
+  documento_coincidencia?: DatoCoincidencia | null;
+  // true si proviene del segundo pase (revalidación con el dato complementario hallado).
+  derivado?: boolean;
+  derivado_de?: DerivadoDe | null;
 };
 
 export type ValidaResultado = {
@@ -32,11 +42,14 @@ export type ValidaResultado = {
   matches: ValidaMatch[];
   hash_reporte: string;
   fecha_reporte: string;
+  // Consulta con un solo dato identificador (solo nombre o solo documento) → cobertura parcial.
+  consulta_parcial?: boolean;
 };
 
 export type ValidaConsultaInput = {
   tipo: TipoPersona;
-  nombre: string;
+  // nombre y documento son opcionales; se exige al menos uno (validado en el form y en Valida).
+  nombre?: string;
   documento?: { tipo: TipoDocumento; numero: string };
 };
 
@@ -334,22 +347,26 @@ export async function prepararLoteValida(
       ? codigoToId.get(negocioCodigo) ?? null
       : opts.negocio_id_lote ?? null;
 
-    if (!nombre || (tipoPersona !== 'natural' && tipoPersona !== 'juridica')) {
+    const tipoValido = tipoPersona === 'natural' || tipoPersona === 'juridica';
+    const tieneDoc = !!(numDoc && tipoDoc);
+
+    // Al menos un dato identificador: nombre o documento (consistente con el motor).
+    if (!tipoValido || (!nombre && !tieneDoc)) {
       return {
         posicion: idx + 1,
         input: {
           tipo: tipoPersona === 'juridica' ? 'juridica' : 'natural',
-          nombre: nombre || '(sin nombre)',
+          ...(nombre ? { nombre } : {}),
         },
         negocio_id: negocioId,
-        error: 'tipo_persona o nombre invalido',
+        error: 'tipo_persona invalido o fila sin nombre ni documento',
       };
     }
 
     const input: ValidaConsultaInput = {
       tipo: tipoPersona,
-      nombre,
-      ...(numDoc && tipoDoc ? { documento: { tipo: tipoDoc, numero: numDoc } } : {}),
+      ...(nombre ? { nombre } : {}),
+      ...(tieneDoc ? { documento: { tipo: tipoDoc, numero: numDoc } } : {}),
     };
 
     return {

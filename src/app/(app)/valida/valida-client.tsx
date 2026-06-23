@@ -235,7 +235,8 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
     setResultado(null);
 
     startTransition(async () => {
-      const input: Parameters<typeof consultarValida>[0] = { tipo, nombre: nombre.trim() };
+      const input: Parameters<typeof consultarValida>[0] = { tipo };
+      if (nombre.trim()) input.nombre = nombre.trim();
       if (docNumero.trim()) input.documento = { tipo: docTipo, numero: docNumero.trim() };
       const r = await consultarValida(input, { negocio_id: negocio?.id ?? null });
       if (r.ok) {
@@ -273,13 +274,13 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
 
         <div>
           <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
-            {tipo === 'natural' ? 'Nombre completo' : 'Razón social'}
+            {tipo === 'natural' ? 'Nombre completo' : 'Razón social'}{' '}
+            <span className="font-light lowercase tracking-normal">(nombre o documento)</span>
           </label>
           <input
             type="text"
             value={nombre}
             onChange={e => setNombre(e.target.value)}
-            required
             minLength={2}
             placeholder={tipo === 'natural' ? 'Juan Pérez Gómez' : 'Acme Trading SAS'}
             className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
@@ -331,9 +332,17 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
           </p>
         </div>
 
+        {(nombre.trim().length >= 2) !== (docNumero.trim().length >= 3) && (nombre.trim() || docNumero.trim()) ? (
+          <div className="p-3 rounded-lg bg-[#FFFBEB] border-l-[3px] border-[#F59E0B] text-[#1A1A1A] text-xs leading-relaxed">
+            Estás consultando con un solo dato ({nombre.trim().length >= 2 ? 'nombre' : 'documento'}). Es posible que no se
+            detecten todas las coincidencias. Si una coincidencia aporta el dato faltante, Valida revalida automáticamente
+            contra el resto de listas. Para máxima cobertura, ingresa nombre y documento.
+          </div>
+        ) : null}
+
         <button
           type="submit"
-          disabled={pending || nombre.trim().length < 2}
+          disabled={pending || (nombre.trim().length < 2 && docNumero.trim().length < 3)}
           className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
         >
           <Search className="h-4 w-4" />
@@ -496,7 +505,7 @@ function ResultadoCard({
       <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
         <div>
           <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Resultado</p>
-          <h3 className="text-lg font-bold text-[#1A1A1A] mt-1">{nombreConsultado}</h3>
+          <h3 className="text-lg font-bold text-[#1A1A1A] mt-1">{nombreConsultado.trim() || 'Consulta por documento'}</h3>
           <p className="text-xs text-[#6B7280] font-mono">ID: {data.consulta_id}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -510,6 +519,12 @@ function ResultadoCard({
       </div>
 
       <div className="p-5 space-y-2">
+        {data.consulta_parcial && (
+          <div className="p-3 mb-2 rounded-lg bg-[#FFFBEB] border-l-[3px] border-[#F59E0B] text-[#1A1A1A] text-xs leading-relaxed">
+            Consulta con un solo dato identificador — es posible que no se detecten todas las coincidencias. Cuando una
+            coincidencia aporta el dato que faltaba, se revalida contra el resto de listas (marcado como “derivada”).
+          </div>
+        )}
         <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
           Coincidencias ({data.total_matches})
         </p>
@@ -527,6 +542,17 @@ function ResultadoCard({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-[#1A1A1A] truncate">{m.nombre_coincidencia}</p>
                   <p className="text-xs text-[#6B7280] truncate">{m.lista_nombre}</p>
+                  {m.documento_coincidencia?.numero && (
+                    <p className="text-[11px] text-[#059669] truncate">
+                      Documento en la lista: {m.documento_coincidencia.tipo} {m.documento_coincidencia.numero}
+                      {m.documento_coincidencia.pais ? ` (${m.documento_coincidencia.pais})` : ''}
+                    </p>
+                  )}
+                  {m.derivado && m.derivado_de && (
+                    <p className="text-[10px] text-[#6B7280] uppercase tracking-wider">
+                      Coincidencia derivada · {m.derivado_de.tipo} hallado en {m.derivado_de.lista_nombre}
+                    </p>
+                  )}
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold">{(m.score * 100).toFixed(1)}%</p>
