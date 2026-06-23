@@ -3,7 +3,7 @@
 import { useState, useTransition, useEffect } from 'react'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
-import { consultarEpayco, registrarPagoEpayco } from '@/lib/actions/epayco-actions'
+import { consultarEpayco, registrarPagoEpayco, type NegocioExistente } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 
@@ -24,6 +24,14 @@ interface BloquePagosEpaycoProps {
   modo: 'editable' | 'visible'
   tipoCobro: string // 'anticipo' | 'pago'
   nota?: string // texto guía explícito sobre qué referencia ingresar
+  /**
+   * Opt-in (config_extra.validar_epayco). Cuando es true:
+   *  - bloquea referencias no aprobadas en ePayco (estado != 'Aceptada')
+   *  - bloquea referencias ya registradas en otro negocio del workspace,
+   *    exigiendo una justificación para forzar el registro.
+   * Sin el flag, el bloque se comporta igual que hoy.
+   */
+  validarEpayco?: boolean
 }
 
 const fmt = (v: number) =>
@@ -36,6 +44,7 @@ export default function BloquePagosEpayco({
   modo,
   tipoCobro,
   nota,
+  validarEpayco = false,
 }: BloquePagosEpaycoProps) {
   const [pagos, setPagos] = useState<PagoRegistrado[]>(
     () => ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
@@ -55,22 +64,38 @@ export default function BloquePagosEpayco({
   const [consultando, setConsultando] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  // Duplicado workspace-wide detectado: requiere justificación para forzar.
+  const [duplicado, setDuplicado] = useState<NegocioExistente | null>(null)
+  const [justificacion, setJustificacion] = useState('')
 
   const total = pagos.reduce((s, p) => s + p.monto_bruto, 0)
+
+  function resetEstado() {
+    setError(null)
+    setDuplicado(null)
+    setJustificacion('')
+    setPreviewDesglose(null)
+  }
 
   async function handleConsultar() {
     if (!newRef.trim()) return
     setConsultando(true)
-    setError(null)
-    setPreviewDesglose(null)
+    resetEstado()
     try {
-      const result = await consultarEpayco(newRef.trim())
+      const result = await consultarEpayco(newRef.trim(), validarEpayco)
       if (!result.success) {
         setError(result.error)
+        if (result.code === 'referencia_duplicada' && result.negocio_existente) {
+          // Aún tenemos que mostrar el preview para registrar con override,
+          // pero consultarEpayco no devolvió el desglose (cortó en el dup).
+          // Marcamos el duplicado; el desglose se obtiene en el registro con
+          // override (el server re-consulta ePayco).
+          setDuplicado(result.negocio_existente)
+        }
       } else {
-        // Check if already registered
+        // Check if already registered en este mismo bloque
         if (pagos.some(p => p.ref_payco === result.data.ref_payco)) {
-          setError('Este pago ya esta registrado')
+          setError('Este pago ya está registrado en este negocio.')
         } else {
           setPreviewDesglose(result.data)
         }
@@ -85,15 +110,52 @@ export default function BloquePagosEpayco({
   function handleRegistrar() {
     if (!previewDesglose) return
     startTransition(async () => {
-      const result = await registrarPagoEpayco(negocioBloqueId, negocioId, previewDesglose, tipoCobro)
+      const result = await registrarPagoEpayco(negocioBloqueId, negocioId, previewDesglose, tipoCobro, {
+        validarEpayco,
+      })
+      if (!result.success) {
+        toast.error(result.error)
+        if (result.code === 'referencia_duplicada' && result.negocio_existente) {
+          setDuplicado(result.negocio_existente)
+          setError(result.error)
+        }
+      } else {
+        setPagos(result.pagos)
+        resetEstado()
+        setNewRef('')
+        toast.success('Pago registrado')
+      }
+    })
+  }
+
+  // Override: registrar una referencia duplicada con justificación obligatoria.
+  function handleRegistrarConJustificacion() {
+    if (!duplicado) return
+    const just = justificacion.trim()
+    if (!just) {
+      toast.error('Escribe una justificación para registrar la referencia duplicada.')
+      return
+    }
+    const ref = parseInt(newRef.trim(), 10)
+    if (isNaN(ref) || ref <= 0) {
+      toast.error('Referencia inválida.')
+      return
+    }
+    startTransition(async () => {
+      // El server re-consulta ePayco para armar el desglose real; solo necesita
+      // el ref_payco para identificar la transacción aprobada.
+      const minimalDesglose = { ...(previewDesglose ?? ({} as EpaycoDesglose)), ref_payco: ref }
+      const result = await registrarPagoEpayco(negocioBloqueId, negocioId, minimalDesglose as EpaycoDesglose, tipoCobro, {
+        validarEpayco,
+        justificacion: just,
+      })
       if (!result.success) {
         toast.error(result.error)
       } else {
         setPagos(result.pagos)
-        setPreviewDesglose(null)
+        resetEstado()
         setNewRef('')
-        setError(null)
-        toast.success('Pago registrado')
+        toast.success('Pago registrado con justificación')
       }
     })
   }
@@ -202,8 +264,49 @@ export default function BloquePagosEpayco({
         </div>
       </div>
 
-      {/* Error */}
-      {error && <p className="text-[11px] text-red-600 font-medium">{error}</p>}
+      {/* Error / alerta (estado no aprobado, referencia inexistente, etc.) */}
+      {error && !duplicado && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-medium text-red-700">
+          {error}
+        </div>
+      )}
+
+      {/* Duplicado workspace-wide → bloqueo con override por justificación */}
+      {duplicado && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2">
+          <p className="text-[11px] font-semibold text-amber-900">Referencia ya registrada</p>
+          <p className="text-[11px] leading-relaxed text-amber-900">
+            Esta referencia ePayco ya está registrada en el negocio{' '}
+            <span className="font-semibold">{duplicado.codigo ?? duplicado.nombre ?? duplicado.negocio_id}</span>
+            {duplicado.nombre && duplicado.codigo ? ` (${duplicado.nombre})` : ''}. Para registrarla de
+            nuevo, justifica el motivo. Quedará anotado en el historial del negocio.
+          </p>
+          <textarea
+            value={justificacion}
+            onChange={e => setJustificacion(e.target.value)}
+            placeholder="Justifica por qué registras esta referencia duplicada…"
+            rows={2}
+            disabled={isPending}
+            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-amber-400/30 focus:border-amber-400 disabled:opacity-60"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleRegistrarConJustificacion}
+              disabled={isPending || !justificacion.trim()}
+              className="flex-1 rounded-lg bg-amber-600 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-40 transition-colors"
+            >
+              {isPending ? 'Registrando…' : 'Registrar con justificación'}
+            </button>
+            <button
+              onClick={resetEstado}
+              disabled={isPending}
+              className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-40 transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Preview card */}
       {previewDesglose && (

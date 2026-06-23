@@ -1188,6 +1188,7 @@ function BloqueRenderer({
             modo={modo}
             tipoCobro={(configExtra.tipo_cobro as string) ?? 'pago'}
             nota={configExtra.nota as string | undefined}
+            validarEpayco={!!configExtra.validar_epayco}
           />
         )
       }
