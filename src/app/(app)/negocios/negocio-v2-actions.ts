@@ -2323,28 +2323,50 @@ export async function autoCrearCobrosMulti(
 
   if (!pagos.length) return { error: null }
 
-  // Verificar cuales refs ya existen para idempotencia
-  const refs = pagos.map(p => p.referencia_epayco)
+  // Idempotencia por MULTIPLICIDAD de (external_ref, monto), no por external_ref
+  // como conjunto. Bug 26 (SOENA): dos abonos reales que comparten la misma
+  // referencia ePayco (o referencia vacía/repetida) colapsaban en un Set →
+  // tras insertar el primero, el segundo se descartaba como "ya existe" y el
+  // saldo no bajaba. Contando cuántos cobros ya existen por cada par (ref, monto)
+  // e insertando solo el delta faltante, distinguimos "re-guardar el mismo pago"
+  // (idempotente, delta 0) de "dos pagos reales distintos" (ambos se registran).
+  const claveDe = (ref: string, monto: number) =>
+    `${ref ?? ''} ${Math.round(Number(monto) * 100)}`
+
   const { data: existentes } = await db(supabase)
     .from('cobros')
-    .select('external_ref')
+    .select('external_ref, monto')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
-    .in('external_ref', refs)
+    .eq('tipo_cobro', 'pago')
 
-  const existingRefs = new Set(
-    ((existentes ?? []) as Record<string, unknown>[]).map(e => e.external_ref as string)
-  )
+  // Cuántos cobros ya existen por cada par (ref, monto)
+  const restante = new Map<string, number>()
+  for (const e of (existentes ?? []) as Array<{ external_ref: string | null; monto: number }>) {
+    const k = claveDe(e.external_ref ?? '', e.monto)
+    restante.set(k, (restante.get(k) ?? 0) + 1)
+  }
 
+  // Recorrer las filas pedidas; insertar solo las que exceden lo ya registrado
+  // por su par (ref, monto). El Map se decrementa por cada par "consumido" para
+  // que un pago repetido legítimamente (2 filas iguales) registre 2 cobros.
   const nuevos = pagos
-    .filter(p => !existingRefs.has(p.referencia_epayco))
+    .filter(p => {
+      const k = claveDe(p.referencia_epayco, p.valor_pago)
+      const ya = restante.get(k) ?? 0
+      if (ya > 0) {
+        restante.set(k, ya - 1) // este par ya está cubierto por un cobro existente
+        return false
+      }
+      return true
+    })
     .map(p => ({
       workspace_id: workspaceId,
       negocio_id: negocioId,
       notas: 'Pago',
       monto: p.valor_pago,
       tipo_cobro: 'pago',
-        fecha: todayBogotaISO(),
+      fecha: todayBogotaISO(),
       external_ref: p.referencia_epayco,
     }))
 
