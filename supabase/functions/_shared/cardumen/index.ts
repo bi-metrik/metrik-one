@@ -79,8 +79,17 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
         .eq("phone", phone);
     }
   } catch (e) {
-    console.error("[cardumen-chat] error en turno:", (e as Error).message);
-    await sendTextMessage(phone, "Perdona, se me cruzaron los cables un momento. ¿Me lo cuentas otra vez?");
+    // El modelo no respondio (tras reintentos) o fallo el turno. La sesion NO se cierra:
+    // el hilo queda guardado en el turno actual y el participante puede retomar reenviando.
+    const errMsg = (e as Error).message ?? "";
+    console.error("[cardumen-chat] error en turno:", errMsg);
+    const overloaded = /\b(429|500|502|503|504|529)\b/.test(errMsg) || /overloaded|high demand|rate.?limit|timeout/i.test(errMsg);
+    await sendTextMessage(
+      phone,
+      overloaded
+        ? "Estoy recibiendo muchas historias en este momento 🙏. Tu conversación quedó guardada — dame un par de minutos y reenvíame tu última respuesta; seguimos justo donde quedamos."
+        : "Ups, no te alcancé a escuchar bien. ¿Me lo repites, por favor? Seguimos justo donde quedamos.",
+    );
   }
 }
 
