@@ -1133,8 +1133,18 @@ function BloqueRenderer({
       case 'documento':
       case 'formulario':
         // Operativo: subir documentos, generar formularios (010/1668) y registrar
-        // cobros lo hace también supervisor (coherente con roles.ts:canRegisterCobro).
-        return SUPERVISOR_UP.includes(userRole) ? 'editable' : 'visible'
+        // cobros lo hace supervisor+ y también el operator RESPONSABLE del negocio.
+        // Alinea el cliente con el modelo del servidor (can-edit.ts / guardEditarBloque,
+        // 2026-06-04): un operator responsable edita los bloques del stage que cubre su
+        // área. El gating por área ya se aplicó aguas arriba (_areaReadonly fuerza
+        // 'visible' si su área no cubre el stage del negocio) y el server revalida cada
+        // mutación → sin regresión de seguridad, solo alineación de UX.
+        return (
+          SUPERVISOR_UP.includes(userRole) ||
+          (userRole === 'operator' && (bloque._esResponsable ?? false))
+        )
+          ? 'editable'
+          : 'visible'
       case 'resumen_financiero':
       case 'ejecucion':
       case 'historial':
