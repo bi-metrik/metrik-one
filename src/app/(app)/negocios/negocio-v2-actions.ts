@@ -2173,6 +2173,12 @@ export async function actualizarBloqueData(
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
+  // Guard server-side de permisos (rol+área+responsable). El autosave de borrador
+  // también escribe negocio_bloques.data → debe validar igual que marcarBloqueCompleto.
+  // getBloqueMode (cliente) es solo UX; esta es la barrera real.
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
   const { data: row, error: updateError } = await db(supabase)
     .from('negocio_bloques')
     .update({
