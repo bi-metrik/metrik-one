@@ -429,17 +429,20 @@ export async function resolverFormularioParaEdicion(
   for (const c of camposFuente) { valorBase[c.slug] = datos[c.slug] ?? ''; esConstante[c.slug] = false }
   for (const [k, v] of Object.entries(constantes)) { valorBase[k] = v ?? ''; esConstante[k] = true }
 
-  // Ordenar por el orden del mapa de metadata (lo no mapeado va al final).
+  // Mostrar TODAS las casillas del template (no solo las autollenadas): las
+  // casillas vacías del 010/1668 deben verse para poder llenarlas a mano cuando
+  // la DIAN lo solicite. Une las casillas del meta del template con las que ya
+  // tienen valor base (campos_fuente + constantes), ordenadas por el meta.
   const meta = getCasillasMeta(template)
   const ordenMeta = new Map(meta.map((m, i) => [m.slug, i]))
-  const slugs = Object.keys(valorBase).sort(
-    (a, b) => (ordenMeta.get(a) ?? 999) - (ordenMeta.get(b) ?? 999),
-  )
+  const slugs = Array.from(
+    new Set([...meta.map((m) => m.slug), ...Object.keys(valorBase)]),
+  ).sort((a, b) => (ordenMeta.get(a) ?? 999) - (ordenMeta.get(b) ?? 999))
 
   const casillas: CasillaEditable[] = slugs.map((slug) => {
     const m = metaDeCasilla(template, slug)
     const editado = Object.prototype.hasOwnProperty.call(overrides, slug)
-    const value = editado ? (overrides[slug] ?? '') : valorBase[slug]
+    const value = editado ? (overrides[slug] ?? '') : (valorBase[slug] ?? '')
     return {
       slug,
       label: m.label,

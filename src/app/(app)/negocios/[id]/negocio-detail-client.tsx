@@ -1101,6 +1101,13 @@ function BloqueRenderer({
   const SUPERVISOR_UP = ['owner', 'admin', 'supervisor']
 
   function getBloqueMode(): 'editable' | 'visible' {
+    // editable_siempre: formularios (010/1668) regenerables aun completados o
+    // heredados — la DIAN devuelve requerimientos tras avanzar de etapa.
+    if (
+      tipo === 'formulario' &&
+      (configExtra as { editable_siempre?: boolean }).editable_siempre === true &&
+      SUPERVISOR_UP.includes(userRole)
+    ) return 'editable'
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
     // Instance-level: bloque already completed (except datos — auto-save needs re-editing)
