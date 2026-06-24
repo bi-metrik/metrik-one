@@ -38,11 +38,12 @@ export async function startCardumenChat(supabase: Supa, phone: string): Promise<
     phone,
     state,
     closed: false,
+    reminded_at: null,
     updated_at: new Date().toISOString(),
   });
   await sendTextMessage(
     phone,
-    "🐟 *Cardumen*\nGracias por sumar tu historia. Conversemos un momento — responde con tus propias palabras. Escribe *salir* cuando quieras terminar.\n\n" + opening,
+    "🐟 *Cardumen*\nGracias por sumar tu historia. Conversemos un momento — responde con tus propias palabras.\n\n⏳ *Tienes 24 horas para completarla; si no, se pierde el avance.* Lo ideal es terminarla hoy mismo. Escribe *salir* si quieres terminar antes.\n\n" + opening,
   );
   console.log(`[cardumen-chat] iniciada para ${phone}`);
 }
@@ -51,11 +52,18 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
   const exit = (text || "").trim().toLowerCase().replace(/[!¡.,]/g, "");
   const { data: row } = await supabase
     .from("cardumen_chat_sessions")
-    .select("state")
+    .select("state, updated_at")
     .eq("phone", phone)
     .eq("closed", false)
     .maybeSingle();
   if (!row) return; // no hay sesion abierta (carrera) → no hace nada
+
+  // Expiracion: si pasaron mas de 24h sin actividad, el avance se pierde (la sesion se cierra).
+  if (Date.now() - new Date(row.updated_at).getTime() > 24 * 60 * 60 * 1000) {
+    await supabase.from("cardumen_chat_sessions").update({ closed: true }).eq("phone", phone);
+    await sendTextMessage(phone, "Tu conversación anterior se venció (pasaron más de 24 horas) y el avance se perdió. Escribe *cardumenchat* para empezar de nuevo cuando quieras.");
+    return;
+  }
 
   const state = row.state as ConversationState;
   const model = claudeHaiku();
@@ -69,7 +77,7 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
   try {
     const { output } = await nextTurn(model, FEDE_SPEC, state, text);
     if (state.closed) {
-      if (output.message_to_user) await sendTextMessage(phone, output.message_to_user);
+      // No enviamos otra pregunta al cerrar — solo el agradecimiento/cierre (evita "pregunta + cerramos").
       await closeAndSerialize(supabase, phone, state, model, false);
     } else {
       await sendTextMessage(phone, output.message_to_user);

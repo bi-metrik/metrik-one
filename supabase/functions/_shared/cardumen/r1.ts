@@ -67,6 +67,11 @@ export async function nextTurn(
   state.history.push({ role: "interviewer", text: output.message_to_user });
   state.reflexivity_log.push({ turn: state.turn, why: output.reflexivity_note });
 
+  // Cobertura ANTES de aplicar lo de este turno: si la pregunta de este turno introduce la ultima
+  // dimension, NO debe disparar el cierre en el mismo turno (el usuario aun no la ha respondido).
+  const allDims = [...spec.triads.map((t) => t.id), ...spec.dyads.map((d) => d.id)];
+  const coverageBefore = allDims.every((d) => state.dimensions_touched.includes(d));
+
   for (const d of output.dimensions_addressed ?? []) {
     if (!state.dimensions_touched.includes(d)) state.dimensions_touched.push(d);
   }
@@ -79,12 +84,12 @@ export async function nextTurn(
   state.saturation_streak = output.new_content ? 0 : state.saturation_streak + 1;
 
   // --- evaluar cierre (la decision es del codigo, no solo del LLM) ---
-  const allDims = [...spec.triads.map((t) => t.id), ...spec.dyads.map((d) => d.id)];
-  const coverageComplete = allDims.every((d) => state.dimensions_touched.includes(d));
   const saturated = state.saturation_streak >= spec.closing.saturation_window;
   const hitCap = state.turn >= spec.closing.turn_cap;
 
-  if ((coverageComplete && (saturated || output.propose_close)) || hitCap) {
+  // Cierra solo si la cobertura YA estaba completa al iniciar este turno (asi no cierra justo despues
+  // de preguntar la ultima dimension). El tope duro de turnos siempre cierra.
+  if ((coverageBefore && (saturated || output.propose_close)) || hitCap) {
     state.closed = true;
   }
 

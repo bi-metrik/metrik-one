@@ -401,3 +401,9 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+[functions.cardumen-cron]
+# Cron interno (recordatorios/expiracion CardumenChat). No usa JWT de Supabase (el
+# service key legacy ya no es aceptado por el gateway). Se protege con un secreto
+# interno (CARDUMEN_CRON_SECRET) verificado dentro de la funcion.
+verify_jwt = false
