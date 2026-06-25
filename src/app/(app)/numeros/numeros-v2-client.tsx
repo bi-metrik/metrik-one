@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, AlertTriangle, X } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { formatCOP } from '@/lib/contacts/constants'
 import QuestionCard from './question-card'
@@ -12,7 +12,6 @@ import DrillDownSheet from './drill-down-sheet'
 import type { NumerosData } from './actions-v2'
 import { getNumeros } from './actions-v2'
 import { FEATURES } from '@/lib/feature-flags'
-import MetrikLockup from '@/components/metrik-lockup'
 
 interface Props {
   initialData: NumerosData | null
@@ -32,6 +31,10 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
   const [isPending, startTransition] = useTransition()
   const [showSaldoDialog, setShowSaldoDialog] = useState(false)
   const [activeDrill, setActiveDrill] = useState<1 | 2 | 3 | 4 | 5 | null>(null)
+  // Modo vitrina: modal flotante centrado sobre el dashboard real en ceros.
+  // Abierto al entrar (default true). Al cerrar, queda el dashboard limpio + un
+  // pill discreto que lo reabre. Solo aplica cuando modoVitrina.
+  const [vitrinaModalOpen, setVitrinaModalOpen] = useState(true)
 
   // Open saldo dialog when arriving via ?saldo=1 (only when CONCILIACION is enabled)
   useEffect(() => {
@@ -98,11 +101,17 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
     : data.carteraPendiente > data.carteraMesAnterior * 1.05 ? 'up'
     : 'stable' as const
 
-  return (
-    <div className="mx-auto max-w-2xl space-y-4 pb-24">
-      {/* Modo vitrina: banner comercial sobre el dashboard real en ceros */}
-      {modoVitrina && <VitrinaNumerosBanner />}
+  // Modo vitrina: difuminar el dashboard de fondo mientras el modal está abierto.
+  const vitrinaBlur = modoVitrina && vitrinaModalOpen
 
+  return (
+    <>
+    <div
+      className={`mx-auto max-w-2xl space-y-4 pb-24 transition-[filter] duration-200 ${
+        vitrinaBlur ? 'pointer-events-none select-none blur-sm' : ''
+      }`}
+      aria-hidden={vitrinaBlur || undefined}
+    >
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-base font-bold">
@@ -343,48 +352,91 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
         />
       )}
     </div>
+
+    {/* Modo vitrina: modal flotante centrado + pill de reapertura */}
+    {modoVitrina && vitrinaModalOpen && (
+      <VitrinaNumerosModal onClose={() => setVitrinaModalOpen(false)} />
+    )}
+    {modoVitrina && !vitrinaModalOpen && (
+      <VitrinaPill onClick={() => setVitrinaModalOpen(true)} />
+    )}
+    </>
   )
 }
 
-// ── Banner modo vitrina ───────────────────────────────
+// ── Modo vitrina: modal flotante + pill ───────────────
 // Muestra comercial sobre el dashboard real en ceros (workspaces Valida-only).
-// Marca: MetrikLockup, Verde Métrica #10B981, Negro Carbón #1A1A1A, Montserrat
-// (heredada), "Powered by MéTRIK", CTA real a metrik.com.co. Copy de Mateo (no editar).
-function VitrinaNumerosBanner() {
+// Modal centrado sobre el dashboard borroso. Sin lockup pesado: solo copy + un CTA
+// centrado + "Powered by MéTRIK" en chico. Marca: Verde Métrica #10B981, Negro
+// Carbón #1A1A1A, tokens existentes. Copy de Mateo (no editar).
+
+const METRIK_URL = 'https://metrik.com.co'
+
+function VitrinaNumerosModal({ onClose }: { onClose: () => void }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <p className="text-[15px] leading-relaxed" style={{ color: '#1A1A1A' }}>
-            Vista de muestra. Estos indicadores se construyen con los datos de tu
-            operación en tiempo real. Hoy usas Valida para cumplir; suma tu operación
-            con MeTRIK ONE.
-          </p>
-          <a
-            href="https://metrik.com.co"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-4 inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:brightness-95"
-            style={{ backgroundColor: '#10B981' }}
-          >
-            Hablemos con MeTRIK
-          </a>
-        </div>
-        <div className="hidden sm:block shrink-0">
-          <MetrikLockup size="md" />
-        </div>
-      </div>
-      <div className="mt-4 border-t border-border pt-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Velo + blur del fondo (refuerza el blur del dashboard) */}
+      <div
+        className="absolute inset-0 bg-[#1A1A1A]/30 backdrop-blur-[2px]"
+        onClick={onClose}
+        aria-hidden
+      />
+      {/* Tarjeta del modal */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Vista de muestra de Números"
+        className="relative w-full max-w-md rounded-2xl border border-border bg-card p-7 text-center shadow-xl"
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Cerrar"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        <p className="mx-auto mt-2 max-w-sm text-[15px] leading-relaxed" style={{ color: '#1A1A1A' }}>
+          Estos indicadores se construyen con los datos de tu operación en tiempo
+          real. Hoy usas Valida para cumplir; suma tu operación con MeTRIK ONE.
+        </p>
+
         <a
-          href="https://metrik.com.co"
+          href={METRIK_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          className="mt-6 inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-colors hover:brightness-95"
+          style={{ backgroundColor: '#10B981' }}
         >
-          Powered by MéTRIK
+          Hablemos con MéTRIK
         </a>
+
+        <div className="mt-6 border-t border-border pt-3">
+          <a
+            href={METRIK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Powered by MéTRIK
+          </a>
+        </div>
       </div>
     </div>
+  )
+}
+
+function VitrinaPill({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:brightness-95"
+      style={{ backgroundColor: '#10B981' }}
+    >
+      Hablemos con MéTRIK
+    </button>
   )
 }
 
