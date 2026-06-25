@@ -3,9 +3,19 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import TablerosClient from './tableros-client'
+import VitrinaPlaceholder from '@/components/vitrina-placeholder'
+import { getVitrinaCopy } from '@/lib/workspace/vitrina'
 
 export default async function TablerosPage() {
   const { supabase, workspaceId, role } = await getWorkspace()
+
+  // Modo vitrina: el workspace solo compró Valida. Tableros se muestra como vitrina
+  // comercial de upsell a ONE — bypassa el guard de permiso canViewNumbers.
+  const vitrina = await getVitrinaCopy(supabase, workspaceId)
+  if (vitrina) {
+    return <VitrinaPlaceholder title="Tableros" body={vitrina.tableros} />
+  }
+
   const perms = getRolePermissions(role || '')
   if (!perms.canViewNumbers) {
     redirect('/negocios')

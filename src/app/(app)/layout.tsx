@@ -31,8 +31,8 @@ export default async function AppLayout({
     .single()
 
   if (!profile) {
-    // New user — needs onboarding
-    redirect('/onboarding')
+    // Usuario sin perfil — creacion centralizada en MeTRIK
+    redirect('/sin-espacio')
   }
 
   // Rol EFECTIVO (respeta impersonación "Ver como" vía getWorkspace). Sin impersonar,
@@ -107,7 +107,7 @@ export default async function AppLayout({
 
   const workspace = workspaceResult.data
   if (!workspace) {
-    redirect('/onboarding')
+    redirect('/sin-espacio')
   }
 
   const workspaceModules = (modulesResult.data?.modules as Record<string, boolean> | null) ?? { business: true }
@@ -116,6 +116,11 @@ export default async function AppLayout({
   // Sin override = comportamiento global intacto (resto de workspaces sin cambio).
   const navRolesOverride = (modulesResult.data?.config_extra as { nav_roles_override?: Record<string, string[]> } | null)
     ?.nav_roles_override ?? undefined
+  // Modo vitrina comercial (opt-in por workspace, config-driven). Cliente Valida-only
+  // ve un shell curado: solo Valida (funcional) + Tableros + Números (vitrinas de upsell
+  // a ONE). Ausente/false → comportamiento idéntico a hoy (cero impacto a otros workspaces).
+  const modoVitrina = (modulesResult.data?.config_extra as { modo_vitrina?: boolean } | null)
+    ?.modo_vitrina === true
   const hasLineas = (lineasResult.count ?? 0) > 0
 
   // Badge "Conciliación" — número de negocios por conciliar (F2). Solo se computa
@@ -152,6 +157,7 @@ export default async function AppLayout({
         }}
         modules={workspaceModules}
         navRolesOverride={navRolesOverride}
+        modoVitrina={modoVitrina}
         hasLineas={hasLineas}
         conciliacionPendientes={conciliacionPendientes}
         notificationBell={<NotificationBell userId={user.id} />}

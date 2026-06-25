@@ -72,6 +72,14 @@ interface AppShellProps {
    * Sin override → roles globales por defecto (resto de workspaces sin cambio).
    */
   navRolesOverride?: Record<string, string[]>
+  /**
+   * Modo vitrina comercial (opt-in por workspace, desde
+   * workspaces.config_extra.modo_vitrina). Cuando es true, el sidebar y la tab
+   * bar mobile se recortan a SOLO Valida (funcional) + Tableros + Números (estos
+   * dos como vitrinas de upsell a ONE). Todo lo demás (Directorio, Configuración,
+   * Negocios, Caja, Compliance, etc.) se oculta. Default false → nav íntegro.
+   */
+  modoVitrina?: boolean
   hasLineas?: boolean
   /**
    * Número de negocios "por conciliar" (F2). Se muestra como badge en el item
@@ -245,6 +253,7 @@ export default function AppShell({
   branding,
   modules,
   navRolesOverride,
+  modoVitrina = false,
   hasLineas,
   conciliacionPendientes = 0,
   notificationBell,
@@ -278,41 +287,55 @@ export default function AppShell({
     .toUpperCase()
 
   const mod = modules ?? { business: true }
-  const businessItems = mod.business ? filterByRole(applyOverride(BUSINESS_NAV_ITEMS), role) : []
-  const contabilidadItems = mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : []
+  // ── Modo vitrina ──
+  // En modo vitrina solo sobreviven 3 hrefs en TODO el nav: Valida (funcional)
+  // + Tableros + Números (vitrinas de upsell a ONE). Cualquier item con otro href
+  // se filtra. Aplica a cada grupo (incluidos los "siempre visibles" como
+  // Directorio/Configuración). Helper único para no duplicar la lista.
+  const VITRINA_HREFS = ['/valida', '/tableros', '/numeros'] as const
+  const vitrinaGate = <T extends { href: string }>(items: T[]): T[] =>
+    modoVitrina ? items.filter((i) => (VITRINA_HREFS as readonly string[]).includes(i.href)) : items
+
+  const businessItems = vitrinaGate(mod.business ? filterByRole(applyOverride(BUSINESS_NAV_ITEMS), role) : [])
+  const contabilidadItems = vitrinaGate(mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : [])
   // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
-  const complianceItems = (mod.compliance || mod.compliance_audit)
+  const complianceItems = vitrinaGate((mod.compliance || mod.compliance_audit)
     ? filterCompliance(COMPLIANCE_NAV_ITEMS, role, mod)
-    : []
+    : [])
   // Validacion — segmentacion + listas, mismo gating que compliance, grupo propio en sidebar
-  const validacionItems = (mod.compliance || mod.compliance_audit)
+  const validacionItems = vitrinaGate((mod.compliance || mod.compliance_audit)
     ? filterCompliance(VALIDACION_NAV_ITEMS, role, mod)
-    : []
-  const sharedItems = filterByRole(applyOverride(SHARED_NAV_ITEMS), role)
+    : [])
+  const sharedItems = vitrinaGate(filterByRole(applyOverride(SHARED_NAV_ITEMS), role))
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
   // Href dinamico: owner del workspace admin global ve la biblioteca cross-workspace, el resto ve el Kanban del workspace actual
-  const workflowsItems = hasLineas
+  const workflowsItems = vitrinaGate(hasLineas
     ? filterByRole(applyOverride(WORKFLOWS_NAV_ITEMS), role).map(item =>
         isAdminWorkspace && role === 'owner' ? { ...item, href: '/admin/workflows' } : item
       )
-    : []
-  const validaItems = mod.valida_consulta ? filterByRole(VALIDA_NAV_ITEMS, role) : []
-  const certItems = mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []
+    : [])
+  // En modo vitrina, Valida se muestra aunque el flag valida_consulta no esté (el
+  // shell vitrina ES para clientes Valida-only). Fuera de vitrina, opt-in normal.
+  const validaItems = (modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : []
+  const certItems = vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : [])
   const extrasItems = [...validaItems, ...certItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
-  const cajaItems = [
+  const cajaItems = vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
     ...(mod.conciliacion && roleAllowed(CAJA_CONCILIACION_ITEM.href, CAJA_CONCILIACION_ITEM.roles) ? [CAJA_CONCILIACION_ITEM] : []),
     ...(mod.cobros_recurrentes && roleAllowed(CAJA_COBROS_ITEM.href, CAJA_COBROS_ITEM.roles) ? [CAJA_COBROS_ITEM] : []),
-  ]
-  const adminItems = isAdminWorkspace ? getAdminItemsForRole(role) : []
+  ])
+  const adminItems = modoVitrina ? [] : (isAdminWorkspace ? getAdminItemsForRole(role) : [])
 
-  // Home href based on active modules
-  const homeHref = mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio')
+  // Home href based on active modules. En modo vitrina el home es Valida (la única
+  // superficie funcional); /numeros y /mi-negocio podrían estar ocultos.
+  const homeHref = modoVitrina ? '/valida' : (mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio'))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
   const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...sharedItems, ...validaItems, ...certItems, ...workflowsItems]
-  const primaryHrefs = (!mod.business && mod.compliance)
+  const primaryHrefs = modoVitrina
+    ? ['/valida', '/tableros', '/numeros']
+    : (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
   const mobilePrimary = allMobileItems.filter(item => primaryHrefs.includes(item.href))
@@ -889,8 +912,9 @@ export default function AppShell({
         </nav>
       </div>
 
-      {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA) */}
-      {mod.business && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} />}
+      {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA).
+          En modo vitrina se oculta: el shell es comercial, no operativo. */}
+      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} />}
       </div>
     </div>
   )
