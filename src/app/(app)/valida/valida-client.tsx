@@ -35,6 +35,7 @@ import {
 import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
+import { useFileDrop } from '@/hooks/use-file-drop';
 
 type TabKey = 'puntual' | 'masiva' | 'historial';
 
@@ -656,6 +657,15 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
   const [pendingPDF, setPendingPDF] = useState(false);
   const [errorPDF, setErrorPDF] = useState<string | null>(null);
 
+  // Drag-and-drop sobre la zona de carga (mismo callback que el file picker).
+  // Se deshabilita mientras el cargue corre para no reemplazar el archivo en vuelo.
+  // La validación de extensión/tamaño/filas la sigue haciendo el server
+  // (prepararLoteValida) igual que con el picker — no se filtra aquí.
+  const drop = useFileDrop({
+    onFiles: f => setArchivo(f[0] ?? null),
+    disabled: estado.fase === 'preparando' || estado.fase === 'procesando',
+  });
+
   async function descargarPlantilla() {
     startTplTransition(async () => {
       const r = await descargarPlantillaValida({ sinNegocio: modoVitrina });
@@ -802,12 +812,21 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
 
           <label
             htmlFor="archivo-batch"
-            className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-[#E5E7EB] hover:border-[#1A1A1A] rounded-lg p-8 cursor-pointer transition-colors"
+            {...drop.dropProps}
+            className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-lg p-8 cursor-pointer transition-colors ${
+              drop.isDragging
+                ? 'border-[#10B981] bg-[#10B981]/5'
+                : 'border-[#E5E7EB] hover:border-[#1A1A1A]'
+            }`}
           >
-            <Upload className="h-8 w-8 text-[#6B7280]" />
+            <Upload className={`h-8 w-8 ${drop.isDragging ? 'text-[#10B981]' : 'text-[#6B7280]'}`} />
             <div className="text-center">
               <p className="text-sm font-semibold text-[#1A1A1A]">
-                {archivo ? archivo.name : 'Arrastra o selecciona un archivo XLSX'}
+                {drop.isDragging
+                  ? 'Suelta el archivo aquí'
+                  : archivo
+                  ? archivo.name
+                  : 'Arrastra o selecciona un archivo XLSX'}
               </p>
               <p className="text-xs text-[#6B7280] mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
             </div>
