@@ -9,10 +9,11 @@ async function getLandingForInvite(role: string, workspaceId: string): Promise<s
   const svc = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: ws } = await (svc.from('workspaces') as any)
-    .select('modules')
+    .select('modules, config_extra')
     .eq('id', workspaceId)
     .single()
-  return landingForWorkspace(role, (ws?.modules as Record<string, boolean> | null) ?? null)
+  const modoVitrina = (ws?.config_extra as { modo_vitrina?: boolean } | null)?.modo_vitrina === true
+  return landingForWorkspace(role, (ws?.modules as Record<string, boolean> | null) ?? null, modoVitrina)
 }
 
 /**
