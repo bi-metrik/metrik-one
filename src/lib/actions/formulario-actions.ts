@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { uploadFileToDrive, setFilePublicByLink, createSubfolderPath } from '@/lib/google-drive'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
@@ -178,23 +179,48 @@ function getTemplateComponent(
 
 // ── Main action ──────────────────────────────────────────────────────────────
 
-export async function generarFormulario(
-  negocioBloqueId: string,
-  negocioId: string,
-): Promise<{
+type GenerarFormularioResult = {
   success: boolean
   drive_url?: string
   campos_usados?: Record<string, string | null>
   faltantes?: string[]
   version_n?: number
   error?: string
-}> {
+}
+
+export async function generarFormulario(
+  negocioBloqueId: string,
+  negocioId: string,
+): Promise<GenerarFormularioResult> {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
 
+  return generarFormularioCore(
+    supabase as unknown as SupabaseClient,
+    workspaceId,
+    userId ?? null,
+    negocioBloqueId,
+    negocioId,
+  )
+}
+
+/**
+ * Núcleo de generación SIN auth. Lo invocan el server action `generarFormulario`
+ * (tras getWorkspace + guardEditarBloque) y los scripts de cargue masivo (con
+ * service client). Misma lógica de producción: resuelve casillas, arma el PDF con
+ * el template oficial, lo sube a la carpeta canónica del negocio en Drive y deja
+ * una versión en `formulario_versiones`. → una sola vía de generación, sin drift.
+ */
+export async function generarFormularioCore(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  userId: string | null,
+  negocioBloqueId: string,
+  negocioId: string,
+): Promise<GenerarFormularioResult> {
   const admin = createServiceClient()
 
   try {
@@ -351,8 +377,8 @@ export async function generarFormulario(
       })
       .eq('id', negocioBloqueId)
 
-    // 8. Revalidate
-    revalidatePath(`/negocios/${negocioId}`)
+    // 8. Revalidate (no-op fuera de un request: scripts de cargue masivo)
+    try { revalidatePath(`/negocios/${negocioId}`) } catch { /* sin request context */ }
 
     return {
       success: true,
