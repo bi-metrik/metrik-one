@@ -2,7 +2,6 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
-import FiscalNudge from './fiscal-nudge'
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
@@ -80,16 +79,11 @@ export default async function AppLayout({
     }
   }
 
-  const [workspaceResult, fiscalResult, modulesResult, lineasResult] = await Promise.all([
+  const [workspaceResult, modulesResult, lineasResult] = await Promise.all([
     activeClient
       .from('workspaces')
       .select('name, slug, color_primario, color_secundario, logo_url')
       .eq('id', activeWorkspaceId)
-      .single(),
-    activeClient
-      .from('fiscal_profiles')
-      .select('is_complete, is_estimated, nudge_count')
-      .eq('workspace_id', activeWorkspaceId)
       .single(),
     // modules column added in migration 20260409300001 — not in generated types yet
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -137,8 +131,6 @@ export default async function AppLayout({
     conciliacionPendientes = typeof cnt === 'number' ? cnt : 0
   }
 
-  const fiscal = fiscalResult.data
-
   const platformAdminState = await getPlatformAdminState()
 
   return (
@@ -162,16 +154,6 @@ export default async function AppLayout({
         conciliacionPendientes={conciliacionPendientes}
         notificationBell={<NotificationBell userId={user.id} />}
       >
-        {/* D235/D236: Fiscal nudge — shows when profile incomplete, max 3 nudges. Not for contador. */}
-        {fiscal && !fiscal.is_complete && navRole !== 'contador' && (
-          <div className="mb-4">
-            <FiscalNudge
-              isComplete={fiscal.is_complete ?? false}
-              isEstimated={fiscal.is_estimated ?? false}
-              nudgeCount={fiscal.nudge_count ?? 0}
-            />
-          </div>
-        )}
         {children}
       </AppShell>
       {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
