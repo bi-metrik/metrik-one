@@ -296,7 +296,16 @@ export default function AppShell({
   const vitrinaGate = <T extends { href: string }>(items: T[]): T[] =>
     modoVitrina ? items.filter((i) => (VITRINA_HREFS as readonly string[]).includes(i.href)) : items
 
-  const businessItems = vitrinaGate(mod.business ? filterByRole(applyOverride(BUSINESS_NAV_ITEMS), role) : [])
+  // En modo vitrina, Números y Tableros se FUERZAN aunque sus módulos (business)
+  // estén off — son vitrinas de upsell. Sin esto no aparecen en un workspace
+  // Valida-only porque sus grupos no se construyen. Se muestran para cualquier rol
+  // del workspace (el shell ya está curado). Tomamos la definición canónica del item.
+  const VITRINA_NUMEROS_ITEM = BUSINESS_NAV_ITEMS.find((i) => i.href === '/numeros')!
+  const VITRINA_TABLEROS_ITEM = SHARED_NAV_ITEMS.find((i) => i.href === '/tableros')!
+
+  const businessItems = modoVitrina
+    ? [VITRINA_NUMEROS_ITEM]
+    : (mod.business ? filterByRole(applyOverride(BUSINESS_NAV_ITEMS), role) : [])
   const contabilidadItems = vitrinaGate(mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : [])
   // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
   const complianceItems = vitrinaGate((mod.compliance || mod.compliance_audit)
@@ -306,7 +315,10 @@ export default function AppShell({
   const validacionItems = vitrinaGate((mod.compliance || mod.compliance_audit)
     ? filterCompliance(VALIDACION_NAV_ITEMS, role, mod)
     : [])
-  const sharedItems = vitrinaGate(filterByRole(applyOverride(SHARED_NAV_ITEMS), role))
+  // En vitrina, "Compartidos" = solo Tableros, forzado para cualquier rol del ws.
+  const sharedItems = modoVitrina
+    ? [VITRINA_TABLEROS_ITEM]
+    : filterByRole(applyOverride(SHARED_NAV_ITEMS), role)
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
   // Href dinamico: owner del workspace admin global ve la biblioteca cross-workspace, el resto ve el Kanban del workspace actual
   const workflowsItems = vitrinaGate(hasLineas

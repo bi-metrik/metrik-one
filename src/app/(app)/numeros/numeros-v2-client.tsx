@@ -12,12 +12,19 @@ import DrillDownSheet from './drill-down-sheet'
 import type { NumerosData } from './actions-v2'
 import { getNumeros } from './actions-v2'
 import { FEATURES } from '@/lib/feature-flags'
+import MetrikLockup from '@/components/metrik-lockup'
 
 interface Props {
   initialData: NumerosData | null
+  /**
+   * Modo vitrina (workspaces Valida-only). Cuando es true, el dashboard real se
+   * muestra EN CEROS como muestra comercial, con un banner de upsell a ONE arriba.
+   * El guard de módulo/permiso ya fue bypasseado en la page.
+   */
+  modoVitrina?: boolean
 }
 
-export default function NumerosV2Client({ initialData }: Props) {
+export default function NumerosV2Client({ initialData, modoVitrina = false }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [data, setData] = useState(initialData)
@@ -93,6 +100,9 @@ export default function NumerosV2Client({ initialData }: Props) {
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 pb-24">
+      {/* Modo vitrina: banner comercial sobre el dashboard real en ceros */}
+      {modoVitrina && <VitrinaNumerosBanner />}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-base font-bold">
@@ -332,6 +342,48 @@ export default function NumerosV2Client({ initialData }: Props) {
           onChangeDrill={(q) => setActiveDrill(q)}
         />
       )}
+    </div>
+  )
+}
+
+// ── Banner modo vitrina ───────────────────────────────
+// Muestra comercial sobre el dashboard real en ceros (workspaces Valida-only).
+// Marca: MetrikLockup, Verde Métrica #10B981, Negro Carbón #1A1A1A, Montserrat
+// (heredada), "Powered by MéTRIK", CTA real a metrik.com.co. Copy de Mateo (no editar).
+function VitrinaNumerosBanner() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <p className="text-[15px] leading-relaxed" style={{ color: '#1A1A1A' }}>
+            Vista de muestra. Estos indicadores se construyen con los datos de tu
+            operación en tiempo real. Hoy usas Valida para cumplir; suma tu operación
+            con MeTRIK ONE.
+          </p>
+          <a
+            href="https://metrik.com.co"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:brightness-95"
+            style={{ backgroundColor: '#10B981' }}
+          >
+            Hablemos con MeTRIK
+          </a>
+        </div>
+        <div className="hidden sm:block shrink-0">
+          <MetrikLockup size="md" />
+        </div>
+      </div>
+      <div className="mt-4 border-t border-border pt-3">
+        <a
+          href="https://metrik.com.co"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Powered by MéTRIK
+        </a>
+      </div>
     </div>
   )
 }

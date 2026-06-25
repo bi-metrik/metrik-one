@@ -53,3 +53,24 @@ export async function getVitrinaCopy(
     tableros: override.tableros ?? VITRINA_COPY_DEFAULT.tableros,
   }
 }
+
+/**
+ * ¿El workspace está en modo vitrina? (solo el booleano, sin resolver copys).
+ * Para callers que renderizan su propio contenido vitrina (ej. Números muestra el
+ * dashboard real en ceros, no un placeholder de copy). `false` = flujo normal.
+ */
+export async function isModoVitrina(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string | null,
+): Promise<boolean> {
+  if (!supabase || !workspaceId) return false
+
+  const { data } = await supabase
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', workspaceId)
+    .single()
+
+  return (data?.config_extra as { modo_vitrina?: boolean } | null)?.modo_vitrina === true
+}
