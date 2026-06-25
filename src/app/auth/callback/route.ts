@@ -99,42 +99,11 @@ export async function GET(request: Request) {
       }
     }
 
-    // New user — check pending invitation by email (service client bypasses RLS since no profile yet)
-    const userEmail = user.email?.toLowerCase()
-    if (userEmail) {
-      const serviceClient = createServiceClient()
-      const { data: pendingInvite } = await serviceClient
-        .from('team_invitations')
-        .select('workspace_id')
-        .eq('email', userEmail)
-        .eq('status', 'pending')
-        .limit(1)
-        .maybeSingle()
-
-      if (pendingInvite) {
-        const targetPath = '/accept-invite'
-        if (isLocalEnv) return NextResponse.redirect(`${origin}${targetPath}`)
-        const { data: invWs } = await serviceClient
-          .from('workspaces')
-          .select('slug')
-          .eq('id', pendingInvite.workspace_id)
-          .single()
-        if (invWs?.slug) {
-          return NextResponse.redirect(`https://${invWs.slug}.${baseDomain}${targetPath}`)
-        }
-        return NextResponse.redirect(`${origin}${targetPath}`)
-      }
-    }
-
-    // Honor explicit /accept-invite redirect even if lookup failed
-    if (redirectTo === '/accept-invite') {
-      return NextResponse.redirect(`${origin}/accept-invite`)
-    }
-
-    // No invitation → onboarding
-    if (isLocalEnv) return NextResponse.redirect(`${origin}/onboarding`)
-    if (forwardedHost) return NextResponse.redirect(`https://${forwardedHost}/onboarding`)
-    return NextResponse.redirect(`${origin}/onboarding`)
+    // Sin workspace asignado — no hay self-serve ni invitaciones. La creacion y
+    // activacion de usuarios esta centralizada en MeTRIK. Lo maneja /sin-espacio.
+    if (isLocalEnv) return NextResponse.redirect(`${origin}/sin-espacio`)
+    if (forwardedHost) return NextResponse.redirect(`https://${forwardedHost}/sin-espacio`)
+    return NextResponse.redirect(`${origin}/sin-espacio`)
   }
 
   // Branch 1: PKCE flow (?code=...) — login, signup, OAuth

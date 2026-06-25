@@ -23,6 +23,10 @@ interface StaffSectionProps {
   negociosCount?: Record<string, number>
 }
 
+// Invitaciones cerradas: la creacion y activacion de nuevos usuarios esta
+// centralizada en MeTRIK. Se conserva el alta de personal (registro de costos).
+const INVITACIONES_HABILITADAS = false
+
 // rol_plataforma que NO entra al modelo de areas operativas.
 const ROL_SIN_AREAS = ['contador', 'campo']
 const rolUsaAreas = (rol: string) => !ROL_SIN_AREAS.includes(rol)
@@ -447,7 +451,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                     )}
                   </div>
                   {/* Invite to platform */}
-                  {!s.profile_id && currentUserRole === 'owner' && (
+                  {!s.profile_id && currentUserRole === 'owner' && INVITACIONES_HABILITADAS && (
                     <div className="pt-1 border-t mt-1">
                       {invitingId === s.id ? (
                         <div className="flex items-center gap-1.5">

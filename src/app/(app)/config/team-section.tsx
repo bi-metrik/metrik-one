@@ -14,6 +14,10 @@ import type { RoleKey } from '@/lib/roles'
 
 type InviteRole = 'admin' | 'supervisor' | 'operator' | 'read_only'
 
+// Invitaciones cerradas: la creacion y activacion de nuevos usuarios esta
+// centralizada en MeTRIK. Se conserva la gestion de roles del equipo existente.
+const INVITACIONES_HABILITADAS = false
+
 // ── Types ──────────────────────────────────────────────
 
 interface TeamMember {
@@ -176,7 +180,7 @@ export default function TeamSection({ currentUserRole }: TeamSectionProps) {
             {invitations.length > 0 && ` · ${invitations.length} pendiente${invitations.length !== 1 ? 's' : ''}`}
           </p>
         </div>
-        {isOwner && (
+        {isOwner && INVITACIONES_HABILITADAS && (
           <button
             onClick={() => setShowInviteForm(!showInviteForm)}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -187,8 +191,17 @@ export default function TeamSection({ currentUserRole }: TeamSectionProps) {
         )}
       </div>
 
+      {/* Aviso: alta de usuarios centralizada en MeTRIK */}
+      {isOwner && !INVITACIONES_HABILITADAS && (
+        <div className="rounded-lg border border-dashed p-3 text-center">
+          <p className="text-xs text-muted-foreground">
+            La creacion y activacion de nuevos usuarios esta centralizada en MéTRIK. Aqui puedes administrar los roles del equipo existente.
+          </p>
+        </div>
+      )}
+
       {/* Invite Form */}
-      {showInviteForm && (
+      {INVITACIONES_HABILITADAS && showInviteForm && (
         <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
           <input
             type="email"

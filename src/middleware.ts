@@ -62,9 +62,12 @@ export async function middleware(request: NextRequest) {
 
     // Rutas publicas permitidas en el subdomain sin sesion
     if (pathname.startsWith('/auth/callback')) return supabaseResponse
-    if (pathname === '/accept-invite') return supabaseResponse
     if (pathname === '/login') return supabaseResponse
-    if (pathname === '/registro') return supabaseResponse
+    if (pathname === '/sin-espacio') return supabaseResponse
+    // Signup cerrado: registro / onboarding / invitaciones ya no existen -> al login
+    if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
     // Certificacion publica via QR (read-only, sin login). La pagina valida el
     // flag del workspace y solo expone lotes estado='publicado' via service-role.
     if (pathname.startsWith('/cert/')) return supabaseResponse
@@ -125,15 +128,11 @@ export async function middleware(request: NextRequest) {
   }
 
   if (pathname.startsWith('/auth/callback')) return supabaseResponse
-  if (pathname === '/registro') return supabaseResponse
-  if (pathname === '/accept-invite') return supabaseResponse
+  if (pathname === '/sin-espacio') return supabaseResponse
 
-  // Onboarding route — allow for authenticated users without profile
-  if (pathname === '/onboarding') {
-    if (!user) {
-      return NextResponse.redirect(new URL('/registro', request.url))
-    }
-    return supabaseResponse
+  // Signup cerrado: registro / onboarding / invitaciones -> al login
+  if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   // Login page
@@ -162,12 +161,8 @@ export async function middleware(request: NextRequest) {
         }
       }
 
-      // User exists but no profile → check for invite redirect, otherwise onboarding
-      const redirectParam = request.nextUrl.searchParams.get('redirectTo')
-      if (redirectParam === '/accept-invite') {
-        return NextResponse.redirect(new URL('/accept-invite', request.url))
-      }
-      return NextResponse.redirect(new URL('/onboarding', request.url))
+      // Usuario autenticado sin workspace → no hay self-serve, lo maneja /sin-espacio
+      return NextResponse.redirect(new URL('/sin-espacio', request.url))
     }
     return supabaseResponse
   }
@@ -197,8 +192,8 @@ export async function middleware(request: NextRequest) {
         }
       }
 
-      // User exists but no profile → onboarding
-      return NextResponse.redirect(new URL('/onboarding', request.url))
+      // Usuario autenticado sin workspace → /sin-espacio
+      return NextResponse.redirect(new URL('/sin-espacio', request.url))
     }
     return supabaseResponse
   }
