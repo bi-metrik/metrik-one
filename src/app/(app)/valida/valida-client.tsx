@@ -93,6 +93,13 @@ type Props = {
   errorHistorial: string | null;
   tutorialNuncaVisto?: boolean;
   negocioInicial?: NegocioBusqueda | null;
+  /**
+   * Modo vitrina (workspaces Valida-only, config_extra.modo_vitrina). Oculta toda
+   * la mecánica de "asociar a negocio" (picker en consulta puntual + carga masiva,
+   * filtro y columna en historial) y descarga la plantilla sin la columna
+   * negocio_codigo. Default false → comportamiento íntegro (AFI conserva el picker).
+   */
+  modoVitrina?: boolean;
 };
 
 export default function ValidaClient({
@@ -100,6 +107,7 @@ export default function ValidaClient({
   errorHistorial,
   tutorialNuncaVisto = false,
   negocioInicial = null,
+  modoVitrina = false,
 }: Props) {
   const [tab, setTab] = useState<TabKey>(negocioInicial ? 'historial' : 'puntual');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
@@ -169,14 +177,15 @@ export default function ValidaClient({
         </TabButton>
       </div>
 
-      {tab === 'puntual' && <ConsultaPuntualForm onPersisted={() => refrescarHistorial()} />}
-      {tab === 'masiva' && <ConsultaMasivaForm onPersisted={() => refrescarHistorial()} />}
+      {tab === 'puntual' && <ConsultaPuntualForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
+      {tab === 'masiva' && <ConsultaMasivaForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
       {tab === 'historial' && (
         <Historial
           consultas={historial}
           error={historialError}
           onFiltrar={refrescarHistorial}
           negocioInicial={negocioInicial}
+          modoVitrina={modoVitrina}
         />
       )}
 
@@ -219,7 +228,7 @@ function TabButton({
 
 // ─── Consulta puntual ─────────────────────────────────────────────────────
 
-function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
+function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted: () => void; modoVitrina?: boolean }) {
   const [tipo, setTipo] = useState<TipoPersona>('natural');
   const [nombre, setNombre] = useState('');
   const [docTipo, setDocTipo] = useState<TipoDocumento>('CC');
@@ -322,15 +331,17 @@ function ConsultaPuntualForm({ onPersisted }: { onPersisted: () => void }) {
           </div>
         </div>
 
-        <div data-tutorial-target="negocio-picker">
-          <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
-            Asociar a negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
-          </label>
-          <NegocioPicker value={negocio} onChange={setNegocio} />
-          <p className="text-xs text-[#6B7280] mt-1.5">
-            Útil para agrupar consultas por CDA. Incluye negocios cerrados.
-          </p>
-        </div>
+        {!modoVitrina && (
+          <div data-tutorial-target="negocio-picker">
+            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+              Asociar a negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
+            </label>
+            <NegocioPicker value={negocio} onChange={setNegocio} />
+            <p className="text-xs text-[#6B7280] mt-1.5">
+              Útil para agrupar consultas por CDA. Incluye negocios cerrados.
+            </p>
+          </div>
+        )}
 
         {(nombre.trim().length >= 2) !== (docNumero.trim().length >= 3) && (nombre.trim() || docNumero.trim()) ? (
           <div className="p-3 rounded-lg bg-[#FFFBEB] border-l-[3px] border-[#F59E0B] text-[#1A1A1A] text-xs leading-relaxed">
@@ -636,7 +647,7 @@ function severidadesIniciales(): Record<Severidad, number> {
   return { alto: 0, medio: 0, bajo: 0, informativo: 0, sin_hallazgo: 0, error: 0 };
 }
 
-function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
+function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted: () => void; modoVitrina?: boolean }) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [titulo, setTitulo] = useState('');
   const [negocioLote, setNegocioLote] = useState<NegocioBusqueda | null>(null);
@@ -647,7 +658,7 @@ function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
 
   async function descargarPlantilla() {
     startTplTransition(async () => {
-      const r = await descargarPlantillaValida();
+      const r = await descargarPlantillaValida({ sinNegocio: modoVitrina });
       if (!r.ok) {
         setEstado({ fase: 'error', mensaje: r.error });
         return;
@@ -777,6 +788,7 @@ function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
             />
           </div>
 
+          {!modoVitrina && (
           <div>
             <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
               Asociar todo el lote a un negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
@@ -786,6 +798,7 @@ function ConsultaMasivaForm({ onPersisted }: { onPersisted: () => void }) {
               Si la columna <code className="bg-[#F5F4F2] px-1 rounded">negocio_codigo</code> tiene valor en el XLSX, sobrescribe esta selección fila por fila.
             </p>
           </div>
+          )}
 
           <label
             htmlFor="archivo-batch"
@@ -983,11 +996,13 @@ function Historial({
   error,
   onFiltrar,
   negocioInicial = null,
+  modoVitrina = false,
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   onFiltrar: (filtros: FiltrosHistorial) => Promise<void>;
   negocioInicial?: NegocioBusqueda | null;
+  modoVitrina?: boolean;
 }) {
   const [negocio, setNegocio] = useState<NegocioBusqueda | null>(negocioInicial);
   const [severidad, setSeveridad] = useState<Severidad | ''>('');
@@ -1024,12 +1039,14 @@ function Historial({
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
         <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Filtros</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
-              Negocio
-            </label>
-            <NegocioPicker value={negocio} onChange={setNegocio} />
-          </div>
+          {!modoVitrina && (
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+                Negocio
+              </label>
+              <NegocioPicker value={negocio} onChange={setNegocio} />
+            </div>
+          )}
           <div>
             <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
               Severidad
@@ -1106,7 +1123,7 @@ function Historial({
         </div>
       </div>
 
-      <HistorialTable consultas={consultas} error={error} mostrarNegocio />
+      <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} />
     </div>
   );
 }

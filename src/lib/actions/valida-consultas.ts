@@ -243,19 +243,33 @@ export async function consultarValida(
 
 // ─── Plantilla XLSX ───────────────────────────────────────────────────────
 
-export async function descargarPlantillaValida(): Promise<
+export async function descargarPlantillaValida(
+  opts: { sinNegocio?: boolean } = {},
+): Promise<
   { ok: true; data: { base64: string; filename: string } } | { ok: false; error: string }
 > {
   try {
+    // En modo vitrina (workspaces Valida-only) la columna `negocio_codigo` no
+    // aplica — no hay negocios a los que atar consultas. Se omite del template.
+    const sinNegocio = opts.sinNegocio === true;
     const wb = XLSX.utils.book_new();
-    const headers = [
-      ['tipo_persona', 'nombre_completo', 'tipo_documento', 'numero_documento', 'negocio_codigo'],
-      ['natural', 'Juan Perez Gomez', 'CC', '1077089147', ''],
-      ['juridica', 'Acme Trading SAS', 'NIT', '900123456', 'C1 26 1'],
-      ['natural', 'Maria Rodriguez', '', '', ''],
-    ];
+    const headers = sinNegocio
+      ? [
+          ['tipo_persona', 'nombre_completo', 'tipo_documento', 'numero_documento'],
+          ['natural', 'Juan Perez Gomez', 'CC', '1077089147'],
+          ['juridica', 'Acme Trading SAS', 'NIT', '900123456'],
+          ['natural', 'Maria Rodriguez', '', ''],
+        ]
+      : [
+          ['tipo_persona', 'nombre_completo', 'tipo_documento', 'numero_documento', 'negocio_codigo'],
+          ['natural', 'Juan Perez Gomez', 'CC', '1077089147', ''],
+          ['juridica', 'Acme Trading SAS', 'NIT', '900123456', 'C1 26 1'],
+          ['natural', 'Maria Rodriguez', '', '', ''],
+        ];
     const ws = XLSX.utils.aoa_to_sheet(headers);
-    ws['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
+    ws['!cols'] = sinNegocio
+      ? [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }]
+      : [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Consultas');
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
