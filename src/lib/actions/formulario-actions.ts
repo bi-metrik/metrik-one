@@ -47,6 +47,32 @@ interface CampoFuente {
 
 // ── Resolve source campos ────────────────────────────────────────────────────
 
+// ── Seccional DIAN (010) ──────────────────────────────────────────────────────
+function normSeccional(s: string | null | undefined): string {
+  return (s ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+}
+/** Sugiere la seccional por match LITERAL de la ciudad de la factura; fallback "Otras seccionales". */
+function sugerirSeccional(ciudad: string | null, seccionales: string[]): string {
+  const c = normSeccional(ciudad)
+  if (c) {
+    const hit = seccionales.find((s) => normSeccional(s) === c)
+    if (hit) return hit
+  }
+  return seccionales.find((s) => normSeccional(s) === 'otras seccionales') ?? seccionales[seccionales.length - 1] ?? ''
+}
+/** Lee la ciudad de venta extraída del bloque Factura del vehículo (slug estable). */
+async function leerCiudadVentaFactura(supabase: unknown, negocioId: string): Promise<string | null> {
+  const { data } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug)')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.slug', 'factura_venta_vehiculo')
+    .limit(1)
+    .maybeSingle()
+  const campos = ((data as { data?: { campos?: Record<string, { value?: string | null }> } } | null)?.data?.campos) ?? {}
+  return campos.ciudad_venta?.value ?? null
+}
+
 async function resolverCamposFuente(
   supabase: unknown,
   negocioId: string,
@@ -266,6 +292,37 @@ export async function generarFormularioCore(
       if (k in constantesFinal) constantesFinal[k] = (v ?? '') as string
       else datosFinal[k] = v
     }
+
+    // ── Seccional DIAN (010, config-driven, opt-in) ──────────────────────────
+    // Si el bloque define config_extra.seccionales, el preset de la seccional
+    // (seleccionada en data.seccional o sugerida desde la ciudad de la factura)
+    // llena las casillas 12/50/51/57 (y 11/1005/1006 en Cali). Precedencia:
+    // override manual > preset seccional > fuente estándar.
+    const seccionalExtra: Record<string, unknown> = {}
+    if (template === 'formulario-010' && configExtra.seccionales) {
+      const seccionales = configExtra.seccionales as Record<string, Record<string, unknown>>
+      const seleccion =
+        (typeof overrides.seccional === 'string' && overrides.seccional) ||
+        ((bloqueData.data as Record<string, unknown>)?.seccional as string | undefined) ||
+        sugerirSeccional(await leerCiudadVentaFactura(supabase, negocioId), Object.keys(seccionales))
+      const preset = seccionales[seleccion]
+      if (preset) {
+        if (!('tipo_obligacion' in overrides)) constantesFinal.tipo_obligacion = String(preset.tipo_obligacion ?? '')
+        if (!('concepto_saldo' in overrides)) constantesFinal.concepto_saldo = String(preset.concepto_saldo ?? '')
+        if (!('nombre_documento' in overrides)) constantesFinal.nombre_documento = String(preset.nombre_documento ?? '')
+        if (!('direccion_seccional' in overrides)) datosFinal.direccion_seccional = String(preset.direccion_seccional ?? '')
+        seccionalExtra.seccional_literal = true
+        if (preset.razon_social_cali) {
+          seccionalExtra.mostrar_razon_social = true
+          const nombreCompleto =
+            [datosFinal.primer_nombre, datosFinal.otros_nombres, datosFinal.primer_apellido, datosFinal.segundo_apellido]
+              .filter(Boolean).join(' ') || datosFinal.razon_social || ''
+          if (preset.casilla_1006_nombre_completo) seccionalExtra.organizacion_1006 = nombreCompleto
+        }
+        if (preset.cod_representacion) seccionalExtra.cod_representacion_1005 = String(preset.cod_representacion)
+      }
+    }
+
     const tieneValor = (v: string | null | undefined) => v !== null && v !== undefined && v !== ''
     const faltantesReales = faltantes.filter((f) => !tieneValor(overrides[f]) && !tieneValor(datosFinal[f]))
 
@@ -293,7 +350,7 @@ export async function generarFormularioCore(
     if (template === 'formulario-010') {
       // Overlay sobre el PDF oficial de la DIAN (no se modifica el fondo).
       const f010Datos = datosFinal as unknown as Formulario010Datos
-      const f010Constantes = constantesFinal as unknown as Formulario010Constantes
+      const f010Constantes = { ...constantesFinal, ...seccionalExtra } as unknown as Formulario010Constantes
       const bytes = await generarFormulario010(f010Datos, f010Constantes)
       buffer = Buffer.from(bytes)
     } else if (template === 'formulario-1668') {
@@ -352,7 +409,7 @@ export async function generarFormularioCore(
         negocio_bloque_id: negocioBloqueId,
         version_n: versionN,
         drive_url: driveUrl,
-        datos_snapshot: { ...datosFinal, ...constantesFinal },
+        datos_snapshot: { ...datosFinal, ...constantesFinal, ...seccionalExtra },
         generated_by: userId ?? null,
         generated_at: fechaGeneracion,
       })
