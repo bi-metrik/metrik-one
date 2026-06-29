@@ -6,6 +6,7 @@ import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
+import { nitSinDv } from '@/lib/dian/nit'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 
 const BUCKET = 've-documentos'
@@ -433,6 +434,14 @@ export async function procesarDocumento(
         const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'documento')
         if (extraction.data) {
           camposResult = extraction.data
+          // Normalización determinista post-extracción (config-driven). Ej.:
+          // nit_sin_dv deja el NIT base sin el DV pegado por la extracción.
+          for (const campo of camposExtraccion) {
+            if (campo.normalizar === 'nit_sin_dv') {
+              const cr = camposResult[campo.slug]
+              if (cr?.value) cr.value = nitSinDv(cr.value)
+            }
+          }
           newData.campos = camposResult
           extraccionStatus = 'ok'
           console.log('[documento] Step 9 OK: AI extraction done')
@@ -574,6 +583,14 @@ export async function reprocesarDocumento(
     const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'reprocesar')
     if (!extraction.data) {
       return { success: false, error: extraction.error ?? 'Error en extracción AI' }
+    }
+
+    // 4b. Normalización determinista post-extracción (config-driven, ver procesarDocumento)
+    for (const campo of camposExtraccion) {
+      if (campo.normalizar === 'nit_sin_dv') {
+        const cr = extraction.data[campo.slug]
+        if (cr?.value) cr.value = nitSinDv(cr.value)
+      }
     }
 
     // 5. Merge con data existente preservando campos manuales

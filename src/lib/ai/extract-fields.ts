@@ -17,6 +17,11 @@ export interface CampoExtraccion {
   /** Si true, la UI muestra una alerta "Revisar" junto al campo: la IA no es
    *  100% confiable en este dato y debe validarse a mano (ej. ciudad de venta). */
   alerta_revision?: boolean
+  /** Normalización determinista aplicada al valor extraído antes de persistir.
+   *  - `nit_sin_dv`: deja el NIT base sin el dígito de verificación pegado
+   *    (ej. "8600190638" → "860019063"). Lo que se keyea a la DIAN va sin DV;
+   *    la Relación de facturas lo reformatea con guion al renderizar. */
+  normalizar?: 'nit_sin_dv'
 }
 
 export interface CampoResultado {
