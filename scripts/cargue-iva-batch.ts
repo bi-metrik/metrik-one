@@ -121,7 +121,7 @@ async function procesar(c:Caso) {
     if (error) throw new Error(`contacto: ${error.message}`); contactoId = (data as {id:string}).id
   }
   const marca = fac.marca?.value ?? ''
-  const { data: neg, error: nerr } = await supabase.from('negocios').insert({ workspace_id:WS, linea_id:LINEA, contacto_id:contactoId, empresa_id:null, nombre:`${c.nombre} - ${marca}`, codigo:c.codigo, responsable_id:JESSICA_STAFF, etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto' }).select('id').single()
+  const { data: neg, error: nerr } = await supabase.from('negocios').insert({ workspace_id:WS, linea_id:LINEA, contacto_id:contactoId, empresa_id:null, nombre:`${c.nombre} - ${marca}`, codigo:c.codigo, responsable_id:JESSICA_STAFF, etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto', metadata:{ id_hubspot:c.id, fuente_cargue:'iva_devolucion' } }).select('id').single()
   if (nerr) throw new Error(`negocio: ${nerr.message}`)
   const negocioId = (neg as {id:string}).id
   await supabase.from('negocio_responsables').insert({ negocio_id:negocioId, staff_id:JESSICA_STAFF, assigned_by:JESSICA_PROFILE })
