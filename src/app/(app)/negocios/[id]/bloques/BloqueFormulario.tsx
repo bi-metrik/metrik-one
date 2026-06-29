@@ -16,6 +16,7 @@ import {
   generarFormulario,
   resolverFormularioParaEdicion,
   guardarFormularioOverrides,
+  guardarSeccional,
   type CasillaEditable,
   type FormularioVersionItem,
 } from '@/lib/actions/formulario-actions'
@@ -56,6 +57,9 @@ export default function BloqueFormulario({
   const [casillas, setCasillas] = useState<CasillaEditable[]>([])
   const [valores, setValores] = useState<Record<string, string>>({})
   const [versiones, setVersiones] = useState<FormularioVersionItem[]>([])
+  const [seccionales, setSeccionales] = useState<string[] | undefined>(undefined)
+  const [seccional, setSeccional] = useState<string | null>(null)
+  const [seccionalSugerida, setSeccionalSugerida] = useState(false)
   const [state, setState] = useState<GenerateState>('idle')
   const [isPending, startTransition] = useTransition()
   const [verHistorial, setVerHistorial] = useState(false)
@@ -70,10 +74,24 @@ export default function BloqueFormulario({
     if (res.error) { toast.error(res.error); setLoading(false); return }
     setCasillas(res.casillas)
     setVersiones(res.versiones)
+    setSeccionales(res.seccionales)
+    setSeccional(res.seccional ?? null)
+    setSeccionalSugerida(res.seccional_sugerida ?? false)
     const init: Record<string, string> = {}
     res.casillas.forEach((c) => { init[c.slug] = c.value })
     setValores(init)
     setLoading(false)
+  }
+
+  function handleSeccionalChange(value: string) {
+    setSeccional(value)
+    setSeccionalSugerida(false)
+    startTransition(async () => {
+      const r = await guardarSeccional(negocioBloqueId, value)
+      if (r.error) { toast.error(r.error); return }
+      await cargar() // recarga casillas con el preset de la nueva seccional
+      toast.success(`Seccional: ${value}`)
+    })
   }
 
   useEffect(() => {
@@ -169,6 +187,31 @@ export default function BloqueFormulario({
       <p className="text-[11px] text-muted-foreground/70">
         Revisa y ajusta las casillas si lo necesitas. El PDF se genera con estos valores — no se edita el PDF.
       </p>
+
+      {/* Selector de seccional DIAN (solo 010 con config de seccionales) */}
+      {seccionales && seccionales.length > 0 && (
+        <div className="rounded-lg border border-primary/30 bg-primary/[0.03] p-3">
+          <label className="flex flex-col gap-1">
+            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Seccional DIAN
+              {seccionalSugerida && (
+                <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700">Revisar — sugerida</span>
+              )}
+            </span>
+            <select
+              value={seccional ?? ''}
+              onChange={(e) => handleSeccionalChange(e.target.value)}
+              disabled={isPending}
+              className="w-full rounded-md border border-border px-2 py-1.5 text-xs focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 sm:max-w-xs"
+            >
+              {seccionales.map((s) => (<option key={s} value={s}>{s}</option>))}
+            </select>
+            <span className="text-[10px] text-muted-foreground/70">
+              Define las casillas 12, 50, 51 y 57 (y la firma en Cali). Sugerida por la ciudad de la factura — confírmala.
+            </span>
+          </label>
+        </div>
+      )}
 
       {/* Casillas editables agrupadas */}
       <div className="space-y-3">

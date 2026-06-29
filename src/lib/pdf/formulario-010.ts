@@ -56,6 +56,11 @@ export interface Formulario010Constantes {
   tipo_obligacion: string // Casilla 50 — "Impuesto sobre las ventas IVA"
   concepto_saldo: string // Casilla 51 — "Pago de lo no debido"
   nombre_documento?: string // Casilla 57 — "Factura electrónica de ventas"
+  // ── Seccional DIAN (config-driven, opt-in; ver config_extra.seccionales) ──
+  seccional_literal?: boolean // casilla 12: usar direccion_seccional tal cual (NO mapear a nombre oficial)
+  mostrar_razon_social?: boolean // casilla 11: llenar razón social (solo algunas seccionales, ej. Cali)
+  cod_representacion_1005?: string | null // casilla 1005 (solo algunas seccionales)
+  organizacion_1006?: string | null // casilla 1006 (solo algunas seccionales)
 }
 
 const TEMPLATE_PATH = path.join(process.cwd(), 'src/lib/pdf/templates/formulario-010-dian.pdf')
@@ -104,7 +109,10 @@ const P1 = {
   firma_tipo_doc: { x: 72, y: 134, maxWidth: 30 }, // 1002
   firma_identificacion: { x: 172, y: 134, maxWidth: 88 }, // 1003
   firma_dv: { x: 295, y: 134, maxWidth: 20 }, // 1004
-  // 1005 (Cod Representación) y 1006 (Organización): EN BLANCO por instrucción
+  // 1005 (Cod. Representación) y 1006 (Organización): solo se llenan en algunas
+  // seccionales (ej. Cali). Coords calibradas con pdftotext -bbox sobre el oficial.
+  firma_cod_representacion: { x: 145, y: 120, maxWidth: 40 }, // 1005
+  firma_organizacion: { x: 120, y: 109, maxWidth: 180 }, // 1006
 }
 
 // ── Página 2 (Datos solicitante repetidos + Titular saldo + Origen saldo) ────
@@ -215,9 +223,12 @@ export async function generarFormulario010(
 
   const fecha = parseFecha(datos.fecha_factura)
   const valorFmt = formatCurrency(datos.valor_solicitado)
-  // Casilla 12 — nombre OFICIAL de la seccional (la DIAN lo exige completo en
-  // hojas 1 y 2). Normaliza lo extraído del RUT contra el catálogo oficial.
-  const seccionalOficial = nombreOficialSeccional(datos.direccion_seccional)
+  // Casilla 12 — la seccional. Si la línea usa config de seccionales (seccional_literal),
+  // el valor ya viene resuelto literal del preset (tal cual el documento de Deisy) y NO
+  // se mapea. Si no, se normaliza lo extraído del RUT contra el catálogo oficial.
+  const seccionalOficial = constantes.seccional_literal
+    ? (datos.direccion_seccional ?? '')
+    : nombreOficialSeccional(datos.direccion_seccional)
 
   // SOENA opera 100% personas naturales: la casilla 11 (Razón social) SIEMPRE va en
   // BLANCO (determinista, sin heurística → sin campo). Se llenan las casillas 7-10
@@ -244,7 +255,8 @@ export async function generarFormulario010(
   edit1('segundo_apellido', datos.segundo_apellido, P1.segundo_apellido)
   edit1('primer_nombre', datos.primer_nombre, P1.primer_nombre)
   edit1('otros_nombres', datos.otros_nombres, P1.otros_nombres)
-  // Razón social (casilla 11): BLANCO determinista, sin campo.
+  // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
+  if (constantes.mostrar_razon_social && datos.razon_social) edit1('razon_social', datos.razon_social, P1.razon_social)
   edit1('direccion_seccional', seccionalOficial, P1.direccion_seccional)
   edit1('correo_electronico', datos.correo_electronico, P1.correo_electronico)
   edit1('direccion', datos.direccion, P1.direccion)
@@ -269,6 +281,9 @@ export async function generarFormulario010(
   fixed1('CC', P1.firma_tipo_doc) // DETERMINISTA
   edit1('nit', datos.nit, P1.firma_identificacion)
   edit1('dv', datos.dv, P1.firma_dv)
+  // 1005 (Cod. Representación) / 1006 (Organización): solo algunas seccionales (ej. Cali).
+  if (constantes.cod_representacion_1005) fixed1(constantes.cod_representacion_1005, P1.firma_cod_representacion)
+  if (constantes.organizacion_1006) edit1('organizacion_1006', constantes.organizacion_1006, P1.firma_organizacion)
 
   // ── PÁGINA 2 ──────────────────────────────────────────────────────────────
   // "06" en el espacio reservado para la DIAN: DETERMINISTA.
@@ -282,7 +297,8 @@ export async function generarFormulario010(
   edit2('segundo_apellido', datos.segundo_apellido, P2.segundo_apellido)
   edit2('primer_nombre', datos.primer_nombre, P2.primer_nombre)
   edit2('otros_nombres', datos.otros_nombres, P2.otros_nombres)
-  // Razón social (casilla 11): BLANCO determinista, sin campo.
+  // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
+  if (constantes.mostrar_razon_social && datos.razon_social) edit2('razon_social', datos.razon_social, P2.razon_social)
   edit2('direccion_seccional', seccionalOficial, P2.direccion_seccional)
 
   // Titular del saldo (= solicitante). Casilla 45: la palabra "NIT" en el campo +
