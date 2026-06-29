@@ -82,14 +82,47 @@ const C_UPME: CampoExtraccion[] = [
 ]
 
 type Campos = Record<string, CampoResultado>
-type Caso = { id:string; nombre:string; celular:string; codigo:string; rut:string; factura:string; cert:string; upme:string; seccional?:string }
+type Caso = { id:string; nombre:string; celular:string; codigo:string; rut:string; factura:string; cert:string; upme:string; seccional?:string; existente?:string }
 const mimeOf = (p:string) => { const l=p.toLowerCase(); return l.endsWith('.png')?'image/png':(l.endsWith('.jpg')||l.endsWith('.jpeg'))?'image/jpeg':'application/pdf' }
 
 function descargar(remotePath:string, localPath:string) {
   execFileSync('rclone', ['copyto', `gdrive:${remotePath}`, localPath, '--drive-root-folder-id', ARCHIVE], { stdio:'pipe' })
 }
-async function extraer(path:string, campos:CampoExtraccion[]):Promise<Campos> {
-  const { data, error } = await extractFieldsFromDocument(readFileSync(path), mimeOf(path), campos, GEMINI)
+const PY_DECRYPT = `import sys
+try:
+ from pypdf import PdfReader,PdfWriter
+except Exception:
+ from PyPDF2 import PdfReader,PdfWriter
+r=PdfReader(sys.argv[1])
+if r.is_encrypted: r.decrypt(sys.argv[3])
+w=PdfWriter()
+for p in r.pages: w.add_page(p)
+w.write(open(sys.argv[2],'wb'))`
+
+async function extraer(path:string, campos:CampoExtraccion[], password?:string):Promise<Campos> {
+  let src = path
+  let { data, error } = await extractFieldsFromDocument(readFileSync(src), mimeOf(src), campos, GEMINI)
+  // Fallback 1: certificados bancarios suelen venir CIFRADOS con la cédula del cliente
+  // ("BANCO CLAVE CC"). Descifrar con el password (= cédula del RUT) y reintentar.
+  if ((error || !data) && mimeOf(src) === 'application/pdf' && password) {
+    const dec = src.replace(/\.[^.]+$/, '') + '_dec.pdf'
+    try {
+      execFileSync('python3', ['-c', PY_DECRYPT, src, dec, password], { stdio:'pipe' })
+      if (existsSync(dec)) {
+        ;({ data, error } = await extractFieldsFromDocument(readFileSync(dec), 'application/pdf', campos, GEMINI))
+        if (data && !error) { src = dec; console.log(`   (${path.split('/').pop()}: descifrado con cédula)`) }
+      }
+    } catch { /* sin pypdf o password incorrecto */ }
+  }
+  // Fallback 2: PDFs escaneados/imagen que Gemini rechaza ("no pages") → PNG.
+  if ((error || !data) && mimeOf(src) === 'application/pdf') {
+    const png = src.replace(/\.[^.]+$/, '') + '_p1'
+    try {
+      execFileSync('pdftoppm', ['-png','-r','200','-f','1','-l','1','-singlefile', src, png], { stdio:'pipe' })
+      ;({ data, error } = await extractFieldsFromDocument(readFileSync(png+'.png'), 'image/png', campos, GEMINI))
+      if (data && !error) console.log(`   (${path.split('/').pop()}: extraído vía PNG)`)
+    } catch { /* pdftoppm no disponible o falló */ }
+  }
   if (error || !data) throw new Error(`extracción (${path.split('/').pop()}): ${error}`)
   return data
 }
@@ -105,26 +138,35 @@ async function procesar(c:Caso) {
   }
   const rut = await extraer(local.rut, C_RUT)
   const fac = await extraer(local.factura, C_FACTURA)
-  const cert = await extraer(local.cert, C_CERT)
+  const cert = await extraer(local.cert, C_CERT, rut.numero_identificacion?.value ?? undefined)
   const upme = await extraer(local.upme, C_UPME)
   // ajustes: depto DIVIPOLA, entidad sin S.A. (teléfono = el del RUT, NO override)
   const dp = noac(rut.departamento?.value || ''); if (DIVIPOLA[dp]) rut.codigo_departamento = { value:DIVIPOLA[dp], confidence:1, manual:false }
   if (cert.entidad_financiera?.value) cert.entidad_financiera.value = cert.entidad_financiera.value.replace(/\s*S\.?\s*A\.?S?\.?\s*$/i,'').trim()
   console.log(`  RUT ${rut.numero_identificacion?.value} · tel ${rut.telefono?.value} · IVA ${fac.valor_iva?.value} · ${cert.entidad_financiera?.value} ${cert.numero_cuenta?.value}`)
 
-  // contacto (dedup por teléfono)
-  let contactoId:string
-  const { data: ex } = await supabase.from('contactos').select('id').eq('workspace_id', WS).eq('telefono', c.celular).maybeSingle()
-  if (ex) contactoId = (ex as {id:string}).id
-  else {
-    const { data, error } = await supabase.from('contactos').insert({ workspace_id:WS, telefono:c.celular, nombre:c.nombre, email:rut.email?.value ?? null }).select('id').single()
-    if (error) throw new Error(`contacto: ${error.message}`); contactoId = (data as {id:string}).id
-  }
   const marca = fac.marca?.value ?? ''
-  const { data: neg, error: nerr } = await supabase.from('negocios').insert({ workspace_id:WS, linea_id:LINEA, contacto_id:contactoId, empresa_id:null, nombre:`${c.nombre} - ${marca}`, codigo:c.codigo, responsable_id:JESSICA_STAFF, etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto', metadata:{ id_hubspot:c.id, fuente_cargue:'iva_devolucion' } }).select('id').single()
-  if (nerr) throw new Error(`negocio: ${nerr.message}`)
-  const negocioId = (neg as {id:string}).id
-  await supabase.from('negocio_responsables').insert({ negocio_id:negocioId, staff_id:JESSICA_STAFF, assigned_by:JESSICA_PROFILE })
+  let negocioId:string
+  if (c.existente) {
+    // Completar un negocio EXISTENTE (reusa contacto/cobros/código; borra los bloques
+    // stub del seed para re-sembrar limpio). No rompe el consecutivo.
+    negocioId = c.existente
+    await supabase.from('negocio_bloques').delete().eq('negocio_id', negocioId)
+    await supabase.from('negocios').update({ metadata:{ id_hubspot:c.id, fuente_cargue:'iva_devolucion' } }).eq('id', negocioId)
+  } else {
+    // contacto (dedup por teléfono)
+    let contactoId:string
+    const { data: ex } = await supabase.from('contactos').select('id').eq('workspace_id', WS).eq('telefono', c.celular).maybeSingle()
+    if (ex) contactoId = (ex as {id:string}).id
+    else {
+      const { data, error } = await supabase.from('contactos').insert({ workspace_id:WS, telefono:c.celular, nombre:c.nombre, email:rut.email?.value ?? null }).select('id').single()
+      if (error) throw new Error(`contacto: ${error.message}`); contactoId = (data as {id:string}).id
+    }
+    const { data: neg, error: nerr } = await supabase.from('negocios').insert({ workspace_id:WS, linea_id:LINEA, contacto_id:contactoId, empresa_id:null, nombre:`${c.nombre} - ${marca}`, codigo:c.codigo, responsable_id:JESSICA_STAFF, etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto', metadata:{ id_hubspot:c.id, fuente_cargue:'iva_devolucion' } }).select('id').single()
+    if (nerr) throw new Error(`negocio: ${nerr.message}`)
+    negocioId = (neg as {id:string}).id
+    await supabase.from('negocio_responsables').insert({ negocio_id:negocioId, staff_id:JESSICA_STAFF, assigned_by:JESSICA_PROFILE })
+  }
 
   // carpeta Drive
   const { data: ln } = await supabase.from('lineas_negocio').select('drive_folder_id').eq('id', LINEA).maybeSingle()
@@ -155,6 +197,10 @@ async function procesar(c:Caso) {
     if (error) { console.error('   instancia:', error.message); continue }
     const r = await generarFormularioCore(supabase, WS, JESSICA_PROFILE, (inst as {id:string}).id, negocioId)
     if (r.success) ok++; else console.error('   gen ✗', r.error)
+  }
+  if (c.existente) {
+    // Mover el negocio existente a Envío (venía de otra etapa, ej. Cobro del piloto).
+    await supabase.from('negocios').update({ etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto' }).eq('id', negocioId)
   }
   console.log(`  ✓ ${c.codigo} en Envío · ${ok}/8 formularios · /negocios/${negocioId}`)
   return { codigo:c.codigo, negocioId, ok }
