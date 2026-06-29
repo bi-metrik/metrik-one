@@ -82,7 +82,7 @@ const C_UPME: CampoExtraccion[] = [
 ]
 
 type Campos = Record<string, CampoResultado>
-type Caso = { id:string; nombre:string; celular:string; codigo:string; rut:string; factura:string; cert:string; upme:string }
+type Caso = { id:string; nombre:string; celular:string; codigo:string; rut:string; factura:string; cert:string; upme:string; seccional?:string }
 const mimeOf = (p:string) => { const l=p.toLowerCase(); return l.endsWith('.png')?'image/png':(l.endsWith('.jpg')||l.endsWith('.jpeg'))?'image/jpeg':'application/pdf' }
 
 function descargar(remotePath:string, localPath:string) {
@@ -145,10 +145,13 @@ async function procesar(c:Caso) {
   await supabase.from('negocio_bloques').insert({ negocio_id:negocioId, bloque_config_id:'a6a0732b-a427-499c-b806-15d68608cb24', estado:'completo', data:{ modalidad_solicitante:'unico', _migrado:true } })
   for (const cfg of SEED_MIGRADO) await supabase.from('negocio_bloques').insert({ negocio_id:negocioId, bloque_config_id:cfg, estado:'completo', data:{ _migrado:true } })
 
-  // generar 4 formularios en Gen + 4 en Envío
+  // generar 4 formularios en Gen + 4 en Envío. Los 010 nacen con data.seccional
+  // (de CIUDAD FACTURA del sheet) para que el preset por seccional se aplique.
+  const ES_010 = new Set(['e0e92bdb-b6f3-48db-b9f8-26044be02b67', '8d70eb69-d35b-4918-8b80-5d2656b33412'])
   let ok=0
   for (const cfg of FORMS) {
-    const { data: inst, error } = await supabase.from('negocio_bloques').insert({ negocio_id:negocioId, bloque_config_id:cfg, estado:'pendiente', data:{} }).select('id').single()
+    const initData = (ES_010.has(cfg) && c.seccional) ? { seccional: c.seccional } : {}
+    const { data: inst, error } = await supabase.from('negocio_bloques').insert({ negocio_id:negocioId, bloque_config_id:cfg, estado:'pendiente', data:initData }).select('id').single()
     if (error) { console.error('   instancia:', error.message); continue }
     const r = await generarFormularioCore(supabase, WS, JESSICA_PROFILE, (inst as {id:string}).id, negocioId)
     if (r.success) ok++; else console.error('   gen ✗', r.error)
