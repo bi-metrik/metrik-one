@@ -1,4 +1,5 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
+import { nitConGuion } from '@/lib/dian/nit'
 
 interface RelacionFacturasProps {
   datos: {
@@ -131,7 +132,7 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
           <View style={s.dataRow}>
             <View style={[s.dataCell, { width: COL.no }]}><Text style={s.dataText}>1</Text></View>
             <View style={[s.dataCell, { width: COL.factura }]}><Text style={s.dataText}>{datos.numero_factura ?? '—'}</Text></View>
-            <View style={[s.dataCell, { width: COL.nitProv }]}><Text style={s.dataText}>{datos.nit_proveedor ?? '—'}</Text></View>
+            <View style={[s.dataCell, { width: COL.nitProv }]}><Text style={s.dataText}>{nitConGuion(datos.nit_proveedor) ?? '—'}</Text></View>
             <View style={[s.dataCell, { width: COL.nombreProv }]}><Text style={[s.dataText, { textAlign: 'left' }]}>{datos.nombre_proveedor ?? '—'}</Text></View>
             <View style={[s.dataCell, { width: COL.descripcion }]}><Text style={[s.dataText, { textAlign: 'left' }]}>{descripcion}</Text></View>
             <View style={[s.dataCell, { width: COL.valor }]}><Text style={s.dataText}>{fmtCurrency(datos.valor_unitario_sin_iva)}</Text></View>
