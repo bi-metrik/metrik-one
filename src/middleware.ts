@@ -33,6 +33,22 @@ function extractSlug(hostname: string): string | null {
   return null
 }
 
+/**
+ * Propaga las cookies de sesion refrescadas (las que `updateSession` escribio en
+ * `supabaseResponse` via el callback `setAll`) sobre CUALQUIER NextResponse que el
+ * middleware arme (redirect o next). Sin esto, cuando Supabase rota el refresh token
+ * y el middleware redirige con una respuesta nueva y vacia, el browser se queda con el
+ * token viejo (ya invalidado) -> la siguiente request falla -> bounce a /login.
+ * Pitfall documentado de Supabase SSR: "copy over the cookies when creating a new
+ * NextResponse, or the session terminates prematurely".
+ */
+function withAuthCookies(response: NextResponse, supabaseResponse: NextResponse): NextResponse {
+  supabaseResponse.cookies.getAll().forEach((cookie) => {
+    response.cookies.set(cookie)
+  })
+  return response
+}
+
 /** Role-aware landing: check permissions + workspace config */
 async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string, workspaceId?: string): Promise<string> {
   let modules: Record<string, boolean> | null = null
@@ -66,7 +82,7 @@ export async function middleware(request: NextRequest) {
     if (pathname === '/sin-espacio') return supabaseResponse
     // Signup cerrado: registro / onboarding / invitaciones ya no existen -> al login
     if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {
-      return NextResponse.redirect(new URL('/login', request.url))
+      return withAuthCookies(NextResponse.redirect(new URL('/login', request.url)), supabaseResponse)
     }
     // Certificacion publica via QR (read-only, sin login). La pagina valida el
     // flag del workspace y solo expone lotes estado='publicado' via service-role.
@@ -80,7 +96,7 @@ export async function middleware(request: NextRequest) {
     if (!user) {
       const loginUrl = new URL('/login', request.url)
       loginUrl.searchParams.set('redirectTo', pathname)
-      return NextResponse.redirect(loginUrl)
+      return withAuthCookies(NextResponse.redirect(loginUrl), supabaseResponse)
     }
 
     // Root → role-based landing
@@ -91,7 +107,7 @@ export async function middleware(request: NextRequest) {
         .eq('id', user.id)
         .single()
       const landing = await getLanding(supabase, tenantProfile?.role ?? undefined, tenantProfile?.workspace_id ?? undefined)
-      return NextResponse.redirect(new URL(landing, request.url))
+      return withAuthCookies(NextResponse.redirect(new URL(landing, request.url)), supabaseResponse)
     }
 
     // Guard: contador can only access /revision
@@ -102,7 +118,7 @@ export async function middleware(request: NextRequest) {
         .eq('id', user.id)
         .single()
       if (tenantProfile?.role === 'contador') {
-        return NextResponse.redirect(new URL('/revision', request.url))
+        return withAuthCookies(NextResponse.redirect(new URL('/revision', request.url)), supabaseResponse)
       }
     }
 
@@ -117,7 +133,7 @@ export async function middleware(request: NextRequest) {
     if (devWs !== null) {
       const cleanUrl = new URL(request.url)
       cleanUrl.searchParams.delete('__ws')
-      const res = NextResponse.redirect(cleanUrl)
+      const res = withAuthCookies(NextResponse.redirect(cleanUrl), supabaseResponse)
       if (devWs === 'off') {
         res.cookies.delete('__dev_ws')
       } else {
@@ -132,7 +148,7 @@ export async function middleware(request: NextRequest) {
 
   // Signup cerrado: registro / onboarding / invitaciones -> al login
   if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return withAuthCookies(NextResponse.redirect(new URL('/login', request.url)), supabaseResponse)
   }
 
   // Login page
@@ -155,14 +171,14 @@ export async function middleware(request: NextRequest) {
         if (ws?.slug) {
           const landing = await getLanding(supabase, profile.role ?? undefined, profile.workspace_id ?? undefined)
           if (IS_DEV) {
-            return NextResponse.redirect(new URL(landing, request.url))
+            return withAuthCookies(NextResponse.redirect(new URL(landing, request.url)), supabaseResponse)
           }
-          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`)
+          return withAuthCookies(NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`), supabaseResponse)
         }
       }
 
       // Usuario autenticado sin workspace → no hay self-serve, lo maneja /sin-espacio
-      return NextResponse.redirect(new URL('/sin-espacio', request.url))
+      return withAuthCookies(NextResponse.redirect(new URL('/sin-espacio', request.url)), supabaseResponse)
     }
     return supabaseResponse
   }
@@ -186,14 +202,14 @@ export async function middleware(request: NextRequest) {
         if (ws?.slug) {
           const landing = await getLanding(supabase, profile.role ?? undefined, profile.workspace_id ?? undefined)
           if (IS_DEV) {
-            return NextResponse.redirect(new URL(landing, request.url))
+            return withAuthCookies(NextResponse.redirect(new URL(landing, request.url)), supabaseResponse)
           }
-          return NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`)
+          return withAuthCookies(NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`), supabaseResponse)
         }
       }
 
       // Usuario autenticado sin workspace → /sin-espacio
-      return NextResponse.redirect(new URL('/sin-espacio', request.url))
+      return withAuthCookies(NextResponse.redirect(new URL('/sin-espacio', request.url)), supabaseResponse)
     }
     return supabaseResponse
   }
@@ -203,7 +219,7 @@ export async function middleware(request: NextRequest) {
   if (protectedPaths.some(p => pathname.startsWith(p)) && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', pathname)
-    return NextResponse.redirect(loginUrl)
+    return withAuthCookies(NextResponse.redirect(loginUrl), supabaseResponse)
   }
 
   return supabaseResponse
