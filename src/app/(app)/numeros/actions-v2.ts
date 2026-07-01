@@ -77,6 +77,10 @@ export interface NumerosData {
   diaActual: number
   diasDelMes: number
   nombreUsuario: string
+
+  // Modo Rentabilidad Comercial: workspace alimentado por ventas_hechos (export Siesa),
+  // sin operacion viva en ONE. P2 muestra el margen real; P1/P3/P5 se activan al conectar la fuente.
+  rentabilidadComercialMode: boolean
 }
 
 export interface SemaforoData {
@@ -669,16 +673,45 @@ export async function getNumeros(mesRef?: string) {
 
   const nombre = profileRes.data?.full_name ?? 'Usuario'
 
+  // ── Modo Rentabilidad Comercial (gateado) ────────────
+  // Workspaces alimentados por ventas_hechos (export Siesa) no tienen cobros/gastos/saldo en ONE.
+  // Encendemos P2 con su margen bruto real; el resto de paneles queda como "el norte" (se activa al conectar).
+  let rentabilidadComercialMode = false
+  let p2Ingresos = ingresosMes
+  let p2Costo = gastosMes
+  let p2Utilidad = ingresosMes - gastosMes - costosFijosMes
+  let p2Margen = margenContribucion
+  let p2McMonto = mcMonto
+  let p2Ebitda = ebitda
+  {
+    const { data: wsMod } = await supabase.from('workspaces').select('modules').eq('id', workspaceId).single()
+    const mods = (wsMod?.modules ?? {}) as Record<string, boolean>
+    if (mods.rentabilidad_comercial) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rc } = await (supabase as any).rpc('get_rentabilidad_comercial', { p_anio: null })
+      const k = rc?.kpis
+      if (k && Number(k.ventaNeta) > 0) {
+        rentabilidadComercialMode = true
+        p2Ingresos = Number(k.ventaNeta)
+        p2Costo = Number(k.costo)
+        p2Utilidad = Number(k.utilidad)
+        p2McMonto = Number(k.utilidad)
+        p2Ebitda = Number(k.utilidad) // proxy: sin gasto operativo no hay EBITDA real (ver footer del tab)
+        p2Margen = Number(k.margenPct) / 100
+      }
+    }
+  }
+
   return {
     saldoCaja,
     saldoEsReal,
     recaudoMes,
     metaRecaudo,
     recaudoMesAnterior,
-    ingresosMes,
-    gastosMes,
+    ingresosMes: p2Ingresos,
+    gastosMes: p2Costo,
     gastosProyectosMes,
-    utilidad: ingresosMes - gastosMes - costosFijosMes,
+    utilidad: p2Utilidad,
     ingresosMesAnterior,
     gastosMesAnterior,
     carteraPendiente,
@@ -693,9 +726,9 @@ export async function getNumeros(mesRef?: string) {
     componenteOperativo,
     staffNomina,
     costosVariablesMes,
-    margenContribucion,
-    mcMonto,
-    ebitda,
+    margenContribucion: p2Margen,
+    mcMonto: p2McMonto,
+    ebitda: p2Ebitda,
     mcNegociosTop,
     mcLineas,
     puntoEquilibrio,
@@ -716,6 +749,7 @@ export async function getNumeros(mesRef?: string) {
     diaActual,
     diasDelMes,
     nombreUsuario: nombre.split(' ')[0],
+    rentabilidadComercialMode,
   } satisfies NumerosData
 }
 

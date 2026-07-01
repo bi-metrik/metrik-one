@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
-import { getComercialData, getOperativoData, getFinancieroData } from './actions'
+import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData } from './actions'
 import TablerosClient from './tableros-client'
 import VitrinaPlaceholder from '@/components/vitrina-placeholder'
 import { getVitrinaCopy } from '@/lib/workspace/vitrina'
@@ -41,11 +41,17 @@ export default async function TablerosPage() {
       ])
     : [null, null, null]
 
+  // Rentabilidad Comercial: gateado por su propio modulo (alimentado por ventas_hechos)
+  const rentabilidad = modules.rentabilidad_comercial
+    ? await getRentabilidadComercialData()
+    : null
+
   return (
     <TablerosClient
       initialComercial={comercial}
       initialOperativo={operativo}
       initialFinanciero={financiero}
+      initialRentabilidad={rentabilidad}
       modules={modules}
     />
   )
