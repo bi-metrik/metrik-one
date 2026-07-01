@@ -46,8 +46,14 @@ export default function TablerosClient({
   const mod = modules ?? { business: true }
   const tabs = useMemo(() => {
     const t: { key: TabKey; label: string }[] = []
-    if (mod.rentabilidad_comercial) t.push(RENTABILIDAD_TAB)
-    if (mod.business) t.push(...BUSINESS_TABS)
+    if (mod.rentabilidad_comercial) {
+      // Workspace de Rentabilidad Comercial (alimentado por ventas_hechos): Tableros
+      // muestra solo esa vista. Las pestañas de negocio (Financiero/Comercial/Operativo)
+      // dependen de la operación viva en ONE, que este workspace aún no tiene.
+      t.push(RENTABILIDAD_TAB)
+    } else if (mod.business) {
+      t.push(...BUSINESS_TABS)
+    }
     if (mod.compliance) t.push(COMPLIANCE_TAB)
     return t
   }, [mod.rentabilidad_comercial, mod.business, mod.compliance])
