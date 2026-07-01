@@ -1,10 +1,11 @@
 'use client'
 
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { slugVendedor, type VendedorResumen } from './vendedores-types'
 
-const GREEN = '#10B981'
+const GREEN = '#059669'
 const SMALL_N = 15
 function fmtCOP(n: number): string { return `$${Math.round(n).toLocaleString('es-CO')}` }
 function nombreCorto(s: string): string {
@@ -15,9 +16,43 @@ function iniciales(s: string): string {
   return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase()
 }
 
+type SortKey = 'ventaNeta' | 'margenPct'
+type SortDir = 'asc' | 'desc'
+
 export default function VendedoresClient({ vendedores }: { vendedores: VendedorResumen[] }) {
-  const max = vendedores[0]?.ventaNeta || 1
+  const [sortKey, setSortKey] = useState<SortKey>('ventaNeta')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
   const totalVenta = vendedores.reduce((s, v) => s + v.ventaNeta, 0)
+
+  const rows = useMemo(() => {
+    const arr = [...vendedores]
+    arr.sort((a, b) => {
+      const av = a[sortKey]
+      const bv = b[sortKey]
+      // nulls (margen sin denominador) siempre al final
+      if (av === null && bv === null) return 0
+      if (av === null) return 1
+      if (bv === null) return -1
+      return sortDir === 'desc' ? bv - av : av - bv
+    })
+    return arr
+  }, [vendedores, sortKey, sortDir])
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'desc' ? 'asc' : 'desc'))
+    } else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+  }
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3.5 w-3.5 text-gray-300" />
+    return sortDir === 'desc'
+      ? <ArrowDown className="h-3.5 w-3.5 text-[#059669]" />
+      : <ArrowUp className="h-3.5 w-3.5 text-[#059669]" />
+  }
 
   return (
     <div>
@@ -28,42 +63,55 @@ export default function VendedoresClient({ vendedores }: { vendedores: VendedorR
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {vendedores.map((v, i) => (
-          <Link
-            key={i}
-            href={`/equipo/vendedor/${slugVendedor(v.vendedor)}`}
-            className="group rounded-2xl border border-gray-100 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
-            style={{ borderTop: `2px solid ${GREEN}` }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#1A1A1A] text-white text-sm font-bold shrink-0">
-                {iniciales(v.vendedor)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-gray-900 truncate">{nombreCorto(v.vendedor)}</p>
-                <p className="text-xs text-gray-400">{v.documentos.toLocaleString('es-CO')} documentos</p>
-              </div>
-              <ArrowUpRight className="h-4 w-4 text-gray-300 group-hover:text-[#059669]" />
-            </div>
-            <div className="mt-4 flex items-end justify-between">
-              <div>
-                <p className="text-[11px] font-bold text-gray-400 uppercase">Venta neta</p>
-                <p className="text-lg font-extrabold text-gray-900 tabular-nums">{fmtCOP(v.ventaNeta)}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[11px] font-bold text-gray-400 uppercase">Margen</p>
-                <p className="text-lg font-extrabold text-[#059669] tabular-nums">
-                  {v.margenPct === null ? '—' : `${v.margenPct}%`}
-                  {v.documentos < SMALL_N && <span className="text-[10px] text-gray-400 font-normal"> n={v.documentos}</span>}
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 h-2 rounded-full bg-gray-100 overflow-hidden">
-              <div className="h-full rounded-full" style={{ width: `${(v.ventaNeta / max) * 100}%`, backgroundColor: GREEN }} />
-            </div>
-          </Link>
-        ))}
+      <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50/60">
+                <th className="py-3 px-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wide">Vendedor</th>
+                <th className="py-3 px-4 text-right">
+                  <button onClick={() => toggleSort('ventaNeta')} className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide hover:text-[#1A1A1A]">
+                    Venta neta <SortIcon col="ventaNeta" />
+                  </button>
+                </th>
+                <th className="py-3 px-4 text-right hidden sm:table-cell text-[11px] font-bold text-gray-400 uppercase tracking-wide">Utilidad</th>
+                <th className="py-3 px-4 text-right">
+                  <button onClick={() => toggleSort('margenPct')} className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide hover:text-[#1A1A1A]">
+                    Margen <SortIcon col="margenPct" />
+                  </button>
+                </th>
+                <th className="py-3 px-4 text-right hidden md:table-cell text-[11px] font-bold text-gray-400 uppercase tracking-wide">Docs</th>
+                <th className="py-3 px-4 text-right text-[11px] font-bold text-gray-400 uppercase tracking-wide"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((v, i) => (
+                <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1A1A1A] text-white text-xs font-bold shrink-0">
+                        {iniciales(v.vendedor)}
+                      </div>
+                      <span className="font-medium text-gray-900 truncate">{nombreCorto(v.vendedor)}</span>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{fmtCOP(v.ventaNeta)}</td>
+                  <td className="py-3 px-4 text-right text-gray-600 tabular-nums whitespace-nowrap hidden sm:table-cell">{fmtCOP(v.utilidad)}</td>
+                  <td className="py-3 px-4 text-right tabular-nums whitespace-nowrap">
+                    <span className="font-semibold" style={{ color: GREEN }}>{v.margenPct === null ? '—' : `${v.margenPct}%`}</span>
+                    {v.margenPct !== null && v.documentos < SMALL_N && <span className="text-[10px] text-gray-400 ml-1">n={v.documentos}</span>}
+                  </td>
+                  <td className="py-3 px-4 text-right text-gray-500 tabular-nums hidden md:table-cell">{v.documentos.toLocaleString('es-CO')}</td>
+                  <td className="py-3 px-4 text-right">
+                    <Link href={`/equipo/vendedor/${slugVendedor(v.vendedor)}`} className="inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold text-[#059669] hover:bg-emerald-50 whitespace-nowrap">
+                      Ver más
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
