@@ -4,6 +4,8 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import EquipoClient from './equipo-client'
+import VendedoresClient from './vendedores-client'
+import { getVendedoresResumen } from './vendedores-actions'
 
 interface Props {
   searchParams: Promise<{ mes?: string; staff?: string; proyecto?: string; estado?: string }>
@@ -16,7 +18,19 @@ export default async function EquipoPage({ searchParams }: Props) {
   const proyecto = params.proyecto ?? 'todos'
   const estado = params.estado ?? 'todos'
 
-  const { role } = await getWorkspace()
+  const { supabase, workspaceId, role } = await getWorkspace()
+
+  // Workspaces de Rentabilidad Comercial: Equipo muestra vendedores (derivados de ventas_hechos),
+  // visible tambien a read_only. No aplica el flujo de gestion de horas/staff.
+  if (workspaceId && supabase) {
+    const { data: ws } = await supabase.from('workspaces').select('modules').eq('id', workspaceId).single()
+    const modules = (ws?.modules as Record<string, boolean> | null) ?? {}
+    if (modules.rentabilidad_comercial) {
+      const vendedores = await getVendedoresResumen()
+      return <VendedoresClient vendedores={vendedores} />
+    }
+  }
+
   const perms = getRolePermissions(role || '')
   if (!perms.canManageTeam) redirect('/negocios')
 
