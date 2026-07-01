@@ -7,7 +7,7 @@ import type {
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
   ProyectoEstado, AlertaProyecto, StaffProductividad, CostoProyecto, RentabilidadProyecto,
   MesIngresosEgresos, GastoAnomalo, ProyectoCartera,
-  Periodo, RentabilidadComercialData,
+  Periodo, RentabilidadComercialData, RcFiltrosInput,
 } from './types'
 
 // ── Helpers ────────────────────────────────────────────────
@@ -667,19 +667,24 @@ export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<Opera
 // Alimentado por ventas_hechos (grano linea de documento). Un solo RPC agrega
 // KPIs + cortes por mes/linea/vendedor/producto, con RLS por workspace.
 export async function getRentabilidadComercialData(
-  anio?: number | null,
+  f?: RcFiltrosInput,
 ): Promise<RentabilidadComercialData | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
+  const sinFiltros = !f || (f.anio == null && f.mes == null && f.vendedor == null && f.linea == null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: rpcErr } = await (supabase as any).rpc('get_rentabilidad_comercial', {
-    p_anio: anio ?? null,
+    p_anio: f?.anio ?? null,
+    p_mes: f?.mes ?? null,
+    p_vendedor: f?.vendedor ?? null,
+    p_linea: f?.linea ?? null,
   })
   if (rpcErr || !data) return null
 
   const d = data as RentabilidadComercialData
-  // Sin filas cargadas: tratar como vacio para que el tab muestre su empty state.
-  if (!d.kpis || Number(d.kpis.ventaNeta) === 0) return null
+  // Sin filtros y sin ventas => workspace vacio (empty state global). Con filtros, devolvemos
+  // aunque quede vacio para que la UI muestre "sin datos para este filtro".
+  if (sinFiltros && (!d.kpis || Number(d.kpis.ventaNeta) === 0)) return null
   return d
 }

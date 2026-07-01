@@ -186,20 +186,40 @@ export interface RcKpis {
   ventaNeta: number
   costo: number
   utilidad: number
-  margenPct: number
+  margenPct: number | null
+  margenValido: boolean
   unidades: number
   documentos: number
   lineas: number
+  vendedores: number
 }
-export interface RcMes { label: string; ventaNeta: number; utilidad: number; margenPct: number }
-export interface RcLinea { linea: string; ventaNeta: number; utilidad: number; margenPct: number }
-export interface RcVendedor { vendedor: string; ventaNeta: number; utilidad: number; margenPct: number }
-export interface RcProducto { producto: string; ventaNeta: number; utilidad: number; margenPct: number }
+export interface RcAnio { anio: number; label: string; ventaNeta: number; utilidad: number; margenPct: number | null; documentos: number }
+export interface RcMes { mes: string; anio: number; label: string; ventaNeta: number; utilidad: number; margenPct: number | null; documentos: number }
+export interface RcLinea { linea: string; ventaNeta: number; utilidad: number; margenPct: number | null; documentos: number }
+export interface RcVendedor { vendedor: string; ventaNeta: number; utilidad: number; margenPct: number | null; documentos: number }
+export interface RcProducto { producto: string; ventaNeta: number; utilidad: number; margenPct: number | null; documentos: number }
 export interface RentabilidadComercialData {
   anios: number[]
   kpis: RcKpis
+  ventaNetaGlobal: number
+  porAnio: RcAnio[]
   porMes: RcMes[]
   porLinea: RcLinea[]
   porVendedor: RcVendedor[]
   topProductos: RcProducto[]
+}
+
+// Estado de filtros del dashboard interactivo (Noor). Se sincroniza a la URL.
+export interface RcFiltros {
+  anioScope: number | 'todos'
+  drill: 'anios' | 'meses'
+  mes: string | null
+  vendedor: string | null
+  linea: string | null
+}
+export interface RcFiltrosInput {
+  anio?: number | null
+  mes?: string | null
+  vendedor?: string | null
+  linea?: string | null
 }
