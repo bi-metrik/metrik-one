@@ -180,3 +180,26 @@ export interface FinancieroData {
   // F7 - Impuestos
   impuestos: ImpuestosEstimados | null
 }
+
+// ── Rentabilidad Comercial (tab alimentado por ventas_hechos) ─
+export interface RcKpis {
+  ventaNeta: number
+  costo: number
+  utilidad: number
+  margenPct: number
+  unidades: number
+  documentos: number
+  lineas: number
+}
+export interface RcMes { label: string; ventaNeta: number; utilidad: number; margenPct: number }
+export interface RcLinea { linea: string; ventaNeta: number; utilidad: number; margenPct: number }
+export interface RcVendedor { vendedor: string; ventaNeta: number; utilidad: number; margenPct: number }
+export interface RcProducto { producto: string; ventaNeta: number; utilidad: number; margenPct: number }
+export interface RentabilidadComercialData {
+  anios: number[]
+  kpis: RcKpis
+  porMes: RcMes[]
+  porLinea: RcLinea[]
+  porVendedor: RcVendedor[]
+  topProductos: RcProducto[]
+}

@@ -7,7 +7,7 @@ import type {
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
   ProyectoEstado, AlertaProyecto, StaffProductividad, CostoProyecto, RentabilidadProyecto,
   MesIngresosEgresos, GastoAnomalo, ProyectoCartera,
-  Periodo,
+  Periodo, RentabilidadComercialData,
 } from './types'
 
 // ── Helpers ────────────────────────────────────────────────
@@ -661,4 +661,25 @@ export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<Opera
     costoPorProyecto,
     productividadEquipo,
   }
+}
+
+// ── Rentabilidad Comercial ─────────────────────────────────
+// Alimentado por ventas_hechos (grano linea de documento). Un solo RPC agrega
+// KPIs + cortes por mes/linea/vendedor/producto, con RLS por workspace.
+export async function getRentabilidadComercialData(
+  anio?: number | null,
+): Promise<RentabilidadComercialData | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcErr } = await (supabase as any).rpc('get_rentabilidad_comercial', {
+    p_anio: anio ?? null,
+  })
+  if (rpcErr || !data) return null
+
+  const d = data as RentabilidadComercialData
+  // Sin filas cargadas: tratar como vacio para que el tab muestre su empty state.
+  if (!d.kpis || Number(d.kpis.ventaNeta) === 0) return null
+  return d
 }

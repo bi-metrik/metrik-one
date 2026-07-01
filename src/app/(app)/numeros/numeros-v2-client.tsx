@@ -194,6 +194,14 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
             </div>
           </button>
 
+          {/* Modo Rentabilidad Comercial: aclara que el margen es bruto (histórico Siesa), no EBITDA completo */}
+          {data.rentabilidadComercialMode && (
+            <p className="text-[10px] text-[#6B7280] leading-relaxed px-1 -mt-1">
+              Margen bruto real de tu operación (histórico Siesa). El EBITDA completo, la caja, la cartera y el
+              runway se encienden al conectar ONE a Siesa con tus gastos y cobros. Detalle en el tab Rentabilidad Comercial.
+            </p>
+          )}
+
           {/* P1 + P2 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* P1: ¿Cuánta plata tengo? — Saldo bancario + meta de cobro del mes */}
@@ -215,7 +223,8 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
               }}
               barColor={recaudoColor}
               onClick={() => setActiveDrill(1)}
-              isEmpty={monthType === 'future'}
+              isEmpty={monthType === 'future' || data.rentabilidadComercialMode}
+              emptyHint={data.rentabilidadComercialMode ? 'Se activa al conectar Siesa' : undefined}
               monthType={monthType}
 
             />
@@ -284,7 +293,8 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
                   : undefined
               }
               onClick={() => setActiveDrill(3)}
-              isEmpty={monthType === 'future'}
+              isEmpty={monthType === 'future' || data.rentabilidadComercialMode}
+              emptyHint={data.rentabilidadComercialMode ? 'Se activa al conectar Siesa' : undefined}
               monthType={monthType}
 
             />
@@ -306,7 +316,8 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
               }}
               barColor={ventasColor}
               onClick={() => setActiveDrill(4)}
-              isEmpty={monthType === 'future'}
+              isEmpty={monthType === 'future' || data.rentabilidadComercialMode}
+              emptyHint={data.rentabilidadComercialMode ? 'Se activa al conectar Siesa' : undefined}
               monthType={monthType}
 
             />
@@ -330,7 +341,8 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
               ],
             }}
             onClick={() => setActiveDrill(5)}
-            isEmpty={monthType === 'future'}
+            isEmpty={monthType === 'future' || data.rentabilidadComercialMode}
+            emptyHint={data.rentabilidadComercialMode ? 'Se activa al conectar Siesa' : undefined}
             monthType={monthType}
           />
         </>

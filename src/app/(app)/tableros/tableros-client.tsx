@@ -1,14 +1,17 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import type { ComercialData, OperativoData, FinancieroData, Periodo } from './types'
+import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo } from './types'
 import { TabComercial } from './components/tab-comercial'
 import { TabOperativo } from './components/tab-operativo'
 import { TabFinanciero } from './components/tab-financiero'
+import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercial'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { ShieldCheck } from 'lucide-react'
 
-type TabKey = 'financiero' | 'comercial' | 'operativo' | 'cumplimiento'
+type TabKey = 'rentabilidad_comercial' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento'
+
+const RENTABILIDAD_TAB: { key: TabKey; label: string } = { key: 'rentabilidad_comercial', label: 'Rentabilidad Comercial' }
 
 const BUSINESS_TABS: { key: TabKey; label: string }[] = [
   { key: 'financiero', label: 'Financiero' },
@@ -29,6 +32,7 @@ interface TablerosClientProps {
   initialComercial: ComercialData | null
   initialOperativo: OperativoData | null
   initialFinanciero: FinancieroData | null
+  initialRentabilidad?: RentabilidadComercialData | null
   modules?: Record<string, boolean>
 }
 
@@ -36,15 +40,23 @@ export default function TablerosClient({
   initialComercial,
   initialOperativo,
   initialFinanciero,
+  initialRentabilidad,
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
   const tabs = useMemo(() => {
     const t: { key: TabKey; label: string }[] = []
-    if (mod.business) t.push(...BUSINESS_TABS)
+    if (mod.rentabilidad_comercial) {
+      // Workspace de Rentabilidad Comercial (alimentado por ventas_hechos): Tableros
+      // muestra solo esa vista. Las pestañas de negocio (Financiero/Comercial/Operativo)
+      // dependen de la operación viva en ONE, que este workspace aún no tiene.
+      t.push(RENTABILIDAD_TAB)
+    } else if (mod.business) {
+      t.push(...BUSINESS_TABS)
+    }
     if (mod.compliance) t.push(COMPLIANCE_TAB)
     return t
-  }, [mod.business, mod.compliance])
+  }, [mod.rentabilidad_comercial, mod.business, mod.compliance])
 
   const defaultTab = tabs[0]?.key ?? 'cumplimiento'
   const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
@@ -54,6 +66,7 @@ export default function TablerosClient({
   const [comercial, setComercial] = useState(initialComercial)
   const [operativo, setOperativo] = useState(initialOperativo)
   const [financiero, setFinanciero] = useState(initialFinanciero)
+  const rentabilidad = initialRentabilidad ?? null
 
   function handlePeriodoChange(p: Periodo) {
     setPeriodo(p)
@@ -98,8 +111,8 @@ export default function TablerosClient({
           ))}
         </div>
 
-        {/* Periodo selector — only for business tabs */}
-        {activeTab !== 'cumplimiento' && (
+        {/* Periodo selector — only for business tabs (no aplica a Rentabilidad Comercial ni Cumplimiento) */}
+        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && (
           <div className="flex gap-1">
             {PERIODOS.map(p => (
               <button
@@ -120,12 +133,14 @@ export default function TablerosClient({
 
       {/* Content */}
       <div className={`transition-opacity duration-200 ${isPending ? 'opacity-50' : 'opacity-100'}`}>
+        {activeTab === 'rentabilidad_comercial' && rentabilidad && <TabRentabilidadComercial data={rentabilidad} />}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
         {activeTab === 'operativo' && operativo && <TabOperativo data={operativo} />}
         {activeTab === 'cumplimiento' && <CumplimientoPlaceholder />}
 
         {/* Empty state */}
+        {activeTab === 'rentabilidad_comercial' && !rentabilidad && <EmptyState />}
         {activeTab === 'financiero' && !financiero && <EmptyState />}
         {activeTab === 'comercial' && !comercial && <EmptyState />}
         {activeTab === 'operativo' && !operativo && <EmptyState />}

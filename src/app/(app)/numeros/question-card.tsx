@@ -43,6 +43,7 @@ interface QuestionCardProps {
   barColor?: string
   onClick?: () => void
   isEmpty?: boolean
+  emptyHint?: string
   monthType?: 'current' | 'past' | 'future'
 }
 
@@ -59,6 +60,7 @@ export default function QuestionCard({
   barColor,
   onClick,
   isEmpty,
+  emptyHint,
   monthType = 'current',
 }: QuestionCardProps) {
   const formattedValue = valueFormat === 'currency'
@@ -96,6 +98,11 @@ export default function QuestionCard({
       }`}>
         {isEmpty ? '—' : formattedValue}
       </div>
+
+      {/* Empty hint (ej. "Se activa al conectar Siesa") */}
+      {isEmpty && emptyHint && (
+        <p className="mt-0.5 text-[10px] font-medium text-muted-foreground leading-tight">{emptyHint}</p>
+      )}
 
       {/* Bar */}
       <div className="mt-3">
