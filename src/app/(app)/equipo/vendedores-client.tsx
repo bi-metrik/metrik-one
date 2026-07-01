@@ -16,7 +16,7 @@ function iniciales(s: string): string {
   return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase()
 }
 
-type SortKey = 'ventaNeta' | 'margenPct'
+type SortKey = 'ventaNeta' | 'utilidad' | 'margenPct' | 'documentos'
 type SortDir = 'asc' | 'desc'
 
 export default function VendedoresClient({ vendedores }: { vendedores: VendedorResumen[] }) {
@@ -74,13 +74,21 @@ export default function VendedoresClient({ vendedores }: { vendedores: VendedorR
                     Venta neta <SortIcon col="ventaNeta" />
                   </button>
                 </th>
-                <th className="py-3 px-4 text-right hidden sm:table-cell text-[11px] font-bold text-gray-400 uppercase tracking-wide">Utilidad</th>
+                <th className="py-3 px-4 text-right hidden sm:table-cell">
+                  <button onClick={() => toggleSort('utilidad')} className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide hover:text-[#1A1A1A]">
+                    Utilidad <SortIcon col="utilidad" />
+                  </button>
+                </th>
                 <th className="py-3 px-4 text-right">
                   <button onClick={() => toggleSort('margenPct')} className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide hover:text-[#1A1A1A]">
                     Margen <SortIcon col="margenPct" />
                   </button>
                 </th>
-                <th className="py-3 px-4 text-right hidden md:table-cell text-[11px] font-bold text-gray-400 uppercase tracking-wide">Docs</th>
+                <th className="py-3 px-4 text-right hidden md:table-cell">
+                  <button onClick={() => toggleSort('documentos')} className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide hover:text-[#1A1A1A]" title="Número de facturas y notas de venta del vendedor">
+                    Documentos <SortIcon col="documentos" />
+                  </button>
+                </th>
                 <th className="py-3 px-4 text-right text-[11px] font-bold text-gray-400 uppercase tracking-wide"></th>
               </tr>
             </thead>
