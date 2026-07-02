@@ -117,8 +117,8 @@ const P1 = {
 
 // ── Página 2 (Datos solicitante repetidos + Titular saldo + Origen saldo) ────
 const P2 = {
-  // "Espacio reservado para la DIAN" (encabezado): el "06" va frente al título (~2pt).
-  concepto_reservado: { x: 118, y: 705, size: 9 },
+  // El "Espacio reservado para la DIAN" (encabezado hoja 2) lo llena la DIAN: no se
+  // dibuja nada ahí. (Antes caía el "06" del concepto por error — reporte de Deisy.)
   // Fila superior — repite datos solicitante en y=615.4 → valor ~599
   tipo_documento: { x: 28, y: 599, maxWidth: 35 },
   nit: { x: 65, y: 599, maxWidth: 100 },
@@ -239,16 +239,18 @@ export async function generarFormulario010(
     .join(' ')
   const nombreTitular = nombreCompleto || datos.razon_social
 
+  // Casilla 20 (tipo de documento del solicitante). Default "13" (Cédula de
+  // Ciudadanía), pero HONRA el override del operador: si Deisy lo cambia a "31"
+  // (NIT) el PDF lo respeta. Antes estaba fijo en "13" e ignoraba su edición.
+  const tipoDocSolicitante = (datos.tipo_documento && datos.tipo_documento.trim()) || '13'
+
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — DETERMINISTA, Bold pequeño por estar en caja chica.
   fixed1(constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
 
-  // Datos solicitante (casilla 20). Tipo de documento = "13" (Cédula de
-  // Ciudadanía): DETERMINISTA. SOENA opera 100% personas naturales → el solicitante
-  // se identifica con cédula (13). El "31"/NIT solo aplica al TITULAR del saldo
-  // (casilla 45) y al RESPONSABLE (casilla 60), no aquí. Confirmado con el
-  // diligenciado de referencia de Deisy.
-  fixed1('13', P1.tipo_documento)
+  // Datos solicitante (casilla 20). Default "13" (Cédula); override del operador
+  // manda. Ver `tipoDocSolicitante` arriba.
+  fixed1(tipoDocSolicitante, P1.tipo_documento)
   edit1('nit', datos.nit, P1.nit)
   edit1('dv', datos.dv, P1.dv)
   edit1('primer_apellido', datos.primer_apellido, P1.primer_apellido)
@@ -286,11 +288,12 @@ export async function generarFormulario010(
   if (constantes.organizacion_1006) edit1('organizacion_1006', constantes.organizacion_1006, P1.firma_organizacion)
 
   // ── PÁGINA 2 ──────────────────────────────────────────────────────────────
-  // "06" en el espacio reservado para la DIAN: DETERMINISTA.
-  fixed2(constantes.concepto, P2.concepto_reservado, fontBold)
+  // El "Espacio reservado para la DIAN" (encabezado hoja 2) lo diligencia la DIAN,
+  // NO el solicitante: no se imprime nada ahí (antes caía el "06" por error).
 
-  // Datos solicitante (repetir en hoja 2). Casilla 20 tipo doc = "13" (CC): DETERMINISTA.
-  fixed2('13', P2.tipo_documento)
+  // Datos solicitante (repetir en hoja 2). Casilla 20: mismo criterio que hoja 1
+  // (default "13", override manda).
+  fixed2(tipoDocSolicitante, P2.tipo_documento)
   edit2('nit', datos.nit, P2.nit)
   edit2('dv', datos.dv, P2.dv)
   edit2('primer_apellido', datos.primer_apellido, P2.primer_apellido)

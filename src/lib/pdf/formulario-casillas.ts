@@ -42,11 +42,10 @@ const CASILLAS_010: CasillaMeta[] = [
   { slug: 'entidad_financiera', label: 'Entidad financiera', grupo: 'Cuenta bancaria' },
   { slug: 'numero_cuenta', label: 'Número de cuenta', grupo: 'Cuenta bancaria' },
   { slug: 'tipo_cuenta', label: 'Tipo de cuenta', grupo: 'Cuenta bancaria' },
-  // Firma (fuente: RUT)
-  { slug: 'nombre_suscriptor', label: 'Nombre quien suscribe', grupo: 'Firma' },
-  { slug: 'tipo_doc_suscriptor', label: 'Tipo doc. suscriptor', grupo: 'Firma' },
-  { slug: 'identificacion_suscriptor', label: 'Identificación suscriptor', grupo: 'Firma' },
-  { slug: 'dv_suscriptor', label: 'DV suscriptor', grupo: 'Firma' },
+  // NOTA: la Firma (casillas 1001-1004) la llena el PDF automáticamente con los
+  // datos del solicitante (nombre + cédula + DV + "CC"); no son casillas de entrada
+  // aparte. Antes había slugs de firma sin fuente que se veían vacíos en la UI y
+  // hacían creer que "la firma no jala" — removidos.
   // Constantes / clasificación (editables: cambian por seccional)
   { slug: 'concepto', label: 'Concepto', grupo: 'Clasificación', casilla: '2' },
   { slug: 'concepto_label', label: 'Concepto (texto)', grupo: 'Clasificación' },
