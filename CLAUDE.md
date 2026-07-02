@@ -332,6 +332,27 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-07-01 (`hjbc--clarity` → producto: módulo `rentabilidad_comercial` + tablero interactivo + perfil de vendedor). **4 PRs #17-#20 mergeados a `main`** (deployados Vercel).
+
+- **Módulo nuevo `rentabilidad_comercial`** (gateado por `workspaces.modules.rentabilidad_comercial`): tablero comercial alimentado por tabla de hechos **`ventas_hechos`** (grano línea de documento) + **`metas_vendedor`** (presupuesto). RLS por workspace (lectura `authenticated`, ingesta `service_role`).
+- **RPCs** (SQL, security invoker, RLS via `current_user_workspace_id`): `get_rentabilidad_comercial(anio,mes,vendedor,linea)` con **cross-filter** (bases full/control/vend/linea, cada dimensión excluye su propio filtro), `get_vendedor_perfil(vendedor)` (KPIs + percentil vs equipo + cumplimiento de meta real + tendencia + mix + top productos), `get_vendedores_resumen()`.
+- **UI:** tab "Rentabilidad Comercial" en `/tableros` (interactivo: cross-filter mes/vendedor/línea, drill año→mes, chips, breadcrumb, seleccionado/atenuado, re-consulta `useTransition`). `/equipo` muestra vendedores (tabla ordenable) cuando el ws tiene el módulo, con `/equipo/vendedor/[slug]` (perfil). `/numeros` en modo RC: P2 encendido con margen real, P1/P3/P5 "se activa al conectar", banner de alcance. Diseño Saga/Noor/Ren.
+- **Ingesta:** `scripts/load-ventas-hechos.ts` + `scripts/load-metas-vendedor.ts` (carga puntual desde export Excel Siesa). Futuro: conector Siesa (CoreApp/WebServices).
+- Workspace demo `hjbc` aislado. Migraciones `20260701000001_ventas_hechos.sql` + `20260701000002_rc_interactivo_metas.sql` (aplicadas vía MCP a la instancia).
+- **Gotcha:** el hook `branch-guard-one` falso-positiva con el literal "main" en el comando (ej. `gh pr create --base main`); separar el comando del commit/push u omitir `--base` (el default ya es main).
+
+---
+
+**Sesion:** 2026-06-30 (`metrik-one--core`, Mik + Max: fix login por cookies del middleware + seguridad advisor Supabase Olas 1-2). Todo en PRs sin mergear, nada en `main`.
+
+- **Fix login (PR #13, `fix/middleware-cookie-propagation`):** el middleware refrescaba el token de Supabase pero sus `NextResponse.redirect` no copiaban las cookies rotadas, el refresh token viejo quedaba en el browser, el 1er login fallaba y el 2o funcionaba. Helper `withAuthCookies()` que propaga `supabaseResponse.cookies` a los 13 redirects del middleware. Gotcha permanente: todo `NextResponse` nuevo en middleware SSR debe copiar las cookies o la sesión se corta.
+- **Seguridad Ola 1 (PR #14, `fix/security-advisors-ola1`):** `search_path` fijado en 3 funciones de certificaciones + policy de listing del bucket `cert-documentos` acotada (mata la enumeración anon; el GET por path directo sobrevive porque el bucket sigue `public=true`).
+- **Seguridad Ola 2 (PR #15, `fix/security-advisors-ola2`):** `REVOKE EXECUTE FROM anon` en las 45 funciones SECURITY DEFINER + revoke a `authenticated` en 21 triggers puros. Se MANTUVO `authenticated` en 24 (RPCs del cliente + las usadas en policies RLS como `current_user_workspace_id` / `is_admin_or_owner`: revocarlas rompe el aislamiento por workspace).
+- **Pendiente de Mauricio:** mergear #13/#14/#15, luego aplicar las migraciones (Mik/Max por MCP) y re-correr el advisor. Además toggle manual de leaked-password protection en Auth. Migraciones NO aplicadas a prod todavía.
+- **Nota multi-tenant Supabase:** el producto Cardumen (SenseMaker, owner Saga) convive en esta misma instancia (`yfjqscvvxetobiidnepa`) con tablas `cardumen_*` y la vista `v_cardumen_live`; sus lints del advisor son by-design, NO de ONE.
+
+---
+
 **Sesion:** 2026-06-23 (`soena` — Max — **conciliación v2 (5 pestañas + freeze duplicados) + FAB Registrar pago global + drag-and-drop de carga**)
 **Branch:** `main` (deploy Vercel Ready) · merges `85f2cdc` (dnd) `258bf23` (conciliación+FAB) · commits `d5d846f` `4f0dd04` `b62678f` · migración producto `20260623000001_conciliacion_v2.sql`
 
