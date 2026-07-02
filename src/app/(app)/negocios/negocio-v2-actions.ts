@@ -2994,6 +2994,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   const base = await getNegocioDetalle(id)
   if (!base) return null
 
+  // Seccional seleccionada en el 010 (negocios.metadata.seccional): la Guía de
+  // Devolución la hereda para mostrar los mismos valores que el 010.
+  const { data: negMetaRow } = await db(supabase)
+    .from('negocios').select('metadata').eq('id', id).maybeSingle()
+  const seccional010DelNegocio = (negMetaRow?.metadata as Record<string, unknown> | null)?.seccional as string | undefined
+
   // ¿El usuario actual es responsable? Comparación por staff.id (no profile.id):
   // negocio_responsables guarda staff.id, igual que staffId de getWorkspace.
   const currentUserEsResponsable = !!staffId && base.negocio.responsables.some((r) => r.id === staffId)
@@ -3786,11 +3792,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const ciudadVenta = (facturaData.ciudad_venta as string) ?? ''
       const fechaCitaData = datosGuiaPorSlug['fecha_cita_dian'] ?? datosGuiaPorNombre['fecha cita dian'] ?? {}
       const fechaCita = (fechaCitaData.fecha_cita_dian as string) ?? null
-      const seccional = mapCiudadASeccional(ciudadVenta, tipoPersona)
+      // La seccional (y la ciudad que se muestra) heredan lo SELECCIONADO en el 010
+      // (negocios.metadata.seccional): así la Guía y el 010 muestran lo mismo. Si el
+      // 010 quedó en "Otras seccionales" o sin selección, cae a la ciudad de la factura.
+      const seccional010Label = seccional010DelNegocio
+      const seccional010 = seccional010Label ? mapCiudadASeccional(seccional010Label, tipoPersona) : null
+      const seccional = seccional010 ?? mapCiudadASeccional(ciudadVenta, tipoPersona)
       enrichedConfigExtra._guia_preview = {
         nombre: razonSocial || null,
         nit: nit ? (dv ? `${nit}-${dv}` : nit) : null,
-        ciudad_venta: ciudadVenta || null,
+        ciudad_venta: (seccional010 ? seccional010Label : ciudadVenta) || null,
         fecha_cita: fechaCita,
         seccional_sugerida_slug: seccional?.slug ?? null,
       }

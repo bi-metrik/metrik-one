@@ -113,10 +113,20 @@ export async function generarVersionGuia(
     }
   }
 
-  // 3. Resolver seccional
+  // 3. Resolver seccional. Precedencia:
+  //   override manual (en la Guía)  >  seccional del 010 (negocios.metadata.seccional)  >  ciudad de la factura
+  // Heredar la del 010 hace que la Guía muestre lo mismo que se seleccionó allí.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negRow } = await (supabase as any)
+    .from('negocios').select('metadata').eq('id', negocioId).maybeSingle()
+  const seccional010Label = (negRow?.metadata as Record<string, unknown> | null)?.seccional as string | undefined
+
   let seccional: SeccionalDIAN | null = null
   if (input.seccional_slug_override) {
     seccional = getSeccionalBySlug(input.seccional_slug_override)
+  }
+  if (!seccional && seccional010Label) {
+    seccional = mapCiudadASeccional(seccional010Label, tipoPersona)
   }
   if (!seccional) {
     seccional = mapCiudadASeccional(ciudadVenta, tipoPersona)
@@ -124,7 +134,7 @@ export async function generarVersionGuia(
   if (!seccional) {
     return {
       ok: false,
-      error: `No se pudo mapear la ciudad "${ciudadVenta || 'vacía'}" a una seccional DIAN. Selecciona manualmente.`,
+      error: `No se pudo resolver la seccional DIAN (ni del 010 ni de la ciudad "${ciudadVenta || 'vacía'}"). Selecciónala manualmente.`,
     }
   }
 
