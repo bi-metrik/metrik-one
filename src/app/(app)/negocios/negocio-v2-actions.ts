@@ -396,10 +396,12 @@ export async function getNegociosV2(
       closed_at: (row.closed_at as string) ?? null,
       razon_cierre: (row.razon_cierre as string) ?? null,
       vehiculo_label: vehiculoPorNeg[id]?.label ?? null,
-      // Seccional DIAN: la real seleccionada (negocios.metadata.seccional) manda;
-      // fallback a la derivada por ciudad para negocios sin selección.
-      seccional_label: ((row.metadata as Record<string, unknown> | null)?.seccional as string | undefined)
-        ?? vehiculoPorNeg[id]?.seccional ?? null,
+      // Seccional DIAN = SOLO la seleccionada en el 010 (negocios.metadata.seccional),
+      // que usa el vocabulario controlado de config_extra.seccionales ("Bogotá",
+      // "Cali", "Otras seccionales"...). NO se deriva de la ciudad de la factura para
+      // evitar dualidad de etiquetas ("Bogotá" vs "Bogotá — Personas naturales").
+      // Un negocio sin seccional seleccionada queda null (no aparece en el filtro).
+      seccional_label: ((row.metadata as Record<string, unknown> | null)?.seccional as string | undefined) ?? null,
       ciudad_label: vehiculoPorNeg[id]?.ciudad ?? null,
       cedula: cedulaPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
