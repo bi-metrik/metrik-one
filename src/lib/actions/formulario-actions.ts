@@ -628,8 +628,13 @@ export async function resolverFormularioParaEdicion(
 
   const casillas: CasillaEditable[] = slugs.map((slug) => {
     const m = metaDeCasilla(template, slug)
+    const rawOverride = overrides[slug]
+    // Un override vacío de 'dv' NO se muestra en blanco: el DV es determinista y la
+    // generación lo recalcula, así que la UI debe reflejar el calculado (evita el
+    // drift display⟺generación). Mismo criterio que aplicarDeterministas.
     const editado = Object.prototype.hasOwnProperty.call(overrides, slug)
-    const value = editado ? (overrides[slug] ?? '') : (valorBase[slug] ?? '')
+      && !(slug === 'dv' && (rawOverride ?? '').trim() === '')
+    const value = editado ? (rawOverride ?? '') : (valorBase[slug] ?? '')
     return {
       slug,
       label: m.label,
