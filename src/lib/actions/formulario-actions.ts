@@ -12,6 +12,8 @@ import { generarFormulario1668, type Formulario1668Datos, type Formulario1668Con
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
+import { calcularDvNit } from '@/lib/dian/nit'
+import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
 import { createElement } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,7 +94,17 @@ async function aplicarSeccionalPreset(
   if (template !== 'formulario-010' || !configExtra.seccionales) return { seleccion: null, sugerida: false, seccionales: [], seccionalExtra }
   const seccionales = configExtra.seccionales as Record<string, Record<string, unknown>>
   const keys = Object.keys(seccionales)
-  const explicit = (typeof overrides.seccional === 'string' && overrides.seccional) || (data?.seccional as string | undefined)
+  // Seccional a nivel de NEGOCIO: fuente única compartida por las 2 copias del 010
+  // (generación y envío). Antes vivía por-bloque en data.seccional y se
+  // desincronizaba (una copia quedaba en "Otras" mientras la otra decía "Cali").
+  // Precedencia: override manual del campo > seccional del negocio > legacy bloque > sugerida.
+  const { data: negRow } = await db(supabase)
+    .from('negocios').select('metadata').eq('id', negocioId).maybeSingle()
+  const negocioSeccional = (negRow?.metadata as Record<string, unknown> | null)?.seccional
+  const explicit =
+    (typeof overrides.seccional === 'string' && overrides.seccional) ||
+    (typeof negocioSeccional === 'string' && negocioSeccional) ||
+    (data?.seccional as string | undefined)
   const seleccion = explicit || sugerirSeccional(await leerCiudadVentaFactura(supabase, negocioId), keys)
   const preset = seccionales[seleccion]
   if (preset) {
@@ -111,6 +123,48 @@ async function aplicarSeccionalPreset(
     if (preset.cod_representacion) seccionalExtra.cod_representacion_1005 = String(preset.cod_representacion)
   }
   return { seleccion, sugerida: !explicit, seccionales: keys, seccionalExtra }
+}
+
+/**
+ * Aplica los valores DETERMINISTAS que no deben confiarse a la extracción, MUTANDO
+ * datosFinal. Respeta cualquier override del operador.
+ *  - DV (010/1668): el dígito de verificación es función del nº de identificación
+ *    (módulo 11 DIAN). La extracción del RUT lo trae mal a veces (ej. Echeverry:
+ *    trajo "1", el real es "0"). Se recalcula siempre desde la cédula base.
+ *  - Códigos DANE país/depto/municipio (010): se resuelven por NOMBRE (que se
+ *    extrae bien) y no por el código extraído (poco fiable; se vio el código del
+ *    departamento "76" copiado en el del municipio).
+ */
+function aplicarDeterministas(
+  template: string,
+  datosFinal: Record<string, string | null>,
+  overrides: Record<string, string | null>,
+): void {
+  const usaDv = template === 'formulario-010' || template === 'formulario-1668'
+  // Solo un override con VALOR (no vacío) gana; un override "" no debe dejar el DV
+  // en blanco, se recalcula. El DV se calcula sobre la cédula base completa (módulo
+  // 11); no se usa separarNitDv aquí a propósito: la identificación del solicitante
+  // es una cédula limpia (sin DV pegado), separarla podría cortar un dígito real.
+  const dvOverride = overrides.dv
+  const dvManual = 'dv' in overrides && dvOverride != null && dvOverride.trim() !== ''
+  if (usaDv && !dvManual) {
+    const base = datosFinal.nit ?? datosFinal.numero_identificacion ?? null
+    const dvCalc = calcularDvNit(base)
+    if (dvCalc != null) datosFinal.dv = dvCalc
+  }
+  if (template === 'formulario-010') {
+    const codes = resolverCodigosUbicacion(
+      datosFinal.pais, datosFinal.departamento, datosFinal.municipio,
+      {
+        codigo_pais: datosFinal.codigo_pais ?? null,
+        codigo_departamento: datosFinal.codigo_departamento ?? null,
+        codigo_municipio: datosFinal.codigo_municipio ?? null,
+      },
+    )
+    if (!('codigo_pais' in overrides)) datosFinal.codigo_pais = codes.codigo_pais
+    if (!('codigo_departamento' in overrides)) datosFinal.codigo_departamento = codes.codigo_departamento
+    if (!('codigo_municipio' in overrides)) datosFinal.codigo_municipio = codes.codigo_municipio
+  }
 }
 
 async function resolverCamposFuente(
@@ -340,6 +394,9 @@ export async function generarFormularioCore(
       (bloqueData.data as Record<string, unknown>) ?? {}, overrides, datosFinal, constantesFinal,
     )
 
+    // Valores deterministas (DV módulo 11 + códigos DANE por nombre), respetando overrides.
+    aplicarDeterministas(template, datosFinal, overrides)
+
     const tieneValor = (v: string | null | undefined) => v !== null && v !== undefined && v !== ''
     const faltantesReales = faltantes.filter((f) => !tieneValor(overrides[f]) && !tieneValor(datosFinal[f]))
 
@@ -551,6 +608,14 @@ export async function resolverFormularioParaEdicion(
     valorBase.direccion_seccional = (datosEd.direccion_seccional ?? valorBase.direccion_seccional) as string
   }
 
+  // Deterministas (DV recalculado + códigos DANE) para que la UI muestre lo que se
+  // generará (misma lógica que la generación real).
+  aplicarDeterministas(template, datosEd, overrides)
+  valorBase.dv = datosEd.dv ?? valorBase.dv
+  valorBase.codigo_pais = datosEd.codigo_pais ?? valorBase.codigo_pais
+  valorBase.codigo_departamento = datosEd.codigo_departamento ?? valorBase.codigo_departamento
+  valorBase.codigo_municipio = datosEd.codigo_municipio ?? valorBase.codigo_municipio
+
   // Mostrar TODAS las casillas del template (no solo las autollenadas): las
   // casillas vacías del 010/1668 deben verse para poder llenarlas a mano cuando
   // la DIAN lo solicite. Une las casillas del meta del template con las que ya
@@ -563,8 +628,13 @@ export async function resolverFormularioParaEdicion(
 
   const casillas: CasillaEditable[] = slugs.map((slug) => {
     const m = metaDeCasilla(template, slug)
+    const rawOverride = overrides[slug]
+    // Un override vacío de 'dv' NO se muestra en blanco: el DV es determinista y la
+    // generación lo recalcula, así que la UI debe reflejar el calculado (evita el
+    // drift display⟺generación). Mismo criterio que aplicarDeterministas.
     const editado = Object.prototype.hasOwnProperty.call(overrides, slug)
-    const value = editado ? (overrides[slug] ?? '') : (valorBase[slug] ?? '')
+      && !(slug === 'dv' && (rawOverride ?? '').trim() === '')
+    const value = editado ? (rawOverride ?? '') : (valorBase[slug] ?? '')
     return {
       slug,
       label: m.label,
@@ -625,7 +695,15 @@ export async function guardarSeccional(
     .eq('id', negocioBloqueId)
   if (upErr) return { error: (upErr as { message: string }).message }
   const nid = row?.negocio_id as string | undefined
-  if (nid) revalidatePath(`/negocios/${nid}`)
+  // Persistir la seccional a nivel de NEGOCIO (fuente única): así una sola
+  // selección aplica a las 2 copias del 010 (generación y envío) y no vuelve a
+  // desincronizarse. El data.seccional del bloque queda como eco inmediato para la UI.
+  if (nid) {
+    const { data: neg } = await db(supabase).from('negocios').select('metadata').eq('id', nid).maybeSingle()
+    const meta = (neg?.metadata as Record<string, unknown>) ?? {}
+    await db(supabase).from('negocios').update({ metadata: { ...meta, seccional } }).eq('id', nid)
+    revalidatePath(`/negocios/${nid}`)
+  }
   return { error: null }
 }
 
