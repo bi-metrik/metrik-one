@@ -135,7 +135,12 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
             {negocio.codigo && (
               <span className="shrink-0 font-mono">{negocio.codigo}{' — '}</span>
             )}
-            <span className="truncate">{negocio.nombre}</span>
+            <span>{negocio.nombre}</span>
+            {negocio.cedula && (
+              <span className="ml-1.5 font-mono text-[11px] font-normal text-[#6B7280]">
+                CC {negocio.cedula}
+              </span>
+            )}
           </p>
           {negocio.vehiculo_label || negocio.seccional_label ? (
             /* Variante config-driven (ej. SOENA): vehículo (izq) + seccional DIAN (der).

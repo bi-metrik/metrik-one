@@ -124,6 +124,7 @@ export default function NegociosClient({
     if (term) {
       res = res.filter((n) => {
         const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
+          n.cedula, n.seccional_label,
           ...n.responsables.map((r) => r.full_name)]
           .filter(Boolean)
           .join(' ')
@@ -197,7 +198,7 @@ export default function NegociosClient({
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por código, cliente o vehículo…"
+          placeholder="Buscar por código, cliente, cédula, seccional o vehículo…"
           className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 pl-9 pr-9 text-sm text-[#1A1A1A] placeholder:text-[#6B7280] focus:border-[#1A1A1A]/30 focus:outline-none"
         />
         {q && (
@@ -289,7 +290,7 @@ export default function NegociosClient({
         sinResultadosBusqueda ? (
           <EmptyState
             title={`Sin resultados para "${q.trim()}"`}
-            description="Prueba con otro código, cliente o vehículo."
+            description="Prueba con otro código, cliente, cédula, seccional o vehículo."
             primaryCta={{ label: 'Limpiar búsqueda', onClick: () => setQ('') }}
           />
         ) : filtro === 'cerrados' && !isFilteringMotivo ? (

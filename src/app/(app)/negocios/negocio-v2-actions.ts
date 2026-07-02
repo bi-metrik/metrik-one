@@ -139,6 +139,8 @@ export type NegocioResumen = {
   vehiculo_label: string | null
   seccional_label: string | null
   ciudad_label: string | null
+  // Cédula/identificación del solicitante (bloque RUT, config-driven) — tarjeta + búsqueda
+  cedula: string | null
   // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
   responsables: Array<{ id: string; full_name: string }>
 }
@@ -250,6 +252,7 @@ export async function getNegociosV2(
       cierre_motivo,
       closed_at,
       razon_cierre,
+      metadata,
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero),
       empresas(nombre),
@@ -318,37 +321,50 @@ export async function getNegociosV2(
   // Solo workspaces con ese config (ej. SOENA) lo llenan; el resto queda null.
   const cardCfg = ((wsRes.data as { config_extra?: Record<string, unknown> } | null)
     ?.config_extra?.negocio_card) as
-    { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string } | undefined
+    { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string
+      cedula_bloque?: string; cedula_campo?: string } | undefined
   const vehiculoPorNeg: Record<string, { label: string | null; seccional: string | null; ciudad: string | null }> = {}
-  if (cardCfg?.vehiculo_bloque && negocioIds.length > 0) {
+  // Cédula del solicitante (bloque RUT, config-driven). Para tarjeta + búsqueda.
+  const cedulaPorNeg: Record<string, string | null> = {}
+  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque].filter(Boolean) as string[]
+  if (cardBloqueNombres.length > 0 && negocioIds.length > 0) {
     const getVal = (bdata: Record<string, unknown>, slug: string): string | null => {
       const campos = (bdata.campos as Record<string, { value?: unknown }> | undefined) ?? null
       const v = campos?.[slug]?.value ?? bdata[slug]
       const s = v == null ? '' : String(v).trim()
       return s || null
     }
-    const { data: factBloques } = await db(supabase)
+    const { data: cardBloques } = await db(supabase)
       .from('negocio_bloques')
       .select('negocio_id, data, bloque_configs!inner(nombre)')
       .in('negocio_id', negocioIds)
-      .eq('bloque_configs.nombre', cardCfg.vehiculo_bloque)
-    for (const row of ((factBloques ?? []) as Record<string, unknown>[])) {
+      .in('bloque_configs.nombre', cardBloqueNombres)
+    for (const row of ((cardBloques ?? []) as Record<string, unknown>[])) {
       const negId = row.negocio_id as string
+      const bnombre = (row.bloque_configs as { nombre: string } | null)?.nombre ?? ''
       const bdata = (row.data as Record<string, unknown>) ?? {}
-      const parts = (cardCfg.vehiculo_campos ?? [])
-        .map(slug => getVal(bdata, slug))
-        .filter(Boolean) as string[]
-      const label = parts.length ? parts.join(' ') : null
-      const ciudad = cardCfg.ciudad_campo ? getVal(bdata, cardCfg.ciudad_campo) : null
-      // SOENA = 100% personas naturales; para Bogotá esto resuelve a la seccional de naturales.
-      const seccional = ciudad ? (mapCiudadASeccional(ciudad, 'natural')?.label ?? null) : null
-      // El bloque origen (Validación) es el único con data extraída; si llega una
-      // instancia heredada vacía, no se pisa un label/seccional ya resuelto.
-      const prev = vehiculoPorNeg[negId]
-      vehiculoPorNeg[negId] = {
-        label: label ?? prev?.label ?? null,
-        seccional: seccional ?? prev?.seccional ?? null,
-        ciudad: ciudad ?? prev?.ciudad ?? null,
+      // Vehículo + ciudad (del bloque Factura)
+      if (cardCfg?.vehiculo_bloque && bnombre === cardCfg.vehiculo_bloque) {
+        const parts = (cardCfg.vehiculo_campos ?? [])
+          .map(slug => getVal(bdata, slug))
+          .filter(Boolean) as string[]
+        const label = parts.length ? parts.join(' ') : null
+        const ciudad = cardCfg.ciudad_campo ? getVal(bdata, cardCfg.ciudad_campo) : null
+        // SOENA = 100% personas naturales; para Bogotá esto resuelve a la seccional de naturales.
+        const seccional = ciudad ? (mapCiudadASeccional(ciudad, 'natural')?.label ?? null) : null
+        // El bloque origen (Validación) es el único con data extraída; si llega una
+        // instancia heredada vacía, no se pisa un label/seccional ya resuelto.
+        const prev = vehiculoPorNeg[negId]
+        vehiculoPorNeg[negId] = {
+          label: label ?? prev?.label ?? null,
+          seccional: seccional ?? prev?.seccional ?? null,
+          ciudad: ciudad ?? prev?.ciudad ?? null,
+        }
+      }
+      // Cédula (del bloque RUT). Conserva la primera instancia con valor.
+      if (cardCfg?.cedula_bloque && bnombre === cardCfg.cedula_bloque) {
+        const ced = cardCfg.cedula_campo ? getVal(bdata, cardCfg.cedula_campo) : null
+        cedulaPorNeg[negId] = cedulaPorNeg[negId] ?? ced
       }
     }
   }
@@ -380,8 +396,12 @@ export async function getNegociosV2(
       closed_at: (row.closed_at as string) ?? null,
       razon_cierre: (row.razon_cierre as string) ?? null,
       vehiculo_label: vehiculoPorNeg[id]?.label ?? null,
-      seccional_label: vehiculoPorNeg[id]?.seccional ?? null,
+      // Seccional DIAN: la real seleccionada (negocios.metadata.seccional) manda;
+      // fallback a la derivada por ciudad para negocios sin selección.
+      seccional_label: ((row.metadata as Record<string, unknown> | null)?.seccional as string | undefined)
+        ?? vehiculoPorNeg[id]?.seccional ?? null,
       ciudad_label: vehiculoPorNeg[id]?.ciudad ?? null,
+      cedula: cedulaPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
     }
   })
