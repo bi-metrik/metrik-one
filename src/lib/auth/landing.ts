@@ -11,7 +11,14 @@
 export function landingForWorkspace(
   role: string | undefined,
   modules: Record<string, boolean> | null | undefined,
+  modoVitrina?: boolean,
 ): string {
+  // Modo vitrina (workspaces Valida-only, config_extra.modo_vitrina): el cliente
+  // solo compró consulta de listas → aterriza directo en lo que usa. Tiene
+  // prioridad sobre TODA otra rama (incluso contador). Workspaces sin el flag:
+  // comportamiento idéntico (modoVitrina ausente/false → se ignora).
+  if (modoVitrina) return '/valida';
+
   if (role === 'contador') return '/revision';
 
   const mods = modules ?? { business: true };

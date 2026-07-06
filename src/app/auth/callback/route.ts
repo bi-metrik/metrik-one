@@ -83,17 +83,19 @@ export async function GET(request: Request) {
 
       const { data: ws } = await supabase
         .from('workspaces')
-        .select('slug, modules')
+        .select('slug, modules, config_extra')
         .eq('id', profile.workspace_id)
         .single()
 
       if (ws?.slug) {
+        const wsModules = (ws.modules as Record<string, boolean> | null) ?? null
+        const wsModoVitrina = (ws.config_extra as { modo_vitrina?: boolean } | null)?.modo_vitrina === true
         let safePath = redirectTo
         if (!searchParams.get('redirectTo') && !searchParams.get('next')) {
           // Fuente unica de verdad (compartida con middleware y accept-invite)
-          safePath = landingForWorkspace(profile.role || undefined, (ws.modules as Record<string, boolean> | null) ?? null)
+          safePath = landingForWorkspace(profile.role || undefined, wsModules, wsModoVitrina)
         }
-        if (!safePath.startsWith('/')) safePath = landingForWorkspace(profile.role || undefined, (ws.modules as Record<string, boolean> | null) ?? null)
+        if (!safePath.startsWith('/')) safePath = landingForWorkspace(profile.role || undefined, wsModules, wsModoVitrina)
         if (isLocalEnv) return NextResponse.redirect(`${origin}${safePath}`)
         return NextResponse.redirect(`https://${ws.slug}.${baseDomain}${safePath}`)
       }

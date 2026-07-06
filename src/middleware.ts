@@ -52,16 +52,18 @@ function withAuthCookies(response: NextResponse, supabaseResponse: NextResponse)
 /** Role-aware landing: check permissions + workspace config */
 async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['supabase'], role?: string, workspaceId?: string): Promise<string> {
   let modules: Record<string, boolean> | null = null
+  let modoVitrina = false
   if (workspaceId) {
     const { data: ws } = await supabase
       .from('workspaces')
-      .select('modules')
+      .select('modules, config_extra')
       .eq('id', workspaceId)
       .single()
     modules = (ws?.modules as Record<string, boolean> | null) ?? null
+    modoVitrina = (ws?.config_extra as { modo_vitrina?: boolean } | null)?.modo_vitrina === true
   }
   // Fuente unica de verdad (compartida con callback de auth y accept-invite)
-  return landingForWorkspace(role, modules)
+  return landingForWorkspace(role, modules, modoVitrina)
 }
 
 export async function middleware(request: NextRequest) {
