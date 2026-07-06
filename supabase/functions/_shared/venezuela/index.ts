@@ -39,9 +39,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Tope bajo para no exceder la ventana del indicador "escribiendo" (~25s) ni impacientar al usuario.
 const humanDelay = (text: string) => sleep(Math.min(900 + (text?.length ?? 0) * 12, 3000));
 
-// Deteccion de cierre — misma heuristica del eval (agradece + senal de anonimato/difusion).
+// Deteccion de cierre — agradece + senal de anonimato/difusion.
 function isClose(text: string): boolean {
   const t = text.toLowerCase();
+  // Una PREGUNTA nunca es cierre. El paso de difusion ("¿con tu nombre o anonimo?") menciona
+  // "anonimo"/"nombre" pero AUN espera respuesta; cerrar ahi corta la conversacion antes de
+  // tiempo y el turno siguiente del usuario cae al flujo de ONE (bug del contacto fantasma).
+  if (/[?¿]/.test(t)) return false;
   const thanks = /(gracias|cu[ií]d|un abrazo|acompa|te mando|estamos (con|contigo)|con cari)/.test(t);
   const sig = /(an[oó]nim|reenv[ií]|comparte (el|este|ese) enlace|difund|con tu nombre|hasta pronto|cu[ií]date mucho)/.test(t);
   return thanks && sig;
