@@ -332,6 +332,17 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-07-02→03 (`metrik-one--soena` → producto: **determinismo en formularios DIAN + búsqueda/tarjeta config-driven en negocios + guía hereda seccional**). **PRs #22, #24, #25, #26, #27 mergeados a `main`** (deploy Vercel).
+
+- **`aplicarDeterministas`** (`src/lib/actions/formulario-actions.ts`): valores que NO deben confiarse a la extracción. **DV** recalculado con `calcularDvNit` (módulo 11) para 010/1668; **códigos DANE** país/depto/municipio resueltos por nombre. Respeta overrides (con valor; vacío recalcula). Se llama en generación y en `resolverFormularioParaEdicion` (display ⟺ generación sin drift).
+- **`src/lib/dian/divipola.ts`** (NUEVO): DIVIPOLA DANE por nombre (33 deptos + ~50 municipios + alias), dept-scoped para evitar homónimos (Rionegro). País Colombia = "169". `resolverCodigosUbicacion(pais, depto, muni, extraidos)`.
+- **Formato 010** (`src/lib/pdf/formulario-010.ts`): casilla 20 (tipo doc) honra override (default "13"); se quitó el "06" del espacio reservado de la hoja 2; firma jala del solicitante. Casillas de firma huérfanas removidas del meta (`formulario-casillas.ts`).
+- **Seccional a nivel de negocio** (`negocios.metadata.seccional`): `guardarSeccional` la escribe; `aplicarSeccionalPreset` la lee (precedencia override > metadata > data.seccional legacy > sugerida). Fuente única para las 2 copias del 010. La Guía de Devolución (`guia-devolucion-actions.ts` + preview en `getNegocioDetalleCompleto`) también la hereda.
+- **Vista de negocios** (`negocio-v2-actions.ts` + `negocios-client.tsx` + `negocio-card.tsx`): cédula config-driven en tarjeta y búsqueda (`config_extra.negocio_card.cedula_bloque/cedula_campo`); búsqueda libre incluye cédula + seccional; `seccional_label` = solo `metadata.seccional` (sin dualidad); filtro de ciudad removido.
+- **Gotcha infra:** `metrik-pdf-render` corre en **Google Cloud Run** (proyecto `metrik-pdf-render`, us-east1), NO en Fly (README legacy). Deploy: `gcloud run deploy metrik-pdf-render --source . --region us-east1`.
+
+---
+
 **Sesion:** 2026-07-01 (`hjbc--clarity` → producto: módulo `rentabilidad_comercial` + tablero interactivo + perfil de vendedor). **4 PRs #17-#20 mergeados a `main`** (deployados Vercel).
 
 - **Módulo nuevo `rentabilidad_comercial`** (gateado por `workspaces.modules.rentabilidad_comercial`): tablero comercial alimentado por tabla de hechos **`ventas_hechos`** (grano línea de documento) + **`metas_vendedor`** (presupuesto). RLS por workspace (lectura `authenticated`, ingesta `service_role`).
