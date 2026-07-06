@@ -1,10 +1,10 @@
 // ============================================================
-// VE Documents OCR Parser — Gemini 2.5 Flash
+// VE Documents OCR Parser - Gemini 3.1 Flash-Lite
 // Extrae datos de vehiculo de facturas y fichas tecnicas colombianas.
 // Pattern: parse-rut.ts (inline_data base64, structured output)
 // ============================================================
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+const GEMINI_MODEL = 'gemini-3.1-flash-lite'
 
 const SYSTEM_PROMPT = `Eres un extractor de datos de tramites de vehiculos colombianos.
 
