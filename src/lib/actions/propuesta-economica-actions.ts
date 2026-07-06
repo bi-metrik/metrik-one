@@ -18,6 +18,7 @@
 // ============================================================
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
@@ -241,6 +242,68 @@ export async function generarVersionPropuesta(
     negocio?.empresas?.nombre ?? negocio?.contactos?.nombre ?? 'Cliente'
   const clienteDoc = negocio?.empresas?.numero_documento ?? ''
 
+  // ── Personalización: firma del generador + vehículo (de la Factura) ──────────
+  // Generador = usuario que genera esta versión (staff + profiles.avatar_url + email auth).
+  // La foto es opcional: si no hay avatar_url, el template deja el espacio en blanco.
+  let generadorNombre = ''
+  let generadorCargo = ''
+  let generadorTel = ''
+  let generadorEmail = ''
+  let generadorFotoImg = ''
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: staffRow } = await (supabase as any)
+      .from('staff')
+      .select('full_name, position, phone_whatsapp, profile_id')
+      .eq('id', staffId)
+      .single()
+    if (staffRow) {
+      generadorNombre = staffRow.full_name ?? ''
+      generadorCargo = staffRow.position ?? ''
+      generadorTel = staffRow.phone_whatsapp ?? ''
+      if (staffRow.profile_id) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: prof } = await (supabase as any)
+          .from('profiles').select('avatar_url').eq('id', staffRow.profile_id).single()
+        const avatarUrl = prof?.avatar_url as string | null | undefined
+        if (avatarUrl) generadorFotoImg = `<img src="${avatarUrl}">`
+      }
+    }
+  }
+  try {
+    const { user } = await getCachedUser()
+    generadorEmail = user?.email ?? ''
+  } catch { /* email opcional */ }
+
+  // Vehículo = campos extraídos de la Factura (bloque source slug 'factura_venta_vehiculo').
+  let vehiculoTipo = ''
+  let vehiculoMarca = ''
+  let vehiculoLinea = ''
+  let vehiculoAnio = ''
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: facturaBloque } = await (supabase as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug)')
+    .eq('negocio_id', ctx.negocioId)
+    .eq('bloque_configs.slug', 'factura_venta_vehiculo')
+    .limit(1)
+    .maybeSingle()
+  {
+    const campos = (facturaBloque?.data?.campos ?? {}) as Record<string, { value?: unknown }>
+    const val = (slug: string) => String(campos[slug]?.value ?? '').trim()
+    vehiculoTipo = val('tipo_vehiculo')
+    vehiculoMarca = val('marca')
+    vehiculoLinea = val('linea')
+    vehiculoAnio = val('modelo')
+  }
+  // Imagen genérica por tipo (default eléctrico) + label normalizado a "Eléctrico"/"Híbrido"
+  // (el valor extraído viene variado: "Híbrido" / "ELECTRICO" / a veces null).
+  const tipoLower = vehiculoTipo.toLowerCase()
+  const vehiculoImg = /h[íi]brid/.test(tipoLower) ? 'carro-hibrido.jpg' : 'carro-electrico.jpg'
+  const vehiculoTipoLabel = /h[íi]brid/.test(tipoLower) ? 'Híbrido'
+    : /el[eé]ctric/.test(tipoLower) ? 'Eléctrico'
+    : (vehiculoTipo ? vehiculoTipo.charAt(0).toUpperCase() + vehiculoTipo.slice(1).toLowerCase() : '')
+
   // Versionado
   const versionesActuales = (ctx.data.versiones ?? []) as PropuestaVersion[]
   const nuevaN = versionesActuales.length > 0
@@ -276,6 +339,17 @@ export async function generarVersionPropuesta(
       plan2_descuento_pct: `${desc2}%`,
       plan2_ahorro: formatCOP(calc.ahorro_plan2),
       version: nuevaN,
+      // Personalización (SOENA): firma del generador + vehículo de la factura
+      generador_nombre: generadorNombre,
+      generador_cargo: generadorCargo,
+      generador_tel: generadorTel,
+      generador_email: generadorEmail,
+      generador_foto_img: generadorFotoImg,
+      vehiculo_tipo: vehiculoTipoLabel,
+      vehiculo_marca: vehiculoMarca,
+      vehiculo_linea: vehiculoLinea,
+      vehiculo_anio: vehiculoAnio,
+      vehiculo_img: vehiculoImg,
     })
   } catch (e) {
     renderError = e instanceof Error ? e.message : String(e)

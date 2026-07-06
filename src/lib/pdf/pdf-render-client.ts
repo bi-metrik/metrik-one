@@ -273,6 +273,17 @@ export type PropuestaEconomicaRenderPayload = {
   plan2_descuento_pct: string       // "25%"
   plan2_ahorro: string              // base - plan2
   version: number                   // 1, 2, 3...
+  // ── Personalización (opcionales; SOENA los envía, otros templates los ignoran) ──
+  generador_nombre?: string         // firma: nombre del usuario que genera
+  generador_cargo?: string          // firma: cargo (staff.position)
+  generador_tel?: string            // firma: teléfono (staff.phone_whatsapp)
+  generador_email?: string          // firma: email (auth)
+  generador_foto_img?: string       // firma: <img src="url"> o "" si no hay foto → espacio en blanco
+  vehiculo_tipo?: string            // "Eléctrico" | "Híbrido"
+  vehiculo_marca?: string
+  vehiculo_linea?: string
+  vehiculo_anio?: string            // modelo (año)
+  vehiculo_img?: string             // "carro-electrico.jpg" | "carro-hibrido.jpg"
 }
 
 export async function renderPropuestaEconomica(
