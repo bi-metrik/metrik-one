@@ -144,6 +144,7 @@ export interface IncomingMessage {
   audio_id?: string;
   interactive_reply?: string;
   flow_response?: string; // JSON string del Flow completado (nfm_reply.response_json)
+  wa_message_id?: string; // wamid del mensaje entrante (marcar leido / indicador "escribiendo")
   timestamp: string;
 }
 

@@ -139,6 +139,29 @@ export async function markAsRead(messageId: string): Promise<void> {
   });
 }
 
+/**
+ * Marca leido + muestra el indicador "escribiendo..." al usuario. Dura hasta 25s o hasta
+ * que se envie el proximo mensaje. Fire-and-forget: si la WABA no soporta typing_indicator
+ * la request falla en silencio (no rompe el turno). Usar antes de una respuesta que tarda.
+ */
+export async function sendTypingIndicator(messageId: string): Promise<void> {
+  const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')!;
+  try {
+    await fetch(`https://graph.facebook.com/${META_API_VERSION}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+        typing_indicator: { type: 'text' },
+      }),
+    });
+  } catch (_e) {
+    // ignorar: el indicador es cosmetico, nunca debe romper la conversacion
+  }
+}
+
 // --- Internal ---
 
 async function postMessage(phone: string, payload: Record<string, unknown>): Promise<void> {

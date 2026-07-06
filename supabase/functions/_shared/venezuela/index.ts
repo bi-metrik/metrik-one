@@ -5,7 +5,7 @@
 // ADITIVO: el participante NO es usuario de ONE; el estado vive en ve_chat_sessions.
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
-import { sendTextMessage } from "../wa-respond.ts";
+import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
@@ -34,6 +34,11 @@ interface VeState {
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Retraso proporcional al largo del texto para que la respuesta no se sienta instantanea/robotica.
+// Tope bajo para no exceder la ventana del indicador "escribiendo" (~25s) ni impacientar al usuario.
+const humanDelay = (text: string) => sleep(Math.min(900 + (text?.length ?? 0) * 12, 3000));
+
 // Deteccion de cierre — misma heuristica del eval (agradece + senal de anonimato/difusion).
 function isClose(text: string): boolean {
   const t = text.toLowerCase();
@@ -57,7 +62,7 @@ export async function hasOpenVeChat(supabase: Supa, phone: string): Promise<bool
   return !!data;
 }
 
-export async function startVeChat(supabase: Supa, phone: string): Promise<void> {
+export async function startVeChat(supabase: Supa, phone: string, waMessageId?: string): Promise<void> {
   const state: VeState = { history: [{ role: "model", text: SALUDO }], crisis: null, turns: 0 };
   await supabase.from("ve_chat_sessions").upsert({
     phone,
@@ -65,11 +70,13 @@ export async function startVeChat(supabase: Supa, phone: string): Promise<void> 
     closed: false,
     updated_at: new Date().toISOString(),
   });
+  if (waMessageId) await sendTypingIndicator(waMessageId); // marca leido + "escribiendo..."
+  await humanDelay(SALUDO);
   await sendTextMessage(phone, SALUDO);
   console.log(`[ve-chat] iniciada para ${phone}`);
 }
 
-export async function continueVeChat(supabase: Supa, phone: string, text: string): Promise<void> {
+export async function continueVeChat(supabase: Supa, phone: string, text: string, waMessageId?: string): Promise<void> {
   const exit = (text || "").trim().toLowerCase().replace(/[!¡.,]/g, "");
   const { data: row } = await supabase
     .from("ve_chat_sessions")
@@ -78,6 +85,9 @@ export async function continueVeChat(supabase: Supa, phone: string, text: string
     .eq("closed", false)
     .maybeSingle();
   if (!row) return; // no hay sesion abierta (carrera) → no hace nada
+
+  // Marca leido + muestra "escribiendo..." mientras se genera la respuesta y corre el retraso humano.
+  if (waMessageId) await sendTypingIndicator(waMessageId);
 
   // Expiracion 24h: fuera de la ventana de servicio de WhatsApp el avance se pierde.
   if (Date.now() - new Date(row.updated_at).getTime() > 24 * 60 * 60 * 1000) {
@@ -133,6 +143,7 @@ export async function continueVeChat(supabase: Supa, phone: string, text: string
       .from("ve_chat_sessions")
       .update({ state, closed, updated_at: new Date().toISOString() })
       .eq("phone", phone);
+    await humanDelay(botText); // pausa proporcional para que no llegue instantaneo
     await sendTextMessage(phone, botText);
   } catch (e) {
     // El modelo no respondio (tras reintentos). La sesion NO se cierra: el hilo queda guardado
