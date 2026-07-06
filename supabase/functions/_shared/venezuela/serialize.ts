@@ -11,6 +11,10 @@ export interface VeRecord {
   necesidades: string[];
   quien_ayudo: string | null;
   historia: string | null;
+  edad: number | null;
+  sexo: string | null;
+  genero: string | null;
+  zona: "rural" | "urbano" | null;
   resumen: string;
   idioma: string;
 }
@@ -29,6 +33,10 @@ usa null (o [] para listas).
   "necesidades": [string],                  // necesidades mencionadas (agua, comida, medicinas, techo, pilas...)
   "quien_ayudo": string o null,             // quien ha ayudado hasta ahora, si lo menciono
   "historia": string o null,                // el mensaje que quiere que el mundo escuche (textual o parafraseo fiel)
+  "edad": number o null,                    // edad en anios, solo si la dijo
+  "sexo": string o null,                    // sexo, si lo menciono
+  "genero": string o null,                  // genero con el que se identifica (respeta la identidad de genero que exprese)
+  "zona": "rural" o "urbano" o null,        // si vive en zona rural o urbana
   "resumen": string,                        // 1-2 frases neutrales que resumen su situacion
   "idioma": string                          // codigo del idioma en que hablo: "es", "pt", etc.
 }`;
@@ -71,6 +79,10 @@ export async function serializeVe(
     necesidades: Array.isArray(rec.necesidades) ? rec.necesidades : [],
     quien_ayudo: rec.quien_ayudo ?? null,
     historia: rec.historia ?? null,
+    edad: typeof rec.edad === "number" ? rec.edad : null,
+    sexo: rec.sexo ?? null,
+    genero: rec.genero ?? null,
+    zona: rec.zona === "rural" || rec.zona === "urbano" ? rec.zona : null,
     resumen: rec.resumen ?? "",
     idioma: rec.idioma ?? "es",
   };
