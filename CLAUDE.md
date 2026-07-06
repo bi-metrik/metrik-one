@@ -364,6 +364,18 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ---
 
+**Sesion:** 2026-06-29 (`soena` — Max — **NIT con DV: helper genérico + normalización en extracción + guion en relación de facturas**)
+**Branch:** `main` (deploy Vercel) · PR #11 `47734e0`
+
+Disparado por reporte de Deisy (SOENA), pero **genérico/opt-in**. Detalle de config + backfill SOENA en `proyectos/soena/ve/`.
+
+- **`src/lib/dian/nit.ts`** (nuevo): DV colombiano módulo 11 + `separarNitDv`/`nitSinDv`/`nitConGuion`. Determinista → si el valor trae el DV pegado lo separa, si viene limpio lo calcula.
+- **`CampoExtraccion.normalizar='nit_sin_dv'`** (opt-in por campo en `campos_extraccion`): `procesarDocumento`/`reprocesarDocumento` dejan el NIT **limpio sin DV pegado** al extraer. Sin la marca, comportamiento idéntico.
+- **Relación de facturas** (`relacion-facturas-pdf.tsx`): renderiza el NIT del proveedor **con guion** (`860019063-8`) vía `nitConGuion`, robusto a valores legacy pegados.
+- **Patrón:** el NIT base (sin DV) es la forma canónica almacenada/keyada a la DIAN; cada consumidor que necesite el DV lo recompone al renderizar. El DV NO se guarda pegado al número.
+
+---
+
 **Sesion:** 2026-06-23 (`soena` — Max — **conciliación v2 (5 pestañas + freeze duplicados) + FAB Registrar pago global + drag-and-drop de carga**)
 **Branch:** `main` (deploy Vercel Ready) · merges `85f2cdc` (dnd) `258bf23` (conciliación+FAB) · commits `d5d846f` `4f0dd04` `b62678f` · migración producto `20260623000001_conciliacion_v2.sql`
 
