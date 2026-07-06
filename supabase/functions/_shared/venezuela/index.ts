@@ -9,6 +9,7 @@ import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
+import { serializeVe } from "./serialize.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
@@ -107,6 +108,7 @@ export async function continueVeChat(supabase: Supa, phone: string, text: string
     state.history.push({ role: "user", text });
     await supabase.from("ve_chat_sessions").update({ state, closed: true, updated_at: new Date().toISOString() }).eq("phone", phone);
     await sendTextMessage(phone, "Gracias por lo que compartiste. Cuídate mucho 🙏");
+    await closeAndSerialize(supabase, phone, state);
     return;
   }
 
@@ -122,6 +124,7 @@ export async function continueVeChat(supabase: Supa, phone: string, text: string
   if (state.turns >= cap) {
     await supabase.from("ve_chat_sessions").update({ state, closed: true, updated_at: new Date().toISOString() }).eq("phone", phone);
     await sendTextMessage(phone, "Gracias por tu tiempo y por confiarnos tu historia. Cuídate mucho 🙏");
+    await closeAndSerialize(supabase, phone, state);
     return;
   }
 
@@ -149,10 +152,60 @@ export async function continueVeChat(supabase: Supa, phone: string, text: string
       .eq("phone", phone);
     await humanDelay(botText); // pausa proporcional para que no llegue instantaneo
     await sendTextMessage(phone, botText);
+    if (closed) await closeAndSerialize(supabase, phone, state);
   } catch (e) {
     // El modelo no respondio (tras reintentos). La sesion NO se cierra: el hilo queda guardado
     // y el participante puede retomar reenviando su ultima respuesta.
     console.error("[ve-chat] error en turno:", (e as Error).message ?? "");
     await sendTextMessage(phone, "Perdona, no te alcancé a leer bien. ¿Me lo repites, por favor? Seguimos justo donde quedamos.");
+  }
+}
+
+// Al cerrar: estructura la conversacion en ve_respuestas. Si hubo crisis, guarda un registro
+// marcado y NO difundible (no se extraen campos de difusion). Nunca rompe el cierre.
+async function closeAndSerialize(supabase: Supa, phone: string, state: VeState): Promise<void> {
+  try {
+    if (state.crisis) {
+      await supabase.from("ve_respuestas").insert({
+        phone,
+        atribucion: "anonima",
+        crisis: state.crisis,
+        turnos: state.turns,
+        payload: { motivo: "crisis_no_difundible", raw_history: state.history },
+      });
+      return;
+    }
+    const rec = await serializeVe(state.history);
+    if (!rec) {
+      await supabase.from("ve_respuestas").insert({
+        phone,
+        turnos: state.turns,
+        payload: { error: "serialize_failed", raw_history: state.history },
+      });
+      return;
+    }
+    await supabase.from("ve_respuestas").insert({
+      phone,
+      atribucion: rec.atribucion,
+      nombre: rec.atribucion === "con_nombre" ? rec.nombre : null,
+      ubicacion: rec.ubicacion,
+      necesidades: rec.necesidades,
+      quien_ayudo: rec.quien_ayudo,
+      historia: rec.historia,
+      resumen: rec.resumen,
+      idioma: rec.idioma,
+      turnos: state.turns,
+      payload: { record: rec },
+    });
+    console.log(`[ve-chat] respuesta serializada para ${phone} (${rec.atribucion})`);
+  } catch (e) {
+    console.error("[ve-chat] error serializando:", (e as Error).message ?? "");
+    try {
+      await supabase.from("ve_respuestas").insert({
+        phone,
+        turnos: state.turns,
+        payload: { error: String((e as Error).message ?? "").slice(0, 200), raw_history: state.history },
+      });
+    } catch { /* si hasta el fallback falla, no rompemos el cierre */ }
   }
 }
