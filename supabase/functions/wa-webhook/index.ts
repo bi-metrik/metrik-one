@@ -9,6 +9,7 @@ import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage, sendButtons, sendCtaUrl } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { isCardumenChatTrigger, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
+import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
@@ -77,6 +78,32 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   if (message.type === 'flow_response') {
     await storeCardumenFlowResponse(supabase, message.phone, message.flow_response || '');
     await sendTextMessage(message.phone, '🐟 ¡Gracias! Tu historia ya forma parte del cardumen.');
+    return;
+  }
+
+  // 0a-ve. Voz de Venezuela — AISLAMIENTO TOTAL (mismo patron que CardumenChat). Si hay una conversacion
+  //     de escucha ABIERTA para este telefono, TODO mensaje (texto o audio) va al motor Gemini de escucha
+  //     y retorna ANTES de cualquier logica de ONE. Estudio aparte: estado en ve_chat_sessions.
+  if (await hasOpenVeChat(supabase, message.phone)) {
+    let texto = message.text || '';
+    if (message.type === 'audio' && message.audio_id) {
+      const result = await transcribeAudio(message.audio_id);
+      if (!result.text) {
+        await sendTextMessage(message.phone, 'No alcancé a entender el audio. ¿Me lo puedes escribir o repetir?');
+        return;
+      }
+      texto = result.text;
+    }
+    if (!texto.trim()) {
+      await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
+      return;
+    }
+    await continueVeChat(supabase, message.phone, texto);
+    return;
+  }
+  // 0a-ve trigger. Palabra clave publica "venezuela" abre la conversacion de escucha (solo si no hay una abierta).
+  if (message.type === 'text' && isVeTrigger(message.text)) {
+    await startVeChat(supabase, message.phone);
     return;
   }
 
