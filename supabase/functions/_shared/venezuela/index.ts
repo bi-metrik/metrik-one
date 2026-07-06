@@ -31,6 +31,7 @@ interface VeState {
   history: { role: "user" | "model"; text: string }[];
   crisis: CrisisType | null;
   turns: number;
+  location?: { lat: number; lng: number; name?: string; address?: string };
 }
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
@@ -81,7 +82,13 @@ export async function startVeChat(supabase: Supa, phone: string, waMessageId?: s
   console.log(`[ve-chat] iniciada para ${phone}`);
 }
 
-export async function continueVeChat(supabase: Supa, phone: string, text: string, waMessageId?: string): Promise<void> {
+export async function continueVeChat(
+  supabase: Supa,
+  phone: string,
+  text: string,
+  waMessageId?: string,
+  location?: { latitude: number; longitude: number; name?: string; address?: string },
+): Promise<void> {
   const exit = (text || "").trim().toLowerCase().replace(/[!¡.,]/g, "");
   const { data: row } = await supabase
     .from("ve_chat_sessions")
@@ -102,6 +109,10 @@ export async function continueVeChat(supabase: Supa, phone: string, text: string
   }
 
   const state = row.state as VeState;
+  // Ubicacion compartida por WhatsApp: se guarda en el estado para el registro final.
+  if (location) {
+    state.location = { lat: location.latitude, lng: location.longitude, name: location.name, address: location.address };
+  }
 
   // Salida explicita del participante.
   if (EXIT_WORDS.includes(exit)) {
@@ -188,14 +199,17 @@ async function closeAndSerialize(supabase: Supa, phone: string, state: VeState):
       phone,
       atribucion: rec.atribucion,
       nombre: rec.atribucion === "con_nombre" ? rec.nombre : null,
-      ubicacion: rec.ubicacion,
+      ubicacion: rec.ubicacion ?? state.location?.name ?? state.location?.address ?? null,
+      lat: state.location?.lat ?? null,
+      lng: state.location?.lng ?? null,
+      ubicacion_fuente: state.location ? "gps" : (rec.ubicacion ? "texto" : null),
       necesidades: rec.necesidades,
       quien_ayudo: rec.quien_ayudo,
       historia: rec.historia,
       resumen: rec.resumen,
       idioma: rec.idioma,
       turnos: state.turns,
-      payload: { record: rec },
+      payload: { record: rec, location: state.location ?? null },
     });
     console.log(`[ve-chat] respuesta serializada para ${phone} (${rec.atribucion})`);
   } catch (e) {

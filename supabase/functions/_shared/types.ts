@@ -139,11 +139,12 @@ export interface WaUser {
 export interface IncomingMessage {
   phone: string;
   text: string;
-  type: 'text' | 'image' | 'audio' | 'interactive' | 'button' | 'flow_response';
+  type: 'text' | 'image' | 'audio' | 'interactive' | 'button' | 'flow_response' | 'location';
   image_id?: string;
   audio_id?: string;
   interactive_reply?: string;
   flow_response?: string; // JSON string del Flow completado (nfm_reply.response_json)
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
   wa_message_id?: string; // wamid del mensaje entrante (marcar leido / indicador "escribiendo")
   timestamp: string;
 }

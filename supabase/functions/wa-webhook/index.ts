@@ -94,6 +94,13 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       }
       texto = result.text;
     }
+    if (message.type === 'location' && message.location) {
+      const loc = message.location;
+      const etiqueta = loc.name || loc.address;
+      const textoUbic = etiqueta ? `(Comparto mi ubicación: ${etiqueta})` : '(Comparto mi ubicación actual por WhatsApp.)';
+      await continueVeChat(supabase, message.phone, textoUbic, message.wa_message_id, loc);
+      return;
+    }
     if (!texto.trim()) {
       await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
       return;
@@ -598,6 +605,22 @@ function extractMessage(payload: any): IncomingMessage | null {
         text: reply?.title || reply?.id || '',
         type: 'interactive',
         interactive_reply: reply?.id,
+        timestamp: msg.timestamp,
+      };
+    }
+
+    if (msg.type === 'location' && msg.location) {
+      return {
+        phone,
+        text: '',
+        type: 'location',
+        location: {
+          latitude: msg.location.latitude,
+          longitude: msg.location.longitude,
+          name: msg.location.name,
+          address: msg.location.address,
+        },
+        wa_message_id: msg.id,
         timestamp: msg.timestamp,
       };
     }
