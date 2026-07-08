@@ -7,6 +7,7 @@ import { createDriveFolder } from '@/lib/google-drive'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
+import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 
@@ -3632,7 +3633,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         const ceFields = (ce as { fields?: Array<{
           slug: string
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string; source_bloque_slug?: string }
+          auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string; source_bloque_slug?: string; computed?: string; computed_anio?: number }
         }> }).fields ?? []
         const autoFillHist: Record<string, unknown> = {}
         for (const f of ceFields) {
@@ -3647,7 +3648,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
             ?? datosOtrasEtapas[f.auto_fill.source_etapa_orden]
           if (!srcData) continue
           const rawVal = srcData[f.auto_fill.field]
-          if (f.auto_fill.mapping) {
+          if (f.auto_fill.computed) {
+            // Referencia calculada (informativa, editable) — ej. tarifa UPME.
+            const computed = aplicarComputedAutoFill(f.auto_fill.computed, rawVal, { anio: f.auto_fill.computed_anio })
+            if (computed !== undefined) autoFillHist[f.slug] = computed
+          } else if (f.auto_fill.mapping) {
             const srcVal = String(rawVal ?? '').toLowerCase().trim()
               .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
             if (srcVal && f.auto_fill.mapping[srcVal] !== undefined) {
@@ -3751,7 +3756,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       slug: string
       tipo?: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string; source_bloque_slug?: string }
+      auto_fill?: { field: string; source: string; mapping?: Record<string, any>; source_etapa_orden: number; source_bloque?: string; source_bloque_slug?: string; computed?: string; computed_anio?: number }
       doc_link?: { source_bloque_nombre: string; source_etapa_orden: number; source_bloque_slug?: string }
     }>
     for (const f of fields) {
@@ -3766,7 +3771,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           ?? datosOtrasEtapas[f.auto_fill.source_etapa_orden]
         if (srcData) {
           const rawVal = srcData[f.auto_fill.field]
-          if (f.auto_fill.mapping) {
+          if (f.auto_fill.computed) {
+            // Referencia calculada (informativa, editable) — ej. tarifa UPME
+            // (Res. UPME 135/2025). NUNCA es gate ni bloquea; el operador la
+            // sobrescribe y el valor final lo tiene la plataforma UPME.
+            const computed = aplicarComputedAutoFill(f.auto_fill.computed, rawVal, { anio: f.auto_fill.computed_anio })
+            if (computed !== undefined) autoFill[f.slug] = computed
+          } else if (f.auto_fill.mapping) {
             const srcVal = String(rawVal ?? '').toLowerCase().trim()
               .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents: eléctrico → electrico
             if (srcVal && f.auto_fill.mapping[srcVal] !== undefined) {

@@ -23,6 +23,11 @@ export interface DatosField {
   // Texto de ayuda opcional (ícono "i" con tooltip junto al label). Opt-in por
   // config — solo aparece donde el equipo lo necesite. Mantener breve (1-2 frases).
   ayuda?: string
+  // Marca el campo como VALOR DE REFERENCIA editable (badge "Referencia" verde).
+  // Su valor lo precalcula el servidor vía auto_fill (ej. tarifa UPME calculada con
+  // la fórmula Res. UPME 135/2025). Es SOLO informativo: el operador puede
+  // sobrescribirlo y nunca bloquea ni es gate. Opt-in por config.
+  es_referencia?: boolean
   // plantilla: texto readonly con placeholders {{slug}} que se sustituyen por el
   // valor de otros campos del bloque (ej. cuerpo de correo a la DIAN). Con copiar.
   template?: string
@@ -567,6 +572,10 @@ export default function BloqueDatos({
               {/* Dato leído por IA de un pantallazo y aún sin verificar → badge "Revisar" */}
               {aiFilled[f.slug] && (
                 <span className="rounded bg-[#FEF3C7] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#B45309]">Revisar</span>
+              )}
+              {/* Valor de referencia calculado (informativo, editable) → badge "Referencia" */}
+              {f.es_referencia && values[f.slug] != null && values[f.slug] !== '' && (
+                <span className="rounded bg-[#D1FAE5] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#047857]">Referencia</span>
               )}
             </label>
           )}

@@ -41,6 +41,9 @@ const TIPO_LABELS: Record<string, string> = {
   saldo: 'Saldo',
   pago: 'Pago',
   programado: 'Cuota',
+  // Recaudo a favor de terceros (ej. tarifa UPME): cuadra el saldo pero NO es
+  // ingreso de SOENA (excluido de recaudo/MC/EBITDA).
+  pasante: 'Pasante',
 }
 
 function CobroConfirmadoRow({ cobro }: { cobro: Cobro }) {
