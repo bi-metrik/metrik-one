@@ -1,5 +1,5 @@
 // ============================================================
-// RUT OCR Parser — Gemini 2.5 Flash
+// RUT OCR Parser - Gemini 3.1 Flash-Lite
 // Spec: [98B] D69-D77
 // Pattern: wa-transcribe.ts (inline_data base64)
 // ============================================================
@@ -7,7 +7,7 @@
 import type { RutParseResult, RutField } from './types'
 import { validateNit } from './validate-nit'
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+const GEMINI_MODEL = 'gemini-3.1-flash-lite'
 
 const SYSTEM_PROMPT = `Eres un extractor de datos del RUT colombiano (Registro Unico Tributario de la DIAN).
 

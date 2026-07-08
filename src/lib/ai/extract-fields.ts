@@ -1,10 +1,10 @@
 // ============================================================
-// Generic AI Field Extractor — Gemini 2.5 Flash
+// Generic AI Field Extractor - Gemini 3.1 Flash-Lite
 // Extrae campos configurables de cualquier documento.
 // Pattern: parse-ve-docs.ts (inline_data base64, structured output)
 // ============================================================
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+const GEMINI_MODEL = 'gemini-3.1-flash-lite'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -161,7 +161,7 @@ export async function extractFieldsFromDocument(
         generationConfig: {
           temperature: 0.1,
           // Documentos con muchos campos (RUT = 20+) desbordaban el presupuesto:
-          // el "thinking" de gemini-2.5-flash consume maxOutputTokens y dejaba la
+          // el "thinking" del modelo consume maxOutputTokens y dejaba la
           // respuesta SIN la parte JSON (finishReason MAX_TOKENS) → el parser caía
           // en texto de razonamiento truncado ("position 120"). Desactivamos
           // thinking (la extracción es determinista, no lo necesita) y subimos el
