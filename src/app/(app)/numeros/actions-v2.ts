@@ -209,21 +209,25 @@ export async function getNumeros(mesRef?: string) {
       .order('created_at', { ascending: false })
       .limit(1),
 
-    // Cobros del mes
+    // Cobros del mes — recaudo/ingreso. Excluye tipo_cobro='pasante' (recaudo a
+    // favor de terceros, ej. tarifa UPME: no es ingreso de SOENA). null-safe:
+    // los cobros legacy sin tipo (NULL) siguen contando. Espeja v_pyl_mes.
     supabase
       .from('cobros')
       .select('monto')
       .eq('workspace_id', workspaceId)
       .gte('fecha', mesStart)
-      .lt('fecha', mesEnd),
+      .lt('fecha', mesEnd)
+      .or('tipo_cobro.is.null,tipo_cobro.neq.pasante'),
 
-    // Cobros mes anterior
+    // Cobros mes anterior (misma exclusión de pasante)
     supabase
       .from('cobros')
       .select('monto')
       .eq('workspace_id', workspaceId)
       .gte('fecha', prevStart)
-      .lt('fecha', prevEnd),
+      .lt('fecha', prevEnd)
+      .or('tipo_cobro.is.null,tipo_cobro.neq.pasante'),
 
     // Gastos del mes (include proyecto_id/negocio_id for COH-5, categoria/soporte for D141/D142)
     // 2026-04-27: estado_causacion eliminado, todos los gastos son reales
