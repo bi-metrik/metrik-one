@@ -616,7 +616,9 @@ function SelectorEtapa({
       } else if (result.error) {
         toast.error('Error al cambiar etapa: ' + result.error)
       } else {
-        toast.success(`Avanzado a: ${siguienteEtapa.nombre}`)
+        // El destino REAL lo resuelve el routing en el server; el toast lo nombra
+        // (siguienteEtapa por orden puede no ser el destino cuando el routing salta).
+        toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? siguienteEtapa.nombre}`)
       }
     })
   }
@@ -726,7 +728,7 @@ function SelectorEtapa({
               ) : (
                 <>
                   <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                  <span className="truncate max-w-[120px]">{siguienteEtapa.nombre}</span>
+                  <span>Avanzar de etapa</span>
                 </>
               )}
             </button>

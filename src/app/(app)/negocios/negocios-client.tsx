@@ -5,18 +5,21 @@ import NegocioCard from './negocio-card'
 import EmptyState from '@/components/empty-state'
 import type { NegocioResumen } from './negocio-v2-actions'
 
-type StageFilter = 'todos' | 'venta' | 'inclusion' | 'ejecucion' | 'cobro' | 'cerrados'
+type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
 type MotivoCierre = 'todos' | 'exitoso' | 'perdido' | 'cancelado'
 
-interface FiltroSpec {
-  key: StageFilter
+/** Etapa del workflow de la línea, para el segmentador de nivel 2. */
+export type EtapaSeg = { numero: number; nombre: string; stage: string; orden: number }
+
+interface FaseSpec {
+  key: FaseFilter
   label: string
   /** Tokens MeTRIK por stage. */
   active: { bg: string; text: string; border: string }
 }
 
 // Tokens MeTRIK (no Tailwind generico)
-const ALL_FILTROS: FiltroSpec[] = [
+const ALL_FASES: FaseSpec[] = [
   {
     key: 'todos',
     label: 'Todos',
@@ -26,11 +29,6 @@ const ALL_FILTROS: FiltroSpec[] = [
     key: 'venta',
     label: 'Venta',
     active: { bg: 'bg-[#10B981]/10', text: 'text-[#059669]', border: 'border-[#10B981]' },
-  },
-  {
-    key: 'inclusion',
-    label: 'Inclusión',
-    active: { bg: 'bg-[#FEF3C7]', text: 'text-[#B45309]', border: 'border-[#FCD34D]' },
   },
   {
     key: 'ejecucion',
@@ -53,14 +51,18 @@ export default function NegociosClient({
   negocios,
   cerrados,
   stagesActivos,
+  etapas,
   defaultStage = 'todos',
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
   stagesActivos: string[]
-  defaultStage?: StageFilter
+  etapas: EtapaSeg[]
+  defaultStage?: FaseFilter
 }) {
-  const [filtro, setFiltro] = useState<StageFilter>(defaultStage)
+  // Segmentador jerárquico: fase (stage) → etapa (numero dentro de la fase).
+  const [fase, setFase] = useState<FaseFilter>(defaultStage)
+  const [etapaNum, setEtapaNum] = useState<number | null>(null)
   const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
   const [q, setQ] = useState('')
   const [seccional, setSeccional] = useState<string>('todas')
@@ -87,18 +89,38 @@ export default function NegociosClient({
     return cerrados.filter((n) => n.cierre_motivo === motivoCierre)
   }, [cerrados, motivoCierre])
 
-  // Inclusión es una etapa dentro del stage 'venta'; se separa en su propio filtro.
-  // En 'venta' NO se muestran los de Inclusión.
-  const current =
-    filtro === 'cerrados'
-      ? cerradosFiltrados
-      : filtro === 'todos'
-        ? negocios
-        : filtro === 'inclusion'
-          ? negocios.filter((n) => n.etapa_nombre === 'Inclusión')
-          : filtro === 'venta'
-            ? negocios.filter((n) => n.stage_actual === 'venta' && n.etapa_nombre !== 'Inclusión')
-            : negocios.filter((n) => n.stage_actual === filtro)
+  // ── Contadores (sobre `negocios`, que ya viene scopeado por servidor: el
+  //    operator solo recibe sus negocios, así que los conteos salen por rol). ──
+  const faseCount = (key: FaseFilter) =>
+    key === 'todos'
+      ? negocios.length
+      : key === 'cerrados'
+        ? cerrados.length
+        : negocios.filter((n) => n.stage_actual === key).length
+  const etapaCount = (numero: number) => negocios.filter((n) => n.etapa_numero === numero).length
+
+  // Etapas de la fase seleccionada (solo cuando la fase es un stage), en orden del workflow.
+  const etapasDeFase = useMemo(
+    () =>
+      fase === 'venta' || fase === 'ejecucion' || fase === 'cobro'
+        ? etapas.filter((e) => e.stage === fase).sort((a, b) => a.orden - b.orden)
+        : [],
+    [etapas, fase],
+  )
+
+  // Al cambiar de fase se limpia la etapa seleccionada.
+  const seleccionarFase = (key: FaseFilter) => {
+    setFase(key)
+    setEtapaNum(null)
+  }
+
+  // Filtrado por fase / etapa.
+  const current = useMemo(() => {
+    if (fase === 'cerrados') return cerradosFiltrados
+    if (fase === 'todos') return negocios
+    if (etapaNum !== null) return negocios.filter((n) => n.etapa_numero === etapaNum)
+    return negocios.filter((n) => n.stage_actual === fase)
+  }, [fase, etapaNum, negocios, cerradosFiltrados])
 
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
@@ -124,41 +146,31 @@ export default function NegociosClient({
     return res
   }, [current, term, seccional, responsable])
 
-  // Filtros visibles. El pill "Inclusión" solo si hay negocios en esa etapa.
-  const hayInclusion = useMemo(() => negocios.some((n) => n.etapa_nombre === 'Inclusión'), [negocios])
-  const filtros = ALL_FILTROS.filter((f) =>
-    f.key === 'inclusion'
-      ? hayInclusion
-      : f.key === 'todos' || f.key === 'cerrados'
-        ? f.key === 'todos' || cerrados.length > 0
+  // Fases visibles (según stages activos del workspace + si hay cerrados).
+  const fases = ALL_FASES.filter((f) =>
+    f.key === 'todos'
+      ? true
+      : f.key === 'cerrados'
+        ? cerrados.length > 0
         : stagesActivos.includes(f.key),
   )
 
   const showEmpty = currentFiltrado.length === 0
-  const isFilteringMotivo = filtro === 'cerrados' && motivoCierre !== 'todos'
+  const isFilteringMotivo = fase === 'cerrados' && motivoCierre !== 'todos'
   const sinResultadosBusqueda = term.length > 0 && currentFiltrado.length === 0 && current.length > 0
 
   return (
     <div className="space-y-4">
-      {/* Pills de filtro */}
+      {/* Nivel 1: fases */}
       <div className="scrollbar-none flex gap-2 overflow-x-auto pb-1">
-        {filtros.map((f) => {
-          const count =
-            f.key === 'todos'
-              ? negocios.length
-              : f.key === 'cerrados'
-                ? cerrados.length
-                : f.key === 'inclusion'
-                  ? negocios.filter((n) => n.etapa_nombre === 'Inclusión').length
-                  : f.key === 'venta'
-                    ? negocios.filter((n) => n.stage_actual === 'venta' && n.etapa_nombre !== 'Inclusión').length
-                    : negocios.filter((n) => n.stage_actual === f.key).length
-          const active = filtro === f.key
+        {fases.map((f) => {
+          const count = faseCount(f.key)
+          const active = fase === f.key
           return (
             <button
               key={f.key}
               type="button"
-              onClick={() => setFiltro(f.key)}
+              onClick={() => seleccionarFase(f.key)}
               className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                 active
                   ? `${f.active.bg} ${f.active.text} ${f.active.border}`
@@ -179,6 +191,51 @@ export default function NegociosClient({
           )
         })}
       </div>
+
+      {/* Nivel 2: etapas de la fase seleccionada (solo stages) */}
+      {etapasDeFase.length > 0 && (
+        <div className="scrollbar-none flex gap-1.5 overflow-x-auto pb-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setEtapaNum(null)}
+            className={`shrink-0 rounded-full border px-2.5 py-1 transition-colors ${
+              etapaNum === null
+                ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]'
+                : 'border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1A1A]'
+            }`}
+          >
+            Todas
+          </button>
+          {etapasDeFase.map((e) => {
+            const count = etapaCount(e.numero)
+            const active = etapaNum === e.numero
+            const vacia = count === 0
+            return (
+              <button
+                key={e.numero}
+                type="button"
+                onClick={() => setEtapaNum(e.numero)}
+                className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 transition-colors ${
+                  active
+                    ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]'
+                    : vacia
+                      ? 'border-[#E5E7EB] text-[#6B7280]/50 hover:text-[#6B7280]'
+                      : 'border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1A1A]'
+                }`}
+              >
+                {e.nombre}
+                <span
+                  className={`rounded-full px-1 py-0.5 text-[10px] font-bold ${
+                    active ? 'bg-black/10' : vacia ? 'bg-[#F5F4F2] text-[#6B7280]/50' : 'bg-[#F5F4F2]'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Barra de búsqueda */}
       <div className="relative">
@@ -233,7 +290,7 @@ export default function NegociosClient({
       )}
 
       {/* Sub-filtros Cerrados (motivo) */}
-      {filtro === 'cerrados' && cerrados.length > 0 && (
+      {fase === 'cerrados' && cerrados.length > 0 && (
         <div className="scrollbar-none flex gap-1.5 overflow-x-auto pb-1 text-xs">
           {(['todos', 'exitoso', 'perdido', 'cancelado'] as MotivoCierre[]).map((m) => {
             const isActive = motivoCierre === m
@@ -267,14 +324,14 @@ export default function NegociosClient({
             description="Prueba con otro código, cliente, cédula, seccional o vehículo."
             primaryCta={{ label: 'Limpiar búsqueda', onClick: () => setQ('') }}
           />
-        ) : filtro === 'cerrados' && !isFilteringMotivo ? (
+        ) : fase === 'cerrados' && !isFilteringMotivo ? (
           <EmptyState
             illustration="/empty-states/empty-cerrados.svg"
             illustrationAlt="Sin negocios cerrados todavia"
             title="Sin negocios cerrados todavia"
             description="Aqui veras el historial de negocios exitosos, perdidos y cancelados cuando los tengas."
           />
-        ) : filtro === 'cerrados' && isFilteringMotivo ? (
+        ) : fase === 'cerrados' && isFilteringMotivo ? (
           <EmptyState
             title={`Sin cerrados como ${motivoLabel(motivoCierre).toLowerCase()}`}
             description="Prueba otro filtro o quita el filtro de motivo."
@@ -286,11 +343,13 @@ export default function NegociosClient({
         ) : (
           <div className="py-16 text-center">
             <p className="text-sm text-[#6B7280]">
-              {filtro === 'todos'
+              {fase === 'todos'
                 ? 'Sin negocios abiertos'
-                : `Sin negocios en ${ALL_FILTROS.find((f) => f.key === filtro)?.label}`}
+                : etapaNum !== null
+                  ? `Sin negocios en ${etapasDeFase.find((e) => e.numero === etapaNum)?.nombre ?? 'esta etapa'}`
+                  : `Sin negocios en ${ALL_FASES.find((f) => f.key === fase)?.label}`}
             </p>
-            {filtro === 'todos' && (
+            {fase === 'todos' && (
               <p className="mt-1 text-xs text-[#6B7280]/70">Crea uno con el boton +</p>
             )}
           </div>
