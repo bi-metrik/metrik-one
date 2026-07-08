@@ -143,6 +143,8 @@ export type NegocioResumen = {
   cedula: string | null
   // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
   responsables: Array<{ id: string; full_name: string }>
+  // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
+  es_meta_lead: boolean
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -405,6 +407,7 @@ export async function getNegociosV2(
       ciudad_label: vehiculoPorNeg[id]?.ciudad ?? null,
       cedula: cedulaPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
+      es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
     }
   })
 }
