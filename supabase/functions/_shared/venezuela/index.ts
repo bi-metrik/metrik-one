@@ -5,7 +5,7 @@
 // ADITIVO: el participante NO es usuario de ONE; el estado vive en ve_chat_sessions.
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
-import { sendTextMessage, sendTypingIndicator, sendCtaUrl } from "../wa-respond.ts";
+import { sendTextMessage, sendTypingIndicator, sendContact, sendButtons, sendLocationRequest } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
@@ -22,17 +22,19 @@ const CRISIS_TURN_CAP = 10; // tope suave en crisis: acompanar sin colgarse ni d
 const VE_KEYWORDS = ["venezuela"];
 const EXIT_WORDS = ["salir", "cancelar", "terminar"];
 
-// Politica de tratamiento de datos (voz.metrik.com.co). La salvedad esencial va en el saludo;
-// el consentimiento se registra por conducta concluyente (primer mensaje del usuario tras el saludo).
+// Politica de tratamiento de datos. La salvedad esencial va DENTRO del saludo (mensaje de texto,
+// NO boton: el URL en texto plano se siente opcional, no obligatorio, y no rompe el hilo). El
+// consentimiento se registra por conducta concluyente (primer mensaje del usuario tras el saludo).
 const POLICY_URL = "https://voz.metrik.com.co";
 const POLICY_VERSION = "1.0";
-const SALVEDAD =
-  "Antes de empezar: lo que compartas se usa solo para mostrarle al mundo lo que está pasando y dónde se necesita ayuda. No es una promesa de ayuda ni de rescate. Es voluntario y, si quieres, anónimo. Al continuar aceptas cómo tratamos tus datos (botón de abajo).";
 
-// Saludo/consentimiento del punto 1 del prompt de Juanita, verbatim. Determinista: no lo genera
-// el modelo (evita que improvise el consentimiento y ahorra la 1a llamada). El motor entra en el turno 2.
+// Saludo corto: proposito + salvedad esencial + URL de politica en texto plano + disparador suave.
+// Determinista (no lo genera el modelo). Ajuste del instrumento de Juanita, pendiente de ratificar.
 const SALUDO =
-  "Hola 🙏 Somos aliados de The House Project y estamos recogiendo las historias de quienes están viviendo esta emergencia, para mostrarle al mundo lo que está pasando y dónde se necesita ayuda. Nos gustaría hacerte unas pocas preguntas. Puedes responder solo las que quieras, con texto o audio, y parar cuando quieras. ¿Te parece bien?";
+  "Hola 🙏 Recogemos las historias de quienes están viviendo esta emergencia, para mostrarle al mundo lo que está pasando y dónde se necesita ayuda.\n\n" +
+  "No es un canal de ayuda ni una promesa de rescate; es voluntario y anónimo si quieres. Cómo tratamos tus datos: " +
+  POLICY_URL.replace("https://", "") + "\n\n" +
+  "Si estás de acuerdo, presiona OK para empezar.";
 
 interface VeState {
   history: { role: "user" | "model"; text: string }[];
@@ -40,6 +42,7 @@ interface VeState {
   turns: number;
   location?: { lat: number; lng: number; name?: string; address?: string };
   consent?: { version: string; at: string };
+  bot_phone?: string; // numero del bot (display_phone_number), para compartir su contacto al cierre
 }
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
@@ -76,8 +79,8 @@ export async function hasOpenVeChat(supabase: Supa, phone: string): Promise<bool
   return !!data;
 }
 
-export async function startVeChat(supabase: Supa, phone: string, waMessageId?: string): Promise<void> {
-  const state: VeState = { history: [{ role: "model", text: SALUDO }], crisis: null, turns: 0 };
+export async function startVeChat(supabase: Supa, phone: string, waMessageId?: string, botPhone?: string): Promise<void> {
+  const state: VeState = { history: [{ role: "model", text: SALUDO }], crisis: null, turns: 0, bot_phone: botPhone };
   await supabase.from("ve_chat_sessions").upsert({
     phone,
     state,
@@ -86,8 +89,10 @@ export async function startVeChat(supabase: Supa, phone: string, waMessageId?: s
   });
   if (waMessageId) await sendTypingIndicator(waMessageId); // marca leido + "escribiendo..."
   await humanDelay(SALUDO);
-  // Saludo + salvedad esencial en el mismo mensaje, con boton a la politica completa.
-  await sendCtaUrl(phone, `${SALUDO}\n\n${SALVEDAD}`, "Ver política", POLICY_URL);
+  // Boton de RESPUESTA "OK" para confirmar con un tap y seguir (in-chat, NO saca del navegador
+  // como un cta_url). El URL de la politica va en texto plano dentro del cuerpo (autolinkeado),
+  // opcional. Tocar OK = consentimiento; llega como texto "OK" y lo registra continueVeChat.
+  await sendButtons(phone, SALUDO, [{ id: "ve_ok", title: "OK" }]);
   console.log(`[ve-chat] iniciada para ${phone}`);
 }
 
@@ -166,6 +171,9 @@ export async function continueVeChat(
     const botText = clean(r.text) || "Estoy aquí contigo. ¿Me cuentas un poco más?";
 
     // 6. Guardar estado y responder
+    // El primer turno generado (respuesta al OK) es el paso de ubicacion: se envia con el boton
+    // nativo "Enviar ubicacion" de WhatsApp, salvo que la persona ya haya compartido su ubicacion.
+    const esTurnoUbicacion = state.turns === 0 && !state.location;
     state.history.push({ role: "model", text: botText });
     state.turns += 1;
     const closed = isClose(botText) || state.turns >= cap;
@@ -174,7 +182,11 @@ export async function continueVeChat(
       .update({ state, closed, updated_at: new Date().toISOString() })
       .eq("phone", phone);
     await humanDelay(botText); // pausa proporcional para que no llegue instantaneo
-    await sendTextMessage(phone, botText);
+    if (esTurnoUbicacion) {
+      await sendLocationRequest(phone, botText); // texto del modelo + boton "Enviar ubicacion"
+    } else {
+      await sendTextMessage(phone, botText);
+    }
     if (closed) await closeAndSerialize(supabase, phone, state);
   } catch (e) {
     // El modelo no respondio (tras reintentos). La sesion NO se cierra: el hilo queda guardado
@@ -187,6 +199,11 @@ export async function continueVeChat(
 // Al cerrar: estructura la conversacion en ve_respuestas. Si hubo crisis, guarda un registro
 // marcado y NO difundible (no se extraen campos de difusion). Nunca rompe el cierre.
 async function closeAndSerialize(supabase: Supa, phone: string, state: VeState): Promise<void> {
+  // Cierre normal: enviar el contacto del bot como tarjeta (vCard) para que la persona lo reenvie
+  // con un toque. En crisis NO aplica (fue una emergencia, no el cierre de difusion).
+  if (!state.crisis && state.bot_phone) {
+    try { await sendContact(phone, "Voz de Venezuela", state.bot_phone); } catch { /* cosmetico, no rompe el cierre */ }
+  }
   try {
     if (state.crisis) {
       await supabase.from("ve_respuestas").insert({

@@ -162,6 +162,35 @@ export async function sendTypingIndicator(messageId: string): Promise<void> {
   }
 }
 
+/** Envia una tarjeta de contacto (vCard) para que el usuario pueda reenviarla con un toque. */
+export async function sendContact(phone: string, displayName: string, contactPhone: string): Promise<void> {
+  const digits = (contactPhone || '').replace(/\D/g, '');
+  if (!digits) return;
+  await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'contacts',
+    contacts: [{
+      name: { formatted_name: displayName, first_name: displayName },
+      phones: [{ phone: `+${digits}`, type: 'WORK', wa_id: digits }],
+    }],
+  });
+}
+
+/** Pide la ubicacion con el boton nativo "Enviar ubicacion" de WhatsApp (in-chat). */
+export async function sendLocationRequest(phone: string, body: string): Promise<void> {
+  await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'location_request_message',
+      body: { text: (body || '').slice(0, 1024) },
+      action: { name: 'send_location' },
+    },
+  });
+}
+
 // --- Internal ---
 
 async function postMessage(phone: string, payload: Record<string, unknown>): Promise<void> {
