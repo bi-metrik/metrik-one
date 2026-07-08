@@ -5,7 +5,7 @@
 // ADITIVO: el participante NO es usuario de ONE; el estado vive en ve_chat_sessions.
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
-import { sendTextMessage, sendTypingIndicator, sendCtaUrl } from "../wa-respond.ts";
+import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
@@ -22,17 +22,19 @@ const CRISIS_TURN_CAP = 10; // tope suave en crisis: acompanar sin colgarse ni d
 const VE_KEYWORDS = ["venezuela"];
 const EXIT_WORDS = ["salir", "cancelar", "terminar"];
 
-// Politica de tratamiento de datos (voz.metrik.com.co). La salvedad esencial va en el saludo;
-// el consentimiento se registra por conducta concluyente (primer mensaje del usuario tras el saludo).
+// Politica de tratamiento de datos. La salvedad esencial va DENTRO del saludo (mensaje de texto,
+// NO boton: el URL en texto plano se siente opcional, no obligatorio, y no rompe el hilo). El
+// consentimiento se registra por conducta concluyente (primer mensaje del usuario tras el saludo).
 const POLICY_URL = "https://voz.metrik.com.co";
 const POLICY_VERSION = "1.0";
-const SALVEDAD =
-  "Antes de empezar: lo que compartas se usa solo para mostrarle al mundo lo que está pasando y dónde se necesita ayuda. No es una promesa de ayuda ni de rescate. Es voluntario y, si quieres, anónimo. Al continuar aceptas cómo tratamos tus datos (botón de abajo).";
 
-// Saludo/consentimiento del punto 1 del prompt de Juanita, verbatim. Determinista: no lo genera
-// el modelo (evita que improvise el consentimiento y ahorra la 1a llamada). El motor entra en el turno 2.
+// Saludo corto: proposito + salvedad esencial + URL de politica en texto plano + disparador suave.
+// Determinista (no lo genera el modelo). Ajuste del instrumento de Juanita, pendiente de ratificar.
 const SALUDO =
-  "Hola 🙏 Somos aliados de The House Project y estamos recogiendo las historias de quienes están viviendo esta emergencia, para mostrarle al mundo lo que está pasando y dónde se necesita ayuda. Nos gustaría hacerte unas pocas preguntas. Puedes responder solo las que quieras, con texto o audio, y parar cuando quieras. ¿Te parece bien?";
+  "Hola 🙏 Recogemos las historias de quienes están viviendo esta emergencia, para mostrarle al mundo lo que está pasando y dónde se necesita ayuda.\n\n" +
+  "No es un canal de ayuda ni una promesa de rescate; es voluntario y anónimo si quieres. Cómo tratamos tus datos: " +
+  POLICY_URL.replace("https://", "") + "\n\n" +
+  "Si estás de acuerdo, escríbeme *ok* (o cuéntame directamente) y seguimos.";
 
 interface VeState {
   history: { role: "user" | "model"; text: string }[];
@@ -86,8 +88,9 @@ export async function startVeChat(supabase: Supa, phone: string, waMessageId?: s
   });
   if (waMessageId) await sendTypingIndicator(waMessageId); // marca leido + "escribiendo..."
   await humanDelay(SALUDO);
-  // Saludo + salvedad esencial en el mismo mensaje, con boton a la politica completa.
-  await sendCtaUrl(phone, `${SALUDO}\n\n${SALVEDAD}`, "Ver política", POLICY_URL);
+  // Un solo mensaje de texto: el URL de la politica va en texto plano (autolinkeado por WhatsApp),
+  // no como boton, para que se sienta opcional y no rompa el hilo de la conversacion.
+  await sendTextMessage(phone, SALUDO);
   console.log(`[ve-chat] iniciada para ${phone}`);
 }
 
