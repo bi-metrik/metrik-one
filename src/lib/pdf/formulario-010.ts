@@ -24,6 +24,8 @@ export interface Formulario010Datos {
   otros_nombres: string | null
   razon_social: string | null
   direccion_seccional: string | null
+  // Casilla 12 "Cód." — código oficial de la seccional (autocompletado del catálogo).
+  codigo_seccional: string | null
   correo_electronico: string | null
   direccion: string | null
   telefono: string | null
@@ -51,11 +53,13 @@ export interface Formulario010Datos {
 
 export interface Formulario010Constantes {
   // Códigos según tablas del formato 010
-  concepto: string // Casilla 2 — "1" (Saldos a favor)
+  concepto: string // Casilla 2 — "3" (Concepto devolución; verificado contra el ejemplo real de Deisy)
   tipo_solicitud: string // Casilla 44 — "A solicitud de parte"
-  tipo_obligacion: string // Casilla 50 — "Impuesto sobre las ventas IVA"
-  concepto_saldo: string // Casilla 51 — "Pago de lo no debido"
-  nombre_documento?: string // Casilla 57 — "Factura electrónica de ventas"
+  tipo_obligacion: string // Casilla 50 — "UPME"
+  concepto_saldo: string // Casilla 51 — "IVA"
+  codigo_concepto_saldo?: string // Casilla 51 sub-casilla "Cód." — "175" (IVA/UPME)
+  nombre_documento?: string // Casilla 57 — vacío (no diligenciable; la DIAN no lo exige aquí)
+  descripcion_forma_pago?: string // Casilla 40 — "Giro cuenta" (TIDIS si > 1000 UVT; editable)
   // ── Seccional DIAN (config-driven, opt-in; ver config_extra.seccionales) ──
   seccional_literal?: boolean // casilla 12: usar direccion_seccional tal cual (NO mapear a nombre oficial)
   mostrar_razon_social?: boolean // casilla 11: llenar razón social (solo algunas seccionales, ej. Cali)
@@ -83,9 +87,15 @@ const P1 = {
   otros_nombres: { x: 510, y: 599, maxWidth: 85 },
   // Razón social (fila y = 591.4, valor ~575)
   razon_social: { x: 28, y: 575, maxWidth: 560 },
-  // Dirección seccional (fila y = 567.4, valor ~551). Size 8 + maxWidth 305:
-  // los nombres oficiales son largos ("...de Barrancabermeja") y no deben truncarse.
-  direccion_seccional: { x: 28, y: 551, maxWidth: 305, size: 8 },
+  // Dirección seccional (fila y = 567.4, valor ~551). Size 7 + maxWidth 280:
+  // los nombres OFICIALES son largos ("Dirección Seccional de Impuestos y Aduanas
+  // de Barrancabermeja") y deben caber SIN truncarse y sin invadir la sub-casilla
+  // "Cód." (label en x≈318). Size 7 para que el nombre completo entre.
+  direccion_seccional: { x: 28, y: 551, maxWidth: 280, size: 7 },
+  // Casilla 12 "Cód." — código de la seccional (2 dígitos), justo a la derecha del
+  // label "Cód." (bbox del label xMin≈318, xMax≈330) y antes del valor de "Correo
+  // electrónico" (casilla 14, valor en x≈343). Caja estrecha para no colisionar.
+  codigo_seccional: { x: 331, y: 551, maxWidth: 11, size: 8 },
   correo_electronico: { x: 343, y: 551, maxWidth: 240 },
   // Dirección y Teléfono (fila y = 543.4, valor ~527)
   direccion: { x: 28, y: 527, maxWidth: 470 },
@@ -99,6 +109,10 @@ const P1 = {
   codigo_departamento: { x: 389, y: 503, maxWidth: 22, size: 8 },
   codigo_municipio: { x: 575, y: 503, maxWidth: 32, size: 8 },
   // Formas de pago
+  // Casilla 40 (Descripción forma de pago) — misma fila que la 41 (y=443). Label
+  // "40." en x≈26.5; el valor va debajo, izquierda, sin invadir la sub-casilla
+  // "Cód." (label en x≈290). "Giro cuenta" en el ejemplo real de Deisy.
+  descripcion_forma_pago: { x: 28, y: 443, maxWidth: 255 },
   entidad_financiera: { x: 313, y: 443, maxWidth: 250 },
   numero_cuenta: { x: 28, y: 419, maxWidth: 165 },
   tipo_cuenta: { x: 200, y: 419, maxWidth: 360 },
@@ -139,6 +153,10 @@ const P2 = {
   tipo_obligacion: { x: 159, y: 479, maxWidth: 195 },
   // Fila 1 origen saldo (y=471.4 → 455)
   concepto_saldo_1: { x: 43, y: 455, maxWidth: 155 },
+  // Casilla 51 sub-casilla "Cód." (label en x≈203, yMin=460) — el código del
+  // concepto del saldo ("175" = IVA/UPME). Va entre el texto del concepto (termina
+  // en x≈198) y la casilla 52 "Año grav." (x≈224).
+  codigo_concepto_saldo_1: { x: 207, y: 455, maxWidth: 16, size: 8 },
   anio_gravable_1: { x: 226, y: 455, maxWidth: 40 },
   periodo_1: { x: 270, y: 455, maxWidth: 35 },
   // Casilla 55 (No. documento que origina el saldo) — la DIAN exige aquí el
@@ -172,6 +190,16 @@ const P2 = {
 // baseline; lo conservamos para que el texto fijo caiga donde la DIAN ya aprobó.
 const Y_NUDGE = 2
 
+// Tamaño de fuente por defecto de las casillas SIN `size` explícito. Bajarlo de 9
+// a 8 compacta el texto dentro de cada casilla y elimina el "espacio en blanco
+// entre líneas" que reportó Deisy (operaciones SOENA), sin descalibrar las
+// posiciones Y (fijas contra el formato oficial). Las casillas que ya fijan su
+// propio `size` (seccional=8, códigos=8, sub-casillas) NO se tocan.
+const DEFAULT_FONT_SIZE = 8
+
+// Aplica el tamaño compacto por defecto solo cuando la casilla no fija uno propio.
+const compact = (cell: Cell): Cell => (cell.size == null ? { ...cell, size: DEFAULT_FONT_SIZE } : cell)
+
 function formatCurrency(v: string | null): string | null {
   if (!v) return null
   const n = Number(String(v).replace(/[^\d.-]/g, ''))
@@ -198,7 +226,14 @@ function parseFecha(iso: string | null): { anio: string; mes: string; dia: strin
 export async function generarFormulario010(
   datos: Formulario010Datos,
   constantes: Formulario010Constantes,
+  // El PDF de SALIDA que va a la DIAN debe ser PLANO (no editable): Deisy
+  // (operaciones SOENA) reportó que el 010 generado "se puede modificar" y teme
+  // rechazo. Con `flatten=true` (default) se aplanan los campos de formulario a
+  // contenido estático de página → el resultado NO tiene widgets editables.
+  // `flatten=false` deja las casillas editables (solo para calibración/debug).
+  opts: { flatten?: boolean } = {},
 ): Promise<Uint8Array> {
+  const { flatten = true } = opts
   const templateBytes = fs.readFileSync(TEMPLATE_PATH)
   const pdfDoc = await PDFDocument.load(templateBytes)
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
@@ -212,14 +247,16 @@ export async function generarFormulario010(
   // Atajos: `edit*` = campo editable pre-llenado (con el +2pt de calibración del
   // 010); `fixed*` = texto determinista no editable (mismo nudge). Nombres de
   // campo compartidos → un dato repetido en varias casillas queda sincronizado.
+  // `compact()` aplica el tamaño de fuente compacto (8pt) a las casillas que no
+  // fijan uno propio.
   const edit1 = (name: string, value: string | null | undefined, cell: Cell) =>
-    addEditableField(form, font, page1, name, value, cell, Y_NUDGE)
+    addEditableField(form, font, page1, name, value, compact(cell), Y_NUDGE)
   const edit2 = (name: string, value: string | null | undefined, cell: Cell) =>
-    addEditableField(form, font, page2, name, value, cell, Y_NUDGE)
+    addEditableField(form, font, page2, name, value, compact(cell), Y_NUDGE)
   const fixed1 = (value: string | null | undefined, cell: Cell, f = font) =>
-    drawFixed(page1, f, value, cell, Y_NUDGE)
+    drawFixed(page1, f, value, compact(cell), Y_NUDGE)
   const fixed2 = (value: string | null | undefined, cell: Cell, f = font) =>
-    drawFixed(page2, f, value, cell, Y_NUDGE)
+    drawFixed(page2, f, value, compact(cell), Y_NUDGE)
 
   const fecha = parseFecha(datos.fecha_factura)
   const valorFmt = formatCurrency(datos.valor_solicitado)
@@ -239,10 +276,10 @@ export async function generarFormulario010(
     .join(' ')
   const nombreTitular = nombreCompleto || datos.razon_social
 
-  // Casilla 20 (tipo de documento del solicitante). Default "13" (Cédula de
-  // Ciudadanía), pero HONRA el override del operador: si Deisy lo cambia a "31"
-  // (NIT) el PDF lo respeta. Antes estaba fijo en "13" e ignoraba su edición.
-  const tipoDocSolicitante = (datos.tipo_documento && datos.tipo_documento.trim()) || '13'
+  // Casilla 20 (tipo de documento del solicitante). Default "31" (NIT) — el ejemplo
+  // real de Deisy (persona natural) va con "31", no con cédula. HONRA el override
+  // del operador si lo cambia a otro código.
+  const tipoDocSolicitante = (datos.tipo_documento && datos.tipo_documento.trim()) || '31'
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — DETERMINISTA, Bold pequeño por estar en caja chica.
@@ -260,6 +297,8 @@ export async function generarFormulario010(
   // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
   if (constantes.mostrar_razon_social && datos.razon_social) edit1('razon_social', datos.razon_social, P1.razon_social)
   edit1('direccion_seccional', seccionalOficial, P1.direccion_seccional)
+  // Casilla 12 "Cód." — código oficial de la seccional (autocompletado).
+  edit1('codigo_seccional', datos.codigo_seccional, P1.codigo_seccional)
   edit1('correo_electronico', datos.correo_electronico, P1.correo_electronico)
   edit1('direccion', datos.direccion, P1.direccion)
   edit1('telefono', datos.telefono, P1.telefono)
@@ -271,16 +310,19 @@ export async function generarFormulario010(
   edit1('codigo_municipio', datos.codigo_municipio, P1.codigo_municipio)
 
   // Formas de pago
+  // Casilla 40 (Descripción forma de pago) — DETERMINISTA config-driven ("Giro
+  // cuenta"). Editable vía override si el caso es TIDIS (> 1000 UVT).
+  if (constantes.descripcion_forma_pago) fixed1(constantes.descripcion_forma_pago, P1.descripcion_forma_pago)
   edit1('entidad_financiera', datos.entidad_financiera, P1.entidad_financiera)
   edit1('numero_cuenta', datos.numero_cuenta, P1.numero_cuenta)
   edit1('tipo_cuenta', datos.tipo_cuenta, P1.tipo_cuenta)
   fixed1(constantes.tipo_solicitud, P1.tipo_solicitud) // DETERMINISTA
 
   // Firma de quien suscribe (1001-1004) = el solicitante. 1005/1006 EN BLANCO.
-  // Casilla 1002 = "CC" (tipo doc de la firma): el suscriptor persona natural firma
-  // con su cédula, no con el código NIT. Confirmado con el diligenciado de Deisy.
+  // Casilla 1002 = "31" (tipo doc de la firma): en el ejemplo real de Deisy el
+  // suscriptor firma con el código NIT ("31"), no "CC". DETERMINISTA.
   edit1('nombre_completo', nombreTitular, P1.firma_nombre)
-  fixed1('CC', P1.firma_tipo_doc) // DETERMINISTA
+  fixed1('31', P1.firma_tipo_doc) // DETERMINISTA
   edit1('nit', datos.nit, P1.firma_identificacion)
   edit1('dv', datos.dv, P1.firma_dv)
   // 1005 (Cod. Representación) / 1006 (Organización): solo algunas seccionales (ej. Cali).
@@ -318,9 +360,13 @@ export async function generarFormulario010(
   fixed2(constantes.tipo_obligacion, P2.tipo_obligacion)
 
   // Fila 1 origen del saldo (factura + UPME)
-  fixed2(constantes.concepto_saldo, P2.concepto_saldo_1) // DETERMINISTA
+  fixed2(constantes.concepto_saldo, P2.concepto_saldo_1) // Casilla 51 texto ("IVA") DETERMINISTA
+  // Casilla 51 sub-casilla "Cód." — "175" (IVA/UPME). DETERMINISTA config-driven.
+  if (constantes.codigo_concepto_saldo) fixed2(constantes.codigo_concepto_saldo, P2.codigo_concepto_saldo_1)
   edit2('anio_gravable', fecha.anio, P2.anio_gravable_1)
-  fixed2(fecha.bimestre, P2.periodo_1) // casilla 53 periodo bimestral: BLINDADO
+  // Casilla 53 (Período) — FIJO "01" (verificado contra el ejemplo real de Deisy;
+  // NO es el bimestre calculado de la fecha de factura).
+  fixed2('01', P2.periodo_1)
   edit2('numero_factura', datos.numero_factura, P2.numero_factura_1)
   // Casilla 57 — nombre del documento que origina el saldo (constante DETERMINISTA)
   if (constantes.nombre_documento) fixed2(constantes.nombre_documento, P2.nombre_documento_1)
@@ -341,6 +387,13 @@ export async function generarFormulario010(
   // Regenera apariencias con la fuente embebida (texto pre-llenado visible en
   // cualquier lector, sin depender de NeedAppearances).
   form.updateFieldAppearances(font)
+
+  // PDF de salida PLANO: aplanar convierte cada widget de formulario en contenido
+  // estático dibujado sobre la página y elimina los campos editables del AcroForm.
+  // El texto queda calcado en su posición (usa las apariencias ya regeneradas) y
+  // el resultado ya no se puede modificar en un lector PDF. Solución al reporte de
+  // Deisy (SOENA) de que el 010 "se puede modificar".
+  if (flatten) form.flatten()
 
   return pdfDoc.save()
 }

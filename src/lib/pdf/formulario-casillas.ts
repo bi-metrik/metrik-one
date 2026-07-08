@@ -24,6 +24,7 @@ const CASILLAS_010: CasillaMeta[] = [
   { slug: 'razon_social', label: 'Razón social', grupo: 'Solicitante', casilla: '11' },
   // Ubicación (fuente: RUT)
   { slug: 'direccion_seccional', label: 'Dirección seccional', grupo: 'Ubicación', casilla: '12' },
+  { slug: 'codigo_seccional', label: 'Código seccional', grupo: 'Ubicación', casilla: '12' },
   { slug: 'pais', label: 'País', grupo: 'Ubicación', casilla: '26' },
   { slug: 'codigo_pais', label: 'Código país', grupo: 'Ubicación', casilla: '26' },
   { slug: 'departamento', label: 'Departamento', grupo: 'Ubicación', casilla: '27' },
@@ -39,9 +40,10 @@ const CASILLAS_010: CasillaMeta[] = [
   { slug: 'valor_iva', label: 'Valor IVA', grupo: 'Factura / Valor' },
   { slug: 'valor_solicitado', label: 'Valor solicitado', grupo: 'Factura / Valor', casilla: '56' },
   // Formas de pago (fuente: Certificación bancaria)
-  { slug: 'entidad_financiera', label: 'Entidad financiera', grupo: 'Cuenta bancaria' },
-  { slug: 'numero_cuenta', label: 'Número de cuenta', grupo: 'Cuenta bancaria' },
-  { slug: 'tipo_cuenta', label: 'Tipo de cuenta', grupo: 'Cuenta bancaria' },
+  { slug: 'descripcion_forma_pago', label: 'Descripción forma de pago', grupo: 'Cuenta bancaria', casilla: '40' },
+  { slug: 'entidad_financiera', label: 'Entidad financiera', grupo: 'Cuenta bancaria', casilla: '41' },
+  { slug: 'numero_cuenta', label: 'Número de cuenta', grupo: 'Cuenta bancaria', casilla: '42' },
+  { slug: 'tipo_cuenta', label: 'Tipo de cuenta', grupo: 'Cuenta bancaria', casilla: '43' },
   // NOTA: la Firma (casillas 1001-1004) la llena el PDF automáticamente con los
   // datos del solicitante (nombre + cédula + DV + "CC"); no son casillas de entrada
   // aparte. Antes había slugs de firma sin fuente que se veían vacíos en la UI y
@@ -52,6 +54,7 @@ const CASILLAS_010: CasillaMeta[] = [
   { slug: 'tipo_solicitud', label: 'Tipo de solicitud', grupo: 'Clasificación', casilla: '44' },
   { slug: 'tipo_obligacion', label: 'Tipo de obligación', grupo: 'Clasificación', casilla: '50' },
   { slug: 'concepto_saldo', label: 'Concepto del saldo', grupo: 'Clasificación', casilla: '51' },
+  { slug: 'codigo_concepto_saldo', label: 'Código concepto del saldo', grupo: 'Clasificación', casilla: '51' },
   { slug: 'nombre_documento', label: 'Nombre del documento', grupo: 'Clasificación', casilla: '57' },
 ]
 

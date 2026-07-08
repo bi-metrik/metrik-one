@@ -180,6 +180,56 @@ export function getSeccionalBySlug(slug: string): SeccionalDIAN | null {
 }
 
 /**
+ * Resuelve una entrada de seccional (nombre de ciudad, nombre oficial parcial, o
+ * el key de un preset como "Cali"/"Tuluá") al par CANÓNICO { nombre_oficial, codigo }
+ * que exige la DIAN en la casilla 12 del Formato 010.
+ *
+ * Es la fuente que hace que el operador NO teclee el código: elige la seccional en
+ * el desplegable y el código oficial (Resolución 000064/2021) se autocompleta.
+ *
+ * Para Bogotá (2 buzones con el mismo código '32') `tipo_persona` desambigua el
+ * email/buzón; el código y el nombre oficial son idénticos, así que no afecta la 12.
+ *
+ * Si no logra mapear (ej. "Otras seccionales"), devuelve null → el operador puede
+ * teclear el código a mano en esa casilla (queda editable en la plataforma).
+ */
+export function resolverSeccionalOficial(
+  input: string | null | undefined,
+  tipo_persona?: string | null,
+): { nombre_oficial: string; codigo: string } | null {
+  if (!input) return null
+  const n = normalize(input)
+  if (!n) return null
+
+  // Bogotá: elegir el buzón por tipo_persona (código/nombre son iguales igual).
+  if (n.includes('bogota')) {
+    const tp = normalize(tipo_persona ?? '')
+    const slug = tp.includes('juridic') ? 'bogota-juridicas' : 'bogota-naturales'
+    const s = SECCIONALES_DIAN.find(x => x.slug === slug)
+    return s ? { nombre_oficial: s.nombre_oficial, codigo: s.codigo } : null
+  }
+
+  // 1) match por nombre oficial (contenido en cualquier dirección)
+  const porNombre = SECCIONALES_DIAN.find(s => {
+    const no = normalize(s.nombre_oficial)
+    return no === n || no.includes(n) || n.includes(no)
+  })
+  if (porNombre) return { nombre_oficial: porNombre.nombre_oficial, codigo: porNombre.codigo }
+
+  // 2) match por ciudad (el preset SOENA guarda la ciudad: "Cali", "Tuluá"…)
+  const porCiudad = SECCIONALES_DIAN.find(
+    s => s.ciudad && (normalize(s.ciudad) === n || n.includes(normalize(s.ciudad))),
+  )
+  if (porCiudad) return { nombre_oficial: porCiudad.nombre_oficial, codigo: porCiudad.codigo }
+
+  // 3) match por label (ej. "Bucaramanga")
+  const porLabel = SECCIONALES_DIAN.find(s => normalize(s.label) === n)
+  if (porLabel) return { nombre_oficial: porLabel.nombre_oficial, codigo: porLabel.codigo }
+
+  return null
+}
+
+/**
  * Normaliza un texto (ej. la "Dirección seccional" extraída del RUT, que puede
  * venir como "Tuluá", "Impuestos y Aduanas de Tuluá" o el nombre completo) al
  * NOMBRE OFICIAL canónico que exige la DIAN en la casilla 12 del Formato 010.
