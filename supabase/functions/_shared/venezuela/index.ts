@@ -5,7 +5,7 @@
 // ADITIVO: el participante NO es usuario de ONE; el estado vive en ve_chat_sessions.
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
-import { sendTextMessage, sendTypingIndicator, sendContact } from "../wa-respond.ts";
+import { sendTextMessage, sendTypingIndicator, sendContact, sendButtons } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
@@ -34,7 +34,7 @@ const SALUDO =
   "Hola 🙏 Recogemos las historias de quienes están viviendo esta emergencia, para mostrarle al mundo lo que está pasando y dónde se necesita ayuda.\n\n" +
   "No es un canal de ayuda ni una promesa de rescate; es voluntario y anónimo si quieres. Cómo tratamos tus datos: " +
   POLICY_URL.replace("https://", "") + "\n\n" +
-  "Si estás de acuerdo, escríbeme *ok* (o cuéntame directamente) y seguimos.";
+  "Si estás de acuerdo, presiona OK para empezar.";
 
 interface VeState {
   history: { role: "user" | "model"; text: string }[];
@@ -89,9 +89,10 @@ export async function startVeChat(supabase: Supa, phone: string, waMessageId?: s
   });
   if (waMessageId) await sendTypingIndicator(waMessageId); // marca leido + "escribiendo..."
   await humanDelay(SALUDO);
-  // Un solo mensaje de texto: el URL de la politica va en texto plano (autolinkeado por WhatsApp),
-  // no como boton, para que se sienta opcional y no rompa el hilo de la conversacion.
-  await sendTextMessage(phone, SALUDO);
+  // Boton de RESPUESTA "OK" para confirmar con un tap y seguir (in-chat, NO saca del navegador
+  // como un cta_url). El URL de la politica va en texto plano dentro del cuerpo (autolinkeado),
+  // opcional. Tocar OK = consentimiento; llega como texto "OK" y lo registra continueVeChat.
+  await sendButtons(phone, SALUDO, [{ id: "ve_ok", title: "OK" }]);
   console.log(`[ve-chat] iniciada para ${phone}`);
 }
 
