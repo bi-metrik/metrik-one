@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone } from 'lucide-react'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
@@ -119,6 +119,15 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               <span className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]">
                 <Pause className="h-2.5 w-2.5" />
                 Pausado
+              </span>
+            )}
+            {negocio.es_meta_lead && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[#1877F2]/10 px-2 py-0.5 text-[10px] font-medium text-[#1877F2]"
+                title="Lead recibido automáticamente desde Meta (Facebook)"
+              >
+                <Megaphone className="h-2.5 w-2.5" />
+                Meta
               </span>
             )}
           </div>
