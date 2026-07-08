@@ -5,7 +5,7 @@
 // ADITIVO: el participante NO es usuario de ONE; el estado vive en ve_chat_sessions.
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
-import { sendTextMessage, sendTypingIndicator, sendContact, sendButtons } from "../wa-respond.ts";
+import { sendTextMessage, sendTypingIndicator, sendContact, sendButtons, sendLocationRequest } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
@@ -171,6 +171,9 @@ export async function continueVeChat(
     const botText = clean(r.text) || "Estoy aquí contigo. ¿Me cuentas un poco más?";
 
     // 6. Guardar estado y responder
+    // El primer turno generado (respuesta al OK) es el paso de ubicacion: se envia con el boton
+    // nativo "Enviar ubicacion" de WhatsApp, salvo que la persona ya haya compartido su ubicacion.
+    const esTurnoUbicacion = state.turns === 0 && !state.location;
     state.history.push({ role: "model", text: botText });
     state.turns += 1;
     const closed = isClose(botText) || state.turns >= cap;
@@ -179,7 +182,11 @@ export async function continueVeChat(
       .update({ state, closed, updated_at: new Date().toISOString() })
       .eq("phone", phone);
     await humanDelay(botText); // pausa proporcional para que no llegue instantaneo
-    await sendTextMessage(phone, botText);
+    if (esTurnoUbicacion) {
+      await sendLocationRequest(phone, botText); // texto del modelo + boton "Enviar ubicacion"
+    } else {
+      await sendTextMessage(phone, botText);
+    }
     if (closed) await closeAndSerialize(supabase, phone, state);
   } catch (e) {
     // El modelo no respondio (tras reintentos). La sesion NO se cierra: el hilo queda guardado

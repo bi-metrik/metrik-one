@@ -177,6 +177,20 @@ export async function sendContact(phone: string, displayName: string, contactPho
   });
 }
 
+/** Pide la ubicacion con el boton nativo "Enviar ubicacion" de WhatsApp (in-chat). */
+export async function sendLocationRequest(phone: string, body: string): Promise<void> {
+  await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'location_request_message',
+      body: { text: (body || '').slice(0, 1024) },
+      action: { name: 'send_location' },
+    },
+  });
+}
+
 // --- Internal ---
 
 async function postMessage(phone: string, payload: Record<string, unknown>): Promise<void> {
