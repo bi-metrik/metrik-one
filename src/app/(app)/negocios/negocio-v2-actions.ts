@@ -427,6 +427,36 @@ export async function getWorkspaceStagesActivos(): Promise<string[]> {
     : ['venta', 'ejecucion', 'cobro']
 }
 
+/**
+ * Etapas de la línea activa del workspace, para el segmentador Fase → Etapa de
+ * /negocios. Devuelve numero (ID estable por línea, para contar), nombre, stage
+ * y orden (para ordenar). Vacío si el workspace no tiene línea activa.
+ */
+export async function getEtapasSegmentador(): Promise<
+  { numero: number; nombre: string; stage: string; orden: number }[]
+> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  const { data: ws } = await db(supabase)
+    .from('workspaces')
+    .select('linea_activa_id')
+    .eq('id', workspaceId)
+    .single()
+  const lineaId = (ws as { linea_activa_id: string | null } | null)?.linea_activa_id
+  if (!lineaId) return []
+
+  const { data } = await db(supabase)
+    .from('etapas_negocio')
+    .select('numero, nombre, stage, orden')
+    .eq('linea_id', lineaId)
+    .order('orden', { ascending: true })
+
+  return ((data as { numero: number | null; nombre: string; stage: string | null; orden: number }[] | null) ?? [])
+    .filter((e) => e.numero != null && e.stage != null)
+    .map((e) => ({ numero: e.numero as number, nombre: e.nombre, stage: e.stage as string, orden: e.orden }))
+}
+
 // ── Detalle de un negocio ─────────────────────────────────────────────────────
 
 export async function getNegocioDetalle(id: string): Promise<{
@@ -1496,6 +1526,8 @@ export async function cambiarEtapaNegocioConGate(
 ): Promise<{
   error: string | null
   bloquesPendientes?: Array<{ nombre: string; es_gate: boolean }>
+  /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
+  etapaDestinoNombre?: string
 }> {
   const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
@@ -1965,7 +1997,7 @@ export async function cambiarEtapaNegocioConGate(
       })
   }
 
-  return resultCambio
+  return { ...resultCambio, etapaDestinoNombre: nuevaEtapaNombre }
 }
 
 // ── Retroceder a etapa anterior ──────────────────────────────────────────────

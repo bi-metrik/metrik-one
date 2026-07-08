@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
-import { getNegociosV2, getWorkspaceStagesActivos } from './negocio-v2-actions'
+import { getNegociosV2, getWorkspaceStagesActivos, getEtapasSegmentador } from './negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
 import NegociosClient from './negocios-client'
@@ -23,10 +23,11 @@ function defaultStageFilter(role: string | null, areas: string[]): StageFilter {
 }
 
 export default async function NegociosPage() {
-  const [abiertos, cerrados, stagesActivos, ws] = await Promise.all([
+  const [abiertos, cerrados, stagesActivos, etapas, ws] = await Promise.all([
     getNegociosV2('abierto'),
     getNegociosV2('completado'),
     getWorkspaceStagesActivos(),
+    getEtapasSegmentador(),
     getWorkspace(),
   ])
   const defaultStage = defaultStageFilter(ws.role, ws.areas)
@@ -48,7 +49,7 @@ export default async function NegociosPage() {
           Nuevo negocio
         </Link>
       </div>
-      <NegociosClient negocios={abiertos} cerrados={cerrados} stagesActivos={stagesActivos} defaultStage={defaultStage} />
+      <NegociosClient negocios={abiertos} cerrados={cerrados} stagesActivos={stagesActivos} etapas={etapas} defaultStage={defaultStage} />
     </div>
   )
 }
