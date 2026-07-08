@@ -110,7 +110,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   }
   // 0a-ve trigger. Palabra clave publica "venezuela" abre la conversacion de escucha (solo si no hay una abierta).
   if (message.type === 'text' && isVeTrigger(message.text)) {
-    await startVeChat(supabase, message.phone, message.wa_message_id);
+    await startVeChat(supabase, message.phone, message.wa_message_id, message.bot_phone);
     return;
   }
 
@@ -556,6 +556,7 @@ function extractMessage(payload: any): IncomingMessage | null {
 
     const msg = value.messages[0];
     const phone = msg.from;
+    const botPhone = value?.metadata?.display_phone_number; // numero del bot (para compartir su contacto)
 
     if (msg.type === 'text') {
       return {
@@ -563,6 +564,7 @@ function extractMessage(payload: any): IncomingMessage | null {
         text: msg.text.body,
         type: 'text',
         wa_message_id: msg.id,
+        bot_phone: botPhone,
         timestamp: msg.timestamp,
       };
     }
@@ -584,6 +586,7 @@ function extractMessage(payload: any): IncomingMessage | null {
         type: 'audio',
         audio_id: msg.audio?.id,
         wa_message_id: msg.id,
+        bot_phone: botPhone,
         timestamp: msg.timestamp,
       };
     }
@@ -621,6 +624,7 @@ function extractMessage(payload: any): IncomingMessage | null {
           address: msg.location.address,
         },
         wa_message_id: msg.id,
+        bot_phone: botPhone,
         timestamp: msg.timestamp,
       };
     }

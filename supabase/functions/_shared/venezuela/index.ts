@@ -5,7 +5,7 @@
 // ADITIVO: el participante NO es usuario de ONE; el estado vive en ve_chat_sessions.
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
-import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
+import { sendTextMessage, sendTypingIndicator, sendContact } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
@@ -42,6 +42,7 @@ interface VeState {
   turns: number;
   location?: { lat: number; lng: number; name?: string; address?: string };
   consent?: { version: string; at: string };
+  bot_phone?: string; // numero del bot (display_phone_number), para compartir su contacto al cierre
 }
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
@@ -78,8 +79,8 @@ export async function hasOpenVeChat(supabase: Supa, phone: string): Promise<bool
   return !!data;
 }
 
-export async function startVeChat(supabase: Supa, phone: string, waMessageId?: string): Promise<void> {
-  const state: VeState = { history: [{ role: "model", text: SALUDO }], crisis: null, turns: 0 };
+export async function startVeChat(supabase: Supa, phone: string, waMessageId?: string, botPhone?: string): Promise<void> {
+  const state: VeState = { history: [{ role: "model", text: SALUDO }], crisis: null, turns: 0, bot_phone: botPhone };
   await supabase.from("ve_chat_sessions").upsert({
     phone,
     state,
@@ -190,6 +191,11 @@ export async function continueVeChat(
 // Al cerrar: estructura la conversacion en ve_respuestas. Si hubo crisis, guarda un registro
 // marcado y NO difundible (no se extraen campos de difusion). Nunca rompe el cierre.
 async function closeAndSerialize(supabase: Supa, phone: string, state: VeState): Promise<void> {
+  // Cierre normal: enviar el contacto del bot como tarjeta (vCard) para que la persona lo reenvie
+  // con un toque. En crisis NO aplica (fue una emergencia, no el cierre de difusion).
+  if (!state.crisis && state.bot_phone) {
+    try { await sendContact(phone, "Voz de Venezuela", state.bot_phone); } catch { /* cosmetico, no rompe el cierre */ }
+  }
   try {
     if (state.crisis) {
       await supabase.from("ve_respuestas").insert({

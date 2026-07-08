@@ -162,6 +162,21 @@ export async function sendTypingIndicator(messageId: string): Promise<void> {
   }
 }
 
+/** Envia una tarjeta de contacto (vCard) para que el usuario pueda reenviarla con un toque. */
+export async function sendContact(phone: string, displayName: string, contactPhone: string): Promise<void> {
+  const digits = (contactPhone || '').replace(/\D/g, '');
+  if (!digits) return;
+  await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'contacts',
+    contacts: [{
+      name: { formatted_name: displayName, first_name: displayName },
+      phones: [{ phone: `+${digits}`, type: 'WORK', wa_id: digits }],
+    }],
+  });
+}
+
 // --- Internal ---
 
 async function postMessage(phone: string, payload: Record<string, unknown>): Promise<void> {
