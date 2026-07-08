@@ -5,7 +5,7 @@
 // ADITIVO: el participante NO es usuario de ONE; el estado vive en ve_chat_sessions.
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
-import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
+import { sendTextMessage, sendTypingIndicator, sendCtaUrl } from "../wa-respond.ts";
 import { generate, type Msg } from "./gemini.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
@@ -22,6 +22,13 @@ const CRISIS_TURN_CAP = 10; // tope suave en crisis: acompanar sin colgarse ni d
 const VE_KEYWORDS = ["venezuela"];
 const EXIT_WORDS = ["salir", "cancelar", "terminar"];
 
+// Politica de tratamiento de datos (voz.metrik.com.co). La salvedad esencial va en el saludo;
+// el consentimiento se registra por conducta concluyente (primer mensaje del usuario tras el saludo).
+const POLICY_URL = "https://voz.metrik.com.co";
+const POLICY_VERSION = "1.0";
+const SALVEDAD =
+  "Antes de empezar: lo que compartas se usa solo para mostrarle al mundo lo que está pasando y dónde se necesita ayuda. No es una promesa de ayuda ni de rescate. Es voluntario y, si quieres, anónimo. Al continuar aceptas cómo tratamos tus datos (botón de abajo).";
+
 // Saludo/consentimiento del punto 1 del prompt de Juanita, verbatim. Determinista: no lo genera
 // el modelo (evita que improvise el consentimiento y ahorra la 1a llamada). El motor entra en el turno 2.
 const SALUDO =
@@ -32,6 +39,7 @@ interface VeState {
   crisis: CrisisType | null;
   turns: number;
   location?: { lat: number; lng: number; name?: string; address?: string };
+  consent?: { version: string; at: string };
 }
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
@@ -78,7 +86,8 @@ export async function startVeChat(supabase: Supa, phone: string, waMessageId?: s
   });
   if (waMessageId) await sendTypingIndicator(waMessageId); // marca leido + "escribiendo..."
   await humanDelay(SALUDO);
-  await sendTextMessage(phone, SALUDO);
+  // Saludo + salvedad esencial en el mismo mensaje, con boton a la politica completa.
+  await sendCtaUrl(phone, `${SALUDO}\n\n${SALVEDAD}`, "Ver política", POLICY_URL);
   console.log(`[ve-chat] iniciada para ${phone}`);
 }
 
@@ -113,6 +122,9 @@ export async function continueVeChat(
   if (location) {
     state.location = { lat: location.latitude, lng: location.longitude, name: location.name, address: location.address };
   }
+  // Consentimiento informado por conducta concluyente: el saludo ya expuso la salvedad y enlazo la
+  // politica; el primer mensaje del usuario tras el saludo es su aceptacion. Se registra una sola vez.
+  if (!state.consent) state.consent = { version: POLICY_VERSION, at: new Date().toISOString() };
 
   // Salida explicita del participante.
   if (EXIT_WORDS.includes(exit)) {
@@ -182,6 +194,8 @@ async function closeAndSerialize(supabase: Supa, phone: string, state: VeState):
         atribucion: "anonima",
         crisis: state.crisis,
         turnos: state.turns,
+        consent_version: state.consent?.version ?? null,
+        consent_at: state.consent?.at ?? null,
         payload: { motivo: "crisis_no_difundible", raw_history: state.history },
       });
       return;
@@ -213,6 +227,8 @@ async function closeAndSerialize(supabase: Supa, phone: string, state: VeState):
       resumen: rec.resumen,
       idioma: rec.idioma,
       turnos: state.turns,
+      consent_version: state.consent?.version ?? null,
+      consent_at: state.consent?.at ?? null,
       payload: { record: rec, location: state.location ?? null },
     });
     console.log(`[ve-chat] respuesta serializada para ${phone} (${rec.atribucion})`);
