@@ -41,11 +41,13 @@ const datos: Formulario010Datos = {
 }
 
 const constantes: Formulario010Constantes = {
-  concepto: '06',
-  tipo_solicitud: 'A solicitud de parte',
-  tipo_obligacion: 'Beneficio tributario',
-  concepto_saldo: 'Pago de lo no debido. Otros: UPME',
-  nombre_documento: 'Factura electrónica de ventas',
+  concepto: '3', // casilla 2
+  tipo_solicitud: 'A solicitud de parte', // casilla 44
+  tipo_obligacion: 'UPME', // casilla 50
+  concepto_saldo: 'IVA', // casilla 51 texto
+  codigo_concepto_saldo: '175', // casilla 51 Cód.
+  nombre_documento: '', // casilla 57 vacía
+  descripcion_forma_pago: 'Giro cuenta', // casilla 40
 }
 
 async function main() {

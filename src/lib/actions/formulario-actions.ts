@@ -109,9 +109,14 @@ async function aplicarSeccionalPreset(
   const seleccion = explicit || sugerirSeccional(await leerCiudadVentaFactura(supabase, negocioId), keys)
   const preset = seccionales[seleccion]
   if (preset) {
-    if (!('tipo_obligacion' in overrides)) constantesFinal.tipo_obligacion = String(preset.tipo_obligacion ?? '')
-    if (!('concepto_saldo' in overrides)) constantesFinal.concepto_saldo = String(preset.concepto_saldo ?? '')
-    if (!('nombre_documento' in overrides)) constantesFinal.nombre_documento = String(preset.nombre_documento ?? '')
+    // El preset SOLO sobreescribe una constante cuando trae esa clave explícita.
+    // Si la clave NO está en el preset, se conserva el valor GENERAL de
+    // `campos_constantes` (antes se forzaba a '' con `?? ''`, borrando el general).
+    // Esto permite que una seccional (ej. Cali) herede las constantes generales
+    // nuevas quitando esas claves de su preset, y solo aporte sus particularidades.
+    if (!('tipo_obligacion' in overrides) && preset.tipo_obligacion != null) constantesFinal.tipo_obligacion = String(preset.tipo_obligacion)
+    if (!('concepto_saldo' in overrides) && preset.concepto_saldo != null) constantesFinal.concepto_saldo = String(preset.concepto_saldo)
+    if (!('nombre_documento' in overrides) && preset.nombre_documento != null) constantesFinal.nombre_documento = String(preset.nombre_documento)
     // Casilla 12 — nombre oficial + CÓDIGO auto-resueltos del catálogo oficial
     // (SECCIONALES_DIAN, Resolución 000064/2021) a partir del preset. Así el
     // operador NO teclea el código: elige la seccional y el código sale solo.
