@@ -62,7 +62,7 @@ function datosEcheverri(): Formulario010Datos {
   return {
     nit, dv: calcularDvNit(nit), tipo_documento: '31', // <-- override de Deisy
     primer_apellido: 'ECHEVERRI', segundo_apellido: 'PANESSO', primer_nombre: 'JUAN', otros_nombres: 'PABLO',
-    razon_social: null, direccion_seccional: 'Otras seccionales',
+    razon_social: null, direccion_seccional: 'Otras seccionales', codigo_seccional: null,
     correo_electronico: 'juecheverri@royalpha.com.co', direccion: 'PARC COLINAS DE ARROYOHONDO CORR DAPA', telefono: '6582202',
     pais: 'COLOMBIA', departamento: 'Valle del Cauca', municipio: 'Yumbo',
     codigo_pais: codes.codigo_pais, codigo_departamento: codes.codigo_departamento, codigo_municipio: codes.codigo_municipio,
@@ -78,7 +78,7 @@ function datosVillegas(): Formulario010Datos {
   return {
     nit, dv: calcularDvNit(nit), tipo_documento: null, // default → 13
     primer_apellido: 'VILLEGAS', segundo_apellido: 'TORO', primer_nombre: 'JAVIER', otros_nombres: 'ALONSO',
-    razon_social: null, direccion_seccional: 'Cali',
+    razon_social: null, direccion_seccional: 'Cali', codigo_seccional: '05',
     correo_electronico: 'contacto@isamoda.com.co', direccion: 'CR 102 34 133 TO 2 AP 103 CON CAPRIANI', telefono: '5580109',
     pais: 'COLOMBIA', departamento: 'Valle del Cauca', municipio: 'Cali',
     codigo_pais: codes.codigo_pais, codigo_departamento: codes.codigo_departamento, codigo_municipio: codes.codigo_municipio,

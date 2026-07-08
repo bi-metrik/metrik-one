@@ -207,7 +207,7 @@ export default function BloqueFormulario({
               {seccionales.map((s) => (<option key={s} value={s}>{s}</option>))}
             </select>
             <span className="text-[10px] text-muted-foreground/70">
-              Define las casillas 12, 50, 51 y 57 (y la firma en Cali). Sugerida por la ciudad de la factura — confírmala.
+              Autocompleta la casilla 12 (nombre oficial + código DIAN) y las casillas 50, 51 y 57 (y la firma en Cali). Sugerida por la ciudad de la factura — confírmala.
             </span>
           </label>
         </div>

@@ -24,6 +24,7 @@ const CASILLAS_010: CasillaMeta[] = [
   { slug: 'razon_social', label: 'Razón social', grupo: 'Solicitante', casilla: '11' },
   // Ubicación (fuente: RUT)
   { slug: 'direccion_seccional', label: 'Dirección seccional', grupo: 'Ubicación', casilla: '12' },
+  { slug: 'codigo_seccional', label: 'Código seccional', grupo: 'Ubicación', casilla: '12' },
   { slug: 'pais', label: 'País', grupo: 'Ubicación', casilla: '26' },
   { slug: 'codigo_pais', label: 'Código país', grupo: 'Ubicación', casilla: '26' },
   { slug: 'departamento', label: 'Departamento', grupo: 'Ubicación', casilla: '27' },

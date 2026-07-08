@@ -17,7 +17,8 @@ const datos: Formulario010Datos = {
   primer_nombre: 'OSCAR',
   otros_nombres: '',
   razon_social: null, // persona natural → casilla 11 SIEMPRE en blanco
-  direccion_seccional: 'Tuluá',
+  direccion_seccional: 'Dirección Seccional de Impuestos y Aduanas de Tuluá',
+  codigo_seccional: '21', // casilla 12 "Cód." — código oficial de Tuluá
   correo_electronico: 'oscar.ramirez@correo.com',
   direccion: 'CALLE 10 # 5-20',
   telefono: '3001234567',

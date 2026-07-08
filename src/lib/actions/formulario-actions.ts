@@ -14,6 +14,7 @@ import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
+import { resolverSeccionalOficial } from '@/lib/dian/seccionales'
 import { createElement } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,7 +112,20 @@ async function aplicarSeccionalPreset(
     if (!('tipo_obligacion' in overrides)) constantesFinal.tipo_obligacion = String(preset.tipo_obligacion ?? '')
     if (!('concepto_saldo' in overrides)) constantesFinal.concepto_saldo = String(preset.concepto_saldo ?? '')
     if (!('nombre_documento' in overrides)) constantesFinal.nombre_documento = String(preset.nombre_documento ?? '')
-    if (!('direccion_seccional' in overrides)) datosFinal.direccion_seccional = String(preset.direccion_seccional ?? '')
+    // Casilla 12 — nombre oficial + CÓDIGO auto-resueltos del catálogo oficial
+    // (SECCIONALES_DIAN, Resolución 000064/2021) a partir del preset. Así el
+    // operador NO teclea el código: elige la seccional y el código sale solo.
+    // El nombre oficial completo ("Dirección Seccional de Impuestos de Cali")
+    // reemplaza el nombre corto del preset ("Cali") — es lo que exige la DIAN.
+    // Fallback: si no hay match en el catálogo (ej. "Otras seccionales"), se usa
+    // el `direccion_seccional` del preset tal cual y el código queda editable.
+    const oficial = resolverSeccionalOficial(String(preset.direccion_seccional ?? seleccion), null)
+    if (!('direccion_seccional' in overrides)) {
+      datosFinal.direccion_seccional = oficial?.nombre_oficial ?? String(preset.direccion_seccional ?? '')
+    }
+    if (!('codigo_seccional' in overrides)) {
+      datosFinal.codigo_seccional = oficial?.codigo ?? null
+    }
     seccionalExtra.seccional_literal = true
     if (preset.razon_social_cali) {
       seccionalExtra.mostrar_razon_social = true
@@ -606,6 +620,9 @@ export async function resolverFormularioParaEdicion(
     valorBase.concepto_saldo = constantesEd.concepto_saldo ?? valorBase.concepto_saldo
     valorBase.nombre_documento = constantesEd.nombre_documento ?? valorBase.nombre_documento
     valorBase.direccion_seccional = (datosEd.direccion_seccional ?? valorBase.direccion_seccional) as string
+    // Código de la seccional (casilla 12 "Cód.") — autocompletado desde el catálogo
+    // oficial al elegir la seccional; se muestra en la UI para revisión/edición.
+    valorBase.codigo_seccional = (datosEd.codigo_seccional ?? valorBase.codigo_seccional ?? '') as string
   }
 
   // Deterministas (DV recalculado + códigos DANE) para que la UI muestre lo que se
