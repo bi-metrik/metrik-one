@@ -386,6 +386,13 @@ verify_jwt = false
 # Notificaciones internas invocadas sin JWT de Supabase.
 verify_jwt = false
 
+[functions.meta-leads-webhook]
+# Webhook de Meta Lead Ads (leadgen): NO usa el JWT de Supabase. Meta no lo
+# envia, y la autenticidad se valida dentro de la funcion con la firma
+# HMAC-SHA256 (x-hub-signature-256) + el handshake GET con META_LEADS_VERIFY_TOKEN.
+# Sin este flag, un redeploy aplica el default true y Meta recibe 401.
+verify_jwt = false
+
 # Nota: wa-alerts y evaluar-reglas se dejan en el default (verify_jwt = true)
 # a proposito: las invocan crons/triggers internos con service key.
 
