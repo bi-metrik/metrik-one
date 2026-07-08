@@ -162,7 +162,7 @@ export default function NegociosClient({
   return (
     <div className="space-y-4">
       {/* Nivel 1: fases */}
-      <div className="scrollbar-none flex gap-2 overflow-x-auto pb-1">
+      <div className="flex flex-wrap gap-2">
         {fases.map((f) => {
           const count = faseCount(f.key)
           const active = fase === f.key
@@ -194,7 +194,7 @@ export default function NegociosClient({
 
       {/* Nivel 2: etapas de la fase seleccionada (solo stages) */}
       {etapasDeFase.length > 0 && (
-        <div className="scrollbar-none flex gap-1.5 overflow-x-auto pb-1 text-xs">
+        <div className="flex flex-wrap gap-1.5 text-xs">
           <button
             type="button"
             onClick={() => setEtapaNum(null)}
