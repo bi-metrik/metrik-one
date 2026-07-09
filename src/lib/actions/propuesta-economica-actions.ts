@@ -24,6 +24,9 @@ import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { createServiceClient } from '@/lib/supabase/server'
+import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
+import { uvtDelAnio } from '@/lib/upme/uvt'
+import { componerPrecioAprobado } from '@/lib/upme/modelo-dinero'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -31,8 +34,9 @@ export type PropuestaVersion = {
   n: number
   descuento_pct_plan1: number
   descuento_pct_plan2: number
-  valor_final_plan1: number
-  valor_final_plan2: number
+  valor_final_plan1: number       // HONORARIO plan 1
+  valor_final_plan2: number       // HONORARIO plan 2
+  tarifa_upme?: number            // tarifa (pasante) vigente al generar la versión
   pdf_drive_id: string | null
   pdf_url: string | null
   generated_at: string
@@ -40,18 +44,31 @@ export type PropuestaVersion = {
 }
 
 export type PropuestaData = {
-  precio_base_con_iva: number       // snapshot al crear bloque
+  precio_base_con_iva: number       // snapshot al crear bloque (HONORARIO base con IVA)
   iva_pct: number                   // snapshot (0.19 default)
   descuento_pct_plan1: number       // valor actual input plan 1
   descuento_pct_plan2: number       // valor actual input plan 2
-  valor_final_plan1: number         // valor calculado plan 1
-  valor_final_plan2: number         // valor calculado plan 2
+  valor_final_plan1: number         // valor calculado plan 1 (HONORARIO)
+  valor_final_plan2: number         // valor calculado plan 2 (HONORARIO)
+  // ── Tarifa UPME (pasante) ──────────────────────────────────────────────────
+  // OPT-IN SOENA. Se auto-calcula desde el valor del vehículo sin IVA (Factura)
+  // y el UVT del año. INFORMATIVA y editable — NUNCA gate ni bloqueo (el valor
+  // final lo tiene la plataforma UPME). Snapshot de auditoría en tarifa_upme_detalle.
+  // Ausente/0 en workspaces sin tarifa → composición de precio = solo honorario
+  // (comportamiento previo intacto).
+  tarifa_upme?: number
+  tarifa_upme_editada?: boolean     // true si el operador la sobrescribió a mano
+  tarifa_upme_detalle?: TarifaUpmeDetalle | null  // snapshot del cálculo (auditoría)
   versiones: PropuestaVersion[]
   version_activa: number | null
   aprobado_at: string | null
   aprobado_por: string | null
   aprobado_version: number | null
-  aprobado_plan: 1 | 2 | null       // plan elegido al aprobar
+  aprobado_plan: 1 | 2 | null       // plan elegido al aprobar (1 = 50/50, 2 = único)
+  // Desglose congelado al aprobar: honorario del plan elegido + tarifa (pasante).
+  // precio_aprobado del negocio = aprobado_honorario + aprobado_tarifa_upme.
+  aprobado_honorario?: number | null
+  aprobado_tarifa_upme?: number | null
 }
 
 // ── Helpers de calculo ──────────────────────────────────────────────────────
@@ -161,6 +178,18 @@ async function loadBloqueContext(
   const templateSlug = (configExtra.template_slug as string) ?? 'soena/propuesta-economica'
   const driveSubfolder = (configExtra.drive_subfolder as string | undefined) ?? null
 
+  // ── Tarifa UPME (pasante) — OPT-IN por config ─────────────────────────────
+  // config_extra.tarifa_upme = { enabled: true, factura_slug?, valor_field?, anio? }
+  // Se auto-calcula desde el valor del vehículo sin IVA (Factura). Ausente →
+  // tarifaUpme = 0 (composición de precio = solo honorario, comportamiento previo).
+  const tarifaCfg = (configExtra.tarifa_upme ?? null) as
+    | { enabled?: boolean; factura_slug?: string; valor_field?: string; anio?: number }
+    | null
+  const tarifaEnabled = tarifaCfg?.enabled === true
+  const facturaSlug = tarifaCfg?.factura_slug ?? 'factura_venta_vehiculo'
+  const valorField = tarifaCfg?.valor_field ?? 'valor_unitario_sin_iva'
+  const tarifaAnio = tarifaCfg?.anio  // undefined → uvtDelAnio cae al año más reciente
+
   // Si data esta vacio o no tiene precio_base, lo derivamos del servicio
   let precioBase = data.precio_base_con_iva ?? 0
   let ivaPct = data.iva_pct ?? 0.19
@@ -179,6 +208,34 @@ async function loadBloqueContext(
     }
   }
 
+  // Resolver la tarifa UPME. Precedencia:
+  //   1) si el operador la editó a mano (data.tarifa_upme_editada) → respetar data.tarifa_upme
+  //   2) si está habilitada → auto-calcular desde el valor sin IVA de la Factura
+  //   3) si no → 0 (sin tarifa)
+  let tarifaUpme = 0
+  let tarifaDetalle: TarifaUpmeDetalle | null = null
+  const tarifaEditada = data.tarifa_upme_editada === true
+  if (tarifaEditada && typeof data.tarifa_upme === 'number') {
+    tarifaUpme = data.tarifa_upme
+  } else if (tarifaEnabled) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: facturaBloque } = await (supabase as any)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', b.negocio_id)
+      .eq('bloque_configs.slug', facturaSlug)
+      .limit(1)
+      .maybeSingle()
+    const campos = (facturaBloque?.data?.campos ?? {}) as Record<string, { value?: unknown }>
+    const raw = campos[valorField]?.value
+    const valorSinIva = parsearNumeroCop(raw)
+    if (valorSinIva != null && valorSinIva > 0) {
+      // Cálculo INFORMATIVO. Nunca lanza; nunca bloquea.
+      tarifaDetalle = calcularTarifaUpmeDetalle(valorSinIva, uvtDelAnio(tarifaAnio))
+      tarifaUpme = tarifaDetalle.tarifaCop
+    }
+  }
+
   return {
     error: null as null,
     bloque: b,
@@ -191,7 +248,20 @@ async function loadBloqueContext(
     umbralAprobacion,
     templateSlug,
     driveSubfolder,
+    tarifaEnabled,
+    tarifaEditada,
+    tarifaUpme,
+    tarifaDetalle,
   }
+}
+
+/** Parsea un valor COP que puede venir número o string ("$ 120.000.000"). */
+function parsearNumeroCop(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+  const limpio = String(raw).replace(/[^\d.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '')
+  const n = Number(limpio)
+  return Number.isFinite(n) ? n : null
 }
 
 // ── Action: generar nueva version ───────────────────────────────────────────
@@ -338,6 +408,13 @@ export async function generarVersionPropuesta(
       plan2_valor: formatCOP(calc.plan2_valor),
       plan2_descuento_pct: `${desc2}%`,
       plan2_ahorro: formatCOP(calc.ahorro_plan2),
+      // Tarifa UPME (pasante) + total a pagar por plan = honorario + tarifa.
+      // Claves extra retrocompatibles: el template las usa si están, si no las ignora.
+      // (El render del PDF se ajusta en la rama plomeria; aquí solo se alimentan.)
+      tarifa_upme: formatCOP(ctx.tarifaUpme),
+      tarifa_upme_valor: ctx.tarifaUpme,
+      plan1_total_con_tarifa: formatCOP(calc.plan1_valor + ctx.tarifaUpme),
+      plan2_total_con_tarifa: formatCOP(calc.plan2_valor + ctx.tarifaUpme),
       version: nuevaN,
       // Personalización (SOENA): firma del generador + vehículo de la factura
       generador_nombre: generadorNombre,
@@ -394,6 +471,7 @@ export async function generarVersionPropuesta(
     descuento_pct_plan2: desc2,
     valor_final_plan1: calc.plan1_valor,
     valor_final_plan2: calc.plan2_valor,
+    tarifa_upme: ctx.tarifaUpme,
     pdf_drive_id: pdfDriveId,
     pdf_url: pdfUrl,
     generated_at: ahora.toISOString(),
@@ -407,12 +485,17 @@ export async function generarVersionPropuesta(
     descuento_pct_plan2: desc2,
     valor_final_plan1: calc.plan1_valor,
     valor_final_plan2: calc.plan2_valor,
+    tarifa_upme: ctx.tarifaUpme,
+    tarifa_upme_editada: ctx.tarifaEditada,
+    tarifa_upme_detalle: ctx.tarifaDetalle,
     versiones: [...versionesActuales, nuevaVersion],
     version_activa: nuevaN,
     aprobado_at: ctx.data.aprobado_at ?? null,
     aprobado_por: ctx.data.aprobado_por ?? null,
     aprobado_version: ctx.data.aprobado_version ?? null,
     aprobado_plan: ctx.data.aprobado_plan ?? null,
+    aprobado_honorario: ctx.data.aprobado_honorario ?? null,
+    aprobado_tarifa_upme: ctx.data.aprobado_tarifa_upme ?? null,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -468,7 +551,14 @@ export async function aprobarVersionPropuesta(
     }
   }
 
-  const valorElegido = plan === 1 ? version.valor_final_plan1 : version.valor_final_plan2
+  // Honorario del plan elegido (los planes 50/50 vs único aplican al HONORARIO).
+  const honorarioElegido = plan === 1 ? version.valor_final_plan1 : version.valor_final_plan2
+  // Tarifa (pasante) congelada al aprobar: la de la versión (snapshot) con fallback
+  // a la vigente en ctx (compat con versiones viejas sin tarifa persistida).
+  const tarifaElegida = version.tarifa_upme ?? ctx.tarifaUpme ?? 0
+  // COMPOSICIÓN NUEVA: precio_aprobado = honorario + tarifa (siempre completa por
+  // adelantado). Sin tarifa (0), el precio queda = honorario (comportamiento previo).
+  const valorElegido = componerPrecioAprobado(honorarioElegido, tarifaElegida)
 
   const ahora = new Date().toISOString()
   const nuevoData: PropuestaData = {
@@ -478,12 +568,17 @@ export async function aprobarVersionPropuesta(
     descuento_pct_plan2: version.descuento_pct_plan2,
     valor_final_plan1: version.valor_final_plan1,
     valor_final_plan2: version.valor_final_plan2,
+    tarifa_upme: tarifaElegida,
+    tarifa_upme_editada: ctx.tarifaEditada,
+    tarifa_upme_detalle: ctx.tarifaDetalle,
     versiones,
     version_activa: versionN,
     aprobado_at: ahora,
     aprobado_por: staffId ?? null,
     aprobado_version: versionN,
     aprobado_plan: plan,
+    aprobado_honorario: honorarioElegido,
+    aprobado_tarifa_upme: tarifaElegida,
   }
 
   // Marcar bloque completo + setear precio_aprobado del negocio (en transaccion ligera)
@@ -500,14 +595,17 @@ export async function aprobarVersionPropuesta(
     .update({ precio_aprobado: valorElegido, updated_at: ahora })
     .eq('id', ctx.negocioId)
 
-  // Activity log
+  // Activity log — desglosa honorario + tarifa cuando hay tarifa (pasante).
+  const contenidoLog = tarifaElegida > 0
+    ? `Propuesta económica v${versionN} aprobada — Plan ${plan}: honorario ${formatCOP(honorarioElegido)} + tarifa UPME ${formatCOP(tarifaElegida)} = ${formatCOP(valorElegido)}`
+    : `Propuesta económica v${versionN} aprobada — Plan ${plan} ${formatCOP(valorElegido)}`
   await sb.from('activity_log').insert({
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
     entidad_id: ctx.negocioId,
     tipo: 'propuesta_aprobada',
     autor_id: staffId,
-    contenido: `Propuesta económica v${versionN} aprobada — Plan ${plan} ${formatCOP(valorElegido)}`,
+    contenido: contenidoLog,
   })
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
@@ -564,12 +662,18 @@ export async function crearV1Automatica(
     descuento_pct_plan2: 0,
     valor_final_plan1: calc.plan1_valor,
     valor_final_plan2: calc.plan2_valor,
+    // Tarifa se computa al generar la 1ª versión (necesita la Factura del negocio).
+    tarifa_upme: 0,
+    tarifa_upme_editada: false,
+    tarifa_upme_detalle: null,
     versiones: [],
     version_activa: null,
     aprobado_at: null,
     aprobado_por: null,
     aprobado_version: null,
     aprobado_plan: null,
+    aprobado_honorario: null,
+    aprobado_tarifa_upme: null,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -580,4 +684,83 @@ export async function crearV1Automatica(
 
   console.log(`[propuesta] v1 base inicializada para bloque ${bloqueId} (ws=${workspaceId})`)
   return { ok: true }
+}
+
+// ── Action: editar la tarifa UPME (informativa, editable) ───────────────────
+//
+// La tarifa auto-calculada es SOLO una referencia; el valor final lo tiene la
+// plataforma UPME. Este action deja que el operador la sobrescriba a mano (marca
+// tarifa_upme_editada=true para que loadBloqueContext respete el valor manual y
+// no lo recompute). Pasar null "des-edita" (vuelve a auto-calcular). NUNCA gate.
+export async function actualizarTarifaUpmePropuesta(
+  bloqueId: string,
+  tarifa: number | null,
+): Promise<{ ok: boolean; error?: string; tarifa_upme?: number }> {
+  const { supabase, workspaceId, error: errWs } = await getWorkspace()
+  if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(bloqueId)
+  if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
+
+  const ctx = await loadBloqueContext(supabase, workspaceId, bloqueId)
+  if (ctx.error) return { ok: false, error: ctx.error }
+
+  if (ctx.bloque.estado === 'completo') {
+    return { ok: false, error: 'Bloque aprobado — no se puede editar la tarifa' }
+  }
+
+  let nuevaTarifa: number
+  let editada: boolean
+  let detalle = ctx.tarifaDetalle
+  if (tarifa === null) {
+    // Des-editar → recomputar desde la Factura. Como loadBloqueContext respeta el
+    // flag `tarifa_upme_editada` guardado, primero lo bajamos a false en DB y luego
+    // recargamos, para que el auto-cálculo (desde el valor sin IVA) vuelva a correr.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any)
+      .from('negocio_bloques')
+      .update({ data: { ...ctx.data, tarifa_upme_editada: false } })
+      .eq('id', bloqueId)
+    const recomputado = await loadBloqueContext(supabase, workspaceId, bloqueId)
+    editada = false
+    nuevaTarifa = recomputado.error ? 0 : recomputado.tarifaUpme
+    detalle = recomputado.error ? null : recomputado.tarifaDetalle
+  } else {
+    const n = Number(tarifa)
+    if (!Number.isFinite(n) || n < 0) return { ok: false, error: 'La tarifa debe ser un número ≥ 0' }
+    nuevaTarifa = Math.round(n)
+    editada = true
+    detalle = null  // valor manual → sin detalle de fórmula
+  }
+
+  const nuevoData: PropuestaData = {
+    ...ctx.data,
+    precio_base_con_iva: ctx.precioBase,
+    iva_pct: ctx.ivaPct,
+    descuento_pct_plan1: ctx.data.descuento_pct_plan1 ?? 0,
+    descuento_pct_plan2: ctx.data.descuento_pct_plan2 ?? 0,
+    valor_final_plan1: ctx.data.valor_final_plan1 ?? 0,
+    valor_final_plan2: ctx.data.valor_final_plan2 ?? 0,
+    tarifa_upme: nuevaTarifa,
+    tarifa_upme_editada: editada,
+    tarifa_upme_detalle: detalle,
+    versiones: ctx.data.versiones ?? [],
+    version_activa: ctx.data.version_activa ?? null,
+    aprobado_at: ctx.data.aprobado_at ?? null,
+    aprobado_por: ctx.data.aprobado_por ?? null,
+    aprobado_version: ctx.data.aprobado_version ?? null,
+    aprobado_plan: ctx.data.aprobado_plan ?? null,
+    aprobado_honorario: ctx.data.aprobado_honorario ?? null,
+    aprobado_tarifa_upme: ctx.data.aprobado_tarifa_upme ?? null,
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any)
+    .from('negocio_bloques')
+    .update({ data: nuevoData })
+    .eq('id', bloqueId)
+  if (errUpd) return { ok: false, error: errUpd.message }
+
+  revalidatePath(`/negocios/${ctx.negocioId}`)
+  return { ok: true, tarifa_upme: nuevaTarifa }
 }

@@ -10,6 +10,7 @@ import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
+import { crearCobrosSoenaCore, leerModeloDineroNegocio } from '@/lib/actions/conciliacion-actions'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -2489,6 +2490,24 @@ export async function autoCrearCobros(
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // ── Modelo de dinero SOENA (OPT-IN): partir el pago en 2 cobros (pasante + honorario) ──
+  // Si el negocio tiene propuesta aprobada con tarifa UPME, el UN pago que entra
+  // (valorAnticipo) se reparte: la tarifa (pasante) primero, el resto honorario.
+  // Sin barreras: si no calza con el anticipo esperado, se parte lo que entró y la
+  // conciliación maneja la diferencia. Negocios sin tarifa siguen con 1 solo cobro.
+  const modelo = await leerModeloDineroNegocio(supabase, negocioId)
+  if (modelo) {
+    const res = await crearCobrosSoenaCore(
+      supabase, workspaceId, negocioId,
+      (referenciaEpayco ?? '').trim() || `anticipo-${negocioId.slice(0, 8)}`,
+      valorAnticipo, modelo,
+    )
+    if (!res.success) return { error: res.error }
+    await reevaluarBloquesCobros(negocioId)
+    revalidatePath(`/negocios/${negocioId}`)
+    return { error: null }
+  }
 
   // Idempotencia: verificar si ya existe un cobro anticipo para este negocio
   const { data: existente } = await db(supabase)
