@@ -117,6 +117,12 @@ function fechaEnLetras(d: Date): string {
   return `${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`
 }
 
+// Descuento mostrado (PDF): redondeado a 2 decimales. El descuento ALMACENADO
+// conserva precisión completa para que el precio quede exacto (el precio manda).
+function pctMostrado(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
 // ── Lectura del bloque + servicio asociado ──────────────────────────────────
 
 async function loadBloqueContext(
@@ -216,8 +222,11 @@ export async function generarVersionPropuesta(
     return { ok: false, error: 'Precio base no disponible — verifica el servicio asociado' }
   }
 
-  const desc1 = Math.round((input.descuento_pct_plan1 ?? 0) * 100) / 100
-  const desc2 = Math.round((input.descuento_pct_plan2 ?? 0) * 100) / 100
+  // Se conserva precisión (hasta 6 decimales, solo para matar ruido de float):
+  // así el precio final tecleado por el equipo queda EXACTO al peso. El % se
+  // redondea a 2 decimales únicamente al mostrarlo (PDF / UI).
+  const desc1 = Math.round((input.descuento_pct_plan1 ?? 0) * 1e6) / 1e6
+  const desc2 = Math.round((input.descuento_pct_plan2 ?? 0) * 1e6) / 1e6
 
   for (const [label, pct] of [['Plan 1', desc1], ['Plan 2', desc2]] as const) {
     if (pct < 0) return { ok: false, error: `Descuento ${label} no puede ser negativo` }
@@ -320,7 +329,7 @@ export async function generarVersionPropuesta(
   try {
     // Linea condicional plan 1: solo si tiene descuento > 0
     const plan1DescuentoLinea = desc1 > 0
-      ? `<p class="plan-detail">Descuento aplicado: ${desc1}%</p>`
+      ? `<p class="plan-detail">Descuento aplicado: ${pctMostrado(desc1)}%</p>`
       : ''
     pdfBuffer = await renderPropuestaEconomica(ctx.templateSlug, {
       cliente_nombre: clienteNombre,
@@ -332,11 +341,11 @@ export async function generarVersionPropuesta(
       plan1_valor: formatCOP(calc.plan1_valor),
       plan1_anticipo: formatCOP(calc.plan1_anticipo),
       plan1_exito_iva: formatCOP(calc.plan1_exito_iva),
-      plan1_descuento_pct: `${desc1}%`,
+      plan1_descuento_pct: `${pctMostrado(desc1)}%`,
       plan1_descuento_linea: plan1DescuentoLinea,
       plan1_ahorro: formatCOP(calc.ahorro_plan1),
       plan2_valor: formatCOP(calc.plan2_valor),
-      plan2_descuento_pct: `${desc2}%`,
+      plan2_descuento_pct: `${pctMostrado(desc2)}%`,
       plan2_ahorro: formatCOP(calc.ahorro_plan2),
       version: nuevaN,
       // Personalización (SOENA): firma del generador + vehículo de la factura
