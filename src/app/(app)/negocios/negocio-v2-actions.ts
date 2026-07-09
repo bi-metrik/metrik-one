@@ -212,6 +212,44 @@ function computeFieldDefaults(configExtra: Record<string, unknown> | null): Reco
   return defaults
 }
 
+/** Limpieza ligera de un valor declarado por el lead (formularios de Meta): quita
+ *  guiones bajos de relleno y capitaliza los tokens tipo enum (natural, nuevo,
+ *  híbrido). Deja intacto el texto libre con espacios/guiones (marca-línea-modelo,
+ *  precio). Opt-in vía data_desde_metadata.clean. */
+function limpiarValorDeclarado(v: string): string {
+  const t = v.trim().replace(/^_+/, '').replace(/_+$/, '').trim()
+  if (!t) return t
+  if (/^\p{L}+$/u.test(t)) return t.charAt(0).toUpperCase() + t.slice(1)
+  return t
+}
+
+/** Construye el `data` de un bloque `datos` a partir de negocios.metadata según
+ *  config_extra.data_desde_metadata = { source, map:{fieldSlug: metaFieldName}, clean? }.
+ *  `source` apunta a un arreglo [{name, values[]}] dentro de metadata (ej. el
+ *  field_data de un lead de Meta). Genérico: cualquier workspace puede exponer
+ *  datos de metadata en un bloque de solo lectura sin duplicarlos en DB. */
+function dataDesdeMetadata(
+  cfg: { source: string; map: Record<string, string>; clean?: boolean },
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const arr = metadata[cfg.source]
+  const byName = new Map<string, string>()
+  if (Array.isArray(arr)) {
+    for (const it of arr as Array<{ name?: string; values?: unknown[] }>) {
+      if (it?.name && Array.isArray(it.values) && it.values.length) {
+        byName.set(it.name, String(it.values[0]))
+      }
+    }
+  }
+  const out: Record<string, unknown> = {}
+  for (const [fieldSlug, metaName] of Object.entries(cfg.map)) {
+    const raw = byName.get(metaName)
+    if (raw == null) continue
+    out[fieldSlug] = cfg.clean ? limpiarValorDeclarado(raw) : raw
+  }
+  return out
+}
+
 // ── Listar negocios del workspace ─────────────────────────────────────────────
 
 export async function getNegociosV2(
@@ -498,6 +536,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       cierre_motivo,
       razon_cierre,
       descripcion_cierre,
+      metadata,
       responsable_id,
       pausado,
       pausado_hasta,
@@ -527,6 +566,7 @@ export async function getNegocioDetalle(id: string): Promise<{
     .filter((s): s is { id: string; full_name: string } => s !== null)
 
   const negocioRaw = negocio as Record<string, unknown>
+  const negocioMetadata = (negocioRaw.metadata ?? {}) as Record<string, unknown>
   const negocioTyped = {
     ...negocioRaw,
     responsables,
@@ -575,9 +615,17 @@ export async function getNegocioDetalle(id: string): Promise<{
 
     // Excluir bloques desactivados (config_extra.desactivado === true): quedan fuera
     // del flujo operativo sin borrarse (reversible desde la config del workflow).
-    const bloqueConfigs = ((bloqueConfigsRaw ?? []) as Array<Record<string, unknown>>).filter(
-      bc => (bc.config_extra as Record<string, unknown> | null)?.desactivado !== true,
-    )
+    // Además, visibilidad condicional por metadata del negocio (genérico, opt-in):
+    // config_extra.mostrar_si_metadata = { key, equals } → el bloque solo aparece
+    // cuando negocio.metadata[key] === equals (ej. datos de un lead de Meta que solo
+    // se muestran en negocios con fuente_cargue = 'meta_lead').
+    const bloqueConfigs = ((bloqueConfigsRaw ?? []) as Array<Record<string, unknown>>).filter(bc => {
+      const ce = bc.config_extra as Record<string, unknown> | null
+      if (ce?.desactivado === true) return false
+      const cond = ce?.mostrar_si_metadata as { key: string; equals: unknown } | undefined
+      if (cond && negocioMetadata[cond.key] !== cond.equals) return false
+      return true
+    })
 
     // Cargar instancias runtime
     const configIds = ((bloqueConfigs ?? []) as Record<string, unknown>[]).map(b => b.id as string)
@@ -592,6 +640,27 @@ export async function getNegocioDetalle(id: string): Promise<{
 
       for (const inst of ((instancias ?? []) as Record<string, unknown>[])) {
         instanciasMap[inst.bloque_config_id as string] = inst as unknown as NegocioBloque
+      }
+
+      // Instancias efímeras de solo lectura derivadas de negocio.metadata
+      // (config-driven, genérico). Si un bloque declara config_extra.data_desde_metadata
+      // y no tiene instancia real, se sintetiza una con el `data` mapeado desde
+      // metadata. El estado 'visible' del bloque_config fuerza render read-only
+      // (BloqueDatos no persiste), así que la instancia sin id no escribe nada.
+      for (const bc of (bloqueConfigs as Array<Record<string, unknown>>)) {
+        const dm = (bc.config_extra as {
+          data_desde_metadata?: { source: string; map: Record<string, string>; clean?: boolean }
+        } | null)?.data_desde_metadata
+        if (!dm || instanciasMap[bc.id as string]) continue
+        instanciasMap[bc.id as string] = {
+          id: '',
+          negocio_id: id,
+          bloque_config_id: bc.id as string,
+          estado: 'visible',
+          data: dataDesdeMetadata(dm, negocioMetadata),
+          completado_at: null,
+          completado_por: null,
+        } as unknown as NegocioBloque
       }
 
       // Auto-crear instancias faltantes (negocio creado antes de bloque_configs)
