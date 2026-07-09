@@ -11,12 +11,13 @@ export interface NumerosData {
   // P1: Cuanta plata tengo
   saldoCaja: number
   saldoEsReal: boolean          // true = from saldos_banco, false = calculated
-  recaudoMes: number
+  recaudoMes: number             // recaudo CAJA del mes (tesorería, excluye pasante)
   metaRecaudo: number | null
   recaudoMesAnterior: number
 
   // P2: Estoy ganando
-  ingresosMes: number            // cobros del mes
+  ingresosMes: number            // ingreso RECONOCIDO del mes (v_pyl_mes: caja, o
+                                 // completitud si el ws opta por P3 Ola 3)
   gastosMes: number              // gastos del mes
   gastosProyectosMes: number     // COH-5: gastos with proyecto_id (direct project costs)
   utilidad: number               // ingresos - gastos - costos fijos
@@ -189,6 +190,8 @@ export async function getNumeros(mesRef?: string) {
     staffNominaRes,
     // 2026-04-27: v_pyl_mes para MC + EBITDA (reemplaza blend D130)
     pylMesRes,
+    // 2026-07-08 P3 Ola 3: v_pyl_mes del mes ANTERIOR (ingreso reconocido prev)
+    prevPylMesRes,
     // 2026-04-28: top-N negocios por MC (drill-down P2)
     mcNegociosRes,
     // 2026-05-04: MC por linea del mes (drill-down P2)
@@ -350,6 +353,15 @@ export async function getNumeros(mesRef?: string) {
       .eq('mes', mesStart)
       .maybeSingle(),
 
+    // 2026-07-08 P3 Ola 3: PyL del mes ANTERIOR — solo ingresos (reconocido).
+    // Espeja la base de la vista (caja o completitud según opt-in del ws).
+    supabase
+      .from('v_pyl_mes')
+      .select('ingresos')
+      .eq('workspace_id', workspaceId)
+      .eq('mes', prevStart)
+      .maybeSingle(),
+
     // 2026-04-28: top-N negocios por MC (abiertos primero, luego cerrados con MC > 0)
     supabase
       .from('v_mc_negocio')
@@ -405,11 +417,16 @@ export async function getNumeros(mesRef?: string) {
   const ultimoSaldo = saldoBancoRes.data?.[0] ?? null
   const saldoEsReal = !!ultimoSaldo
 
-  // Cobros / Ingresos
+  // Cobros / Recaudo (CAJA) — tesorería. Excluye pasante (Ola 1). Se preserva
+  // como foto de caja para TODOS los workspaces, no cambia con reconocimiento.
   const recaudoMes = (cobrosRes.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
   const recaudoMesAnterior = (cobrosPrevRes.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
-  const ingresosMes = recaudoMes
-  const ingresosMesAnterior = recaudoMesAnterior
+  // Ingreso RECONOCIDO — se lee de v_pyl_mes (fuente única de ingreso→MC→EBITDA).
+  // Para ws opt-in (P3 Ola 3) la vista aplica base COMPLETITUD; para el resto es
+  // caja idéntica al recaudo → sin cambio. Fallback a caja si la vista no tiene
+  // fila del mes (ej. mes sin movimientos en la vista pero con cobros sueltos).
+  const ingresosMes = pylMesRes.data?.ingresos != null ? Number(pylMesRes.data.ingresos) : recaudoMes
+  const ingresosMesAnterior = prevPylMesRes.data?.ingresos != null ? Number(prevPylMesRes.data.ingresos) : recaudoMesAnterior
 
   // Gastos
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
