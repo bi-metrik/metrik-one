@@ -19,6 +19,11 @@ config({ path: resolve(process.cwd(), '.env.local') })
 
 const WS_ID = process.argv[2]
 const DRY_RUN = process.env.DRY_RUN !== 'false'
+// Códigos de negocio a EXCLUIR del dedup (ej. radicados ante la DIAN: solo se suma
+// el archivo nuevo, no se borra el viejo). Coma-separado en env SKIP_CODES.
+const SKIP_CODES = new Set((process.env.SKIP_CODES ?? '').split(',').map(s => s.trim()).filter(Boolean))
+// Si ONLY_CODES está seteado, el dedup por-negocio SOLO corre para esos (acota alcance).
+const ONLY_CODES = new Set((process.env.ONLY_CODES ?? '').split(',').map(s => s.trim()).filter(Boolean))
 const FOLDER = 'application/vnd.google-apps.folder'
 const API = 'https://www.googleapis.com/drive/v3/files'
 const CODIGO_RE = /^[A-Z]+\d* \d{2} \d+$/
@@ -98,6 +103,8 @@ async function main() {
 
   // ── (A) DEDUP por negocio ─────────────────────────────────────────────────
   for (const n of negocios) {
+    if (SKIP_CODES.has(n.codigo)) { console.log(`\n[dedup] "${n.codigo}" en SKIP_CODES (radicado) — no se toca`); continue }
+    if (ONLY_CODES.size > 0 && !ONLY_CODES.has(n.codigo)) continue
     const folderId = folderIdFromUrl(n.carpeta_url)
     if (!folderId) { console.log(`\n[dedup] "${n.codigo}" sin carpeta_url — skip`); continue }
     const { data: bloques } = await supa.from('negocio_bloques').select('data').eq('negocio_id', n.id)
@@ -114,6 +121,12 @@ async function main() {
   }
 
   // ── (B) STRAY: carpetas de negocios borrados en el root ───────────────────
+  // Se salta cuando se acota el alcance (ONLY_CODES) o se pide SKIP_STRAY=true.
+  if (ONLY_CODES.size > 0 || process.env.SKIP_STRAY === 'true') {
+    console.log('\n[stray] omitido (alcance acotado)')
+    console.log('\n=== Fin ===')
+    return
+  }
   const rootChildren = await listChildren(ws.drive_folder_id, token)
   const stray = rootChildren.filter(f => {
     if (f.mimeType !== FOLDER) return false
