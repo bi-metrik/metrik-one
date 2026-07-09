@@ -43,6 +43,9 @@ interface VeState {
   location?: { lat: number; lng: number; name?: string; address?: string };
   consent?: { version: string; at: string };
   bot_phone?: string; // numero del bot (display_phone_number), para compartir su contacto al cierre
+  fase?: "atribucion"; // paso deterministico de cierre (nombre/anonima) manejado por codigo
+  atribucion?: "con_nombre" | "anonima";
+  nombre?: string | null;
 }
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
@@ -131,6 +134,28 @@ export async function continueVeChat(
   // politica; el primer mensaje del usuario tras el saludo es su aceptacion. Se registra una sola vez.
   if (!state.consent) state.consent = { version: POLICY_VERSION, at: new Date().toISOString() };
 
+  // FASE DETERMINISTA DE ATRIBUCION (nombre / anonima). NO la maneja el modelo (regresionaba: no
+  // pedia el nombre). El codigo pregunta y captura el nombre SIEMPRE.
+  if (state.fase === "atribucion") {
+    state.history.push({ role: "user", text });
+    const t = (text || "").trim().toLowerCase();
+    if (/an[oó]nim|sin (mi )?nombre|prefiero no|no (quiero|gracias)/.test(t)) {
+      state.atribucion = "anonima"; state.fase = undefined;
+      await cerrarVe(supabase, phone, state, "Perfecto, tu historia se comparte de forma anónima.");
+      return;
+    }
+    // Afirmo pero no dio el nombre concreto → pedirlo explicito, sigue en fase.
+    if (/^(s[ií]|claro|okey?|ok|dale|listo|bueno|de acuerdo|obvio|por supuesto|con mi nombre( est[aá] bien)?|mi nombre|est[aá] bien)[.! ]*$/.test(t)) {
+      await sendTextMessage(phone, "¡Genial! Escríbeme el nombre tal como quieres que aparezca 🙏");
+      await supabase.from("ve_chat_sessions").update({ state, updated_at: new Date().toISOString() }).eq("phone", phone);
+      return;
+    }
+    // Cualquier otra cosa = el nombre que quiere mostrar.
+    state.nombre = text.trim(); state.atribucion = "con_nombre"; state.fase = undefined;
+    await cerrarVe(supabase, phone, state, `Gracias, ${state.nombre}. Tu historia aparecerá con tu nombre.`);
+    return;
+  }
+
   // Salida explicita del participante.
   if (EXIT_WORDS.includes(exit)) {
     state.history.push({ role: "user", text });
@@ -170,7 +195,21 @@ export async function continueVeChat(
     const r = await generate({ model, system, messages, temperature: 0.7, maxOutputTokens: 256, thinkingBudget: 0 });
     const botText = clean(r.text) || "Estoy aquí contigo. ¿Me cuentas un poco más?";
 
-    // 6. Guardar estado y responder
+    // 6. Interceptar la ATRIBUCION: si el modelo la pregunta o intenta cerrar, tomamos el control y
+    // pedimos el nombre de forma deterministica (el modelo no lo pedia de forma confiable).
+    const modeloPideAtribucion = /an[oó]nim/i.test(botText) && /nombre/i.test(botText);
+    if (state.turns >= 2 && state.atribucion === undefined && (modeloPideAtribucion || isClose(botText))) {
+      const preg = "Por último 🙏 ¿quieres que tu historia aparezca con tu nombre? Si es así, escríbeme el nombre tal como quieres que salga; o si prefieres, escribe *anónima*.";
+      state.history.push({ role: "model", text: preg });
+      state.fase = "atribucion";
+      state.turns += 1;
+      await supabase.from("ve_chat_sessions").update({ state, closed: false, updated_at: new Date().toISOString() }).eq("phone", phone);
+      await humanDelay(preg);
+      await sendTextMessage(phone, preg);
+      return;
+    }
+
+    // 7. Guardar estado y responder
     // El primer turno generado (respuesta al OK) es el paso de ubicacion: se envia con el boton
     // nativo "Enviar ubicacion" de WhatsApp, salvo que la persona ya haya compartido su ubicacion.
     const esTurnoUbicacion = state.turns === 0 && !state.location;
@@ -194,6 +233,17 @@ export async function continueVeChat(
     console.error("[ve-chat] error en turno:", (e as Error).message ?? "");
     await sendTextMessage(phone, "Perdona, no te alcancé a leer bien. ¿Me lo repites, por favor? Seguimos justo donde quedamos.");
   }
+}
+
+// Cierre deterministico tras resolver la atribucion: despedida + invitacion a compartir el contacto,
+// y luego serializa (closeAndSerialize envia la tarjeta vCard).
+async function cerrarVe(supabase: Supa, phone: string, state: VeState, prefijo: string): Promise<void> {
+  const cierre = `${prefijo}\n\nTu voz ya es parte de este esfuerzo. Si conoces a alguien más que necesite ser escuchado, comparte este contacto. Cuídate mucho 🙏💙`;
+  state.history.push({ role: "model", text: cierre });
+  await supabase.from("ve_chat_sessions").update({ state, closed: true, updated_at: new Date().toISOString() }).eq("phone", phone);
+  await humanDelay(cierre);
+  await sendTextMessage(phone, cierre);
+  await closeAndSerialize(supabase, phone, state);
 }
 
 // Al cerrar: estructura la conversacion en ve_respuestas. Si hubo crisis, guarda un registro
@@ -226,10 +276,13 @@ async function closeAndSerialize(supabase: Supa, phone: string, state: VeState):
       });
       return;
     }
+    // La atribucion/nombre resueltos por la fase deterministica mandan sobre lo que infiera el serializador.
+    const atribucion = state.atribucion ?? rec.atribucion;
+    const nombre = atribucion === "con_nombre" ? (state.nombre ?? rec.nombre) : null;
     await supabase.from("ve_respuestas").insert({
       phone,
-      atribucion: rec.atribucion,
-      nombre: rec.atribucion === "con_nombre" ? rec.nombre : null,
+      atribucion,
+      nombre,
       ubicacion: rec.ubicacion ?? state.location?.name ?? state.location?.address ?? null,
       lat: state.location?.lat ?? null,
       lng: state.location?.lng ?? null,
@@ -248,7 +301,7 @@ async function closeAndSerialize(supabase: Supa, phone: string, state: VeState):
       consent_at: state.consent?.at ?? null,
       payload: { record: rec, location: state.location ?? null },
     });
-    console.log(`[ve-chat] respuesta serializada para ${phone} (${rec.atribucion})`);
+    console.log(`[ve-chat] respuesta serializada para ${phone} (${atribucion})`);
   } catch (e) {
     console.error("[ve-chat] error serializando:", (e as Error).message ?? "");
     try {
