@@ -152,6 +152,20 @@ type MetaLeadsConfig = {
   // el valor de esos campos del formulario (ej. marca-línea-modelo del vehículo)
   // para identificar el negocio desde el pipeline: "PERSONA - MARCA MODELO".
   nombre_negocio?: { uppercase?: boolean; append_fields?: string[] };
+  // Defaults del contacto que se crea desde el lead (opt-in). fuente_adquisicion y
+  // fuente_detalle etiquetan el origen (ej. pauta digital pagada). rol_natural se
+  // asigna solo si el lead declara ser persona natural (el campo tipo_persona_field
+  // del formulario === natural_value); para jurídica no se asume rol.
+  contacto?: {
+    fuente_adquisicion?: string;
+    fuente_detalle?: string;
+    rol_natural?: string;
+    tipo_persona_field?: string;
+    natural_value?: string;
+    // Segmento inicial del contacto (el lead nace en la etapa de entrada). El resto
+    // del ciclo lo mantiene el avance de etapa en la app (sincronizarSegmentoContacto).
+    segmento_inicial?: string;
+  };
 };
 
 // Arma el nombre del negocio a partir del nombre del lead y, si el workspace lo
@@ -251,6 +265,15 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   // persona; solo el negocio lleva el nombre compuesto para identificarlo en el pipeline.
   const negocioNombre = construirNombreNegocio(nombre, cfg.nombre_negocio, getField);
 
+  // Defaults del contacto creado desde el lead (opt-in): fuente = pauta digital,
+  // rol = decisor si el lead es persona natural. Solo aplican al CREAR el contacto;
+  // un contacto ya existente (dedup) no se pisa.
+  const cc = cfg.contacto ?? {};
+  const tipoPersona = cc.tipo_persona_field ? getField([cc.tipo_persona_field]) : null;
+  const esNatural = !!tipoPersona
+    && tipoPersona.trim().toLowerCase().replace(/_+$/, '') === (cc.natural_value ?? 'natural').toLowerCase();
+  const contactoRol = esNatural ? (cc.rol_natural ?? null) : null;
+
   // 4. Dedup de contacto (por teléfono, luego email).
   let contactoId: string | null = null;
   if (telefono) {
@@ -266,7 +289,16 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   if (!contactoId) {
     const { data, error } = await supabase
       .from('contactos')
-      .insert({ workspace_id: workspaceId, nombre, telefono: telefono ?? null, email: email ?? null })
+      .insert({
+        workspace_id: workspaceId,
+        nombre,
+        telefono: telefono ?? null,
+        email: email ?? null,
+        fuente_adquisicion: cc.fuente_adquisicion ?? null,
+        fuente_detalle: cc.fuente_detalle ?? null,
+        rol: contactoRol,
+        segmento: cc.segmento_inicial ?? null,
+      })
       .select('id').single();
     if (error) {
       console.error('[meta-leads] error creando contacto:', error.message);

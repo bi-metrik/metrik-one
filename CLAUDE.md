@@ -332,6 +332,14 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-07-08 (`metrik-one--soena` → producto: **defaults del contacto de lead Meta (fuente/rol) + segmento automático por ciclo de vida**). Rama `feat/soena-meta-lead-contacto-defaults` (PR, sin mergear).
+
+- **Webhook `meta-leads-webhook`** — `config_extra.meta_leads.contacto` = `{ fuente_adquisicion, fuente_detalle, rol_natural, tipo_persona_field, natural_value, segmento_inicial }`. Al crear el contacto: fuente = `pauta_digital`, rol = `decisor` solo si el lead declara persona **natural**, segmento inicial = `sin_contactar`. Opt-in; no pisa contactos existentes (dedup).
+- **`sincronizarSegmentoContacto` (`negocio-v2-actions.ts`)** — llamada en `cambiarEtapaNegocioConGate` tras cada avance: mapea la etapa del negocio al segmento del contacto por ciclo de vida (entrada de venta → `sin_contactar`, resto de venta → `contactado`, ejecución/cobro → `convertido`). **Solo sube** (rank), no reactiva `inactivo`. Genérico (todos los negocios). En `perderNegocio`: contacto → `inactivo` si era su único negocio abierto.
+- **Config + backfill SOENA** (`proyectos/soena/ve/migrations/20260708_meta_lead_contacto_defaults.sql`): config aplicada; 4 contactos de Meta → fuente `pauta_digital` + rol `decisor` + segmento `sin_contactar`.
+
+---
+
 **Sesion:** 2026-07-08 (`metrik-one--soena` → producto: **Meta Lead Ads Capa 1 — bloque "Datos del lead" de solo lectura desde metadata**). Rama `feat/soena-meta-lead-datos-bloque` (PR, sin mergear).
 
 - **Dos hooks genéricos en `getNegocioDetalle`** (`negocio-v2-actions.ts`), reutilizables por cualquier workspace, config-driven vía `config_extra`:

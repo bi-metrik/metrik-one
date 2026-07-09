@@ -1600,6 +1600,67 @@ export async function cambiarEtapaNegocio(
   return { error: null }
 }
 
+// Segmento del contacto por ciclo de vida del negocio. Rank para "solo subir"
+// (nunca degradar por routing hacia atrás ni por otro negocio del mismo contacto).
+const SEGMENTO_RANK: Record<string, number> = { sin_contactar: 0, contactado: 1, convertido: 2 }
+
+/**
+ * Sincroniza el segmento del contacto del negocio según su etapa actual:
+ * entrada de venta (primera etapa de la línea) → sin_contactar; resto de venta →
+ * contactado; ejecución/cobro → convertido. Solo sube de nivel; no reactiva a un
+ * contacto marcado 'inactivo'. Defensivo: cualquier fallo se loguea y no propaga.
+ */
+async function sincronizarSegmentoContacto(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  negocioId: string,
+): Promise<void> {
+  try {
+    const { data: negRaw } = await db(supabase)
+      .from('negocios')
+      .select('contacto_id, stage_actual, etapas_negocio(orden, linea_id)')
+      .eq('id', negocioId)
+      .single()
+    const neg = negRaw as {
+      contacto_id: string | null
+      stage_actual: string | null
+      etapas_negocio: { orden: number; linea_id: string } | null
+    } | null
+    if (!neg?.contacto_id || !neg.etapas_negocio) return
+
+    let esEntrada = false
+    const { data: minRaw } = await db(supabase)
+      .from('etapas_negocio')
+      .select('orden')
+      .eq('linea_id', neg.etapas_negocio.linea_id)
+      .order('orden', { ascending: true })
+      .limit(1)
+      .single()
+    const minOrden = (minRaw as { orden: number } | null)?.orden
+    esEntrada = minOrden != null && neg.etapas_negocio.orden === minOrden
+
+    const target =
+      neg.stage_actual === 'ejecucion' || neg.stage_actual === 'cobro'
+        ? 'convertido'
+        : neg.stage_actual === 'venta'
+          ? (esEntrada ? 'sin_contactar' : 'contactado')
+          : null
+    if (!target) return
+
+    const { data: cRaw } = await db(supabase)
+      .from('contactos').select('segmento').eq('id', neg.contacto_id).single()
+    const actual = (cRaw as { segmento: string | null } | null)?.segmento ?? null
+    if (actual === 'inactivo') return
+    if ((SEGMENTO_RANK[target] ?? 0) <= (actual ? (SEGMENTO_RANK[actual] ?? -1) : -1)) return
+
+    await db(supabase)
+      .from('contactos').update({ segmento: target })
+      .eq('id', neg.contacto_id).eq('workspace_id', workspaceId)
+  } catch (e) {
+    console.error('[segmento] sincronización falló:', e instanceof Error ? e.message : e)
+  }
+}
+
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 
 export async function cambiarEtapaNegocioConGate(
@@ -2062,6 +2123,11 @@ export async function cambiarEtapaNegocioConGate(
   // Cambiar etapa
   const resultCambio = await cambiarEtapaNegocio(negocioId, resolvedEtapaId)
   if (resultCambio.error) return resultCambio
+
+  // Sincronizar el segmento del contacto según el ciclo de vida del negocio
+  // (solo sube, nunca degrada): entrada de venta → sin_contactar, resto de venta →
+  // contactado, ejecución/cobro → convertido. Defensivo: no rompe el avance.
+  await sincronizarSegmentoContacto(supabase, workspaceId, negocioId)
 
   // Registrar en activity_log
   if (staffId) {
@@ -4196,6 +4262,29 @@ export async function perderNegocio(
       contenido: `Negocio perdido. Motivo: ${razonLabel}`,
       valor_nuevo: 'perdido',
     })
+  }
+
+  // El contacto pasa a 'inactivo' si este era su único negocio abierto (no se
+  // desactiva a alguien que aún tiene otro negocio vivo). Defensivo.
+  try {
+    const { data: cRaw } = await db(supabase)
+      .from('negocios').select('contacto_id').eq('id', negocioId).single()
+    const contactoId = (cRaw as { contacto_id: string | null } | null)?.contacto_id
+    if (contactoId) {
+      const { count } = await db(supabase)
+        .from('negocios')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+        .eq('contacto_id', contactoId)
+        .eq('estado', 'abierto')
+      if (!count || count === 0) {
+        await db(supabase)
+          .from('contactos').update({ segmento: 'inactivo' })
+          .eq('id', contactoId).eq('workspace_id', workspaceId)
+      }
+    }
+  } catch (e) {
+    console.error('[segmento] inactivo falló:', e instanceof Error ? e.message : e)
   }
 
   revalidatePath(`/negocios/${negocioId}`)
