@@ -340,6 +340,9 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
   - Se agregó `metadata` al `select` del negocio.
 - **Uso SOENA (config, no código):** bloque `datos` "Datos del lead (Meta)" en Validación (orden 2), `estado='visible'` (read-only, reusa `BloqueDatos`), solo visible en negocios `fuente_cargue='meta_lead'`. Muestra lo declarado en el formulario (tipo vehículo, nuevo/usado, natural/jurídica, marca-línea-modelo, precio). La Factura sigue siendo la fuente de verdad; esto es referencia comercial. Migración en `proyectos/soena/ve/migrations/20260708_bloque_datos_lead_meta.sql` (aplicar a prod DESPUÉS del deploy del código).
 - **Gotcha Meta/campaña:** el webhook `meta-leads-webhook` ya pide `campaign_*`/`ad_name`/`adset_*` a la Graph API, pero llegan `null` porque el System User no tiene la **cuenta publicitaria de SOENA** asignada (solo la Página está compartida). Capa 2 (campaña) depende de que Daniela comparta la cuenta al Business Portfolio `992387823949163`.
+- **Refinamientos (rama `feat/soena-meta-lead-nombre-y-precio`):**
+  - `dataDesdeMetadata` acepta `numeric: [fieldSlug]` → limpia el valor declarado sucio a número (`"$ 132.734.513"` → `132734513`) para render currency vía field `tipo:'numero'`. Config SOENA: `lead_precio` pasa a `numero` + `numeric:['lead_precio']`.
+  - Webhook `meta-leads-webhook`: `config_extra.meta_leads.nombre_negocio = { uppercase, append_fields[] }` → el negocio nace con nombre `PERSONA - MARCA MODELO` en MAYÚSCULAS (el contacto conserva el nombre de la persona). SOENA: `append_fields=['marca_-línea_-modelo…']`. Backfill de V0026/V0028/V0029/V0030 aplicado.
 
 ---
 
