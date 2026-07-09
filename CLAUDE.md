@@ -332,6 +332,27 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-07-08 (`metrik-one--soena` → producto: **Meta Lead Ads Capa 1 — bloque "Datos del lead" de solo lectura desde metadata**). Rama `feat/soena-meta-lead-datos-bloque` (PR, sin mergear).
+
+- **Dos hooks genéricos en `getNegocioDetalle`** (`negocio-v2-actions.ts`), reutilizables por cualquier workspace, config-driven vía `config_extra`:
+  - `mostrar_si_metadata: { key, equals }` → el bloque solo aparece cuando `negocio.metadata[key] === equals` (visibilidad condicional por negocio).
+  - `data_desde_metadata: { source, map:{fieldSlug→metaFieldName}, clean? }` → sintetiza una instancia efímera de **solo lectura** cuyo `data` sale de `negocios.metadata[source]` (arreglo `[{name,values}]`, ej. el `field_data` de un lead de Meta). No duplica en DB, no requiere backfill. Helper `limpiarValorDeclarado` (quita `_` de relleno + capitaliza enums).
+  - Se agregó `metadata` al `select` del negocio.
+- **Uso SOENA (config, no código):** bloque `datos` "Datos del lead (Meta)" en Validación (orden 2), `estado='visible'` (read-only, reusa `BloqueDatos`), solo visible en negocios `fuente_cargue='meta_lead'`. Muestra lo declarado en el formulario (tipo vehículo, nuevo/usado, natural/jurídica, marca-línea-modelo, precio). La Factura sigue siendo la fuente de verdad; esto es referencia comercial. Migración en `proyectos/soena/ve/migrations/20260708_bloque_datos_lead_meta.sql` (aplicar a prod DESPUÉS del deploy del código).
+- **Gotcha Meta/campaña:** el webhook `meta-leads-webhook` ya pide `campaign_*`/`ad_name`/`adset_*` a la Graph API, pero llegan `null` porque el System User no tiene la **cuenta publicitaria de SOENA** asignada (solo la Página está compartida). Capa 2 (campaña) depende de que Daniela comparta la cuenta al Business Portfolio `992387823949163`.
+
+---
+
+**Sesion:** 2026-07-08 (`metrik-one--soena` → producto: **plomería propuesta personalizada + segmentador Fase→Etapa en /negocios + botón de avance honesto + marcador Meta**). **PRs #23, #31, #33, #34, #35 mergeados a `main`** (deploy Vercel).
+
+- **Propuesta personalizada (PR #31):** `generarVersionPropuesta` arma y envía al render `generador_*` (staff que genera: full_name/position/phone_whatsapp + email de auth + `profiles.avatar_url` como `<img>` opcional) + `vehiculo_*` (leídos de la Factura del negocio por slug `factura_venta_vehiculo`, `data.campos[slug].value`) + `vehiculo_img` por tipo. Tipo del payload extendido (opcionales, retrocompat). Alimenta el template SOENA nuevo (portada/vehículo/firma dinámicos) en `metrik-pdf-render` (rev Cloud Run `00011-qsl`).
+- **Segmentador Fase→Etapa en /negocios (PR #33, #34):** nueva server action `getEtapasSegmentador()` (etapas de la línea activa: numero/nombre/stage/orden). `NegociosClient` usa 2 niveles (fase → etapas de la fase, en orden, con contadores). Contadores sobre el prop `negocios` (ya server-scopeado para operator → cuenta por rol sin lógica extra). Cuenta/filtra por `etapa_numero` (ID estable). Filas con `flex-wrap` (no scroll). Reemplaza el pill especial "Inclusión".
+- **Botón de avance honesto (PR #33):** label neutral "Avanzar de etapa" (no la siguiente por orden, que confunde cuando el routing salta). `cambiarEtapaNegocioConGate` ahora expone `etapaDestinoNombre` (destino REAL ya resuelto por routing) → el toast lo nombra. El motor ya redirigía bien; era el feedback visual el que engañaba.
+- **Marcador Meta (PR #35):** `NegocioResumen.es_meta_lead` (`metadata.fuente_cargue === 'meta_lead'`) + badge "Meta" (azul FB, icono Megaphone) en `NegocioCard`. Integración Meta Lead Ads validada en prod con lead real (V0026).
+- **Gotcha:** `getWorkspace` no expone email; usar `getCachedUser()` para el email del usuario. Provisioning de usuarios nuevos (staff+profile+auth) = server-side (auth admin API + inserts), la invitación por UI está rota para nuevos.
+
+---
+
 **Sesion:** 2026-07-02→03 (`metrik-one--soena` → producto: **determinismo en formularios DIAN + búsqueda/tarjeta config-driven en negocios + guía hereda seccional**). **PRs #22, #24, #25, #26, #27 mergeados a `main`** (deploy Vercel).
 
 - **`aplicarDeterministas`** (`src/lib/actions/formulario-actions.ts`): valores que NO deben confiarse a la extracción. **DV** recalculado con `calcularDvNit` (módulo 11) para 010/1668; **códigos DANE** país/depto/municipio resueltos por nombre. Respeta overrides (con valor; vacío recalcula). Se llama en generación y en `resolverFormularioParaEdicion` (display ⟺ generación sin drift).
