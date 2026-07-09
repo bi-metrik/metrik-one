@@ -147,7 +147,29 @@ type MetaLeadsConfig = {
   linea_id?: string | null;
   etapa_entrada_orden?: number | null;
   field_map?: Record<string, string[]>;
+  // Cómo armar el nombre del negocio (opt-in por workspace). Por defecto = nombre
+  // del lead tal cual. `uppercase` lo pone en MAYÚSCULAS; `append_fields` concatena
+  // el valor de esos campos del formulario (ej. marca-línea-modelo del vehículo)
+  // para identificar el negocio desde el pipeline: "PERSONA - MARCA MODELO".
+  nombre_negocio?: { uppercase?: boolean; append_fields?: string[] };
 };
+
+// Arma el nombre del negocio a partir del nombre del lead y, si el workspace lo
+// configura, concatena campos del formulario (ej. marca-línea-modelo) y lo pasa a
+// MAYÚSCULAS. Sin config → nombre tal cual. getField resuelve un campo del field_data.
+function construirNombreNegocio(
+  base: string,
+  cfgNombre: { uppercase?: boolean; append_fields?: string[] } | undefined,
+  getField: (names: string[]) => string | null,
+): string {
+  let nombre = base;
+  const extra = (cfgNombre?.append_fields ?? [])
+    .map((name) => getField([name]))
+    .filter((v): v is string => !!v && v.trim().length > 0)
+    .map((v) => v.trim());
+  if (extra.length) nombre = `${base} - ${extra.join(' ')}`;
+  return cfgNombre?.uppercase ? nombre.toUpperCase() : nombre;
+}
 
 async function handleLead(c: LeadgenChange): Promise<void> {
   const supabase = getServiceClient();
@@ -224,6 +246,11 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   const telefono = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone']);
   const empresaNombre = fm.empresa ? getField(fm.empresa) : null;
 
+  // Nombre del negocio (opt-in): persona + campos extra (ej. marca-modelo del
+  // vehículo), en MAYÚSCULAS si se pide. El contacto conserva el nombre de la
+  // persona; solo el negocio lleva el nombre compuesto para identificarlo en el pipeline.
+  const negocioNombre = construirNombreNegocio(nombre, cfg.nombre_negocio, getField);
+
   // 4. Dedup de contacto (por teléfono, luego email).
   let contactoId: string | null = null;
   if (telefono) {
@@ -299,7 +326,7 @@ async function handleLead(c: LeadgenChange): Promise<void> {
       linea_id: lineaId,
       contacto_id: contactoId,
       empresa_id: empresaId,
-      nombre,
+      nombre: negocioNombre,
       etapa_actual_id: etapa.id,
       stage_actual: etapa.stage,
       estado: 'abierto',

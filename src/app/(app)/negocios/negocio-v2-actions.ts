@@ -229,7 +229,7 @@ function limpiarValorDeclarado(v: string): string {
  *  field_data de un lead de Meta). Genérico: cualquier workspace puede exponer
  *  datos de metadata en un bloque de solo lectura sin duplicarlos en DB. */
 function dataDesdeMetadata(
-  cfg: { source: string; map: Record<string, string>; clean?: boolean },
+  cfg: { source: string; map: Record<string, string>; clean?: boolean; numeric?: string[] },
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
   const arr = metadata[cfg.source]
@@ -241,10 +241,19 @@ function dataDesdeMetadata(
       }
     }
   }
+  const numeric = new Set(cfg.numeric ?? [])
   const out: Record<string, unknown> = {}
   for (const [fieldSlug, metaName] of Object.entries(cfg.map)) {
     const raw = byName.get(metaName)
     if (raw == null) continue
+    if (numeric.has(fieldSlug)) {
+      // Valor declarado sucio ("76.000.000", "$ 132.734.513", "163000000") → número
+      // para que el field tipo 'numero' lo renderice como currency. Se asume formato
+      // colombiano sin decimales (los precios de vehículo no traen centavos).
+      const n = Number(String(raw).replace(/[^\d]/g, ''))
+      if (Number.isFinite(n) && n > 0) out[fieldSlug] = n
+      continue
+    }
     out[fieldSlug] = cfg.clean ? limpiarValorDeclarado(raw) : raw
   }
   return out
@@ -649,7 +658,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       // (BloqueDatos no persiste), así que la instancia sin id no escribe nada.
       for (const bc of (bloqueConfigs as Array<Record<string, unknown>>)) {
         const dm = (bc.config_extra as {
-          data_desde_metadata?: { source: string; map: Record<string, string>; clean?: boolean }
+          data_desde_metadata?: { source: string; map: Record<string, string>; clean?: boolean; numeric?: string[] }
         } | null)?.data_desde_metadata
         if (!dm || instanciasMap[bc.id as string]) continue
         instanciasMap[bc.id as string] = {
