@@ -7,16 +7,20 @@ import Link from 'next/link'
 import {
   Scale, CheckCircle2, Loader2, X, Plus, Trash2, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
+  AlertTriangle, Landmark, Ban,
 } from 'lucide-react'
 import {
   agregarPago,
   setPorcionReferencia,
   conciliarReferencia,
+  liquidarHonorarioCancelado,
+  liquidarPasanteCancelado,
   type ConciliacionV2,
   type SobrepagoRef,
   type NegocioSaldo,
   type NegocioParaSplit,
   type ReferenciaPago,
+  type CanceladoPorLiquidar,
 } from '@/lib/actions/conciliacion-actions'
 
 const fmtCOP = (n: number) =>
@@ -25,7 +29,7 @@ const fmtCOP = (n: number) =>
 const VERDE = '#10B981'
 const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
 
-type TabKey = 'por_conciliar' | 'saldos' | 'general'
+type TabKey = 'por_conciliar' | 'saldos' | 'general' | 'cancelados'
 
 export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
   const router = useRouter()
@@ -48,6 +52,7 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
     { key: 'general', label: 'Vista general' },
     { key: 'por_conciliar', label: 'Por conciliar', count: data.metricas.por_conciliar },
     { key: 'saldos', label: 'Saldos', count: data.metricas.en_saldo },
+    { key: 'cancelados', label: 'Cancelados por liquidar', count: data.metricas.cancelados_por_liquidar },
   ]
 
   return (
@@ -103,6 +108,7 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'por_conciliar' && <TabPorConciliar data={data} onDone={() => router.refresh()} />}
       {tab === 'saldos' && <TabSaldos data={data} />}
+      {tab === 'cancelados' && <TabCancelados data={data} onDone={() => router.refresh()} />}
 
       {addOpen && (
         <AgregarPagoModal
@@ -775,6 +781,163 @@ function AgregarPagoModal({
             Registrar pago
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Pestaña — CANCELADOS POR LIQUIDAR (Regla 2 SOENA)
+// ════════════════════════════════════════════════════════════════════════════
+
+function TabCancelados({ data, onDone }: { data: ConciliacionV2; onDone: () => void }) {
+  if (data.canceladosPorLiquidar.length === 0) {
+    return <Empty>No hay negocios cancelados con plata por liquidar.</Empty>
+  }
+  return (
+    <div className="space-y-4">
+      <p className="text-[12px]" style={{ color: '#6B7280' }}>
+        Negocios cancelados o perdidos con dinero ya recaudado. El sistema surte las dos bolsas; el área
+        financiera liquida caso a caso según el contrato SOENA↔cliente. El sistema no decide devolución vs penalidad.
+      </p>
+      {data.canceladosPorLiquidar.map((c) => (
+        <CanceladoCard key={c.negocio_id} cancelado={c} onDone={onDone} />
+      ))}
+    </div>
+  )
+}
+
+function CanceladoCard({ cancelado: c, onDone }: { cancelado: CanceladoPorLiquidar; onDone: () => void }) {
+  const [pending, startTransition] = useTransition()
+  const b = c.bolsas
+  const [devolver, setDevolver] = useState('')
+  const [penalidad, setPenalidad] = useState('')
+  const [motivo, setMotivo] = useState('')
+
+  const honorarioPendiente = b.honorario_por_liquidar > 0
+  const pasantePendiente = b.pasante_recaudado > 0 && !c.pasante_resuelto
+
+  function liquidarHonorario() {
+    const dev = Number(devolver) || 0
+    const pen = Number(penalidad) || 0
+    if (dev <= 0 && pen <= 0) return toast.error('Indica un monto a devolver y/o a retener como penalidad')
+    if (dev + pen > b.honorario_por_liquidar + 1) return toast.error('La suma excede el honorario por liquidar')
+    if (!motivo.trim()) return toast.error('El motivo es obligatorio')
+    startTransition(async () => {
+      const res = await liquidarHonorarioCancelado({ negocio_id: c.negocio_id, devolver: dev, penalidad: pen, motivo: motivo.trim() })
+      if (res.success) { setDevolver(''); setPenalidad(''); setMotivo(''); onDone() }
+      else toast.error(res.error)
+    })
+  }
+
+  function liquidarPasante(accion: 'devolver' | 'cerrar_contra_desembolso') {
+    startTransition(async () => {
+      const res = await liquidarPasanteCancelado({ negocio_id: c.negocio_id, accion, motivo: motivo.trim() || undefined })
+      if (res.success) onDone()
+      else toast.error(res.error)
+    })
+  }
+
+  return (
+    <div className="rounded-lg border" style={{ borderColor: '#FED7AA' }}>
+      {/* Encabezado */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: '#F3F4F6' }}>
+        <div className="flex min-w-0 items-center gap-2">
+          <Link href={`/negocios/${c.negocio_id}`} className="font-semibold" style={{ color: '#1A1A1A' }}>{c.codigo ?? '—'}</Link>
+          <span className="text-[12px]" style={{ color: '#6B7280' }}>{c.nombre ?? c.empresa ?? ''}</span>
+          <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: '#FEF3C7', color: '#B45309' }}>
+            <Ban className="h-3 w-3" /> {c.estado === 'perdido' ? 'Perdido' : 'Cancelado'}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-4 px-4 py-3">
+        {c.razon_cierre && (
+          <p className="text-[12px]" style={{ color: '#6B7280' }}>Motivo del cierre: {c.razon_cierre}</p>
+        )}
+
+        {/* Bolsa 1 — Honorario recaudado-no-reconocido */}
+        <section className="rounded-md border p-3" style={{ borderColor: '#E5E7EB' }}>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>Honorario recaudado (no reconocido)</h3>
+            <span className="text-[15px] font-bold tabular-nums" style={{ color: honorarioPendiente ? '#DC2626' : '#10B981' }}>
+              {fmtCOP(b.honorario_por_liquidar)}
+            </span>
+          </div>
+          <p className="mb-2 text-[11px]" style={{ color: '#9CA3AF' }}>
+            Recaudado {fmtCOP(b.honorario_recaudado)}
+            {b.ya_por_devolver > 0 ? ` · ya por devolver ${fmtCOP(b.ya_por_devolver)}` : ''}
+            {b.ya_penalidad > 0 ? ` · ya penalidad ${fmtCOP(b.ya_penalidad)}` : ''}
+          </p>
+          {honorarioPendiente ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Devolver al cliente">
+                  <input value={devolver} onChange={(e) => setDevolver(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric"
+                    placeholder="0" className="w-full rounded-md border px-2 py-1.5 text-[13px] tabular-nums outline-none" style={{ borderColor: '#E5E7EB' }} />
+                </Field>
+                <Field label="Retener como penalidad">
+                  <input value={penalidad} onChange={(e) => setPenalidad(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric"
+                    placeholder="0" className="w-full rounded-md border px-2 py-1.5 text-[13px] tabular-nums outline-none" style={{ borderColor: '#E5E7EB' }} />
+                </Field>
+              </div>
+              {(Number(penalidad) || 0) > 0 && (
+                <p className="flex items-start gap-1 text-[11px]" style={{ color: '#B45309' }}>
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  La penalidad es indemnización (no ingreso por servicios). Tratamiento fiscal pendiente de Felipe.
+                </p>
+              )}
+              <Field label="Motivo (obligatorio)">
+                <input value={motivo} onChange={(e) => setMotivo(e.target.value)}
+                  placeholder="ej. cláusula X del contrato, cliente desistió…" className="w-full rounded-md border px-2 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
+              </Field>
+              <button onClick={liquidarHonorario} disabled={pending}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white disabled:opacity-60" style={{ backgroundColor: VERDE }}>
+                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Aplicar liquidación
+              </button>
+            </div>
+          ) : (
+            <p className="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-600">
+              <CheckCircle2 className="h-4 w-4" /> Honorario liquidado
+            </p>
+          )}
+        </section>
+
+        {/* Bolsa 2 — Pasante UPME en custodia */}
+        {b.pasante_recaudado > 0 && (
+          <section className="rounded-md border p-3" style={{ borderColor: '#E5E7EB' }}>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>
+                <Landmark className="h-3.5 w-3.5" /> Pasante UPME en custodia
+              </h3>
+              <span className="text-[15px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(b.pasante_recaudado)}</span>
+            </div>
+            <p className="mb-2 text-[11px]" style={{ color: '#9CA3AF' }}>
+              Sugerencia del sistema: {c.sugerencia_pasante === 'cerrar_contra_desembolso'
+                ? 'ya desembolsado a la UPME → cerrar contra el desembolso (no se devuelve).'
+                : 'no desembolsado a la UPME → devolver al cliente.'} Financiera confirma.
+            </p>
+            {pasantePendiente ? (
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => liquidarPasante('devolver')} disabled={pending}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-semibold disabled:opacity-60"
+                  style={{ borderColor: c.sugerencia_pasante === 'devolver' ? VERDE : '#E5E7EB', color: '#B45309' }}>
+                  <Undo2 className="h-4 w-4" /> Devolver al cliente
+                </button>
+                <button onClick={() => liquidarPasante('cerrar_contra_desembolso')} disabled={pending}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-semibold disabled:opacity-60"
+                  style={{ borderColor: c.sugerencia_pasante === 'cerrar_contra_desembolso' ? VERDE : '#E5E7EB', color: '#1A1A1A' }}>
+                  <Landmark className="h-4 w-4" /> Cerrar contra desembolso
+                </button>
+              </div>
+            ) : (
+              <p className="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-600">
+                <CheckCircle2 className="h-4 w-4" /> Pasante resuelto
+              </p>
+            )}
+          </section>
+        )}
       </div>
     </div>
   )

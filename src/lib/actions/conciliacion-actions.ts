@@ -12,6 +12,14 @@ import {
   saldoEsperadoPorModalidad as saldoEsperadoPuro,
   type ModeloDinero,
 } from '@/lib/upme/modelo-dinero'
+import {
+  componerDosBolsas,
+  tienePlataPorLiquidar,
+  sugerirDestinoPasante,
+  TIPO_PENALIDAD,
+  type CobroLiquidacion,
+  type DosBolsas,
+} from '@/lib/upme/liquidacion-cancelados'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -682,6 +690,8 @@ export interface ConciliacionV2 {
   // Pestaña 5 — Vista general: registro de TODAS las referencias de pago
   // con su desglose por negocio (cuánto de cada pago quedó cargado a cada uno).
   referencias: ReferenciaPago[]
+  // Regla 2 — negocios cancelados/perdidos con plata por liquidar (SOENA opt-in).
+  canceladosPorLiquidar: CanceladoPorLiquidar[]
   // Pestaña 5 — métricas
   metricas: {
     referencias_cargadas: number
@@ -689,6 +699,7 @@ export interface ConciliacionV2 {
     en_saldo: number
     duplicados: number
     conciliados: number
+    cancelados_por_liquidar: number
   }
 }
 
@@ -1006,6 +1017,9 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
       diferencia: s.saldo,
     }))
 
+  // Regla 2: negocios cancelados/perdidos con plata por liquidar (SOENA opt-in).
+  const { filas: canceladosPorLiquidar } = await getCanceladosPorLiquidar()
+
   return {
     data: {
       sobrepagos: sobrepagos.sort((a, b) => Number(a.conciliado) - Number(b.conciliado)),
@@ -1022,12 +1036,14 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
         if (am !== bm) return am - bm
         return b.valor_pagado - a.valor_pagado
       }),
+      canceladosPorLiquidar,
       metricas: {
         referencias_cargadas: referencias.length,
         por_conciliar: sobrepagos.filter((s) => !s.conciliado).length,
         en_saldo: saldos.length,
         duplicados: duplicados.length,
         conciliados: conciliadosList.length,
+        cancelados_por_liquidar: canceladosPorLiquidar.length,
       },
     },
   }
@@ -1747,4 +1763,428 @@ export async function aceptarDuplicado(
 
   revalidatePath('/conciliacion')
   return { success: true, desvinculados: aDesvincular.length }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REGLA 2 SOENA — liquidación de negocios CANCELADOS con plata recibida
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Cuando un negocio SOENA se CANCELA/PIERDE con dinero ya recaudado, esa plata sube
+// al panel de conciliación para que el área financiera (Diana) la liquide CASO A CASO.
+// El sistema SURTE (lista los cancelados con plata + desglose de las dos bolsas),
+// REGISTRA y APLICA la acción que elija financiera; NO auto-decide devolución vs
+// penalidad (esa regla depende del contrato SOENA↔cliente).
+//
+// La lógica pura de las dos bolsas vive en `@/lib/upme/liquidacion-cancelados` (testable
+// sin DB). Aquí va solo la parte que toca DB: detección, proxy de desembolso del pasante,
+// y las acciones de financiera (reusando cobros negativos `devolucion_pendiente` + el
+// nuevo `penalidad`, todo en activity_log).
+//
+// OPT-IN: solo negocios del workspace cuyo módulo `conciliacion` está activo (SOENA).
+// El gate del panel (`page.tsx`) ya exige `modules.conciliacion`; aquí, además, cada
+// action re-valida el área financiera vía ctxFinanciero.
+
+/** Fila del panel "Cancelados por liquidar": un negocio cancelado con plata recibida. */
+export interface CanceladoPorLiquidar {
+  negocio_id: string
+  codigo: string | null
+  nombre: string | null
+  empresa: string | null
+  /** 'cancelado' | 'perdido' — el motivo de cierre. */
+  estado: string | null
+  cierre_motivo: string | null
+  razon_cierre: string | null
+  /** Las dos bolsas (honorario recaudado-no-reconocido + pasante en custodia). */
+  bolsas: DosBolsas
+  /**
+   * ¿El pasante ya se desembolsó a la UPME? Proxy DB-derivable: el negocio alcanzó
+   * (históricamente) la etapa "Pago UPME" (stage=cobro más temprana de su línea) o una
+   * posterior. Es una SUGERENCIA — financiera confirma la acción.
+   */
+  pasante_desembolsado: boolean
+  /** Sugerencia del sistema para el pasante ('devolver' | 'cerrar_contra_desembolso'). */
+  sugerencia_pasante: 'devolver' | 'cerrar_contra_desembolso'
+  /** ¿Ya se resolvió el pasante (devuelto o cerrado contra desembolso)? */
+  pasante_resuelto: boolean
+}
+
+/**
+ * Deriva, para un conjunto de negocios, si históricamente alcanzaron la etapa
+ * "Pago UPME" (o posterior) — proxy de que la tarifa YA se desembolsó a la UPME.
+ *
+ * "Pago UPME" = la etapa `stage='cobro'` de MENOR orden en la línea del negocio (la
+ * temprana, desembolso a UPME; la otra cobro-stage es la conciliación tardía con el
+ * cliente — ver decisión SOENA 2026-07-08). Como el cierre sobreescribió
+ * `etapa_actual_id`, la etapa MÁXIMA alcanzada se reconstruye de `activity_log`
+ * (tipo='cambio_etapa', valor_nuevo/valor_anterior = ids de etapa).
+ *
+ * Devuelve un Set con los negocio_id que SÍ pasaron el gate del comprobante.
+ */
+async function negociosConPasanteDesembolsado(
+  supabase: unknown,
+  workspaceId: string,
+  negocios: Array<{ id: string; linea_id: string | null; etapa_actual_id: string | null }>,
+): Promise<Set<string>> {
+  const desembolsados = new Set<string>()
+  if (negocios.length === 0) return desembolsados
+
+  // 1. orden de "Pago UPME" por línea = MIN(orden) de etapas stage='cobro'.
+  const lineaIds = Array.from(new Set(negocios.map((n) => n.linea_id).filter((x): x is string => !!x)))
+  if (lineaIds.length === 0) return desembolsados
+  const { data: etapasRaw } = await db(supabase)
+    .from('etapas_negocio')
+    .select('id, linea_id, orden, stage')
+    .in('linea_id', lineaIds)
+  const etapas = (etapasRaw ?? []) as Array<{ id: string; linea_id: string; orden: number | null; stage: string | null }>
+
+  // orden de la etapa "Pago UPME" por línea
+  const ordenPagoUpmePorLinea = new Map<string, number>()
+  // orden por etapa_id (para mapear los ids del activity_log a un orden)
+  const ordenPorEtapaId = new Map<string, { linea_id: string; orden: number }>()
+  for (const e of etapas) {
+    if (e.orden == null) continue
+    ordenPorEtapaId.set(e.id, { linea_id: e.linea_id, orden: e.orden })
+    if (e.stage === 'cobro') {
+      const prev = ordenPagoUpmePorLinea.get(e.linea_id)
+      if (prev == null || e.orden < prev) ordenPagoUpmePorLinea.set(e.linea_id, e.orden)
+    }
+  }
+
+  // 2. Máximo orden alcanzado por negocio, de activity_log (cambio_etapa).
+  const negocioIds = negocios.map((n) => n.id)
+  const { data: logRaw } = await db(supabase)
+    .from('activity_log')
+    .select('entidad_id, valor_anterior, valor_nuevo')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad_tipo', 'negocio')
+    .eq('tipo', 'cambio_etapa')
+    .in('entidad_id', negocioIds)
+  const maxOrdenPorNegocio = new Map<string, number>()
+  const acumularOrden = (negId: string, etapaId: string | null | undefined) => {
+    if (!etapaId) return
+    const info = ordenPorEtapaId.get(etapaId)
+    if (!info) return
+    const prev = maxOrdenPorNegocio.get(negId) ?? -Infinity
+    if (info.orden > prev) maxOrdenPorNegocio.set(negId, info.orden)
+  }
+  for (const row of ((logRaw ?? []) as Array<{ entidad_id: string; valor_anterior: string | null; valor_nuevo: string | null }>)) {
+    acumularOrden(row.entidad_id, row.valor_anterior)
+    acumularOrden(row.entidad_id, row.valor_nuevo)
+  }
+  // Fallback: la etapa_actual (aunque sea la de cierre) también aporta orden alcanzado.
+  for (const n of negocios) acumularOrden(n.id, n.etapa_actual_id)
+
+  // 3. Desembolsado si el máximo orden alcanzado >= orden de "Pago UPME" de su línea.
+  for (const n of negocios) {
+    if (!n.linea_id) continue
+    const ordenUpme = ordenPagoUpmePorLinea.get(n.linea_id)
+    if (ordenUpme == null) continue // línea sin etapa Pago UPME → no se puede afirmar
+    const maxOrden = maxOrdenPorNegocio.get(n.id)
+    if (maxOrden != null && maxOrden >= ordenUpme) desembolsados.add(n.id)
+  }
+  return desembolsados
+}
+
+/**
+ * Lista los negocios CANCELADOS/PERDIDOS del workspace que aún tienen plata por
+ * liquidar (honorario recaudado-no-reconocido y/o pasante en custodia sin resolver),
+ * con el desglose de las dos bolsas y la sugerencia de destino del pasante.
+ *
+ * Detección: `estado IN ('cancelado','perdido')`. (`perdido` normalmente tiene 0 cobros
+ * porque `cerrarNegocioPerdido` lo exige, pero se incluye por defensa: si por vía legacy
+ * un perdido tuviera plata, también debe liquidarse.) Solo entran los que `tienePlataPorLiquidar`.
+ */
+export async function getCanceladosPorLiquidar(): Promise<{
+  filas: CanceladoPorLiquidar[]
+  error?: string
+}> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { filas: [], error: ctx.error }
+  const { supabase, workspaceId } = ctx
+
+  const { data: negociosRaw } = await db(supabase)
+    .from('negocios')
+    .select(`
+      id, codigo, nombre, estado, cierre_motivo, razon_cierre, linea_id, etapa_actual_id,
+      empresas:empresa_id ( nombre )
+    `)
+    .eq('workspace_id', workspaceId)
+    .in('estado', ['cancelado', 'perdido'])
+
+  const negocios = (negociosRaw ?? []) as Array<{
+    id: string
+    codigo: string | null
+    nombre: string | null
+    estado: string | null
+    cierre_motivo: string | null
+    razon_cierre: string | null
+    linea_id: string | null
+    etapa_actual_id: string | null
+    empresas: { nombre: string | null } | null
+  }>
+  if (negocios.length === 0) return { filas: [] }
+
+  const ids = negocios.map((n) => n.id)
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros')
+    .select('id, negocio_id, monto, tipo_cobro')
+    .eq('workspace_id', workspaceId)
+    .in('negocio_id', ids)
+  const cobrosPorNegocio = new Map<string, CobroLiquidacion[]>()
+  for (const c of ((cobrosRaw ?? []) as Array<{ id: string; negocio_id: string; monto: number; tipo_cobro: string | null }>)) {
+    if (!cobrosPorNegocio.has(c.negocio_id)) cobrosPorNegocio.set(c.negocio_id, [])
+    cobrosPorNegocio.get(c.negocio_id)!.push({ id: c.id, monto: c.monto, tipo_cobro: c.tipo_cobro })
+  }
+
+  const desembolsados = await negociosConPasanteDesembolsado(supabase, workspaceId, negocios)
+
+  // Negocios cuyo pasante ya se resolvió: dejan una etiqueta en activity_log al aplicar
+  // la acción ('pasante_cerrado_desembolso' o 'pasante_devuelto' en valor_nuevo).
+  const { data: pasanteTagRaw } = await db(supabase)
+    .from('activity_log')
+    .select('entidad_id, valor_nuevo')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad_tipo', 'negocio')
+    .in('entidad_id', ids)
+    .in('valor_nuevo', ['pasante_cerrado_desembolso', 'pasante_devuelto'])
+  const pasanteResueltoPorTag = new Set(
+    ((pasanteTagRaw ?? []) as Array<{ entidad_id: string }>).map((r) => r.entidad_id),
+  )
+
+  const filas: CanceladoPorLiquidar[] = []
+  for (const n of negocios) {
+    const cobros = cobrosPorNegocio.get(n.id) ?? []
+    const bolsas = componerDosBolsas(cobros)
+    const pasanteDesembolsado = desembolsados.has(n.id)
+    // El pasante se considera RESUELTO si no hay pasante en custodia, o si ya se aplicó
+    // una acción de pasante (cerrado contra desembolso / devuelto) marcada en activity_log.
+    const pasanteResuelto =
+      bolsas.pasante_recaudado === 0 || pasanteResueltoPorTag.has(n.id)
+    if (!tienePlataPorLiquidar(bolsas, pasanteResuelto)) continue
+    filas.push({
+      negocio_id: n.id,
+      codigo: n.codigo,
+      nombre: n.nombre,
+      empresa: n.empresas?.nombre ?? null,
+      estado: n.estado,
+      cierre_motivo: n.cierre_motivo,
+      razon_cierre: n.razon_cierre,
+      bolsas,
+      pasante_desembolsado: pasanteDesembolsado,
+      sugerencia_pasante: sugerirDestinoPasante(pasanteDesembolsado),
+      pasante_resuelto: pasanteResuelto,
+    })
+  }
+
+  filas.sort((a, b) => (a.codigo ?? '').localeCompare(b.codigo ?? ''))
+  return { filas }
+}
+
+// ── Acciones de financiera sobre un cancelado ─────────────────────────────────
+
+export interface LiquidarHonorarioInput {
+  negocio_id: string
+  /** Monto a DEVOLVER al cliente (cobro negativo `devolucion_pendiente`). 0 = nada. */
+  devolver: number
+  /** Monto a RETENER como penalidad (cobro `penalidad`, categoría propia). 0 = nada. */
+  penalidad: number
+  /** Motivo obligatorio (queda en activity_log + notas del cobro). */
+  motivo: string
+}
+
+/**
+ * Aplica la decisión de financiera sobre el HONORARIO recaudado-no-reconocido de un
+ * negocio cancelado: devolver (total/parcial), retener como penalidad, o mixto.
+ *
+ *   - `devolver` → cobro NEGATIVO `tipo_cobro='devolucion_pendiente'` (patrón existente).
+ *     Asiento: DB Anticipos de clientes / CR Caja.
+ *   - `penalidad` → cobro `tipo_cobro='penalidad'` (categoría PROPIA, NO ingreso por
+ *     servicios). 🔴 El tratamiento fiscal (renta/IVA/nota) lo escala Felipe — aquí solo
+ *     se deja el registro claro y marcado.
+ *
+ * NO auto-decide: financiera elige los montos. La suma devolver+penalidad no puede
+ * exceder el honorario pendiente por liquidar. Idempotencia suave: no re-inserta si la
+ * misma ref sintética ya existe.
+ */
+export async function liquidarHonorarioCancelado(
+  input: LiquidarHonorarioInput,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const negocioId = input.negocio_id
+  if (!negocioId) return { success: false, error: 'Elige el negocio' }
+  const devolver = Math.max(0, Math.round(Number(input.devolver) || 0))
+  const penalidad = Math.max(0, Math.round(Number(input.penalidad) || 0))
+  const motivo = (input.motivo ?? '').trim()
+  if (devolver <= 0 && penalidad <= 0) {
+    return { success: false, error: 'Indica un monto a devolver y/o a retener como penalidad' }
+  }
+  if (!motivo) return { success: false, error: 'El motivo es obligatorio' }
+
+  // Negocio del workspace y cancelado/perdido.
+  const { data: neg } = await db(supabase)
+    .from('negocios').select('id, estado').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+  const negocio = neg as { id: string; estado: string | null } | null
+  if (!negocio) return { success: false, error: 'Negocio no encontrado' }
+  if (negocio.estado !== 'cancelado' && negocio.estado !== 'perdido') {
+    return { success: false, error: 'Solo se liquida un negocio cancelado o perdido' }
+  }
+
+  // Recalcular las bolsas (server es autoridad — no confiar en el cliente).
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros').select('id, monto, tipo_cobro')
+    .eq('workspace_id', workspaceId).eq('negocio_id', negocioId)
+  const cobros = ((cobrosRaw ?? []) as Array<{ id: string; monto: number; tipo_cobro: string | null }>)
+    .map((c) => ({ id: c.id, monto: c.monto, tipo_cobro: c.tipo_cobro }))
+  const bolsas = componerDosBolsas(cobros)
+  if (devolver + penalidad > bolsas.honorario_por_liquidar + 1) {
+    return {
+      success: false,
+      error: `La suma (${fmtCOP(devolver + penalidad)}) excede el honorario por liquidar (${fmtCOP(bolsas.honorario_por_liquidar)}).`,
+    }
+  }
+
+  const fecha = todayBogotaISO()
+  const filas: Array<Record<string, unknown>> = []
+  if (devolver > 0) {
+    const ref = `LIQ-DEV-${negocioId.slice(0, 8)}`
+    const { data: ex } = await db(supabase).from('cobros').select('id')
+      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId)
+      .eq('external_ref', ref).eq('tipo_cobro', 'devolucion_pendiente').limit(1)
+    if (!ex || (ex as unknown[]).length === 0) {
+      filas.push({
+        workspace_id: workspaceId, negocio_id: negocioId, monto: -devolver,
+        tipo_cobro: 'devolucion_pendiente', fecha, external_ref: ref,
+        notas: `Devolución al cliente (negocio cancelado). ${motivo.slice(0, 300)}`,
+        split_json: { liquidacion_cancelado: true, bolsa: 'honorario', accion: 'devolver' },
+      })
+    }
+  }
+  if (penalidad > 0) {
+    const ref = `LIQ-PEN-${negocioId.slice(0, 8)}`
+    const { data: ex } = await db(supabase).from('cobros').select('id')
+      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId)
+      .eq('external_ref', ref).eq('tipo_cobro', TIPO_PENALIDAD).limit(1)
+    if (!ex || (ex as unknown[]).length === 0) {
+      filas.push({
+        workspace_id: workspaceId, negocio_id: negocioId, monto: penalidad,
+        tipo_cobro: TIPO_PENALIDAD, fecha, external_ref: ref,
+        notas: `Penalidad retenida (indemnización, NO ingreso por servicios — pendiente tratamiento fiscal Felipe). ${motivo.slice(0, 300)}`,
+        split_json: { liquidacion_cancelado: true, bolsa: 'honorario', accion: 'penalidad', pendiente_felipe: true },
+      })
+    }
+  }
+
+  if (filas.length > 0) {
+    const { error: insErr } = await db(supabase).from('cobros').insert(filas)
+    if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar la liquidación' }
+  }
+
+  if (staffId) {
+    try {
+      await db(supabase).from('activity_log').insert({
+        workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: negocioId,
+        tipo: 'comentario', autor_id: staffId,
+        contenido:
+          `Liquidación de honorario (negocio cancelado): ` +
+          [
+            devolver > 0 ? `devolver ${fmtCOP(devolver)}` : null,
+            penalidad > 0 ? `retener ${fmtCOP(penalidad)} como penalidad (marcada para Felipe)` : null,
+          ].filter(Boolean).join(' + ') +
+          `. Motivo: ${motivo.slice(0, 300)}`,
+      })
+    } catch { /* no bloquear por el log */ }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/conciliacion')
+  return { success: true }
+}
+
+export interface LiquidarPasanteInput {
+  negocio_id: string
+  /** 'devolver' | 'cerrar_contra_desembolso'. La confirma financiera (el sistema sugiere). */
+  accion: 'devolver' | 'cerrar_contra_desembolso'
+  motivo?: string
+}
+
+/**
+ * Aplica la decisión de financiera sobre el PASANTE UPME en custodia de un negocio
+ * cancelado:
+ *   - 'devolver' → cobro NEGATIVO `devolucion_pendiente` por el pasante recaudado (el
+ *     trámite no se hizo; es plata del cliente). Nunca fue ingreso de SOENA.
+ *   - 'cerrar_contra_desembolso' → NO se devuelve (SOENA ya cumplió el mandato ante la
+ *     UPME). Solo se deja constancia en activity_log; el pasante ya está excluido del
+ *     ingreso por su `tipo_cobro='pasante'`, así que no hace falta tocar el cobro.
+ *
+ * El sistema PRE-SUGIERE según el gate del comprobante (getCanceladosPorLiquidar), pero
+ * financiera confirma. NO auto-ejecuta.
+ */
+export async function liquidarPasanteCancelado(
+  input: LiquidarPasanteInput,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const negocioId = input.negocio_id
+  if (!negocioId) return { success: false, error: 'Elige el negocio' }
+  if (input.accion !== 'devolver' && input.accion !== 'cerrar_contra_desembolso') {
+    return { success: false, error: 'Acción inválida' }
+  }
+  const motivo = (input.motivo ?? '').trim()
+
+  const { data: neg } = await db(supabase)
+    .from('negocios').select('id, estado').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+  const negocio = neg as { id: string; estado: string | null } | null
+  if (!negocio) return { success: false, error: 'Negocio no encontrado' }
+  if (negocio.estado !== 'cancelado' && negocio.estado !== 'perdido') {
+    return { success: false, error: 'Solo se liquida un negocio cancelado o perdido' }
+  }
+
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros').select('id, monto, tipo_cobro')
+    .eq('workspace_id', workspaceId).eq('negocio_id', negocioId)
+  const cobros = ((cobrosRaw ?? []) as Array<{ id: string; monto: number; tipo_cobro: string | null }>)
+  const bolsas = componerDosBolsas(cobros)
+  if (bolsas.pasante_recaudado <= 0) {
+    return { success: false, error: 'Este negocio no tiene pasante UPME en custodia' }
+  }
+
+  const fecha = todayBogotaISO()
+  if (input.accion === 'devolver') {
+    const ref = `LIQ-PAS-DEV-${negocioId.slice(0, 8)}`
+    const { data: ex } = await db(supabase).from('cobros').select('id')
+      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId)
+      .eq('external_ref', ref).eq('tipo_cobro', 'devolucion_pendiente').limit(1)
+    if (!ex || (ex as unknown[]).length === 0) {
+      const { error: insErr } = await db(supabase).from('cobros').insert({
+        workspace_id: workspaceId, negocio_id: negocioId, monto: -bolsas.pasante_recaudado,
+        tipo_cobro: 'devolucion_pendiente', fecha, external_ref: ref,
+        notas: `Devolución del pasante UPME (trámite no realizado). ${motivo.slice(0, 300)}`,
+        split_json: { liquidacion_cancelado: true, bolsa: 'pasante', accion: 'devolver' },
+      })
+      if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar la devolución del pasante' }
+    }
+  }
+
+  if (staffId) {
+    try {
+      await db(supabase).from('activity_log').insert({
+        workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: negocioId,
+        tipo: 'comentario', autor_id: staffId,
+        contenido: input.accion === 'devolver'
+          ? `Pasante UPME (${fmtCOP(bolsas.pasante_recaudado)}) marcado por devolver al cliente (trámite no realizado).${motivo ? ` ${motivo.slice(0, 300)}` : ''}`
+          : `Pasante UPME (${fmtCOP(bolsas.pasante_recaudado)}) cerrado contra el desembolso a la UPME (mandato cumplido; no se devuelve).${motivo ? ` ${motivo.slice(0, 300)}` : ''}`,
+        // etiqueta estable para que getCanceladosPorLiquidar sepa que el pasante ya se cerró
+        valor_nuevo: input.accion === 'cerrar_contra_desembolso' ? 'pasante_cerrado_desembolso' : 'pasante_devuelto',
+      })
+    } catch { /* no bloquear por el log */ }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/conciliacion')
+  return { success: true }
 }
