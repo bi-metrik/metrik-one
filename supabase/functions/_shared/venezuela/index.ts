@@ -181,6 +181,19 @@ export async function continueVeChat(
     return;
   }
 
+  // 3b. Paso de UBICACION deterministico: primer turno tras el OK. Texto FIJO (estado/municipio,
+  // SIN ofrecer audio) + boton nativo "Enviar ubicacion". No pasa por el modelo -> no se sale de
+  // contexto ni ofrece audio. Se salta si la persona ya compartio su ubicacion.
+  if (state.turns === 0 && !state.location) {
+    const body = "Para ubicar tu voz en el mapa: ¿en qué parte de Venezuela estás? Dime tu *estado y municipio* (o la ciudad). Si quieres, toca el botón de abajo para enviar tu ubicación 👇";
+    state.history.push({ role: "model", text: body });
+    state.turns += 1;
+    await supabase.from("ve_chat_sessions").update({ state, closed: false, updated_at: new Date().toISOString() }).eq("phone", phone);
+    await humanDelay(body);
+    await sendLocationRequest(phone, body);
+    return;
+  }
+
   // 4. Routing: modelo + system segun crisis
   const model = state.crisis ? CRISIS_MODEL : BASE_MODEL;
   const system = state.crisis ? BOT_SYSTEM + crisisPromptBlock(state.crisis) : BOT_SYSTEM;
@@ -193,12 +206,15 @@ export async function continueVeChat(
   try {
     // 5. Generar (thinking OFF obligatorio)
     const r = await generate({ model, system, messages, temperature: 0.7, maxOutputTokens: 256, thinkingBudget: 0 });
-    const botText = clean(r.text) || "Estoy aquí contigo. ¿Me cuentas un poco más?";
+    const botText = (clean(r.text) || "Estoy aquí contigo. ¿Me cuentas un poco más?").replace(/\[LISTO\]/gi, "").trim() || "Gracias por compartir esto.";
 
-    // 6. Interceptar la ATRIBUCION: si el modelo la pregunta o intenta cerrar, tomamos el control y
-    // pedimos el nombre de forma deterministica (el modelo no lo pedia de forma confiable).
+    // 6. Interceptar la ATRIBUCION de forma robusta: el modelo marca el fin con [LISTO] (paso 8), y
+    // ademas disparamos si intenta cerrar de cualquier forma o menciona nombre/anonima. El nombre lo
+    // pide SIEMPRE el codigo (el modelo no lo hacia de forma confiable).
+    const wrapUp = /\[LISTO\]/i.test(r.text) || isClose(botText) ||
+      /no (tengo|hay) m[aá]s preguntas|hemos terminado|eso es todo|por ahora (no|es todo|eso es)|con esto (cerramos|terminamos)/i.test(botText);
     const modeloPideAtribucion = /an[oó]nim/i.test(botText) && /nombre/i.test(botText);
-    if (state.turns >= 2 && state.atribucion === undefined && (modeloPideAtribucion || isClose(botText))) {
+    if (state.turns >= 2 && state.atribucion === undefined && (wrapUp || modeloPideAtribucion)) {
       const preg = "Por último 🙏 ¿quieres que tu historia aparezca con tu nombre? Si es así, escríbeme el nombre tal como quieres que salga; o si prefieres, escribe *anónima*.";
       state.history.push({ role: "model", text: preg });
       state.fase = "atribucion";
@@ -209,24 +225,16 @@ export async function continueVeChat(
       return;
     }
 
-    // 7. Guardar estado y responder
-    // El primer turno generado (respuesta al OK) es el paso de ubicacion: se envia con el boton
-    // nativo "Enviar ubicacion" de WhatsApp, salvo que la persona ya haya compartido su ubicacion.
-    const esTurnoUbicacion = state.turns === 0 && !state.location;
+    // 7. Turno conversacional normal. El cierre real NO se decide aqui: lo dispara la fase de
+    // atribucion (arriba) o el tope de turnos. Asi la sesion nunca se cierra sin pasar por el nombre.
     state.history.push({ role: "model", text: botText });
     state.turns += 1;
-    const closed = isClose(botText) || state.turns >= cap;
     await supabase
       .from("ve_chat_sessions")
-      .update({ state, closed, updated_at: new Date().toISOString() })
+      .update({ state, updated_at: new Date().toISOString() })
       .eq("phone", phone);
-    await humanDelay(botText); // pausa proporcional para que no llegue instantaneo
-    if (esTurnoUbicacion) {
-      await sendLocationRequest(phone, botText); // texto del modelo + boton "Enviar ubicacion"
-    } else {
-      await sendTextMessage(phone, botText);
-    }
-    if (closed) await closeAndSerialize(supabase, phone, state);
+    await humanDelay(botText);
+    await sendTextMessage(phone, botText);
   } catch (e) {
     // El modelo no respondio (tras reintentos). La sesion NO se cierra: el hilo queda guardado
     // y el participante puede retomar reenviando su ultima respuesta.
