@@ -272,6 +272,12 @@ export type PropuestaEconomicaRenderPayload = {
   plan2_valor: string               // valor final Plan 2 con descuento aplicado
   plan2_descuento_pct: string       // "25%"
   plan2_ahorro: string              // base - plan2
+  // ── Tarifa UPME (pasante) — opcionales; el template las usa si están ─────────
+  // (El render del PDF se ajusta en la rama plomeria; aquí solo se alimentan.)
+  tarifa_upme?: string              // tarifa formateada ("$1.234.567")
+  tarifa_upme_valor?: number        // tarifa numérica
+  plan1_total_con_tarifa?: string   // honorario plan 1 + tarifa (total a pagar)
+  plan2_total_con_tarifa?: string   // honorario plan 2 + tarifa (total a pagar)
   version: number                   // 1, 2, 3...
   // ── Personalización (opcionales; SOENA los envía, otros templates los ignoran) ──
   generador_nombre?: string         // firma: nombre del usuario que genera

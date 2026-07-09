@@ -6,6 +6,12 @@ import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { randomUUID } from 'crypto'
 import { consultarTransaccionEpayco } from '@/lib/epayco'
+import {
+  repartirPagoTarifaHonorario,
+  tipoCobroHonorario,
+  saldoEsperadoPorModalidad as saldoEsperadoPuro,
+  type ModeloDinero,
+} from '@/lib/upme/modelo-dinero'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -53,12 +59,36 @@ export interface FilaConciliacion {
   precio: number
   cobrado: number
   diferencia: number // precio - cobrado. >0 saldo pendiente, <0 sobrepago, 0 cuadrado
+  /**
+   * Saldo ESPERADO según la modalidad del negocio. En 50/50 (plan 1), mientras no
+   * llegue el 2º pago, se espera un saldo = 50% del honorario (NO es descuadre). En
+   * único (plan 2) o sin modalidad, saldo_esperado = 0. Deriva de la propuesta.
+   */
+  saldo_esperado: number
+  /**
+   * Descuadre REAL = diferencia − saldo_esperado. 0 = todo cuadra (incluido el
+   * pendiente esperado de 50/50). ≠0 = requiere atención (sobrepago o faltante real).
+   * El panel debe interpretar ESTE valor, no `diferencia`, para no marcar en falso
+   * el 50% pendiente esperado de un negocio 50/50.
+   */
+  descuadre: number
+  modalidad: 1 | 2 | null // 1 = 50/50, 2 = único, null = sin propuesta con modalidad
   /** Referencias ePayco/externas ya registradas en el negocio (para la columna Referencia). */
   referencias: string[]
   conciliado: boolean
   conciliado_at: string | null
   /** Un comercial pidió conciliación de Diana (etiqueta pendiente en activity_log). */
   solicitado: boolean
+}
+
+/**
+ * Saldo esperado (pendiente legítimo) según la modalidad. En 50/50 el 2º 50% del
+ * honorario está pendiente por diseño hasta el pago de éxito → ese saldo NO es
+ * descuadre. La tarifa (pasante) va completa por adelantado, así que no cuenta
+ * como pendiente esperado. Pura (no exportada: este archivo es 'use server').
+ */
+function saldoEsperadoPorModalidad(modelo: ModeloDineroNegocio | null): number {
+  return saldoEsperadoPuro(modelo as ModeloDinero | null)
 }
 
 /** Un negocio elegible para recibir una porción de un pago repartido. */
@@ -147,6 +177,30 @@ export async function getPanelConciliacion(): Promise<{
     concPorNegocio.set(r.negocio_id, { conciliado: r.conciliado, conciliado_at: r.conciliado_at })
   }
 
+  // Modelo de dinero (tarifa + modalidad) por negocio, leído de sus bloques
+  // propuesta_economica aprobados. Sirve para el saldo ESPERADO por modalidad
+  // (50/50 → el 2º 50% del honorario es pendiente legítimo, no descuadre).
+  const { data: propuestasRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+    .in('negocio_id', ids)
+  const modeloPorNegocio = new Map<string, ModeloDineroNegocio>()
+  for (const p of ((propuestasRaw ?? []) as Array<{ negocio_id: string; data: Record<string, unknown> | null }>)) {
+    const d = p.data
+    if (!d) continue
+    const plan = (d.aprobado_plan === 1 || d.aprobado_plan === 2) ? (d.aprobado_plan as 1 | 2) : null
+    const tarifa = Number(d.aprobado_tarifa_upme ?? d.tarifa_upme ?? 0)
+    const honorario = d.aprobado_honorario != null ? Number(d.aprobado_honorario) : null
+    // Guardar aun sin tarifa: la modalidad importa para el saldo esperado.
+    if (plan == null && !(tarifa > 0)) continue
+    modeloPorNegocio.set(p.negocio_id, {
+      tarifa_upme: Number.isFinite(tarifa) ? tarifa : 0,
+      aprobado_plan: plan,
+      aprobado_honorario: honorario,
+    })
+  }
+
   // Etiquetas de "solicitud de conciliación" de comerciales (activity_log). Una
   // etiqueta vale solo si NO tiene una 'conciliacion_atendida' posterior. Resolvemos
   // en JS sobre un solo fetch batch de ambos tipos para estos negocios.
@@ -173,6 +227,9 @@ export async function getPanelConciliacion(): Promise<{
     const precio = n.precio_aprobado ?? n.precio_estimado ?? 0
     const cobrado = cobradoPorNegocio.get(n.id) ?? 0
     const conc = concPorNegocio.get(n.id)
+    const modelo = modeloPorNegocio.get(n.id) ?? null
+    const diferencia = precio - cobrado
+    const saldoEsperado = saldoEsperadoPorModalidad(modelo)
     return {
       negocio_id: n.id,
       codigo: n.codigo,
@@ -181,7 +238,11 @@ export async function getPanelConciliacion(): Promise<{
       etapa_nombre: n.etapas_negocio?.nombre ?? null,
       precio,
       cobrado,
-      diferencia: precio - cobrado,
+      diferencia,
+      saldo_esperado: saldoEsperado,
+      // Descuadre real = lo que falta MÁS ALLÁ de lo esperado por modalidad.
+      descuadre: diferencia - saldoEsperado,
+      modalidad: modelo?.aprobado_plan ?? null,
       referencias: Array.from(refsPorNegocio.get(n.id) ?? []),
       conciliado: conc?.conciliado ?? false,
       conciliado_at: conc?.conciliado_at ?? null,
@@ -190,14 +251,15 @@ export async function getPanelConciliacion(): Promise<{
   })
 
   // Acotar a lo que está en la cancha de Diana: negocio en Cobro (escalado), o
-  // etiquetado por un comercial, o con sobrepago (diferencia < 0), o ya conciliado
-  // (historial). El pipeline temprano con saldo pendiente (diferencia > 0 sin estar
-  // en Cobro) es "por cobrar" — del comercial, NO "por conciliar" de Diana.
+  // etiquetado por un comercial, o con sobrepago REAL (descuadre < 0), o ya
+  // conciliado (historial). El pipeline temprano con pendiente esperado (50% de
+  // 50/50, o saldo por cobrar sin estar en Cobro) NO es "por conciliar" de Diana.
+  // Usamos `descuadre` (no `diferencia`) para no marcar en falso el 50% esperado.
   const filasRelevantes = filas.filter(
     (f) =>
       stagePorNegocio.get(f.negocio_id) === 'cobro' ||
       f.solicitado ||
-      f.diferencia < 0 ||
+      f.descuadre < 0 ||
       f.conciliado,
   )
 
@@ -1141,6 +1203,189 @@ async function refDuplicadaNoSplit(
   const row = data as { negocio_id: string; negocios: { codigo: string | null } | null } | null
   if (!row?.negocio_id) return null
   return { negocio_id: row.negocio_id, codigo: row.negocios?.codigo ?? null }
+}
+
+// ── Modelo de dinero SOENA: reparto de UN pago en 2 cobros (pasante + honorario) ──
+//
+// El cliente paga en UN pago ePayco dos componentes: honorario de SOENA + tarifa
+// UPME (pasante — SOENA solo recauda y desembolsa). Este helper lee, del bloque
+// `propuesta_economica` aprobado del negocio, la tarifa (pasante) congelada y la
+// modalidad (aprobado_plan: 1 = 50/50, 2 = único). OPT-IN: si el negocio no tiene
+// propuesta aprobada con tarifa, devuelve null → el caller usa el flujo de 1 cobro.
+
+/** Info del modelo de dinero de un negocio, leída de su propuesta aprobada. */
+export type ModeloDineroNegocio = ModeloDinero
+
+export async function leerModeloDineroNegocio(
+  supabase: unknown,
+  negocioId: string,
+): Promise<ModeloDineroNegocio | null> {
+  // Busca el bloque propuesta_economica del negocio (por tipo de su definición).
+  const { data } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, estado, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+    .limit(1)
+    .maybeSingle()
+  const row = data as { data: Record<string, unknown> | null } | null
+  if (!row?.data) return null
+  const d = row.data
+  const tarifa = Number(d.aprobado_tarifa_upme ?? d.tarifa_upme ?? 0)
+  const plan = (d.aprobado_plan === 1 || d.aprobado_plan === 2) ? (d.aprobado_plan as 1 | 2) : null
+  const honorario = d.aprobado_honorario != null ? Number(d.aprobado_honorario) : null
+  if (!Number.isFinite(tarifa) || tarifa <= 0) {
+    // Sin tarifa (pasante) → este negocio no usa el reparto en 2 cobros.
+    return null
+  }
+  return { tarifa_upme: tarifa, aprobado_plan: plan, aprobado_honorario: honorario }
+}
+
+export interface CrearCobrosSoenaInput {
+  negocio_id: string
+  referencia: string
+  monto: number
+  fuente?: string          // 'epayco' | 'davivienda' | texto libre (default 'epayco')
+  fecha?: string
+}
+
+/**
+ * Reparte UN pago de un negocio SOENA con tarifa en DOS cobros con `split_id`
+ * compartido dentro del MISMO negocio:
+ *   - Pasante: tipo_cobro='pasante', monto = min(pago, tarifa_upme) — la tarifa se
+ *     cubre PRIMERO (recaudo a favor de terceros, se excluye del ingreso).
+ *   - Honorario: monto = pago − monto_pasante. tipo_cobro según la modalidad
+ *     (anticipo en 50/50, saldo/pago en único).
+ *
+ * SIN BARRERAS: si el pago no calza exacto con el anticipo esperado, NO se rechaza;
+ * se parte lo que entró y la diferencia la maneja la conciliación (consistente con
+ * "nada bloquea"). Idempotente por (external_ref, negocio_id, tipo_cobro) dentro del
+ * split. OPT-IN: solo actúa si el negocio tiene propuesta aprobada con tarifa.
+ *
+ * Devuelve `applied:false` cuando el negocio no tiene tarifa (el caller debe usar el
+ * flujo de un solo cobro).
+ */
+export async function crearCobrosDesdePagoSoena(
+  input: CrearCobrosSoenaInput,
+): Promise<
+  | { success: true; applied: true; split_id: string; monto_pasante: number; monto_honorario: number }
+  | { success: true; applied: false }
+  | { success: false; error: string }
+> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId } = ctx
+
+  const negocioId = input.negocio_id
+  if (!negocioId) return { success: false, error: 'Elige el negocio al que se asigna el pago' }
+  const referencia = (input.referencia ?? '').trim()
+  if (!referencia) return { success: false, error: 'La referencia del pago es obligatoria' }
+  const monto = Number(input.monto)
+  if (!Number.isFinite(monto) || monto <= 0) return { success: false, error: 'El monto debe ser mayor a cero' }
+
+  const { data: neg } = await db(supabase)
+    .from('negocios').select('id').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+  if (!neg) return { success: false, error: 'Negocio no encontrado' }
+
+  const modelo = await leerModeloDineroNegocio(supabase, negocioId)
+  if (!modelo) return { success: true, applied: false }
+
+  return crearCobrosSoenaCore(supabase, workspaceId, negocioId, referencia, monto, modelo, input)
+}
+
+/**
+ * Núcleo del reparto (sin guard) — reutilizable desde el auto-cobro de anticipo
+ * (que corre con `getWorkspace` en negocio-v2-actions) y desde el panel financiero.
+ * El guard lo aplica el caller.
+ */
+export async function crearCobrosSoenaCore(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+  referencia: string,
+  monto: number,
+  modelo: ModeloDineroNegocio,
+  opts?: { fuente?: string; fecha?: string },
+): Promise<
+  | { success: true; applied: true; split_id: string; monto_pasante: number; monto_honorario: number }
+  | { success: false; error: string }
+> {
+  const fecha = (opts?.fecha ?? '').trim() || todayBogotaISO()
+  const fuente = (opts?.fuente ?? 'epayco').trim() || 'epayco'
+
+  // La tarifa (pasante) se cubre PRIMERO; el resto es honorario (helper puro).
+  const { monto_pasante: montoPasante, monto_honorario: montoHonorario } =
+    repartirPagoTarifaHonorario(monto, modelo.tarifa_upme)
+  const tipoHonorario = tipoCobroHonorario(modelo.aprobado_plan)
+
+  // Idempotencia: buscar cobros ya existentes de esta referencia en este negocio,
+  // por tipo. Si ya existe el pasante y/o el honorario, no re-insertar.
+  const { data: existentes } = await db(supabase)
+    .from('cobros')
+    .select('id, tipo_cobro')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+    .eq('external_ref', referencia)
+  const yaTipos = new Set(
+    ((existentes ?? []) as Array<{ tipo_cobro: string | null }>).map((c) => c.tipo_cobro),
+  )
+
+  // split_id: reusar el de un cobro existente de esta ref si lo hay; si no, nuevo.
+  let splitId: string = randomUUID()
+  const { data: existSplit } = await db(supabase)
+    .from('cobros')
+    .select('split_json')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+    .eq('external_ref', referencia)
+    .not('split_json', 'is', null)
+    .limit(1)
+    .maybeSingle()
+  const prevSplit = (existSplit as { split_json: { split_id?: string } | null } | null)?.split_json?.split_id
+  if (prevSplit) splitId = prevSplit
+
+  const filas: Array<Record<string, unknown>> = []
+  if (montoPasante > 0 && !yaTipos.has('pasante')) {
+    filas.push({
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      monto: montoPasante,
+      tipo_cobro: 'pasante',
+      fecha,
+      external_ref: referencia,
+      fuente,
+      notas: `Tarifa UPME (pasante) — Ref ${referencia}`,
+      split_json: { split_id: splitId, split_total: monto, split_n: 2, componente: 'pasante' },
+    })
+  }
+  if (montoHonorario > 0 && !yaTipos.has(tipoHonorario)) {
+    filas.push({
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      monto: montoHonorario,
+      tipo_cobro: tipoHonorario,
+      fecha,
+      external_ref: referencia,
+      fuente,
+      notas: `Honorario SOENA — Ref ${referencia}`,
+      split_json: { split_id: splitId, split_total: monto, split_n: 2, componente: 'honorario' },
+    })
+  }
+
+  if (filas.length > 0) {
+    const { error: insErr } = await db(supabase).from('cobros').insert(filas)
+    if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar el reparto' }
+  }
+
+  // Cambió el cobrado → des-conciliar.
+  await db(supabase)
+    .from('negocio_conciliacion')
+    .update({ conciliado: false, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspaceId).eq('negocio_id', negocioId)
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/conciliacion')
+  return { success: true, applied: true, split_id: splitId, monto_pasante: montoPasante, monto_honorario: montoHonorario }
 }
 
 // ── repartirSobrepago — reparto INLINE del remanente de una referencia ───────
