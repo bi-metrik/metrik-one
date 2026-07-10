@@ -3,12 +3,15 @@
 // Soporta OAuth per-workspace + Shared Drives.
 //
 // Modos de credenciales:
-//   1. Per-workspace (preferido si workspaceId tiene config_extra.drive_*):
-//      Lee refresh_token + client_id + client_secret de
-//      `workspaces.config_extra` con el service client.
-//   2. Global (fallback): env vars GOOGLE_DRIVE_CLIENT_ID /
-//      CLIENT_SECRET / REFRESH_TOKEN — corresponde al OAuth de MeTRIK
-//      (cuenta mauricio.moreno@metrik.com.co).
+//   1. Service account (preferido, NO caduca): si el workspace tiene
+//      config_extra.drive_auth_mode='service_account' + drive_impersonate_user.
+//      Firma un JWT con la llave del SA (env GOOGLE_DRIVE_SA_KEY, fallback
+//      METRIK_PDF_RENDER_SA_KEY) e impersona al usuario via domain-wide
+//      delegation. Sin refresh tokens que caduquen, sin reautorización.
+//   2. Per-workspace OAuth (si config_extra tiene drive_refresh_token +
+//      drive_client_id + drive_client_secret): flujo refresh_token clásico.
+//   3. Global (fallback): env vars GOOGLE_DRIVE_CLIENT_ID / CLIENT_SECRET /
+//      REFRESH_TOKEN — OAuth de MeTRIK (cuenta mauricio.moreno@metrik.com.co).
 //
 // Todas las requests pasan supportsAllDrives=true para soportar
 // Unidades Compartidas (Shared Drives).
@@ -16,6 +19,7 @@
 // Server-only — NEVER import from client components.
 // ============================================================
 
+import { createSign } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 
 // ── Token cache (por workspace) ──────────────────────────────────────────────
@@ -29,11 +33,73 @@ interface CachedToken {
 
 const tokenCache = new Map<string, CachedToken>()
 
-interface DriveCredentials {
-  clientId: string
-  clientSecret: string
-  refreshToken: string
-  cacheKey: string
+type DriveCredentials =
+  | {
+      mode: 'oauth'
+      clientId: string
+      clientSecret: string
+      refreshToken: string
+      cacheKey: string
+    }
+  | {
+      mode: 'service_account'
+      saKeyRaw: string
+      impersonate: string
+      cacheKey: string
+    }
+
+/**
+ * Mintea un access token de Drive via service account + domain-wide delegation.
+ * Firma un JWT (RS256) con la llave privada del SA, con `sub` = usuario a
+ * impersonar. No usa refresh tokens → no caduca ni requiere reautorización.
+ */
+async function mintServiceAccountToken(
+  saKeyRaw: string,
+  impersonate: string,
+): Promise<{ access_token: string; expires_in: number }> {
+  let sa: { client_email?: string; private_key?: string; token_uri?: string }
+  try {
+    sa = JSON.parse(saKeyRaw)
+  } catch {
+    throw new Error('SA key (GOOGLE_DRIVE_SA_KEY / METRIK_PDF_RENDER_SA_KEY) no es JSON válido')
+  }
+  if (!sa.client_email || !sa.private_key) {
+    throw new Error('SA key inválida — falta client_email o private_key')
+  }
+  const tokenUri = sa.token_uri || 'https://oauth2.googleapis.com/token'
+  const now = Math.floor(Date.now() / 1000)
+  const b64url = (b: Buffer | string) =>
+    Buffer.from(b as Buffer).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+  const claims = b64url(
+    JSON.stringify({
+      iss: sa.client_email,
+      sub: impersonate,
+      scope: 'https://www.googleapis.com/auth/drive',
+      aud: tokenUri,
+      iat: now,
+      exp: now + 3600,
+    }),
+  )
+  const signingInput = `${header}.${claims}`
+  const signer = createSign('RSA-SHA256')
+  signer.update(signingInput)
+  const assertion = `${signingInput}.${b64url(signer.sign(sa.private_key))}`
+
+  const res = await fetch(tokenUri, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    }),
+  })
+  if (!res.ok) {
+    const t = await res.text()
+    throw new Error(`Drive SA token mint failed (${res.status}): ${t.slice(0, 300)}`)
+  }
+  const data = await res.json()
+  return { access_token: data.access_token as string, expires_in: (data.expires_in as number) ?? 3600 }
 }
 
 /**
@@ -59,6 +125,32 @@ async function resolveCredentials(workspaceId?: string): Promise<DriveCredential
 
     if (!error && ws) {
       const cfg = (ws.config_extra ?? {}) as Record<string, unknown>
+
+      // ── Modo service account (domain-wide delegation) — preferido ──
+      // No caduca ni requiere reautorización. Se chequea ANTES del OAuth.
+      if (cfg.drive_auth_mode === 'service_account') {
+        const impersonate = cfg.drive_impersonate_user as string | undefined
+        if (!impersonate) {
+          const slug = (ws.slug as string) ?? workspaceId
+          throw new Error(
+            `Workspace ${slug}: drive_auth_mode=service_account requiere ` +
+            `config_extra.drive_impersonate_user`,
+          )
+        }
+        const saKeyRaw = process.env.GOOGLE_DRIVE_SA_KEY || process.env.METRIK_PDF_RENDER_SA_KEY
+        if (!saKeyRaw) {
+          throw new Error(
+            'Falta env GOOGLE_DRIVE_SA_KEY (o METRIK_PDF_RENDER_SA_KEY) para modo service_account',
+          )
+        }
+        return {
+          mode: 'service_account',
+          saKeyRaw,
+          impersonate,
+          cacheKey: `sa:${workspaceId}:${impersonate}`,
+        }
+      }
+
       const refreshToken = cfg.drive_refresh_token as string | undefined
       const clientId = cfg.drive_client_id as string | undefined
       const clientSecret = cfg.drive_client_secret as string | undefined
@@ -68,6 +160,7 @@ async function resolveCredentials(workspaceId?: string): Promise<DriveCredential
 
       if (hasAll) {
         return {
+          mode: 'oauth',
           clientId: clientId!,
           clientSecret: clientSecret!,
           refreshToken: refreshToken!,
@@ -99,6 +192,7 @@ async function resolveCredentials(workspaceId?: string): Promise<DriveCredential
   }
 
   return {
+    mode: 'oauth',
     clientId,
     clientSecret,
     refreshToken,
@@ -120,6 +214,20 @@ export async function getAccessToken(workspaceId?: string): Promise<string> {
     return cached.token
   }
 
+  // ── Service account (domain-wide delegation): mint via JWT, no caduca ──
+  if (creds.mode === 'service_account') {
+    const { access_token, expires_in } = await mintServiceAccountToken(
+      creds.saKeyRaw,
+      creds.impersonate,
+    )
+    tokenCache.set(creds.cacheKey, {
+      token: access_token,
+      expiresAt: Date.now() + (expires_in - 60) * 1000,
+    })
+    return access_token
+  }
+
+  // ── OAuth refresh_token flow ──
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
