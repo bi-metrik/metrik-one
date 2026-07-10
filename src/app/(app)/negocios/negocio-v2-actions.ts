@@ -3,7 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
-import { createDriveFolder } from '@/lib/google-drive'
+import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
@@ -1125,95 +1125,12 @@ export async function crearNegocio(input: {
   }
 
   // ── Auto-crear carpeta en Google Drive ──
-  // Prioridad: linea.drive_folder_id → workspaces.drive_folder_id (fallback)
-  // El fallback workspace permite que workspaces con lineas-plantilla globales
-  // (workspace_id NULL) auto-creen carpetas sin tener que clonar la linea.
-  try {
-    const { data: lineaDrive } = await db(supabase)
-      .from('lineas_negocio')
-      .select('drive_folder_id')
-      .eq('id', lineaId)
-      .single()
-
-    let driveFolderId = (lineaDrive as { drive_folder_id: string | null } | null)?.drive_folder_id
-
-    if (!driveFolderId) {
-      const { data: wsData } = await db(supabase)
-        .from('workspaces')
-        .select('drive_folder_id')
-        .eq('id', workspaceId)
-        .single()
-      driveFolderId = (wsData as { drive_folder_id: string | null } | null)?.drive_folder_id
-    }
-
-    if (driveFolderId) {
-      // Obtener codigo auto-generado + nombre del cliente
-      const { data: negocioCreado } = await db(supabase)
-        .from('negocios')
-        .select('codigo, empresas(nombre), contactos(nombre)')
-        .eq('id', negocioData.id)
-        .single()
-
-      const neg = negocioCreado as {
-        codigo: string | null
-        empresas: { nombre: string } | null
-        contactos: { nombre: string } | null
-      } | null
-
-      const codigo = neg?.codigo ?? negocioData.id.slice(0, 8)
-      const clienteNombre = neg?.empresas?.nombre ?? neg?.contactos?.nombre ?? input.nombre
-      const folderName = `${codigo} - ${clienteNombre}`
-
-      const folderId = await createDriveFolder(folderName, driveFolderId, workspaceId)
-      const folderUrl = `https://drive.google.com/drive/folders/${folderId}`
-
-      // Pre-crear estructura canonica de subcarpetas — el operador y el cliente
-      // ven los compartimentos desde el primer dia, aunque no haya archivos.
-      const CARPETAS_INICIALES = [
-        '1. Legal',
-        '2. Comercial',
-        '3. UPME',
-        '4. DIAN',
-        '5. Otros',
-      ]
-      for (const carpeta of CARPETAS_INICIALES) {
-        try {
-          await createDriveFolder(carpeta, folderId, workspaceId)
-        } catch (err) {
-          // No bloquea creacion del negocio si una subcarpeta falla
-          console.warn(`[crearNegocio] no se pudo pre-crear "${carpeta}":`, err instanceof Error ? err.message : err)
-        }
-      }
-
-      // Guardar link en el negocio
-      await db(supabase)
-        .from('negocios')
-        .update({ carpeta_url: folderUrl })
-        .eq('id', negocioData.id)
-    }
-  } catch (driveErr) {
-    // No bloquear la creación del negocio si Drive falla, pero log explicito
-    // + registro en activity_log para que sea visible al owner sin tener que
-    // mirar logs de Vercel. Detectado tras incidente SOENA 2026-05-24 donde
-    // las carpetas dejaron de crearse silenciosamente al revocarse el OAuth.
-    const msg = driveErr instanceof Error ? driveErr.message : String(driveErr)
-    console.error(
-      `[crearNegocio] Error creando carpeta Drive (workspace=${workspaceId}, negocio=${negocioData.id}, linea=${lineaId}):`,
-      msg,
-    )
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase as any).from('activity_log').insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioData.id,
-        tipo: 'drive_folder_failed',
-        contenido: `Error creando carpeta en Drive: ${msg.slice(0, 500)}`,
-      })
-    } catch (logErr) {
-      console.error('[crearNegocio] No se pudo registrar drive_folder_failed en activity_log:', logErr)
-    }
-  }
+  // La lógica vive en el helper idempotente compartido `ensureNegocioDriveFolder`
+  // (una sola vía para formulario / webhook Meta / carga manual / backfill / cron).
+  // Resuelve drive_folder_id (linea → fallback workspace), crea carpeta +
+  // subcarpetas canónicas y setea carpeta_url. No bloquea la creación del negocio
+  // si Drive falla (el error queda registrado en activity_log).
+  await ensureNegocioDriveFolder(supabase, workspaceId, negocioData.id)
 
   // Derivar tipo_persona del solicitante desde la empresa del negocio (natural vs
   // jurídica). Se determina en la creación → ningún bloque manual lo pregunta; los
