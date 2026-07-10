@@ -143,6 +143,8 @@ export type NegocioResumen = {
   ciudad_label: string | null
   // Cédula/identificación del solicitante (bloque RUT, config-driven) — tarjeta + búsqueda
   cedula: string | null
+  // Radicado de certificación (bloque DA22, config-driven) — tarjeta + búsqueda
+  radicado: string | null
   // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
   responsables: Array<{ id: string; full_name: string }>
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
@@ -373,11 +375,14 @@ export async function getNegociosV2(
   const cardCfg = ((wsRes.data as { config_extra?: Record<string, unknown> } | null)
     ?.config_extra?.negocio_card) as
     { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string
-      cedula_bloque?: string; cedula_campo?: string } | undefined
+      cedula_bloque?: string; cedula_campo?: string
+      radicado_bloque?: string; radicado_campo?: string } | undefined
   const vehiculoPorNeg: Record<string, { label: string | null; seccional: string | null; ciudad: string | null }> = {}
   // Cédula del solicitante (bloque RUT, config-driven). Para tarjeta + búsqueda.
   const cedulaPorNeg: Record<string, string | null> = {}
-  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque].filter(Boolean) as string[]
+  // Radicado de certificación (bloque DA22, config-driven). Para tarjeta + búsqueda.
+  const radicadoPorNeg: Record<string, string | null> = {}
+  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque, cardCfg?.radicado_bloque].filter(Boolean) as string[]
   if (cardBloqueNombres.length > 0 && negocioIds.length > 0) {
     const getVal = (bdata: Record<string, unknown>, slug: string): string | null => {
       const campos = (bdata.campos as Record<string, { value?: unknown }> | undefined) ?? null
@@ -417,6 +422,12 @@ export async function getNegociosV2(
         const ced = cardCfg.cedula_campo ? getVal(bdata, cardCfg.cedula_campo) : null
         cedulaPorNeg[negId] = cedulaPorNeg[negId] ?? ced
       }
+      // Radicado de certificación (bloque DA22). El origen vive en Cargue y hay
+      // copias readonly heredadas en otras etapas → conserva la primera con valor.
+      if (cardCfg?.radicado_bloque && bnombre === cardCfg.radicado_bloque) {
+        const rad = cardCfg.radicado_campo ? getVal(bdata, cardCfg.radicado_campo) : null
+        radicadoPorNeg[negId] = radicadoPorNeg[negId] ?? rad
+      }
     }
   }
 
@@ -455,6 +466,7 @@ export async function getNegociosV2(
       seccional_label: ((row.metadata as Record<string, unknown> | null)?.seccional as string | undefined) ?? null,
       ciudad_label: vehiculoPorNeg[id]?.ciudad ?? null,
       cedula: cedulaPorNeg[id] ?? null,
+      radicado: radicadoPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
     }

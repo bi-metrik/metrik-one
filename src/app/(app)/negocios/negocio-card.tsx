@@ -169,6 +169,12 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
             </p>
           )}
+          {/* Radicado de certificación (config-driven, ej. SOENA) */}
+          {negocio.radicado && (
+            <p className="mt-0.5 truncate font-mono text-[11px] text-[#6B7280]" title={`Radicado: ${negocio.radicado}`}>
+              Rad. {negocio.radicado}
+            </p>
+          )}
           {/* Responsables asignados */}
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
             <User className="h-3 w-3 shrink-0 text-[#6B7280]/70" />
