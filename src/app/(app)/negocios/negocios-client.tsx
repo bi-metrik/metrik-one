@@ -122,7 +122,7 @@ export default function NegociosClient({
     return negocios.filter((n) => n.stage_actual === fase)
   }, [fase, etapaNum, negocios, cerradosFiltrados])
 
-  // Búsqueda libre (código, nombre/contacto, empresa, vehículo) + filtro de seccional DIAN
+  // Búsqueda libre (código, nombre/contacto, empresa, vehículo, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
   const currentFiltrado = useMemo(() => {
     let res = current
@@ -135,7 +135,7 @@ export default function NegociosClient({
     if (term) {
       res = res.filter((n) => {
         const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.seccional_label,
+          n.cedula, n.radicado, n.seccional_label,
           ...n.responsables.map((r) => r.full_name)]
           .filter(Boolean)
           .join(' ')
