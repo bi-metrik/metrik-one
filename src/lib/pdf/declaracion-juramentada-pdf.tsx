@@ -1,8 +1,10 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
+import { calcularDvNit } from '@/lib/dian/nit'
 
 interface DeclaracionJuramentadaProps {
   datos: {
     nombre_solicitante: string | null
+    // Base LIMPIA del NIT (sin DV), desde el campo rut.numero_identificacion.
     numero_identificacion: string | null
     // Se conserva en la interfaz para no romper el caller (formulario-actions),
     // pero el nuevo formato ya no lo usa: la cláusula PRIMERO es genérica.
@@ -40,9 +42,13 @@ const s = StyleSheet.create({
 
 export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: DeclaracionJuramentadaProps) {
   const nombre = datos.nombre_solicitante ?? '[NOMBRE SOLICITANTE]'
-  // numero_identificacion llega desde el campo rut.nit → es el NIT tal cual el RUT.
-  // Se usa como está, sin calcular DV ni transformar.
-  const nit = datos.numero_identificacion ?? '[NIT]'
+  // NIT SIEMPRE con dígito de verificación CALCULADO (algoritmo DIAN módulo 11).
+  // El DV es determinista; el del RUT puede venir mal extraído, así que se calcula
+  // siempre sobre la base limpia (rut.numero_identificacion) para garantizar el
+  // correcto y ser consistente con el Formato 010 del mismo expediente.
+  const nitBase = (datos.numero_identificacion ?? '').trim() || null
+  const dvFinal = nitBase ? calcularDvNit(nitBase) : null
+  const nitConDv = nitBase ? (dvFinal != null ? `${nitBase}-${dvFinal}` : nitBase) : '[NIT]'
   const ciudad = datos.municipio ?? '[Ciudad]'
   const email = datos.email ?? '[DIRECCIÓN DE CORREO]'
   const telefono = datos.telefono ?? '[NÚMERO DE CELULAR]'
@@ -73,7 +79,7 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
 
         {/* Introducción */}
         <Text style={s.intro}>
-          Yo, <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nombre}</Text>, identificado(a) con NIT No. <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nit}</Text>, actuando en nombre propio, manifiesto bajo la gravedad de juramento, de conformidad con el artículo 7 del Decreto 1165 de 2019:
+          Yo, <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nombre}</Text>, identificado(a) con NIT No. <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nitConDv}</Text>, actuando en nombre propio, manifiesto bajo la gravedad de juramento, de conformidad con el artículo 7 del Decreto 1165 de 2019:
         </Text>
 
         {/* Cláusulas */}
@@ -106,7 +112,7 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
         <View style={s.signatureBlock}>
           <View style={s.signatureLine}>
             <Text style={s.signatureName}>{nombre}</Text>
-            <Text style={s.signatureDetail}>NIT: {nit}</Text>
+            <Text style={s.signatureDetail}>NIT: {nitConDv}</Text>
             <Text style={s.signatureDetail}>Correo: {email}</Text>
             <Text style={s.signatureDetail}>Tel: {telefono}</Text>
           </View>
