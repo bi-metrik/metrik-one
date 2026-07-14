@@ -630,8 +630,34 @@ export async function getNegocioDetalle(id: string): Promise<{
   // la propuesta aprobada. Se expone SIEMPRE para que el bloque de Cobro muestre el
   // plan elegido (seguimiento financiero, sin cazarlo en la propuesta). null si aún
   // no hay propuesta aprobada.
-  const modeloDinero = await leerModeloDineroNegocio(supabase, id)
-  negocioTyped.modelo_dinero = modeloDinero ?? null
+  //
+  // NO se usa leerModeloDineroNegocio aquí: ese helper devuelve null cuando no hay
+  // tarifa UPME (su propósito es el reparto de cobros pasante/honorario). Para mostrar
+  // el plan queremos el plan aunque el negocio sea legacy sin tarifa. Leemos directo,
+  // priorizando el bloque de propuesta que tenga un plan aprobado.
+  let modeloDinero: ModeloDinero | null = null
+  const { data: propBloquesRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+  for (const pb of ((propBloquesRaw ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+    const d = pb.data
+    if (!d) continue
+    const planRaw = d.aprobado_plan
+    const plan = (planRaw === 1 || planRaw === 2) ? (planRaw as 1 | 2) : null
+    const tarifa = Number(d.aprobado_tarifa_upme ?? d.tarifa_upme ?? 0)
+    const honorario = d.aprobado_honorario != null ? Number(d.aprobado_honorario) : null
+    // Ignorar copias vacías (sin plan, sin tarifa, sin honorario).
+    if (plan == null && !(tarifa > 0) && honorario == null) continue
+    modeloDinero = {
+      tarifa_upme: Number.isFinite(tarifa) && tarifa > 0 ? tarifa : 0,
+      aprobado_plan: plan,
+      aprobado_honorario: honorario != null && Number.isFinite(honorario) ? honorario : null,
+    }
+    if (plan != null) break // el bloque con plan aprobado gana
+  }
+  negocioTyped.modelo_dinero = modeloDinero
 
   // Pendiente de recaudo para el handoff a operaciones. Solo se computa si la etapa
   // actual (aún en stage 'venta') tiene el gate `saldo:handoff` en su config_extra.
