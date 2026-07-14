@@ -4,6 +4,8 @@ import {
   repartirPagoTarifaHonorario,
   tipoCobroHonorario,
   saldoEsperadoPorModalidad,
+  umbralRecaudoHandoff,
+  calcularPendienteHandoff,
   type ModeloDinero,
 } from './modelo-dinero'
 
@@ -98,5 +100,86 @@ describe('escenario integrado 50/50: precio, reparto y descuadre', () => {
     const esperado = saldoEsperadoPorModalidad(modelo) // 1.5M esperado
     const descuadre = diferencia - esperado       // 0 → NO es descuadre
     expect(descuadre).toBe(0)
+  })
+})
+
+describe('umbralRecaudoHandoff — precio menos saldo diferido', () => {
+  const tarifa = 1_200_000
+  const honorario = 3_000_000
+  const precio = componerPrecioAprobado(honorario, tarifa) // 4.2M
+
+  it('Plan 1 (50/50) → tarifa + 50% honorario', () => {
+    const modelo: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 1, aprobado_honorario: honorario }
+    expect(umbralRecaudoHandoff(precio, modelo)).toBe(tarifa + honorario * 0.5) // 2.7M
+  })
+  it('Plan 2 (único) → precio completo (tarifa + 100% honorario)', () => {
+    const modelo: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 2, aprobado_honorario: honorario }
+    expect(umbralRecaudoHandoff(precio, modelo)).toBe(precio) // 4.2M
+  })
+  it('sin modelo → umbral = precio completo (no difiere nada)', () => {
+    expect(umbralRecaudoHandoff(precio, null)).toBe(precio)
+  })
+  it('precio inválido → 0', () => {
+    expect(umbralRecaudoHandoff(0, null)).toBe(0)
+    expect(umbralRecaudoHandoff(Number.NaN, null)).toBe(0)
+  })
+})
+
+describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
+  const tarifa = 1_200_000
+  const honorario = 3_000_000
+  const precio = componerPrecioAprobado(honorario, tarifa) // 4.2M
+  const modeloP1: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 1, aprobado_honorario: honorario }
+  const modeloP2: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 2, aprobado_honorario: honorario }
+
+  it('Plan 1, recaudo 0 → falta UPME completa + 50% honorario', () => {
+    const p = calcularPendienteHandoff(precio, modeloP1, 0)
+    expect(p.umbral).toBe(2_700_000)
+    expect(p.pendienteUpme).toBe(1_200_000)
+    expect(p.pendienteHonorario).toBe(1_500_000)
+    expect(p.pendienteTotal).toBe(2_700_000)
+    expect(p.cubierto).toBe(false)
+  })
+
+  it('Plan 1, recaudo parcial que solo cubre la UPME → falta el anticipo del honorario', () => {
+    const p = calcularPendienteHandoff(precio, modeloP1, 1_200_000)
+    expect(p.pendienteUpme).toBe(0)          // UPME cubierta (reparto tarifa-primero)
+    expect(p.pendienteHonorario).toBe(1_500_000)
+    expect(p.pendienteTotal).toBe(1_500_000)
+    expect(p.cubierto).toBe(false)
+  })
+
+  it('Plan 1, recaudo = umbral (tarifa + 50% honorario) → cubierto, avanza', () => {
+    const p = calcularPendienteHandoff(precio, modeloP1, 2_700_000)
+    expect(p.pendienteUpme).toBe(0)
+    expect(p.pendienteHonorario).toBe(0)
+    expect(p.pendienteTotal).toBe(0)
+    expect(p.cubierto).toBe(true)
+  })
+
+  it('Plan 2, recaudo = tarifa + 50% honorario NO alcanza (exige 100% honorario)', () => {
+    const p = calcularPendienteHandoff(precio, modeloP2, 2_700_000)
+    expect(p.umbral).toBe(precio)
+    expect(p.pendienteUpme).toBe(0)
+    expect(p.pendienteHonorario).toBe(1_500_000)
+    expect(p.cubierto).toBe(false)
+  })
+
+  it('Plan 2, recaudo = precio → cubierto', () => {
+    const p = calcularPendienteHandoff(precio, modeloP2, precio)
+    expect(p.pendienteTotal).toBe(0)
+    expect(p.cubierto).toBe(true)
+  })
+
+  it('desglose es consistente: pendienteUpme + pendienteHonorario = pendienteTotal', () => {
+    for (const rec of [0, 500_000, 1_200_000, 2_000_000, 2_700_000]) {
+      const p = calcularPendienteHandoff(precio, modeloP1, rec)
+      expect(p.pendienteUpme + p.pendienteHonorario).toBe(p.pendienteTotal)
+    }
+  })
+
+  it('tolerancia de 1 peso: recaudo a un peso del umbral se considera cubierto', () => {
+    const p = calcularPendienteHandoff(precio, modeloP2, precio - 1)
+    expect(p.cubierto).toBe(true)
   })
 })

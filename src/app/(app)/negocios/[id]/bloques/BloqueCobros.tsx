@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { CheckCircle2, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
+import type { PendienteHandoff } from '@/lib/upme/modelo-dinero'
 
 interface Cobro {
   id: string
@@ -25,6 +26,8 @@ interface BloqueCobrosProps {
   cobros: Cobro[]
   modo: 'editable' | 'visible'
   precioTotal: number
+  /** Pendiente para pasar a operaciones (solo cuando la etapa tiene el gate saldo:handoff). */
+  pendienteHandoff?: PendienteHandoff | null
 }
 
 const fmt = (v: number) =>
@@ -129,7 +132,7 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
   )
 }
 
-export default function BloqueCobros({ cobros, precioTotal, modo }: BloqueCobrosProps) {
+export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff }: BloqueCobrosProps) {
   // Confirmados = todos los cobros con fecha (entraron). Cuentan en saldo.
   const confirmados = cobros.filter(c => c.fecha !== null)
   // Programados pendientes = tipo programado + sin fecha confirmada
@@ -138,6 +141,7 @@ export default function BloqueCobros({ cobros, precioTotal, modo }: BloqueCobros
   const totalCobrado = confirmados.reduce((s, c) => s + c.monto, 0)
   const saldoPendiente = precioTotal - totalCobrado
   const programadosVencidos = programados.filter(c => c.vencido).length
+  const bloqueaHandoff = pendienteHandoff != null && pendienteHandoff.pendienteTotal > 0
 
   return (
     <div className="space-y-4">
@@ -154,6 +158,35 @@ export default function BloqueCobros({ cobros, precioTotal, modo }: BloqueCobros
           </p>
         </div>
       </div>
+
+      {/* Pendiente para pasar a operaciones (gate saldo:handoff). El cliente debe
+          cubrir el 100% de la tarifa UPME + el honorario del plan antes del handoff. */}
+      {bloqueaHandoff && (
+        <div className="rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-2.5">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-[#EF4444] shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-[#1A1A1A]">Pendiente para pasar a operaciones</p>
+              <p className="text-[10px] text-[#6B7280]">
+                El cliente debe cubrir la tarifa UPME y el honorario del plan antes del handoff.
+              </p>
+            </div>
+            <span className="text-sm font-bold text-[#EF4444] tabular-nums shrink-0">
+              {fmt(pendienteHandoff!.pendienteTotal)}
+            </span>
+          </div>
+          {(pendienteHandoff!.pendienteUpme > 0 || pendienteHandoff!.pendienteHonorario > 0) && (
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-[10px] text-[#6B7280]">
+              {pendienteHandoff!.pendienteUpme > 0 && (
+                <span>UPME: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(pendienteHandoff!.pendienteUpme)}</span></span>
+              )}
+              {pendienteHandoff!.pendienteHonorario > 0 && (
+                <span>Honorario: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(pendienteHandoff!.pendienteHonorario)}</span></span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Programados pendientes */}
       {programados.length > 0 && (

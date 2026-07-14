@@ -44,6 +44,7 @@ import BloqueDocumento from './bloques/BloqueDocumento'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
+import type { PendienteHandoff } from '@/lib/upme/modelo-dinero'
 import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
 import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
@@ -1059,6 +1060,7 @@ function BloqueRenderer({
   precioTotal,
   userRole,
   datosPorSlug,
+  pendienteHandoff,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1084,6 +1086,7 @@ function BloqueRenderer({
   precioTotal: number
   userRole: string
   datosPorSlug?: Record<string, Record<string, unknown>>
+  pendienteHandoff?: PendienteHandoff | null
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1340,6 +1343,7 @@ function BloqueRenderer({
           cobros={cobros}
           modo={modo}
           precioTotal={precioTotal}
+          pendienteHandoff={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : pendienteHandoff}
         />
       )
 
@@ -1481,6 +1485,7 @@ function BloqueCard({
   precioTotal,
   userRole,
   datosPorSlug,
+  pendienteHandoff,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1506,6 +1511,7 @@ function BloqueCard({
   precioTotal: number
   userRole: string
   datosPorSlug?: Record<string, Record<string, unknown>>
+  pendienteHandoff?: PendienteHandoff | null
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -1608,6 +1614,7 @@ function BloqueCard({
               precioTotal={precioTotal}
               userRole={userRole}
               datosPorSlug={datosPorSlug}
+              pendienteHandoff={pendienteHandoff}
             />
           )}
         </div>
@@ -1922,6 +1929,7 @@ export default function NegocioDetailClient({
                   precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
                   userRole={userRole}
                   datosPorSlug={datosPorSlug}
+                  pendienteHandoff={negocio.pendiente_handoff ?? null}
                 />
               ))}
             </div>
