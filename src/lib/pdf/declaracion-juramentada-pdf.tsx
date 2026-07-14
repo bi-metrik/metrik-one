@@ -6,8 +6,6 @@ interface DeclaracionJuramentadaProps {
     nombre_solicitante: string | null
     // Base LIMPIA del NIT (sin DV), desde el campo rut.numero_identificacion.
     numero_identificacion: string | null
-    // DV del RUT (rut.dv). Puede faltar → se calcula en código.
-    dv: string | null
     // Se conserva en la interfaz para no romper el caller (formulario-actions),
     // pero el nuevo formato ya no lo usa: la cláusula PRIMERO es genérica.
     tipo_vehiculo: string | null
@@ -44,12 +42,13 @@ const s = StyleSheet.create({
 
 export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: DeclaracionJuramentadaProps) {
   const nombre = datos.nombre_solicitante ?? '[NOMBRE SOLICITANTE]'
-  // NIT SIEMPRE con dígito de verificación. Base limpia desde rut.numero_identificacion;
-  // DV del RUT (rut.dv) si lo tenemos, se calcula (módulo 11) solo como fallback.
+  // NIT SIEMPRE con dígito de verificación CALCULADO (algoritmo DIAN módulo 11).
+  // El DV es determinista; el del RUT puede venir mal extraído, así que se calcula
+  // siempre sobre la base limpia (rut.numero_identificacion) para garantizar el
+  // correcto y ser consistente con el Formato 010 del mismo expediente.
   const nitBase = (datos.numero_identificacion ?? '').trim() || null
-  const dvRut = (datos.dv ?? '').trim() || null
-  const dvFinal = dvRut || (nitBase ? calcularDvNit(nitBase) : null)
-  const nitConDv = nitBase ? (dvFinal ? `${nitBase}-${dvFinal}` : nitBase) : '[NIT]'
+  const dvFinal = nitBase ? calcularDvNit(nitBase) : null
+  const nitConDv = nitBase ? (dvFinal != null ? `${nitBase}-${dvFinal}` : nitBase) : '[NIT]'
   const ciudad = datos.municipio ?? '[Ciudad]'
   const email = datos.email ?? '[DIRECCIÓN DE CORREO]'
   const telefono = datos.telefono ?? '[NÚMERO DE CELULAR]'
