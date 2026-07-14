@@ -8,7 +8,7 @@ import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
-import { calcularPendienteHandoff, type PendienteHandoff } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio } from '@/lib/actions/conciliacion-actions'
@@ -114,6 +114,12 @@ export type NegocioDetalle = {
    * Cobro lo muestra para que el comercial vea qué falta antes de intentar avanzar.
    */
   pendiente_handoff?: PendienteHandoff | null
+  /**
+   * Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME), leído de
+   * la propuesta aprobada. null si aún no hay propuesta aprobada. El bloque de Cobro
+   * lo muestra para que financiera vea el plan elegido sin buscarlo en la propuesta.
+   */
+  modelo_dinero?: ModeloDinero | null
 }
 
 export type NegocioResumen = {
@@ -620,6 +626,13 @@ export async function getNegocioDetalle(id: string): Promise<{
     }))
   }
 
+  // Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME), leído de
+  // la propuesta aprobada. Se expone SIEMPRE para que el bloque de Cobro muestre el
+  // plan elegido (seguimiento financiero, sin cazarlo en la propuesta). null si aún
+  // no hay propuesta aprobada.
+  const modeloDinero = await leerModeloDineroNegocio(supabase, id)
+  negocioTyped.modelo_dinero = modeloDinero ?? null
+
   // Pendiente de recaudo para el handoff a operaciones. Solo se computa si la etapa
   // actual (aún en stage 'venta') tiene el gate `saldo:handoff` en su config_extra.
   // El bloque de Cobro lo muestra para que el comercial vea qué falta antes de
@@ -643,8 +656,7 @@ export async function getNegocioDetalle(id: string): Promise<{
         const recaudadoHandoff = ((cobrosHandoff ?? []) as Array<{ monto: number; tipo_cobro: string | null }>)
           .filter((c) => c.tipo_cobro !== 'devolucion_pendiente')
           .reduce((sum, c) => sum + (c.monto ?? 0), 0)
-        const modeloHandoff = await leerModeloDineroNegocio(supabase, id)
-        negocioTyped.pendiente_handoff = calcularPendienteHandoff(precioHandoff, modeloHandoff, recaudadoHandoff)
+        negocioTyped.pendiente_handoff = calcularPendienteHandoff(precioHandoff, modeloDinero, recaudadoHandoff)
       }
     }
   }

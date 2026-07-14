@@ -44,7 +44,7 @@ import BloqueDocumento from './bloques/BloqueDocumento'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
-import type { PendienteHandoff } from '@/lib/upme/modelo-dinero'
+import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
 import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
@@ -1061,6 +1061,7 @@ function BloqueRenderer({
   userRole,
   datosPorSlug,
   pendienteHandoff,
+  modeloDinero,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1087,6 +1088,7 @@ function BloqueRenderer({
   userRole: string
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
+  modeloDinero?: ModeloDinero | null
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1344,6 +1346,7 @@ function BloqueRenderer({
           modo={modo}
           precioTotal={precioTotal}
           pendienteHandoff={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : pendienteHandoff}
+          modeloDinero={modeloDinero}
         />
       )
 
@@ -1486,6 +1489,7 @@ function BloqueCard({
   userRole,
   datosPorSlug,
   pendienteHandoff,
+  modeloDinero,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1512,6 +1516,7 @@ function BloqueCard({
   userRole: string
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
+  modeloDinero?: ModeloDinero | null
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -1615,6 +1620,7 @@ function BloqueCard({
               userRole={userRole}
               datosPorSlug={datosPorSlug}
               pendienteHandoff={pendienteHandoff}
+              modeloDinero={modeloDinero}
             />
           )}
         </div>
@@ -1930,6 +1936,7 @@ export default function NegocioDetailClient({
                   userRole={userRole}
                   datosPorSlug={datosPorSlug}
                   pendienteHandoff={negocio.pendiente_handoff ?? null}
+                  modeloDinero={negocio.modelo_dinero ?? null}
                 />
               ))}
             </div>
