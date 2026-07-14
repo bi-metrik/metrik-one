@@ -332,6 +332,17 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-07-09→14 (`metrik-one--soena` → producto: **carpeta de Drive universal + auth service-account + reconciliador de documentos + búsqueda por radicado**). PRs #49-#53 mergeados a `main` y desplegados.
+
+- **Carpeta de Drive universal (#49):** helper idempotente `src/lib/negocios/ensure-drive-folder.ts` (`ensureNegocioDriveFolder(supabase, workspaceId, negocioId)`) — una sola vía para formulario/Meta/manual/backfill/cron. `crearNegocio` lo llama (ya no lógica inline). Cron `/api/crons/ensure-negocio-folders` (sweep de `carpeta_url IS NULL`). Skip sin padre → `activity_log` `drive_folder_skipped` (ya no silencioso).
+- **Auth service account + DWD (#50):** modo `service_account` en `src/lib/google-drive.ts`. Si `workspaces.config_extra.drive_auth_mode='service_account'` + `drive_impersonate_user`, `getAccessToken` firma un JWT con la llave del SA (`GOOGLE_DRIVE_SA_KEY`, fallback `METRIK_PDF_RENDER_SA_KEY`) e impersona al usuario via domain-wide delegation → token que **no caduca**. Retrocompatible: los demás ws siguen con OAuth (`drive_refresh_token`). Reusa el patrón JWT de `pdf-render-client.ts`.
+- **Reconciliador de documentos (#51):** helper `src/lib/negocios/push-documento-drive.ts` empuja a Drive los docs atascados en Storage (con nombre `${label}.${ext}` en su subcarpeta). Cron `/api/crons/ensure-negocio-documentos`. Excluye bloques readonly heredados (`config_extra.source_etapa_orden`) — apuntan al mismo archivo de Storage que su origen (doble-borrado → 404). `documento-actions.ts` NO se refactorizó (el push está entrelazado con extracción AI; el helper replica la mecánica).
+- **Búsqueda + tarjeta por radicado (#52):** `negocio_card.radicado_bloque/radicado_campo` (config-driven, patrón de la cédula). `getNegociosV2` extrae → `NegocioResumen.radicado`; búsqueda client-side lo matchea; `NegocioCard` lo muestra.
+- **⚠️ Gotcha Vercel — plan Hobby:** solo permite crons **diarios**. Un schedule sub-diario (`*/15 * * * *`) hace **FALLAR el build** (`deploy_failed`). Todo cron nuevo en `vercel.json` debe ser diario salvo que se suba a Pro.
+- **⚠️ Gotcha Vercel — auto-deploy se desincroniza:** los pushes a `main` dejaron de deployar ~2 días (sin errores visibles, simplemente no dispara). Fix: `vercel git disconnect && vercel git connect` re-sincroniza el trigger; luego el siguiente merge deploya. Verificar `vercel ls` tras mergear.
+
+---
+
 **Sesion:** 2026-07-08 (`metrik-one--soena` → producto: **defaults del contacto de lead Meta (fuente/rol) + segmento automático por ciclo de vida**). Rama `feat/soena-meta-lead-contacto-defaults` (PR, sin mergear).
 
 - **Webhook `meta-leads-webhook`** — `config_extra.meta_leads.contacto` = `{ fuente_adquisicion, fuente_detalle, rol_natural, tipo_persona_field, natural_value, segmento_inicial }`. Al crear el contacto: fuente = `pauta_digital`, rol = `decisor` solo si el lead declara persona **natural**, segmento inicial = `sin_contactar`. Opt-in; no pisa contactos existentes (dedup).
