@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { CheckCircle2, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
+import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 
 interface Cobro {
   id: string
@@ -25,6 +26,16 @@ interface BloqueCobrosProps {
   cobros: Cobro[]
   modo: 'editable' | 'visible'
   precioTotal: number
+  /** Pendiente para pasar a operaciones (solo cuando la etapa tiene el gate saldo:handoff). */
+  pendienteHandoff?: PendienteHandoff | null
+  /** Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME) leído de la propuesta aprobada. */
+  modeloDinero?: ModeloDinero | null
+}
+
+/** Etiqueta legible del plan de pago elegido por el cliente en la propuesta. */
+const PLAN_PAGO_LABEL: Record<1 | 2, { titulo: string; detalle: string }> = {
+  1: { titulo: 'Plan 1 · 50/50', detalle: 'Anticipo (tarifa UPME + 50% honorario) y saldo del honorario a la certificación' },
+  2: { titulo: 'Plan 2 · Pago único', detalle: 'Tarifa UPME + 100% del honorario en un solo pago' },
 }
 
 const fmt = (v: number) =>
@@ -129,7 +140,7 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
   )
 }
 
-export default function BloqueCobros({ cobros, precioTotal, modo }: BloqueCobrosProps) {
+export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero }: BloqueCobrosProps) {
   // Confirmados = todos los cobros con fecha (entraron). Cuentan en saldo.
   const confirmados = cobros.filter(c => c.fecha !== null)
   // Programados pendientes = tipo programado + sin fecha confirmada
@@ -138,9 +149,36 @@ export default function BloqueCobros({ cobros, precioTotal, modo }: BloqueCobros
   const totalCobrado = confirmados.reduce((s, c) => s + c.monto, 0)
   const saldoPendiente = precioTotal - totalCobrado
   const programadosVencidos = programados.filter(c => c.vencido).length
+  const bloqueaHandoff = pendienteHandoff != null && pendienteHandoff.pendienteTotal > 0
+  const plan = modeloDinero?.aprobado_plan
+  const planLabel = plan === 1 || plan === 2 ? PLAN_PAGO_LABEL[plan] : null
 
   return (
     <div className="space-y-4">
+      {/* Plan de pago elegido por el cliente (de la propuesta aprobada). Visible para
+          que financiera haga seguimiento sin buscarlo en la propuesta. */}
+      {planLabel && (
+        <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[#6B7280]">Plan de pago</p>
+            <span className="inline-flex items-center rounded-full bg-[#10B981]/10 px-2 py-0.5 text-[11px] font-semibold text-[#059669]">
+              {planLabel.titulo}
+            </span>
+          </div>
+          <p className="mt-1 text-[10px] text-[#6B7280]">{planLabel.detalle}</p>
+          {(modeloDinero?.aprobado_honorario != null || (modeloDinero?.tarifa_upme ?? 0) > 0) && (
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[#6B7280]">
+              {modeloDinero?.aprobado_honorario != null && (
+                <span>Honorario: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(modeloDinero.aprobado_honorario)}</span></span>
+              )}
+              {(modeloDinero?.tarifa_upme ?? 0) > 0 && (
+                <span>Tarifa UPME: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(modeloDinero!.tarifa_upme)}</span></span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Resumen */}
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-2.5 text-center">
@@ -154,6 +192,35 @@ export default function BloqueCobros({ cobros, precioTotal, modo }: BloqueCobros
           </p>
         </div>
       </div>
+
+      {/* Pendiente para pasar a operaciones (gate saldo:handoff). El cliente debe
+          cubrir el 100% de la tarifa UPME + el honorario del plan antes del handoff. */}
+      {bloqueaHandoff && (
+        <div className="rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-2.5">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-[#EF4444] shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-[#1A1A1A]">Pendiente para pasar a operaciones</p>
+              <p className="text-[10px] text-[#6B7280]">
+                El cliente debe cubrir la tarifa UPME y el honorario del plan antes del handoff.
+              </p>
+            </div>
+            <span className="text-sm font-bold text-[#EF4444] tabular-nums shrink-0">
+              {fmt(pendienteHandoff!.pendienteTotal)}
+            </span>
+          </div>
+          {(pendienteHandoff!.pendienteUpme > 0 || pendienteHandoff!.pendienteHonorario > 0) && (
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-[10px] text-[#6B7280]">
+              {pendienteHandoff!.pendienteUpme > 0 && (
+                <span>UPME: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(pendienteHandoff!.pendienteUpme)}</span></span>
+              )}
+              {pendienteHandoff!.pendienteHonorario > 0 && (
+                <span>Honorario: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(pendienteHandoff!.pendienteHonorario)}</span></span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Programados pendientes */}
       {programados.length > 0 && (

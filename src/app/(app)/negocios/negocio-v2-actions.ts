@@ -8,6 +8,7 @@ import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
+import { calcularPendienteHandoff, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio } from '@/lib/actions/conciliacion-actions'
@@ -107,6 +108,18 @@ export type NegocioDetalle = {
   contactos: { id: string; nombre: string } | null
   /** Multi-responsable (fuente de verdad: negocio_responsables N:M). */
   responsables: Array<{ id: string; full_name: string }>
+  /**
+   * Recaudo pendiente para pasar a operaciones. Presente (no null) solo cuando la
+   * etapa actual tiene el gate `saldo:handoff` (ej. Documentación). El bloque de
+   * Cobro lo muestra para que el comercial vea qué falta antes de intentar avanzar.
+   */
+  pendiente_handoff?: PendienteHandoff | null
+  /**
+   * Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME), leído de
+   * la propuesta aprobada. null si aún no hay propuesta aprobada. El bloque de Cobro
+   * lo muestra para que financiera vea el plan elegido sin buscarlo en la propuesta.
+   */
+  modelo_dinero?: ModeloDinero | null
 }
 
 export type NegocioResumen = {
@@ -611,6 +624,41 @@ export async function getNegocioDetalle(id: string): Promise<{
       orden: e.orden as number,
       numero: e.numero as number,
     }))
+  }
+
+  // Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME), leído de
+  // la propuesta aprobada. Se expone SIEMPRE para que el bloque de Cobro muestre el
+  // plan elegido (seguimiento financiero, sin cazarlo en la propuesta). null si aún
+  // no hay propuesta aprobada.
+  const modeloDinero = await leerModeloDineroNegocio(supabase, id)
+  negocioTyped.modelo_dinero = modeloDinero ?? null
+
+  // Pendiente de recaudo para el handoff a operaciones. Solo se computa si la etapa
+  // actual (aún en stage 'venta') tiene el gate `saldo:handoff` en su config_extra.
+  // El bloque de Cobro lo muestra para que el comercial vea qué falta antes de
+  // intentar avanzar. Fuera de ese caso queda null y la UI no lo renderiza.
+  if (negocioTyped.etapa_actual_id && negocioTyped.stage_actual === 'venta') {
+    const { data: etapaCfgRaw } = await db(supabase)
+      .from('etapas_negocio')
+      .select('config_extra')
+      .eq('id', negocioTyped.etapa_actual_id)
+      .single()
+    const gatesEtapa = (((etapaCfgRaw as { config_extra?: { gates?: string[] } } | null)
+      ?.config_extra?.gates) ?? []) as string[]
+    if (gatesEtapa.includes('saldo:handoff')) {
+      const precioHandoff = negocioTyped.precio_aprobado ?? negocioTyped.precio_estimado ?? 0
+      if (precioHandoff > 0) {
+        const { data: cobrosHandoff } = await db(supabase)
+          .from('cobros')
+          .select('monto, tipo_cobro')
+          .eq('workspace_id', workspaceId)
+          .eq('negocio_id', id)
+        const recaudadoHandoff = ((cobrosHandoff ?? []) as Array<{ monto: number; tipo_cobro: string | null }>)
+          .filter((c) => c.tipo_cobro !== 'devolucion_pendiente')
+          .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+        negocioTyped.pendiente_handoff = calcularPendienteHandoff(precioHandoff, modeloDinero, recaudadoHandoff)
+      }
+    }
   }
 
   // Cargar bloque_configs de la etapa actual + negocio_bloques correspondientes
@@ -1802,6 +1850,58 @@ export async function cambiarEtapaNegocioConGate(
           error: 'gate_bloqueado',
           bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}`, es_gate: true }],
         }
+      }
+    }
+
+    // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
+    // operaciones (handoff comercial → operaciones, ej. salida de Documentación).
+    // El recaudo del cliente debe cubrir el 100% de la tarifa UPME + el honorario
+    // que corresponda según el plan (Plan 1 → 50%; Plan 2 → 100%), es decir el
+    // precio menos el saldo legítimamente diferido. Reusa el modelo de dinero de la
+    // propuesta aprobada. Opt-in por etapa (config_extra.gates). Mensaje configurable
+    // en config_extra.gate_messages['saldo:handoff'].
+    if (etapaGates.includes('saldo:handoff')) {
+      const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+      const { data: negHandoffRaw } = await db(supabase)
+        .from('negocios')
+        .select('precio_aprobado, precio_estimado')
+        .eq('id', negocioId)
+        .single()
+      const negHandoff = negHandoffRaw as { precio_aprobado: number | null; precio_estimado: number | null } | null
+      const precioHandoff = negHandoff?.precio_aprobado ?? negHandoff?.precio_estimado ?? 0
+
+      // Fail-safe: sin precio aprobado no se puede calcular el umbral → no dejar
+      // pasar sin control; exigir aprobar la propuesta económica primero.
+      if (!(precioHandoff > 0)) {
+        return {
+          error: 'gate_bloqueado',
+          bloquesPendientes: [{ nombre: 'Aprueba la propuesta económica antes de pasar a operaciones', es_gate: true }],
+        }
+      }
+
+      // Recaudo real del cliente: suma de cobros, excluyendo remanentes por devolver
+      // (devolucion_pendiente, montos negativos) que no son recaudo entrante.
+      const { data: cobrosHandoff } = await supabase
+        .from('cobros')
+        .select('monto, tipo_cobro')
+        .eq('negocio_id', negocioId)
+        .eq('workspace_id', workspaceId)
+      const recaudadoHandoff = ((cobrosHandoff ?? []) as Array<{ monto: number; tipo_cobro: string | null }>)
+        .filter((c) => c.tipo_cobro !== 'devolucion_pendiente')
+        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+
+      const modeloHandoff = await leerModeloDineroNegocio(supabase, negocioId)
+      const pend = calcularPendienteHandoff(precioHandoff, modeloHandoff, recaudadoHandoff)
+
+      if (!pend.cubierto) {
+        const partes: string[] = []
+        if (pend.pendienteUpme > 0) partes.push(`UPME ${fmt.format(pend.pendienteUpme)}`)
+        if (pend.pendienteHonorario > 0) partes.push(`honorario ${fmt.format(pend.pendienteHonorario)}`)
+        const desglose = partes.length ? ` (${partes.join(' + ')})` : ''
+        const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+        const nombre = gateMessages['saldo:handoff']
+          ?? `Recaudo insuficiente para pasar a operaciones: falta ${fmt.format(pend.pendienteTotal)}${desglose}`
+        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
       }
     }
 

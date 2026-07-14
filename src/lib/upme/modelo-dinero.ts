@@ -75,3 +75,70 @@ export function saldoEsperadoPorModalidad(modelo: ModeloDinero | null): number {
   if (!Number.isFinite(honorario) || honorario <= 0) return 0
   return Math.round(honorario * 0.5)
 }
+
+/**
+ * Umbral de recaudo para SOLTAR el negocio a operaciones (handoff Documentación →
+ * Cargue): el cliente debe haber pagado a SOENA todo el precio EXCEPTO el saldo
+ * legítimamente diferido por la modalidad. Como `precio_aprobado = tarifa_UPME +
+ * honorario_completo`, el umbral queda:
+ *   - Plan 1 (50/50): tarifa + 50% honorario   (100% UPME + anticipo)
+ *   - Plan 2 (único): tarifa + 100% honorario   (100% UPME + honorario)
+ * Es decir `precio − saldoEsperadoPorModalidad`. Nunca negativo.
+ */
+export function umbralRecaudoHandoff(precioAprobado: number, modelo: ModeloDinero | null): number {
+  const precio = Number.isFinite(precioAprobado) && precioAprobado > 0 ? precioAprobado : 0
+  return Math.max(0, Math.round(precio - saldoEsperadoPorModalidad(modelo)))
+}
+
+/** Desglose del recaudo pendiente para el handoff a operaciones. */
+export interface PendienteHandoff {
+  /** Umbral exigido = precio − saldo diferido. */
+  umbral: number
+  /** Recaudo real del cliente considerado. */
+  recaudado: number
+  /** Falta total para alcanzar el umbral (nunca negativo). */
+  pendienteTotal: number
+  /** Falta del componente UPME (pasante). Se cubre primero. */
+  pendienteUpme: number
+  /** Falta del componente honorario del plan. */
+  pendienteHonorario: number
+  /** true si el recaudo cubre el umbral (con tolerancia de 1 peso por redondeo). */
+  cubierto: boolean
+}
+
+/**
+ * Calcula el pendiente para el handoff a operaciones, desglosado en UPME vs
+ * honorario. Coherente con `repartirPagoTarifaHonorario`: el recaudo cubre la
+ * tarifa UPME PRIMERO, así que el chequeo agregado (recaudado ≥ umbral) ya
+ * garantiza ambas bolsas; el desglose es para comunicar qué falta.
+ *
+ * @param precioAprobado precio del negocio (honorario + tarifa), en COP.
+ * @param modelo         modelo de dinero del negocio (plan + honorario + tarifa).
+ * @param recaudado      recaudo real del cliente (suma de cobros reales), en COP.
+ */
+export function calcularPendienteHandoff(
+  precioAprobado: number,
+  modelo: ModeloDinero | null,
+  recaudado: number,
+): PendienteHandoff {
+  const umbral = umbralRecaudoHandoff(precioAprobado, modelo)
+  const rec = Number.isFinite(recaudado) && recaudado > 0 ? recaudado : 0
+
+  const tarifa = modelo && Number.isFinite(modelo.tarifa_upme) && modelo.tarifa_upme > 0 ? modelo.tarifa_upme : 0
+  // Reparto tarifa-primero: la UPME se cubre antes que el honorario.
+  const recUpme = Math.min(rec, tarifa)
+  const pendienteUpme = Math.max(0, Math.round(tarifa - recUpme))
+  const honorarioRequerido = Math.max(0, umbral - tarifa)
+  const recHonorario = Math.max(0, rec - tarifa)
+  const pendienteHonorario = Math.max(0, Math.round(honorarioRequerido - recHonorario))
+
+  const pendienteTotal = Math.max(0, Math.round(umbral - rec))
+  return {
+    umbral,
+    recaudado: rec,
+    pendienteTotal,
+    pendienteUpme,
+    pendienteHonorario,
+    cubierto: pendienteTotal <= 1,
+  }
+}
