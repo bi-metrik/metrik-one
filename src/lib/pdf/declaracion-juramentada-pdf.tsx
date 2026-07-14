@@ -4,6 +4,8 @@ interface DeclaracionJuramentadaProps {
   datos: {
     nombre_solicitante: string | null
     numero_identificacion: string | null
+    // Se conserva en la interfaz para no romper el caller (formulario-actions),
+    // pero el nuevo formato ya no lo usa: la cláusula PRIMERO es genérica.
     tipo_vehiculo: string | null
     email: string | null
     telefono: string | null
@@ -26,7 +28,7 @@ const s = StyleSheet.create({
   asuntoBold: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
   // Body
   intro: { marginBottom: 14, textAlign: 'justify' },
-  clause: { marginBottom: 12, textAlign: 'justify' },
+  clause: { marginBottom: 10, textAlign: 'justify' },
   constancia: { marginTop: 14, marginBottom: 20, textAlign: 'justify' },
   nota: { marginTop: 20, fontSize: 9, fontFamily: 'Helvetica-Oblique', color: '#374151', textAlign: 'justify' },
   // Signature
@@ -38,12 +40,12 @@ const s = StyleSheet.create({
 
 export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: DeclaracionJuramentadaProps) {
   const nombre = datos.nombre_solicitante ?? '[NOMBRE SOLICITANTE]'
-  const cedula = datos.numero_identificacion ?? '[Número de Cédula]'
+  // numero_identificacion llega desde el campo rut.nit → es el NIT tal cual el RUT.
+  // Se usa como está, sin calcular DV ni transformar.
+  const nit = datos.numero_identificacion ?? '[NIT]'
   const ciudad = datos.municipio ?? '[Ciudad]'
   const email = datos.email ?? '[DIRECCIÓN DE CORREO]'
   const telefono = datos.telefono ?? '[NÚMERO DE CELULAR]'
-  // Descripción del vehículo tal cual el Concepto UPME (marca + línea/modelo).
-  const tipoVehiculo = datos.tipo_vehiculo ?? 'híbrido / eléctrico'
 
   const d = new Date(fechaGeneracion)
   const dia = d.getUTCDate()
@@ -71,48 +73,48 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
 
         {/* Introducción */}
         <Text style={s.intro}>
-          Yo, <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nombre}</Text>, identificado(a) con cédula de ciudadanía No. <Text style={{ fontFamily: 'Helvetica-Bold' }}>{cedula}</Text>, actuando en nombre propio, en mi calidad de contribuyente, por medio del presente documento manifiesto bajo la gravedad de juramento, de conformidad con lo establecido en el artículo 7 del Decreto 1165 de 2019 y demás normas concordantes, lo siguiente:
+          Yo, <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nombre}</Text>, identificado(a) con NIT No. <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nit}</Text>, actuando en nombre propio, manifiesto bajo la gravedad de juramento, de conformidad con el artículo 7 del Decreto 1165 de 2019:
         </Text>
 
-        {/* Cláusulas — texto exacto de la plantilla oficial */}
+        {/* Cláusulas */}
         <Text style={s.clause}>
           <Text style={{ fontFamily: 'Helvetica-Bold' }}>PRIMERO. </Text>
-          Que las facturas relacionadas en la solicitud de devolución corresponden efectivamente a la adquisición de un vehículo <Text style={{ fontFamily: 'Helvetica-Bold' }}>{tipoVehiculo}</Text>, el cual cuenta con la certificación expedida por la Unidad de Planeación Minero Energética (UPME), en los términos establecidos por la normativa vigente.
+          Las facturas relacionadas corresponden a la adquisición del vehículo híbrido o eléctrico certificado por la UPME.
         </Text>
 
         <Text style={s.clause}>
-          <Text style={{ fontFamily: 'Helvetica-Bold' }}>SEGUNDO. </Text>
-          Que sobre el valor del impuesto sobre las ventas (IVA) pagado en la adquisición del mencionado vehículo, no se ha efectuado solicitud de devolución ni compensación ante la Dirección de Impuestos y Aduanas Nacionales (DIAN) u otra autoridad competente.
+          <Text style={{ fontFamily: 'Helvetica-Bold' }}>SEGUNDO: </Text>
+          No se ha efectuado devolución ni compensación del IVA pagado.
         </Text>
 
         <Text style={s.clause}>
-          <Text style={{ fontFamily: 'Helvetica-Bold' }}>TERCERO. </Text>
-          Que el IVA cuya devolución se solicita no ha sido tratado como mayor valor del costo o gasto, ni ha sido llevado como deducción en el impuesto sobre la renta, ni como impuesto descontable en declaraciones del impuesto sobre las ventas (IVA).
+          <Text style={{ fontFamily: 'Helvetica-Bold' }}>TERCERO: </Text>
+          El IVA solicitado no ha sido tratado como mayor valor del costo, deducción en renta ni como impuesto descontable en IVA.
         </Text>
 
         <Text style={s.clause}>
           <Text style={{ fontFamily: 'Helvetica-Bold' }}>CUARTO. </Text>
-          Que la información suministrada en la solicitud de devolución es veraz, completa y verificable, y que los documentos aportados corresponden fielmente a la realidad de la operación económica realizada.
+          Que la información suministrada es veraz, completa y verificable.
         </Text>
 
         {/* Para constancia */}
         <Text style={s.constancia}>
-          Para constancia se firma en la ciudad de <Text style={{ fontFamily: 'Helvetica-Bold' }}>{ciudad}</Text>, a los {dia} días del mes de {mes} de {anio}.
+          Para constancia, se firma en {ciudad}, a los {dia} días del mes de {mes} de {anio}.
         </Text>
 
         {/* Firma */}
         <View style={s.signatureBlock}>
           <View style={s.signatureLine}>
             <Text style={s.signatureName}>{nombre}</Text>
-            <Text style={s.signatureDetail}>C.C. No. {cedula}</Text>
-            <Text style={s.signatureDetail}>Correo electrónico: {email}</Text>
-            <Text style={s.signatureDetail}>Celular: {telefono}</Text>
+            <Text style={s.signatureDetail}>NIT: {nit}</Text>
+            <Text style={s.signatureDetail}>Correo: {email}</Text>
+            <Text style={s.signatureDetail}>Tel: {telefono}</Text>
           </View>
         </View>
 
         {/* Nota legal */}
         <Text style={s.nota}>
-          NOTA: El presente documento se suscribe bajo la gravedad de juramento, con los efectos legales previstos en el artículo 442 del Código Penal Colombiano.
+          <Text style={{ fontFamily: 'Helvetica-Bold' }}>NOTA: Art. 442 Código Penal Colombiano</Text>
         </Text>
 
       </Page>
