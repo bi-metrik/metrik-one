@@ -283,6 +283,7 @@ function getTemplateComponent(
         datos: datos as {
           nombre_solicitante: string | null
           numero_identificacion: string | null
+          dv: string | null
           tipo_vehiculo: string | null
           email: string | null
           telefono: string | null
