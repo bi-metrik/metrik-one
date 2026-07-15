@@ -1,6 +1,8 @@
 'use client'
+import { useState } from 'react'
 import Link from 'next/link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check } from 'lucide-react'
+import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
@@ -56,6 +58,23 @@ function openFolder(url: string, e: React.MouseEvent) {
 
 export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
+
+  // Copiar el radicado al portapapeles (para pegarlo rápido en la plataforma UPME).
+  // La tarjeta es un Link; frenamos la navegación al tocar el botón.
+  const [radicadoCopiado, setRadicadoCopiado] = useState(false)
+  const handleCopiarRadicado = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!negocio.radicado) return
+    try {
+      await navigator.clipboard.writeText(negocio.radicado)
+      setRadicadoCopiado(true)
+      toast.success('Radicado copiado')
+      setTimeout(() => setRadicadoCopiado(false), 1500)
+    } catch {
+      toast.error('No se pudo copiar el radicado')
+    }
+  }
 
   const isCerrado = negocio.cierre_motivo !== null
   const motivoCierre = negocio.cierre_motivo
@@ -169,11 +188,24 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
             </p>
           )}
-          {/* Radicado de certificación (config-driven, ej. SOENA) */}
+          {/* Radicado de certificación (config-driven, ej. SOENA) + copiar al portapapeles */}
           {negocio.radicado && (
-            <p className="mt-0.5 truncate font-mono text-[11px] text-[#6B7280]" title={`Radicado: ${negocio.radicado}`}>
-              Rad. {negocio.radicado}
-            </p>
+            <div className="mt-0.5 flex items-center gap-1">
+              <span className="truncate font-mono text-[11px] text-[#6B7280]" title={`Radicado: ${negocio.radicado}`}>
+                Rad. {negocio.radicado}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopiarRadicado}
+                className="shrink-0 rounded p-0.5 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#10B981]"
+                title="Copiar radicado"
+                aria-label="Copiar radicado"
+              >
+                {radicadoCopiado
+                  ? <Check className="h-3 w-3 text-[#10B981]" />
+                  : <Copy className="h-3 w-3" />}
+              </button>
+            </div>
           )}
           {/* Responsables asignados */}
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
