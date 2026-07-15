@@ -9,6 +9,7 @@ import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
 import SolicitarConciliacionButton from './solicitar-conciliacion-button'
+import DistribuirPagoButton from './distribuir-pago-button'
 
 export const maxDuration = 60
 
@@ -115,8 +116,9 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         errorMsg={err}
       />
       {conciliacionActiva && (
-        <div className="mx-auto max-w-2xl px-4 pb-4">
+        <div className="mx-auto max-w-2xl px-4 pb-4 space-y-3">
           <SolicitarConciliacionButton negocioId={id} yaSolicitado={conciliacionYaSolicitada} />
+          <DistribuirPagoButton />
         </div>
       )}
       {validaActivo && (

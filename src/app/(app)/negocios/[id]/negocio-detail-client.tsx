@@ -1063,6 +1063,7 @@ function BloqueRenderer({
   datosPorSlug,
   pendienteHandoff,
   modeloDinero,
+  stageActual,
   epaycoCostos,
 }: {
   bloque: BloqueExtendido
@@ -1081,6 +1082,7 @@ function BloqueRenderer({
     vencido: boolean
     notas: string | null
     external_ref: string | null
+    es_reparto_comercial?: boolean
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
@@ -1091,6 +1093,7 @@ function BloqueRenderer({
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
+  stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
@@ -1350,6 +1353,9 @@ function BloqueRenderer({
           precioTotal={precioTotal}
           pendienteHandoff={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : pendienteHandoff}
           modeloDinero={modeloDinero}
+          // Eliminar porción del comercial: solo en la etapa activa (no en historial readonly)
+          // y solo cuando el negocio está en venta. El server valida además "no conciliado".
+          stageActual={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : stageActual}
           epaycoCostos={epaycoCostos}
         />
       )
@@ -1494,6 +1500,7 @@ function BloqueCard({
   datosPorSlug,
   pendienteHandoff,
   modeloDinero,
+  stageActual,
   epaycoCostos,
 }: {
   bloque: BloqueExtendido
@@ -1512,6 +1519,7 @@ function BloqueCard({
     vencido: boolean
     notas: string | null
     external_ref: string | null
+    es_reparto_comercial?: boolean
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
@@ -1522,6 +1530,7 @@ function BloqueCard({
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
+  stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
 }) {
   const def = bloque.bloque_definitions
@@ -1627,6 +1636,7 @@ function BloqueCard({
               datosPorSlug={datosPorSlug}
               pendienteHandoff={pendienteHandoff}
               modeloDinero={modeloDinero}
+              stageActual={stageActual}
               epaycoCostos={epaycoCostos}
             />
           )}
@@ -1944,6 +1954,7 @@ export default function NegocioDetailClient({
                   datosPorSlug={datosPorSlug}
                   pendienteHandoff={negocio.pendiente_handoff ?? null}
                   modeloDinero={negocio.modelo_dinero ?? null}
+                  stageActual={negocio.stage_actual}
                   epaycoCostos={negocio.epayco_costos ?? {}}
                 />
               ))}

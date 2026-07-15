@@ -213,7 +213,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                   onClick={() => toggle(r.external_ref)}
                   className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
                 >
-                  <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     {open ? <ChevronDown className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} /> : <ChevronRight className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} />}
                     <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{r.external_ref}</span>
                     {r.fuente && <FuenteBadge fuente={r.fuente} small />}
@@ -222,8 +222,18 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                         <ArrowRightLeft className="h-3 w-3" /> Repartido · {r.negocios_ids.length}
                       </span>
                     )}
+                    {r.propuesto_por_comercial && !r.algun_conciliado && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                        Propuesto por el comercial · pendiente de confirmar
+                      </span>
+                    )}
+                    {r.sin_asignar > 1 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                        Sin asignar {fmtCOP(r.sin_asignar)}
+                      </span>
+                    )}
                   </div>
-                  <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.valor_pagado)}</span>
+                  <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.total_declarado ?? r.valor_pagado)}</span>
                 </button>
 
                 {open && (
