@@ -926,7 +926,7 @@ export default function AppShell({
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA).
           En modo vitrina se oculta: el shell es comercial, no operativo. */}
-      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} distribuirPagoEnabled={!!mod.conciliacion} />}
+      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} />}
       </div>
     </div>
   )

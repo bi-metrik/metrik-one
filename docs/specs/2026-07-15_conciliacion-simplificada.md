@@ -153,3 +153,29 @@ El FAB tiene 2 acciones opt-in: "Registrar pago" (`fab_registrar_pago`, resuelve
 5. Verificar que el panel financiero ya NO tiene "Agregar pago" ni edición de porciones.
 6. Verificar que el negocio ya NO muestra las tarjetas sueltas "Pedir conciliación" ni "Distribuir pago".
 7. FAB "Registrar pago" sigue funcionando (comercial cobra fuera de su área).
+
+---
+
+## 6. Resultado ejecutado (cierre)
+
+Rama `feat/soena-conciliacion-simplificada`. Build `✓ Compiled successfully`, `tsc --noEmit` limpio.
+
+### Borrado confirmado (callers en cero verificados)
+
+Server actions de `conciliacion-actions.ts`: `getPanelConciliacion`, `buscarNegociosParaSplit`, `repartirPago` (vía financiera), `repartirSobrepago`, `setPorcionReferencia`, `conciliarReferencia`, `conciliarNegocio`, `agregarPago`, `solicitarConciliacionDiana`, `crearCobrosDesdePagoSoena`, `aceptarDuplicado`. Tipos huérfanos: `FilaConciliacion`, `CrearCobrosSoenaInput`, `RepartirSobrepagoInput`, `SetPorcionInput` + helper `saldoEsperadoPorModalidad`. (~980 líneas menos.)
+
+UI: `distribuir-pago-button.tsx`, `solicitar-conciliacion-button.tsx` (+ su wiring en `page.tsx`). Acción FAB "Distribuir pago entre negocios" + su wiring (`fab.tsx`, `app-shell.tsx`).
+
+### Conservado con caller vivo (no basura)
+
+- `distribuir-pago-modal.tsx` — reusado por BloqueCobros (registro/reparto inline).
+- FAB "Registrar pago" (`agregarPagoFab` + `getNegociosParaPagoFab`) — entrada global para pagar un negocio fuera de tu área/etapa.
+- `registrarPagoEnNegocio`, `repartirPagoComercial`, `repartirPagoCore`, `eliminarPorcionPago`, `crearCobrosSoenaCore`, `leerModeloDineroNegocio`, `getConciliacionV2`.
+
+### Conservado a propósito (no se borró aunque el nuevo panel no lo muestra)
+
+`getConciliacionV2` sigue computando `sobrepagos`, `duplicados`, `porDevolver` y los tipos `SobrepagoRef`/`DuplicadoRef`/`AsignacionRef`/`NegocioParaSplit` (parte del shape `ConciliacionV2`). Reducir ese shape en el módulo del dinero es riesgo sin beneficio; el nuevo client no los renderiza pero no molestan. Anotado como deuda menor.
+
+### Sin cambios de esquema
+
+Cero migraciones. El modelo reusa `cobros` + `split_json` + `negocio_conciliacion`. El badge del nav (`count_negocios_por_conciliar`) sigue vivo; al no crearse ya etiquetas `solicitud_conciliacion`, deja de contar solicitudes (no se rompe).

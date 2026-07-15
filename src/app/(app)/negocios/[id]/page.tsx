@@ -8,8 +8,6 @@ import NegocioDetailClient from './negocio-detail-client'
 import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
-import SolicitarConciliacionButton from './solicitar-conciliacion-button'
-import DistribuirPagoButton from './distribuir-pago-button'
 
 export const maxDuration = 60
 
@@ -44,9 +42,10 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   let datosSarlaft: Awaited<ReturnType<typeof getDatosSarlaft>> | null = null
   let scoreSarlaft: Awaited<ReturnType<typeof getScoreNegocio>> | null = null
   let validaActivo = false
-  // Conciliación (F2): botón "Pedir conciliación a Diana" — opt-in por workspace.
+  // Conciliación: habilita "Registrar pago" dentro del bloque de pagos — opt-in por
+  // workspace (modules.conciliacion). El registro + reparto viven en BloqueCobros; el
+  // panel financiero solo acepta/rechaza.
   let conciliacionActiva = false
-  let conciliacionYaSolicitada = false
   if (workspaceId) {
     const svc = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,19 +62,6 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
     }
     if (modules.conciliacion && !negocioCerrado) {
       conciliacionActiva = true
-      // ¿Etiqueta de solicitud viva? = último evento de tipo solicitud/atendida es
-      // 'solicitud_conciliacion'. Lectura barata (1 query, último primero, limit 1).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: ultTag } = await (svc.from('activity_log') as any)
-        .select('tipo')
-        .eq('workspace_id', workspaceId)
-        .eq('entidad_tipo', 'negocio')
-        .eq('entidad_id', id)
-        .in('tipo', ['solicitud_conciliacion', 'conciliacion_atendida'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      conciliacionYaSolicitada = (ultTag as { tipo?: string } | null)?.tipo === 'solicitud_conciliacion'
     }
   }
 
@@ -116,12 +102,6 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         registrarPagoEnabled={conciliacionActiva}
         errorMsg={err}
       />
-      {conciliacionActiva && (
-        <div className="mx-auto max-w-2xl px-4 pb-4 space-y-3">
-          <SolicitarConciliacionButton negocioId={id} yaSolicitado={conciliacionYaSolicitada} />
-          <DistribuirPagoButton />
-        </div>
-      )}
       {validaActivo && (
         <div className="mx-auto max-w-2xl px-4 pb-4 space-y-3">
           <BloqueRiesgoSarlaft
