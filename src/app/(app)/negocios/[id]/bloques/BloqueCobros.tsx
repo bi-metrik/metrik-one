@@ -6,6 +6,7 @@ import { CheckCircle2, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
+import type { EpaycoCostoCobro } from '@/lib/epayco'
 
 interface Cobro {
   id: string
@@ -30,6 +31,8 @@ interface BloqueCobrosProps {
   pendienteHandoff?: PendienteHandoff | null
   /** Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME) leído de la propuesta aprobada. */
   modeloDinero?: ModeloDinero | null
+  /** Costos ePayco descontados por cobro, keyed por ref_payco (= external_ref del cobro). */
+  epaycoCostos?: Record<string, EpaycoCostoCobro>
 }
 
 /** Etiqueta legible del plan de pago elegido por el cliente en la propuesta. */
@@ -57,26 +60,50 @@ const TIPO_LABELS: Record<string, string> = {
   pasante: 'Pasante',
 }
 
-function CobroConfirmadoRow({ cobro }: { cobro: Cobro }) {
+function CobroConfirmadoRow({ cobro, costo }: { cobro: Cobro; costo?: EpaycoCostoCobro | null }) {
+  const descontado = costo && costo.totalDescontado > 0 ? costo.totalDescontado : 0
+  const neto = descontado > 0 ? cobro.monto - descontado : null
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-[#E5E7EB] p-2.5">
-      <CheckCircle2 className="h-4 w-4 text-[#10B981] shrink-0" />
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-[#1A1A1A] truncate">
-          {cobro.concepto ?? 'Cobro'}
-          {cobro.tipo_cobro && cobro.tipo_cobro !== 'regular' && (
-            <span className="ml-1 inline-flex items-center rounded-full bg-[#F5F4F2] px-1.5 py-0 text-[9px] font-medium text-[#6B7280]">
-              {TIPO_LABELS[cobro.tipo_cobro] ?? cobro.tipo_cobro}
-              {cobro.numero_cuota ? ` ${cobro.numero_cuota}` : ''}
-            </span>
-          )}
-        </p>
-        {cobro.external_ref && <p className="text-[10px] text-[#6B7280]">Ref: {cobro.external_ref}</p>}
-        {cobro.fecha && <p className="text-[10px] text-[#6B7280]">{fmtDate(cobro.fecha)}</p>}
+    <div className="rounded-lg border border-[#E5E7EB] p-2.5">
+      <div className="flex items-center gap-2">
+        <CheckCircle2 className="h-4 w-4 text-[#10B981] shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-[#1A1A1A] truncate">
+            {cobro.concepto ?? 'Cobro'}
+            {cobro.tipo_cobro && cobro.tipo_cobro !== 'regular' && (
+              <span className="ml-1 inline-flex items-center rounded-full bg-[#F5F4F2] px-1.5 py-0 text-[9px] font-medium text-[#6B7280]">
+                {TIPO_LABELS[cobro.tipo_cobro] ?? cobro.tipo_cobro}
+                {cobro.numero_cuota ? ` ${cobro.numero_cuota}` : ''}
+              </span>
+            )}
+          </p>
+          {cobro.external_ref && <p className="text-[10px] text-[#6B7280]">Ref: {cobro.external_ref}</p>}
+          {cobro.fecha && <p className="text-[10px] text-[#6B7280]">{fmtDate(cobro.fecha)}</p>}
+        </div>
+        <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
+          {fmt(cobro.monto)}
+        </span>
       </div>
-      <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
-        {fmt(cobro.monto)}
-      </span>
+
+      {/* Desglose ePayco: lo que descuenta la pasarela y el neto recibido por SOENA. */}
+      {descontado > 0 && (
+        <div className="mt-2 rounded-md bg-[#F5F4F2] px-2 py-1.5 text-[10px] text-[#6B7280]">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-[#1A1A1A]">Descuento ePayco</span>
+            <span className="font-semibold text-[#EF4444] tabular-nums">−{fmt(descontado)}</span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+            {costo!.comision > 0 && <span>Comisión <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.comision)}</span></span>}
+            {costo!.iva > 0 && <span>· IVA <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.iva)}</span></span>}
+            {costo!.retefuente > 0 && <span>· Retefuente <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.retefuente)}</span></span>}
+            {costo!.reteica > 0 && <span>· ReteICA <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.reteica)}</span></span>}
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-[#E5E7EB] pt-1">
+            <span className="font-medium text-[#1A1A1A]">Neto recibido</span>
+            <span className="font-semibold text-[#059669] tabular-nums">{fmt(neto ?? 0)}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -140,7 +167,7 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
   )
 }
 
-export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero }: BloqueCobrosProps) {
+export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, epaycoCostos }: BloqueCobrosProps) {
   // Confirmados = todos los cobros con fecha (entraron). Cuentan en saldo.
   const confirmados = cobros.filter(c => c.fecha !== null)
   // Programados pendientes = tipo programado + sin fecha confirmada
@@ -252,7 +279,7 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
           </p>
           <div className="space-y-1.5">
             {confirmados.map(c => (
-              <CobroConfirmadoRow key={c.id} cobro={c} />
+              <CobroConfirmadoRow key={c.id} cobro={c} costo={c.external_ref ? epaycoCostos?.[c.external_ref] : null} />
             ))}
           </div>
         </div>

@@ -9,6 +9,7 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio } from '@/lib/actions/conciliacion-actions'
@@ -120,6 +121,12 @@ export type NegocioDetalle = {
    * lo muestra para que financiera vea el plan elegido sin buscarlo en la propuesta.
    */
   modelo_dinero?: ModeloDinero | null
+  /**
+   * Costos ePayco descontados por cobro, keyed por ref_payco (= external_ref del
+   * cobro). Reconstruido de los gastos epayco-*. El bloque de Cobro muestra, bajo cada
+   * cobro por pasarela, la comisión + impuestos descontados y el neto recibido.
+   */
+  epayco_costos?: Record<string, EpaycoCostoCobro>
 }
 
 export type NegocioResumen = {
@@ -658,6 +665,37 @@ export async function getNegocioDetalle(id: string): Promise<{
     if (plan != null) break // el bloque con plan aprobado gana
   }
   negocioTyped.modelo_dinero = modeloDinero
+
+  // Costos ePayco por cobro (lo que descuenta la pasarela: comisión + impuestos),
+  // reconstruidos de los gastos `epayco-comision-{ref}` / `epayco-impuestos-{ref}`.
+  // Keyed por ref_payco (= external_ref del cobro). El bloque de Cobro lo muestra bajo
+  // cada cobro por pasarela para que financiera vea el neto recibido sin buscarlo.
+  const epaycoCostos: Record<string, EpaycoCostoCobro> = {}
+  const { data: epaycoGastos } = await db(supabase)
+    .from('gastos')
+    .select('external_ref, monto, split_json')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', id)
+    .like('external_ref', 'epayco-%')
+  for (const g of ((epaycoGastos ?? []) as Array<{ external_ref: string | null; monto: number | null; split_json: Record<string, unknown> | null }>)) {
+    const m = (g.external_ref ?? '').match(/^epayco-(comision|impuestos)-(.+)$/)
+    if (!m) continue
+    const [, kind, refPayco] = m
+    const entry = epaycoCostos[refPayco] ?? { comision: 0, iva: 0, retefuente: 0, reteica: 0, impuestos: 0, totalDescontado: 0 }
+    const monto = Number(g.monto ?? 0)
+    if (kind === 'comision') {
+      entry.comision += monto
+    } else {
+      entry.impuestos += monto
+      const sj = (g.split_json ?? {}) as Record<string, unknown>
+      entry.iva += Number(sj.iva_comision ?? 0)
+      entry.retefuente += Number(sj.retefuente ?? 0)
+      entry.reteica += Number(sj.reteica ?? 0)
+    }
+    entry.totalDescontado = Math.round((entry.comision + entry.impuestos) * 100) / 100
+    epaycoCostos[refPayco] = entry
+  }
+  negocioTyped.epayco_costos = epaycoCostos
 
   // Pendiente de recaudo para el handoff a operaciones. Solo se computa si la etapa
   // actual (aún en stage 'venta') tiene el gate `saldo:handoff` en su config_extra.
