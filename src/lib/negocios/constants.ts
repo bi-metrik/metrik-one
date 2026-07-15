@@ -8,6 +8,23 @@ export const RAZONES_PERDIDA_NEGOCIO = [
   { value: 'desistio', label: 'El cliente desistio' },
   { value: 'no_conversion_post_pausa', label: 'No hubo conversion tras 3 pausas' },
   { value: 'no_incluido_upme', label: 'No incluido en UPME' },
+  { value: 'duplicado', label: 'Lead duplicado' },
+  { value: 'fuera_de_perfil', label: 'Fuera de perfil (no aplica)' },
+  { value: 'dato_falso_incontactable', label: 'Dato falso / incontactable' },
+  { value: 'lead_no_interesado', label: 'No interesado' },
+  { value: 'otro', label: 'Otro motivo' },
+] as const
+
+// Subconjunto para el descarte de un lead en el buzón de entrada (Recepción).
+// Lista separada de las razones de pérdida de venta: mide la calidad de la
+// pauta/prospección, no la pérdida comercial. Se muestra cuando el negocio se
+// descarta desde una etapa buzón (config_extra.buzon_leads). Los valores viven
+// también en RAZONES_PERDIDA_NEGOCIO (misma columna razon_cierre).
+export const RAZONES_DESCARTE_LEAD = [
+  { value: 'duplicado', label: 'Lead duplicado' },
+  { value: 'fuera_de_perfil', label: 'Fuera de perfil (no aplica)' },
+  { value: 'dato_falso_incontactable', label: 'Dato falso / incontactable' },
+  { value: 'lead_no_interesado', label: 'No interesado' },
   { value: 'otro', label: 'Otro motivo' },
 ] as const
 

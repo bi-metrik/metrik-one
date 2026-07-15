@@ -9,6 +9,7 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
@@ -35,6 +36,12 @@ export type EtapaNegocio = {
   nombre: string
   orden: number
   numero: number
+  // config_extra.etapa_cierre = true → esta etapa es el ÚNICO punto de cierre
+  // del negocio (reemplaza la ventana "últimas 3 por orden"). Opt-in por línea.
+  es_cierre?: boolean
+  // config_extra.buzon_leads = true → buzón de entrada (Recepción). Al descartar
+  // desde aquí se piden razones de triage de lead, no de pérdida de venta.
+  es_buzon?: boolean
 }
 
 export type BloqueDefinition = {
@@ -127,6 +134,27 @@ export type NegocioDetalle = {
    * cobro por pasarela, la comisión + impuestos descontados y el neto recibido.
    */
   epayco_costos?: Record<string, EpaycoCostoCobro>
+  /**
+   * Borrador de factura para Siigo: datos del cliente ya capturados en el
+   * expediente (RUT + contacto) + valor bruto (= honorario; la tarifa UPME es
+   * pasante y va fuera de la factura de venta). El bloque de Facturación lo
+   * muestra autopoblado para copiar a Siigo, con opción de override manual.
+   * Mismo esquema que consumirá la API de Siigo a futuro. null si no aplica.
+   */
+  factura_draft?: FacturaDraft | null
+}
+
+/** Autopoblado del bloque de facturación (fuente para copiar a Siigo / API). */
+export type FacturaDraft = {
+  tipo_identificacion: string | null
+  numero_identificacion: string | null
+  dv: string | null
+  nombre: string | null
+  direccion: string | null
+  ciudad: string | null
+  email: string | null
+  telefono: string | null
+  valor_bruto: number | null
 }
 
 export type NegocioResumen = {
@@ -619,7 +647,7 @@ export async function getNegocioDetalle(id: string): Promise<{
   if (negocioTyped.linea_id) {
     const { data: etapas } = await db(supabase)
       .from('etapas_negocio')
-      .select('id, linea_id, stage, nombre, orden, numero')
+      .select('id, linea_id, stage, nombre, orden, numero, config_extra')
       .eq('linea_id', negocioTyped.linea_id)
       .order('orden', { ascending: true })
 
@@ -630,6 +658,8 @@ export async function getNegocioDetalle(id: string): Promise<{
       nombre: e.nombre as string,
       orden: e.orden as number,
       numero: e.numero as number,
+      es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
+      es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
     }))
   }
 
@@ -1032,6 +1062,49 @@ export async function getNegocioDetalle(id: string): Promise<{
     }))
   }
 
+  // Borrador de factura Siigo: solo si la etapa actual expone un bloque de
+  // facturación (evita queries de más en el resto del flujo). Cliente desde el
+  // RUT (campos extraídos de los bloques `documento`) + contacto; valor bruto =
+  // honorario (la tarifa UPME es pasante, va FUERA de la factura de venta).
+  if (bloques.some(b => b.bloque_definitions?.tipo === 'facturacion')) {
+    const { data: docBloques } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.bloque_definitions.tipo', 'documento')
+    const campos: Record<string, string> = {}
+    for (const b of ((docBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+      const c = (b.data?.campos ?? {}) as Record<string, { value?: unknown } | undefined>
+      for (const [slug, v] of Object.entries(c)) {
+        const val = v?.value
+        if (val != null && val !== '' && campos[slug] == null) campos[slug] = String(val)
+      }
+    }
+    const numId = campos.numero_identificacion ?? nitSinDv(campos.nit ?? '') ?? null
+    let email: string | null = null
+    let telefono: string | null = null
+    if (negocioTyped.contacto_id) {
+      const { data: c } = await db(supabase)
+        .from('contactos')
+        .select('email, telefono')
+        .eq('id', negocioTyped.contacto_id)
+        .single()
+      email = (c as { email?: string | null } | null)?.email ?? null
+      telefono = (c as { telefono?: string | null } | null)?.telefono ?? null
+    }
+    negocioTyped.factura_draft = {
+      tipo_identificacion: campos.tipo_identificacion ?? (numId ? 'NIT' : null),
+      numero_identificacion: numId,
+      dv: numId ? calcularDvNit(numId) : null,
+      nombre: campos.nombre ?? campos.razon_social ?? null,
+      direccion: campos.direccion ?? null,
+      ciudad: campos.ciudad ?? campos.municipio ?? null,
+      email,
+      telefono,
+      valor_bruto: modeloDinero?.aprobado_honorario ?? null,
+    }
+  }
+
   return {
     negocio: negocioTyped,
     bloques,
@@ -1175,16 +1248,21 @@ export async function crearNegocio(input: {
     empresaId = (newEmpresa as { id: string } | null)?.id
   }
 
-  // Obtener primera etapa filtrada por stages activos del workspace
+  // Etapa de entrada del negocio MANUAL. Config-driven: si el workspace define
+  // config_extra.entrada_manual_orden, el negocio nace en esa etapa (ej. SOENA:
+  // Validación orden 1, saltándose el buzón de Recepción que es solo para leads
+  // de Meta). Sin el config, cae a la 1ª etapa por orden (retrocompat).
   const stagesActivos = (wsConfig as { stages_activos: string[] } | null)?.stages_activos ?? ['venta', 'ejecucion', 'cobro']
-  const { data: primeraEtapaRaw } = await db(supabase)
+  const entradaManualOrden = (wsConfig as { config_extra?: Record<string, unknown> } | null)
+    ?.config_extra?.entrada_manual_orden as number | undefined
+  const etapaEntradaQuery = db(supabase)
     .from('etapas_negocio')
     .select('id, stage')
     .eq('linea_id', lineaId)
     .in('stage', stagesActivos)
-    .order('orden', { ascending: true })
-    .limit(1)
-    .single()
+  const { data: primeraEtapaRaw } = typeof entradaManualOrden === 'number'
+    ? await etapaEntradaQuery.eq('orden', entradaManualOrden).limit(1).single()
+    : await etapaEntradaQuery.order('orden', { ascending: true }).limit(1).single()
 
   const primeraEtapa = primeraEtapaRaw as { id: string; stage: string } | null
 
@@ -4466,6 +4544,12 @@ export async function perderNegocio(
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // El motivo es obligatorio (queda registrado en razon_cierre para medir
+  // pérdida de venta y calidad de pauta en el descarte de leads).
+  if (!razon || !razon.trim()) {
+    return { error: 'Debes registrar el motivo del descarte' }
+  }
 
   // Validar que existe y esta en stage venta
   const { data: negocio } = await db(supabase)

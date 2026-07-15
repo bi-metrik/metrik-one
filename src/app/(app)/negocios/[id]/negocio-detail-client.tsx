@@ -42,7 +42,8 @@ import BloqueDocumentos from './bloques/BloqueDocumentos'
 import type { DocumentoConfig } from './bloques/BloqueDocumentos'
 import BloqueDocumento from './bloques/BloqueDocumento'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
-import type { CotizacionResumen } from '../negocio-v2-actions'
+import type { CotizacionResumen, FacturaDraft } from '../negocio-v2-actions'
+import BloqueFacturacion from './bloques/BloqueFacturacion'
 import BloqueCobros from './bloques/BloqueCobros'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -637,9 +638,15 @@ function SelectorEtapa({
     })
   }
 
-  // Detectar etapa terminal (las últimas 3 etapas del flujo pueden ser la última según condicionales)
+  // Detectar etapa terminal (habilita cerrar/completar). Config-driven: si la
+  // línea marca una etapa con es_cierre, ESA es la única terminal (SOENA:
+  // Facturación). Si ninguna la marca, cae a la heurística legacy "últimas 3
+  // etapas por orden" (retrocompat para líneas sin el flag).
+  const hayEtapaCierre = etapasLinea.some(e => e.es_cierre)
   const maxOrden = etapasLinea.length > 0 ? Math.max(...etapasLinea.map(e => e.orden)) : 0
-  const isTerminalStage = etapaActual ? etapaActual.orden >= maxOrden - 2 : false
+  const isTerminalStage = etapaActual
+    ? (hayEtapaCierre ? etapaActual.es_cierre === true : etapaActual.orden >= maxOrden - 2)
+    : false
 
   // Texto y estilo del boton de cierre segun stage
   const esEjecucionTerminal = stageActual === 'ejecucion' && isTerminalStage
@@ -684,6 +691,7 @@ function SelectorEtapa({
             negocioId={negocioId}
             stage={stageActual ?? 'venta'}
             isTerminalStage={isTerminalStage}
+            esBuzonLeads={etapaActual?.es_buzon === true}
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
             onClose={() => setShowCierreDialog(false)}
@@ -771,6 +779,7 @@ function SelectorEtapa({
           negocioId={negocioId}
           stage={stageActual ?? 'venta'}
           isTerminalStage={isTerminalStage}
+          esBuzonLeads={etapaActual?.es_buzon === true}
           resumenFinanciero={resumenFinanciero}
           precioAprobado={precioAprobado}
           onClose={() => setShowCierreDialog(false)}
@@ -1065,6 +1074,7 @@ function BloqueRenderer({
   modeloDinero,
   stageActual,
   epaycoCostos,
+  facturaDraft,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1095,6 +1105,7 @@ function BloqueRenderer({
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
+  facturaDraft?: FacturaDraft | null
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1360,6 +1371,25 @@ function BloqueRenderer({
         />
       )
 
+    case 'facturacion':
+      return (
+        <BloqueFacturacion
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia ? {
+            id: bloque.instancia.id,
+            completado: bloque.instancia.estado === 'completo',
+            data: bloque.instancia.data as Record<string, unknown> | null,
+          } : null}
+          modo={modo}
+          draft={facturaDraft ?? null}
+          configExtra={configExtra as {
+            label?: string
+            descripcion?: string
+            iva_pct?: number
+          }}
+        />
+      )
+
     case 'plan_recurrente':
       return (
         <BloquePlanRecurrente
@@ -1502,6 +1532,7 @@ function BloqueCard({
   modeloDinero,
   stageActual,
   epaycoCostos,
+  facturaDraft,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1532,6 +1563,7 @@ function BloqueCard({
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
+  facturaDraft?: FacturaDraft | null
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -1638,6 +1670,7 @@ function BloqueCard({
               modeloDinero={modeloDinero}
               stageActual={stageActual}
               epaycoCostos={epaycoCostos}
+              facturaDraft={facturaDraft}
             />
           )}
         </div>
@@ -1956,6 +1989,7 @@ export default function NegocioDetailClient({
                   modeloDinero={negocio.modelo_dinero ?? null}
                   stageActual={negocio.stage_actual}
                   epaycoCostos={negocio.epayco_costos ?? {}}
+                  facturaDraft={negocio.factura_draft ?? null}
                 />
               ))}
             </div>
