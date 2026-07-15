@@ -59,6 +59,26 @@ export interface EpaycoDesglose {
   pagador_email: string
 }
 
+/**
+ * Costo de ePayco descontado a UN cobro, reconstruido desde los gastos que dejó el
+ * registro del pago (`epayco-comision-{ref}` + `epayco-impuestos-{ref}`). Sirve para
+ * mostrar en el bloque de Cobro qué descontó la plataforma y cuánto se recibió neto.
+ */
+export interface EpaycoCostoCobro {
+  /** Comisión de la pasarela (costo variable). */
+  comision: number
+  /** IVA sobre la comisión. */
+  iva: number
+  /** Retención en la fuente. */
+  retefuente: number
+  /** ReteICA. */
+  reteica: number
+  /** IVA + retefuente + reteica (impuestos recuperables). */
+  impuestos: number
+  /** Total descontado por ePayco = comisión + impuestos. */
+  totalDescontado: number
+}
+
 // ── Token cache ──────────────────────────────────────────────────────────────
 
 let cachedToken: string | null = null

@@ -45,6 +45,7 @@ import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
+import type { EpaycoCostoCobro } from '@/lib/epayco'
 import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
 import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
@@ -1062,6 +1063,7 @@ function BloqueRenderer({
   datosPorSlug,
   pendienteHandoff,
   modeloDinero,
+  epaycoCostos,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1089,6 +1091,7 @@ function BloqueRenderer({
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
+  epaycoCostos?: Record<string, EpaycoCostoCobro>
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1347,6 +1350,7 @@ function BloqueRenderer({
           precioTotal={precioTotal}
           pendienteHandoff={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : pendienteHandoff}
           modeloDinero={modeloDinero}
+          epaycoCostos={epaycoCostos}
         />
       )
 
@@ -1490,6 +1494,7 @@ function BloqueCard({
   datosPorSlug,
   pendienteHandoff,
   modeloDinero,
+  epaycoCostos,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1517,6 +1522,7 @@ function BloqueCard({
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
+  epaycoCostos?: Record<string, EpaycoCostoCobro>
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -1621,6 +1627,7 @@ function BloqueCard({
               datosPorSlug={datosPorSlug}
               pendienteHandoff={pendienteHandoff}
               modeloDinero={modeloDinero}
+              epaycoCostos={epaycoCostos}
             />
           )}
         </div>
@@ -1937,6 +1944,7 @@ export default function NegocioDetailClient({
                   datosPorSlug={datosPorSlug}
                   pendienteHandoff={negocio.pendiente_handoff ?? null}
                   modeloDinero={negocio.modelo_dinero ?? null}
+                  epaycoCostos={negocio.epayco_costos ?? {}}
                 />
               ))}
             </div>
