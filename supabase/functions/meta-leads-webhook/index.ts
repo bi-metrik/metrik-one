@@ -21,6 +21,12 @@
 //
 // Idempotencia: negocios.metadata->>leadgen_id. Meta reintenta el webhook.
 // verify_jwt=false en config.toml (Meta no manda el JWT de Supabase).
+//
+// Tras crear el negocio, dispara al instante la carpeta de Drive vía el
+// endpoint puntual del app. Requiere dos secretos:
+//   CRON_SECRET   — mismo valor que el env de Vercel (auth del endpoint).
+//   APP_BASE_URL  — URL estable del app desplegado (ej. https://soena.metrikone.co).
+// Si faltan, el disparo se omite (fail-soft) y el cron diario reconcilia.
 // ============================================================
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -374,4 +380,55 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     '[meta-leads] negocio creado %s (%s) desde lead %s en ws %s',
     created.codigo ?? created.id, nombre, c.leadgen_id, workspaceId,
   );
+
+  // 8. Disparar la carpeta de Drive AL INSTANTE (opción 1). El insert directo
+  //    se salta crearNegocio, así que sin esto la carpeta la crearía solo el
+  //    cron diario → un lead que entra entre corridas queda sin carpeta y su
+  //    propuesta económica sale sin PDF. Llamamos el endpoint puntual con
+  //    service role (no es tenant-scoped). Fail-soft: cualquier fallo se loguea
+  //    y NUNCA se propaga — el cron diario es el backstop.
+  await dispararCarpetaDrive(created.id, created.codigo);
+}
+
+// Dispara la creación de la carpeta de Drive del negocio recién creado, vía el
+// endpoint puntual del app (`/api/crons/ensure-negocio-folders?negocio_id=`).
+// Fail-soft por diseño: no lanza. Si faltan CRON_SECRET o APP_BASE_URL, o el
+// fetch falla, solo se loguea; el cron diario reconcilia después.
+async function dispararCarpetaDrive(negocioId: string, codigo: string | null): Promise<void> {
+  const codigoLog = codigo ?? negocioId;
+  const baseUrl = Deno.env.get('APP_BASE_URL');
+  const cronSecret = Deno.env.get('CRON_SECRET');
+  if (!baseUrl || !cronSecret) {
+    console.warn(
+      '[meta-leads] carpeta Drive no disparada para %s: falta %s (backstop: cron diario)',
+      codigoLog,
+      !baseUrl ? 'APP_BASE_URL' : 'CRON_SECRET',
+    );
+    return;
+  }
+  try {
+    const url = `${baseUrl.replace(/\/+$/, '')}/api/crons/ensure-negocio-folders?negocio_id=${negocioId}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${cronSecret}` },
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      console.error(
+        '[meta-leads] carpeta Drive: endpoint respondió %s para %s — %s (backstop: cron diario)',
+        res.status, codigoLog, txt.slice(0, 300),
+      );
+      return;
+    }
+    const out = await res.json().catch(() => ({}));
+    console.log(
+      '[meta-leads] carpeta Drive disparada para %s: created=%s reason=%s',
+      codigoLog, out?.created, out?.reason,
+    );
+  } catch (e) {
+    console.error(
+      '[meta-leads] carpeta Drive: fetch falló para %s: %s (backstop: cron diario)',
+      codigoLog, e instanceof Error ? e.message : e,
+    );
+  }
 }
