@@ -1947,6 +1947,148 @@ export async function conciliarReferencia(
   return { success: true }
 }
 
+// ── aceptarRepartoComercial — la financiera confirma el reparto del comercial ─
+
+/**
+ * ACEPTA (concilia) un reparto/pago PROPUESTO por el comercial para una referencia.
+ * Marca el check de conciliación en TODOS los negocios que reciben una porción
+ * `origen='comercial'` de esa referencia. Cada negocio cuadra su propia parte del
+ * pago — la financiera valida que el dinero real corresponde y da el visto bueno.
+ *
+ * Permisos: solo área financiera (Diana) vía ctxFinanciero.
+ */
+export async function aceptarRepartoComercial(
+  externalRef: string,
+): Promise<{ success: true; conciliados: number } | { success: false; error: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const ref = (externalRef ?? '').trim()
+  if (!ref) return { success: false, error: 'Referencia inválida' }
+
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros')
+    .select('negocio_id, split_json')
+    .eq('workspace_id', workspaceId)
+    .eq('external_ref', ref)
+  const negociosTocados = Array.from(new Set(
+    ((cobrosRaw ?? []) as Array<{ negocio_id: string | null; split_json: { origen?: string } | null }>)
+      .filter((c) => c.split_json?.origen === 'comercial' && c.negocio_id)
+      .map((c) => c.negocio_id as string),
+  ))
+
+  if (negociosTocados.length === 0) {
+    return { success: false, error: 'No hay un reparto propuesto por el comercial para esta referencia.' }
+  }
+
+  const nowIso = new Date().toISOString()
+  for (const id of negociosTocados) {
+    const { error: upErr } = await db(supabase).from('negocio_conciliacion').upsert(
+      {
+        workspace_id: workspaceId,
+        negocio_id: id,
+        conciliado: true,
+        conciliado_por: staffId,
+        conciliado_at: nowIso,
+        nota: `Reparto de la referencia ${ref} aceptado por el área financiera.`,
+        updated_at: nowIso,
+      },
+      { onConflict: 'negocio_id' },
+    )
+    if (upErr) return { success: false, error: (upErr as { message?: string }).message ?? 'No se pudo aceptar el reparto' }
+
+    if (staffId) {
+      try {
+        await db(supabase).from('activity_log').insert({
+          workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: id,
+          tipo: 'comentario', autor_id: staffId,
+          contenido: `Pago conciliado por el área financiera (referencia ${ref}).`,
+        })
+      } catch { /* no bloquear por el log */ }
+    }
+  }
+
+  for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
+  revalidatePath('/conciliacion')
+  return { success: true, conciliados: negociosTocados.length }
+}
+
+// ── rechazarRepartoComercial — la financiera devuelve el reparto al comercial ─
+
+/**
+ * RECHAZA un reparto/pago PROPUESTO por el comercial (`split_json.origen='comercial'`)
+ * para una referencia. Borra SOLO las porciones del comercial de esa referencia,
+ * des-concilia los negocios tocados y deja constancia en el activity_log de cada uno
+ * (con la nota opcional de la financiera). Devuelve el trabajo al comercial: la
+ * referencia queda liberada para que él la vuelva a registrar/repartir bien.
+ *
+ * NO toca cobros que no sean del reparto comercial (ePayco directo, pasante/honorario
+ * del auto-cobro, etc.). Permisos: solo área financiera (Diana) vía ctxFinanciero.
+ */
+export async function rechazarRepartoComercial(
+  externalRef: string,
+  nota?: string,
+): Promise<{ success: true; eliminados: number } | { success: false; error: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const ref = (externalRef ?? '').trim()
+  if (!ref) return { success: false, error: 'Referencia inválida' }
+
+  // Cargar los cobros de esta referencia propuestos por el comercial.
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros')
+    .select('id, negocio_id, split_json')
+    .eq('workspace_id', workspaceId)
+    .eq('external_ref', ref)
+  const comercial = ((cobrosRaw ?? []) as Array<{
+    id: string
+    negocio_id: string | null
+    split_json: { origen?: string } | null
+  }>).filter((c) => c.split_json?.origen === 'comercial' && c.negocio_id)
+
+  if (comercial.length === 0) {
+    return { success: false, error: 'No hay un reparto propuesto por el comercial para esta referencia.' }
+  }
+
+  const negociosTocados = Array.from(new Set(comercial.map((c) => c.negocio_id as string)))
+
+  for (const c of comercial) {
+    const { error: delErr } = await db(supabase).from('cobros').delete().eq('id', c.id).eq('workspace_id', workspaceId)
+    if (delErr) return { success: false, error: (delErr as { message?: string }).message ?? 'No se pudo rechazar el reparto' }
+  }
+
+  // Cambió el cobrado → des-conciliar los negocios tocados (defensivo).
+  await db(supabase)
+    .from('negocio_conciliacion')
+    .update({ conciliado: false, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspaceId)
+    .in('negocio_id', negociosTocados)
+
+  // Constancia en el timeline de cada negocio → el comercial ve el rechazo + la nota.
+  if (staffId) {
+    const notaTxt = (nota ?? '').trim().slice(0, 300)
+    for (const id of negociosTocados) {
+      try {
+        await db(supabase).from('activity_log').insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: id,
+          tipo: 'comentario',
+          autor_id: staffId,
+          contenido: `El área financiera rechazó el reparto propuesto para la referencia ${ref}.${notaTxt ? ` Nota: ${notaTxt}` : ' Vuelve a registrarlo.'}`,
+        })
+      } catch { /* no bloquear por el log */ }
+    }
+  }
+
+  for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
+  revalidatePath('/conciliacion')
+  return { success: true, eliminados: comercial.length }
+}
+
 // ── aceptarDuplicado — resuelve una referencia duplicada ─────────────────────
 
 export async function aceptarDuplicado(
