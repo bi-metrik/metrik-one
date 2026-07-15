@@ -43,7 +43,7 @@ function rolHabilitadoParaPagoFab(role: Role, areas: Area[]): boolean {
   return false
 }
 
-async function ctxFabPago(): Promise<
+export async function ctxFabPago(): Promise<
   | { ok: true; supabase: unknown; workspaceId: string; staffId: string | null }
   | { ok: false; error: string }
 > {

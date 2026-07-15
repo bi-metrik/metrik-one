@@ -3208,6 +3208,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     vencido: boolean
     notas: string | null
     external_ref: string | null
+    /** true si es una porción de un reparto propuesto por el comercial (split_json.origen==='comercial'). */
+    es_reparto_comercial: boolean
   }>
   cotizacion: null
   cotizacionesNegocio: CotizacionResumen[]
@@ -3338,7 +3340,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Cargar cobros del negocio (db() para evitar type errors en columnas nuevas)
   const { data: cobrosData } = await db(supabase)
     .from('cobros')
-    .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref')
+    .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', id)
     .order('created_at', { ascending: true })
@@ -4119,6 +4121,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       vencido: (c.vencido as boolean | null) ?? false,
       notas: c.notas as string | null,
       external_ref: c.external_ref as string | null,
+      es_reparto_comercial:
+        ((c.split_json as { origen?: string } | null)?.origen ?? null) === 'comercial',
     })),
     cotizacion,
     cotizacionesNegocio,

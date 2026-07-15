@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText, Loader2, Wallet } from 'lucide-react'
+import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText, Loader2, Wallet, ArrowRightLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
 } from './timer-actions'
 import { FEATURES } from '@/lib/feature-flags'
 import { agregarPagoFab, getNegociosParaPagoFab, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+import DistribuirPagoModal from '@/components/distribuir-pago-modal'
 
 const VERDE = '#10B981'
 
@@ -18,6 +19,8 @@ interface FABProps {
   role: string
   /** Muestra la acción "Registrar pago" (opt-in por workspace, flag modules.fab_registrar_pago). */
   registrarPagoEnabled?: boolean
+  /** Muestra la acción "Distribuir pago entre negocios" (opt-in, flag modules.conciliacion). */
+  distribuirPagoEnabled?: boolean
 }
 
 interface FABAction {
@@ -92,10 +95,11 @@ const DEFAULT_TIMER: TimerLocal = {
 
 // ── FAB Component ─────────────────────────────────────
 
-export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
+export default function FAB({ role, registrarPagoEnabled = false, distribuirPagoEnabled = false }: FABProps) {
   const [open, setOpen] = useState(false)
   const [timerPanel, setTimerPanel] = useState(false)
   const [pagoModal, setPagoModal] = useState(false)
+  const [distribuirModal, setDistribuirModal] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
   const negocioContextMatch = pathname.match(/^\/negocios\/([a-f0-9-]{36})/)
@@ -113,14 +117,24 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
   // "Registrar pago" es opt-in por workspace (flag) y se inyecta dinámicamente.
   // Visible para roles que tocan dinero; el guard server (rolHabilitadoParaPagoFab)
   // es la barrera real — excluye operaciones pura aunque la UI lo muestre.
-  const dynamicActions: FABAction[] = registrarPagoEnabled
-    ? [{
-        label: 'Registrar pago',
-        icon: Wallet,
-        action: 'pago',
-        roles: ['owner', 'admin', 'supervisor', 'operator'],
-      }]
-    : []
+  const dynamicActions: FABAction[] = [
+    ...(registrarPagoEnabled
+      ? [{
+          label: 'Registrar pago',
+          icon: Wallet,
+          action: 'pago',
+          roles: ['owner', 'admin', 'supervisor', 'operator'],
+        } as FABAction]
+      : []),
+    ...(distribuirPagoEnabled
+      ? [{
+          label: 'Distribuir pago entre negocios',
+          icon: ArrowRightLeft,
+          action: 'distribuir',
+          roles: ['owner', 'admin', 'supervisor', 'operator'],
+        } as FABAction]
+      : []),
+  ]
 
   const visibleActions = [...FAB_ACTIONS, ...dynamicActions].filter(a =>
     a.roles.includes(role) &&
@@ -197,6 +211,8 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
     setOpen(false)
     if (action.action === 'pago') {
       setPagoModal(true)
+    } else if (action.action === 'distribuir') {
+      setDistribuirModal(true)
     } else if (action.action === 'saldo') {
       router.push('/numeros?saldo=1')
     } else if (action.action === 'factura' && contextNegocioId) {
@@ -414,6 +430,14 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
         <RegistrarPagoModal
           onClose={() => setPagoModal(false)}
           onDone={() => { setPagoModal(false); router.refresh() }}
+        />
+      )}
+
+      {/* ── Modal Distribuir pago entre negocios (reparto propuesto por el comercial) ── */}
+      {distribuirModal && (
+        <DistribuirPagoModal
+          onClose={() => setDistribuirModal(false)}
+          onDone={() => { setDistribuirModal(false); router.refresh() }}
         />
       )}
     </>
