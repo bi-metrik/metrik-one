@@ -35,6 +35,9 @@ export type EtapaNegocio = {
   nombre: string
   orden: number
   numero: number
+  // config_extra.etapa_cierre = true → esta etapa es el ÚNICO punto de cierre
+  // del negocio (reemplaza la ventana "últimas 3 por orden"). Opt-in por línea.
+  es_cierre?: boolean
 }
 
 export type BloqueDefinition = {
@@ -619,7 +622,7 @@ export async function getNegocioDetalle(id: string): Promise<{
   if (negocioTyped.linea_id) {
     const { data: etapas } = await db(supabase)
       .from('etapas_negocio')
-      .select('id, linea_id, stage, nombre, orden, numero')
+      .select('id, linea_id, stage, nombre, orden, numero, config_extra')
       .eq('linea_id', negocioTyped.linea_id)
       .order('orden', { ascending: true })
 
@@ -630,6 +633,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       nombre: e.nombre as string,
       orden: e.orden as number,
       numero: e.numero as number,
+      es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
     }))
   }
 
@@ -1175,16 +1179,21 @@ export async function crearNegocio(input: {
     empresaId = (newEmpresa as { id: string } | null)?.id
   }
 
-  // Obtener primera etapa filtrada por stages activos del workspace
+  // Etapa de entrada del negocio MANUAL. Config-driven: si el workspace define
+  // config_extra.entrada_manual_orden, el negocio nace en esa etapa (ej. SOENA:
+  // Validación orden 1, saltándose el buzón de Recepción que es solo para leads
+  // de Meta). Sin el config, cae a la 1ª etapa por orden (retrocompat).
   const stagesActivos = (wsConfig as { stages_activos: string[] } | null)?.stages_activos ?? ['venta', 'ejecucion', 'cobro']
-  const { data: primeraEtapaRaw } = await db(supabase)
+  const entradaManualOrden = (wsConfig as { config_extra?: Record<string, unknown> } | null)
+    ?.config_extra?.entrada_manual_orden as number | undefined
+  const etapaEntradaQuery = db(supabase)
     .from('etapas_negocio')
     .select('id, stage')
     .eq('linea_id', lineaId)
     .in('stage', stagesActivos)
-    .order('orden', { ascending: true })
-    .limit(1)
-    .single()
+  const { data: primeraEtapaRaw } = typeof entradaManualOrden === 'number'
+    ? await etapaEntradaQuery.eq('orden', entradaManualOrden).limit(1).single()
+    : await etapaEntradaQuery.order('orden', { ascending: true }).limit(1).single()
 
   const primeraEtapa = primeraEtapaRaw as { id: string; stage: string } | null
 
