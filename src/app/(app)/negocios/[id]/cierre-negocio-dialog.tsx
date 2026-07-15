@@ -8,7 +8,7 @@ import {
   cancelarNegocio,
   completarNegocio,
 } from '../negocio-v2-actions'
-import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
+import { RAZONES_PERDIDA_NEGOCIO, RAZONES_DESCARTE_LEAD, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -25,6 +25,7 @@ interface CierreNegocioDialogProps {
   negocioId: string
   stage: string // 'venta' | 'ejecucion' | 'cobro'
   isTerminalStage?: boolean
+  esBuzonLeads?: boolean // descarte desde el buzón de entrada (Recepción)
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   precioAprobado: number | null
   onClose: () => void
@@ -32,11 +33,14 @@ interface CierreNegocioDialogProps {
 
 // ── Stage: VENTA — Perder negocio ───────────────────────────────────────────
 
-function PerderForm({ negocioId, onClose }: { negocioId: string; onClose: () => void }) {
+function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; esBuzonLeads?: boolean; onClose: () => void }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [razon, setRazon] = useState('')
   const [notas, setNotas] = useState('')
+  // Desde el buzón (Recepción) se descarta un lead → razones de triage; en el
+  // resto de la venta → razones de pérdida comercial.
+  const razones = esBuzonLeads ? RAZONES_DESCARTE_LEAD : RAZONES_PERDIDA_NEGOCIO
 
   const handleConfirm = () => {
     if (!razon) return
@@ -54,11 +58,13 @@ function PerderForm({ negocioId, onClose }: { negocioId: string; onClose: () => 
 
   return (
     <>
-      <h3 className="text-sm font-bold text-[#1A1A1A]">Perder negocio</h3>
-      <p className="text-xs text-[#6B7280]">Selecciona la razon principal</p>
+      <h3 className="text-sm font-bold text-[#1A1A1A]">{esBuzonLeads ? 'Descartar lead' : 'Perder negocio'}</h3>
+      <p className="text-xs text-[#6B7280]">
+        {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : 'Selecciona la razon principal'}
+      </p>
 
       <div className="space-y-1.5 mt-3">
-        {RAZONES_PERDIDA_NEGOCIO.map(r => (
+        {razones.map(r => (
           <button
             key={r.value}
             onClick={() => setRazon(r.value)}
@@ -300,6 +306,7 @@ export default function CierreNegocioDialog({
   negocioId,
   stage,
   isTerminalStage,
+  esBuzonLeads,
   resumenFinanciero,
   precioAprobado,
   onClose,
@@ -311,7 +318,7 @@ export default function CierreNegocioDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-xl bg-white shadow-xl p-6 space-y-1">
         {stage === 'venta' && (
-          <PerderForm negocioId={negocioId} onClose={onClose} />
+          <PerderForm negocioId={negocioId} esBuzonLeads={esBuzonLeads} onClose={onClose} />
         )}
         {showCancelar && (
           <CancelarForm negocioId={negocioId} onClose={onClose} />

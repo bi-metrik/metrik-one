@@ -690,6 +690,7 @@ function SelectorEtapa({
             negocioId={negocioId}
             stage={stageActual ?? 'venta'}
             isTerminalStage={isTerminalStage}
+            esBuzonLeads={etapaActual?.es_buzon === true}
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
             onClose={() => setShowCierreDialog(false)}
@@ -777,6 +778,7 @@ function SelectorEtapa({
           negocioId={negocioId}
           stage={stageActual ?? 'venta'}
           isTerminalStage={isTerminalStage}
+          esBuzonLeads={etapaActual?.es_buzon === true}
           resumenFinanciero={resumenFinanciero}
           precioAprobado={precioAprobado}
           onClose={() => setShowCierreDialog(false)}

@@ -38,6 +38,9 @@ export type EtapaNegocio = {
   // config_extra.etapa_cierre = true → esta etapa es el ÚNICO punto de cierre
   // del negocio (reemplaza la ventana "últimas 3 por orden"). Opt-in por línea.
   es_cierre?: boolean
+  // config_extra.buzon_leads = true → buzón de entrada (Recepción). Al descartar
+  // desde aquí se piden razones de triage de lead, no de pérdida de venta.
+  es_buzon?: boolean
 }
 
 export type BloqueDefinition = {
@@ -634,6 +637,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       orden: e.orden as number,
       numero: e.numero as number,
       es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
+      es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
     }))
   }
 
@@ -4475,6 +4479,12 @@ export async function perderNegocio(
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // El motivo es obligatorio (queda registrado en razon_cierre para medir
+  // pérdida de venta y calidad de pauta en el descarte de leads).
+  if (!razon || !razon.trim()) {
+    return { error: 'Debes registrar el motivo del descarte' }
+  }
 
   // Validar que existe y esta en stage venta
   const { data: negocio } = await db(supabase)
