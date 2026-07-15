@@ -9,6 +9,7 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
@@ -133,6 +134,27 @@ export type NegocioDetalle = {
    * cobro por pasarela, la comisión + impuestos descontados y el neto recibido.
    */
   epayco_costos?: Record<string, EpaycoCostoCobro>
+  /**
+   * Borrador de factura para Siigo: datos del cliente ya capturados en el
+   * expediente (RUT + contacto) + valor bruto (= honorario; la tarifa UPME es
+   * pasante y va fuera de la factura de venta). El bloque de Facturación lo
+   * muestra autopoblado para copiar a Siigo, con opción de override manual.
+   * Mismo esquema que consumirá la API de Siigo a futuro. null si no aplica.
+   */
+  factura_draft?: FacturaDraft | null
+}
+
+/** Autopoblado del bloque de facturación (fuente para copiar a Siigo / API). */
+export type FacturaDraft = {
+  tipo_identificacion: string | null
+  numero_identificacion: string | null
+  dv: string | null
+  nombre: string | null
+  direccion: string | null
+  ciudad: string | null
+  email: string | null
+  telefono: string | null
+  valor_bruto: number | null
 }
 
 export type NegocioResumen = {
@@ -1038,6 +1060,49 @@ export async function getNegocioDetalle(id: string): Promise<{
       instancia: instanciasMap[bc.id as string] ?? null,
       block_id: blockIdByConfigId.get(bc.id as string),
     }))
+  }
+
+  // Borrador de factura Siigo: solo si la etapa actual expone un bloque de
+  // facturación (evita queries de más en el resto del flujo). Cliente desde el
+  // RUT (campos extraídos de los bloques `documento`) + contacto; valor bruto =
+  // honorario (la tarifa UPME es pasante, va FUERA de la factura de venta).
+  if (bloques.some(b => b.bloque_definitions?.tipo === 'facturacion')) {
+    const { data: docBloques } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.bloque_definitions.tipo', 'documento')
+    const campos: Record<string, string> = {}
+    for (const b of ((docBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+      const c = (b.data?.campos ?? {}) as Record<string, { value?: unknown } | undefined>
+      for (const [slug, v] of Object.entries(c)) {
+        const val = v?.value
+        if (val != null && val !== '' && campos[slug] == null) campos[slug] = String(val)
+      }
+    }
+    const numId = campos.numero_identificacion ?? nitSinDv(campos.nit ?? '') ?? null
+    let email: string | null = null
+    let telefono: string | null = null
+    if (negocioTyped.contacto_id) {
+      const { data: c } = await db(supabase)
+        .from('contactos')
+        .select('email, telefono')
+        .eq('id', negocioTyped.contacto_id)
+        .single()
+      email = (c as { email?: string | null } | null)?.email ?? null
+      telefono = (c as { telefono?: string | null } | null)?.telefono ?? null
+    }
+    negocioTyped.factura_draft = {
+      tipo_identificacion: campos.tipo_identificacion ?? (numId ? 'NIT' : null),
+      numero_identificacion: numId,
+      dv: numId ? calcularDvNit(numId) : null,
+      nombre: campos.nombre ?? campos.razon_social ?? null,
+      direccion: campos.direccion ?? null,
+      ciudad: campos.ciudad ?? campos.municipio ?? null,
+      email,
+      telefono,
+      valor_bruto: modeloDinero?.aprobado_honorario ?? null,
+    }
   }
 
   return {

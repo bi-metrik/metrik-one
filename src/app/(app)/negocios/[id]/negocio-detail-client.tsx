@@ -42,7 +42,8 @@ import BloqueDocumentos from './bloques/BloqueDocumentos'
 import type { DocumentoConfig } from './bloques/BloqueDocumentos'
 import BloqueDocumento from './bloques/BloqueDocumento'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
-import type { CotizacionResumen } from '../negocio-v2-actions'
+import type { CotizacionResumen, FacturaDraft } from '../negocio-v2-actions'
+import BloqueFacturacion from './bloques/BloqueFacturacion'
 import BloqueCobros from './bloques/BloqueCobros'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -1073,6 +1074,7 @@ function BloqueRenderer({
   modeloDinero,
   stageActual,
   epaycoCostos,
+  facturaDraft,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1103,6 +1105,7 @@ function BloqueRenderer({
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
+  facturaDraft?: FacturaDraft | null
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1368,6 +1371,25 @@ function BloqueRenderer({
         />
       )
 
+    case 'facturacion':
+      return (
+        <BloqueFacturacion
+          negocioBloqueId={instanciaId}
+          instancia={bloque.instancia ? {
+            id: bloque.instancia.id,
+            completado: bloque.instancia.estado === 'completo',
+            data: bloque.instancia.data as Record<string, unknown> | null,
+          } : null}
+          modo={modo}
+          draft={facturaDraft ?? null}
+          configExtra={configExtra as {
+            label?: string
+            descripcion?: string
+            iva_pct?: number
+          }}
+        />
+      )
+
     case 'plan_recurrente':
       return (
         <BloquePlanRecurrente
@@ -1510,6 +1532,7 @@ function BloqueCard({
   modeloDinero,
   stageActual,
   epaycoCostos,
+  facturaDraft,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1540,6 +1563,7 @@ function BloqueCard({
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
+  facturaDraft?: FacturaDraft | null
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -1646,6 +1670,7 @@ function BloqueCard({
               modeloDinero={modeloDinero}
               stageActual={stageActual}
               epaycoCostos={epaycoCostos}
+              facturaDraft={facturaDraft}
             />
           )}
         </div>
@@ -1964,6 +1989,7 @@ export default function NegocioDetailClient({
                   modeloDinero={negocio.modelo_dinero ?? null}
                   stageActual={negocio.stage_actual}
                   epaycoCostos={negocio.epayco_costos ?? {}}
+                  facturaDraft={negocio.factura_draft ?? null}
                 />
               ))}
             </div>

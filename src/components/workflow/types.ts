@@ -95,6 +95,7 @@ export const BLOQUE_TIPO_CODE: Record<string, string> = {
   documentos: 'DS',
   ejecucion: 'EJ',
   equipo: 'EQ',
+  facturacion: 'FA',
   formulario: 'FO',
   guia_devolucion: 'GD',
   historial: 'HI',
