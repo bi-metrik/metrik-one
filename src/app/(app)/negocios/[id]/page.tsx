@@ -113,6 +113,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         bloquesEtapasPrevias={data.bloquesEtapasPrevias as any}
         pausaEnabled={data.pausaEnabled}
+        registrarPagoEnabled={conciliacionActiva}
         errorMsg={err}
       />
       {conciliacionActiva && (
