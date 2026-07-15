@@ -1664,6 +1664,146 @@ async function sincronizarSegmentoContacto(
   }
 }
 
+// ── Gate de anticipo cubierto por saldo (independiente de la vía de pago) ─────
+//
+// El bloque de anticipo (config_extra.es_pagos_epayco, es_gate) se cerraba SOLO si
+// el pago entraba por su propio flujo ePayco (persiste `pagos` en la instancia). Un
+// pago que llega por REPARTO (cobro tipo_cobro='pago' con split_id), por el FAB, o
+// manual, deja el negocio pagado pero el gate del anticipo nunca se cierra → no
+// avanza. Opción A (aprobada): el gate se satisface cuando el negocio YA tiene
+// cubierto su anticipo esperado, sin importar la vía.
+
+// Porcentaje del precio que constituye el anticipo en Plan 1 (50/50).
+// TODO: validar con Carmen si la base del anticipo es honorario-only vs precio
+// completo. Por ahora la base es el precio_aprobado completo.
+const ANTICIPO_PCT_PLAN1 = 0.5
+
+/**
+ * ¿El negocio ya tiene cubierto su anticipo esperado por el saldo real (cualquier
+ * vía: reparto, FAB, manual, ePayco)?
+ *
+ * - `cobrado` = SUM(cobros.monto) del negocio (todos los cobros — mismo criterio que
+ *   usa `conciliarNegocio`).
+ * - `anticipoEsperado` se deriva de la propuesta aprobada (`aprobado_plan`, leído
+ *   DIRECTO de la propuesta — NO vía `leerModeloDineroNegocio`, que devuelve null sin
+ *   tarifa pasante) + `precio_aprobado`:
+ *     · Plan 1 (50/50) → round(precio_aprobado * ANTICIPO_PCT_PLAN1)
+ *     · Plan 2 (único) → precio_aprobado (100%)
+ *     · Sin plan / sin precio → precio_aprobado (conservador: exige pago completo)
+ *
+ * Devuelve true solo si `anticipoEsperado > 0` Y `cobrado >= anticipoEsperado - 1`
+ * (tolerancia de 1 peso). Con cobrado=0 y precio>0 devuelve false (sigue bloqueando).
+ */
+async function anticipoCubiertoPorSaldo(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+): Promise<boolean> {
+  const [negRes, cobrosRes, propRes] = await Promise.all([
+    db(supabase)
+      .from('negocios')
+      .select('precio_aprobado, precio_estimado')
+      .eq('id', negocioId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle(),
+    db(supabase)
+      .from('cobros')
+      .select('monto')
+      .eq('negocio_id', negocioId)
+      .eq('workspace_id', workspaceId),
+    db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+      .eq('negocio_id', negocioId)
+      .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica'),
+  ])
+
+  const neg = negRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+  const precio = neg?.precio_aprobado ?? neg?.precio_estimado ?? 0
+  if (!(precio > 0)) return false
+
+  const cobrado = ((cobrosRes.data ?? []) as Array<{ monto: number }>)
+    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+
+  // Plan aprobado, leído DIRECTO de la propuesta (el bloque con plan aprobado gana).
+  let plan: 1 | 2 | null = null
+  for (const pb of ((propRes.data ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+    const planRaw = pb.data?.aprobado_plan
+    if (planRaw === 1 || planRaw === 2) { plan = planRaw as 1 | 2; break }
+  }
+
+  const anticipoEsperado = plan === 1
+    ? Math.round(precio * ANTICIPO_PCT_PLAN1)
+    : precio // Plan 2 (único) o sin plan → pago completo (conservador)
+
+  if (!(anticipoEsperado > 0)) return false
+  return cobrado >= anticipoEsperado - 1
+}
+
+/**
+ * Auto-completa los bloques gate de la etapa actual con `config_extra.es_pagos_epayco`
+ * cuyo anticipo esperado YA está cubierto por el saldo del negocio (cualquier vía).
+ * Genérico/opt-in por `es_pagos_epayco` (otros workspaces sin esa config no se tocan).
+ * Idempotente: no toca bloques ya `completo`. NO auto-completa si el saldo no cubre.
+ */
+async function autocompletarGatesAnticipoPorSaldo(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+  etapaActualId: string,
+  staffId: string | null,
+): Promise<void> {
+  const { data: bloquesRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('id, estado, data, bloque_configs!inner(config_extra, es_gate, etapa_id)')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.etapa_id', etapaActualId)
+
+  const bloques = ((bloquesRaw ?? []) as Array<{
+    id: string
+    estado: string | null
+    data: Record<string, unknown> | null
+    bloque_configs: { config_extra: Record<string, unknown> | null; es_gate: boolean | null } | null
+  }>).filter((b) => {
+    const cfg = b.bloque_configs
+    return cfg?.es_gate === true
+      && cfg?.config_extra?.es_pagos_epayco === true
+      && b.estado === 'pendiente'
+  })
+
+  if (bloques.length === 0) return
+
+  // Solo consultar el saldo si hay algún bloque candidato.
+  const cubierto = await anticipoCubiertoPorSaldo(supabase, workspaceId, negocioId)
+  if (!cubierto) return
+
+  const nowIso = new Date().toISOString()
+  for (const b of bloques) {
+    const nuevaData = {
+      ...(b.data ?? {}),
+      _completado_via: 'saldo',
+      _nota: 'Anticipo cubierto por el saldo del negocio (reparto/otro pago); gate cerrado automáticamente.',
+    }
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'completo', completado_at: nowIso, data: nuevaData })
+      .eq('id', b.id)
+
+    if (staffId) {
+      try {
+        await db(supabase).from('activity_log').insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'comentario',
+          autor_id: staffId,
+          contenido: 'Anticipo cubierto por el saldo del negocio (reparto/otro pago); gate cerrado automáticamente.',
+        })
+      } catch { /* no bloquear por el log */ }
+    }
+  }
+}
+
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 
 export async function cambiarEtapaNegocioConGate(
@@ -1809,6 +1949,15 @@ export async function cambiarEtapaNegocioConGate(
 
   // Verificar gates si no hay motivo de override
   if (!motivoOverride && negocio.etapa_actual_id) {
+    // ANTES de evaluar los gates: cerrar automáticamente los bloques gate de anticipo
+    // (config_extra.es_pagos_epayco) cuyo anticipo esperado ya está cubierto por el
+    // saldo del negocio, sin importar la vía (reparto, FAB, manual, ePayco). Sin esto,
+    // un negocio pagado por reparto queda atascado porque el gate solo se cierra por el
+    // flujo ePayco propio. Genérico/opt-in por es_pagos_epayco; idempotente.
+    await autocompletarGatesAnticipoPorSaldo(
+      supabase, workspaceId, negocioId, negocio.etapa_actual_id, staffId,
+    )
+
     const { data: puedeAvanzar } = await db(supabase)
       .rpc('puede_avanzar_etapa', {
         p_negocio_id: negocioId,

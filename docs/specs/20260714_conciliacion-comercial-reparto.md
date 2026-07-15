@@ -88,6 +88,46 @@ porción a un negocio por error, no puede corregirla.
   "Sin asignar $X" y el total declarado. La confirmación sigue por el flujo existente
   (`conciliarNegocio` / `conciliarReferencia`) — sin reinventarlo.
 
+## Gate de anticipo por saldo (independiente de la vía de pago)
+
+**Problema (real, visto en SOENA V0064):** el bloque de anticipo
+(`config_extra.es_pagos_epayco=true`, `es_gate`) solo cerraba su gate si el anticipo
+entraba por su propio flujo ePayco (que persiste `pagos` en la instancia del bloque).
+Cuando la plata llega por un **reparto** (cobro `tipo_cobro='pago'` con `split_id`),
+por el **FAB** o **manual**, el negocio queda pagado pero el gate nunca se cierra → no
+avanza. Con el reparto del comercial, esto le pasaría a todo negocio pagado por
+reparto → el feature nacería roto.
+
+**Opción A (aprobada):** el gate del anticipo se satisface cuando el negocio YA tiene
+cubierto su anticipo esperado, sin importar la vía.
+
+Implementación (todo en `negocio-v2-actions.ts`, genérico/opt-in por `es_pagos_epayco`):
+
+- **`anticipoCubiertoPorSaldo(supabase, workspaceId, negocioId)`** —
+  - `cobrado` = SUM(cobros.monto) del negocio (todos los cobros; mismo criterio que
+    `conciliarNegocio`).
+  - `anticipoEsperado` desde `aprobado_plan` (leído DIRECTO de la propuesta aprobada,
+    NO vía `leerModeloDineroNegocio` que devuelve null sin tarifa pasante) +
+    `precio_aprobado`:
+    · Plan 1 (50/50) → `round(precio_aprobado * ANTICIPO_PCT_PLAN1)`, con
+    `ANTICIPO_PCT_PLAN1 = 0.5` (constante nombrada).
+    · Plan 2 (único) → `precio_aprobado` (100%).
+    · Sin plan / sin precio → `precio_aprobado` (conservador: exige pago completo).
+  - Devuelve true solo si `anticipoEsperado > 0` y `cobrado >= anticipoEsperado - 1`
+    (tol 1 peso). `cobrado=0` con `precio>0` → false (sigue bloqueando, correcto).
+  - `// TODO: validar con Carmen si la base del anticipo es honorario-only vs precio
+    completo` (única duda de modelo de dinero; hoy base = precio completo).
+- **`autocompletarGatesAnticipoPorSaldo(...)`** — barre los bloques de la etapa actual
+  con `es_gate` + `config_extra.es_pagos_epayco=true` + `estado='pendiente'`; si el
+  anticipo está cubierto, los auto-completa (`estado='completo'`, `completado_at=now`,
+  `data._completado_via='saldo'` + `_nota` de traza) + `activity_log`. Idempotente (no
+  toca los ya `completo`). NO auto-completa si el saldo no cubre.
+- **Wire:** se llama en `cambiarEtapaNegocioConGate` JUSTO ANTES del RPC
+  `puede_avanzar_etapa` (que lee `negocio_bloques.estado` de los gates). Al cerrar el
+  gate antes, el RPC pasa. NO toca el cálculo de `cobrado` en ningún lado.
+- **Idempotencia frente a V0064:** ese negocio ya se destrabó a mano en prod (gate
+  `completo`); el barrido lo ignora porque solo actúa sobre `estado='pendiente'`.
+
 ## Permisos
 
 - Reparto y eliminación del comercial: `ctxFabPago` (rol, desacoplado de STAGE_TO_AREA).
