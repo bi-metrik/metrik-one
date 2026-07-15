@@ -45,6 +45,7 @@ import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen } from '../negocio-v2-actions'
 import BloqueCobros from './bloques/BloqueCobros'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
+import type { EpaycoCostoCobro } from '@/lib/epayco'
 import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
 import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
 import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
@@ -1063,6 +1064,7 @@ function BloqueRenderer({
   pendienteHandoff,
   modeloDinero,
   stageActual,
+  epaycoCostos,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1092,6 +1094,7 @@ function BloqueRenderer({
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
+  epaycoCostos?: Record<string, EpaycoCostoCobro>
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1353,6 +1356,7 @@ function BloqueRenderer({
           // Eliminar porción del comercial: solo en la etapa activa (no en historial readonly)
           // y solo cuando el negocio está en venta. El server valida además "no conciliado".
           stageActual={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : stageActual}
+          epaycoCostos={epaycoCostos}
         />
       )
 
@@ -1497,6 +1501,7 @@ function BloqueCard({
   pendienteHandoff,
   modeloDinero,
   stageActual,
+  epaycoCostos,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1526,6 +1531,7 @@ function BloqueCard({
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
+  epaycoCostos?: Record<string, EpaycoCostoCobro>
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -1631,6 +1637,7 @@ function BloqueCard({
               pendienteHandoff={pendienteHandoff}
               modeloDinero={modeloDinero}
               stageActual={stageActual}
+              epaycoCostos={epaycoCostos}
             />
           )}
         </div>
@@ -1948,6 +1955,7 @@ export default function NegocioDetailClient({
                   pendienteHandoff={negocio.pendiente_handoff ?? null}
                   modeloDinero={negocio.modelo_dinero ?? null}
                   stageActual={negocio.stage_actual}
+                  epaycoCostos={negocio.epayco_costos ?? {}}
                 />
               ))}
             </div>

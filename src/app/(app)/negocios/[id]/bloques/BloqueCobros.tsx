@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
 import { eliminarPorcionPago } from '@/lib/actions/conciliacion-actions'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
+import type { EpaycoCostoCobro } from '@/lib/epayco'
 
 interface Cobro {
   id: string
@@ -39,6 +40,8 @@ interface BloqueCobrosProps {
    * (eliminarPorcionPago) valida además que no esté conciliada.
    */
   stageActual?: string | null
+  /** Costos ePayco descontados por cobro, keyed por ref_payco (= external_ref del cobro). */
+  epaycoCostos?: Record<string, EpaycoCostoCobro>
 }
 
 /** Etiqueta legible del plan de pago elegido por el cliente en la propuesta. */
@@ -66,10 +69,21 @@ const TIPO_LABELS: Record<string, string> = {
   pasante: 'Pasante',
 }
 
-function CobroConfirmadoRow({ cobro, eliminable }: { cobro: Cobro; eliminable: boolean }) {
+function CobroConfirmadoRow({
+  cobro,
+  eliminable,
+  costo,
+}: {
+  cobro: Cobro
+  eliminable: boolean
+  costo?: EpaycoCostoCobro | null
+}) {
   const router = useRouter()
   const [confirmando, setConfirmando] = useState(false)
   const [isPending, startTransition] = useTransition()
+
+  const descontado = costo && costo.totalDescontado > 0 ? costo.totalDescontado : 0
+  const neto = descontado > 0 ? cobro.monto - descontado : null
 
   const handleEliminar = () => {
     startTransition(async () => {
@@ -120,6 +134,26 @@ function CobroConfirmadoRow({ cobro, eliminable }: { cobro: Cobro; eliminable: b
           </button>
         )}
       </div>
+
+      {/* Desglose ePayco: lo que descuenta la pasarela y el neto recibido por SOENA. */}
+      {descontado > 0 && (
+        <div className="mt-2 rounded-md bg-[#F5F4F2] px-2 py-1.5 text-[10px] text-[#6B7280]">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-[#1A1A1A]">Descuento ePayco</span>
+            <span className="font-semibold text-[#EF4444] tabular-nums">−{fmt(descontado)}</span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+            {costo!.comision > 0 && <span>Comisión <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.comision)}</span></span>}
+            {costo!.iva > 0 && <span>· IVA <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.iva)}</span></span>}
+            {costo!.retefuente > 0 && <span>· Retefuente <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.retefuente)}</span></span>}
+            {costo!.reteica > 0 && <span>· ReteICA <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.reteica)}</span></span>}
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-[#E5E7EB] pt-1">
+            <span className="font-medium text-[#1A1A1A]">Neto recibido</span>
+            <span className="font-semibold text-[#059669] tabular-nums">{fmt(neto ?? 0)}</span>
+          </div>
+        </div>
+      )}
 
       {eliminable && confirmando && (
         <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-2">
@@ -206,7 +240,7 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
   )
 }
 
-export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, stageActual }: BloqueCobrosProps) {
+export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, stageActual, epaycoCostos }: BloqueCobrosProps) {
   // El comercial puede eliminar una porción que él propuso mientras el negocio esté
   // en venta (modo editable). El server valida además "no conciliada".
   const permiteEliminar = modo === 'editable' && stageActual === 'venta'
@@ -325,6 +359,7 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
                 key={c.id}
                 cobro={c}
                 eliminable={permiteEliminar && c.es_reparto_comercial === true}
+                costo={c.external_ref ? epaycoCostos?.[c.external_ref] : null}
               />
             ))}
           </div>
