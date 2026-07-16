@@ -37,11 +37,22 @@ export default function DistribuirPagoModal({
   onClose,
   onDone,
   negocioFijado,
+  referenciaInicial,
+  totalInicial,
+  contextoEpayco = false,
 }: {
   onClose: () => void
   onDone: () => void
   /** Cuando viene del bloque de pagos: fija la 1ª porción a este negocio. */
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
+  /** Referencia ePayco ya consultada (bloque de Pagos): se pre-llena y bloquea. */
+  referenciaInicial?: string
+  /** Monto real del pago (monto_bruto de ePayco): se pre-llena y bloquea → el
+   *  balanceador funciona de una. */
+  totalInicial?: number
+  /** Abierto desde el bloque de Pagos ePayco: fuente fija ePayco, ref/total en
+   *  solo-lectura (ya validados por la consulta). */
+  contextoEpayco?: boolean
 }) {
   const [negocios, setNegocios] = useState<NegocioParaPagoFab[]>([])
   const [loading, setLoading] = useState(true)
@@ -49,8 +60,8 @@ export default function DistribuirPagoModal({
 
   const [fuente, setFuente] = useState<'epayco' | 'otra'>('epayco')
   const [fuenteNombre, setFuenteNombre] = useState('')
-  const [referencia, setReferencia] = useState('')
-  const [total, setTotal] = useState('')
+  const [referencia, setReferencia] = useState(referenciaInicial ?? '')
+  const [total, setTotal] = useState(totalInicial != null ? String(totalInicial) : '')
   const [fecha, setFecha] = useState('')
   // Con negocioFijado la 1ª porción arranca fijada a ese negocio (monto libre).
   const [porciones, setPorciones] = useState<PorcionUI[]>([
@@ -170,7 +181,7 @@ export default function DistribuirPagoModal({
           <div className="flex items-center gap-2">
             {fijadoActivo ? <Wallet className="h-4 w-4" style={{ color: VERDE }} /> : <ArrowRightLeft className="h-4 w-4" style={{ color: VERDE }} />}
             <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>
-              {fijadoActivo ? 'Registrar pago' : 'Distribuir pago entre negocios'}
+              {contextoEpayco ? 'Repartir pago entre negocios' : fijadoActivo ? 'Registrar pago' : 'Distribuir pago entre negocios'}
             </h3>
           </div>
           <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: '#6B7280' }} /></button>
@@ -183,6 +194,7 @@ export default function DistribuirPagoModal({
               : 'Propón cómo se reparte un solo pago entre varios negocios. El área financiera lo valida contra el dinero real y concilia.'}
           </p>
 
+          {!contextoEpayco && (
           <Field label="Fuente del pago">
             <div className="grid grid-cols-2 gap-2">
               {(['epayco', 'otra'] as const).map((f) => (
@@ -199,8 +211,9 @@ export default function DistribuirPagoModal({
               ))}
             </div>
           </Field>
+          )}
 
-          {fuente === 'otra' && (
+          {!contextoEpayco && fuente === 'otra' && (
             <Field label="Nombre de la fuente">
               <input value={fuenteNombre} onChange={(e) => setFuenteNombre(e.target.value)} placeholder="ej. Davivienda, Bancolombia, Nequi, efectivo…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
             </Field>
@@ -212,10 +225,11 @@ export default function DistribuirPagoModal({
               onChange={(e) => setReferencia(esEpayco ? e.target.value.replace(/[^\d]/g, '') : e.target.value)}
               inputMode={esEpayco ? 'numeric' : 'text'}
               placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
-              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
+              disabled={contextoEpayco}
+              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none disabled:bg-[#F9FAFB] disabled:text-[#6B7280]"
               style={{ borderColor: '#E5E7EB' }}
             />
-            {esEpayco && <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Se valida con ePayco: solo se registra si está Aceptada. El total se toma del pago real.</p>}
+            {esEpayco && <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>{contextoEpayco ? 'Referencia ya validada en ePayco. Reparte el monto entre los negocios abajo.' : 'Se valida con ePayco: solo se registra si está Aceptada. El total se toma del pago real.'}</p>}
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
@@ -224,6 +238,7 @@ export default function DistribuirPagoModal({
                 value={total}
                 onChange={(e) => setTotal(e.target.value.replace(/[^\d]/g, ''))}
                 inputMode="numeric"
+                disabled={contextoEpayco}
                 placeholder={esEpayco ? 'opcional' : '0'}
                 className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none"
                 style={{ borderColor: '#E5E7EB' }}

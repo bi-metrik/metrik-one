@@ -249,11 +249,12 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
   )
 }
 
-export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, stageActual, epaycoCostos, registrarPagoEnabled = false, negocioFijado }: BloqueCobrosProps) {
+export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, stageActual, epaycoCostos, negocioFijado }: BloqueCobrosProps) {
   const router = useRouter()
   const [pagoModal, setPagoModal] = useState(false)
-  // Registrar pago inline: opt-in por workspace + solo en la etapa activa editable.
-  const permiteRegistrarPago = modo === 'editable' && registrarPagoEnabled && !!negocioFijado
+  // Cobros es SOLO-LECTURA: registrar y repartir pagos vive en el bloque de Pagos
+  // ePayco (una sola puerta para el comercial). Aquí solo se visualiza.
+  const permiteRegistrarPago = false
   // El comercial puede eliminar una porción que él propuso mientras el negocio esté
   // en venta (modo editable). El server valida además "no conciliada".
   const permiteEliminar = modo === 'editable' && stageActual === 'venta'
