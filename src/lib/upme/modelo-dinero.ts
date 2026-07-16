@@ -148,3 +148,42 @@ export function calcularPendienteHandoff(
     cubierto: pendienteTotal <= 1,
   }
 }
+
+/** Fila mínima de un bloque `propuesta_economica` para detectar el cero deliberado. */
+export interface PropuestaBloqueData {
+  data: Record<string, unknown> | null
+}
+
+/**
+ * ¿El negocio tiene un "cero DELIBERADO"? No hay honorario que cobrar porque su
+ * propuesta económica está APROBADA y el valor final aprobado es 0.
+ *
+ * Distingue este caso del "aún sin cotizar" (precio null/0 porque nunca se aprobó una
+ * propuesta). La señal es que la propuesta canónica del negocio tiene `aprobado_at`
+ * (fue aprobada) Y su honorario aprobado es <= 0 (`aprobado_honorario`, con fallback al
+ * `precio_aprobado` del negocio — al aprobar, `precio_aprobado` queda igual al honorario
+ * elegido, que puede ser 0).
+ *
+ * SOLO un cero deliberado da por satisfecho el gate de anticipo/handoff — un negocio sin
+ * propuesta aprobada sigue bloqueando (no se abre la puerta a saltar el anticipo de algo
+ * no cotizado). Puro: no toca DB ni red.
+ *
+ * @param propuestas    filas de `negocio_bloques` tipo `propuesta_economica` del negocio.
+ * @param precioAprobado `negocios.precio_aprobado` (fallback del honorario aprobado).
+ */
+export function esCeroDeliberado(
+  propuestas: PropuestaBloqueData[],
+  precioAprobado: number | null,
+): boolean {
+  for (const pb of propuestas) {
+    const d = pb.data
+    if (!d || typeof d !== 'object') continue
+    // Solo cuenta si la propuesta fue APROBADA (no una versión generada sin aprobar).
+    if (!d.aprobado_at) continue
+    const honorarioRaw = d.aprobado_honorario
+    const honorario = typeof honorarioRaw === 'number' ? honorarioRaw : precioAprobado
+    // Aprobada + honorario conocido y no positivo → cero deliberado.
+    if (typeof honorario === 'number' && honorario <= 0) return true
+  }
+  return false
+}
