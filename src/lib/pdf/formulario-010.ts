@@ -2,15 +2,13 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
-import { addEditableField, drawFixed, type Cell } from './acroform'
+import { drawFixed, type Cell } from './acroform'
 
 // Sobre el PDF oficial de la DIAN (Formato 010). El fondo no se modifica.
-// Las casillas de DATOS VARIABLES (datos del solicitante, cuenta, saldo y la
-// dirección seccional — que cambia según a qué DIAN se presente) se generan como
-// CAMPOS de formulario EDITABLES pre-llenados; el operador ajusta lo que pida la
-// seccional y aplana al imprimir. Las DETERMINISTAS (concepto 06, periodo
-// bimestral, tipo doc 31, razón social en blanco, tipo solicitud/obligación)
-// van como texto fijo no editable.
+// TODAS las casillas (datos variables + deterministas) se ESTAMPAN como texto
+// plano (drawText) sobre el formato oficial: no se usan campos de formulario
+// AcroForm (quedaban opacos y tapaban líneas/etiquetas del formato). El PDF sale
+// plano/no editable por naturaleza; la edición vive en la plataforma.
 // Coordenadas en puntos, origen (0,0) = esquina inferior izquierda.
 
 export interface Formulario010Datos {
@@ -226,33 +224,26 @@ function parseFecha(iso: string | null): { anio: string; mes: string; dia: strin
 export async function generarFormulario010(
   datos: Formulario010Datos,
   constantes: Formulario010Constantes,
-  // El PDF de SALIDA que va a la DIAN debe ser PLANO (no editable): Deisy
-  // (operaciones SOENA) reportó que el 010 generado "se puede modificar" y teme
-  // rechazo. Con `flatten=true` (default) se aplanan los campos de formulario a
-  // contenido estático de página → el resultado NO tiene widgets editables.
-  // `flatten=false` deja las casillas editables (solo para calibración/debug).
-  opts: { flatten?: boolean } = {},
 ): Promise<Uint8Array> {
-  const { flatten = true } = opts
   const templateBytes = fs.readFileSync(TEMPLATE_PATH)
   const pdfDoc = await PDFDocument.load(templateBytes)
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
-  const form = pdfDoc.getForm()
 
   const pages = pdfDoc.getPages()
   const page1 = pages[0]
   const page2 = pages[1]
 
-  // Atajos: `edit*` = campo editable pre-llenado (con el +2pt de calibración del
-  // 010); `fixed*` = texto determinista no editable (mismo nudge). Nombres de
-  // campo compartidos → un dato repetido en varias casillas queda sincronizado.
-  // `compact()` aplica el tamaño de fuente compacto (8pt) a las casillas que no
-  // fijan uno propio.
-  const edit1 = (name: string, value: string | null | undefined, cell: Cell) =>
-    addEditableField(form, font, page1, name, value, compact(cell), Y_NUDGE)
-  const edit2 = (name: string, value: string | null | undefined, cell: Cell) =>
-    addEditableField(form, font, page2, name, value, compact(cell), Y_NUDGE)
+  // Todo se ESTAMPA como texto plano (drawText) sobre el formato oficial: `edit*`
+  // (datos variables) y `fixed*` (deterministas) comparten la misma vía. Se
+  // conservan nombres separados por legibilidad del mapeo de casillas. El +2pt
+  // (Y_NUDGE) de calibración del 010 se aplica a todo. `compact()` aplica el
+  // tamaño de fuente compacto (8pt) a las casillas que no fijan uno propio. El 1er
+  // arg de `edit*` (antes el nombre del campo AcroForm) ya no se usa: se ignora.
+  const edit1 = (_name: string, value: string | null | undefined, cell: Cell) =>
+    drawFixed(page1, font, value, compact(cell), Y_NUDGE)
+  const edit2 = (_name: string, value: string | null | undefined, cell: Cell) =>
+    drawFixed(page2, font, value, compact(cell), Y_NUDGE)
   const fixed1 = (value: string | null | undefined, cell: Cell, f = font) =>
     drawFixed(page1, f, value, compact(cell), Y_NUDGE)
   const fixed2 = (value: string | null | undefined, cell: Cell, f = font) =>
@@ -384,16 +375,9 @@ export async function generarFormulario010(
 
   // Hoja 3 se deja en blanco: no aplica para devolución IVA por UPME (VE/HEV/PHEV).
 
-  // Regenera apariencias con la fuente embebida (texto pre-llenado visible en
-  // cualquier lector, sin depender de NeedAppearances).
-  form.updateFieldAppearances(font)
-
-  // PDF de salida PLANO: aplanar convierte cada widget de formulario en contenido
-  // estático dibujado sobre la página y elimina los campos editables del AcroForm.
-  // El texto queda calcado en su posición (usa las apariencias ya regeneradas) y
-  // el resultado ya no se puede modificar en un lector PDF. Solución al reporte de
-  // Deisy (SOENA) de que el 010 "se puede modificar".
-  if (flatten) form.flatten()
-
+  // El PDF sale PLANO por naturaleza: el texto se estampó directo sobre la página,
+  // no hay campos de formulario que aplanar ni apariencias que regenerar. Nada
+  // queda editable en el lector (la edición vive en la plataforma) y la estructura
+  // base del formato queda intacta.
   return pdfDoc.save()
 }

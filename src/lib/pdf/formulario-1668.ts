@@ -1,13 +1,13 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
-import { addEditableField, drawFixed, type Cell } from './acroform'
+import { drawFixed, type Cell } from './acroform'
 
 // Overlay sobre el PDF oficial de la DIAN (Formato 1668 — Información /
 // Constancia de Titularidad de Cuenta Bancaria). El fondo no se modifica.
-// Las casillas de DATOS VARIABLES se generan como CAMPOS de formulario EDITABLES
-// (pre-llenados) para que el operador ajuste según la seccional y aplane al
-// imprimir; las DETERMINISTAS (tipo doc, cód. representación) van como texto fijo.
+// TODAS las casillas (datos variables + deterministas) se ESTAMPAN como texto
+// plano (drawText): no se usan campos de formulario AcroForm (quedaban opacos y
+// tapaban líneas/etiquetas del formato). El PDF sale plano/no editable.
 // Coordenadas en puntos, origen (0,0) = esquina inferior izquierda.
 //
 // Calibradas contra el PDF diligenciado de referencia (Diego Tavera) con
@@ -97,13 +97,15 @@ export async function generarFormulario1668(
   const templateBytes = fs.readFileSync(TEMPLATE_PATH)
   const pdfDoc = await PDFDocument.load(templateBytes)
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
-  const form = pdfDoc.getForm()
 
   const page = pdfDoc.getPages()[0]
 
-  // Atajos para no repetir (form, font, page) en cada casilla editable.
-  const edit = (name: string, value: string | null | undefined, cell: Cell) =>
-    addEditableField(form, font, page, name, value, cell)
+  // Todo se ESTAMPA como texto plano (drawText) sobre el formato oficial. `edit`
+  // (datos variables) y `fixed` (deterministas) comparten la misma vía; se
+  // conservan nombres separados por legibilidad del mapeo. El 1er arg de `edit`
+  // (antes el nombre del campo AcroForm) ya no se usa: se ignora.
+  const edit = (_name: string, value: string | null | undefined, cell: Cell) =>
+    drawFixed(page, font, value, cell)
   const fixed = (value: string | null | undefined, cell: Cell) =>
     drawFixed(page, font, value, cell)
 
@@ -134,9 +136,8 @@ export async function generarFormulario1668(
   edit('dv', datos.dv, FIRMA.dv)
   fixed(constantes.cod_representacion, FIRMA.cod_representacion) // DETERMINISTA
 
-  // Regenera las apariencias con la fuente embebida (texto pre-llenado visible en
-  // cualquier lector, sin depender de NeedAppearances).
-  form.updateFieldAppearances(font)
-
+  // El PDF sale PLANO por naturaleza: el texto se estampó directo sobre la página,
+  // sin campos de formulario. Nada queda editable en el lector y la estructura base
+  // del formato queda intacta.
   return pdfDoc.save()
 }
