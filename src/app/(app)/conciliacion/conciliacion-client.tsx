@@ -5,17 +5,14 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
-  Scale, CheckCircle2, Loader2, X, Plus, Trash2, ExternalLink,
+  Scale, CheckCircle2, Loader2, X, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
 } from 'lucide-react'
 import {
-  agregarPago,
-  setPorcionReferencia,
-  conciliarReferencia,
+  aceptarRepartoComercial,
+  rechazarRepartoComercial,
   type ConciliacionV2,
-  type SobrepagoRef,
   type NegocioSaldo,
-  type NegocioParaSplit,
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
 
@@ -25,51 +22,45 @@ const fmtCOP = (n: number) =>
 const VERDE = '#10B981'
 const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
 
-type TabKey = 'por_conciliar' | 'saldos' | 'general'
+type TabKey = 'bandeja' | 'saldos' | 'general'
 
+/**
+ * Panel de conciliación de la FINANCIERA — SOLO aceptar o rechazar lo que el
+ * comercial ya distribuyó. La financiera NO agrega pagos ni distribuye (eso vive en
+ * el bloque de pagos del negocio). Tres pestañas:
+ *   - Bandeja: repartos propuestos por el comercial, pendientes de confirmar →
+ *     Aceptar (conciliar) / Rechazar (devolver al comercial con nota).
+ *   - Saldos: vista de solo lectura de la cartera (falta/sobra por negocio).
+ *   - Vista general: registro read-only de todas las referencias de pago.
+ */
 export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
   const router = useRouter()
-  const [tab, setTab] = useState<TabKey>('general')
-  const [addOpen, setAddOpen] = useState(false)
 
-  // Negocios para el selector "Agregar pago": todos los abiertos (con o sin saldo).
-  const negociosSelector = useMemo(() => {
-    const map = new Map<string, { negocio_id: string; codigo: string | null; nombre: string | null }>()
-    for (const s of [...data.saldos, ...data.conciliados]) {
-      map.set(s.negocio_id, { negocio_id: s.negocio_id, codigo: s.codigo, nombre: s.nombre })
-    }
-    for (const s of data.sobrepagos) {
-      if (!map.has(s.negocio_id)) map.set(s.negocio_id, { negocio_id: s.negocio_id, codigo: s.negocio_codigo, nombre: s.negocio_nombre })
-    }
-    return Array.from(map.values()).sort((a, b) => (a.codigo ?? '').localeCompare(b.codigo ?? ''))
-  }, [data])
+  // Repartos propuestos por el comercial, pendientes de confirmar.
+  const pendientes = useMemo(
+    () => data.referencias.filter((r) => r.propuesto_por_comercial && !r.algun_conciliado),
+    [data],
+  )
+
+  const [tab, setTab] = useState<TabKey>(pendientes.length > 0 ? 'bandeja' : 'general')
 
   const tabs: { key: TabKey; label: string; count?: number }[] = [
-    { key: 'general', label: 'Vista general' },
-    { key: 'por_conciliar', label: 'Por conciliar', count: data.metricas.por_conciliar },
+    { key: 'bandeja', label: 'Por confirmar', count: pendientes.length },
     { key: 'saldos', label: 'Saldos', count: data.metricas.en_saldo },
+    { key: 'general', label: 'Vista general' },
   ]
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6" style={FONT}>
-      {/* ── Panel base (encabezado) ── */}
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Scale className="h-5 w-5" style={{ color: VERDE }} />
-            <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>Conciliación de pagos</h1>
-          </div>
-          <p className="mt-1 text-[13px]" style={{ color: '#6B7280' }}>
-            {data.metricas.referencias_cargadas} referencia{data.metricas.referencias_cargadas === 1 ? '' : 's'} de pago cargada{data.metricas.referencias_cargadas === 1 ? '' : 's'} a ONE en este workspace.
-          </p>
+      {/* ── Encabezado ── */}
+      <div className="mb-5">
+        <div className="flex items-center gap-2">
+          <Scale className="h-5 w-5" style={{ color: VERDE }} />
+          <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>Conciliación de pagos</h1>
         </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90"
-          style={{ backgroundColor: VERDE }}
-        >
-          <Plus className="h-4 w-4" /> Agregar pago
-        </button>
+        <p className="mt-1 text-[13px]" style={{ color: '#6B7280' }}>
+          Confirma o rechaza los pagos que el comercial registró. Los pagos se registran desde el bloque de pagos de cada negocio.
+        </p>
       </div>
 
       {/* ── Pestañas ── */}
@@ -100,30 +91,179 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
         })}
       </div>
 
-      {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
-      {tab === 'por_conciliar' && <TabPorConciliar data={data} onDone={() => router.refresh()} />}
+      {tab === 'bandeja' && <TabBandeja pendientes={pendientes} onDone={() => router.refresh()} />}
       {tab === 'saldos' && <TabSaldos data={data} />}
+      {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
+    </div>
+  )
+}
 
-      {addOpen && (
-        <AgregarPagoModal
-          negocios={negociosSelector}
-          onClose={() => setAddOpen(false)}
-          onDone={() => { setAddOpen(false); router.refresh() }}
-        />
+// ════════════════════════════════════════════════════════════════════════════
+// BANDEJA — repartos del comercial pendientes de confirmar
+// ════════════════════════════════════════════════════════════════════════════
+
+function TabBandeja({ pendientes, onDone }: { pendientes: ReferenciaPago[]; onDone: () => void }) {
+  if (pendientes.length === 0) {
+    return <Empty>No hay pagos por confirmar. Cuando el comercial registre un pago, aparecerá aquí.</Empty>
+  }
+  return (
+    <div className="space-y-4">
+      {pendientes.map((r) => (
+        <RepartoCard key={r.external_ref} ref_={r} onDone={onDone} />
+      ))}
+    </div>
+  )
+}
+
+function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => void }) {
+  const [pending, startTransition] = useTransition()
+  const [rechazando, setRechazando] = useState(false)
+  const [nota, setNota] = useState('')
+
+  const porcionesReales = r.porciones.filter((p) => !p.por_devolver)
+  const esReparto = porcionesReales.length > 1
+
+  function aceptar() {
+    startTransition(async () => {
+      const res = await aceptarRepartoComercial(r.external_ref)
+      if (res.success) { toast.success('Pago conciliado'); onDone() }
+      else toast.error(res.error)
+    })
+  }
+
+  function rechazar() {
+    startTransition(async () => {
+      const res = await rechazarRepartoComercial(r.external_ref, nota.trim() || undefined)
+      if (res.success) { toast.success('Reparto devuelto al comercial'); onDone() }
+      else toast.error(res.error)
+    })
+  }
+
+  return (
+    <div className="rounded-lg border" style={{ borderColor: '#C7D2FE' }}>
+      {/* Encabezado: referencia + total + badge propuesto */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: '#F3F4F6' }}>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{r.external_ref}</span>
+          {r.fuente && <FuenteBadge fuente={r.fuente} small />}
+          {esReparto && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+              <ArrowRightLeft className="h-3 w-3" /> Reparto · {porcionesReales.length}
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+            Propuesto por el comercial
+          </span>
+        </div>
+        <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>
+          {fmtCOP(r.total_declarado ?? r.valor_pagado)}
+        </span>
+      </div>
+
+      {/* Desglose por negocio (read-only) */}
+      <div className="px-4 py-3">
+        <table className="w-full text-left text-[12px]">
+          <thead>
+            <tr style={{ color: '#9CA3AF' }}>
+              <th className="py-1 font-semibold">Negocio</th>
+              <th className="py-1 font-semibold">Etapa</th>
+              <th className="py-1 text-right font-semibold">Asignado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {porcionesReales.map((p) => (
+              <tr key={p.cobro_id} className="border-t" style={{ borderColor: '#F3F4F6' }}>
+                <td className="py-1.5">
+                  {p.negocio_id ? (
+                    <Link href={`/negocios/${p.negocio_id}`} className="group inline-flex items-center gap-1">
+                      <span className="font-semibold" style={{ color: '#1A1A1A' }}>{p.negocio_codigo ?? '—'}</span>
+                      <span style={{ color: '#6B7280' }}>{p.negocio_nombre ?? ''}</span>
+                      <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
+                    </Link>
+                  ) : (
+                    <span className="italic" style={{ color: '#9CA3AF' }}>Sin negocio</span>
+                  )}
+                </td>
+                <td className="py-1.5" style={{ color: '#6B7280' }}>{p.etapa_nombre ?? '—'}</td>
+                <td className="py-1.5 text-right font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(p.monto)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {r.sin_asignar > 1 && (
+          <p className="mt-1.5 text-right text-[11px] font-semibold" style={{ color: '#B45309' }}>
+            Sin asignar: {fmtCOP(r.sin_asignar)}
+          </p>
+        )}
+      </div>
+
+      {/* Acciones: Aceptar / Rechazar */}
+      {!rechazando ? (
+        <div className="flex items-center justify-end gap-2 border-t px-4 py-3" style={{ borderColor: '#F3F4F6' }}>
+          <button
+            onClick={() => setRechazando(true)}
+            disabled={pending}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12px] font-semibold transition disabled:opacity-50"
+            style={{ borderColor: '#E5E7EB', color: '#DC2626' }}
+          >
+            <X className="h-3.5 w-3.5" /> Rechazar
+          </button>
+          <button
+            onClick={aceptar}
+            disabled={pending}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: VERDE }}
+          >
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+            Aceptar
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2 border-t px-4 py-3" style={{ borderColor: '#F3F4F6' }}>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Nota para el comercial (opcional)</span>
+            <input
+              value={nota}
+              onChange={(e) => setNota(e.target.value)}
+              placeholder="ej. la referencia no cuadra con el banco…"
+              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
+              style={{ borderColor: '#E5E7EB' }}
+            />
+          </label>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => { setRechazando(false); setNota('') }}
+              disabled={pending}
+              className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ color: '#6B7280' }}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={rechazar}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: '#DC2626' }}
+            >
+              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+              Devolver al comercial
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Pestaña 5 — VISTA GENERAL
+// VISTA GENERAL — registro read-only de referencias
 // ════════════════════════════════════════════════════════════════════════════
 
 function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey) => void }) {
   const m = data.metricas
+  const pendientes = data.referencias.filter((r) => r.propuesto_por_comercial && !r.algun_conciliado).length
   const tiles: { label: string; value: number; tab: TabKey; icon: React.ReactNode }[] = [
     { label: 'Referencias cargadas', value: m.referencias_cargadas, tab: 'general', icon: <LayoutGrid className="h-4 w-4" /> },
-    { label: 'Por conciliar', value: m.por_conciliar, tab: 'por_conciliar', icon: <Scale className="h-4 w-4" /> },
+    { label: 'Por confirmar', value: pendientes, tab: 'bandeja', icon: <Scale className="h-4 w-4" /> },
     { label: 'En saldo', value: m.en_saldo, tab: 'saldos', icon: <Wallet className="h-4 w-4" /> },
   ]
   return (
@@ -151,8 +291,6 @@ function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey
     </div>
   )
 }
-
-// ── Registro general de pagos por referencia (dentro de Vista general) ────────
 
 function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] }) {
   const [q, setQ] = useState('')
@@ -227,6 +365,11 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                         Propuesto por el comercial · pendiente de confirmar
                       </span>
                     )}
+                    {r.algun_conciliado && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                        <CheckCircle2 className="h-3 w-3" /> Conciliado
+                      </span>
+                    )}
                     {r.sin_asignar > 1 && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
                         Sin asignar {fmtCOP(r.sin_asignar)}
@@ -291,234 +434,16 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Pestaña 1 — POR CONCILIAR (solo sobrepagos)
-// ════════════════════════════════════════════════════════════════════════════
-
-function TabPorConciliar({ data, onDone }: { data: ConciliacionV2; onDone: () => void }) {
-  if (data.sobrepagos.length === 0 && data.porDevolver.length === 0) {
-    return <Empty>No hay referencias con sobrepago por conciliar.</Empty>
-  }
-
-  return (
-    <div className="space-y-4">
-      {data.sobrepagos.map((s) => (
-        <SobrepagoCard key={s.external_ref} sobrepago={s} candidatos={data.negociosConSaldo} onDone={onDone} />
-      ))}
-
-      {/* Sub-listado de devoluciones pendientes */}
-      {data.porDevolver.length > 0 && (
-        <section>
-          <h2 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#6B7280' }}>
-            <Undo2 className="h-3.5 w-3.5" /> Por devolver al cliente ({data.porDevolver.length})
-          </h2>
-          <div className="rounded-lg border" style={{ borderColor: '#E5E7EB' }}>
-            <table className="w-full text-left text-[13px]">
-              <tbody>
-                {data.porDevolver.map((p) => (
-                  <tr key={p.cobro_id} className="border-b last:border-0" style={{ borderColor: '#F3F4F6' }}>
-                    <td className="px-3 py-2">
-                      <Link href={`/negocios/${p.negocio_id}`} className="font-semibold" style={{ color: '#1A1A1A' }}>{p.negocio_codigo ?? '—'}</Link>
-                      <span className="ml-1 text-[12px]" style={{ color: '#6B7280' }}>{p.negocio_nombre ?? ''}</span>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: '#B45309' }}>{fmtCOP(Math.abs(p.monto))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>
-            Trazable, sin impacto contable todavía.
-          </p>
-        </section>
-      )}
-    </div>
-  )
-}
-
-// ── Tarjeta de un sobrepago: reparto editable inline + conciliar ──────────────
-
-function SobrepagoCard({
-  sobrepago: s,
-  candidatos,
-  onDone,
-}: {
-  sobrepago: SobrepagoRef
-  candidatos: NegocioParaSplit[]
-  onDone: () => void
-}) {
-  const [pending, startTransition] = useTransition()
-  const [nuevoNegocio, setNuevoNegocio] = useState('')
-  const [nuevoMonto, setNuevoMonto] = useState('')
-
-  const cuadrado = s.remanente <= 1
-  const idsAsignados = new Set(s.asignaciones.map((a) => a.negocio_id))
-  // Candidatos: negocios con saldo, que no sean el origen ni ya estén asignados.
-  const disponibles = candidatos.filter((c) => c.negocio_id !== s.negocio_id && !idsAsignados.has(c.negocio_id))
-
-  function guardarPorcion(negocioId: string, monto: number) {
-    startTransition(async () => {
-      const res = await setPorcionReferencia({ external_ref: s.external_ref, negocio_id: negocioId, monto })
-      if (res.success) onDone()
-      else toast.error(res.error)
-    })
-  }
-
-  function agregar() {
-    if (!nuevoNegocio) return toast.error('Elige el negocio')
-    const monto = Number(nuevoMonto)
-    if (!monto || monto <= 0) return toast.error('Ingresa el monto a asignar')
-    if (monto > s.remanente + 1) return toast.error('No puedes asignar más que el remanente')
-    startTransition(async () => {
-      const res = await setPorcionReferencia({ external_ref: s.external_ref, negocio_id: nuevoNegocio, monto })
-      if (res.success) { setNuevoNegocio(''); setNuevoMonto(''); onDone() }
-      else toast.error(res.error)
-    })
-  }
-
-  function elegirNuevo(id: string) {
-    setNuevoNegocio(id)
-    const cand = disponibles.find((c) => c.negocio_id === id)
-    const sugerido = cand ? Math.min(cand.diferencia, s.remanente) : s.remanente
-    setNuevoMonto(sugerido > 0 ? String(sugerido) : '')
-  }
-
-  return (
-    <div className="rounded-lg border" style={{ borderColor: cuadrado ? '#A7F3D0' : '#FECACA' }}>
-      {/* Encabezado: referencia + pago + remanente */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: '#F3F4F6' }}>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{s.external_ref}</span>
-          {s.fuente && <FuenteBadge fuente={s.fuente} small />}
-          <span className="text-[12px]" style={{ color: '#6B7280' }}>
-            Pagó <span className="font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(s.valor_pagado)}</span>
-          </span>
-        </div>
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>Remanente</div>
-          {cuadrado ? (
-            <div className="inline-flex items-center gap-1 text-[15px] font-bold text-emerald-600">
-              <CheckCircle2 className="h-4 w-4" /> $0
-            </div>
-          ) : (
-            <div className="text-[15px] font-bold tabular-nums" style={{ color: '#DC2626' }}>{fmtCOP(s.remanente)}</div>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-3 px-4 py-3">
-        {/* Asignaciones agrupadas por negocio (editables) */}
-        <div className="space-y-1.5">
-          {s.asignaciones.map((a) => (
-            <div key={a.negocio_id ?? 'sin'} className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <Link href={`/negocios/${a.negocio_id}`} className="group inline-flex items-center gap-1 text-[13px]">
-                  <span className="font-semibold" style={{ color: '#1A1A1A' }}>{a.codigo ?? '—'}</span>
-                  <span className="truncate" style={{ color: '#6B7280' }}>{a.nombre ?? ''}</span>
-                  <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
-                </Link>
-                {a.es_origen && (
-                  <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase" style={{ color: '#6B7280' }}>Origen</span>
-                )}
-              </div>
-              <input
-                key={`${a.negocio_id}-${a.monto}`}
-                defaultValue={a.monto}
-                onBlur={(e) => {
-                  const v = Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)
-                  if (v !== a.monto) guardarPorcion(a.negocio_id as string, v)
-                }}
-                inputMode="numeric"
-                disabled={pending}
-                className="w-32 rounded-md border px-2 py-1 text-right text-[13px] tabular-nums outline-none disabled:opacity-50"
-                style={{ borderColor: '#E5E7EB' }}
-              />
-              {!a.es_origen && (
-                <button
-                  onClick={() => guardarPorcion(a.negocio_id as string, 0)}
-                  disabled={pending}
-                  title="Quitar esta asignación (el monto vuelve al remanente)"
-                  className="rounded p-1 hover:bg-gray-100 disabled:opacity-30"
-                >
-                  <Trash2 className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Agregar un negocio nuevo al reparto */}
-        {!cuadrado && (
-          <div className="flex items-center gap-2 border-t pt-3" style={{ borderColor: '#F3F4F6' }}>
-            <select
-              value={nuevoNegocio}
-              onChange={(e) => elegirNuevo(e.target.value)}
-              disabled={pending}
-              className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[12px] outline-none disabled:opacity-50"
-              style={{ borderColor: '#E5E7EB' }}
-            >
-              <option value="">Asignar remanente a otro negocio…</option>
-              {disponibles.map((c) => (
-                <option key={c.negocio_id} value={c.negocio_id}>{c.codigo ?? c.nombre} · falta {fmtCOP(c.diferencia)}</option>
-              ))}
-            </select>
-            <input
-              value={nuevoMonto}
-              onChange={(e) => setNuevoMonto(e.target.value.replace(/[^\d]/g, ''))}
-              inputMode="numeric"
-              placeholder="monto"
-              disabled={pending}
-              className="w-32 rounded-md border px-2 py-1.5 text-right text-[12px] tabular-nums outline-none disabled:opacity-50"
-              style={{ borderColor: '#E5E7EB' }}
-            />
-            <button
-              onClick={agregar}
-              disabled={pending || !nuevoNegocio}
-              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
-              style={{ backgroundColor: VERDE }}
-            >
-              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-              Asignar
-            </button>
-          </div>
-        )}
-
-        {/* Conciliar (solo en remanente $0) */}
-        <div className="flex items-center justify-between gap-2 border-t pt-3" style={{ borderColor: '#F3F4F6' }}>
-          <span className="text-[11px]" style={{ color: '#9CA3AF' }}>
-            {cuadrado ? 'Todo el pago quedó repartido. Ya puedes conciliar.' : 'Reparte el remanente hasta $0 para poder conciliar.'}
-          </span>
-          <button
-            disabled={pending || !cuadrado}
-            onClick={() => startTransition(async () => {
-              const res = await conciliarReferencia(s.external_ref, s.negocio_id)
-              if (res.success) { toast.success('Referencia conciliada'); onDone() }
-              else toast.error(res.error)
-            })}
-            className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderColor: cuadrado ? VERDE : '#E5E7EB', color: cuadrado ? VERDE : '#9CA3AF' }}
-          >
-            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-            Conciliar
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Pestaña 2 — SALDOS (con búsqueda)
+// SALDOS — vista de solo lectura de la cartera
 // ════════════════════════════════════════════════════════════════════════════
 
 type SaldoFiltro = 'sobrante' | 'faltante' | 'cero'
 
 function TabSaldos({ data }: { data: ConciliacionV2 }) {
   const [q, setQ] = useState('')
-  // Por defecto visibles los sobrantes; faltantes y en cero se activan al picar.
   const [filtros, setFiltros] = useState<Record<SaldoFiltro, boolean>>({ sobrante: true, faltante: false, cero: false })
   const query = q.trim().toLowerCase()
 
-  // Totales (siempre sobre TODO el universo, no dependen del filtro).
   const totales = useMemo(() => {
     let sobrante = 0
     let faltante = 0
@@ -562,6 +487,10 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
 
   return (
     <div>
+      <p className="mb-3 text-[11px]" style={{ color: '#9CA3AF' }}>
+        Vista de solo lectura de la cartera. Para registrar o repartir un pago, entra al bloque de pagos del negocio.
+      </p>
+
       {/* Tarjetas de resumen */}
       <div className="mb-4 grid grid-cols-3 gap-3">
         {cards.map((c) => (
@@ -662,144 +591,7 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// Modal — Agregar pago (panel base)
-// ════════════════════════════════════════════════════════════════════════════
-
-function AgregarPagoModal({
-  negocios,
-  onClose,
-  onDone,
-}: {
-  negocios: { negocio_id: string; codigo: string | null; nombre: string | null }[]
-  onClose: () => void
-  onDone: () => void
-}) {
-  const [negocioId, setNegocioId] = useState('')
-  const [fuente, setFuente] = useState<'epayco' | 'davivienda' | 'otra'>('epayco')
-  const [fuenteNombre, setFuenteNombre] = useState('')
-  const [referencia, setReferencia] = useState('')
-  const [monto, setMonto] = useState('')
-  const [fecha, setFecha] = useState('')
-  const [pending, startTransition] = useTransition()
-
-  const esEpayco = fuente === 'epayco'
-
-  function handleSubmit() {
-    if (!negocioId) return toast.error('Elige el negocio')
-    if (!referencia.trim()) return toast.error('Ingresa la referencia del pago')
-    if (!esEpayco && (!Number(monto) || Number(monto) <= 0)) return toast.error('Ingresa el monto del pago')
-    if (fuente === 'otra' && !fuenteNombre.trim()) return toast.error('Indica el nombre de la fuente')
-
-    startTransition(async () => {
-      const res = await agregarPago({
-        negocio_id: negocioId,
-        fuente,
-        fuente_nombre: fuente === 'otra' ? fuenteNombre.trim() : undefined,
-        referencia: referencia.trim(),
-        monto: esEpayco ? undefined : Number(monto),
-        fecha: fecha || undefined,
-      })
-      if (res.success) {
-        toast.success('Pago registrado')
-        onDone()
-      } else {
-        toast.error(res.error)
-      }
-    })
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" style={FONT}>
-      <div className="flex max-h-[92vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
-        <div className="flex shrink-0 items-center justify-between border-b px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
-          <div className="flex items-center gap-2">
-            <Plus className="h-4 w-4" style={{ color: VERDE }} />
-            <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>Agregar pago</h3>
-          </div>
-          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: '#6B7280' }} /></button>
-        </div>
-
-        <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
-          <Field label="Negocio">
-            <select value={negocioId} onChange={(e) => setNegocioId(e.target.value)} className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }}>
-              <option value="">Elige negocio…</option>
-              {negocios.map((n) => (
-                <option key={n.negocio_id} value={n.negocio_id}>{n.codigo ?? n.nombre} · {n.nombre ?? ''}</option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Fuente del pago">
-            <div className="grid grid-cols-3 gap-2">
-              {(['epayco', 'davivienda', 'otra'] as const).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFuente(f)}
-                  className="rounded-md border px-2 py-1.5 text-[12px] font-semibold capitalize transition"
-                  style={fuente === f
-                    ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
-                    : { borderColor: '#E5E7EB', color: '#6B7280' }}
-                >
-                  {f === 'epayco' ? 'ePayco' : f === 'davivienda' ? 'Davivienda' : 'Otra'}
-                </button>
-              ))}
-            </div>
-          </Field>
-
-          {fuente === 'otra' && (
-            <Field label="Nombre de la fuente">
-              <input value={fuenteNombre} onChange={(e) => setFuenteNombre(e.target.value)} placeholder="ej. Bancolombia, Nequi, efectivo…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
-            </Field>
-          )}
-
-          <Field label={esEpayco ? 'Referencia ePayco (ref_payco)' : 'Referencia / comprobante'}>
-            <input
-              value={referencia}
-              onChange={(e) => setReferencia(esEpayco ? e.target.value.replace(/[^\d]/g, '') : e.target.value)}
-              inputMode={esEpayco ? 'numeric' : 'text'}
-              placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
-              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-              style={{ borderColor: '#E5E7EB' }}
-            />
-            {esEpayco && <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Se valida con ePayco: solo se registra si está Aceptada.</p>}
-          </Field>
-
-          {!esEpayco && (
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Monto">
-                <input value={monto} onChange={(e) => setMonto(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="0" className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none" style={{ borderColor: '#E5E7EB' }} />
-              </Field>
-              <Field label="Fecha">
-                <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
-              </Field>
-            </div>
-          )}
-
-        </div>
-
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
-          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
-          <button onClick={handleSubmit} disabled={pending} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Registrar pago
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Primitivos ───────────────────────────────────────────────────────────────
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>{label}</span>
-      {children}
-    </label>
-  )
-}
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (

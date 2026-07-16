@@ -1809,8 +1809,8 @@ const ANTICIPO_PCT_PLAN1 = 0.5
  * ¿El negocio ya tiene cubierto su anticipo esperado por el saldo real (cualquier
  * vía: reparto, FAB, manual, ePayco)?
  *
- * - `cobrado` = SUM(cobros.monto) del negocio (todos los cobros — mismo criterio que
- *   usa `conciliarNegocio`).
+ * - `cobrado` = SUM(cobros.monto) del negocio (todos los cobros — mismo criterio de
+ *   cobrado que usa la conciliación).
  * - `anticipoEsperado` se deriva de la propuesta aprobada (`aprobado_plan`, leído
  *   DIRECTO de la propuesta — NO vía `leerModeloDineroNegocio`, que devuelve null sin
  *   tarifa pasante) + `precio_aprobado`:

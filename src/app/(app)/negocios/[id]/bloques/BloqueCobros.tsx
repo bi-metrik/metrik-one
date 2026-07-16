@@ -2,10 +2,11 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle2, Clock, AlertTriangle, Trash2, Loader2 } from 'lucide-react'
+import { CheckCircle2, Clock, AlertTriangle, Trash2, Loader2, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
 import { eliminarPorcionPago } from '@/lib/actions/conciliacion-actions'
+import DistribuirPagoModal from '@/components/distribuir-pago-modal'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 
@@ -42,6 +43,14 @@ interface BloqueCobrosProps {
   stageActual?: string | null
   /** Costos ePayco descontados por cobro, keyed por ref_payco (= external_ref del cobro). */
   epaycoCostos?: Record<string, EpaycoCostoCobro>
+  /**
+   * Habilita el botón "Registrar pago" dentro del bloque (opt-in modules.conciliacion).
+   * Solo en modo editable. Abre el modal de registro con reparto opcional; el
+   * comercial PROPONE, la financiera confirma (control de dos personas).
+   */
+  registrarPagoEnabled?: boolean
+  /** Negocio de este bloque (código/nombre) para fijar la 1ª porción del pago. */
+  negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
 }
 
 /** Etiqueta legible del plan de pago elegido por el cliente en la propuesta. */
@@ -240,7 +249,11 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
   )
 }
 
-export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, stageActual, epaycoCostos }: BloqueCobrosProps) {
+export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, stageActual, epaycoCostos, registrarPagoEnabled = false, negocioFijado }: BloqueCobrosProps) {
+  const router = useRouter()
+  const [pagoModal, setPagoModal] = useState(false)
+  // Registrar pago inline: opt-in por workspace + solo en la etapa activa editable.
+  const permiteRegistrarPago = modo === 'editable' && registrarPagoEnabled && !!negocioFijado
   // El comercial puede eliminar una porción que él propuso mientras el negocio esté
   // en venta (modo editable). El server valida además "no conciliada".
   const permiteEliminar = modo === 'editable' && stageActual === 'venta'
@@ -258,6 +271,20 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
 
   return (
     <div className="space-y-4">
+      {/* Registrar pago (comercial propone; financiera confirma). Reparto opcional
+          a otros negocios dentro del mismo modal. */}
+      {permiteRegistrarPago && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => setPagoModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90"
+            style={{ backgroundColor: '#10B981' }}
+          >
+            <Wallet className="h-3.5 w-3.5" /> Registrar pago
+          </button>
+        </div>
+      )}
+
       {/* Plan de pago elegido por el cliente (de la propuesta aprobada). Visible para
           que financiera haga seguimiento sin buscarlo en la propuesta. */}
       {planLabel && (
@@ -368,6 +395,14 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
         programados.length === 0 && (
           <p className="text-center text-xs text-[#6B7280] py-4">Sin cobros registrados</p>
         )
+      )}
+
+      {pagoModal && negocioFijado && (
+        <DistribuirPagoModal
+          negocioFijado={negocioFijado}
+          onClose={() => setPagoModal(false)}
+          onDone={() => { setPagoModal(false); router.refresh() }}
+        />
       )}
     </div>
   )

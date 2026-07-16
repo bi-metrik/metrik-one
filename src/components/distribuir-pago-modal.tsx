@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { X, Loader2, Plus, Trash2, ArrowRightLeft } from 'lucide-react'
+import { X, Loader2, Plus, Trash2, ArrowRightLeft, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { repartirPagoComercial } from '@/lib/actions/conciliacion-actions'
 import { getNegociosParaPagoFab, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
@@ -18,33 +18,48 @@ interface PorcionUI {
 }
 
 /**
- * Modal "Distribuir pago entre negocios" — el COMERCIAL propone el reparto de UN
- * pago entre varios negocios. La financiera lo valida y concilia. Reusable desde el
- * FAB global y desde el detalle del negocio. Escribe por `repartirPagoComercial`.
+ * Modal de registro de pago del COMERCIAL — con reparto opcional entre varios
+ * negocios. El comercial PROPONE el pago/reparto; la financiera lo valida y concilia
+ * (control de dos personas). Escribe SIEMPRE por `repartirPagoComercial` (1 porción =
+ * pago simple; N porciones = reparto).
+ *
+ * Dos modos de entrada, según `negocioFijado`:
+ *   - Desde el bloque de pagos de un negocio → `negocioFijado` fija la 1ª porción a
+ *     ese negocio (no se puede cambiar ni quitar). El reparto a OTROS negocios es
+ *     opcional: si solo hay la porción fija, es un pago simple.
+ *   - Desde el FAB global → sin `negocioFijado`, el comercial elige el/los negocios.
  *
  * El picker de negocios (getNegociosParaPagoFab) es la materialización de la regla
- * dura: solo negocios existentes y abiertos.
+ * dura: solo negocios existentes y abiertos. Fuentes: ePayco + Otra (manual/externo,
+ * Davivienda entra como texto libre bajo "otra").
  */
 export default function DistribuirPagoModal({
   onClose,
   onDone,
+  negocioFijado,
 }: {
   onClose: () => void
   onDone: () => void
+  /** Cuando viene del bloque de pagos: fija la 1ª porción a este negocio. */
+  negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
 }) {
   const [negocios, setNegocios] = useState<NegocioParaPagoFab[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [fuente, setFuente] = useState<'epayco' | 'davivienda' | 'otra'>('epayco')
+  const [fuente, setFuente] = useState<'epayco' | 'otra'>('epayco')
   const [fuenteNombre, setFuenteNombre] = useState('')
   const [referencia, setReferencia] = useState('')
   const [total, setTotal] = useState('')
   const [fecha, setFecha] = useState('')
-  const [porciones, setPorciones] = useState<PorcionUI[]>([{ negocio_id: '', monto: '' }])
+  // Con negocioFijado la 1ª porción arranca fijada a ese negocio (monto libre).
+  const [porciones, setPorciones] = useState<PorcionUI[]>([
+    { negocio_id: negocioFijado?.negocio_id ?? '', monto: '' },
+  ])
   const [pending, startTransition] = useTransition()
 
   const esEpayco = fuente === 'epayco'
+  const fijadoActivo = !!negocioFijado
 
   useEffect(() => {
     let cancel = false
@@ -60,6 +75,8 @@ export default function DistribuirPagoModal({
   const totalNum = Number(total) || 0
   const sumaAsignada = porciones.reduce((s, p) => s + (Number(p.monto) || 0), 0)
   const sinAsignar = totalNum - sumaAsignada
+  // Es "reparto" (varios negocios) cuando hay 2+ porciones con negocio y monto.
+  const esReparto = porciones.filter((p) => p.negocio_id && Number(p.monto) > 0).length > 1
 
   function setPorcion(i: number, patch: Partial<PorcionUI>) {
     setPorciones((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)))
@@ -68,12 +85,16 @@ export default function DistribuirPagoModal({
     setPorciones((prev) => [...prev, { negocio_id: '', monto: '' }])
   }
   function removePorcion(i: number) {
+    // La porción fijada (índice 0 con negocioFijado) no se puede quitar.
+    if (fijadoActivo && i === 0) return
     setPorciones((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev))
   }
 
   // Negocios ya elegidos en otras filas (para no ofrecer el mismo dos veces).
+  // Con negocioFijado, el negocio fijo también se excluye del resto de selectores.
   function disponiblesPara(i: number): NegocioParaPagoFab[] {
     const usados = new Set(porciones.filter((_, idx) => idx !== i).map((p) => p.negocio_id).filter(Boolean))
+    if (fijadoActivo && i !== 0) usados.add(negocioFijado!.negocio_id)
     return negocios.filter((n) => !usados.has(n.negocio_id))
   }
 
@@ -86,6 +107,10 @@ export default function DistribuirPagoModal({
       .filter((p) => p.negocio_id && Number(p.monto) > 0)
       .map((p) => ({ negocio_id: p.negocio_id, monto: Number(p.monto) }))
     if (limpias.length === 0) return toast.error('Asigna al menos un negocio con monto')
+    // Con negocioFijado, la porción del negocio del bloque es obligatoria.
+    if (fijadoActivo && !limpias.some((p) => p.negocio_id === negocioFijado!.negocio_id)) {
+      return toast.error(`Asigna un monto al negocio ${negocioFijado!.codigo ?? ''}`)
+    }
     // Con total conocido (manual, o ePayco con total explícito), la suma no puede
     // exceder el total. En ePayco-auto (total=0) el server valida contra el pago real.
     if (totalNum > 0 && sinAsignar < -1) return toast.error('La suma de las porciones supera el total del pago')
@@ -102,7 +127,11 @@ export default function DistribuirPagoModal({
         fecha: fecha || undefined,
       })
       if (res.success) {
-        toast.success('Reparto propuesto. El área financiera lo confirmará.')
+        toast.success(
+          limpias.length > 1
+            ? 'Reparto propuesto. El área financiera lo confirmará.'
+            : 'Pago registrado. El área financiera lo confirmará.',
+        )
         onDone()
       } else {
         toast.error(res.error)
@@ -115,20 +144,24 @@ export default function DistribuirPagoModal({
       <div className="flex max-h-[92vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
         <div className="flex shrink-0 items-center justify-between border-b px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
           <div className="flex items-center gap-2">
-            <ArrowRightLeft className="h-4 w-4" style={{ color: VERDE }} />
-            <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>Distribuir pago entre negocios</h3>
+            {fijadoActivo ? <Wallet className="h-4 w-4" style={{ color: VERDE }} /> : <ArrowRightLeft className="h-4 w-4" style={{ color: VERDE }} />}
+            <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>
+              {fijadoActivo ? 'Registrar pago' : 'Distribuir pago entre negocios'}
+            </h3>
           </div>
           <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: '#6B7280' }} /></button>
         </div>
 
         <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
           <p className="text-[11px] leading-relaxed" style={{ color: '#6B7280' }}>
-            Propón cómo se reparte un solo pago entre varios negocios. El área financiera lo valida contra el dinero real y concilia.
+            {fijadoActivo
+              ? 'Registra el pago de este negocio. Si un mismo pago cubre varios negocios, reparte el resto abajo. El área financiera lo confirma.'
+              : 'Propón cómo se reparte un solo pago entre varios negocios. El área financiera lo valida contra el dinero real y concilia.'}
           </p>
 
           <Field label="Fuente del pago">
-            <div className="grid grid-cols-3 gap-2">
-              {(['epayco', 'davivienda', 'otra'] as const).map((f) => (
+            <div className="grid grid-cols-2 gap-2">
+              {(['epayco', 'otra'] as const).map((f) => (
                 <button
                   key={f}
                   onClick={() => setFuente(f)}
@@ -137,7 +170,7 @@ export default function DistribuirPagoModal({
                     ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
                     : { borderColor: '#E5E7EB', color: '#6B7280' }}
                 >
-                  {f === 'epayco' ? 'ePayco' : f === 'davivienda' ? 'Davivienda' : 'Otra'}
+                  {f === 'epayco' ? 'ePayco' : 'Otra (manual)'}
                 </button>
               ))}
             </div>
@@ -145,7 +178,7 @@ export default function DistribuirPagoModal({
 
           {fuente === 'otra' && (
             <Field label="Nombre de la fuente">
-              <input value={fuenteNombre} onChange={(e) => setFuenteNombre(e.target.value)} placeholder="ej. Bancolombia, Nequi, efectivo…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
+              <input value={fuenteNombre} onChange={(e) => setFuenteNombre(e.target.value)} placeholder="ej. Davivienda, Bancolombia, Nequi, efectivo…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
             </Field>
           )}
 
@@ -180,7 +213,9 @@ export default function DistribuirPagoModal({
           {/* Repetidor de porciones */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>Reparto por negocio</span>
+              <span className="text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>
+                {fijadoActivo ? 'Monto del pago' : 'Reparto por negocio'}
+              </span>
               {totalNum > 0 && (
                 <span className="text-[11px]" style={{ color: sinAsignar < -1 ? '#DC2626' : '#6B7280' }}>
                   Sin asignar: <span className="font-semibold tabular-nums">{fmtCOP(sinAsignar)}</span>
@@ -196,45 +231,55 @@ export default function DistribuirPagoModal({
               <p className="text-[12px]" style={{ color: '#DC2626' }}>{loadError}</p>
             ) : (
               <div className="space-y-2">
-                {porciones.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <select
-                      value={p.negocio_id}
-                      onChange={(e) => setPorcion(i, { negocio_id: e.target.value })}
-                      className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[12px] outline-none"
-                      style={{ borderColor: '#E5E7EB' }}
-                    >
-                      <option value="">Elige negocio…</option>
-                      {disponiblesPara(i).map((n) => (
-                        <option key={n.negocio_id} value={n.negocio_id}>
-                          {(n.codigo ?? n.nombre ?? '')}{n.empresa ? ` · ${n.empresa}` : (n.nombre ? ` · ${n.nombre}` : '')}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      value={p.monto}
-                      onChange={(e) => setPorcion(i, { monto: e.target.value.replace(/[^\d]/g, '') })}
-                      inputMode="numeric"
-                      placeholder="monto"
-                      className="w-28 rounded-md border px-2 py-1.5 text-right text-[12px] tabular-nums outline-none"
-                      style={{ borderColor: '#E5E7EB' }}
-                    />
-                    <button
-                      onClick={() => removePorcion(i)}
-                      disabled={porciones.length <= 1}
-                      title="Quitar esta línea"
-                      className="rounded p-1 hover:bg-gray-100 disabled:opacity-30"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
-                    </button>
-                  </div>
-                ))}
+                {porciones.map((p, i) => {
+                  const esFilaFija = fijadoActivo && i === 0
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      {esFilaFija ? (
+                        <div className="min-w-0 flex-1 rounded-md border bg-[#F9FAFB] px-2 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}>
+                          {negocioFijado!.codigo ?? negocioFijado!.nombre ?? 'Este negocio'}
+                          {negocioFijado!.nombre && negocioFijado!.codigo ? <span className="ml-1 font-normal" style={{ color: '#6B7280' }}>· {negocioFijado!.nombre}</span> : null}
+                        </div>
+                      ) : (
+                        <select
+                          value={p.negocio_id}
+                          onChange={(e) => setPorcion(i, { negocio_id: e.target.value })}
+                          className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[12px] outline-none"
+                          style={{ borderColor: '#E5E7EB' }}
+                        >
+                          <option value="">Elige negocio…</option>
+                          {disponiblesPara(i).map((n) => (
+                            <option key={n.negocio_id} value={n.negocio_id}>
+                              {(n.codigo ?? n.nombre ?? '')}{n.empresa ? ` · ${n.empresa}` : (n.nombre ? ` · ${n.nombre}` : '')}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <input
+                        value={p.monto}
+                        onChange={(e) => setPorcion(i, { monto: e.target.value.replace(/[^\d]/g, '') })}
+                        inputMode="numeric"
+                        placeholder="monto"
+                        className="w-28 rounded-md border px-2 py-1.5 text-right text-[12px] tabular-nums outline-none"
+                        style={{ borderColor: '#E5E7EB' }}
+                      />
+                      <button
+                        onClick={() => removePorcion(i)}
+                        disabled={porciones.length <= 1 || esFilaFija}
+                        title={esFilaFija ? 'El negocio de este bloque no se puede quitar' : 'Quitar esta línea'}
+                        className="rounded p-1 hover:bg-gray-100 disabled:opacity-30"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+                      </button>
+                    </div>
+                  )
+                })}
                 <button
                   onClick={addPorcion}
                   className="inline-flex items-center gap-1 text-[12px] font-semibold"
                   style={{ color: VERDE }}
                 >
-                  <Plus className="h-3.5 w-3.5" /> Agregar negocio
+                  <Plus className="h-3.5 w-3.5" /> {fijadoActivo ? '¿El pago cubre otro negocio? Repartir' : 'Agregar negocio'}
                 </button>
               </div>
             )}
@@ -244,8 +289,8 @@ export default function DistribuirPagoModal({
         <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
           <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
           <button onClick={handleSubmit} disabled={pending || loading} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
-            Proponer reparto
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : esReparto ? <ArrowRightLeft className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
+            {esReparto ? 'Proponer reparto' : 'Registrar pago'}
           </button>
         </div>
       </div>

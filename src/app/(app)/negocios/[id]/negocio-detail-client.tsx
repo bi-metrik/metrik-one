@@ -1074,6 +1074,8 @@ function BloqueRenderer({
   modeloDinero,
   stageActual,
   epaycoCostos,
+  registrarPagoEnabled = false,
+  negocioFijado,
   facturaDraft,
 }: {
   bloque: BloqueExtendido
@@ -1105,6 +1107,8 @@ function BloqueRenderer({
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
+  registrarPagoEnabled?: boolean
+  negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
   facturaDraft?: FacturaDraft | null
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
@@ -1368,6 +1372,9 @@ function BloqueRenderer({
           // y solo cuando el negocio está en venta. El server valida además "no conciliado".
           stageActual={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : stageActual}
           epaycoCostos={epaycoCostos}
+          // Registrar pago inline: solo en la etapa activa (no en historial readonly).
+          registrarPagoEnabled={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? false : registrarPagoEnabled}
+          negocioFijado={negocioFijado}
         />
       )
 
@@ -1532,6 +1539,8 @@ function BloqueCard({
   modeloDinero,
   stageActual,
   epaycoCostos,
+  registrarPagoEnabled = false,
+  negocioFijado,
   facturaDraft,
 }: {
   bloque: BloqueExtendido
@@ -1563,6 +1572,8 @@ function BloqueCard({
   modeloDinero?: ModeloDinero | null
   stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
+  registrarPagoEnabled?: boolean
+  negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
   facturaDraft?: FacturaDraft | null
 }) {
   const def = bloque.bloque_definitions
@@ -1670,6 +1681,8 @@ function BloqueCard({
               modeloDinero={modeloDinero}
               stageActual={stageActual}
               epaycoCostos={epaycoCostos}
+              registrarPagoEnabled={registrarPagoEnabled}
+              negocioFijado={negocioFijado}
               facturaDraft={facturaDraft}
             />
           )}
@@ -1733,6 +1746,8 @@ interface Props {
   datosPorSlug?: Record<string, Record<string, unknown>>
   bloquesEtapasPrevias?: BloqueHistorialItem[]
   pausaEnabled: boolean
+  /** Habilita "Registrar pago" dentro del bloque de pagos (opt-in modules.conciliacion). */
+  registrarPagoEnabled?: boolean
   errorMsg?: string
 }
 
@@ -1756,6 +1771,7 @@ export default function NegocioDetailClient({
   datosPorSlug = {},
   bloquesEtapasPrevias = [],
   pausaEnabled,
+  registrarPagoEnabled = false,
   errorMsg,
 }: Props) {
   useEffect(() => {
@@ -1989,6 +2005,8 @@ export default function NegocioDetailClient({
                   modeloDinero={negocio.modelo_dinero ?? null}
                   stageActual={negocio.stage_actual}
                   epaycoCostos={negocio.epayco_costos ?? {}}
+                  registrarPagoEnabled={registrarPagoEnabled}
+                  negocioFijado={{ negocio_id: negocio.id, codigo: negocio.codigo, nombre: negocio.nombre }}
                   facturaDraft={negocio.factura_draft ?? null}
                 />
               ))}
