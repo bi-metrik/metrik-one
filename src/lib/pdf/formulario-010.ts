@@ -289,8 +289,9 @@ export async function generarFormulario010(
   edit1('segundo_apellido', datos.segundo_apellido, P1.segundo_apellido)
   edit1('primer_nombre', datos.primer_nombre, P1.primer_nombre)
   edit1('otros_nombres', datos.otros_nombres, P1.otros_nombres)
-  // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
-  if (constantes.mostrar_razon_social && datos.razon_social) edit1('razon_social', datos.razon_social, P1.razon_social)
+  // Razón social (casilla 11): SIEMPRE en blanco. SOENA opera 100% personas
+  // naturales; ninguna seccional (tampoco Cali) la diligencia. Confirmado por Deisy
+  // (2026-07-16): todas las seccionales son iguales.
   edit1('direccion_seccional', seccionalOficial, P1.direccion_seccional)
   // Casilla 12 "Cód." — código oficial de la seccional (autocompletado).
   edit1('codigo_seccional', datos.codigo_seccional, P1.codigo_seccional)
@@ -321,9 +322,9 @@ export async function generarFormulario010(
   fixed1('31', P1.firma_tipo_doc) // DETERMINISTA
   edit1('nit', datos.nit, P1.firma_identificacion)
   edit1('dv', datos.dv, P1.firma_dv)
-  // 1005 (Cod. Representación) / 1006 (Organización): solo algunas seccionales (ej. Cali).
-  if (constantes.cod_representacion_1005) fixed1(constantes.cod_representacion_1005, P1.firma_cod_representacion)
-  if (constantes.organizacion_1006) edit1('organizacion_1006', constantes.organizacion_1006, P1.firma_organizacion)
+  // 1005 (Cod. Representación) y 1006 (Organización): SIEMPRE en blanco. Persona
+  // natural a nombre propio NO diligencia representación ni organización (instructivo
+  // DIAN). Confirmado por Deisy (2026-07-16): Cali ya no es excepción.
 
   // ── PÁGINA 2 ──────────────────────────────────────────────────────────────
   // El "Espacio reservado para la DIAN" (encabezado hoja 2) lo diligencia la DIAN,
@@ -338,8 +339,7 @@ export async function generarFormulario010(
   edit2('segundo_apellido', datos.segundo_apellido, P2.segundo_apellido)
   edit2('primer_nombre', datos.primer_nombre, P2.primer_nombre)
   edit2('otros_nombres', datos.otros_nombres, P2.otros_nombres)
-  // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
-  if (constantes.mostrar_razon_social && datos.razon_social) edit2('razon_social', datos.razon_social, P2.razon_social)
+  // Razón social (casilla 11): SIEMPRE en blanco (persona natural).
   edit2('direccion_seccional', seccionalOficial, P2.direccion_seccional)
   // Casilla 12 "Cód." — código oficial de la seccional (faltaba en hoja 2).
   edit2('codigo_seccional', datos.codigo_seccional, P2.codigo_seccional)
