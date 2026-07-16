@@ -1,15 +1,15 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Copy, Check, FileText, AlertTriangle } from 'lucide-react'
-import { marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { FacturaDraft } from '../../negocio-v2-actions'
 
-// Bloque de facturación Siigo-ready. Autopobla los datos del cliente ya
-// capturados en el expediente (RUT + contacto) + el valor (honorario), para
-// copiarlos a Siigo. Con opción de override manual (facturar a nombre de otro).
+// Bloque de facturación Siigo-ready (OUTBOUND). Autopobla los datos del cliente
+// ya capturados en el expediente (RUT + contacto) + el valor (honorario), para
+// copiarlos a Siigo y crear la factura. Con opción de override manual (facturar
+// a nombre de otro). El cierre del negocio NO ocurre aquí: se cierra al cargar
+// la factura emitida en el bloque "Factura emitida" (documento + IA + gate).
 // El mismo esquema de campos es el contrato que consumirá la API de Siigo.
 
 const formatCOP = (v: number) =>
@@ -44,13 +44,11 @@ interface Props {
   configExtra: { label?: string; descripcion?: string; iva_pct?: number }
 }
 
-export default function BloqueFacturacion({ negocioBloqueId, instancia, modo, draft, configExtra }: Props) {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+export default function BloqueFacturacion({ instancia, modo, draft, configExtra }: Props) {
   const [copiado, setCopiado] = useState(false)
 
   const data = (instancia?.data ?? {}) as Record<string, unknown>
-  const readonly = modo === 'visible' || instancia?.completado === true
+  const readonly = modo === 'visible'
 
   const descripcion = configExtra.descripcion ?? 'Incentivos tributarios UPME'
   const ivaPct = configExtra.iva_pct ?? 19
@@ -60,8 +58,6 @@ export default function BloqueFacturacion({ negocioBloqueId, instancia, modo, dr
   const [override, setOverride] = useState<Record<string, string>>(
     (data.override as Record<string, string> | undefined) ?? {},
   )
-  const [numeroFactura, setNumeroFactura] = useState<string>((data.numero_factura_siigo as string) ?? '')
-  const [fecha, setFecha] = useState<string>((data.fecha_factura as string) ?? '')
 
   // Valor efectivo de un campo: si se factura a un tercero, gana el override; si
   // no, el autopoblado del draft.
@@ -107,32 +103,7 @@ export default function BloqueFacturacion({ negocioBloqueId, instancia, modo, dr
     }
   }
 
-  const handleMarcarFacturado = () => {
-    if (!numeroFactura.trim() || !fecha) {
-      toast.error('Ingresa el número de factura de Siigo y la fecha')
-      return
-    }
-    if (emailFalta) {
-      toast.error('Falta el email del cliente para facturar')
-      return
-    }
-    startTransition(async () => {
-      const res = await marcarBloqueCompleto(negocioBloqueId, {
-        numero_factura_siigo: numeroFactura.trim(),
-        fecha_factura: fecha,
-        facturar_a_tercero: facturarATercero,
-        override: facturarATercero ? override : {},
-      })
-      if (res.error) {
-        toast.error(res.error)
-      } else {
-        toast.success('Factura registrada')
-        router.refresh()
-      }
-    })
-  }
-
-  // ── Modo solo lectura (etapa completada / heredada) ────────────────────────
+  // ── Modo solo lectura (heredado desde otra etapa) ──────────────────────────
   if (readonly) {
     return (
       <div className="space-y-2 text-sm">
@@ -140,14 +111,10 @@ export default function BloqueFacturacion({ negocioBloqueId, instancia, modo, dr
           <FileText className="h-4 w-4 text-[#10B981]" />
           {configExtra.label ?? 'Facturación'}
         </div>
-        {instancia?.completado && (
-          <div className="rounded-md border border-[#E5E7EB] bg-[#F9FAFB] p-3 space-y-1 text-xs text-[#6B7280]">
-            <div><span className="text-[#1A1A1A] font-medium">Factura Siigo:</span> {(data.numero_factura_siigo as string) || '-'}</div>
-            <div><span className="text-[#1A1A1A] font-medium">Fecha:</span> {(data.fecha_factura as string) || '-'}</div>
-            <div><span className="text-[#1A1A1A] font-medium">Cliente:</span> {val('nombre') || '-'}</div>
-            <div><span className="text-[#1A1A1A] font-medium">Total:</span> {formatCOP(total)}</div>
-          </div>
-        )}
+        <div className="rounded-md border border-[#E5E7EB] bg-[#F9FAFB] p-3 space-y-1 text-xs text-[#6B7280]">
+          <div><span className="text-[#1A1A1A] font-medium">Cliente:</span> {val('nombre') || '-'}</div>
+          <div><span className="text-[#1A1A1A] font-medium">Total:</span> {formatCOP(total)}</div>
+        </div>
       </div>
     )
   }
@@ -181,6 +148,10 @@ export default function BloqueFacturacion({ negocioBloqueId, instancia, modo, dr
           Facturar a nombre de otro
         </label>
       </div>
+
+      <p className="text-xs text-[#6B7280]">
+        Copia estos campos para crear la factura en Siigo. El negocio se cierra al cargar la factura emitida abajo.
+      </p>
 
       {emailFalta && (
         <div className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -240,36 +211,6 @@ export default function BloqueFacturacion({ negocioBloqueId, instancia, modo, dr
       >
         {copiado ? <Check className="h-3.5 w-3.5 text-[#10B981]" /> : <Copy className="h-3.5 w-3.5" />}
         {copiado ? 'Copiado' : 'Copiar campos'}
-      </button>
-
-      {/* Retorno: número de factura Siigo + fecha (cierra el negocio) */}
-      <div className="border-t border-[#E5E7EB] pt-3 grid grid-cols-2 gap-2">
-        <div>
-          <label className="block text-[10px] uppercase tracking-wide text-[#9CA3AF] mb-0.5">N° factura Siigo</label>
-          <input
-            value={numeroFactura}
-            onChange={e => setNumeroFactura(e.target.value)}
-            placeholder="SOE ..."
-            className="w-full rounded-md border border-[#E5E7EB] px-2 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] uppercase tracking-wide text-[#9CA3AF] mb-0.5">Fecha</label>
-          <input
-            type="date"
-            value={fecha}
-            onChange={e => setFecha(e.target.value)}
-            className="w-full rounded-md border border-[#E5E7EB] px-2 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
-          />
-        </div>
-      </div>
-
-      <button
-        onClick={handleMarcarFacturado}
-        disabled={isPending}
-        className="w-full rounded-lg bg-[#10B981] py-2 text-sm font-medium text-white hover:bg-[#059669] disabled:opacity-50"
-      >
-        {isPending ? 'Guardando...' : 'Registrar factura'}
       </button>
     </div>
   )
