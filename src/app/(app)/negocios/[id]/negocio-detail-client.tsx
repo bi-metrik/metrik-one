@@ -27,7 +27,7 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -176,6 +176,84 @@ function CarpetaUrlEditor({
       <FolderOpen className="h-4 w-4 text-muted-foreground/50 shrink-0" />
       <span className="text-xs text-muted-foreground/60">Agregar carpeta Drive</span>
     </button>
+  )
+}
+
+// ── Nombre del negocio editable (header) ──────────────────────────────────────
+
+function NombreNegocioEditable({
+  negocioId,
+  initialNombre,
+  canEdit,
+}: {
+  negocioId: string
+  initialNombre: string
+  canEdit: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(initialNombre)
+  const [savedNombre, setSavedNombre] = useState(initialNombre)
+  const [isPending, startTransition] = useTransition()
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function startEditing() {
+    setValue(savedNombre)
+    setEditing(true)
+    setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select() }, 0)
+  }
+
+  function save() {
+    setEditing(false)
+    const trimmed = value.trim()
+    if (!trimmed || trimmed === savedNombre) { setValue(savedNombre); return }
+    const anterior = savedNombre
+    setSavedNombre(trimmed) // optimista
+    startTransition(async () => {
+      const res = await actualizarNombreNegocio(negocioId, trimmed)
+      if (res.error) {
+        toast.error(res.error)
+        setSavedNombre(anterior)
+        setValue(anterior)
+      } else {
+        toast.success('Nombre actualizado')
+      }
+    })
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); save() }
+    if (e.key === 'Escape') { setEditing(false); setValue(savedNombre) }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={handleKeyDown}
+        disabled={isPending}
+        maxLength={200}
+        className="min-w-0 flex-1 rounded-md border border-primary bg-background px-1.5 py-0.5 text-lg font-bold leading-tight text-foreground focus:outline-none focus:ring-2 focus:ring-primary/15"
+      />
+    )
+  }
+
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5 group">
+      <span className="truncate">{savedNombre}</span>
+      {canEdit && (
+        <button
+          onClick={startEditing}
+          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-muted-foreground"
+          title="Editar nombre del negocio"
+          aria-label="Editar nombre"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </span>
   )
 }
 
@@ -1881,7 +1959,11 @@ export default function NegocioDetailClient({
                 <span className="text-muted-foreground font-normal">—</span>
               </>
             )}
-            <span className="truncate">{negocio.nombre}</span>
+            <NombreNegocioEditable
+              negocioId={negocio.id}
+              initialNombre={negocio.nombre}
+              canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
+            />
           </h1>
         </div>
         <div className="shrink-0 mt-1">

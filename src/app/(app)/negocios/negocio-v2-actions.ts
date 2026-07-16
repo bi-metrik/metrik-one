@@ -4494,6 +4494,52 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }
 }
 
+// ── Actualizar nombre del negocio ─────────────────────────────────────────────
+
+export async function actualizarNombreNegocio(
+  negocioId: string,
+  nombre: string,
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const nuevo = nombre.trim()
+  if (!nuevo) return { error: 'El nombre no puede estar vacío' }
+  if (nuevo.length > 200) return { error: 'El nombre es demasiado largo (máx 200)' }
+
+  const { data: negocioAntes } = await db(supabase)
+    .from('negocios')
+    .select('nombre')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  const nombreAnterior = (negocioAntes as { nombre: string | null } | null)?.nombre
+
+  const { error: updErr } = await db(supabase)
+    .from('negocios')
+    .update({ nombre: nuevo, updated_at: new Date().toISOString() })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+  if (updErr) return { error: (updErr as { message: string }).message }
+
+  if (staffId && (nombreAnterior ?? '') !== nuevo) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: 'nombre',
+      valor_anterior: nombreAnterior ?? null,
+      valor_nuevo: nuevo,
+    })
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null }
+}
+
 // ── Actualizar carpeta URL del negocio ────────────────────────────────────────
 
 export async function actualizarCarpetaUrlNegocio(
