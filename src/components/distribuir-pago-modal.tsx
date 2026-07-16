@@ -73,10 +73,22 @@ export default function DistribuirPagoModal({
   }, [])
 
   const totalNum = Number(total) || 0
-  const sumaAsignada = porciones.reduce((s, p) => s + (Number(p.monto) || 0), 0)
-  const sinAsignar = totalNum - sumaAsignada
-  // Es "reparto" (varios negocios) cuando hay 2+ porciones con negocio y monto.
-  const esReparto = porciones.filter((p) => p.negocio_id && Number(p.monto) > 0).length > 1
+  // Reparto BALANCEADOR (solo con negocio origen fijado): el origen (índice 0)
+  // queda con el saldo = total − suma(los negocios que se abren). Arranca en el
+  // 100% y NUNCA queda en $0 (regla de Mauricio). Lo que se abre se teclea; el
+  // origen se calcula solo.
+  const sumRepartido = fijadoActivo
+    ? porciones.slice(1).reduce((s, p) => s + (Number(p.monto) || 0), 0)
+    : porciones.reduce((s, p) => s + (Number(p.monto) || 0), 0)
+  const montoOrigen = fijadoActivo ? totalNum - sumRepartido : 0
+  // El origen no puede quedar en 0 o negativo (solo aplica con total conocido).
+  const origenEnCero = fijadoActivo && totalNum > 0 && montoOrigen <= 0
+  // Hay reparto cuando, además del origen fijado, se abrió al menos otro negocio.
+  const repartoActivo = fijadoActivo && porciones.slice(1).some((p) => p.negocio_id)
+  // "Sin asignar" (solo se muestra fuera del reparto): total − lo tecleado.
+  const sinAsignar = totalNum - porciones.reduce((s, p) => s + (Number(p.monto) || 0), 0)
+  // Es "reparto" (varios negocios) cuando hay 2+ porciones con negocio.
+  const esReparto = porciones.filter((p) => p.negocio_id).length > 1
 
   function setPorcion(i: number, patch: Partial<PorcionUI>) {
     setPorciones((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)))
@@ -103,17 +115,29 @@ export default function DistribuirPagoModal({
     if (!esEpayco && totalNum <= 0) return toast.error('Ingresa el total del pago')
     if (fuente === 'otra' && !fuenteNombre.trim()) return toast.error('Indica el nombre de la fuente')
 
-    const limpias = porciones
-      .filter((p) => p.negocio_id && Number(p.monto) > 0)
-      .map((p) => ({ negocio_id: p.negocio_id, monto: Number(p.monto) }))
-    if (limpias.length === 0) return toast.error('Asigna al menos un negocio con monto')
-    // Con negocioFijado, la porción del negocio del bloque es obligatoria.
-    if (fijadoActivo && !limpias.some((p) => p.negocio_id === negocioFijado!.negocio_id)) {
-      return toast.error(`Asigna un monto al negocio ${negocioFijado!.codigo ?? ''}`)
+    let limpias: { negocio_id: string; monto: number }[]
+    if (repartoActivo) {
+      // REPARTO con ORIGEN BALANCEADOR: el origen queda con el saldo (total − repartido),
+      // arranca en 100% y NUNCA queda en $0. Los demás se teclean.
+      if (totalNum <= 0) return toast.error('Ingresa el total del pago para repartir entre negocios')
+      if (origenEnCero) return toast.error('El negocio original no puede quedar en $0. Reduce lo repartido.')
+      const otros = porciones
+        .slice(1)
+        .filter((p) => p.negocio_id && Number(p.monto) > 0)
+        .map((p) => ({ negocio_id: p.negocio_id, monto: Number(p.monto) }))
+      if (otros.length === 0) return toast.error('Asigna un monto a los negocios que abriste')
+      limpias = [{ negocio_id: negocioFijado!.negocio_id, monto: montoOrigen }, ...otros]
+    } else {
+      // PAGO SIMPLE / FAB: comportamiento previo intacto (se envía lo tecleado).
+      limpias = porciones
+        .filter((p) => p.negocio_id && Number(p.monto) > 0)
+        .map((p) => ({ negocio_id: p.negocio_id, monto: Number(p.monto) }))
+      if (limpias.length === 0) return toast.error('Asigna al menos un negocio con monto')
+      if (fijadoActivo && !limpias.some((p) => p.negocio_id === negocioFijado!.negocio_id)) {
+        return toast.error(`Asigna un monto al negocio ${negocioFijado!.codigo ?? ''}`)
+      }
+      if (totalNum > 0 && sinAsignar < -1) return toast.error('La suma de las porciones supera el total del pago')
     }
-    // Con total conocido (manual, o ePayco con total explícito), la suma no puede
-    // exceder el total. En ePayco-auto (total=0) el server valida contra el pago real.
-    if (totalNum > 0 && sinAsignar < -1) return toast.error('La suma de las porciones supera el total del pago')
 
     const tipoFuente: 'epayco' | 'manual' = esEpayco ? 'epayco' : 'manual'
 
@@ -216,11 +240,15 @@ export default function DistribuirPagoModal({
               <span className="text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>
                 {fijadoActivo ? 'Monto del pago' : 'Reparto por negocio'}
               </span>
-              {totalNum > 0 && (
+              {totalNum > 0 && (repartoActivo ? (
+                <span className="text-[11px]" style={{ color: origenEnCero ? '#DC2626' : '#6B7280' }}>
+                  {origenEnCero ? '⚠ El origen no puede quedar en $0' : <>Queda en {negocioFijado!.codigo ?? 'origen'}: <span className="font-semibold tabular-nums">{fmtCOP(montoOrigen)}</span></>}
+                </span>
+              ) : (
                 <span className="text-[11px]" style={{ color: sinAsignar < -1 ? '#DC2626' : '#6B7280' }}>
                   Sin asignar: <span className="font-semibold tabular-nums">{fmtCOP(sinAsignar)}</span>
                 </span>
-              )}
+              ))}
             </div>
 
             {loading ? (
@@ -255,14 +283,24 @@ export default function DistribuirPagoModal({
                           ))}
                         </select>
                       )}
-                      <input
-                        value={p.monto}
-                        onChange={(e) => setPorcion(i, { monto: e.target.value.replace(/[^\d]/g, '') })}
-                        inputMode="numeric"
-                        placeholder="monto"
-                        className="w-28 rounded-md border px-2 py-1.5 text-right text-[12px] tabular-nums outline-none"
-                        style={{ borderColor: '#E5E7EB' }}
-                      />
+                      {esFilaFija && repartoActivo ? (
+                        <div
+                          className="w-28 rounded-md border px-2 py-1.5 text-right text-[12px] font-semibold tabular-nums"
+                          style={{ borderColor: origenEnCero ? '#FCA5A5' : '#A7F3D0', backgroundColor: origenEnCero ? '#FEF2F2' : '#ECFDF5', color: origenEnCero ? '#DC2626' : '#065F46' }}
+                          title="Saldo del negocio original — se calcula solo (total menos lo repartido) y no puede quedar en $0"
+                        >
+                          {fmtCOP(Math.max(0, montoOrigen))}
+                        </div>
+                      ) : (
+                        <input
+                          value={p.monto}
+                          onChange={(e) => setPorcion(i, { monto: e.target.value.replace(/[^\d]/g, '') })}
+                          inputMode="numeric"
+                          placeholder="monto"
+                          className="w-28 rounded-md border px-2 py-1.5 text-right text-[12px] tabular-nums outline-none"
+                          style={{ borderColor: '#E5E7EB' }}
+                        />
+                      )}
                       <button
                         onClick={() => removePorcion(i)}
                         disabled={porciones.length <= 1 || esFilaFija}
@@ -288,7 +326,7 @@ export default function DistribuirPagoModal({
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
           <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
-          <button onClick={handleSubmit} disabled={pending || loading} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
+          <button onClick={handleSubmit} disabled={pending || loading || origenEnCero} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : esReparto ? <ArrowRightLeft className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
             {esReparto ? 'Proponer reparto' : 'Registrar pago'}
           </button>
