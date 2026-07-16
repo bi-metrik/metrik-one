@@ -241,12 +241,12 @@ function NombreNegocioEditable({
   }
 
   return (
-    <span className="group">
+    <span className="group break-words [overflow-wrap:anywhere]">
       {savedNombre}
       {canEdit && (
         <button
           onClick={startEditing}
-          className="ml-1.5 inline-flex align-middle opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-muted-foreground"
+          className="ml-1.5 inline-flex align-middle text-muted-foreground/40 hover:text-muted-foreground transition-colors"
           title="Editar nombre del negocio"
           aria-label="Editar nombre"
         >
