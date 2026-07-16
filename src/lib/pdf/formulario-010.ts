@@ -2,6 +2,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
+import { formatearTelefonoFijo } from '@/lib/dian/indicativos'
 import { drawFixed, type Cell } from './acroform'
 
 // Sobre el PDF oficial de la DIAN (Formato 010). El fondo no se modifica.
@@ -140,7 +141,9 @@ const P2 = {
   primer_nombre: { x: 409, y: 599, maxWidth: 95 },
   otros_nombres: { x: 510, y: 599, maxWidth: 85 },
   razon_social: { x: 28, y: 575, maxWidth: 560 },
-  direccion_seccional: { x: 28, y: 551, maxWidth: 560, size: 8 },
+  direccion_seccional: { x: 28, y: 551, maxWidth: 280, size: 7 },
+  // Casilla 12 "Cód." en hoja 2 — misma posición que en hoja 1 (bbox idéntico).
+  codigo_seccional: { x: 331, y: 551, maxWidth: 11, size: 8 },
   // Titular del saldo (fila y=519.4 → valor ~503)
   titular_tipo_doc: { x: 28, y: 503, maxWidth: 100 },
   titular_nit: { x: 159, y: 503, maxWidth: 90 },
@@ -274,7 +277,8 @@ export async function generarFormulario010(
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — DETERMINISTA, Bold pequeño por estar en caja chica.
-  fixed1(constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
+  // La casilla es de 2 dígitos: se rellena con cero a la izquierda ("3" → "03").
+  fixed1(constantes.concepto ? constantes.concepto.padStart(2, '0') : constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
 
   // Datos solicitante (casilla 20). Default "13" (Cédula); override del operador
   // manda. Ver `tipoDocSolicitante` arriba.
@@ -292,7 +296,8 @@ export async function generarFormulario010(
   edit1('codigo_seccional', datos.codigo_seccional, P1.codigo_seccional)
   edit1('correo_electronico', datos.correo_electronico, P1.correo_electronico)
   edit1('direccion', datos.direccion, P1.direccion)
-  edit1('telefono', datos.telefono, P1.telefono)
+  // Casilla 25 (Teléfono) — línea fija con indicativo de ciudad delante ("601 …").
+  edit1('telefono', formatearTelefonoFijo(datos.telefono, datos.codigo_departamento), P1.telefono)
   edit1('pais', datos.pais, P1.pais)
   edit1('departamento', datos.departamento, P1.departamento)
   edit1('municipio', datos.municipio, P1.municipio)
@@ -336,6 +341,8 @@ export async function generarFormulario010(
   // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
   if (constantes.mostrar_razon_social && datos.razon_social) edit2('razon_social', datos.razon_social, P2.razon_social)
   edit2('direccion_seccional', seccionalOficial, P2.direccion_seccional)
+  // Casilla 12 "Cód." — código oficial de la seccional (faltaba en hoja 2).
+  edit2('codigo_seccional', datos.codigo_seccional, P2.codigo_seccional)
 
   // Titular del saldo (= solicitante). Casilla 45: la palabra "NIT" en el campo +
   // el código "31" en la sub-casilla "Cód." (persona natural responde por la
@@ -355,9 +362,9 @@ export async function generarFormulario010(
   // Casilla 51 sub-casilla "Cód." — "175" (IVA/UPME). DETERMINISTA config-driven.
   if (constantes.codigo_concepto_saldo) fixed2(constantes.codigo_concepto_saldo, P2.codigo_concepto_saldo_1)
   edit2('anio_gravable', fecha.anio, P2.anio_gravable_1)
-  // Casilla 53 (Período) — FIJO "01" (verificado contra el ejemplo real de Deisy;
-  // NO es el bimestre calculado de la fecha de factura).
-  fixed2('01', P2.periodo_1)
+  // Casilla 53 (Período) — FIJO "1" (sin cero a la izquierda; NO es el bimestre
+  // calculado de la fecha de factura).
+  fixed2('1', P2.periodo_1)
   edit2('numero_factura', datos.numero_factura, P2.numero_factura_1)
   // Casilla 57 — nombre del documento que origina el saldo (constante DETERMINISTA)
   if (constantes.nombre_documento) fixed2(constantes.nombre_documento, P2.nombre_documento_1)
