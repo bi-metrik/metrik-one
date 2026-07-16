@@ -2,15 +2,14 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
-import { addEditableField, drawFixed, type Cell } from './acroform'
+import { formatearTelefonoFijo } from '@/lib/dian/indicativos'
+import { drawFixed, type Cell } from './acroform'
 
 // Sobre el PDF oficial de la DIAN (Formato 010). El fondo no se modifica.
-// Las casillas de DATOS VARIABLES (datos del solicitante, cuenta, saldo y la
-// dirección seccional — que cambia según a qué DIAN se presente) se generan como
-// CAMPOS de formulario EDITABLES pre-llenados; el operador ajusta lo que pida la
-// seccional y aplana al imprimir. Las DETERMINISTAS (concepto 06, periodo
-// bimestral, tipo doc 31, razón social en blanco, tipo solicitud/obligación)
-// van como texto fijo no editable.
+// TODAS las casillas (datos variables + deterministas) se ESTAMPAN como texto
+// plano (drawText) sobre el formato oficial: no se usan campos de formulario
+// AcroForm (quedaban opacos y tapaban líneas/etiquetas del formato). El PDF sale
+// plano/no editable por naturaleza; la edición vive en la plataforma.
 // Coordenadas en puntos, origen (0,0) = esquina inferior izquierda.
 
 export interface Formulario010Datos {
@@ -142,7 +141,9 @@ const P2 = {
   primer_nombre: { x: 409, y: 599, maxWidth: 95 },
   otros_nombres: { x: 510, y: 599, maxWidth: 85 },
   razon_social: { x: 28, y: 575, maxWidth: 560 },
-  direccion_seccional: { x: 28, y: 551, maxWidth: 560, size: 8 },
+  direccion_seccional: { x: 28, y: 551, maxWidth: 280, size: 7 },
+  // Casilla 12 "Cód." en hoja 2 — misma posición que en hoja 1 (bbox idéntico).
+  codigo_seccional: { x: 331, y: 551, maxWidth: 11, size: 8 },
   // Titular del saldo (fila y=519.4 → valor ~503)
   titular_tipo_doc: { x: 28, y: 503, maxWidth: 100 },
   titular_nit: { x: 159, y: 503, maxWidth: 90 },
@@ -226,33 +227,26 @@ function parseFecha(iso: string | null): { anio: string; mes: string; dia: strin
 export async function generarFormulario010(
   datos: Formulario010Datos,
   constantes: Formulario010Constantes,
-  // El PDF de SALIDA que va a la DIAN debe ser PLANO (no editable): Deisy
-  // (operaciones SOENA) reportó que el 010 generado "se puede modificar" y teme
-  // rechazo. Con `flatten=true` (default) se aplanan los campos de formulario a
-  // contenido estático de página → el resultado NO tiene widgets editables.
-  // `flatten=false` deja las casillas editables (solo para calibración/debug).
-  opts: { flatten?: boolean } = {},
 ): Promise<Uint8Array> {
-  const { flatten = true } = opts
   const templateBytes = fs.readFileSync(TEMPLATE_PATH)
   const pdfDoc = await PDFDocument.load(templateBytes)
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
-  const form = pdfDoc.getForm()
 
   const pages = pdfDoc.getPages()
   const page1 = pages[0]
   const page2 = pages[1]
 
-  // Atajos: `edit*` = campo editable pre-llenado (con el +2pt de calibración del
-  // 010); `fixed*` = texto determinista no editable (mismo nudge). Nombres de
-  // campo compartidos → un dato repetido en varias casillas queda sincronizado.
-  // `compact()` aplica el tamaño de fuente compacto (8pt) a las casillas que no
-  // fijan uno propio.
-  const edit1 = (name: string, value: string | null | undefined, cell: Cell) =>
-    addEditableField(form, font, page1, name, value, compact(cell), Y_NUDGE)
-  const edit2 = (name: string, value: string | null | undefined, cell: Cell) =>
-    addEditableField(form, font, page2, name, value, compact(cell), Y_NUDGE)
+  // Todo se ESTAMPA como texto plano (drawText) sobre el formato oficial: `edit*`
+  // (datos variables) y `fixed*` (deterministas) comparten la misma vía. Se
+  // conservan nombres separados por legibilidad del mapeo de casillas. El +2pt
+  // (Y_NUDGE) de calibración del 010 se aplica a todo. `compact()` aplica el
+  // tamaño de fuente compacto (8pt) a las casillas que no fijan uno propio. El 1er
+  // arg de `edit*` (antes el nombre del campo AcroForm) ya no se usa: se ignora.
+  const edit1 = (_name: string, value: string | null | undefined, cell: Cell) =>
+    drawFixed(page1, font, value, compact(cell), Y_NUDGE)
+  const edit2 = (_name: string, value: string | null | undefined, cell: Cell) =>
+    drawFixed(page2, font, value, compact(cell), Y_NUDGE)
   const fixed1 = (value: string | null | undefined, cell: Cell, f = font) =>
     drawFixed(page1, f, value, compact(cell), Y_NUDGE)
   const fixed2 = (value: string | null | undefined, cell: Cell, f = font) =>
@@ -283,7 +277,8 @@ export async function generarFormulario010(
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — DETERMINISTA, Bold pequeño por estar en caja chica.
-  fixed1(constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
+  // La casilla es de 2 dígitos: se rellena con cero a la izquierda ("3" → "03").
+  fixed1(constantes.concepto ? constantes.concepto.padStart(2, '0') : constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
 
   // Datos solicitante (casilla 20). Default "13" (Cédula); override del operador
   // manda. Ver `tipoDocSolicitante` arriba.
@@ -294,14 +289,16 @@ export async function generarFormulario010(
   edit1('segundo_apellido', datos.segundo_apellido, P1.segundo_apellido)
   edit1('primer_nombre', datos.primer_nombre, P1.primer_nombre)
   edit1('otros_nombres', datos.otros_nombres, P1.otros_nombres)
-  // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
-  if (constantes.mostrar_razon_social && datos.razon_social) edit1('razon_social', datos.razon_social, P1.razon_social)
+  // Razón social (casilla 11): SIEMPRE en blanco. SOENA opera 100% personas
+  // naturales; ninguna seccional (tampoco Cali) la diligencia. Confirmado por Deisy
+  // (2026-07-16): todas las seccionales son iguales.
   edit1('direccion_seccional', seccionalOficial, P1.direccion_seccional)
   // Casilla 12 "Cód." — código oficial de la seccional (autocompletado).
   edit1('codigo_seccional', datos.codigo_seccional, P1.codigo_seccional)
   edit1('correo_electronico', datos.correo_electronico, P1.correo_electronico)
   edit1('direccion', datos.direccion, P1.direccion)
-  edit1('telefono', datos.telefono, P1.telefono)
+  // Casilla 25 (Teléfono) — línea fija con indicativo de ciudad delante ("601 …").
+  edit1('telefono', formatearTelefonoFijo(datos.telefono, datos.codigo_departamento), P1.telefono)
   edit1('pais', datos.pais, P1.pais)
   edit1('departamento', datos.departamento, P1.departamento)
   edit1('municipio', datos.municipio, P1.municipio)
@@ -325,9 +322,9 @@ export async function generarFormulario010(
   fixed1('31', P1.firma_tipo_doc) // DETERMINISTA
   edit1('nit', datos.nit, P1.firma_identificacion)
   edit1('dv', datos.dv, P1.firma_dv)
-  // 1005 (Cod. Representación) / 1006 (Organización): solo algunas seccionales (ej. Cali).
-  if (constantes.cod_representacion_1005) fixed1(constantes.cod_representacion_1005, P1.firma_cod_representacion)
-  if (constantes.organizacion_1006) edit1('organizacion_1006', constantes.organizacion_1006, P1.firma_organizacion)
+  // 1005 (Cod. Representación) y 1006 (Organización): SIEMPRE en blanco. Persona
+  // natural a nombre propio NO diligencia representación ni organización (instructivo
+  // DIAN). Confirmado por Deisy (2026-07-16): Cali ya no es excepción.
 
   // ── PÁGINA 2 ──────────────────────────────────────────────────────────────
   // El "Espacio reservado para la DIAN" (encabezado hoja 2) lo diligencia la DIAN,
@@ -342,9 +339,10 @@ export async function generarFormulario010(
   edit2('segundo_apellido', datos.segundo_apellido, P2.segundo_apellido)
   edit2('primer_nombre', datos.primer_nombre, P2.primer_nombre)
   edit2('otros_nombres', datos.otros_nombres, P2.otros_nombres)
-  // Razón social (casilla 11): en blanco salvo que la seccional lo exija (ej. Cali).
-  if (constantes.mostrar_razon_social && datos.razon_social) edit2('razon_social', datos.razon_social, P2.razon_social)
+  // Razón social (casilla 11): SIEMPRE en blanco (persona natural).
   edit2('direccion_seccional', seccionalOficial, P2.direccion_seccional)
+  // Casilla 12 "Cód." — código oficial de la seccional (faltaba en hoja 2).
+  edit2('codigo_seccional', datos.codigo_seccional, P2.codigo_seccional)
 
   // Titular del saldo (= solicitante). Casilla 45: la palabra "NIT" en el campo +
   // el código "31" en la sub-casilla "Cód." (persona natural responde por la
@@ -364,9 +362,9 @@ export async function generarFormulario010(
   // Casilla 51 sub-casilla "Cód." — "175" (IVA/UPME). DETERMINISTA config-driven.
   if (constantes.codigo_concepto_saldo) fixed2(constantes.codigo_concepto_saldo, P2.codigo_concepto_saldo_1)
   edit2('anio_gravable', fecha.anio, P2.anio_gravable_1)
-  // Casilla 53 (Período) — FIJO "01" (verificado contra el ejemplo real de Deisy;
-  // NO es el bimestre calculado de la fecha de factura).
-  fixed2('01', P2.periodo_1)
+  // Casilla 53 (Período) — FIJO "1" (sin cero a la izquierda; NO es el bimestre
+  // calculado de la fecha de factura).
+  fixed2('1', P2.periodo_1)
   edit2('numero_factura', datos.numero_factura, P2.numero_factura_1)
   // Casilla 57 — nombre del documento que origina el saldo (constante DETERMINISTA)
   if (constantes.nombre_documento) fixed2(constantes.nombre_documento, P2.nombre_documento_1)
@@ -384,16 +382,9 @@ export async function generarFormulario010(
 
   // Hoja 3 se deja en blanco: no aplica para devolución IVA por UPME (VE/HEV/PHEV).
 
-  // Regenera apariencias con la fuente embebida (texto pre-llenado visible en
-  // cualquier lector, sin depender de NeedAppearances).
-  form.updateFieldAppearances(font)
-
-  // PDF de salida PLANO: aplanar convierte cada widget de formulario en contenido
-  // estático dibujado sobre la página y elimina los campos editables del AcroForm.
-  // El texto queda calcado en su posición (usa las apariencias ya regeneradas) y
-  // el resultado ya no se puede modificar en un lector PDF. Solución al reporte de
-  // Deisy (SOENA) de que el 010 "se puede modificar".
-  if (flatten) form.flatten()
-
+  // El PDF sale PLANO por naturaleza: el texto se estampó directo sobre la página,
+  // no hay campos de formulario que aplanar ni apariencias que regenerar. Nada
+  // queda editable en el lector (la edición vive en la plataforma) y la estructura
+  // base del formato queda intacta.
   return pdfDoc.save()
 }
