@@ -8,13 +8,13 @@ import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
-import { calcularPendienteHandoff, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, valorARecaudar, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
-import { crearCobrosSoenaCore, leerModeloDineroNegocio } from '@/lib/actions/conciliacion-actions'
+import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -129,6 +129,12 @@ export type NegocioDetalle = {
    * lo muestra para que financiera vea el plan elegido sin buscarlo en la propuesta.
    */
   modelo_dinero?: ModeloDinero | null
+  /**
+   * Valor a recaudar del cliente = precio_aprobado (honorario) + tarifa UPME
+   * confirmada (pasante). Es la base del saldo del bloque de Cobros. Derivado, no
+   * almacenado. Cuando no hay tarifa confirmada, = precio_aprobado (honorario).
+   */
+  valor_a_recaudar?: number | null
   /**
    * Costos ePayco descontados por cobro, keyed por ref_payco (= external_ref del
    * cobro). Reconstruido de los gastos epayco-*. El bloque de Cobro muestra, bajo cada
@@ -684,48 +690,20 @@ export async function getNegocioDetalle(id: string): Promise<{
   // tarifa UPME (su propósito es el reparto de cobros pasante/honorario). Para mostrar
   // el plan queremos el plan aunque el negocio sea legacy sin tarifa. Leemos directo,
   // priorizando el bloque de propuesta que tenga un plan aprobado.
-  let modeloDinero: ModeloDinero | null = null
-  const { data: propBloquesRaw } = await db(supabase)
-    .from('negocio_bloques')
-    .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
-    .eq('negocio_id', id)
-    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
-  for (const pb of ((propBloquesRaw ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
-    const d = pb.data
-    if (!d) continue
-    const planRaw = d.aprobado_plan
-    const plan = (planRaw === 1 || planRaw === 2) ? (planRaw as 1 | 2) : null
-    const tarifa = Number(d.aprobado_tarifa_upme ?? d.tarifa_upme ?? 0)
-    const honorario = d.aprobado_honorario != null ? Number(d.aprobado_honorario) : null
-    // Ignorar copias vacías (sin plan, sin tarifa, sin honorario).
-    if (plan == null && !(tarifa > 0) && honorario == null) continue
-    modeloDinero = {
-      tarifa_upme: Number.isFinite(tarifa) && tarifa > 0 ? tarifa : 0,
-      aprobado_plan: plan,
-      aprobado_honorario: honorario != null && Number.isFinite(honorario) ? honorario : null,
-    }
-    if (plan != null) break // el bloque con plan aprobado gana
-  }
-  // Tarifa UPME de REFERENCIA (Art. 13) para MOSTRAR en el bloque de Cobros cuando
-  // la propuesta aprobada no guardó la tarifa (caso común en SOENA: la propuesta
-  // solo tiene el plan). Se calcula del valor del vehículo (Factura, sin IVA). NO
-  // toca `tarifa_upme` (que alimenta los gates de handoff/anticipo) — es solo display.
-  if (modeloDinero && !(modeloDinero.tarifa_upme > 0)) {
-    const { data: facturaBloques } = await db(supabase)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(slug)')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.slug', 'factura_venta_vehiculo')
-    for (const fb of ((facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
-      const campos = (fb.data?.campos ?? {}) as Record<string, { value?: unknown }>
-      const valorSinIva = Number(String(campos.valor_unitario_sin_iva?.value ?? '').replace(/[^\d.-]/g, ''))
-      if (Number.isFinite(valorSinIva) && valorSinIva > 0) {
-        modeloDinero.tarifa_upme_ref = calcularTarifaUpmePorAnio(valorSinIva)
-        break
-      }
-    }
-  }
+  // Modelo de dinero (honorario/plan de la propuesta + tarifa CONFIRMADA en
+  // Validación + referencia de display). Helper compartido con el gate de handoff y
+  // el reparto → sin divergencia gate⟺render. La tarifa (pasante) ya NO se lee de la
+  // propuesta (rediseño valor_a_recaudar).
+  const modeloDinero: ModeloDinero | null = await leerModeloDineroCompleto(supabase, id)
   negocioTyped.modelo_dinero = modeloDinero
+
+  // Valor a recaudar del cliente = precio_aprobado (honorario) + tarifa confirmada
+  // (pasante). Base del saldo del bloque de Cobros. Derivado, no almacenado. Sin
+  // tarifa confirmada, = honorario.
+  const precioHonorario = negocioTyped.precio_aprobado ?? negocioTyped.precio_estimado ?? 0
+  negocioTyped.valor_a_recaudar = precioHonorario > 0
+    ? valorARecaudar(precioHonorario, modeloDinero)
+    : null
 
   // Costos ePayco por cobro (lo que descuenta la pasarela: comisión + impuestos),
   // reconstruidos de los gastos `epayco-comision-{ref}` / `epayco-impuestos-{ref}`.
@@ -2263,7 +2241,7 @@ export async function cambiarEtapaNegocioConGate(
         .filter((c) => c.tipo_cobro !== 'devolucion_pendiente')
         .reduce((sum, c) => sum + (c.monto ?? 0), 0)
 
-      const modeloHandoff = await leerModeloDineroNegocio(supabase, negocioId)
+      const modeloHandoff = await leerModeloDineroCompleto(supabase, negocioId)
       const pend = calcularPendienteHandoff(precioHandoff, modeloHandoff, recaudadoHandoff)
 
       if (!pend.cubierto) {
