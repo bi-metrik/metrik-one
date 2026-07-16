@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  componerPrecioAprobado,
+  valorARecaudar,
   repartirPagoTarifaHonorario,
   tipoCobroHonorario,
   saldoEsperadoPorModalidad,
@@ -9,19 +9,37 @@ import {
   type ModeloDinero,
 } from './modelo-dinero'
 
-describe('componerPrecioAprobado — precio = honorario + tarifa', () => {
-  it('suma honorario + tarifa', () => {
-    expect(componerPrecioAprobado(3_000_000, 1_200_000)).toBe(4_200_000)
+// precio_aprobado del negocio = HONORARIO. La tarifa (pasante) vive aparte, en el
+// modelo. valor_a_recaudar = honorario + tarifa.
+const HONORARIO = 3_000_000
+const TARIFA = 1_200_000
+const modelo = (over: Partial<ModeloDinero>): ModeloDinero => ({
+  tarifa_upme: TARIFA,
+  aprobado_plan: 1,
+  aprobado_honorario: HONORARIO,
+  ...over,
+})
+
+describe('valorARecaudar — honorario (precio_aprobado) + tarifa (pasante)', () => {
+  it('suma honorario + tarifa confirmada', () => {
+    expect(valorARecaudar(HONORARIO, modelo({}))).toBe(4_200_000)
   })
-  it('sin tarifa (0) → precio = honorario (comportamiento previo)', () => {
-    expect(componerPrecioAprobado(3_000_000, 0)).toBe(3_000_000)
+  it('sin tarifa confirmada (0) → valor a recaudar = honorario', () => {
+    expect(valorARecaudar(HONORARIO, modelo({ tarifa_upme: 0 }))).toBe(HONORARIO)
   })
-  it('tarifa negativa o NaN se trata como 0 (no resta)', () => {
-    expect(componerPrecioAprobado(3_000_000, -50 as number)).toBe(3_000_000)
-    expect(componerPrecioAprobado(3_000_000, Number.NaN)).toBe(3_000_000)
+  it('sin modelo → valor a recaudar = honorario (no asume tarifa)', () => {
+    expect(valorARecaudar(HONORARIO, null)).toBe(HONORARIO)
+  })
+  it('tarifa negativa o NaN se trata como 0 (no resta al honorario)', () => {
+    expect(valorARecaudar(HONORARIO, modelo({ tarifa_upme: -50 as number }))).toBe(HONORARIO)
+    expect(valorARecaudar(HONORARIO, modelo({ tarifa_upme: Number.NaN }))).toBe(HONORARIO)
+  })
+  it('honorario inválido → 0 + tarifa', () => {
+    expect(valorARecaudar(0, modelo({}))).toBe(TARIFA)
+    expect(valorARecaudar(Number.NaN, modelo({}))).toBe(TARIFA)
   })
   it('redondea a peso', () => {
-    expect(componerPrecioAprobado(1_000_000.4, 500_000.4)).toBe(1_500_001)
+    expect(valorARecaudar(1_000_000.4, modelo({ tarifa_upme: 500_000.4 }))).toBe(1_500_001)
   })
 })
 
@@ -67,73 +85,57 @@ describe('tipoCobroHonorario — según modalidad', () => {
 })
 
 describe('saldoEsperadoPorModalidad — 50/50 espera el 2º 50% del honorario', () => {
-  const base = (over: Partial<ModeloDinero>): ModeloDinero => ({
-    tarifa_upme: 1_200_000,
-    aprobado_plan: 1,
-    aprobado_honorario: 3_000_000,
-    ...over,
-  })
   it('50/50 → saldo esperado = 50% del honorario (NO descuadre)', () => {
-    expect(saldoEsperadoPorModalidad(base({}))).toBe(1_500_000)
+    expect(saldoEsperadoPorModalidad(modelo({}))).toBe(1_500_000)
   })
   it('único (plan 2) → saldo esperado 0', () => {
-    expect(saldoEsperadoPorModalidad(base({ aprobado_plan: 2 }))).toBe(0)
+    expect(saldoEsperadoPorModalidad(modelo({ aprobado_plan: 2 }))).toBe(0)
   })
   it('sin modelo → 0', () => {
     expect(saldoEsperadoPorModalidad(null)).toBe(0)
   })
   it('50/50 sin honorario conocido → 0 (no oculta faltante real)', () => {
-    expect(saldoEsperadoPorModalidad(base({ aprobado_honorario: null }))).toBe(0)
+    expect(saldoEsperadoPorModalidad(modelo({ aprobado_honorario: null }))).toBe(0)
   })
 })
 
-describe('escenario integrado 50/50: precio, reparto y descuadre', () => {
+describe('escenario integrado 50/50: valor a recaudar, reparto y descuadre', () => {
   it('el descuadre = 0 cuando solo falta el 2º 50% esperado', () => {
-    const honorario = 3_000_000
-    const tarifa = 1_200_000
-    const modelo: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 1, aprobado_honorario: honorario }
-    const precio = componerPrecioAprobado(honorario, tarifa) // 4.2M
+    const m = modelo({}) // honorario 3M, tarifa 1.2M, plan 1
+    const valorRecaudar = valorARecaudar(HONORARIO, m) // 4.2M
     // 1er pago 50/50: tarifa completa + 50% honorario = 2.7M
-    const primerPago = tarifa + honorario * 0.5
+    const primerPago = TARIFA + HONORARIO * 0.5
     const cobrado = primerPago
-    const diferencia = precio - cobrado           // 1.5M pendiente
-    const esperado = saldoEsperadoPorModalidad(modelo) // 1.5M esperado
-    const descuadre = diferencia - esperado       // 0 → NO es descuadre
+    const diferencia = valorRecaudar - cobrado          // 1.5M pendiente
+    const esperado = saldoEsperadoPorModalidad(m)       // 1.5M esperado
+    const descuadre = diferencia - esperado             // 0 → NO es descuadre
     expect(descuadre).toBe(0)
   })
 })
 
-describe('umbralRecaudoHandoff — precio menos saldo diferido', () => {
-  const tarifa = 1_200_000
-  const honorario = 3_000_000
-  const precio = componerPrecioAprobado(honorario, tarifa) // 4.2M
-
+describe('umbralRecaudoHandoff — valor a recaudar menos saldo diferido', () => {
   it('Plan 1 (50/50) → tarifa + 50% honorario', () => {
-    const modelo: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 1, aprobado_honorario: honorario }
-    expect(umbralRecaudoHandoff(precio, modelo)).toBe(tarifa + honorario * 0.5) // 2.7M
+    expect(umbralRecaudoHandoff(HONORARIO, modelo({ aprobado_plan: 1 }))).toBe(TARIFA + HONORARIO * 0.5) // 2.7M
   })
-  it('Plan 2 (único) → precio completo (tarifa + 100% honorario)', () => {
-    const modelo: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 2, aprobado_honorario: honorario }
-    expect(umbralRecaudoHandoff(precio, modelo)).toBe(precio) // 4.2M
+  it('Plan 2 (único) → valor a recaudar completo (tarifa + 100% honorario)', () => {
+    expect(umbralRecaudoHandoff(HONORARIO, modelo({ aprobado_plan: 2 }))).toBe(4_200_000)
   })
-  it('sin modelo → umbral = precio completo (no difiere nada)', () => {
-    expect(umbralRecaudoHandoff(precio, null)).toBe(precio)
+  it('sin modelo → umbral = honorario (no difiere nada, no asume tarifa)', () => {
+    expect(umbralRecaudoHandoff(HONORARIO, null)).toBe(HONORARIO)
   })
-  it('precio inválido → 0', () => {
+  it('honorario inválido → 0', () => {
     expect(umbralRecaudoHandoff(0, null)).toBe(0)
     expect(umbralRecaudoHandoff(Number.NaN, null)).toBe(0)
   })
 })
 
 describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
-  const tarifa = 1_200_000
-  const honorario = 3_000_000
-  const precio = componerPrecioAprobado(honorario, tarifa) // 4.2M
-  const modeloP1: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 1, aprobado_honorario: honorario }
-  const modeloP2: ModeloDinero = { tarifa_upme: tarifa, aprobado_plan: 2, aprobado_honorario: honorario }
+  const modeloP1 = modelo({ aprobado_plan: 1 })
+  const modeloP2 = modelo({ aprobado_plan: 2 })
+  const valorRecaudar = 4_200_000 // honorario 3M + tarifa 1.2M
 
   it('Plan 1, recaudo 0 → falta UPME completa + 50% honorario', () => {
-    const p = calcularPendienteHandoff(precio, modeloP1, 0)
+    const p = calcularPendienteHandoff(HONORARIO, modeloP1, 0)
     expect(p.umbral).toBe(2_700_000)
     expect(p.pendienteUpme).toBe(1_200_000)
     expect(p.pendienteHonorario).toBe(1_500_000)
@@ -142,7 +144,7 @@ describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
   })
 
   it('Plan 1, recaudo parcial que solo cubre la UPME → falta el anticipo del honorario', () => {
-    const p = calcularPendienteHandoff(precio, modeloP1, 1_200_000)
+    const p = calcularPendienteHandoff(HONORARIO, modeloP1, 1_200_000)
     expect(p.pendienteUpme).toBe(0)          // UPME cubierta (reparto tarifa-primero)
     expect(p.pendienteHonorario).toBe(1_500_000)
     expect(p.pendienteTotal).toBe(1_500_000)
@@ -150,7 +152,7 @@ describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
   })
 
   it('Plan 1, recaudo = umbral (tarifa + 50% honorario) → cubierto, avanza', () => {
-    const p = calcularPendienteHandoff(precio, modeloP1, 2_700_000)
+    const p = calcularPendienteHandoff(HONORARIO, modeloP1, 2_700_000)
     expect(p.pendienteUpme).toBe(0)
     expect(p.pendienteHonorario).toBe(0)
     expect(p.pendienteTotal).toBe(0)
@@ -158,28 +160,28 @@ describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
   })
 
   it('Plan 2, recaudo = tarifa + 50% honorario NO alcanza (exige 100% honorario)', () => {
-    const p = calcularPendienteHandoff(precio, modeloP2, 2_700_000)
-    expect(p.umbral).toBe(precio)
+    const p = calcularPendienteHandoff(HONORARIO, modeloP2, 2_700_000)
+    expect(p.umbral).toBe(valorRecaudar)
     expect(p.pendienteUpme).toBe(0)
     expect(p.pendienteHonorario).toBe(1_500_000)
     expect(p.cubierto).toBe(false)
   })
 
-  it('Plan 2, recaudo = precio → cubierto', () => {
-    const p = calcularPendienteHandoff(precio, modeloP2, precio)
+  it('Plan 2, recaudo = valor a recaudar → cubierto', () => {
+    const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar)
     expect(p.pendienteTotal).toBe(0)
     expect(p.cubierto).toBe(true)
   })
 
   it('desglose es consistente: pendienteUpme + pendienteHonorario = pendienteTotal', () => {
     for (const rec of [0, 500_000, 1_200_000, 2_000_000, 2_700_000]) {
-      const p = calcularPendienteHandoff(precio, modeloP1, rec)
+      const p = calcularPendienteHandoff(HONORARIO, modeloP1, rec)
       expect(p.pendienteUpme + p.pendienteHonorario).toBe(p.pendienteTotal)
     }
   })
 
   it('tolerancia de 1 peso: recaudo a un peso del umbral se considera cubierto', () => {
-    const p = calcularPendienteHandoff(precio, modeloP2, precio - 1)
+    const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar - 1)
     expect(p.cubierto).toBe(true)
   })
 })
