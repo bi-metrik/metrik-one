@@ -110,8 +110,10 @@ export async function generarFormulario1668(
     drawFixed(page, font, value, cell)
 
   // ── Información Cuenta Bancaria ─────────────────────────────────────────────
-  // Tipo de documento (casilla 20): DETERMINISTA → texto fijo, no editable.
-  fixed(constantes.tipo_documento, INFO.tipo_documento)
+  // Tipo de documento (casilla 20): DETERMINISTA "31" (NIT). Decisión de Mauricio
+  // (2026-07-16): el titular se identifica con "31", no con "13" (CC). Se fija en el
+  // código (como la casilla 1002 = "CC") y NO se toma de constantes.tipo_documento.
+  fixed('31', INFO.tipo_documento)
   // Datos del titular (variables, editables). numero_identificacion y dv se
   // reutilizan en la sección de firma → mismo nombre de campo, queda sincronizado.
   edit('numero_identificacion', datos.numero_identificacion, INFO.numero_identificacion)
