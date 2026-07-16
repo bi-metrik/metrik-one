@@ -235,18 +235,18 @@ function NombreNegocioEditable({
         onKeyDown={handleKeyDown}
         disabled={isPending}
         maxLength={200}
-        className="min-w-0 flex-1 rounded-md border border-primary bg-background px-1.5 py-0.5 text-lg font-bold leading-tight text-foreground focus:outline-none focus:ring-2 focus:ring-primary/15"
+        className="w-full rounded-md border border-primary bg-background px-1.5 py-0.5 text-lg font-bold leading-tight text-foreground focus:outline-none focus:ring-2 focus:ring-primary/15"
       />
     )
   }
 
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 group">
-      <span className="truncate">{savedNombre}</span>
+    <span className="group">
+      {savedNombre}
       {canEdit && (
         <button
           onClick={startEditing}
-          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-muted-foreground"
+          className="ml-1.5 inline-flex align-middle opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-muted-foreground"
           title="Editar nombre del negocio"
           aria-label="Editar nombre"
         >
@@ -1917,10 +1917,11 @@ export default function NegocioDetailClient({
       </div>
 
       {/* Fila 2 — STICKY titulo + accion */}
-      <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40 flex items-start justify-between gap-3">
+      <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40">
+        <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {/* Fila A — estado: [STAGE] › [E{N} ETAPA] */}
-          <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <StageBadge stage={negocio.stage_actual} />
             {negocio.etapas_negocio?.nombre && (() => {
               const stageKey = negocio.stage_actual as WorkflowStage | null
@@ -1950,21 +1951,6 @@ export default function NegocioDetailClient({
               </span>
             )}
           </div>
-          <h1 className="flex items-baseline gap-1.5 text-lg font-bold leading-tight">
-            {negocio.codigo && (
-              <>
-                <span className="shrink-0 font-mono text-foreground select-all">
-                  {formatNegocioCodigo(negocio.codigo)}
-                </span>
-                <span className="text-muted-foreground font-normal">—</span>
-              </>
-            )}
-            <NombreNegocioEditable
-              negocioId={negocio.id}
-              initialNombre={negocio.nombre}
-              canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
-            />
-          </h1>
         </div>
         <div className="shrink-0 mt-1">
           <SelectorEtapa
@@ -1981,6 +1967,21 @@ export default function NegocioDetailClient({
             vecesPausado={negocio.veces_pausado}
           />
         </div>
+        </div>
+        {/* Nombre — fila completa, de lado a lado (no se corta) */}
+        <h1 className="mt-1 text-lg font-bold leading-tight break-words">
+          {negocio.codigo && (
+            <>
+              <span className="font-mono text-foreground select-all">{formatNegocioCodigo(negocio.codigo)}</span>
+              <span className="text-muted-foreground font-normal"> — </span>
+            </>
+          )}
+          <NombreNegocioEditable
+            negocioId={negocio.id}
+            initialNombre={negocio.nombre}
+            canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
+          />
+        </h1>
       </div>
 
       {/* Badge + Filas 3, 4, 5 (scrollean) */}
