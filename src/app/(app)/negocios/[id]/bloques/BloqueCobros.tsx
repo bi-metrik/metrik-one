@@ -269,6 +269,10 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
   const bloqueaHandoff = pendienteHandoff != null && pendienteHandoff.pendienteTotal > 0
   const plan = modeloDinero?.aprobado_plan
   const planLabel = plan === 1 || plan === 2 ? PLAN_PAGO_LABEL[plan] : null
+  // Tarifa UPME a mostrar: la de la propuesta si está; si no, la de referencia
+  // calculada (Art. 13). Marcamos "(ref.)" cuando es la calculada.
+  const tarifaAprobada = (modeloDinero?.tarifa_upme ?? 0) > 0
+  const tarifaMostrar = tarifaAprobada ? modeloDinero!.tarifa_upme : (modeloDinero?.tarifa_upme_ref ?? 0)
 
   return (
     <div className="space-y-4">
@@ -297,13 +301,13 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
             </span>
           </div>
           <p className="mt-1 text-[10px] text-[#6B7280]">{planLabel.detalle}</p>
-          {(modeloDinero?.aprobado_honorario != null || (modeloDinero?.tarifa_upme ?? 0) > 0) && (
+          {(modeloDinero?.aprobado_honorario != null || tarifaMostrar > 0) && (
             <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[#6B7280]">
               {modeloDinero?.aprobado_honorario != null && (
                 <span>Honorario: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(modeloDinero.aprobado_honorario)}</span></span>
               )}
-              {(modeloDinero?.tarifa_upme ?? 0) > 0 && (
-                <span>Tarifa UPME: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(modeloDinero!.tarifa_upme)}</span></span>
+              {tarifaMostrar > 0 && (
+                <span>Tarifa UPME{tarifaAprobada ? '' : ' (ref.)'}: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(tarifaMostrar)}</span></span>
               )}
             </div>
           )}

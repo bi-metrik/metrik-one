@@ -20,6 +20,12 @@ export interface ModeloDinero {
   aprobado_plan: 1 | 2 | null
   /** Honorario del plan elegido (sin la tarifa). */
   aprobado_honorario: number | null
+  /**
+   * Tarifa UPME de REFERENCIA calculada (Art. 13) desde el valor del vehículo,
+   * SOLO para mostrar cuando la propuesta no guardó `tarifa_upme`. NO la leen los
+   * gates (handoff/anticipo usan `tarifa_upme`). Informativa.
+   */
+  tarifa_upme_ref?: number
 }
 
 /**
