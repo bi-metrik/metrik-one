@@ -135,7 +135,7 @@ export default function NegociosClient({
     if (term) {
       res = res.filter((n) => {
         const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.radicado, n.seccional_label,
+          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
           ...n.responsables.map((r) => r.full_name)]
           .filter(Boolean)
           .join(' ')
