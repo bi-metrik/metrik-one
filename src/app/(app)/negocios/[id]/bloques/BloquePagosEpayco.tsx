@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import DistribuirPagoModal from '@/components/distribuir-pago-modal'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { consultarEpayco, registrarPagoEpayco, type NegocioExistente } from '@/lib/actions/epayco-actions'
@@ -67,6 +69,8 @@ export default function BloquePagosEpayco({
   // Duplicado workspace-wide detectado: requiere justificación para forzar.
   const [duplicado, setDuplicado] = useState<NegocioExistente | null>(null)
   const [justificacion, setJustificacion] = useState('')
+  const [showReparto, setShowReparto] = useState(false)
+  const router = useRouter()
 
   const total = pagos.reduce((s, p) => s + p.monto_bruto, 0)
 
@@ -333,7 +337,24 @@ export default function BloquePagosEpayco({
           >
             {isPending ? 'Registrando...' : 'Registrar pago'}
           </button>
+          <button
+            onClick={() => setShowReparto(true)}
+            disabled={isPending}
+            className="w-full mt-1.5 rounded-lg border border-[#10B981] py-2 text-xs font-semibold text-[#10B981] hover:bg-[#ECFDF5] disabled:opacity-40 transition-colors"
+          >
+            ¿El pago cubre varios negocios? Repartir
+          </button>
         </div>
+      )}
+      {showReparto && previewDesglose && (
+        <DistribuirPagoModal
+          negocioFijado={{ negocio_id: negocioId, codigo: null, nombre: null }}
+          referenciaInicial={newRef.trim()}
+          totalInicial={previewDesglose.monto_bruto}
+          contextoEpayco
+          onClose={() => setShowReparto(false)}
+          onDone={() => { setShowReparto(false); resetEstado(); setNewRef(''); router.refresh() }}
+        />
       )}
     </div>
   )

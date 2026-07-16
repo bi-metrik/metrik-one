@@ -249,14 +249,15 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
   )
 }
 
-export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, stageActual, epaycoCostos, registrarPagoEnabled = false, negocioFijado }: BloqueCobrosProps) {
+export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHandoff, modeloDinero, epaycoCostos, negocioFijado }: BloqueCobrosProps) {
   const router = useRouter()
   const [pagoModal, setPagoModal] = useState(false)
-  // Registrar pago inline: opt-in por workspace + solo en la etapa activa editable.
-  const permiteRegistrarPago = modo === 'editable' && registrarPagoEnabled && !!negocioFijado
-  // El comercial puede eliminar una porción que él propuso mientras el negocio esté
-  // en venta (modo editable). El server valida además "no conciliada".
-  const permiteEliminar = modo === 'editable' && stageActual === 'venta'
+  // Cobros es SOLO-LECTURA: registrar y repartir pagos vive en el bloque de Pagos
+  // ePayco (una sola puerta para el comercial). Aquí solo se visualiza.
+  const permiteRegistrarPago = false
+  // Cobros es SOLO-LECTURA: se quitó "eliminar porción" (las correcciones de reparto
+  // se harán desde el módulo de conciliación / bloque de Pagos).
+  const permiteEliminar = false
   // Confirmados = todos los cobros con fecha (entraron). Cuentan en saldo.
   const confirmados = cobros.filter(c => c.fecha !== null)
   // Programados pendientes = tipo programado + sin fecha confirmada

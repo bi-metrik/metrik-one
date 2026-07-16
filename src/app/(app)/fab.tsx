@@ -436,7 +436,6 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
 
   const [negocioId, setNegocioId] = useState('')
   const [fuente, setFuente] = useState<'epayco' | 'davivienda' | 'otra'>('epayco')
-  const [fuenteNombre, setFuenteNombre] = useState('')
   const [referencia, setReferencia] = useState('')
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState('')
@@ -461,13 +460,12 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     if (!negocioId) return toast.error('Elige el negocio')
     if (!referencia.trim()) return toast.error('Ingresa la referencia del pago')
     if (!esEpayco && (!Number(monto) || Number(monto) <= 0)) return toast.error('Ingresa el monto del pago')
-    if (fuente === 'otra' && !fuenteNombre.trim()) return toast.error('Indica el nombre de la fuente')
 
     startTransition(async () => {
       const res = await agregarPagoFab({
         negocio_id: negocioId,
         fuente,
-        fuente_nombre: fuente === 'otra' ? fuenteNombre.trim() : undefined,
+        fuente_nombre: undefined,
         referencia: referencia.trim(),
         monto: esEpayco ? undefined : Number(monto),
         fecha: fecha || undefined,
@@ -517,8 +515,8 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
           </PagoField>
 
           <PagoField label="Fuente del pago">
-            <div className="grid grid-cols-3 gap-2">
-              {(['epayco', 'davivienda', 'otra'] as const).map((f) => (
+            <div className="grid grid-cols-1 gap-2">
+              {(['epayco'] as const).map((f) => (
                 <button
                   key={f}
                   onClick={() => { setFuente(f); setNeedJust(false) }}
@@ -527,17 +525,12 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
                     ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
                     : { borderColor: '#E5E7EB', color: '#6B7280' }}
                 >
-                  {f === 'epayco' ? 'ePayco' : f === 'davivienda' ? 'Davivienda' : 'Otra'}
+                  ePayco
                 </button>
               ))}
             </div>
+            <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Los comerciales registran solo pagos por ePayco.</p>
           </PagoField>
-
-          {fuente === 'otra' && (
-            <PagoField label="Nombre de la fuente">
-              <input value={fuenteNombre} onChange={(e) => setFuenteNombre(e.target.value)} placeholder="ej. Bancolombia, Nequi, efectivo…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }} />
-            </PagoField>
-          )}
 
           <PagoField label={esEpayco ? 'Referencia ePayco (ref_payco)' : 'Referencia / comprobante'}>
             <input
