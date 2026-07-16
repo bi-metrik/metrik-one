@@ -10,6 +10,7 @@ import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
+import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
@@ -704,6 +705,25 @@ export async function getNegocioDetalle(id: string): Promise<{
       aprobado_honorario: honorario != null && Number.isFinite(honorario) ? honorario : null,
     }
     if (plan != null) break // el bloque con plan aprobado gana
+  }
+  // Tarifa UPME de REFERENCIA (Art. 13) para MOSTRAR en el bloque de Cobros cuando
+  // la propuesta aprobada no guardó la tarifa (caso común en SOENA: la propuesta
+  // solo tiene el plan). Se calcula del valor del vehículo (Factura, sin IVA). NO
+  // toca `tarifa_upme` (que alimenta los gates de handoff/anticipo) — es solo display.
+  if (modeloDinero && !(modeloDinero.tarifa_upme > 0)) {
+    const { data: facturaBloques } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.slug', 'factura_venta_vehiculo')
+    for (const fb of ((facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+      const campos = (fb.data?.campos ?? {}) as Record<string, { value?: unknown }>
+      const valorSinIva = Number(String(campos.valor_unitario_sin_iva?.value ?? '').replace(/[^\d.-]/g, ''))
+      if (Number.isFinite(valorSinIva) && valorSinIva > 0) {
+        modeloDinero.tarifa_upme_ref = calcularTarifaUpmePorAnio(valorSinIva)
+        break
+      }
+    }
   }
   negocioTyped.modelo_dinero = modeloDinero
 
