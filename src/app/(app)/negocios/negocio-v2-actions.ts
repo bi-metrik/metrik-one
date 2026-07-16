@@ -910,6 +910,57 @@ export async function getNegocioDetalle(id: string): Promise<{
         }
       }
 
+      // Auto-init "Confirmar tarifa UPME" (SOENA): un bloque `datos` con
+      // config_extra.tarifa_confirmacion computa la tarifa Art. 13 desde el valor
+      // sin IVA de la Factura y PERSISTE en el data del bloque la referencia
+      // calculada + el valor a recaudar por defecto. Es la fuente única de la
+      // tarifa (pasante) que consumen aguas abajo el saldo de Cobros, el gate de
+      // handoff y el reparto pasante/honorario. Idempotente: solo inyecta cuando la
+      // referencia aún no está — NO pisa un valor confirmado/ajustado a mano. Si la
+      // Factura aún no tiene valor, no hace nada y reintenta en la próxima carga.
+      for (const bc of ((bloqueConfigs ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }>)) {
+        const tcfg = (bc.config_extra?.tarifa_confirmacion ?? null) as
+          | { enabled?: boolean; factura_slug?: string; valor_field?: string; ref_field?: string; ref_fmt_field?: string; confirmada_field?: string; anio?: number }
+          | null
+        if (bc.bloque_definitions?.tipo !== 'datos' || tcfg?.enabled !== true) continue
+        if ((bc.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
+        const inst = instanciasMap[bc.id]
+        if (!inst) continue
+        const refField = tcfg.ref_field ?? 'tarifa_upme_ref'
+        const refFmtField = tcfg.ref_fmt_field ?? 'tarifa_upme_ref_fmt'
+        const confField = tcfg.confirmada_field ?? 'tarifa_upme_confirmada'
+        const data = ((inst.data ?? {}) as Record<string, unknown>)
+        if (data[refField] != null) continue // ya inicializado — no re-computar ni pisar ajuste
+        const facturaSlug = tcfg.factura_slug ?? 'factura_venta_vehiculo'
+        const valorField = tcfg.valor_field ?? 'valor_unitario_sin_iva'
+        const { data: facturaBloques } = await db(supabase)
+          .from('negocio_bloques')
+          .select('data, bloque_configs!inner(slug)')
+          .eq('negocio_id', id)
+          .eq('bloque_configs.slug', facturaSlug)
+        let valorSinIva = 0
+        for (const fb of ((facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+          const campos = (fb.data?.campos ?? {}) as Record<string, { value?: unknown }>
+          const v = Number(String(campos[valorField]?.value ?? '').replace(/[^\d.-]/g, ''))
+          if (Number.isFinite(v) && v > 0) { valorSinIva = v; break }
+        }
+        if (!(valorSinIva > 0)) continue // Factura sin valor aún → reintenta en próxima carga
+        const tarifa = calcularTarifaUpmePorAnio(valorSinIva, tcfg.anio)
+        const tarifaFmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(tarifa)
+        const nuevoData = {
+          ...data,
+          [refField]: tarifa,
+          [refFmtField]: tarifaFmt,
+          [confField]: data[confField] ?? tarifa,
+        }
+        try {
+          await db(supabase).from('negocio_bloques').update({ data: nuevoData }).eq('id', inst.id)
+          instanciasMap[bc.id] = { ...inst, data: nuevoData } as NegocioBloque
+        } catch (e) {
+          console.error('[getNegocioDetalle] auto-init tarifa UPME falló:', e)
+        }
+      }
+
       // ── Herencia de data para bloques 'visible' con data vacía ───────────────
       // Cuando un bloque visible no tiene data propia (es nuevo en esta etapa),
       // heredar la data de la instancia más reciente del mismo bloque_definition_id
