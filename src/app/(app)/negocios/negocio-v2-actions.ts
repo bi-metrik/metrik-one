@@ -193,6 +193,8 @@ export type NegocioResumen = {
   cedula: string | null
   // Radicado de certificación (bloque DA22, config-driven) — tarjeta + búsqueda
   radicado: string | null
+  // Número de factura emitida (bloque "Factura emitida", config-driven) — búsqueda
+  numero_factura: string | null
   // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
   responsables: Array<{ id: string; full_name: string }>
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
@@ -424,13 +426,16 @@ export async function getNegociosV2(
     ?.config_extra?.negocio_card) as
     { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string
       cedula_bloque?: string; cedula_campo?: string
-      radicado_bloque?: string; radicado_campo?: string } | undefined
+      radicado_bloque?: string; radicado_campo?: string
+      factura_bloque?: string; factura_campo?: string } | undefined
   const vehiculoPorNeg: Record<string, { label: string | null; seccional: string | null; ciudad: string | null }> = {}
   // Cédula del solicitante (bloque RUT, config-driven). Para tarjeta + búsqueda.
   const cedulaPorNeg: Record<string, string | null> = {}
   // Radicado de certificación (bloque DA22, config-driven). Para tarjeta + búsqueda.
   const radicadoPorNeg: Record<string, string | null> = {}
-  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque, cardCfg?.radicado_bloque].filter(Boolean) as string[]
+  // Número de factura emitida (bloque documento "Factura emitida", config-driven). Para búsqueda.
+  const facturaPorNeg: Record<string, string | null> = {}
+  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque, cardCfg?.radicado_bloque, cardCfg?.factura_bloque].filter(Boolean) as string[]
   if (cardBloqueNombres.length > 0 && negocioIds.length > 0) {
     const getVal = (bdata: Record<string, unknown>, slug: string): string | null => {
       const campos = (bdata.campos as Record<string, { value?: unknown }> | undefined) ?? null
@@ -476,6 +481,11 @@ export async function getNegociosV2(
         const rad = cardCfg.radicado_campo ? getVal(bdata, cardCfg.radicado_campo) : null
         radicadoPorNeg[negId] = radicadoPorNeg[negId] ?? rad
       }
+      // Número de factura emitida (bloque documento "Factura emitida"). Conserva la primera con valor.
+      if (cardCfg?.factura_bloque && bnombre === cardCfg.factura_bloque) {
+        const nf = cardCfg.factura_campo ? getVal(bdata, cardCfg.factura_campo) : null
+        facturaPorNeg[negId] = facturaPorNeg[negId] ?? nf
+      }
     }
   }
 
@@ -515,6 +525,7 @@ export async function getNegociosV2(
       ciudad_label: vehiculoPorNeg[id]?.ciudad ?? null,
       cedula: cedulaPorNeg[id] ?? null,
       radicado: radicadoPorNeg[id] ?? null,
+      numero_factura: facturaPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
     }
@@ -4897,6 +4908,53 @@ export async function cancelarNegocio(
 
 // ── Completar negocio (stage cobro) ───────────────────────────────────────────
 
+// Gate de cierre source-agnostic: lee el bloque de factura de la etapa de cierre
+// (data.campos) y exige consecutivo presente + NIT emisor == NIT esperado del
+// workspace. Devuelve mensaje de error o null si pasa. Lo satisface igual la
+// extracción IA (manual) que el volcado de Siigo (futuro): ambos escriben en
+// data.campos del mismo bloque.
+async function validarGateFacturaEmitida(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioId: string,
+  etapaId: string | null,
+): Promise<string | null> {
+  if (!etapaId) return null
+  const { data: etapaRow } = await db(supabase)
+    .from('etapas_negocio')
+    .select('config_extra')
+    .eq('id', etapaId)
+    .single()
+  const cfg = ((etapaRow as { config_extra?: Record<string, unknown> } | null)?.config_extra ?? {}) as {
+    gates?: string[]
+    factura_gate?: { bloque_slug?: string; nit_campo?: string; numero_campo?: string; emisor_nit_esperado?: string }
+  }
+  if (!cfg.gates?.includes('factura:emitida') || !cfg.factura_gate) return null
+  const { bloque_slug, nit_campo = 'emisor_nit', numero_campo = 'numero_factura', emisor_nit_esperado } = cfg.factura_gate
+  if (!bloque_slug) return null
+
+  const { data: bloques } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug)')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.slug', bloque_slug)
+  // Puede haber más de una instancia (heredadas); toma la que tenga datos.
+  let campos: Record<string, { value?: unknown }> = {}
+  for (const b of ((bloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+    const c = (b.data?.campos ?? {}) as Record<string, { value?: unknown }>
+    if (Object.keys(c).length > 0) { campos = c; break }
+  }
+  const numero = String(campos[numero_campo]?.value ?? '').trim()
+  if (!numero) return 'Carga la factura emitida (falta el consecutivo) antes de cerrar el negocio.'
+
+  const emisor = nitSinDv(String(campos[nit_campo]?.value ?? '').trim())
+  const esperado = emisor_nit_esperado ? nitSinDv(emisor_nit_esperado) : null
+  if (esperado && emisor !== esperado) {
+    return 'La factura cargada no es de SOENA (el NIT del emisor no coincide). No se puede cerrar el negocio.'
+  }
+  return null
+}
+
 export async function completarNegocio(
   negocioId: string,
   lecciones?: string,
@@ -4907,7 +4965,7 @@ export async function completarNegocio(
   // Validar que existe y esta en stage cobro
   const { data: negocio } = await db(supabase)
     .from('negocios')
-    .select('id, stage_actual, estado, precio_aprobado, precio_estimado')
+    .select('id, stage_actual, estado, precio_aprobado, precio_estimado, etapa_actual_id')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
@@ -4919,6 +4977,13 @@ export async function completarNegocio(
   if (negocio.estado !== 'abierto') {
     return { error: 'El negocio ya esta cerrado' }
   }
+
+  // Gate de cierre "factura:emitida": si la etapa de cierre lo exige, no cerrar
+  // hasta que el bloque de factura tenga consecutivo y el NIT del emisor coincida
+  // con el del workspace. Source-agnostic: lo satisface igual la extracción
+  // manual (IA) que el volcado futuro de Siigo (misma estructura data.campos).
+  const gateErr = await validarGateFacturaEmitida(supabase, negocioId, negocio.etapa_actual_id as string | null)
+  if (gateErr) return { error: gateErr }
 
   // Calcular snapshot financiero: buscar cobros del negocio
   const { data: cobrosData } = await db(supabase)
