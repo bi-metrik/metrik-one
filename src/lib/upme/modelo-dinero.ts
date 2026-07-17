@@ -1,41 +1,66 @@
 /**
- * Modelo de dinero SOENA (cambio UPME 2026-07-08) — helpers PUROS y testables.
+ * Modelo de dinero SOENA (rediseño 2026-07-16) — helpers PUROS y testables.
  *
- * El cliente paga en UN pago dos componentes: honorario de SOENA + tarifa UPME
- * (pasante — SOENA solo recauda y desembolsa). Modalidad de la propuesta:
+ * El cliente paga en UN recaudo dos componentes distintos:
+ *   - HONORARIO de SOENA  → es el INGRESO. Vive en `negocios.precio_aprobado`.
+ *   - TARIFA UPME (pasante) → SOENA solo la RECAUDA y la desembolsa a la UPME; NO
+ *     es ingreso. Se confirma en Validación (bloque "Confirmar tarifa UPME") y vive
+ *     en el `data` de ese bloque, NO en el precio del negocio.
+ *
+ * Regla cardinal del rediseño (GO Vera 2026-07-16, reemplaza el diseño "Ola 2"
+ * donde `precio_aprobado = honorario + tarifa`):
+ *
+ *     precio_aprobado   = HONORARIO            (ingreso — lo que entra al P&L)
+ *     valor_a_recaudar  = honorario + tarifa   (lo que el cliente le paga a SOENA)
+ *
+ * El P&L (`v_pyl_mes`) reconoce solo cobros NO-pasante, así que la tarifa nunca
+ * infla EBITDA. Por eso `precio_aprobado` debe quedarse en honorario: es la señal
+ * de ingreso en todo el sistema y mezclarle la tarifa la corrompe.
+ *
+ * Modalidad de la propuesta (aplica SOLO al honorario; la tarifa va completa por
+ * adelantado en ambos planes):
  *   - Plan 1 = 50/50: tarifa COMPLETA + 50% honorario ahora, 50% después.
  *   - Plan 2 = único: todo ahora.
  *
  * Estos helpers NO tocan DB ni red — viven aparte de las server actions para poder
- * probarse sin mocks. Los `'use server'` (propuesta/conciliación) los consumen.
+ * probarse sin mocks. Los `'use server'` (propuesta/conciliación/cobros) los consumen.
  *
  * REGLA DURA: nada aquí bloquea, descarta ni "gatea" — solo compone y reparte.
  */
 
-/** Modelo de dinero de un negocio, leído de su propuesta aprobada. */
+/** Modelo de dinero de un negocio, leído de su propuesta aprobada + tarifa confirmada. */
 export interface ModeloDinero {
-  /** Tarifa UPME (pasante) aprobada, completa por adelantado. */
+  /**
+   * Tarifa UPME (pasante) CONFIRMADA en Validación, completa por adelantado. 0 si
+   * aún no se confirma. Es la que alimenta el reparto pasante/honorario y el gate
+   * de handoff. NO es la referencia calculada (esa es `tarifa_upme_ref`).
+   */
   tarifa_upme: number
   /** Modalidad: 1 = 50/50, 2 = único, null = sin modalidad. */
   aprobado_plan: 1 | 2 | null
-  /** Honorario del plan elegido (sin la tarifa). */
+  /** Honorario del plan elegido (= precio_aprobado del negocio). */
   aprobado_honorario: number | null
   /**
    * Tarifa UPME de REFERENCIA calculada (Art. 13) desde el valor del vehículo,
-   * SOLO para mostrar cuando la propuesta no guardó `tarifa_upme`. NO la leen los
-   * gates (handoff/anticipo usan `tarifa_upme`). Informativa.
+   * SOLO para mostrar/pre-llenar cuando la tarifa aún no se confirma. NO la leen
+   * los gates ni el reparto (esos usan `tarifa_upme`). Informativa.
    */
   tarifa_upme_ref?: number
 }
 
 /**
- * Composición del precio del negocio: honorario del plan + tarifa (siempre completa).
- * Sin tarifa (0), el precio queda = honorario (comportamiento previo intacto).
+ * Valor a recaudar del cliente = honorario (precio_aprobado) + tarifa UPME (pasante).
+ * Es la base del saldo del bloque de Cobros y del umbral de handoff. NO se almacena:
+ * se deriva del `precio_aprobado` del negocio (honorario) + la tarifa confirmada del
+ * modelo. Sin tarifa (0), el valor a recaudar queda = honorario.
+ *
+ * @param precioAprobado precio_aprobado del negocio = HONORARIO, en COP.
+ * @param modelo         modelo de dinero (aporta la tarifa confirmada). null → sin tarifa.
  */
-export function componerPrecioAprobado(honorario: number, tarifaUpme: number): number {
-  const h = Number.isFinite(honorario) ? honorario : 0
-  const t = Number.isFinite(tarifaUpme) && tarifaUpme > 0 ? tarifaUpme : 0
-  return Math.round(h + t)
+export function valorARecaudar(precioAprobado: number, modelo: ModeloDinero | null): number {
+  const honorario = Number.isFinite(precioAprobado) && precioAprobado > 0 ? precioAprobado : 0
+  const tarifa = modelo && Number.isFinite(modelo.tarifa_upme) && modelo.tarifa_upme > 0 ? modelo.tarifa_upme : 0
+  return Math.round(honorario + tarifa)
 }
 
 export interface RepartoPago {
@@ -69,11 +94,11 @@ export function tipoCobroHonorario(plan: 1 | 2 | null): 'anticipo' | 'pago' {
 }
 
 /**
- * Saldo ESPERADO (pendiente legítimo) según la modalidad. En 50/50 el 2º 50% del
- * honorario está pendiente por diseño hasta el pago de éxito → NO es descuadre. La
- * tarifa (pasante) va completa por adelantado, así que no cuenta como pendiente.
- * En único o sin modalidad → 0. Si no se conoce el honorario, 0 (no asume pendiente
- * para no ocultar un faltante real).
+ * Saldo ESPERADO (pendiente legítimo) del HONORARIO según la modalidad. En 50/50 el
+ * 2º 50% del honorario está pendiente por diseño hasta el pago de éxito → NO es
+ * descuadre. La tarifa (pasante) va completa por adelantado, así que no cuenta como
+ * pendiente. En único o sin modalidad → 0. Si no se conoce el honorario, 0 (no asume
+ * pendiente para no ocultar un faltante real).
  */
 export function saldoEsperadoPorModalidad(modelo: ModeloDinero | null): number {
   if (!modelo || modelo.aprobado_plan !== 1) return 0
@@ -84,21 +109,24 @@ export function saldoEsperadoPorModalidad(modelo: ModeloDinero | null): number {
 
 /**
  * Umbral de recaudo para SOLTAR el negocio a operaciones (handoff Documentación →
- * Cargue): el cliente debe haber pagado a SOENA todo el precio EXCEPTO el saldo
- * legítimamente diferido por la modalidad. Como `precio_aprobado = tarifa_UPME +
- * honorario_completo`, el umbral queda:
+ * Cargue): el cliente debe haber pagado a SOENA todo el VALOR A RECAUDAR excepto el
+ * saldo legítimamente diferido por la modalidad. Como
+ * `valor_a_recaudar = honorario + tarifa`, el umbral queda:
  *   - Plan 1 (50/50): tarifa + 50% honorario   (100% UPME + anticipo)
  *   - Plan 2 (único): tarifa + 100% honorario   (100% UPME + honorario)
- * Es decir `precio − saldoEsperadoPorModalidad`. Nunca negativo.
+ * Es decir `valor_a_recaudar − saldoEsperadoPorModalidad`. Nunca negativo.
+ *
+ * @param precioAprobado precio_aprobado del negocio = HONORARIO, en COP.
+ * @param modelo         modelo de dinero (aporta la tarifa confirmada + modalidad).
  */
 export function umbralRecaudoHandoff(precioAprobado: number, modelo: ModeloDinero | null): number {
-  const precio = Number.isFinite(precioAprobado) && precioAprobado > 0 ? precioAprobado : 0
-  return Math.max(0, Math.round(precio - saldoEsperadoPorModalidad(modelo)))
+  const vr = valorARecaudar(precioAprobado, modelo)
+  return Math.max(0, Math.round(vr - saldoEsperadoPorModalidad(modelo)))
 }
 
 /** Desglose del recaudo pendiente para el handoff a operaciones. */
 export interface PendienteHandoff {
-  /** Umbral exigido = precio − saldo diferido. */
+  /** Umbral exigido = valor a recaudar − saldo diferido. */
   umbral: number
   /** Recaudo real del cliente considerado. */
   recaudado: number
@@ -118,8 +146,8 @@ export interface PendienteHandoff {
  * tarifa UPME PRIMERO, así que el chequeo agregado (recaudado ≥ umbral) ya
  * garantiza ambas bolsas; el desglose es para comunicar qué falta.
  *
- * @param precioAprobado precio del negocio (honorario + tarifa), en COP.
- * @param modelo         modelo de dinero del negocio (plan + honorario + tarifa).
+ * @param precioAprobado precio_aprobado del negocio = HONORARIO, en COP.
+ * @param modelo         modelo de dinero del negocio (plan + honorario + tarifa confirmada).
  * @param recaudado      recaudo real del cliente (suma de cobros reales), en COP.
  */
 export function calcularPendienteHandoff(

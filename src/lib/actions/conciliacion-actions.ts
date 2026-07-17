@@ -12,6 +12,7 @@ import {
   tipoCobroHonorario,
   type ModeloDinero,
 } from '@/lib/upme/modelo-dinero'
+import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -1078,32 +1079,95 @@ async function refDuplicadaNoSplit(
 // modalidad (aprobado_plan: 1 = 50/50, 2 = único). OPT-IN: si el negocio no tiene
 // propuesta aprobada con tarifa, devuelve null → el caller usa el flujo de 1 cobro.
 
-/** Info del modelo de dinero de un negocio, leída de su propuesta aprobada. */
+/** Info del modelo de dinero de un negocio: honorario/plan (propuesta) + tarifa confirmada. */
 export type ModeloDineroNegocio = ModeloDinero
 
+/**
+ * Modelo de dinero COMPLETO de un negocio — FUENTE ÚNICA compartida por el saldo de
+ * Cobros (getNegocioDetalle), el gate de handoff y (vía wrapper) el reparto. Evita la
+ * divergencia gate⟺render: todos construyen el modelo igual.
+ *
+ * - honorario + plan: de la propuesta aprobada (precio_aprobado = honorario).
+ * - `tarifa_upme`: tarifa (pasante) CONFIRMADA en el bloque "Confirmar tarifa UPME"
+ *   (Validación, config_extra.tarifa_confirmacion). Solo con el toggle marcado; 0 si no.
+ * - `tarifa_upme_ref`: referencia calculada (Art. 13), con fallback a la Factura para
+ *   negocios legacy. Solo display; NO la leen gates ni reparto.
+ *
+ * Devuelve null solo si el negocio no tiene ni propuesta ni tarifa (nada que modelar).
+ */
+export async function leerModeloDineroCompleto(
+  supabase: unknown,
+  negocioId: string,
+): Promise<ModeloDinero | null> {
+  // Honorario + plan de la propuesta aprobada (el bloque con plan gana).
+  const { data: prop } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+  let plan: 1 | 2 | null = null
+  let honorario: number | null = null
+  for (const pb of ((prop ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+    const d = pb.data
+    if (!d) continue
+    const p = (d.aprobado_plan === 1 || d.aprobado_plan === 2) ? (d.aprobado_plan as 1 | 2) : null
+    const h = d.aprobado_honorario != null ? Number(d.aprobado_honorario) : null
+    if (p == null && h == null) continue
+    plan = p
+    honorario = h != null && Number.isFinite(h) ? h : null
+    if (p != null) break
+  }
+
+  // Tarifa confirmada + referencia desde el bloque de confirmación (Validación).
+  let tarifaConfirmada = 0
+  let tarifaRef = 0
+  const { data: tarifaBloques } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(config_extra)')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.config_extra->tarifa_confirmacion->>enabled', 'true')
+  for (const tb of ((tarifaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+    const d = (tb.data ?? {}) as Record<string, unknown>
+    const ref = Number(d.tarifa_upme_ref ?? 0)
+    if (Number.isFinite(ref) && ref > 0) tarifaRef = ref
+    if (d.tarifa_confirmada === true) {
+      const conf = Number(d.tarifa_upme_confirmada ?? 0)
+      if (Number.isFinite(conf) && conf > 0) { tarifaConfirmada = conf; break }
+    }
+  }
+  // Fallback de display: negocios legacy sin bloque de confirmación → computa la
+  // referencia desde la Factura para no dejar la tarifa invisible en Cobros.
+  if (!(tarifaRef > 0)) {
+    const { data: facturaBloques } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocioId)
+      .eq('bloque_configs.slug', 'factura_venta_vehiculo')
+    for (const fb of ((facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+      const campos = (fb.data?.campos ?? {}) as Record<string, { value?: unknown }>
+      const valorSinIva = Number(String(campos.valor_unitario_sin_iva?.value ?? '').replace(/[^\d.-]/g, ''))
+      if (Number.isFinite(valorSinIva) && valorSinIva > 0) { tarifaRef = calcularTarifaUpmePorAnio(valorSinIva); break }
+    }
+  }
+
+  if (plan == null && honorario == null && !(tarifaConfirmada > 0) && !(tarifaRef > 0)) return null
+  const modelo: ModeloDinero = { tarifa_upme: tarifaConfirmada, aprobado_plan: plan, aprobado_honorario: honorario }
+  if (tarifaRef > 0) modelo.tarifa_upme_ref = tarifaRef
+  return modelo
+}
+
+/**
+ * Modelo para el REPARTO pasante/honorario: como `leerModeloDineroCompleto` pero
+ * devuelve null cuando NO hay tarifa confirmada → el negocio no usa el reparto en 2
+ * cobros (no hay pasante; se registra un solo cobro de honorario).
+ */
 export async function leerModeloDineroNegocio(
   supabase: unknown,
   negocioId: string,
 ): Promise<ModeloDineroNegocio | null> {
-  // Busca el bloque propuesta_economica del negocio (por tipo de su definición).
-  const { data } = await db(supabase)
-    .from('negocio_bloques')
-    .select('data, estado, bloque_configs!inner(bloque_definitions!inner(tipo))')
-    .eq('negocio_id', negocioId)
-    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
-    .limit(1)
-    .maybeSingle()
-  const row = data as { data: Record<string, unknown> | null } | null
-  if (!row?.data) return null
-  const d = row.data
-  const tarifa = Number(d.aprobado_tarifa_upme ?? d.tarifa_upme ?? 0)
-  const plan = (d.aprobado_plan === 1 || d.aprobado_plan === 2) ? (d.aprobado_plan as 1 | 2) : null
-  const honorario = d.aprobado_honorario != null ? Number(d.aprobado_honorario) : null
-  if (!Number.isFinite(tarifa) || tarifa <= 0) {
-    // Sin tarifa (pasante) → este negocio no usa el reparto en 2 cobros.
-    return null
-  }
-  return { tarifa_upme: tarifa, aprobado_plan: plan, aprobado_honorario: honorario }
+  const modelo = await leerModeloDineroCompleto(supabase, negocioId)
+  if (!modelo || !(modelo.tarifa_upme > 0)) return null
+  return modelo
 }
 
 /**

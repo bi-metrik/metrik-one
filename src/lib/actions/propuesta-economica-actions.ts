@@ -26,7 +26,6 @@ import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
 import { uvtDelAnio } from '@/lib/upme/uvt'
-import { componerPrecioAprobado } from '@/lib/upme/modelo-dinero'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -565,9 +564,11 @@ export async function aprobarVersionPropuesta(
   // Tarifa (pasante) congelada al aprobar: la de la versión (snapshot) con fallback
   // a la vigente en ctx (compat con versiones viejas sin tarifa persistida).
   const tarifaElegida = version.tarifa_upme ?? ctx.tarifaUpme ?? 0
-  // COMPOSICIÓN NUEVA: precio_aprobado = honorario + tarifa (siempre completa por
-  // adelantado). Sin tarifa (0), el precio queda = honorario (comportamiento previo).
-  const valorElegido = componerPrecioAprobado(honorarioElegido, tarifaElegida)
+  // precio_aprobado = HONORARIO (ingreso). La tarifa UPME (pasante) NO entra al
+  // precio del negocio: se confirma aparte en Validación y solo compone el
+  // valor_a_recaudar (honorario + tarifa) aguas abajo. Rediseño 2026-07-16 (GO Vera),
+  // reemplaza la composición "Ola 2" precio = honorario + tarifa.
+  const valorElegido = honorarioElegido
 
   const ahora = new Date().toISOString()
   const nuevoData: PropuestaData = {
@@ -606,8 +607,8 @@ export async function aprobarVersionPropuesta(
 
   // Activity log — desglosa honorario + tarifa cuando hay tarifa (pasante).
   const contenidoLog = tarifaElegida > 0
-    ? `Propuesta económica v${versionN} aprobada — Plan ${plan}: honorario ${formatCOP(honorarioElegido)} + tarifa UPME ${formatCOP(tarifaElegida)} = ${formatCOP(valorElegido)}`
-    : `Propuesta económica v${versionN} aprobada — Plan ${plan} ${formatCOP(valorElegido)}`
+    ? `Propuesta económica v${versionN} aprobada — Plan ${plan}: honorario ${formatCOP(honorarioElegido)} (precio) + tarifa UPME ref. ${formatCOP(tarifaElegida)} → valor a recaudar ${formatCOP(honorarioElegido + tarifaElegida)}`
+    : `Propuesta económica v${versionN} aprobada — Plan ${plan} — honorario ${formatCOP(valorElegido)}`
   await sb.from('activity_log').insert({
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',

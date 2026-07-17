@@ -2081,7 +2081,7 @@ export default function NegocioDetailClient({
                   resumenFinanciero={resumenFinanciero}
                   ejecucionData={ejecucionData}
                   historialData={historialData}
-                  precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
+                  precioTotal={negocio.valor_a_recaudar ?? negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
                   userRole={userRole}
                   datosPorSlug={datosPorSlug}
                   pendienteHandoff={negocio.pendiente_handoff ?? null}
@@ -2109,7 +2109,7 @@ export default function NegocioDetailClient({
             resumenFinanciero={resumenFinanciero}
             ejecucionData={ejecucionData}
             historialData={historialData}
-            precioTotal={negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
+            precioTotal={negocio.valor_a_recaudar ?? negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
             userRole={userRole}
           />
         )}
