@@ -75,7 +75,9 @@ const TEMPLATE_PATH = path.join(process.cwd(), 'src/lib/pdf/templates/formulario
 const P1 = {
   // Header: Casilla 2 Concepto — label en (33.3, 721.9). Caja pequeña a la
   // derecha del label (tipo 2 dígitos). Valor centrado en esa caja.
-  concepto: { x: 76, y: 718 },
+  // x corrido +2mm (5.669pt) a la derecha: el "3" quedaba pegado al divisor
+  // central de la casilla; el shift centra el par "03" en su box (76 → 81.7).
+  concepto: { x: 81.7, y: 718 },
   // Datos solicitante (fila y = 615.4, valor baseline ~599)
   tipo_documento: { x: 28, y: 599, maxWidth: 35 },
   nit: { x: 65, y: 599, maxWidth: 100 },
