@@ -6,7 +6,9 @@ import {
   saldoEsperadoPorModalidad,
   umbralRecaudoHandoff,
   calcularPendienteHandoff,
+  esCeroDeliberado,
   type ModeloDinero,
+  type PropuestaBloqueData,
 } from './modelo-dinero'
 
 // precio_aprobado del negocio = HONORARIO. La tarifa (pasante) vive aparte, en el
@@ -183,5 +185,48 @@ describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
   it('tolerancia de 1 peso: recaudo a un peso del umbral se considera cubierto', () => {
     const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar - 1)
     expect(p.cubierto).toBe(true)
+  })
+})
+
+describe('esCeroDeliberado — cero deliberado vs sin cotizar', () => {
+  const aprobadaEn = (honorario: number | null): PropuestaBloqueData => ({
+    data: { aprobado_at: '2026-07-06T17:35:46.428Z', aprobado_plan: 2, aprobado_honorario: honorario },
+  })
+  const sinAprobar = (valorFinal: number): PropuestaBloqueData => ({
+    data: { aprobado_at: null, aprobado_plan: null, aprobado_honorario: null, valor_final_plan1: valorFinal },
+  })
+
+  it('propuesta APROBADA con honorario 0 → cero deliberado (V0022)', () => {
+    expect(esCeroDeliberado([aprobadaEn(0)], 0)).toBe(true)
+  })
+
+  it('propuesta APROBADA sin aprobado_honorario pero precio_aprobado 0 → cero deliberado', () => {
+    // caso real V0022: aprobado_honorario ausente, se cae a precio_aprobado del negocio
+    const prop: PropuestaBloqueData = { data: { aprobado_at: '2026-07-06T00:00:00Z', aprobado_plan: 2 } }
+    expect(esCeroDeliberado([prop], 0)).toBe(true)
+  })
+
+  it('propuesta SIN aprobar (aún sin cotizar) → NO es cero deliberado (V0066)', () => {
+    // V0066: propuesta v1 generada con honorario 850k pero nunca aprobada; precio null
+    expect(esCeroDeliberado([sinAprobar(850_000)], null)).toBe(false)
+  })
+
+  it('propuesta APROBADA con honorario > 0 → NO es cero deliberado', () => {
+    expect(esCeroDeliberado([aprobadaEn(3_000_000)], 3_000_000)).toBe(false)
+  })
+
+  it('sin ninguna propuesta → NO es cero deliberado', () => {
+    expect(esCeroDeliberado([], null)).toBe(false)
+    expect(esCeroDeliberado([{ data: null }], null)).toBe(false)
+  })
+
+  it('honorario aprobado desconocido y sin precio_aprobado → NO asume cero (no abre fail-open)', () => {
+    const prop: PropuestaBloqueData = { data: { aprobado_at: '2026-07-06T00:00:00Z' } }
+    expect(esCeroDeliberado([prop], null)).toBe(false)
+  })
+
+  it('con varias propuestas, basta una aprobada en 0 (heredadas readonly no rompen)', () => {
+    const heredadaVacia: PropuestaBloqueData = { data: {} }
+    expect(esCeroDeliberado([heredadaVacia, aprobadaEn(0)], 0)).toBe(true)
   })
 })

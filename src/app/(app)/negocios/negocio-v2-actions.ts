@@ -8,7 +8,7 @@ import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
-import { calcularPendienteHandoff, valorARecaudar, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -1896,14 +1896,24 @@ async function anticipoCubiertoPorSaldo(
 
   const neg = negRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
   const precio = neg?.precio_aprobado ?? neg?.precio_estimado ?? 0
-  if (!(precio > 0)) return false
+
+  const propuestas = ((propRes.data ?? []) as Array<{ data: Record<string, unknown> | null }>)
+
+  if (!(precio > 0)) {
+    // Distinguir "cero deliberado" (no hay honorario que cobrar: propuesta económica
+    // APROBADA cuyo valor final es 0) de "aún sin cotizar" (precio null/0 porque nunca
+    // se aprobó una propuesta). Solo el primero da el gate por satisfecho; el segundo
+    // sigue bloqueando — no abrir la puerta a saltar el anticipo de algo no cotizado.
+    if (esCeroDeliberado(propuestas, neg?.precio_aprobado ?? null)) return true
+    return false
+  }
 
   const cobrado = ((cobrosRes.data ?? []) as Array<{ monto: number }>)
     .reduce((sum, c) => sum + (c.monto ?? 0), 0)
 
   // Plan aprobado, leído DIRECTO de la propuesta (el bloque con plan aprobado gana).
   let plan: 1 | 2 | null = null
-  for (const pb of ((propRes.data ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+  for (const pb of propuestas) {
     const planRaw = pb.data?.aprobado_plan
     if (planRaw === 1 || planRaw === 2) { plan = planRaw as 1 | 2; break }
   }
@@ -2222,13 +2232,26 @@ export async function cambiarEtapaNegocioConGate(
       const precioHandoff = negHandoff?.precio_aprobado ?? negHandoff?.precio_estimado ?? 0
 
       // Fail-safe: sin precio aprobado no se puede calcular el umbral → no dejar
-      // pasar sin control; exigir aprobar la propuesta económica primero.
+      // pasar sin control; exigir aprobar la propuesta económica primero. EXCEPCIÓN:
+      // cero DELIBERADO (propuesta aprobada cuyo honorario final es 0) → no hay nada
+      // que recaudar, el gate se da por satisfecho. Un negocio aún sin cotizar
+      // (propuesta no aprobada) sigue bloqueando como hoy.
       if (!(precioHandoff > 0)) {
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: [{ nombre: 'Aprueba la propuesta económica antes de pasar a operaciones', es_gate: true }],
+        const { data: propsHandoff } = await db(supabase)
+          .from('negocio_bloques')
+          .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+          .eq('negocio_id', negocioId)
+          .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+        const propuestasHandoff = ((propsHandoff ?? []) as Array<{ data: Record<string, unknown> | null }>)
+        if (esCeroDeliberado(propuestasHandoff, negHandoff?.precio_aprobado ?? null)) {
+          // Nada que recaudar: el handoff no exige recaudo.
+        } else {
+          return {
+            error: 'gate_bloqueado',
+            bloquesPendientes: [{ nombre: 'Aprueba la propuesta económica antes de pasar a operaciones', es_gate: true }],
+          }
         }
-      }
+      } else {
 
       // Recaudo real del cliente: suma de cobros, excluyendo remanentes por devolver
       // (devolucion_pendiente, montos negativos) que no son recaudo entrante.
@@ -2254,6 +2277,7 @@ export async function cambiarEtapaNegocioConGate(
           ?? `Recaudo insuficiente para pasar a operaciones: falta ${fmt.format(pend.pendienteTotal)}${desglose}`
         return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
       }
+      } // fin else (precioHandoff > 0)
     }
 
     // Gate custom genérico: campo:<slug>=<valor> — un campo de un bloque `datos`
