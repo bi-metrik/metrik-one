@@ -646,12 +646,42 @@ export async function actualizarCampoDocumento(
   value: string,
   camposExtraccion: CampoExtraccion[],
 ): Promise<{ success: boolean; isComplete?: boolean; error?: string }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, role, userId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
   // Validar que slug existe en camposExtraccion
   const slugValido = camposExtraccion.some(c => c.slug === slug)
   if (!slugValido) return { success: false, error: 'Campo no válido' }
+
+  // Guard de permiso: en la etapa activa edita el responsable del área
+  // (guardEditarBloque). Una vez el negocio avanzó (bloque en modo visible), la
+  // corrección la hace un rol gerencial (owner/admin/supervisor). Se preserva el
+  // path histórico (campo con alerta_revision en bloque con editar_extraidos)
+  // para no romper correcciones ya habilitadas en otros workspaces.
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) {
+    let permitido = ['owner', 'admin', 'supervisor'].includes(role ?? '')
+    if (!permitido && camposExtraccion.find(c => c.slug === slug)?.alerta_revision === true) {
+      const { data: bc } = await db(supabase)
+        .from('negocio_bloques')
+        .select('bloque_configs(config_extra)')
+        .eq('id', negocioBloqueId)
+        .single()
+      permitido = (bc?.bloque_configs?.config_extra as { editar_extraidos?: boolean } | null)?.editar_extraidos === true
+    }
+    if (!permitido) return { success: false, error: guard.error ?? 'Tu rol no permite corregir este campo' }
+  }
+
+  // Nombre del editor para la marca de trazabilidad (snapshot).
+  let editorNombre = 'Usuario'
+  if (userId) {
+    const { data: prof } = await db(supabase)
+      .from('profiles')
+      .select('full_name')
+      .eq('id', userId)
+      .single()
+    editorNombre = (prof?.full_name as string | null) ?? 'Usuario'
+  }
 
   const { data: bloque } = await db(supabase)
     .from('negocio_bloques')
@@ -662,8 +692,17 @@ export async function actualizarCampoDocumento(
   const currentData = (bloque?.data as Record<string, unknown>) ?? {}
   const campos = (currentData.campos as Record<string, CampoResultado>) ?? {}
 
-  // Update the specific field
-  campos[slug] = { value: value || null, confidence: 1.0, manual: true }
+  // Update the specific field — marca de edición manual (quién + cuándo).
+  campos[slug] = {
+    value: value || null,
+    confidence: 1.0,
+    manual: true,
+    edicion: {
+      editado_por_id: userId ?? '',
+      editado_por_nombre: editorNombre,
+      editado_en: new Date().toISOString(),
+    },
+  }
   currentData.campos = campos
 
   // Check completeness

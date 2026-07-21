@@ -33,10 +33,19 @@ export interface CampoExtraccion {
   normalizar?: 'nit_sin_dv'
 }
 
+/** Marca de edición manual (trazabilidad para auditoría): quién y cuándo tocó
+ *  el campo a mano. Se estampa en `actualizarCampoDocumento`. */
+export interface CampoEdicion {
+  editado_por_id: string      // profile.id del editor
+  editado_por_nombre: string  // snapshot del nombre para el render/auditoría
+  editado_en: string          // ISO timestamp
+}
+
 export interface CampoResultado {
   value: string | null
   confidence: number  // 0.0 - 1.0
   manual: boolean     // true si confidence < 0.70
+  edicion?: CampoEdicion  // presente solo si un humano editó el campo a mano
 }
 
 // ── Supported MIME types ─────────────────────────────────────────────────────

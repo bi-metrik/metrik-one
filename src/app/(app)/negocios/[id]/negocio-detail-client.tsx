@@ -1417,12 +1417,15 @@ function BloqueRenderer({
           workspaceId={workspaceId}
           instancia={bloque.instancia}
           modo={modo}
+          userRole={userRole}
           configExtra={configExtra as {
             label: string
             tipos_permitidos?: string[]
             max_size_mb?: number
             campos_extraccion?: import('@/lib/ai/extract-fields').CampoExtraccion[]
             campos_visibles?: string[]
+            editar_extraidos?: boolean
+            corregir_campos_gerencial?: boolean
           }}
         />
       )
