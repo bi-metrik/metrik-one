@@ -1,10 +1,19 @@
 // ============================================================
-// Generic AI Field Extractor - Gemini 3.1 Flash-Lite
+// Generic AI Field Extractor - Gemini 2.5 Flash (thinking on)
 // Extrae campos configurables de cualquier documento.
 // Pattern: parse-ve-docs.ts (inline_data base64, structured output)
 // ============================================================
-
-const GEMINI_MODEL = 'gemini-3.1-flash-lite'
+//
+// Modelo: los errores observados en SOENA (razón social vs nombre
+// comercial, prefijo del número de factura, municipio sustituido por la
+// capital, dirección truncada) son de JUICIO SEMÁNTICO, no de legibilidad.
+// Se sube de flash-lite (thinking mínimo) a `gemini-2.5-flash` con thinking
+// encendido a presupuesto acotado — el razonamiento es la palanca que
+// distingue esos casos. A escala SOENA (~cientos de docs/mes) el costo es
+// marginal. Familia 2.5 → se controla con `thinkingBudget` numérico (la
+// config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
+// es sintaxis de la familia 2.5 y en 3.x se ignora).
+const GEMINI_MODEL = 'gemini-2.5-flash'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -89,7 +98,7 @@ REGLAS:
 - Si un campo no está en el documento, usa { "value": null, "confidence": 0.0 }
 - confidence refleja certeza de lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible)
 - Limpia valores: sin espacios al inicio/final
-- Números de identificación y códigos: solo dígitos, sin puntos, guiones ni espacios
+- Números de identificación de personas o empresas (NIT, cédula): solo dígitos, sin puntos, guiones ni espacios. NO apliques esta regla a números de factura, radicados u otros códigos que legítimamente incluyen un prefijo o serie con letras: esos se devuelven COMPLETOS, con su prefijo y tal como aparecen (ej. si el documento muestra "FVM 3903", devuelve "FVM 3903", NUNCA solo "3903")
 - MONEDA COLOMBIANA (campos tipo currency): los valores monetarios están en pesos colombianos (COP). El separador de miles es el punto (.) y el separador decimal es la coma (,). Ejemplo: $1.500.000 = un millón quinientos mil. Devuelve SOLO el valor numérico entero sin puntos, comas ni símbolo $. Ejemplo: si ves "$1.500.000" o "1.500.000,00", devuelve "1500000"
 - Campos tipo numero (no currency): devuelve el número tal cual, sin formato de moneda
 
@@ -160,16 +169,16 @@ export async function extractFieldsFromDocument(
         ],
         generationConfig: {
           temperature: 0.1,
-          // Documentos con muchos campos (RUT = 20+) desbordaban el presupuesto:
-          // el "thinking" del modelo consume maxOutputTokens y dejaba la
-          // respuesta SIN la parte JSON (finishReason MAX_TOKENS) → el parser caía
-          // en texto de razonamiento truncado ("position 120"). Desactivamos
-          // thinking (la extracción es determinista, no lo necesita) y subimos el
-          // límite → todo el presupuesto va al JSON estructurado.
-          maxOutputTokens: 4096,
+          // Thinking ENCENDIDO a presupuesto acotado (1024) para el juicio
+          // semántico de la extracción (razón social vs comercial, prefijo de
+          // factura, municipio correcto). El thinking consume maxOutputTokens
+          // aparte del JSON; por eso el límite se sube a 8192 (thinking ~1024 +
+          // JSON del RUT de 20+ campos) para no reincidir en el MAX_TOKENS que
+          // truncaba la respuesta cuando el presupuesto era compartido.
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           responseSchema,
-          thinkingConfig: { thinkingBudget: 0 },
+          thinkingConfig: { thinkingBudget: 1024 },
         },
       }),
     })
