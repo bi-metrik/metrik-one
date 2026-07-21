@@ -52,48 +52,74 @@ export default function ComercialPerfilClient({
             <div className="flex items-center gap-3">
               <div
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full"
-                style={{ backgroundColor: ranking.rank_honorario === 1 ? '#FEF3C7' : '#F3F4F6' }}
+                style={{ backgroundColor: ranking.rank_ventas === 1 ? '#FEF3C7' : '#F3F4F6' }}
               >
-                <Trophy className="h-6 w-6" style={{ color: ranking.rank_honorario === 1 ? GOLD : '#9CA3AF' }} />
+                <Trophy className="h-6 w-6" style={{ color: ranking.rank_ventas === 1 ? GOLD : '#9CA3AF' }} />
               </div>
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Mi posicion</p>
                 <p className="text-lg font-bold text-gray-900">
-                  #{ranking.rank_honorario} de {totalEquipo}
-                  <span className="ml-2 text-sm font-normal text-gray-500">en recaudo</span>
+                  #{ranking.rank_ventas} de {totalEquipo}
+                  <span className="ml-2 text-sm font-normal text-gray-500">en ventas</span>
                 </p>
               </div>
             </div>
+            <RankPill label="Recaudo" rank={ranking.rank_honorario} total={totalEquipo} />
             <RankPill label="Valor aprobado" rank={ranking.rank_valor} total={totalEquipo} />
-            <RankPill label="Negocios activos" rank={ranking.rank_negocios} total={totalEquipo} />
           </div>
         </div>
       )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <Kpi label="Ventas" value={String(perfil.kpis.num_ventas)} color={GREEN} />
         <Kpi label="Negocios activos" value={String(perfil.kpis.negocios_abiertos)} />
         <Kpi label="Valor aprobado" value={fmtCOP(perfil.kpis.valor_aprobado)} />
         <Kpi label="Honorario recaudado" value={fmtCOP(perfil.kpis.honorario_recaudado)} color={GREEN} />
+        <Kpi label="Pendiente de recaudo" value={fmtCOP(perfil.kpis.pendiente_honorario)} />
         <Kpi label="Tarifa UPME (terceros)" value={fmtCOP(perfil.kpis.tarifa_recaudada)} muted />
       </div>
 
-      {/* Conversion por stage */}
+      {/* Embudo por etapa/estatus con monto pendiente de recaudo */}
       <section className="mb-6">
-        <h2 className="text-sm font-bold text-gray-900 mb-3">Negocios por etapa</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {perfil.porStage.map((s) => (
-            <div key={s.stage} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-              <p className="text-2xl font-bold text-gray-900 tabular-nums leading-none">{s.negocios}</p>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mt-2">
-                {STAGE_LABEL[s.stage] ?? s.stage}
-              </p>
-              <p className="text-xs text-gray-500 tabular-nums mt-1">{fmtCOP(s.valor_aprobado)}</p>
-            </div>
-          ))}
-          {perfil.porStage.length === 0 && (
-            <p className="text-sm text-gray-400 col-span-full">Sin negocios.</p>
-          )}
+        <h2 className="text-sm font-bold text-gray-900 mb-3">Embudo por etapa (pendiente de recaudo)</h2>
+        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                  <th className="py-3 px-4 text-left">Etapa</th>
+                  <th className="py-3 px-4 text-right">Negocios</th>
+                  <th className="py-3 px-4 text-right">Valor aprobado</th>
+                  <th className="py-3 px-4 text-right">Pendiente de recaudo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {perfil.porEtapa.map((e, i) => (
+                  <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/50">
+                    <td className="py-3 px-4">
+                      <span className="font-medium text-gray-900">
+                        {e.etapa_numero != null ? `E${e.etapa_numero} ` : ''}{e.etapa_nombre}
+                      </span>
+                      {e.stage && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-gray-400">
+                          {STAGE_LABEL[e.stage] ?? e.stage}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-right font-semibold text-gray-900 tabular-nums">{e.negocios}</td>
+                    <td className="py-3 px-4 text-right text-gray-600 tabular-nums">{fmtCOP(e.valor_aprobado)}</td>
+                    <td className="py-3 px-4 text-right font-semibold tabular-nums" style={{ color: e.pendiente_honorario > 0 ? '#B45309' : '#9CA3AF' }}>
+                      {fmtCOP(e.pendiente_honorario)}
+                    </td>
+                  </tr>
+                ))}
+                {perfil.porEtapa.length === 0 && (
+                  <tr><td colSpan={4} className="py-8 text-center text-sm text-gray-400">Sin negocios.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

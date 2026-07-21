@@ -121,7 +121,7 @@ function PersonaCard({
           <p className="truncate font-semibold text-gray-900">{nombreCorto(persona.nombre)}</p>
           <p className="truncate text-xs text-gray-400">{persona.position ?? 'Comercial'}</p>
         </div>
-        <RankBadge rank={persona.rank_honorario} total={total} />
+        <RankBadge rank={persona.rank_ventas} total={total} />
       </div>
 
       {/* Indicadores del mes */}
@@ -134,25 +134,25 @@ function PersonaCard({
         />
       </div>
 
-      {/* Indicadores acumulados + posiciones */}
+      {/* Indicadores acumulados + posiciones (ranking primario = ventas) */}
       <div className="space-y-2 border-t border-gray-50 pt-3">
+        <RankRow
+          label="Ventas (total)"
+          value={String(persona.num_ventas)}
+          rank={persona.rank_ventas}
+          total={total}
+          strong
+        />
         <RankRow
           label="Honorario recaudado"
           value={fmtCOP(persona.honorario_recaudado)}
           rank={persona.rank_honorario}
           total={total}
-          strong
         />
         <RankRow
           label="Valor aprobado"
           value={fmtCOP(persona.valor_aprobado)}
           rank={persona.rank_valor}
-          total={total}
-        />
-        <RankRow
-          label="Negocios activos"
-          value={String(persona.negocios_abiertos)}
-          rank={persona.rank_negocios}
           total={total}
         />
       </div>
@@ -175,7 +175,7 @@ function RankBadge({ rank, total }: { rank: number; total: number }) {
         backgroundColor: esPrimero ? '#FEF3C7' : '#F3F4F6',
         color: esPrimero ? GOLD : '#6B7280',
       }}
-      title={`Posicion ${rank} de ${total} en honorario recaudado`}
+      title={`Posicion ${rank} de ${total} en ventas`}
     >
       {esPrimero && <Trophy className="h-3 w-3" />}
       #{rank} de {total}

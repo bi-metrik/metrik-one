@@ -269,3 +269,102 @@ las iteraciones 1 y 2 (`get_comercial_resumen_soena`, `get_comercial_kpis_mes_so
 
 Ninguna nueva. Iteracion de UI + un helper puro. Las RPCs y `metas_comerciales`
 siguen como quedaron en la iteracion 2 (en prod).
+
+---
+
+# Iteracion 4 (2026-07-21) — correccion de fondo: venta = primer pago + operator + ranking por ventas
+
+Disparada por el transcript de la reunion con Daniela. Mauricio confirmo los cambios.
+
+## CORRECCION CRITICA — definicion #1 REEMPLAZADA
+
+La definicion de venta de las iteraciones 1-3 (venta = propuesta aprobada,
+`data.aprobado_at`) estaba MAL segun el cliente. Daniela: **"una venta = cuando el
+cliente le paga a SOENA"** (primer pago de honorario recibido).
+
+**Nueva definicion (reemplaza `aprobado_at` como ancla en TODAS las RPCs):**
+- **fecha_venta(negocio) = MIN(cobros.fecha) WHERE fecha IS NOT NULL AND
+  tipo_cobro <> 'pasante'** (primer pago de honorario; la tarifa Boome/UPME
+  'pasante' NO cuenta como venta ni entra jamas al desempeno; `IS DISTINCT FROM`
+  es null-safe).
+- Un negocio es VENTA solo si tiene >= 1 pago de honorario. Sin pago -> NO es
+  venta, NO aparece en la estadistica comercial.
+- "Ventas del mes" = negocios cuya fecha_venta (primer pago) cae en ese mes.
+- El honorario aprobado de la propuesta canonica (con/sin IVA) YA NO determina si
+  es venta: solo aporta el VALOR (monto). Se sigue tomando por DISTINCT ON negocio.
+
+**Divergencia medida:** julio 2026 = 21 ventas con la def vieja (aprobado_at) vs
+**18 con la correcta** (primer pago). Total historico 28 ventas. Serie real por mes
+(por fecha de primer pago): Feb 2, Abr 3, May 2, Jun 3, Jul 18. Julio por vendedor:
+Jessica 10, Daniela 5, Jenny 3.
+
+Afecta las 4 RPCs (`get_comercial_resumen_soena`, `get_comercial_perfil_soena`,
+`get_comercial_kpis_mes_soena`, `get_comercial_serie_mensual_soena`). Migracion
+`supabase/migrations/20260721000003_comercial_venta_por_pago.sql` (idempotente,
+rollback comentado). Aplicada a prod via MCP.
+
+## Pagos partidos -> "pago uno"
+
+Varios pagos parciales de honorario del cliente se AGREGAN al PRIMER pago hasta
+cubrir el honorario, sin importar el tipo_cobro (anticipo/pago). El "segundo pago"
+es el saldo del 50/50 (`tipo_cobro='saldo'`, hoy inexistente). Boome (pasante)
+NUNCA entra en 1er/2o pago. Se ajusto la logica:
+- `primer_pago  = SUM(monto) WHERE tipo_cobro <> 'pasante' AND <> 'saldo'`
+- `segundo_pago = SUM(monto) WHERE tipo_cobro = 'saldo'`
+(antes primer = anticipo+pago; el cambio lo hace resistente a pagos partidos con
+cualquier etiqueta). Datos: 4 negocios SOENA tienen pago partido; con fecha=MIN
+cuentan como 1 venta con la fecha del primer abono, correcto.
+
+## Ranking por NUMERO DE VENTAS (no recaudo)
+
+Daniela: "el ranking es con respecto a las ventas". La metrica PRIMARIA del ranking
+pasa a **numero de ventas del periodo** (negocios pagados); recaudo y valor quedan
+secundarios. El helper puro `comercial-ranking.ts` gana `rank_ventas` (primario) y
+ordena por el; `get_comercial_resumen_soena` expone `num_ventas` por responsable.
+Transparente entre comerciales (nombres + posiciones de todos). Ranking estandar
+con empates compartidos. Validado: Jessica #1 (20), Daniela #2 (5), Jenny #3 (3),
+tres empatadas #4 (0).
+
+## ACCESO — operator ve SU perfil + ranking
+
+Mauricio aprobo que cada comercial (rol `operator`) vea su propia hoja:
+- El nav `/equipo` se abre a `operator` cuando `modules.comercial_negocios` esta
+  activo (en `app-shell.tsx`: se inyecta `operator` a los roles de `/equipo` bajo
+  el flag). El tablero AGREGADO de `/tableros` sigue restringido a owner/admin/
+  supervisor.
+- `/equipo` (page): si el rol es operator, redirige a `/equipo/comercial/{su-staffId}`
+  (su propio perfil). Gerencia (owner/admin/supervisor) ve el indice de personas.
+- `/equipo/comercial/[staff_id]` (page): operator solo puede abrir SU staff_id; si
+  intenta otro -> redirige al propio. Ve sus indicadores + el ranking (que es
+  transparente: nombres + posiciones + numero de ventas de todos, sin cifras
+  financieras detalladas de otros). Gerencia ve cualquier perfil.
+- **Fallback preservado:** sin `comercial_negocios`, `/equipo` sigue mostrando la
+  gestion de horas/staff; el nav de `/equipo` no gana operator.
+
+## Meta real = 69 ventas/mes
+
+Se reemplazo la meta de PRUEBA (25 / $9M) por la real: **meta_num_ventas = 69**
+para el mes en curso (global, staff_id NULL). Daniela NO dio meta de valor -> 
+`meta_valor` queda NULL (no se inventa). Cumplimiento julio: 18/69 = 26.1%;
+cumplimiento_valor = null (no exigido).
+
+## Ajustes menores
+
+- **Ventas diarias del mes:** grafico de barras "Ventas por dia" en `/tableros` ->
+  pestaña Comercial, usando la fecha-de-venta (primer pago). RPC kpis expone
+  `porDia` (dia + conteo). Daniela lo pidio ("diariamente cuantas ventas llevamos").
+- **Embudo por vendedor con $ pendiente:** el perfil muestra el embudo por
+  etapa/estatus con el MONTO pendiente de recaudo del honorario
+  (`pendiente_honorario = max(precio_aprobado - honorario_recaudado, 0)`) por etapa.
+  La RPC de perfil expone `porEtapa` (+ `pendiente_honorario` en kpis y por negocio).
+- **Cancelacion de-priorizada:** se mantiene el KPI `tasa_cancelacion` pero sin
+  protagonismo (un tile mas, no destacado).
+
+## Definiciones vigentes tras iteracion 4
+
+1. **Venta = primer pago de honorario recibido** (fecha = MIN cobros.fecha no
+   pasante). REEMPLAZA `aprobado_at`. Gobierna num ventas, ticket, participacion,
+   cumplimiento, run-rate, series y el conteo del ranking.
+2-6. Sin cambios respecto a iteracion 2 (1er/2o pago ajustado a pagos partidos;
+   IVA; caso completo = saldado; cancelacion = estado perdido; tasa recaudo con
+   caveat Grupo 3).

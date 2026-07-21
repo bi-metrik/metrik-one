@@ -13,6 +13,8 @@ export interface ComercialResumenRow {
   en_ejecucion: number
   en_cobro: number
   cerrados: number
+  /** Ventas del negocio = negocios con >=1 pago de honorario recibido (venta = primer pago). */
+  num_ventas: number
   valor_aprobado: number
   /** Honorario recaudado = ingreso real (excluye tarifa UPME / pasante). Headline. */
   honorario_recaudado: number
@@ -23,15 +25,29 @@ export interface ComercialResumenRow {
 export interface ComercialPerfilKpis {
   negocios_total: number
   negocios_abiertos: number
+  num_ventas: number
   valor_aprobado: number
   honorario_recaudado: number
   tarifa_recaudada: number
+  /** Pendiente de recaudo del honorario (precio aprobado - honorario recaudado). */
+  pendiente_honorario: number
 }
 
 export interface ComercialPerfilStage {
   stage: string
   negocios: number
   valor_aprobado: number
+  pendiente_honorario: number
+}
+
+/** Embudo por etapa/estatus con monto pendiente de recaudo. */
+export interface ComercialPerfilEtapa {
+  etapa_numero: number | null
+  etapa_nombre: string
+  stage: string | null
+  negocios: number
+  valor_aprobado: number
+  pendiente_honorario: number
 }
 
 export interface ComercialPerfilNegocio {
@@ -42,9 +58,12 @@ export interface ComercialPerfilNegocio {
   estado: string | null
   etapa_nombre: string | null
   etapa_numero: number | null
+  es_venta: boolean
+  fecha_venta: string | null
   valor_aprobado: number
   honorario_recaudado: number
   tarifa_recaudada: number
+  pendiente_honorario: number
 }
 
 export interface ComercialPerfil {
@@ -54,6 +73,7 @@ export interface ComercialPerfil {
   sin_responsable: boolean
   kpis: ComercialPerfilKpis
   porStage: ComercialPerfilStage[]
+  porEtapa: ComercialPerfilEtapa[]
   negocios: ComercialPerfilNegocio[]
 }
 
@@ -112,10 +132,17 @@ export interface ComercialKpisMes {
   cumplimiento_valor: number | null
 }
 
+/** Ventas de un dia del mes (para el grafico de ventas diarias). */
+export interface ComercialVentaDia {
+  dia: string
+  ventas: number
+}
+
 export interface ComercialMesResponse {
   anio: number
   mes: number
   kpis: ComercialKpisMes
+  porDia: ComercialVentaDia[]
   porVendedor: ComercialVendedorMes[]
 }
 
