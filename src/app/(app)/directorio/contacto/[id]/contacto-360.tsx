@@ -12,7 +12,7 @@ import type { Contacto } from '@/types/database'
 import NotesSection from '@/components/notes-section'
 import { PhoneInput } from '@/components/phone-input'
 import InteraccionesSection from './interacciones-section'
-import type { InteraccionContacto } from '../../actions'
+import type { InteraccionContacto, StaffOption } from '../../actions'
 
 interface NegocioRow {
   id: string
@@ -37,9 +37,10 @@ interface Props {
   empresaVinculada: { id: string; nombre: string } | null
   negocios: NegocioRow[]
   interacciones: InteraccionContacto[]
+  staff: StaffOption[]
 }
 
-export default function Contacto360({ contacto, empresaVinculada, negocios, interacciones }: Props) {
+export default function Contacto360({ contacto, empresaVinculada, negocios, interacciones, staff }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -50,6 +51,8 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
     rol: contacto.rol ?? '',
     segmento: contacto.segmento ?? 'sin_contactar',
     comision_porcentaje: contacto.comision_porcentaje?.toString() ?? '',
+    // responsable_id aún no está en los tipos generados de `contactos`; lectura defensiva.
+    responsable_id: (contacto as { responsable_id?: string | null }).responsable_id ?? '',
   })
 
   const handleSave = () => {
@@ -163,6 +166,19 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
             >
               {SEGMENTOS_CONTACTO.map(s => (
                 <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Responsable</label>
+            <select
+              value={form.responsable_id}
+              onChange={e => setForm(p => ({ ...p, responsable_id: e.target.value }))}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Sin responsable</option>
+              {staff.map(s => (
+                <option key={s.id} value={s.id}>{s.full_name}</option>
               ))}
             </select>
           </div>

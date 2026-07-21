@@ -1,14 +1,15 @@
-import { getContacto, getEmpresaByContacto, getNegociosPorContacto, getInteraccionesPorContacto } from '../../actions'
+import { getContacto, getEmpresaByContacto, getNegociosPorContacto, getInteraccionesPorContacto, getStaffParaResponsable } from '../../actions'
 import { notFound } from 'next/navigation'
 import Contacto360 from './contacto-360'
 
 export default async function ContactoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const [contacto, empresaVinculada, negocios, interacciones] = await Promise.all([
+  const [contacto, empresaVinculada, negocios, interacciones, staff] = await Promise.all([
     getContacto(id),
     getEmpresaByContacto(id),
     getNegociosPorContacto(id),
     getInteraccionesPorContacto(id),
+    getStaffParaResponsable(),
   ])
 
   if (!contacto) notFound()
@@ -19,6 +20,7 @@ export default async function ContactoDetailPage({ params }: { params: Promise<{
       empresaVinculada={empresaVinculada}
       negocios={negocios}
       interacciones={interacciones}
+      staff={staff}
     />
   )
 }
