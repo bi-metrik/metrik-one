@@ -323,6 +323,38 @@ export async function getNegociosPorContacto(contactoId: string) {
   return data ?? []
 }
 
+// ── Interacciones del contacto (bandeja de leads / timeline) ──────────
+// Interacciones entrantes (Meta / WhatsApp / web / manual) del contacto, más
+// recientes primero. Alimenta la línea de tiempo del Contacto 360 y sus acciones
+// (crear negocio, marcar contactada, descartar).
+
+export interface InteraccionContacto {
+  id: string
+  fuente: string
+  fuente_ref: string | null
+  estado: string
+  negocio_id: string | null
+  payload: Record<string, unknown> | null
+  ocurrida_at: string | null
+  created_at: string | null
+}
+
+export async function getInteraccionesPorContacto(contactoId: string): Promise<InteraccionContacto[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
+    .from('contacto_interacciones')
+    .select('id, fuente, fuente_ref, estado, negocio_id, payload, ocurrida_at, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('contacto_id', contactoId)
+    .order('ocurrida_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+
+  return (data ?? []) as InteraccionContacto[]
+}
+
 // ── Vinculo persona natural: empresa <-> contacto ─────────
 
 export async function getEmpresaByContacto(contactoId: string) {

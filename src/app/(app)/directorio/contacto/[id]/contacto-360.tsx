@@ -11,6 +11,8 @@ import { formatCOP } from '@/lib/contacts/constants'
 import type { Contacto } from '@/types/database'
 import NotesSection from '@/components/notes-section'
 import { PhoneInput } from '@/components/phone-input'
+import InteraccionesSection from './interacciones-section'
+import type { InteraccionContacto } from '../../actions'
 
 interface NegocioRow {
   id: string
@@ -34,9 +36,10 @@ interface Props {
   contacto: Contacto
   empresaVinculada: { id: string; nombre: string } | null
   negocios: NegocioRow[]
+  interacciones: InteraccionContacto[]
 }
 
-export default function Contacto360({ contacto, empresaVinculada, negocios }: Props) {
+export default function Contacto360({ contacto, empresaVinculada, negocios, interacciones }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -179,6 +182,9 @@ export default function Contacto360({ contacto, empresaVinculada, negocios }: Pr
           )}
         </div>
       </div>
+
+      {/* Interacciones (leads sin convertir + timeline) */}
+      <InteraccionesSection interacciones={interacciones} />
 
       {/* Negocios */}
       <div className="space-y-3 rounded-lg border p-4">
