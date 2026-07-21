@@ -29,6 +29,8 @@ interface Props {
   mesData: ComercialMesResponse | null
   anio: number
   mes: number
+  /** Metas por vendedor del mes (staff_id, meta_num_ventas). Maps no serializan cross-boundary. */
+  metasPorVendedor: [string, number][]
 }
 
 /**
@@ -36,8 +38,8 @@ interface Props {
  * Cada persona ve sus propios indicadores + su posicion en el ranking del equipo.
  * El bucket "(sin responsable)" aparece como fila informativa, fuera del ranking.
  */
-export default function EquipoComercialPersonasClient({ resumen, mesData, anio, mes }: Props) {
-  const ranking = computeRanking(resumen)
+export default function EquipoComercialPersonasClient({ resumen, mesData, anio, mes, metasPorVendedor }: Props) {
+  const ranking = computeRanking(resumen, new Map(metasPorVendedor))
   const ventasMesPorId = new Map<string, ComercialVendedorMes>()
   for (const v of mesData?.porVendedor ?? []) {
     if (v.responsable_id) ventasMesPorId.set(v.responsable_id, v)
@@ -150,9 +152,9 @@ function PersonaCard({
           total={total}
         />
         <RankRow
-          label="Valor aprobado"
-          value={fmtCOP(persona.valor_aprobado)}
-          rank={persona.rank_valor}
+          label="Cumplimiento de meta"
+          value={persona.pct_cumplimiento != null ? `${persona.pct_cumplimiento}%` : 'Sin meta'}
+          rank={persona.rank_cumplimiento}
           total={total}
         />
       </div>

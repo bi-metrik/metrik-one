@@ -7,7 +7,7 @@ import EquipoClient from './equipo-client'
 import VendedoresClient from './vendedores-client'
 import EquipoComercialPersonasClient from './equipo-comercial-personas-client'
 import { getVendedoresResumen } from './vendedores-actions'
-import { getComercialResumen, getComercialMes } from './comercial-actions'
+import { getComercialResumen, getComercialMes, getMetasPorVendedorPeriodo } from './comercial-actions'
 
 interface Props {
   searchParams: Promise<{ mes?: string; staff?: string; proyecto?: string; estado?: string }>
@@ -47,9 +47,10 @@ export default async function EquipoPage({ searchParams }: Props) {
       const [anioStr, mesStr] = mes.split('-')
       const anioSel = Number(anioStr)
       const mesSel = Number(mesStr)
-      const [resumen, mesData] = await Promise.all([
+      const [resumen, mesData, metasMap] = await Promise.all([
         getComercialResumen(),
         getComercialMes(anioSel, mesSel),
+        getMetasPorVendedorPeriodo(anioSel, mesSel),
       ])
       return (
         <EquipoComercialPersonasClient
@@ -57,6 +58,7 @@ export default async function EquipoPage({ searchParams }: Props) {
           mesData={mesData}
           anio={anioSel}
           mes={mesSel}
+          metasPorVendedor={Array.from(metasMap)}
         />
       )
     }

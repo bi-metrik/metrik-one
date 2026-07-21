@@ -161,7 +161,7 @@ const CERT_NAV_ITEMS = [
 const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/mi-negocio', label: 'Configuración', icon: Settings, roles: ['owner', 'admin', 'supervisor'] },
-  { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
 ]
 
 // Workflows (visible si workspace tiene lineas activas — controlado por hasLineas prop)

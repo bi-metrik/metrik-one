@@ -368,3 +368,87 @@ cumplimiento_valor = null (no exigido).
 2-6. Sin cambios respecto a iteracion 2 (1er/2o pago ajustado a pagos partidos;
    IVA; caso completo = saldado; cancelacion = estado perdido; tasa recaudo con
    caveat Grupo 3).
+
+---
+
+## Iteracion 5 (2026-07-21) — Perfil del vendedor en `/equipo`
+
+Solo el perfil del vendedor (`/equipo/comercial/[staff_id]`) y su ranking. NO toca
+el agregado de `/tableros`. Todo respeta la definicion de venta vigente (primer pago
+de honorario).
+
+### Capa de datos (migracion `20260721000004_comercial_periodo_sla_serie.sql`)
+
+Ya aplicada a prod por MCP (idempotente DROP+CREATE, SECURITY DEFINER con check de
+pertenencia via `current_user_workspace_id()`, grants endurecidos: revoke PUBLIC/anon,
+grant authenticated). Rollback comentado al final.
+
+1. **Selector de periodo en `get_comercial_resumen_soena` y `get_comercial_perfil_soena`:**
+   params `p_anio, p_mes`. NULL = ACUMULADO (global, default). Con anio+mes = solo ese
+   mes. El periodo filtra `num_ventas` + recaudo (por `fecha_venta` = primer pago de
+   honorario) para que el RANKING pueda calcularse acumulado o por mes. `valor_aprobado`,
+   conteo de negocios y el embudo por etapa NO se filtran por periodo (son estado actual
+   del pipeline, no un flujo temporal). Resuelve la ambiguedad "acumulado vs mes" a
+   proposito, con el periodo etiquetado en pantalla.
+2. **SLA / ultimo avance por negocio (perfil):** mismo criterio que la fuente de verdad
+   del producto (`v_negocios_etapa_vencimiento`): **ultimo avance = `negocios.etapa_cambiada_at`**;
+   **SLA = `etapas_negocio.config_extra->>'sla_horas'`** (horas habiles);
+   **vencido = `horas_habiles_entre(etapa_cambiada_at, now()) > sla_horas`**. `sla_estado`:
+   `a_tiempo` | `vencido` | `sin_sla` (sin_sla si la etapa no define SLA o el negocio no
+   esta abierto). En SOENA hay SLA en 3 de 14 etapas (el resto cae a `sin_sla`, degrada
+   con gracia). Los KPIs del perfil ganan `vencidos` (conteo).
+3. **Serie mensual del vendedor:** ventas/mes + recaudo/mes de ese responsable (12 meses),
+   misma def. de venta. Alimenta las 2 graficas historicas.
+
+### Ranking por 3 metricas (`comercial-ranking.ts`)
+
+Los 3 items COMPARATIVOS del leaderboard (transparentes, incluido el operator):
+1. **Numero de ventas** (metrica primaria, orden del leaderboard).
+2. **Honorario recaudado.**
+3. **% cumplimiento de meta** = `num_ventas / meta_num_ventas * 100`.
+
+`computeRanking(resumen, metasPorVendedor)` acepta un mapa `staff_id -> meta_num_ventas`.
+**Cumplimiento requiere meta POR VENDEDOR.** Hoy solo existe la meta global (staff_id
+NULL). Sin meta propia, el vendedor tiene `pct_cumplimiento = null` y queda **fuera del
+ranking de cumplimiento** (`rank_cumplimiento = 0`) — se muestra "Sin meta" / guion. **NO
+se reparte ni se inventa la meta global.** La meta por vendedor ya es configurable desde
+el modal de metas (`metas_comerciales.staff_id`, upsert por vendedor); solo falta que
+Daniela las cargue.
+
+`getMetasPorVendedorPeriodo(anio, mes)` (comercial-actions): por mes = la meta de ese
+vendedor en ese mes; acumulado = SUMA de sus metas mensuales del anio en curso. Solo
+cuenta metas con `staff_id` (la global NO entra). Maps no serializan cross-boundary, se
+pasan al cliente como `[string, number][]`.
+
+### UI del perfil (`comercial-perfil-client.tsx`)
+
+- **Selector de periodo** (arriba a la derecha): Acumulado (default) o un mes de la serie.
+  Navega por `?mes=YYYY-MM`; el server re-consulta perfil + ranking con ese periodo. El
+  periodo se etiqueta junto al leaderboard.
+- **Leaderboard:** 3 tarjetas comparativas (valor del vendedor + su posicion `#N de M` en
+  cada metrica) + tabla del equipo completa (todos rankeados por ventas, con recaudo y
+  cumplimiento visibles, la fila del vendedor actual resaltada y marcada "Tu"). Cumplimiento
+  degrada a guion cuando no hay meta.
+- **2 graficas historicas:** "Ventas por mes" (barras) + "Recaudo por mes / honorario"
+  (linea), de la `serie` del vendedor (12 meses). Recharts, patron del tab agregado.
+- **Tabla de negocios con la config de `/negocios`:** barra de busqueda + filtro por FASE
+  (pills de stage) + filtro por ETAPA (pills de la fase, en orden), scopeada a los negocios
+  del vendedor. Solo se muestran las fases/etapas presentes. **2 columnas nuevas:** "Ultimo
+  avance" (`etapa_cambiada_at`) y "SLA" (badge A tiempo / Vencido / guion). Reusa el patron
+  visual de `negocios-client.tsx` (tokens MeTRIK), adaptado al shape `ComercialPerfilNegocio`.
+- KPIs del periodo ganan un tile "Vencidos (SLA)".
+
+### Acceso
+
+Sin cambios respecto a iteracion 4: operator ve SOLO su perfil (redirige si abre otro
+staff_id) + el leaderboard transparente; no ve el embudo/negocios de otros ni el agregado
+de `/tableros`. El fallback de `/equipo` sin `comercial_negocios` (gestion de horas) intacto.
+
+### Global — `/tableros` habilitado a supervisor
+
+En `app-shell.tsx`, el item `/tableros` pasa a `['owner','admin','supervisor','read_only']`
+(antes sin supervisor). Cambio de PRODUCTO (todos los workspaces), consistente con que
+supervisor ya ve `/numeros`. El guard server-side de `/tableros/page.tsx` usa
+`perms.canViewNumbers`, que para supervisor ya es `true` (roles.ts) — no habia doble
+exclusion; el unico blocker era el nav. En mobile, `/tableros` cae al panel "Mas" de
+supervisor automaticamente.

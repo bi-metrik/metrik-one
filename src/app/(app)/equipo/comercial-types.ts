@@ -31,6 +31,8 @@ export interface ComercialPerfilKpis {
   tarifa_recaudada: number
   /** Pendiente de recaudo del honorario (precio aprobado - honorario recaudado). */
   pendiente_honorario: number
+  /** Negocios abiertos con SLA de etapa vencido. */
+  vencidos: number
 }
 
 export interface ComercialPerfilStage {
@@ -60,10 +62,26 @@ export interface ComercialPerfilNegocio {
   etapa_numero: number | null
   es_venta: boolean
   fecha_venta: string | null
+  /** Fecha de entrada a la etapa actual (ultimo avance). etapa_cambiada_at. */
+  ultimo_avance: string | null
+  /** SLA de la etapa actual en horas habiles (null si la etapa no define SLA). */
+  sla_horas: number | null
+  /** 'a_tiempo' | 'vencido' | 'sin_sla'. */
+  sla_estado: 'a_tiempo' | 'vencido' | 'sin_sla'
   valor_aprobado: number
   honorario_recaudado: number
   tarifa_recaudada: number
   pendiente_honorario: number
+}
+
+/** Punto de la serie mensual del vendedor (ventas + recaudo). */
+export interface ComercialPerfilSerie {
+  anio: number
+  mes: number
+  label: string
+  num_ventas: number
+  valor_aprobado: number
+  honorario_recaudado: number
 }
 
 export interface ComercialPerfil {
@@ -71,9 +89,13 @@ export interface ComercialPerfil {
   nombre: string
   position: string | null
   sin_responsable: boolean
+  /** Periodo del perfil: null = acumulado; con anio+mes = ese mes. */
+  anio: number | null
+  mes: number | null
   kpis: ComercialPerfilKpis
   porStage: ComercialPerfilStage[]
   porEtapa: ComercialPerfilEtapa[]
+  serie: ComercialPerfilSerie[]
   negocios: ComercialPerfilNegocio[]
 }
 
