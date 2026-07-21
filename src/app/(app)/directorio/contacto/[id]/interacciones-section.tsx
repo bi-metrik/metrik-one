@@ -10,6 +10,7 @@ import {
   marcarInteraccionContactada,
   descartarInteraccion,
 } from '../../../negocios/negocio-v2-actions'
+import { formatCOP } from '@/lib/contacts/constants'
 import type { InteraccionContacto } from '../../actions'
 
 // ── Presentación por fuente / estado ────────────────────────────────
@@ -29,13 +30,29 @@ const ESTADO_META: Record<string, { label: string; class: string }> = {
 }
 
 // Campos del field_data que resumimos (nombre candidato → etiqueta). Tolerante:
-// si el campo no está o llega sin values, simplemente no se muestra.
-const CAMPOS_RESUMEN: Array<{ names: string[]; label: string }> = [
+// si el campo no está o llega sin values, simplemente no se muestra. `money`
+// formatea el valor como COP.
+const CAMPOS_RESUMEN: Array<{ names: string[]; label: string; money?: boolean }> = [
   { names: ['¿qué_tipo_de_vehículo_adquiriste?', 'tipo_vehiculo', 'tipo_de_vehiculo'], label: 'Vehículo' },
   { names: ['marca_-línea_-modelo__(_byd_-yuan_-2026)', 'marca_linea_modelo', 'marca'], label: 'Marca/modelo' },
-  { names: ['precio', 'precio_declarado', 'valor'], label: 'Precio declarado' },
+  {
+    names: ['precio_de_el(los)_vehículo(s)._pesos_colombianos', 'precio', 'precio_declarado', 'valor'],
+    label: 'Precio declarado',
+    money: true,
+  },
   { names: ['persona_natural_o_jurídica', 'tipo_persona'], label: 'Tipo persona' },
 ]
+
+// Formatea un valor de precio declarado. Tolera "$", puntos y comas de miles.
+// Si extrae un número, lo formatea como COP; si no, deja el texto limpio.
+function formatPrecio(v: string): string {
+  const digits = v.replace(/[^\d]/g, '')
+  if (digits.length > 0) {
+    const n = Number(digits)
+    if (Number.isFinite(n) && n > 0) return formatCOP(n)
+  }
+  return limpiar(v)
+}
 
 type FieldDatum = { name?: string; values?: string[] }
 
@@ -112,7 +129,8 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
   const resumen = CAMPOS_RESUMEN
     .map((c) => {
       const v = leer(fieldData, c.names)
-      return v ? { label: c.label, value: limpiar(v) } : null
+      if (!v) return null
+      return { label: c.label, value: c.money ? formatPrecio(v) : limpiar(v) }
     })
     .filter((x): x is { label: string; value: string } => x !== null)
 

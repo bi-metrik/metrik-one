@@ -1546,7 +1546,9 @@ export async function crearNegocioDesdeInteraccion(input: {
   empresa_nombre?: string
   empresa_nit?: string
 }): Promise<{ negocio_id: string | null; error: string | null }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  // userId = profile.id (para assigned_by, FK a profiles). staffId = staff.id
+  // (para negocio_responsables.staff_id y como fallback de responsable del negocio).
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
 
   // 1. Cargar la interacción (RLS ya la acota al workspace del usuario).
@@ -1572,14 +1574,16 @@ export async function crearNegocioDesdeInteraccion(input: {
   const fieldData = (inter.payload?.field_data ?? []) as Array<{ name?: string; values?: string[] }>
   const leadgenId = (inter.payload?.leadgen_id ?? null) as string | null
 
-  // 2. Nombre del contacto (base del nombre del negocio).
+  // 2. Nombre + responsable del contacto (el responsable del contacto tiene
+  //    prioridad sobre el staff del usuario que convierte).
   const { data: contactoRow } = await db(supabase)
     .from('contactos')
-    .select('nombre')
+    .select('nombre, responsable_id')
     .eq('id', inter.contacto_id)
     .eq('workspace_id', workspaceId)
     .single()
-  const contactoNombre = (contactoRow as { nombre: string | null } | null)?.nombre?.trim() || 'Lead'
+  const contactoInfo = contactoRow as { nombre: string | null; responsable_id: string | null } | null
+  const contactoNombre = contactoInfo?.nombre?.trim() || 'Lead'
 
   // 3. Nombre del negocio config-driven (misma config que usaba el webhook).
   const { data: wsCfg } = await db(supabase)
@@ -1627,12 +1631,55 @@ export async function crearNegocioDesdeInteraccion(input: {
     return { negocio_id: null, error: res.error ?? 'No se pudo crear el negocio' }
   }
 
-  // 6. Enlazar el negocio con la interacción de origen (metadata) + marcar convertida.
-  await db(supabase)
+  // 6. Enlazar el negocio con la interacción de origen (metadata) + fijar el
+  //    responsable + marcar la interacción convertida.
+  //
+  //    Metadata: MERGE, no overwrite. crearNegocio (y sus triggers/auto-init)
+  //    pueden haber escrito metadata; leemos el actual y combinamos para no
+  //    perderlo. interaccion_id / leadgen_id / fuente_cargue mandan (identifican
+  //    el origen del negocio).
+  const { data: negActual } = await db(supabase)
     .from('negocios')
-    .update({ metadata: { interaccion_id: inter.id, leadgen_id: leadgenId, fuente_cargue: 'meta_lead' } })
+    .select('metadata')
     .eq('id', res.negocio_id)
     .eq('workspace_id', workspaceId)
+    .single()
+  const metadataActual = ((negActual as { metadata?: Record<string, unknown> } | null)?.metadata ?? {}) as Record<string, unknown>
+
+  // Responsable del negocio: el del contacto tiene prioridad; si el contacto no
+  // tiene, el staff del usuario que convierte. El negocio convertido NUNCA queda
+  // sin responsable (mientras haya alguno de los dos).
+  const responsableId = contactoInfo?.responsable_id ?? staffId ?? null
+
+  await db(supabase)
+    .from('negocios')
+    .update({
+      metadata: { ...metadataActual, interaccion_id: inter.id, leadgen_id: leadgenId, fuente_cargue: 'meta_lead' },
+      ...(responsableId ? { responsable_id: responsableId } : {}),
+    })
+    .eq('id', res.negocio_id)
+    .eq('workspace_id', workspaceId)
+
+  // Upsert idempotente en negocio_responsables (N:M, fuente de verdad de la lista
+  // de responsables). Sin esto, las dos vistas (escalar responsable_id vs. lista
+  // N:M) divergen. ON CONFLICT DO NOTHING vía upsert con ignoreDuplicates.
+  if (responsableId) {
+    try {
+      await db(supabase)
+        .from('negocio_responsables')
+        .upsert(
+          { negocio_id: res.negocio_id, staff_id: responsableId, assigned_by: userId ?? null },
+          { onConflict: 'negocio_id,staff_id', ignoreDuplicates: true },
+        )
+      await sincronizarResponsablePrincipal(supabase, res.negocio_id, workspaceId)
+    } catch (respErr) {
+      // No bloquear la conversión si la asignación de responsable falla.
+      console.error(
+        `[crearNegocioDesdeInteraccion] No se pudo asignar responsable (negocio=${res.negocio_id}, staff=${responsableId}):`,
+        respErr instanceof Error ? respErr.message : respErr,
+      )
+    }
+  }
 
   await db(supabase)
     .from('contacto_interacciones')

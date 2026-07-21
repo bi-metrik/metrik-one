@@ -164,11 +164,26 @@ type MetaLeadsConfig = {
   };
 };
 
-// Normaliza un valor de contacto para dedup: lower + trim. Emails y teléfonos se
-// comparan normalizados para que "  Ana@X.com " y "ana@x.com" sean el mismo.
+// Normaliza un valor de contacto para dedup: lower + trim. Emails se comparan así
+// para que "  Ana@X.com " y "ana@x.com" sean el mismo.
 function norm(v: string | null | undefined): string | null {
   const t = (v ?? '').trim().toLowerCase();
   return t.length ? t : null;
+}
+
+// Normaliza un teléfono para dedup: solo dígitos (quita espacios, guiones,
+// paréntesis, '+'). Así "+57 314 536 2841", "3145362841" y "+573145362841"
+// deduplican igual. Devuelve null si no queda ningún dígito.
+function normTel(v: string | null | undefined): string | null {
+  const digits = (v ?? '').replace(/\D/g, '');
+  return digits.length ? digits : null;
+}
+
+// Escapa los comodines de PostgREST `ilike` ('%' y '_') para que un email con
+// esos caracteres (p.ej. la parte local "a_b@x.com") no active un patrón amplio
+// y matchee un contacto ajeno. '\' se escapa primero para no romper los demás.
+function escapeLike(v: string): string {
+  return v.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 async function handleLead(c: LeadgenChange): Promise<void> {
@@ -239,7 +254,7 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   const emailRaw = getField(fm.email ?? ['email', 'correo', 'correo_electronico']);
   const telefonoRaw = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone']);
   const email = norm(emailRaw);
-  const telefono = norm(telefonoRaw);
+  const telefono = normTel(telefonoRaw); // solo dígitos, para dedup robusto
 
   // Defaults del contacto creado desde el lead (opt-in): fuente = pauta digital,
   // rol = decisor si el lead es persona natural. Solo aplican al CREAR el contacto;
@@ -261,18 +276,28 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   let contactoId: string | null = null;
   let estadoInteraccion = 'nueva';
 
-  // Buscar por email normalizado.
+  // Buscar por email normalizado. El email es la llave dura del dedup. Se escapan
+  // los comodines de `ilike` ('%' y '_') para que un email con esos caracteres
+  // válidos en la parte local (ej. "a_b@x.com") no active un patrón amplio y
+  // fusione dos contactos distintos (merge automático → sin falsos positivos).
   if (email) {
     const { data } = await supabase
-      .from('contactos').select('id, email').eq('workspace_id', workspaceId).ilike('email', email).maybeSingle();
+      .from('contactos').select('id, email').eq('workspace_id', workspaceId).ilike('email', escapeLike(email)).maybeSingle();
     contactoId = (data as { id: string } | null)?.id ?? null;
   }
 
-  // Sin match por email → intentar por teléfono.
+  // Sin match por email → intentar por teléfono normalizado. La columna `telefono`
+  // guarda el valor con formato ("+57 314 …"), así que no se puede normalizar en
+  // la query PostgREST: traemos los candidatos del workspace y comparamos por solo
+  // dígitos en memoria. Así "+57 314 536 2841", "3145362841" y "+573145362841"
+  // deduplican igual.
   if (!contactoId && telefono) {
     const { data } = await supabase
-      .from('contactos').select('id, email').eq('workspace_id', workspaceId).eq('telefono', telefono).maybeSingle();
-    const encontrado = data as { id: string; email: string | null } | null;
+      .from('contactos').select('id, email, telefono')
+      .eq('workspace_id', workspaceId)
+      .not('telefono', 'is', null);
+    const candidatos = (data ?? []) as Array<{ id: string; email: string | null; telefono: string | null }>;
+    const encontrado = candidatos.find((c) => normTel(c.telefono) === telefono) ?? null;
     if (encontrado) {
       const emailContacto = norm(encontrado.email);
       // Conflicto: teléfono igual pero email distinto → dos personas, un teléfono.
