@@ -2,50 +2,39 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Phone, Mail, Search, Users, Trash2, Pencil, Flame } from 'lucide-react'
+import Link from 'next/link'
+import { Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown } from 'lucide-react'
 import { toast } from 'sonner'
-import EntityCard from '@/components/entity-card'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/catalogos/constants'
-import { deleteContacto, updateContactoSegmento } from '../actions'
-import type { Contacto } from '@/types/database'
+import { deleteContacto, updateContactoSegmento, type ContactoConMeta } from '../actions'
 
 interface Props {
-  contactos: Contacto[]
+  contactos: ContactoConMeta[]
 }
+
+// Orden de la vista general. Default: ultima interaccion (cualquiera).
+type SortKey = 'ultima_interaccion' | 'ultima_interaccion_meta' | 'alfabetico' | 'creacion'
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'ultima_interaccion', label: 'Ultima interaccion' },
+  { value: 'ultima_interaccion_meta', label: 'Ultima interaccion de Meta' },
+  { value: 'alfabetico', label: 'Alfabetico (A-Z)' },
+  { value: 'creacion', label: 'Fecha de creacion' },
+]
+
+const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const
 
 export default function ContactosList({ contactos }: Props) {
   const [search, setSearch] = useState('')
   const [rolFilter, setRolFilter] = useState<string | null>(null)
   const [segmentoFilter, setSegmentoFilter] = useState<string | null>(null)
+  const [sortBy, setSortBy] = useState<SortKey>('ultima_interaccion')
   const [, startTransition] = useTransition()
   const router = useRouter()
 
-  const filtered = contactos.filter(c => {
-    const matchSearch = !search || c.nombre.toLowerCase().includes(search.toLowerCase())
-    const matchRol = !rolFilter || c.rol === rolFilter
-    const matchSegmento = !segmentoFilter || c.segmento === segmentoFilter
-    return matchSearch && matchRol && matchSegmento
-  })
-
-  const handleDelete = (id: string, nombre: string) => {
-    if (!confirm(`Eliminar contacto "${nombre}"?`)) return
-    startTransition(async () => {
-      const res = await deleteContacto(id)
-      if (res.success) {
-        toast.success('Contacto eliminado')
-        router.refresh()
-      } else {
-        toast.error(res.error)
-      }
-    })
-  }
-
   const getFuenteLabel = (value: string | null) =>
     FUENTES_ADQUISICION.find(f => f.value === value)?.label ?? value ?? ''
-
   const getRolLabel = (value: string | null) =>
     ROLES_CONTACTO.find(r => r.value === value)?.label ?? ''
-
   const getRolChip = (value: string | null) => {
     if (!value) return undefined
     const colors: Record<string, string> = {
@@ -56,25 +45,21 @@ export default function ContactosList({ contactos }: Props) {
     }
     return colors[value] ?? 'bg-gray-100 text-gray-600'
   }
-
   const getSegmentoLabel = (value: string | null) =>
     SEGMENTOS_CONTACTO.find(s => s.value === value)?.label ?? ''
-
   const getSegmentoChip = (value: string | null) =>
-    SEGMENTOS_CONTACTO.find(s => s.value === value)?.chipClass ?? ''
+    SEGMENTOS_CONTACTO.find(s => s.value === value)?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]'
 
-  const timeAgo = (date: string | null) => {
+  // Fecha corta absoluta (pura, calcada de negocio-card). Evita Date.now() en
+  // render (regla react-hooks/purity).
+  const fechaCorta = (date: string | null) => {
     if (!date) return undefined
-    const diff = Date.now() - new Date(date).getTime()
-    const days = Math.floor(diff / 86400000)
-    if (days === 0) return 'Hoy'
-    if (days === 1) return 'Ayer'
-    if (days < 30) return `Hace ${days} días`
-    if (days < 365) return `Hace ${Math.floor(days / 30)} meses`
-    return `Hace ${Math.floor(days / 365)} años`
+    try {
+      return new Date(date).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+    } catch {
+      return undefined
+    }
   }
-
-  const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const
 
   const cycleSegmento = (id: string, currentSegmento: string | null) => {
     const current = currentSegmento ?? 'sin_contactar'
@@ -94,6 +79,48 @@ export default function ContactosList({ contactos }: Props) {
     })
   }
 
+  const handleDelete = (id: string, nombre: string) => {
+    if (!confirm(`Eliminar contacto "${nombre}"?`)) return
+    startTransition(async () => {
+      const res = await deleteContacto(id)
+      if (res.success) {
+        toast.success('Contacto eliminado')
+        router.refresh()
+      } else {
+        toast.error(res.error)
+      }
+    })
+  }
+
+  const filtered = contactos.filter(c => {
+    const matchSearch = !search || c.nombre.toLowerCase().includes(search.toLowerCase())
+    const matchRol = !rolFilter || c.rol === rolFilter
+    const matchSegmento = !segmentoFilter || c.segmento === segmentoFilter
+    return matchSearch && matchRol && matchSegmento
+  })
+
+  // Orden. Fechas ISO comparadas como string (mismo formato timestamptz) — nulls al final.
+  const byDateDesc = (a: string | null, b: string | null) => {
+    if (a === b) return 0
+    if (!a) return 1
+    if (!b) return -1
+    return a > b ? -1 : 1
+  }
+  const sorted = [...filtered].sort((a, b) => {
+    switch (sortBy) {
+      case 'ultima_interaccion':
+        return byDateDesc(a.ultima_interaccion_at, b.ultima_interaccion_at)
+      case 'ultima_interaccion_meta':
+        return byDateDesc(a.ultima_interaccion_meta_at, b.ultima_interaccion_meta_at)
+      case 'alfabetico':
+        return a.nombre.localeCompare(b.nombre, 'es')
+      case 'creacion':
+        return byDateDesc(a.created_at, b.created_at)
+      default:
+        return 0
+    }
+  })
+
   if (contactos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16">
@@ -110,21 +137,35 @@ export default function ContactosList({ contactos }: Props) {
 
   return (
     <div className="space-y-3">
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="Buscar contacto..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-sm"
-        />
+      {/* Search + orden */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Buscar contacto..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-sm"
+          />
+        </div>
+        <div className="relative shrink-0">
+          <ArrowUpDown className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as SortKey)}
+            className="appearance-none rounded-lg border bg-background py-2 pl-8 pr-3 text-xs font-medium"
+            aria-label="Ordenar contactos"
+          >
+            {SORT_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Filters */}
       <div className="space-y-2">
-        {/* Rol + Promotor filter row */}
         <div className="flex gap-1.5 overflow-x-auto">
           <button
             onClick={() => { setRolFilter(null); setSegmentoFilter(null) }}
@@ -134,6 +175,21 @@ export default function ContactosList({ contactos }: Props) {
           >
             Todos ({contactos.length})
           </button>
+          {(() => {
+            const metaCount = contactos.filter(c => c.es_meta).length
+            if (metaCount === 0) return null
+            const active = segmentoFilter === '__meta__'
+            return (
+              <button
+                onClick={() => { setSegmentoFilter(active ? null : '__meta__'); setRolFilter(null) }}
+                className={`shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  active ? 'bg-[#1877F2] text-white' : 'bg-[#1877F2]/10 text-[#1877F2] hover:bg-[#1877F2]/20'
+                }`}
+              >
+                <Megaphone className="h-3 w-3" /> Meta ({metaCount})
+              </button>
+            )
+          })()}
           {ROLES_CONTACTO.map(r => {
             const count = contactos.filter(c => c.rol === r.value).length
             if (count === 0) return null
@@ -151,7 +207,6 @@ export default function ContactosList({ contactos }: Props) {
           })}
         </div>
 
-        {/* Segmento filter row */}
         <div className="flex gap-1.5 overflow-x-auto">
           {SEGMENTOS_CONTACTO.map(s => {
             const count = contactos.filter(c => c.segmento === s.value).length
@@ -171,40 +226,120 @@ export default function ContactosList({ contactos }: Props) {
         </div>
       </div>
 
-      {/* Cards */}
+      {/* Cards (calcado del patron de /negocios) */}
       <div className="space-y-2">
-        {filtered.map(c => {
+        {sorted.map(c => {
           const segLabel = getSegmentoLabel(c.segmento)
           const segChip = getSegmentoChip(c.segmento)
+          const rolLabel = getRolLabel(c.rol)
+          const rolChip = getRolChip(c.rol)
+          const fuenteLabel = getFuenteLabel(c.fuente_adquisicion)
+          const cuando = fechaCorta(c.ultima_interaccion_at ?? c.created_at)
+          const campana = c.origen?.campaign_name?.trim() || null
 
           return (
-            <EntityCard
+            <Link
               key={c.id}
               href={`/directorio/contacto/${c.id}`}
-              title={c.nombre}
-              subtitle={getFuenteLabel(c.fuente_adquisicion)}
-              statusLabel={getRolLabel(c.rol) || undefined}
-              statusColor={getRolChip(c.rol)}
-              isComplete={!!c.email}
-              summaryLines={[
-                ...(c.telefono ? [{ icon: <Phone className="h-3 w-3" />, text: c.telefono }] : []),
-                ...(c.email ? [{ icon: <Mail className="h-3 w-3" />, text: c.email }] : []),
-              ]}
-              badges={segLabel ? [{ label: segLabel, className: segChip, onClick: () => cycleSegmento(c.id, c.segmento) }] : undefined}
-              timeAgo={timeAgo(c.created_at)}
-              quickAction={{
-                tooltip: 'Crear negocio',
-                icon: <Flame className="h-4 w-4" />,
-                onClick: () => router.push(`/negocios/nuevo?contacto_id=${c.id}&contacto_nombre=${encodeURIComponent(c.nombre)}`),
-              }}
-              actions={[
-                { label: 'Editar', icon: <Pencil className="h-3 w-3" />, onClick: () => router.push(`/directorio/contacto/${c.id}`) },
-                { label: 'Eliminar', icon: <Trash2 className="h-3 w-3" />, variant: 'destructive', onClick: () => handleDelete(c.id, c.nombre) },
-              ]}
-            />
+              className="block rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  {/* Fila 1: badges */}
+                  <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                    {segLabel && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); cycleSegmento(c.id, c.segmento) }}
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${segChip}`}
+                        title="Cambiar segmento"
+                      >
+                        {segLabel}
+                      </button>
+                    )}
+                    {c.es_meta && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-[#1877F2]/10 px-2 py-0.5 text-[10px] font-medium text-[#1877F2]"
+                        title="Contacto que llego desde Meta (Facebook/Instagram)"
+                      >
+                        <Megaphone className="h-2.5 w-2.5" />
+                        Meta
+                      </span>
+                    )}
+                    {rolLabel && (
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${rolChip}`}>
+                        {rolLabel}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Nombre (ya viene en mayusculas) */}
+                  <p className="truncate text-sm font-semibold leading-tight text-[#1A1A1A]">
+                    {c.nombre}
+                  </p>
+                  {fuenteLabel && (
+                    <p className="truncate text-[11px] text-[#6B7280]">{fuenteLabel}</p>
+                  )}
+
+                  {/* Contacto */}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    {c.telefono && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-[#6B7280]">
+                        <Phone className="h-3 w-3" /> {c.telefono}
+                      </span>
+                    )}
+                    {c.email && (
+                      <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-[#6B7280]">
+                        <Mail className="h-3 w-3 shrink-0" /> <span className="truncate">{c.email}</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Origen de campana (first-touch) */}
+                  {(campana || c.es_meta) && (
+                    <p className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#6B7280]">
+                      <Megaphone className="h-2.5 w-2.5 text-[#1877F2]" />
+                      Origen: Meta
+                      {campana && <span className="font-medium text-[#1A1A1A]"> · {campana}</span>}
+                      {c.origen?.platform && (
+                        <span className="uppercase text-[#6B7280]/70"> ({c.origen.platform})</span>
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                {/* Acciones */}
+                <div className="flex shrink-0 flex-col items-end gap-1.5 text-right">
+                  {cuando && <span className="text-[10px] text-[#6B7280]/80">{cuando}</span>}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault(); e.stopPropagation()
+                        router.push(`/negocios/nuevo?contacto_id=${c.id}&contacto_nombre=${encodeURIComponent(c.nombre)}`)
+                      }}
+                      className="rounded p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#F59E0B]"
+                      title="Crear negocio"
+                      aria-label="Crear negocio"
+                    >
+                      <Flame className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDelete(c.id, c.nombre) }}
+                      className="rounded p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#EF4444]"
+                      title="Eliminar"
+                      aria-label="Eliminar contacto"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Link>
           )
         })}
-        {filtered.length === 0 && (
+        {sorted.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">
             No se encontraron contactos
           </p>

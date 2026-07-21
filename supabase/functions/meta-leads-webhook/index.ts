@@ -186,6 +186,23 @@ function escapeLike(v: string): string {
   return v.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
+// Graba el ORIGEN de primer toque en el contacto (custom_data.origen) si aun no
+// lo tiene. Es first-touch INMUTABLE: la campana por la que el contacto llego la
+// primera vez. Nunca pisa un origen existente (un contacto dedup que ya tenia
+// origen conserva su primer toque). Merge no destructivo sobre custom_data.
+async function escribirOrigenSiFalta(
+  supabase: SupabaseClient,
+  contactoId: string,
+  origen: Record<string, unknown>,
+): Promise<void> {
+  const { data } = await supabase
+    .from('contactos').select('custom_data').eq('id', contactoId).maybeSingle();
+  const cd = ((data as { custom_data?: Record<string, unknown> } | null)?.custom_data ?? {}) as Record<string, unknown>;
+  if (cd.origen) return; // ya tiene primer origen: no se pisa
+  await supabase
+    .from('contactos').update({ custom_data: { ...cd, origen } }).eq('id', contactoId);
+}
+
 async function handleLead(c: LeadgenChange): Promise<void> {
   const supabase = getServiceClient();
 
@@ -265,6 +282,24 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     && tipoPersona.trim().toLowerCase().replace(/_+$/, '') === (cc.natural_value ?? 'natural').toLowerCase();
   const contactoRol = esNatural ? (cc.rol_natural ?? null) : null;
 
+  // Nombre del contacto en MAYUSCULAS (homogeneo con negocios).
+  const nombreUpper = nombre.toUpperCase();
+
+  // Origen de primer toque (campana desde donde llego). Se graba en el contacto
+  // (custom_data.origen), inmutable: solo si el contacto aun no lo tiene.
+  const createdTimeOrigen = c.created_time ?? lead.created_time ?? null;
+  const firstAtOrigen = createdTimeOrigen != null
+    ? new Date(Number(createdTimeOrigen) * 1000).toISOString() : null;
+  const origen = {
+    fuente: 'meta',
+    campaign_id: lead.campaign_id ?? null,
+    campaign_name: lead.campaign_name ?? null,
+    adset_name: lead.adset_name ?? null,
+    ad_name: lead.ad_name ?? null,
+    platform: lead.platform ?? null,
+    first_at: firstAtOrigen,
+  };
+
   // 3. Dedup de contacto — EMAIL-first. El email identifica mejor a una persona
   //    que el teléfono (un teléfono se comparte entre familiares/empresa). Reglas:
   //    a) hay email y matchea un contacto → fusiona con ese contacto.
@@ -311,18 +346,21 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   }
 
   // Crear contacto si no se resolvió por dedup.
+  let contactoCreado = false;
   if (!contactoId) {
     const { data, error } = await supabase
       .from('contactos')
       .insert({
         workspace_id: workspaceId,
-        nombre,
+        nombre: nombreUpper,
         telefono: telefonoRaw ?? null,
         email: emailRaw ?? null,
         fuente_adquisicion: cc.fuente_adquisicion ?? null,
         fuente_detalle: cc.fuente_detalle ?? null,
         rol: contactoRol,
         segmento: cc.segmento_inicial ?? null,
+        // Origen de primer toque grabado desde el nacimiento del contacto.
+        custom_data: { origen },
       })
       .select('id').single();
     if (error) {
@@ -330,6 +368,12 @@ async function handleLead(c: LeadgenChange): Promise<void> {
       return;
     }
     contactoId = (data as { id: string }).id;
+    contactoCreado = true;
+  }
+
+  // Contacto ya existente (dedup): grabar el primer origen si aun no lo tiene.
+  if (!contactoCreado && contactoId) {
+    await escribirOrigenSiFalta(supabase, contactoId, origen);
   }
 
   // 4. Registrar la INTERACCIÓN (no un negocio). El humano la convierte luego.
