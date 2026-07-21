@@ -89,16 +89,6 @@ export default function NegociosClient({
     return cerrados.filter((n) => n.cierre_motivo === motivoCierre)
   }, [cerrados, motivoCierre])
 
-  // ── Contadores (sobre `negocios`, que ya viene scopeado por servidor: el
-  //    operator solo recibe sus negocios, así que los conteos salen por rol). ──
-  const faseCount = (key: FaseFilter) =>
-    key === 'todos'
-      ? negocios.length
-      : key === 'cerrados'
-        ? cerrados.length
-        : negocios.filter((n) => n.stage_actual === key).length
-  const etapaCount = (numero: number) => negocios.filter((n) => n.etapa_numero === numero).length
-
   // Etapas de la fase seleccionada (solo cuando la fase es un stage), en orden del workflow.
   const etapasDeFase = useMemo(
     () =>
@@ -145,6 +135,66 @@ export default function NegociosClient({
     }
     return res
   }, [current, term, seccional, responsable])
+
+  // Negocios con todos los filtros activos EXCEPTO fase/etapa (responsable + seccional + búsqueda).
+  // Base para los contadores de fase: refleja el filtro de responsable, seccional y búsqueda libre
+  // sin que el tab de fase seleccionado distorsione los totales de los demás tabs.
+  const negociosFiltrados = useMemo(() => {
+    let res = negocios
+    if (seccional !== 'todas') {
+      res = res.filter((n) => n.seccional_label === seccional)
+    }
+    if (responsable !== 'todos') {
+      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
+    }
+    if (term) {
+      res = res.filter((n) => {
+        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
+          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
+          ...n.responsables.map((r) => r.full_name)]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        return hay.includes(term)
+      })
+    }
+    return res
+  }, [negocios, seccional, responsable, term])
+
+  // Cerrados con los mismos filtros de responsable + seccional + búsqueda (ya filtrados por motivo).
+  const cerradosFiltradosConFiltros = useMemo(() => {
+    let res = cerradosFiltrados
+    if (seccional !== 'todas') {
+      res = res.filter((n) => n.seccional_label === seccional)
+    }
+    if (responsable !== 'todos') {
+      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
+    }
+    if (term) {
+      res = res.filter((n) => {
+        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
+          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
+          ...n.responsables.map((r) => r.full_name)]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        return hay.includes(term)
+      })
+    }
+    return res
+  }, [cerradosFiltrados, seccional, responsable, term])
+
+  // ── Contadores — reflejan todos los filtros activos excepto la fase/etapa. ──
+  const faseCount = (key: FaseFilter) =>
+    key === 'todos'
+      ? negociosFiltrados.length
+      : key === 'cerrados'
+        ? cerradosFiltradosConFiltros.length
+        : negociosFiltrados.filter((n) => n.stage_actual === key).length
+
+  // etapaCount cuenta sobre currentFiltrado (fase + responsable + seccional + búsqueda).
+  const etapaCount = (numero: number) =>
+    currentFiltrado.filter((n) => n.etapa_numero === numero).length
 
   // Fases visibles (según stages activos del workspace + si hay cerrados).
   const fases = ALL_FASES.filter((f) =>
