@@ -5,7 +5,9 @@ import { getRolePermissions } from '@/lib/roles'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import EquipoClient from './equipo-client'
 import VendedoresClient from './vendedores-client'
+import EquipoComercialPersonasClient from './equipo-comercial-personas-client'
 import { getVendedoresResumen } from './vendedores-actions'
+import { getComercialResumen, getComercialMes } from './comercial-actions'
 
 interface Props {
   searchParams: Promise<{ mes?: string; staff?: string; proyecto?: string; estado?: string }>
@@ -28,6 +30,30 @@ export default async function EquipoPage({ searchParams }: Props) {
     if (modules.rentabilidad_comercial) {
       const vendedores = await getVendedoresResumen()
       return <VendedoresClient vendedores={vendedores} />
+    }
+    // Workspaces cuyo pipeline vive en negocios (Clarity, ej. SOENA): tablero
+    // comercial por responsable sobre negocios + responsable_id. Visible a quien
+    // gestiona equipo.
+    // Equipo = hoja de indicadores POR PERSONA (con ranking). El tablero AGREGADO
+    // vive en la pestaña "Comercial" de /tableros. Acceso: owner/admin/supervisor.
+    if (modules.comercial_negocios) {
+      const perms = getRolePermissions(role || '')
+      if (!perms.canManageTeam) redirect('/negocios')
+      const [anioStr, mesStr] = mes.split('-')
+      const anioSel = Number(anioStr)
+      const mesSel = Number(mesStr)
+      const [resumen, mesData] = await Promise.all([
+        getComercialResumen(),
+        getComercialMes(anioSel, mesSel),
+      ])
+      return (
+        <EquipoComercialPersonasClient
+          resumen={resumen}
+          mesData={mesData}
+          anio={anioSel}
+          mes={mesSel}
+        />
+      )
     }
   }
 

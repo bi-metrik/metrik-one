@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import {
   ChevronRight,
-  ChevronLeft,
   FolderOpen,
   CheckCircle2,
   Circle,
@@ -27,7 +26,7 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, retrocederEtapaNegocio, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -661,28 +660,7 @@ function SelectorEtapa({
         .find(e => e.orden > etapaActual.orden) ?? null
     : null
 
-  // Etapa anterior en orden estricto (para retroceso)
-  const etapaAnterior = etapaActual
-    ? [...etapasLinea]
-        .sort((a, b) => b.orden - a.orden)
-        .find(e => e.orden < etapaActual.orden) ?? null
-    : null
 
-  function handleRetroceder() {
-    if (!etapaAnterior) return
-    const ok = typeof window !== 'undefined'
-      ? window.confirm(`Retroceder a "${etapaAnterior.nombre}"? Se conservan todos los datos y bloques completados.`)
-      : true
-    if (!ok) return
-    startTransition(async () => {
-      const result = await retrocederEtapaNegocio(negocioId, etapaAnterior.id)
-      if (result.error) {
-        toast.error('Error al retroceder: ' + result.error)
-      } else {
-        toast.success(`Retrocedido a: ${etapaAnterior.nombre}`)
-      }
-    })
-  }
 
   // Si ya esta cerrado/perdido/cancelado/completado, no mostrar nada
   const estadosCerrados = ['cerrado', 'perdido', 'cancelado', 'completado']
@@ -743,17 +721,6 @@ function SelectorEtapa({
     return (
       <>
         <div className="flex items-center gap-1.5">
-          {etapaAnterior && (
-            <button
-              onClick={handleRetroceder}
-              disabled={isPending}
-              title={`Retroceder a ${etapaAnterior.nombre}`}
-              className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-            >
-              <ChevronLeft className="h-3 w-3" />
-              <span className="hidden sm:inline truncate max-w-[100px]">{etapaAnterior.nombre}</span>
-            </button>
-          )}
           <button
             onClick={() => setShowCierreDialog(true)}
             disabled={isPending}
@@ -795,17 +762,6 @@ function SelectorEtapa({
           </button>
         ) : (
           <>
-            {etapaAnterior && (
-              <button
-                onClick={handleRetroceder}
-                disabled={isPending}
-                title={`Retroceder a ${etapaAnterior.nombre}`}
-                className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
-              >
-                <ChevronLeft className="h-3 w-3" />
-                <span className="hidden sm:inline truncate max-w-[100px]">{etapaAnterior.nombre}</span>
-              </button>
-            )}
             <button
               onClick={handleAvanzar}
               disabled={isPending}

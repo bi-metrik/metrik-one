@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData } from './actions'
+import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales } from '../equipo/comercial-actions'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 import TablerosClient from './tableros-client'
 import VitrinaPlaceholder from '@/components/vitrina-placeholder'
 import { getVitrinaCopy } from '@/lib/workspace/vitrina'
@@ -46,12 +48,40 @@ export default async function TablerosPage() {
     ? await getRentabilidadComercialData()
     : null
 
+  // Tablero comercial sobre negocios (Clarity, ej. SOENA): gateado por modulo
+  // comercial_negocios + rol gerencial (owner/admin/supervisor). Vive en la pestaña
+  // "Comercial" de Tableros (los indicadores AGREGADOS no son de Equipo).
+  const puedeVerComercialNegocios = modules.comercial_negocios
+    && ['owner', 'admin', 'supervisor'].includes(role || '')
+  let comercialNegocios = null
+  if (puedeVerComercialNegocios) {
+    const [anioStr, mesStr] = bogotaYearMonth().split('-')
+    const anioSel = Number(anioStr)
+    const mesSel = Number(mesStr)
+    const [equipo, mesData, serie, metas] = await Promise.all([
+      getComercialResumen(),
+      getComercialMes(anioSel, mesSel),
+      getComercialSerie(12),
+      getMetasComerciales(anioSel, mesSel),
+    ])
+    comercialNegocios = {
+      equipo,
+      mesInicial: mesData,
+      serie,
+      metasIniciales: metas,
+      anioInicial: anioSel,
+      mesNumInicial: mesSel,
+      puedeEditarMetas: ['owner', 'admin', 'supervisor'].includes(role || ''),
+    }
+  }
+
   return (
     <TablerosClient
       initialComercial={comercial}
       initialOperativo={operativo}
       initialFinanciero={financiero}
       initialRentabilidad={rentabilidad}
+      initialComercialNegocios={comercialNegocios}
       modules={modules}
     />
   )

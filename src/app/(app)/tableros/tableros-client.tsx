@@ -6,12 +6,20 @@ import { TabComercial } from './components/tab-comercial'
 import { TabOperativo } from './components/tab-operativo'
 import { TabFinanciero } from './components/tab-financiero'
 import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercial'
+import { TabComercialSoena } from './components/tab-comercial-soena'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { ShieldCheck } from 'lucide-react'
+import type {
+  ComercialResumenRow,
+  ComercialMesResponse,
+  ComercialSerieResponse,
+  MetaComercial,
+} from '../equipo/comercial-types'
 
-type TabKey = 'rentabilidad_comercial' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento'
+type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento'
 
 const RENTABILIDAD_TAB: { key: TabKey; label: string } = { key: 'rentabilidad_comercial', label: 'Rentabilidad Comercial' }
+const COMERCIAL_NEGOCIOS_TAB: { key: TabKey; label: string } = { key: 'comercial_negocios', label: 'Comercial' }
 
 const BUSINESS_TABS: { key: TabKey; label: string }[] = [
   { key: 'financiero', label: 'Financiero' },
@@ -28,11 +36,22 @@ const PERIODOS: { key: Periodo; label: string }[] = [
   { key: 'anio', label: 'Anual' },
 ]
 
+export interface ComercialNegociosBundle {
+  equipo: ComercialResumenRow[]
+  mesInicial: ComercialMesResponse | null
+  serie: ComercialSerieResponse | null
+  metasIniciales: MetaComercial[]
+  anioInicial: number
+  mesNumInicial: number
+  puedeEditarMetas: boolean
+}
+
 interface TablerosClientProps {
   initialComercial: ComercialData | null
   initialOperativo: OperativoData | null
   initialFinanciero: FinancieroData | null
   initialRentabilidad?: RentabilidadComercialData | null
+  initialComercialNegocios?: ComercialNegociosBundle | null
   modules?: Record<string, boolean>
 }
 
@@ -41,6 +60,7 @@ export default function TablerosClient({
   initialOperativo,
   initialFinanciero,
   initialRentabilidad,
+  initialComercialNegocios,
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
@@ -52,11 +72,19 @@ export default function TablerosClient({
       // dependen de la operación viva en ONE, que este workspace aún no tiene.
       t.push(RENTABILIDAD_TAB)
     } else if (mod.business) {
-      t.push(...BUSINESS_TABS)
+      // Tablero comercial sobre negocios (Clarity, ej. SOENA): reemplaza la pestaña
+      // "Comercial" generica del pipeline por la vista por vendedor cuando el modulo
+      // comercial_negocios esta activo.
+      if (mod.comercial_negocios && initialComercialNegocios) {
+        t.push(COMERCIAL_NEGOCIOS_TAB)
+        t.push(...BUSINESS_TABS.filter(tab => tab.key !== 'comercial'))
+      } else {
+        t.push(...BUSINESS_TABS)
+      }
     }
     if (mod.compliance) t.push(COMPLIANCE_TAB)
     return t
-  }, [mod.rentabilidad_comercial, mod.business, mod.compliance])
+  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, initialComercialNegocios])
 
   const defaultTab = tabs[0]?.key ?? 'cumplimiento'
   const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
@@ -112,7 +140,7 @@ export default function TablerosClient({
         </div>
 
         {/* Periodo selector — only for business tabs (no aplica a Rentabilidad Comercial ni Cumplimiento) */}
-        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && (
+        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && (
           <div className="flex gap-1">
             {PERIODOS.map(p => (
               <button
@@ -134,6 +162,17 @@ export default function TablerosClient({
       {/* Content */}
       <div className={`transition-opacity duration-200 ${isPending ? 'opacity-50' : 'opacity-100'}`}>
         {activeTab === 'rentabilidad_comercial' && rentabilidad && <TabRentabilidadComercial data={rentabilidad} />}
+        {activeTab === 'comercial_negocios' && initialComercialNegocios && (
+          <TabComercialSoena
+            equipo={initialComercialNegocios.equipo}
+            mesInicial={initialComercialNegocios.mesInicial}
+            serie={initialComercialNegocios.serie}
+            metasIniciales={initialComercialNegocios.metasIniciales}
+            anioInicial={initialComercialNegocios.anioInicial}
+            mesNumInicial={initialComercialNegocios.mesNumInicial}
+            puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
+          />
+        )}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
         {activeTab === 'operativo' && operativo && <TabOperativo data={operativo} />}
