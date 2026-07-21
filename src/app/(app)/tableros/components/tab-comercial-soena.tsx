@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
-import { ArrowRight, Users, ChevronLeft, ChevronRight, Target } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Target } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
   Tooltip, CartesianGrid,
@@ -12,10 +11,10 @@ import type {
   ComercialMesResponse,
   ComercialSerieResponse,
   MetaComercial,
-} from './comercial-types'
-import { MESES_ES } from './comercial-types'
-import { getComercialMes } from './comercial-actions'
-import MetasModal from './metas-modal'
+} from '../../equipo/comercial-types'
+import { MESES_ES } from '../../equipo/comercial-types'
+import { getComercialMes } from '../../equipo/comercial-actions'
+import MetasModal from '../../equipo/metas-modal'
 
 const GREEN = '#059669'
 const BLUE = '#2563EB'
@@ -32,15 +31,11 @@ function fmtCompact(n: number): string {
 function nombreCorto(s: string): string {
   return s.split(' ').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')
 }
-function iniciales(s: string): string {
-  const p = s.split(' ').filter(Boolean)
-  return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase()
-}
 function pct(n: number | null): string {
   return n === null ? 'sin dato' : `${n}%`
 }
 
-interface Props {
+export interface TabComercialSoenaProps {
   equipo: ComercialResumenRow[]
   mesInicial: ComercialMesResponse | null
   serie: ComercialSerieResponse | null
@@ -50,7 +45,7 @@ interface Props {
   puedeEditarMetas: boolean
 }
 
-export default function ComercialClient({
+export function TabComercialSoena({
   equipo,
   mesInicial,
   serie,
@@ -58,7 +53,7 @@ export default function ComercialClient({
   anioInicial,
   mesNumInicial,
   puedeEditarMetas,
-}: Props) {
+}: TabComercialSoenaProps) {
   const [anio, setAnio] = useState(anioInicial)
   const [mes, setMes] = useState(mesNumInicial)
   const [mesData, setMesData] = useState<ComercialMesResponse | null>(mesInicial)
@@ -81,7 +76,6 @@ export default function ComercialClient({
   const kpis = mesData?.kpis
   const vendedoresMes = mesData?.porVendedor ?? []
 
-  // Totales historicos (todas las etapas, todos los meses) desde el resumen.
   const totalHonorario = equipo.reduce((s, v) => s + v.honorario_recaudado, 0)
   const totalTarifa = equipo.reduce((s, v) => s + v.tarifa_recaudada, 0)
   const totalAprobado = equipo.reduce((s, v) => s + v.valor_aprobado, 0)
@@ -90,14 +84,11 @@ export default function ComercialClient({
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Equipo comercial</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Seguimiento por vendedor en vivo. El recaudo es honorario (ingreso real); la tarifa UPME
-            se reporta aparte como plata de terceros.
-          </p>
-        </div>
+      {/* Encabezado interno de la pestana + accion de metas */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-gray-500">
+          El recaudo es honorario (ingreso real); la tarifa UPME se reporta aparte como plata de terceros.
+        </p>
         {puedeEditarMetas && (
           <button
             onClick={() => setMetasModalOpen(true)}
@@ -288,7 +279,7 @@ export default function ComercialClient({
         </section>
       )}
 
-      {/* Embudo por etapa + honorario vs tarifa (resumen historico por responsable) */}
+      {/* Totales historicos + embudo por vendedor */}
       <section>
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <ResumenTotal label="Valor aprobado (historico)" value={fmtCOP(totalAprobado)} />
@@ -297,51 +288,32 @@ export default function ComercialClient({
         </div>
         <h2 className="mb-3 text-sm font-bold text-gray-900">Embudo por vendedor (todo el historico)</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {equipo.map((v) => {
-            const cardKey = v.responsable_id ?? 'sin-responsable'
-            return (
-              <Link
-                key={cardKey}
-                href={`/equipo/comercial/${cardKey}`}
-                className="group rounded-2xl border border-gray-100 bg-white p-5 shadow-sm transition-all hover:border-gray-200 hover:shadow-md"
-              >
-                <div className="mb-4 flex items-center gap-3">
-                  {v.sin_responsable ? (
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400">
-                      <Users className="h-5 w-5" />
-                    </div>
-                  ) : (
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1A1A1A] text-xs font-bold text-white">
-                      {iniciales(v.nombre)}
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-gray-900">
-                      {v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)}
-                    </p>
-                    <p className="truncate text-xs text-gray-400">
-                      {v.sin_responsable ? 'Negocios sin asignar' : v.position ?? 'Comercial'}
-                    </p>
-                  </div>
-                </div>
-                <div className="mb-4 grid grid-cols-3 gap-2">
-                  <StageCount label="Venta" n={v.en_venta} />
-                  <StageCount label="Ejecucion" n={v.en_ejecucion} />
-                  <StageCount label="Cobro" n={v.en_cobro} />
-                </div>
-                <div className="space-y-2 border-t border-gray-50 pt-3">
-                  <Row label="Negocios activos" value={String(v.negocios_abiertos)} />
-                  <Row label="Valor aprobado" value={fmtCOP(v.valor_aprobado)} />
-                  <Row label="Honorario recaudado" value={fmtCOP(v.honorario_recaudado)} strong color={GREEN} />
-                  <Row label="Tarifa UPME (terceros)" value={fmtCOP(v.tarifa_recaudada)} muted />
-                </div>
-                <div className="mt-4 flex items-center justify-end text-xs font-semibold text-[#059669]">
-                  Ver detalle
-                  <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </div>
-              </Link>
-            )
-          })}
+          {equipo.map((v) => (
+            <div
+              key={v.responsable_id ?? 'sin-responsable'}
+              className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+            >
+              <div className="mb-4">
+                <p className="truncate font-semibold text-gray-900">
+                  {v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)}
+                </p>
+                <p className="truncate text-xs text-gray-400">
+                  {v.sin_responsable ? 'Negocios sin asignar' : v.position ?? 'Comercial'}
+                </p>
+              </div>
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                <StageCount label="Venta" n={v.en_venta} />
+                <StageCount label="Ejecucion" n={v.en_ejecucion} />
+                <StageCount label="Cobro" n={v.en_cobro} />
+              </div>
+              <div className="space-y-2 border-t border-gray-50 pt-3">
+                <Row label="Negocios activos" value={String(v.negocios_abiertos)} />
+                <Row label="Valor aprobado" value={fmtCOP(v.valor_aprobado)} />
+                <Row label="Honorario recaudado" value={fmtCOP(v.honorario_recaudado)} strong color={GREEN} />
+                <Row label="Tarifa UPME (terceros)" value={fmtCOP(v.tarifa_recaudada)} muted />
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 

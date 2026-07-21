@@ -1,7 +1,8 @@
 import { notFound, redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
-import { getComercialPerfil } from '../../comercial-actions'
+import { getComercialPerfil, getComercialResumen } from '../../comercial-actions'
+import { computeRanking, rankingDePersona } from '../../comercial-ranking'
 import ComercialPerfilClient from './comercial-perfil-client'
 
 interface Props {
@@ -21,8 +22,21 @@ export default async function ComercialPerfilPage({ params }: Props) {
   const perms = getRolePermissions(role || '')
   if (!perms.canManageTeam) redirect('/negocios')
 
-  const perfil = await getComercialPerfil(staff_id)
+  const [perfil, resumen] = await Promise.all([
+    getComercialPerfil(staff_id),
+    getComercialResumen(),
+  ])
   if (!perfil) notFound()
 
-  return <ComercialPerfilClient perfil={perfil} />
+  // Posicion de esta persona en el ranking del equipo (null para el bucket sin responsable).
+  const ranking = computeRanking(resumen)
+  const miRanking = rankingDePersona(ranking, perfil.sin_responsable ? null : staff_id)
+
+  return (
+    <ComercialPerfilClient
+      perfil={perfil}
+      ranking={miRanking}
+      totalEquipo={ranking.total}
+    />
+  )
 }

@@ -1,10 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Trophy } from 'lucide-react'
 import { STAGE_LABEL, type ComercialPerfil } from '../../comercial-types'
+import type { RankingPersona } from '../../comercial-ranking'
 
 const GREEN = '#059669'
+const GOLD = '#D97706'
 
 function fmtCOP(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
@@ -16,7 +18,15 @@ function nombreCorto(s: string): string {
     .join(' ')
 }
 
-export default function ComercialPerfilClient({ perfil }: { perfil: ComercialPerfil }) {
+export default function ComercialPerfilClient({
+  perfil,
+  ranking,
+  totalEquipo,
+}: {
+  perfil: ComercialPerfil
+  ranking: RankingPersona | null
+  totalEquipo: number
+}) {
   const titulo = perfil.sin_responsable ? 'Sin responsable' : nombreCorto(perfil.nombre)
 
   return (
@@ -34,6 +44,31 @@ export default function ComercialPerfilClient({ perfil }: { perfil: ComercialPer
           {perfil.sin_responsable ? 'Negocios sin responsable asignado' : perfil.position ?? 'Comercial'}
         </p>
       </div>
+
+      {/* Ranking prominente */}
+      {ranking && (
+        <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50/60 p-5">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full"
+                style={{ backgroundColor: ranking.rank_honorario === 1 ? '#FEF3C7' : '#F3F4F6' }}
+              >
+                <Trophy className="h-6 w-6" style={{ color: ranking.rank_honorario === 1 ? GOLD : '#9CA3AF' }} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Mi posicion</p>
+                <p className="text-lg font-bold text-gray-900">
+                  #{ranking.rank_honorario} de {totalEquipo}
+                  <span className="ml-2 text-sm font-normal text-gray-500">en recaudo</span>
+                </p>
+              </div>
+            </div>
+            <RankPill label="Valor aprobado" rank={ranking.rank_valor} total={totalEquipo} />
+            <RankPill label="Negocios activos" rank={ranking.rank_negocios} total={totalEquipo} />
+          </div>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -149,6 +184,18 @@ function Kpi({
         style={color ? { color } : undefined}
       >
         {value}
+      </p>
+    </div>
+  )
+}
+
+function RankPill({ label, rank, total }: { label: string; rank: number; total: number }) {
+  if (!rank) return null
+  return (
+    <div>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="text-lg font-bold text-gray-900">
+        #{rank} <span className="text-sm font-normal text-gray-500">de {total}</span>
       </p>
     </div>
   )

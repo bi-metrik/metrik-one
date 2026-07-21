@@ -199,3 +199,73 @@ Migracion `supabase/migrations/20260721000001_metas_comerciales.sql`.
 
 Archivos nuevos: `metas-modal.tsx`. Extendidos: `comercial-types.ts`, `comercial-actions.ts`,
 `comercial-client.tsx`, `page.tsx`.
+
+---
+
+# Iteracion 3 (2026-07-21) — arquitectura de ubicacion: Tableros (agregado) vs Equipo (por persona) + ranking
+
+## Principio (Mauricio)
+
+Los indicadores comerciales AGREGADOS no son de "Equipo". Equipo es sobre las
+personas, no sobre el pipeline agregado. Por eso:
+
+- **El tablero AGREGADO vive en `/tableros` (pestaña "Comercial").**
+- **`/equipo` muestra una hoja de indicadores POR PERSONA + ranking.**
+
+Nada del contenido de la iteracion 2 se reconstruyo: se RELOCALIZO. Las RPCs de
+las iteraciones 1 y 2 (`get_comercial_resumen_soena`, `get_comercial_kpis_mes_soena`,
+`get_comercial_serie_mensual_soena`) y la tabla `metas_comerciales` quedan intactas
+(NO se re-migraron).
+
+## 1. Tablero agregado -> pestaña "Comercial" de `/tableros`
+
+- Componente nuevo `tableros/components/tab-comercial-soena.tsx` (`TabComercialSoena`):
+  es el cuerpo del antiguo `ComercialClient` (selector de mes, panel KPIs, tabla por
+  vendedor con TOTAL, 4 charts historicos, embudo por etapa, honorario/tarifa, modal
+  de Metas), sin el `<h1>` de pagina (Tableros ya pone su header). En Tableros el
+  embudo por vendedor NO enlaza al perfil (el drill al perfil vive en Equipo).
+- `tableros-client.tsx`: nueva `TabKey` `comercial_negocios` con label "Comercial".
+  Cuando `modules.comercial_negocios` esta activo, esta pestaña REEMPLAZA la pestaña
+  "Comercial" generica del pipeline (`BUSINESS_TABS` filtra `comercial`). El periodo
+  global de Tableros no aplica a esta pestaña (tiene su propio selector de mes, igual
+  que Rentabilidad Comercial y Cumplimiento).
+- `tableros/page.tsx`: carga el bundle (`getComercialResumen` + `getComercialMes` +
+  `getComercialSerie` + `getMetasComerciales`) SOLO si `modules.comercial_negocios` +
+  rol owner/admin/supervisor. Lo pasa como `initialComercialNegocios`.
+- El antiguo `equipo/comercial-client.tsx` se ELIMINO (codigo muerto tras el traslado).
+
+## 2. `/equipo` -> hoja por persona + ranking
+
+- Componente nuevo `equipo/equipo-comercial-personas-client.tsx`
+  (`EquipoComercialPersonasClient`): bajo `comercial_negocios`, `/equipo` lista al
+  equipo comercial como tarjetas POR PERSONA con: ventas del mes, valor vendido del
+  mes (sin IVA headline), honorario recaudado, valor aprobado, negocios activos, y la
+  POSICION de ranking de cada indicador. Cada tarjeta enlaza a su perfil
+  `/equipo/comercial/[staff_id]` ("Ver mi hoja").
+- El bucket "(sin responsable)" NO entra al ranking (no es una persona): se muestra
+  como fila informativa aparte, debajo de las tarjetas.
+- El perfil individual `comercial-perfil-client.tsx` gana un banner de ranking
+  PROMINENTE (posicion en recaudo con trofeo si es #1, + posiciones de valor aprobado
+  y negocios activos).
+- **Fallback preservado:** cuando `comercial_negocios` NO esta activo, `/equipo` sigue
+  mostrando la vista generica de gestion de horas/staff (`EquipoClient`) intacta.
+- **Acceso:** owner/admin/supervisor (gate `canManageTeam`), aunque el supervisor no
+  sea del area comercial (confirmado por Mauricio).
+
+## Logica del ranking (helper PURO, sin tocar RPCs)
+
+`equipo/comercial-ranking.ts`:
+- `computeRanking(resumen)` toma el output de `get_comercial_resumen_soena`
+  (iteracion 1) y calcula, por persona, la posicion en 3 metricas:
+  `honorario_recaudado`, `valor_aprobado`, `negocios_abiertos`. NO duplica la fuente.
+- Ranking estandar: orden descendente por metrica; empates comparten posicion
+  (1, 1, 3...). El bucket sin responsable se excluye del ranking y se devuelve aparte.
+- `rankingDePersona(ranking, staffId)` resuelve la posicion de una persona (usado por
+  el perfil individual). El orden de presentacion por defecto es honorario recaudado
+  desc.
+- Puro y testable: no toca DB ni red; se alimenta del resumen ya cargado.
+
+## Migraciones
+
+Ninguna nueva. Iteracion de UI + un helper puro. Las RPCs y `metas_comerciales`
+siguen como quedaron en la iteracion 2 (en prod).
