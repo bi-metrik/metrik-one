@@ -315,18 +315,26 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
       )}
 
       {/* Resumen */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-2.5 text-center">
-          <p className="text-[10px] font-medium text-[#059669]">Cobrado</p>
-          <p className="text-sm font-bold text-[#059669] tabular-nums">{fmt(totalCobrado)}</p>
+      {(!precioTotal || precioTotal === 0) && confirmados.length === 0 && programados.length === 0 ? (
+        <div className="flex justify-center">
+          <span className="inline-flex items-center rounded-full border border-[#E5E7EB] bg-[#F5F4F2] px-3 py-1 text-xs font-medium text-[#6B7280]">
+            Sin cobro
+          </span>
         </div>
-        <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5 text-center">
-          <p className="text-[10px] font-medium text-[#6B7280]">Saldo</p>
-          <p className="text-sm font-bold text-[#1A1A1A] tabular-nums">
-            {fmt(saldoPendiente > 0 ? saldoPendiente : 0)}
-          </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-2.5 text-center">
+            <p className="text-[10px] font-medium text-[#059669]">Cobrado</p>
+            <p className="text-sm font-bold text-[#059669] tabular-nums">{fmt(totalCobrado)}</p>
+          </div>
+          <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5 text-center">
+            <p className="text-[10px] font-medium text-[#6B7280]">Saldo</p>
+            <p className="text-sm font-bold text-[#1A1A1A] tabular-nums">
+              {fmt(saldoPendiente > 0 ? saldoPendiente : 0)}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Pendiente para pasar a operaciones (gate saldo:handoff). El cliente debe
           cubrir el 100% de la tarifa UPME + el honorario del plan antes del handoff. */}
@@ -398,7 +406,9 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
         </div>
       ) : (
         programados.length === 0 && (
-          <p className="text-center text-xs text-[#6B7280] py-4">Sin cobros registrados</p>
+          <p className="text-center text-xs text-[#6B7280] py-4">
+            {(!precioTotal || precioTotal === 0) ? 'Sin cobro' : 'Sin cobros registrados'}
+          </p>
         )
       )}
 

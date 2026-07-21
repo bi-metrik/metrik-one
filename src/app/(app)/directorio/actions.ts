@@ -76,6 +76,11 @@ export async function updateContacto(id: string, formData: FormData) {
     const raw = formData.get('comision_porcentaje') as string
     updates.comision_porcentaje = raw ? parseFloat(raw) : null
   }
+  // Responsable comercial del contacto (staff.id). Cadena vacía → sin responsable.
+  if (formData.get('responsable_id') !== null) {
+    const raw = (formData.get('responsable_id') as string).trim()
+    updates.responsable_id = raw || null
+  }
 
   const { error: dbError } = await supabase
     .from('contactos')
@@ -135,6 +140,45 @@ export async function searchContactos(query: string) {
     .limit(10)
 
   return data ?? []
+}
+
+// ── Staff para selector de responsable (contacto) ─────────
+// Devuelve el staff activo del workspace para poblar el selector "Responsable"
+// del Contacto 360. Prioriza el área comercial (staff_areas.area='comercial');
+// si no hay ninguno con esa área, cae a todo el staff activo (evita un selector
+// vacío en workspaces que no clasifican por área).
+
+export interface StaffOption {
+  id: string
+  full_name: string
+}
+
+export async function getStaffParaResponsable(): Promise<StaffOption[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  const { data: activos } = await supabase
+    .from('staff')
+    .select('id, full_name')
+    .eq('workspace_id', workspaceId)
+    .eq('is_active', true)
+    .order('full_name')
+
+  const staff = (activos ?? []) as StaffOption[]
+  if (staff.length === 0) return []
+
+  // Filtrar a comercial si hay quienes tengan esa área asignada.
+  const { data: areas } = await supabase
+    .from('staff_areas')
+    .select('staff_id')
+    .eq('area', 'comercial')
+    .in('staff_id', staff.map((s) => s.id))
+
+  const comercialIds = new Set(((areas ?? []) as { staff_id: string }[]).map((a) => a.staff_id))
+  if (comercialIds.size > 0) {
+    return staff.filter((s) => comercialIds.has(s.id))
+  }
+  return staff
 }
 
 // ── Empresas ──────────────────────────────────────────────
@@ -321,6 +365,38 @@ export async function getNegociosPorContacto(contactoId: string) {
     .order('created_at', { ascending: false })
 
   return data ?? []
+}
+
+// ── Interacciones del contacto (bandeja de leads / timeline) ──────────
+// Interacciones entrantes (Meta / WhatsApp / web / manual) del contacto, más
+// recientes primero. Alimenta la línea de tiempo del Contacto 360 y sus acciones
+// (crear negocio, marcar contactada, descartar).
+
+export interface InteraccionContacto {
+  id: string
+  fuente: string
+  fuente_ref: string | null
+  estado: string
+  negocio_id: string | null
+  payload: Record<string, unknown> | null
+  ocurrida_at: string | null
+  created_at: string | null
+}
+
+export async function getInteraccionesPorContacto(contactoId: string): Promise<InteraccionContacto[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any)
+    .from('contacto_interacciones')
+    .select('id, fuente, fuente_ref, estado, negocio_id, payload, ocurrida_at, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('contacto_id', contactoId)
+    .order('ocurrida_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+
+  return (data ?? []) as InteraccionContacto[]
 }
 
 // ── Vinculo persona natural: empresa <-> contacto ─────────

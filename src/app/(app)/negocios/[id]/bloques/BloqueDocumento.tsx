@@ -14,13 +14,14 @@ import {
   Download,
   Copy,
   Check,
+  Pencil,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import type { NegocioBloque } from '../../negocio-v2-actions'
-import type { CampoExtraccion, CampoResultado } from '@/lib/ai/extract-fields'
+import type { CampoExtraccion, CampoResultado, CampoEdicion } from '@/lib/ai/extract-fields'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,9 @@ interface BloqueDocumentoProps {
   workspaceId: string
   instancia: NegocioBloque | null
   modo: 'editable' | 'visible'
+  /** Rol del usuario actual — habilita la corrección gerencial de campos
+   *  extraídos en modo visible (etapas posteriores). */
+  userRole?: string
   configExtra: {
     label: string
     tipos_permitidos?: string[]
@@ -41,6 +45,10 @@ interface BloqueDocumentoProps {
     // extraído y el operador debe corregirlo sin reprocesar el documento. Sin este
     // flag, el modo visible es 100% readonly (comportamiento histórico).
     editar_extraidos?: boolean
+    /** Opt-in: en modo visible (etapas posteriores), un rol gerencial
+     *  (owner/admin/supervisor) puede corregir TODOS los campos extraídos
+     *  (no solo los de alerta_revision). Cada corrección queda marcada. */
+    corregir_campos_gerencial?: boolean
   }
 }
 
@@ -71,6 +79,28 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
     <span className="inline-flex items-center gap-1 text-[10px] text-red-500">
       <AlertTriangle className="h-3 w-3" />
       Manual
+    </span>
+  )
+}
+
+// ── Marca de edición manual (trazabilidad: quién + cuándo) ────────────────────
+
+function EdicionBadge({ edicion }: { edicion: CampoEdicion }) {
+  let fecha = ''
+  try {
+    fecha = new Date(edicion.editado_en).toLocaleDateString('es-CO', {
+      day: '2-digit', month: 'short', year: 'numeric',
+    })
+  } catch {
+    fecha = edicion.editado_en
+  }
+  return (
+    <span
+      title={`Editado a mano por ${edicion.editado_por_nombre} · ${fecha}`}
+      className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+    >
+      <Pencil className="h-3 w-3" />
+      Editado · {edicion.editado_por_nombre}
     </span>
   )
 }
@@ -240,7 +270,9 @@ function CamposExtraidos({
                       Revisar
                     </span>
                   )}
-                  {campo && <ConfidenceBadge confidence={campo.confidence} />}
+                  {campo?.edicion
+                    ? <EdicionBadge edicion={campo.edicion} />
+                    : campo && <ConfidenceBadge confidence={campo.confidence} />}
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
@@ -349,6 +381,7 @@ export default function BloqueDocumento({
   workspaceId,
   instancia,
   modo,
+  userRole,
   configExtra,
 }: BloqueDocumentoProps) {
   const router = useRouter()
@@ -360,6 +393,10 @@ export default function BloqueDocumento({
   const camposVisibles = configExtra.campos_visibles ?? null
   const maxSizeMb = configExtra.max_size_mb ?? 20
   const editarExtraidos = configExtra.editar_extraidos === true
+  // Corrección gerencial en modo visible: owner/admin/supervisor pueden editar
+  // TODOS los campos extraídos una vez el negocio avanzó (opt-in por config).
+  const corregirGerencial = configExtra.corregir_campos_gerencial === true
+  const puedeCorregirVisible = ['owner', 'admin', 'supervisor'].includes(userRole ?? '')
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
     if (saved.drive_url) return 'uploaded'
@@ -577,11 +614,14 @@ export default function BloqueDocumento({
               .filter(c => !camposVisibles || camposVisibles.includes(c.slug))
               .map(config => {
                 const campo = campos[config.slug]
-                // Edición manual opt-in (editar_extraidos): aunque el bloque esté en
-                // modo readonly de una etapa posterior, los campos marcados
-                // alerta_revision se vuelven editables para corregir cuando UPME
-                // difiere del extraído. El resto sigue siendo solo lectura.
-                const editable = editarExtraidos && config.alerta_revision === true
+                // Editable en modo readonly de una etapa posterior por dos vías:
+                //  (a) histórica: campo alerta_revision en bloque con editar_extraidos
+                //      (corrección de datos que difieren de UPME, cualquier autorizado);
+                //  (b) gerencial: owner/admin/supervisor corrigen TODOS los campos
+                //      (opt-in corregir_campos_gerencial). El resto es solo lectura.
+                const editable =
+                  (editarExtraidos && config.alerta_revision === true) ||
+                  (corregirGerencial && puedeCorregirVisible)
                 if (!editable && !campo?.value) return null
                 const displayValue = config.tipo === 'currency'
                   ? formatCurrencyDisplay(campo?.value ?? null)
@@ -593,13 +633,15 @@ export default function BloqueDocumento({
                         {config.label}
                       </label>
                       <div className="flex items-center gap-1.5">
-                        {editable && (
+                        {config.alerta_revision && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
                             <AlertTriangle className="h-3 w-3" />
                             Revisar
                           </span>
                         )}
-                        {campo && !campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
+                        {campo?.edicion
+                          ? <EdicionBadge edicion={campo.edicion} />
+                          : campo && !campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
                       </div>
                     </div>
                     {editable ? (
