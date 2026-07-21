@@ -64,3 +64,91 @@ export const STAGE_LABEL: Record<string, string> = {
   cobro: 'En cobro',
   cerrado: 'Cerrado',
 }
+
+// ── Iteracion 2: paridad Sheet SOENA (tabla por vendedor del mes, KPIs, series) ──
+
+/** Fila de la tabla por vendedor del mes. Espeja el Sheet "INDICADORES DE VENTA". */
+export interface ComercialVendedorMes {
+  responsable_id: string | null
+  nombre: string
+  sin_responsable: boolean
+  num_ventas: number
+  /** Honorario sin IVA (ingreso limpio). Headline. */
+  valor_sin_iva: number
+  /** Honorario con IVA. Columna secundaria de paridad. */
+  valor_con_iva: number
+  primer_pago: number
+  segundo_pago: number
+  casos_completos: number
+  tasa_casos_completos: number | null
+  participacion_pct: number | null
+  meta_num_ventas: number | null
+  meta_valor: number | null
+}
+
+/** Panel de KPIs mensuales. */
+export interface ComercialKpisMes {
+  num_ventas: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  primer_pago: number
+  segundo_pago: number
+  honorario_recaudado: number
+  tarifa_recaudada: number
+  casos_completos: number
+  tasa_casos_completos: number | null
+  ticket_promedio: number
+  mejor_dia: string | null
+  mejor_dia_ventas: number
+  promedio_ventas_dia: number
+  ingreso_promedio_dia: number
+  ventas_proyectadas: number
+  n_perdidos: number
+  tasa_cancelacion: number | null
+  tasa_recaudo: number | null
+  meta_num_ventas: number | null
+  meta_valor: number | null
+  cumplimiento_num: number | null
+  cumplimiento_valor: number | null
+}
+
+export interface ComercialMesResponse {
+  anio: number
+  mes: number
+  kpis: ComercialKpisMes
+  porVendedor: ComercialVendedorMes[]
+}
+
+/** Punto de la serie historica mensual. */
+export interface ComercialSeriePunto {
+  anio: number
+  mes: number
+  label: string
+  num_ventas: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  honorario_recaudado: number
+  primer_pago: number
+  segundo_pago: number
+  tarifa_recaudada: number
+}
+
+export interface ComercialSerieResponse {
+  serie: ComercialSeriePunto[]
+  tasa_recaudo_global: number | null
+}
+
+/** Fila de meta para la mini UI de edicion (staff_id null = meta global). */
+export interface MetaComercial {
+  id: string
+  staff_id: string | null
+  anio: number
+  mes: number
+  meta_num_ventas: number | null
+  meta_valor: number | null
+}
+
+export const MESES_ES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+] as const

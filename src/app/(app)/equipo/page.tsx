@@ -7,7 +7,7 @@ import EquipoClient from './equipo-client'
 import VendedoresClient from './vendedores-client'
 import ComercialClient from './comercial-client'
 import { getVendedoresResumen } from './vendedores-actions'
-import { getComercialResumen } from './comercial-actions'
+import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales } from './comercial-actions'
 
 interface Props {
   searchParams: Promise<{ mes?: string; staff?: string; proyecto?: string; estado?: string }>
@@ -37,8 +37,29 @@ export default async function EquipoPage({ searchParams }: Props) {
     if (modules.comercial_negocios) {
       const perms = getRolePermissions(role || '')
       if (!perms.canManageTeam) redirect('/negocios')
-      const equipo = await getComercialResumen()
-      return <ComercialClient equipo={equipo} />
+      // Mes seleccionado (default: mes actual Bogota).
+      const [anioStr, mesStr] = mes.split('-')
+      const anioSel = Number(anioStr)
+      const mesSel = Number(mesStr)
+      const [equipo, mesData, serie, metas] = await Promise.all([
+        getComercialResumen(),
+        getComercialMes(anioSel, mesSel),
+        getComercialSerie(12),
+        getMetasComerciales(anioSel, mesSel),
+      ])
+      // Editar metas: misma puerta que conciliacion (owner/admin/supervisor).
+      const puedeEditarMetas = ['owner', 'admin', 'supervisor'].includes(role || '')
+      return (
+        <ComercialClient
+          equipo={equipo}
+          mesInicial={mesData}
+          serie={serie}
+          metasIniciales={metas}
+          anioInicial={anioSel}
+          mesNumInicial={mesSel}
+          puedeEditarMetas={puedeEditarMetas}
+        />
+      )
     }
   }
 
