@@ -698,12 +698,12 @@ export async function getNegocioDetalle(id: string): Promise<{
   negocioTyped.modelo_dinero = modeloDinero
 
   // Valor a recaudar del cliente = precio_aprobado (honorario) + tarifa confirmada
-  // (pasante). Base del saldo del bloque de Cobros. Derivado, no almacenado. Sin
-  // tarifa confirmada, = honorario.
+  // (pasante). Base del saldo del bloque de Cobros. Derivado, no almacenado. Cubre el
+  // caso honorario 0 (cero deliberado / regalado) CON tarifa: el cliente igual paga la
+  // tarifa UPME (pasante), así que el valor a recaudar es la tarifa, no null.
   const precioHonorario = negocioTyped.precio_aprobado ?? negocioTyped.precio_estimado ?? 0
-  negocioTyped.valor_a_recaudar = precioHonorario > 0
-    ? valorARecaudar(precioHonorario, modeloDinero)
-    : null
+  const valorRecaudarNegocio = valorARecaudar(precioHonorario, modeloDinero)
+  negocioTyped.valor_a_recaudar = valorRecaudarNegocio > 0 ? valorRecaudarNegocio : null
 
   // Costos ePayco por cobro (lo que descuenta la pasarela: comisión + impuestos),
   // reconstruidos de los gastos `epayco-comision-{ref}` / `epayco-impuestos-{ref}`.
