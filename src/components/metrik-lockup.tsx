@@ -13,10 +13,16 @@ const SIZES = {
     lineMargin: '4px',
     gap: '0.2rem',
   },
+  sm: {
+    fontSize: '0.95rem',
+    lineHeight: '1.5px',
+    lineMargin: '3px',
+    gap: '0.15rem',
+  },
 } as const
 
 interface MetrikLockupProps {
-  size?: 'lg' | 'md'
+  size?: 'lg' | 'md' | 'sm'
   linkTo?: string
 }
 
