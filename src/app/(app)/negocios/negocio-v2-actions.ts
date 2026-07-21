@@ -1574,6 +1574,31 @@ export async function crearNegocioDesdeInteraccion(input: {
   const fieldData = (inter.payload?.field_data ?? []) as Array<{ name?: string; values?: string[] }>
   const leadgenId = (inter.payload?.leadgen_id ?? null) as string | null
 
+  // Atribucion de campana Meta: snapshot que viaja de la interaccion al negocio
+  // al convertir, para medir eficacia de campana desde el negocio ganado. Tolerante
+  // a nulls (los leads viejos solo traen platform + ad_id); copia lo que exista en
+  // el payload, nunca inventa valores.
+  const payloadMeta = (inter.payload ?? {}) as Record<string, unknown>
+  const metaStr = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+  const createdTimeRaw = payloadMeta.created_time
+  const atribucion = {
+    fuente: 'meta' as const,
+    campaign_id: metaStr(payloadMeta.campaign_id),
+    campaign_name: metaStr(payloadMeta.campaign_name),
+    adset_id: metaStr(payloadMeta.adset_id),
+    adset_name: metaStr(payloadMeta.adset_name),
+    ad_id: metaStr(payloadMeta.ad_id),
+    ad_name: metaStr(payloadMeta.ad_name),
+    platform: metaStr(payloadMeta.platform),
+    form_id: metaStr(payloadMeta.form_id),
+    leadgen_id: leadgenId,
+    interaccion_id: inter.id,
+    ocurrida_at:
+      typeof createdTimeRaw === 'number'
+        ? String(createdTimeRaw)
+        : metaStr(createdTimeRaw),
+  }
+
   // 2. Nombre + responsable del contacto (el responsable del contacto tiene
   //    prioridad sobre el staff del usuario que convierte).
   const { data: contactoRow } = await db(supabase)
@@ -1654,7 +1679,7 @@ export async function crearNegocioDesdeInteraccion(input: {
   await db(supabase)
     .from('negocios')
     .update({
-      metadata: { ...metadataActual, interaccion_id: inter.id, leadgen_id: leadgenId, fuente_cargue: 'meta_lead' },
+      metadata: { ...metadataActual, interaccion_id: inter.id, leadgen_id: leadgenId, fuente_cargue: 'meta_lead', atribucion },
       ...(responsableId ? { responsable_id: responsableId } : {}),
     })
     .eq('id', res.negocio_id)
