@@ -5,17 +5,98 @@ import { revalidatePath } from 'next/cache'
 
 // ── Contactos ─────────────────────────────────────────────
 
-export async function getContactos() {
+// Origen (primer toque) grabado en el contacto desde el webhook (custom_data.origen).
+// Es first-touch inmutable: la campaña por la que el contacto llego la primera vez.
+export interface OrigenContacto {
+  fuente?: string | null
+  campaign_id?: string | null
+  campaign_name?: string | null
+  adset_name?: string | null
+  ad_name?: string | null
+  platform?: string | null
+  first_at?: string | null
+}
+
+// Contacto enriquecido para la vista general (calcado del patron de /negocios):
+// marca Meta, ultima interaccion (cualquiera y solo Meta) y origen de campana.
+export interface ContactoConMeta {
+  id: string
+  nombre: string
+  telefono: string | null
+  email: string | null
+  fuente_adquisicion: string | null
+  rol: string | null
+  segmento: string | null
+  comision_porcentaje: number | null
+  created_at: string | null
+  es_meta: boolean
+  ultima_interaccion_at: string | null
+  ultima_interaccion_meta_at: string | null
+  origen: OrigenContacto | null
+}
+
+export async function getContactos(): Promise<ContactoConMeta[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
-  const { data } = await supabase
+  const { data: contactos } = await supabase
     .from('contactos')
-    .select('*')
+    .select('id, nombre, telefono, email, fuente_adquisicion, rol, segmento, comision_porcentaje, created_at, custom_data')
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
 
-  return data ?? []
+  const rows = (contactos ?? []) as Array<{
+    id: string
+    nombre: string
+    telefono: string | null
+    email: string | null
+    fuente_adquisicion: string | null
+    rol: string | null
+    segmento: string | null
+    comision_porcentaje: number | null
+    created_at: string | null
+    custom_data: { origen?: OrigenContacto } | null
+  }>
+  if (rows.length === 0) return []
+
+  // Agregado de interacciones por contacto (a 95 contactos, un solo fetch + reduce
+  // en memoria es suficiente; no amerita columnas cacheadas ni triggers).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: inters } = await (supabase as any)
+    .from('contacto_interacciones')
+    .select('contacto_id, fuente, ocurrida_at, created_at')
+    .eq('workspace_id', workspaceId)
+
+  const agg = new Map<string, { last: string | null; lastMeta: string | null; meta: boolean }>()
+  for (const it of (inters ?? []) as Array<{ contacto_id: string; fuente: string; ocurrida_at: string | null; created_at: string | null }>) {
+    const when = it.ocurrida_at ?? it.created_at
+    const cur = agg.get(it.contacto_id) ?? { last: null, lastMeta: null, meta: false }
+    if (when && (!cur.last || when > cur.last)) cur.last = when
+    if (it.fuente === 'meta') {
+      cur.meta = true
+      if (when && (!cur.lastMeta || when > cur.lastMeta)) cur.lastMeta = when
+    }
+    agg.set(it.contacto_id, cur)
+  }
+
+  return rows.map((c) => {
+    const a = agg.get(c.id)
+    return {
+      id: c.id,
+      nombre: c.nombre,
+      telefono: c.telefono,
+      email: c.email,
+      fuente_adquisicion: c.fuente_adquisicion,
+      rol: c.rol,
+      segmento: c.segmento,
+      comision_porcentaje: c.comision_porcentaje,
+      created_at: c.created_at,
+      es_meta: a?.meta ?? false,
+      ultima_interaccion_at: a?.last ?? null,
+      ultima_interaccion_meta_at: a?.lastMeta ?? null,
+      origen: c.custom_data?.origen ?? null,
+    }
+  })
 }
 
 export async function getContacto(id: string) {
@@ -42,7 +123,8 @@ export async function createContacto(formData: FormData) {
     .from('contactos')
     .insert({
       workspace_id: workspaceId,
-      nombre: nombre.trim(),
+      // Nombres de contacto en MAYUSCULAS (homogeneo con negocios).
+      nombre: nombre.trim().toUpperCase(),
       telefono: (formData.get('telefono') as string)?.trim() || null,
       email: (formData.get('email') as string)?.trim() || null,
       fuente_adquisicion: (formData.get('fuente_adquisicion') as string) || null,
@@ -70,7 +152,11 @@ export async function updateContacto(id: string, formData: FormData) {
   const fields = ['nombre', 'telefono', 'email', 'fuente_adquisicion', 'fuente_detalle', 'rol', 'segmento'] as const
   for (const f of fields) {
     const v = formData.get(f) as string | null
-    if (v !== null) updates[f] = v.trim() || null
+    if (v !== null) {
+      const val = v.trim() || null
+      // El nombre se guarda en MAYUSCULAS (homogeneo con negocios); email intacto.
+      updates[f] = f === 'nombre' && val ? val.toUpperCase() : val
+    }
   }
   if (formData.get('comision_porcentaje') !== null) {
     const raw = formData.get('comision_porcentaje') as string
