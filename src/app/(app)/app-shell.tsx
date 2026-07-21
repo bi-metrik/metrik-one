@@ -53,6 +53,8 @@ interface WorkspaceModules {
   conciliacion?: boolean
   /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
   fab_registrar_pago?: boolean
+  /** Tablero comercial sobre negocios. Abre /equipo (hoja por persona) al rol operator. */
+  comercial_negocios?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -159,7 +161,7 @@ const CERT_NAV_ITEMS = [
 const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/mi-negocio', label: 'Configuración', icon: Settings, roles: ['owner', 'admin', 'supervisor'] },
-  { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'read_only'] },
+  { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
 ]
 
 // Workflows (visible si workspace tiene lineas activas — controlado por hasLineas prop)
@@ -303,9 +305,18 @@ export default function AppShell({
   const VITRINA_NUMEROS_ITEM = BUSINESS_NAV_ITEMS.find((i) => i.href === '/numeros')!
   const VITRINA_TABLEROS_ITEM = SHARED_NAV_ITEMS.find((i) => i.href === '/tableros')!
 
+  // Con comercial_negocios, el vendedor (operator) ve /equipo = SU hoja por persona
+  // + ranking. El tablero agregado de /tableros sigue restringido a gerencia.
+  const businessNavItems = mod.comercial_negocios
+    ? BUSINESS_NAV_ITEMS.map(i =>
+        i.href === '/equipo' && !i.roles.includes('operator')
+          ? { ...i, roles: [...i.roles, 'operator'] }
+          : i,
+      )
+    : BUSINESS_NAV_ITEMS
   const businessItems = modoVitrina
     ? [VITRINA_NUMEROS_ITEM]
-    : (mod.business ? filterByRole(applyOverride(BUSINESS_NAV_ITEMS), role) : [])
+    : (mod.business ? filterByRole(applyOverride(businessNavItems), role) : [])
   const contabilidadItems = vitrinaGate(mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : [])
   // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
   const complianceItems = vitrinaGate((mod.compliance || mod.compliance_audit)

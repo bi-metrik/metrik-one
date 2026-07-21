@@ -7,7 +7,7 @@ import EquipoClient from './equipo-client'
 import VendedoresClient from './vendedores-client'
 import EquipoComercialPersonasClient from './equipo-comercial-personas-client'
 import { getVendedoresResumen } from './vendedores-actions'
-import { getComercialResumen, getComercialMes } from './comercial-actions'
+import { getComercialResumen, getComercialMes, getMetasPorVendedorPeriodo } from './comercial-actions'
 
 interface Props {
   searchParams: Promise<{ mes?: string; staff?: string; proyecto?: string; estado?: string }>
@@ -20,7 +20,7 @@ export default async function EquipoPage({ searchParams }: Props) {
   const proyecto = params.proyecto ?? 'todos'
   const estado = params.estado ?? 'todos'
 
-  const { supabase, workspaceId, role } = await getWorkspace()
+  const { supabase, workspaceId, role, staffId } = await getWorkspace()
 
   // Workspaces de Rentabilidad Comercial: Equipo muestra vendedores (derivados de ventas_hechos),
   // visible tambien a read_only. No aplica el flujo de gestion de horas/staff.
@@ -37,14 +37,20 @@ export default async function EquipoPage({ searchParams }: Props) {
     // Equipo = hoja de indicadores POR PERSONA (con ranking). El tablero AGREGADO
     // vive en la pestaña "Comercial" de /tableros. Acceso: owner/admin/supervisor.
     if (modules.comercial_negocios) {
-      const perms = getRolePermissions(role || '')
-      if (!perms.canManageTeam) redirect('/negocios')
+      // El vendedor (operator) ve SOLO su propia hoja: se le redirige a su perfil.
+      // Sin staff resuelto, no hay hoja que mostrar -> a Negocios.
+      const esGerencial = ['owner', 'admin', 'supervisor'].includes(role || '')
+      if (!esGerencial) {
+        if (role === 'operator' && staffId) redirect(`/equipo/comercial/${staffId}`)
+        redirect('/negocios')
+      }
       const [anioStr, mesStr] = mes.split('-')
       const anioSel = Number(anioStr)
       const mesSel = Number(mesStr)
-      const [resumen, mesData] = await Promise.all([
+      const [resumen, mesData, metasMap] = await Promise.all([
         getComercialResumen(),
         getComercialMes(anioSel, mesSel),
+        getMetasPorVendedorPeriodo(anioSel, mesSel),
       ])
       return (
         <EquipoComercialPersonasClient
@@ -52,6 +58,7 @@ export default async function EquipoPage({ searchParams }: Props) {
           mesData={mesData}
           anio={anioSel}
           mes={mesSel}
+          metasPorVendedor={Array.from(metasMap)}
         />
       )
     }

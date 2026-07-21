@@ -75,6 +75,7 @@ export function TabComercialSoena({
 
   const kpis = mesData?.kpis
   const vendedoresMes = mesData?.porVendedor ?? []
+  const ventasPorDia = mesData?.porDia ?? []
 
   const totalHonorario = equipo.reduce((s, v) => s + v.honorario_recaudado, 0)
   const totalTarifa = equipo.reduce((s, v) => s + v.tarifa_recaudada, 0)
@@ -217,6 +218,32 @@ export function TabComercialSoena({
           </div>
         </div>
       </section>
+
+      {/* Ventas por dia del mes (Daniela: "diariamente cuantas ventas llevamos") */}
+      {ventasPorDia.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-sm font-bold text-gray-900">
+            Ventas por dia · {MESES_ES[mes - 1]} {anio}
+          </h2>
+          <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={ventasPorDia} margin={{ left: -20, right: 12, top: 8 }}>
+                <CartesianGrid vertical={false} stroke="#F3F4F6" />
+                <XAxis
+                  dataKey="dia"
+                  tick={{ fontSize: 10, fill: '#6B7280' }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(d: string) => d.slice(8)}
+                />
+                <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip formatter={(v) => [`${v}`, 'Ventas']} labelFormatter={(l) => `Dia ${String(l).slice(8)}`} />
+                <Bar dataKey="ventas" fill={GREEN} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      )}
 
       {/* Series historicas */}
       {serieData.length > 0 && (

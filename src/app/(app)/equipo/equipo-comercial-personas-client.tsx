@@ -29,6 +29,8 @@ interface Props {
   mesData: ComercialMesResponse | null
   anio: number
   mes: number
+  /** Metas por vendedor del mes (staff_id, meta_num_ventas). Maps no serializan cross-boundary. */
+  metasPorVendedor: [string, number][]
 }
 
 /**
@@ -36,8 +38,8 @@ interface Props {
  * Cada persona ve sus propios indicadores + su posicion en el ranking del equipo.
  * El bucket "(sin responsable)" aparece como fila informativa, fuera del ranking.
  */
-export default function EquipoComercialPersonasClient({ resumen, mesData, anio, mes }: Props) {
-  const ranking = computeRanking(resumen)
+export default function EquipoComercialPersonasClient({ resumen, mesData, anio, mes, metasPorVendedor }: Props) {
+  const ranking = computeRanking(resumen, new Map(metasPorVendedor))
   const ventasMesPorId = new Map<string, ComercialVendedorMes>()
   for (const v of mesData?.porVendedor ?? []) {
     if (v.responsable_id) ventasMesPorId.set(v.responsable_id, v)
@@ -121,7 +123,7 @@ function PersonaCard({
           <p className="truncate font-semibold text-gray-900">{nombreCorto(persona.nombre)}</p>
           <p className="truncate text-xs text-gray-400">{persona.position ?? 'Comercial'}</p>
         </div>
-        <RankBadge rank={persona.rank_honorario} total={total} />
+        <RankBadge rank={persona.rank_ventas} total={total} />
       </div>
 
       {/* Indicadores del mes */}
@@ -134,25 +136,25 @@ function PersonaCard({
         />
       </div>
 
-      {/* Indicadores acumulados + posiciones */}
+      {/* Indicadores acumulados + posiciones (ranking primario = ventas) */}
       <div className="space-y-2 border-t border-gray-50 pt-3">
+        <RankRow
+          label="Ventas (total)"
+          value={String(persona.num_ventas)}
+          rank={persona.rank_ventas}
+          total={total}
+          strong
+        />
         <RankRow
           label="Honorario recaudado"
           value={fmtCOP(persona.honorario_recaudado)}
           rank={persona.rank_honorario}
           total={total}
-          strong
         />
         <RankRow
-          label="Valor aprobado"
-          value={fmtCOP(persona.valor_aprobado)}
-          rank={persona.rank_valor}
-          total={total}
-        />
-        <RankRow
-          label="Negocios activos"
-          value={String(persona.negocios_abiertos)}
-          rank={persona.rank_negocios}
+          label="Cumplimiento de meta"
+          value={persona.pct_cumplimiento != null ? `${persona.pct_cumplimiento}%` : 'Sin meta'}
+          rank={persona.rank_cumplimiento}
           total={total}
         />
       </div>
@@ -175,7 +177,7 @@ function RankBadge({ rank, total }: { rank: number; total: number }) {
         backgroundColor: esPrimero ? '#FEF3C7' : '#F3F4F6',
         color: esPrimero ? GOLD : '#6B7280',
       }}
-      title={`Posicion ${rank} de ${total} en honorario recaudado`}
+      title={`Posicion ${rank} de ${total} en ventas`}
     >
       {esPrimero && <Trophy className="h-3 w-3" />}
       #{rank} de {total}
