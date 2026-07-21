@@ -1497,6 +1497,272 @@ export async function crearNegocio(input: {
   return { negocio_id: negocioData.id, error: null }
 }
 
+// ── Conversión: interacción (lead) → negocio ────────────────────────────────
+// Un lead de Meta ya NO crea negocio automáticamente (ver meta-leads-webhook):
+// crea un contacto + una interacción. El humano confirma tipo de persona y, si
+// es jurídica, la empresa; esta acción crea el negocio real y marca la
+// interacción 'convertida'. Reusa crearNegocio (etapa de entrada config-driven =
+// Validación, bloques, drive folder, auto-init) y luego enlaza los IDs.
+
+/**
+ * Lee un campo del field_data crudo de un lead de Meta (arreglo [{name, values}]).
+ * getField acepta varios nombres candidatos y devuelve el primer valor no vacío.
+ */
+function leerFieldData(
+  fieldData: Array<{ name?: string; values?: string[] }>,
+  names: string[],
+): string | null {
+  for (const n of names) {
+    const f = fieldData.find((fd) => fd.name?.toLowerCase() === n.toLowerCase())
+    // Tolerar campos sin `values` (a veces Meta manda el campo vacío).
+    if (f?.values?.length && f.values[0]?.trim()) return f.values[0]
+  }
+  return null
+}
+
+/**
+ * Arma el nombre del negocio desde el payload del lead usando la MISMA config que
+ * antes usaba el webhook (config_extra.meta_leads.nombre_negocio): base = nombre
+ * del contacto, + append_fields (ej. marca-modelo), uppercase opcional.
+ * Sin config → nombre base tal cual.
+ */
+function construirNombreNegocioDesdePayload(
+  base: string,
+  cfgNombre: { uppercase?: boolean; append_fields?: string[] } | undefined,
+  fieldData: Array<{ name?: string; values?: string[] }>,
+): string {
+  let nombre = base
+  const extra = (cfgNombre?.append_fields ?? [])
+    .map((name) => leerFieldData(fieldData, [name]))
+    .filter((v): v is string => !!v && v.trim().length > 0)
+    .map((v) => v.trim())
+  if (extra.length) nombre = `${base} - ${extra.join(' ')}`
+  return cfgNombre?.uppercase ? nombre.toUpperCase() : nombre
+}
+
+export async function crearNegocioDesdeInteraccion(input: {
+  interaccion_id: string
+  tipo_persona: 'natural' | 'juridica'
+  empresa_nombre?: string
+  empresa_nit?: string
+}): Promise<{ negocio_id: string | null; error: string | null }> {
+  // userId = profile.id (para assigned_by, FK a profiles). staffId = staff.id
+  // (para negocio_responsables.staff_id y como fallback de responsable del negocio).
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
+
+  // 1. Cargar la interacción (RLS ya la acota al workspace del usuario).
+  const { data: interRaw, error: interErr } = await db(supabase)
+    .from('contacto_interacciones')
+    .select('id, contacto_id, estado, negocio_id, payload')
+    .eq('id', input.interaccion_id)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const inter = interRaw as {
+    id: string
+    contacto_id: string
+    estado: string
+    negocio_id: string | null
+    payload: Record<string, unknown> | null
+  } | null
+  if (interErr || !inter) return { negocio_id: null, error: 'Interacción no encontrada' }
+  if (inter.estado === 'convertida' && inter.negocio_id) {
+    // Idempotente: ya se convirtió antes → devolver el negocio existente.
+    return { negocio_id: inter.negocio_id, error: null }
+  }
+
+  const fieldData = (inter.payload?.field_data ?? []) as Array<{ name?: string; values?: string[] }>
+  const leadgenId = (inter.payload?.leadgen_id ?? null) as string | null
+
+  // Atribucion de campana Meta: snapshot que viaja de la interaccion al negocio
+  // al convertir, para medir eficacia de campana desde el negocio ganado. Tolerante
+  // a nulls (los leads viejos solo traen platform + ad_id); copia lo que exista en
+  // el payload, nunca inventa valores.
+  const payloadMeta = (inter.payload ?? {}) as Record<string, unknown>
+  const metaStr = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+  const createdTimeRaw = payloadMeta.created_time
+  const atribucion = {
+    fuente: 'meta' as const,
+    campaign_id: metaStr(payloadMeta.campaign_id),
+    campaign_name: metaStr(payloadMeta.campaign_name),
+    adset_id: metaStr(payloadMeta.adset_id),
+    adset_name: metaStr(payloadMeta.adset_name),
+    ad_id: metaStr(payloadMeta.ad_id),
+    ad_name: metaStr(payloadMeta.ad_name),
+    platform: metaStr(payloadMeta.platform),
+    form_id: metaStr(payloadMeta.form_id),
+    leadgen_id: leadgenId,
+    interaccion_id: inter.id,
+    ocurrida_at:
+      typeof createdTimeRaw === 'number'
+        ? String(createdTimeRaw)
+        : metaStr(createdTimeRaw),
+  }
+
+  // 2. Nombre + responsable del contacto (el responsable del contacto tiene
+  //    prioridad sobre el staff del usuario que convierte).
+  const { data: contactoRow } = await db(supabase)
+    .from('contactos')
+    .select('nombre, responsable_id')
+    .eq('id', inter.contacto_id)
+    .eq('workspace_id', workspaceId)
+    .single()
+  const contactoInfo = contactoRow as { nombre: string | null; responsable_id: string | null } | null
+  const contactoNombre = contactoInfo?.nombre?.trim() || 'Lead'
+
+  // 3. Nombre del negocio config-driven (misma config que usaba el webhook).
+  const { data: wsCfg } = await db(supabase)
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', workspaceId)
+    .single()
+  const cfgNombre = ((wsCfg as { config_extra?: { meta_leads?: {
+    nombre_negocio?: { uppercase?: boolean; append_fields?: string[] }
+  } } } | null)?.config_extra?.meta_leads?.nombre_negocio)
+  const nombreNegocio = construirNombreNegocioDesdePayload(contactoNombre, cfgNombre, fieldData)
+
+  // 4. Empresa jurídica: crearla y vincularla por empresa_id. Natural: crearNegocio
+  //    aplica el patrón vigente (PN = su propia empresa auto, desde el contacto).
+  let empresaId: string | undefined
+  if (input.tipo_persona === 'juridica') {
+    const empresaNombre = input.empresa_nombre?.trim()
+    if (!empresaNombre) return { negocio_id: null, error: 'Falta el nombre de la empresa (persona jurídica)' }
+    const nitLimpio = input.empresa_nit?.trim() ? nitSinDv(input.empresa_nit.trim()) : null
+    const { data: newEmpresa, error: empErr } = await db(supabase)
+      .from('empresas')
+      .insert({
+        workspace_id: workspaceId,
+        nombre: empresaNombre,
+        tipo_persona: 'juridica',
+        ...(nitLimpio ? { numero_documento: nitLimpio, tipo_documento: 'NIT' } : {}),
+      })
+      .select('id')
+      .single()
+    if (empErr || !newEmpresa) {
+      return { negocio_id: null, error: (empErr as { message?: string } | null)?.message ?? 'No se pudo crear la empresa' }
+    }
+    empresaId = (newEmpresa as { id: string }).id
+  }
+
+  // 5. Crear el negocio reusando crearNegocio (etapa de entrada = Validación por
+  //    config entrada_manual_orden, bloques, carpeta de Drive, auto-init).
+  const res = await crearNegocio({
+    nombre: nombreNegocio,
+    contacto_id: inter.contacto_id,
+    empresa_id: empresaId,
+    es_persona_natural: input.tipo_persona === 'natural',
+  })
+  if (res.error || !res.negocio_id) {
+    return { negocio_id: null, error: res.error ?? 'No se pudo crear el negocio' }
+  }
+
+  // 6. Enlazar el negocio con la interacción de origen (metadata) + fijar el
+  //    responsable + marcar la interacción convertida.
+  //
+  //    Metadata: MERGE, no overwrite. crearNegocio (y sus triggers/auto-init)
+  //    pueden haber escrito metadata; leemos el actual y combinamos para no
+  //    perderlo. interaccion_id / leadgen_id / fuente_cargue mandan (identifican
+  //    el origen del negocio).
+  const { data: negActual } = await db(supabase)
+    .from('negocios')
+    .select('metadata')
+    .eq('id', res.negocio_id)
+    .eq('workspace_id', workspaceId)
+    .single()
+  const metadataActual = ((negActual as { metadata?: Record<string, unknown> } | null)?.metadata ?? {}) as Record<string, unknown>
+
+  // Responsable del negocio: el del contacto tiene prioridad; si el contacto no
+  // tiene, el staff del usuario que convierte. El negocio convertido NUNCA queda
+  // sin responsable (mientras haya alguno de los dos).
+  const responsableId = contactoInfo?.responsable_id ?? staffId ?? null
+
+  await db(supabase)
+    .from('negocios')
+    .update({
+      metadata: { ...metadataActual, interaccion_id: inter.id, leadgen_id: leadgenId, fuente_cargue: 'meta_lead', atribucion },
+      ...(responsableId ? { responsable_id: responsableId } : {}),
+    })
+    .eq('id', res.negocio_id)
+    .eq('workspace_id', workspaceId)
+
+  // Upsert idempotente en negocio_responsables (N:M, fuente de verdad de la lista
+  // de responsables). Sin esto, las dos vistas (escalar responsable_id vs. lista
+  // N:M) divergen. ON CONFLICT DO NOTHING vía upsert con ignoreDuplicates.
+  if (responsableId) {
+    try {
+      await db(supabase)
+        .from('negocio_responsables')
+        .upsert(
+          { negocio_id: res.negocio_id, staff_id: responsableId, assigned_by: userId ?? null },
+          { onConflict: 'negocio_id,staff_id', ignoreDuplicates: true },
+        )
+      await sincronizarResponsablePrincipal(supabase, res.negocio_id, workspaceId)
+    } catch (respErr) {
+      // No bloquear la conversión si la asignación de responsable falla.
+      console.error(
+        `[crearNegocioDesdeInteraccion] No se pudo asignar responsable (negocio=${res.negocio_id}, staff=${responsableId}):`,
+        respErr instanceof Error ? respErr.message : respErr,
+      )
+    }
+  }
+
+  await db(supabase)
+    .from('contacto_interacciones')
+    .update({ estado: 'convertida', negocio_id: res.negocio_id })
+    .eq('id', inter.id)
+    .eq('workspace_id', workspaceId)
+
+  revalidatePath(`/directorio/contacto/${inter.contacto_id}`)
+  revalidatePath('/negocios')
+  return { negocio_id: res.negocio_id, error: null }
+}
+
+// ── Acciones de bandeja: marcar/descartar una interacción ───────────────────
+
+export async function marcarInteraccionContactada(
+  interaccionId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const { data: interRaw } = await db(supabase)
+    .from('contacto_interacciones')
+    .select('contacto_id')
+    .eq('id', interaccionId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const { error: dbErr } = await db(supabase)
+    .from('contacto_interacciones')
+    .update({ estado: 'contactada' })
+    .eq('id', interaccionId)
+    .eq('workspace_id', workspaceId)
+  if (dbErr) return { success: false, error: (dbErr as { message: string }).message }
+  const contactoId = (interRaw as { contacto_id: string } | null)?.contacto_id
+  if (contactoId) revalidatePath(`/directorio/contacto/${contactoId}`)
+  return { success: true }
+}
+
+export async function descartarInteraccion(
+  interaccionId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const { data: interRaw } = await db(supabase)
+    .from('contacto_interacciones')
+    .select('contacto_id')
+    .eq('id', interaccionId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const { error: dbErr } = await db(supabase)
+    .from('contacto_interacciones')
+    .update({ estado: 'descartada' })
+    .eq('id', interaccionId)
+    .eq('workspace_id', workspaceId)
+  if (dbErr) return { success: false, error: (dbErr as { message: string }).message }
+  const contactoId = (interRaw as { contacto_id: string } | null)?.contacto_id
+  if (contactoId) revalidatePath(`/directorio/contacto/${contactoId}`)
+  return { success: true }
+}
+
 // ── Auto-crear cotización al crear negocio ──────────────────────────────────
 // Se llama internamente desde crearNegocio() si el bloque cotización tiene
 // config_extra.auto_cotizacion configurado (ej: SOENA VE).

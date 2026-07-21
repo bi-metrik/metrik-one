@@ -3,30 +3,28 @@
 // ------------------------------------------------------------
 // El webhook de Meta NO trae los datos del lead, solo un leadgen_id.
 // Flujo: verificar firma → traer field_data via Graph API con el
-// System User token → mapear page_id → workspace → crear negocio
-// shell en la etapa de entrada (config-driven, opt-in por workspace).
+// System User token → mapear page_id → workspace → crear/dedup el
+// CONTACTO y registrar una INTERACCIÓN (contacto_interacciones).
+//
+// CAMBIO DE PARADIGMA (2026-07-21): un lead de Meta ya NO crea un negocio.
+// Crea (o reusa) un contacto y deja una interacción en estado 'nueva'. El
+// humano decide luego cuáles convierten a negocio (crearNegocioDesdeInteraccion),
+// y solo ahí se resuelve la etapa de entrada y se dispara la carpeta de Drive.
 //
 // Config por workspace en workspaces.config_extra.meta_leads:
 //   {
 //     "page_id": "1234567890",          // Página de FB que dispara el webhook
-//     "linea_id": "uuid" | null,        // null → usa linea_activa_id del ws
-//     "etapa_entrada_orden": 1 | null,  // null → primera etapa activa (orden asc)
 //     "field_map": {                    // opcional, override del mapeo por defecto
 //       "nombre":  ["full_name"],
 //       "email":   ["email"],
-//       "telefono":["phone_number"],
-//       "empresa": ["company_name"]     // si existe → crea empresa juridica
+//       "telefono":["phone_number"]
 //     }
 //   }
+// (linea_id / etapa_entrada_orden ya no se usan aquí: el negocio nace en la
+//  conversión, no en el webhook. Quedan inertes si están configurados.)
 //
-// Idempotencia: negocios.metadata->>leadgen_id. Meta reintenta el webhook.
+// Idempotencia: contacto_interacciones (workspace_id, 'meta', leadgen_id).
 // verify_jwt=false en config.toml (Meta no manda el JWT de Supabase).
-//
-// Tras crear el negocio, dispara al instante la carpeta de Drive vía el
-// endpoint puntual del app. Requiere dos secretos:
-//   CRON_SECRET   — mismo valor que el env de Vercel (auth del endpoint).
-//   APP_BASE_URL  — URL estable del app desplegado (ej. https://soena.metrikone.co).
-// Si faltan, el disparo se omite (fail-soft) y el cron diario reconcilia.
 // ============================================================
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -150,14 +148,7 @@ async function processPayload(payload: Record<string, unknown>): Promise<void> {
 
 type MetaLeadsConfig = {
   page_id: string | number;
-  linea_id?: string | null;
-  etapa_entrada_orden?: number | null;
   field_map?: Record<string, string[]>;
-  // Cómo armar el nombre del negocio (opt-in por workspace). Por defecto = nombre
-  // del lead tal cual. `uppercase` lo pone en MAYÚSCULAS; `append_fields` concatena
-  // el valor de esos campos del formulario (ej. marca-línea-modelo del vehículo)
-  // para identificar el negocio desde el pipeline: "PERSONA - MARCA MODELO".
-  nombre_negocio?: { uppercase?: boolean; append_fields?: string[] };
   // Defaults del contacto que se crea desde el lead (opt-in). fuente_adquisicion y
   // fuente_detalle etiquetan el origen (ej. pauta digital pagada). rol_natural se
   // asigna solo si el lead declara ser persona natural (el campo tipo_persona_field
@@ -168,27 +159,31 @@ type MetaLeadsConfig = {
     rol_natural?: string;
     tipo_persona_field?: string;
     natural_value?: string;
-    // Segmento inicial del contacto (el lead nace en la etapa de entrada). El resto
-    // del ciclo lo mantiene el avance de etapa en la app (sincronizarSegmentoContacto).
+    // Segmento inicial del contacto recién creado desde un lead (aún sin gestionar).
     segmento_inicial?: string;
   };
 };
 
-// Arma el nombre del negocio a partir del nombre del lead y, si el workspace lo
-// configura, concatena campos del formulario (ej. marca-línea-modelo) y lo pasa a
-// MAYÚSCULAS. Sin config → nombre tal cual. getField resuelve un campo del field_data.
-function construirNombreNegocio(
-  base: string,
-  cfgNombre: { uppercase?: boolean; append_fields?: string[] } | undefined,
-  getField: (names: string[]) => string | null,
-): string {
-  let nombre = base;
-  const extra = (cfgNombre?.append_fields ?? [])
-    .map((name) => getField([name]))
-    .filter((v): v is string => !!v && v.trim().length > 0)
-    .map((v) => v.trim());
-  if (extra.length) nombre = `${base} - ${extra.join(' ')}`;
-  return cfgNombre?.uppercase ? nombre.toUpperCase() : nombre;
+// Normaliza un valor de contacto para dedup: lower + trim. Emails se comparan así
+// para que "  Ana@X.com " y "ana@x.com" sean el mismo.
+function norm(v: string | null | undefined): string | null {
+  const t = (v ?? '').trim().toLowerCase();
+  return t.length ? t : null;
+}
+
+// Normaliza un teléfono para dedup: solo dígitos (quita espacios, guiones,
+// paréntesis, '+'). Así "+57 314 536 2841", "3145362841" y "+573145362841"
+// deduplican igual. Devuelve null si no queda ningún dígito.
+function normTel(v: string | null | undefined): string | null {
+  const digits = (v ?? '').replace(/\D/g, '');
+  return digits.length ? digits : null;
+}
+
+// Escapa los comodines de PostgREST `ilike` ('%' y '_') para que un email con
+// esos caracteres (p.ej. la parte local "a_b@x.com") no active un patrón amplio
+// y matchee un contacto ajeno. '\' se escapa primero para no romper los demás.
+function escapeLike(v: string): string {
+  return v.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 async function handleLead(c: LeadgenChange): Promise<void> {
@@ -197,7 +192,7 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   // 1. Routing page_id → workspace (config-driven, opt-in).
   const { data: wss, error: wsErr } = await supabase
     .from('workspaces')
-    .select('id, linea_activa_id, stages_activos, config_extra');
+    .select('id, config_extra');
   if (wsErr) {
     console.error('[meta-leads] error consultando workspaces:', wsErr.message);
     return;
@@ -207,8 +202,6 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     return cfg && String(cfg.page_id) === String(c.page_id);
   }) as {
     id: string;
-    linea_activa_id: string | null;
-    stages_activos: string[] | null;
     config_extra: { meta_leads: MetaLeadsConfig };
   } | undefined;
 
@@ -218,21 +211,17 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   }
   const cfg = ws.config_extra.meta_leads;
   const workspaceId = ws.id;
-  const lineaId = cfg.linea_id ?? ws.linea_activa_id;
-  if (!lineaId) {
-    console.error('[meta-leads] workspace %s sin línea configurada', workspaceId);
-    return;
-  }
 
-  // 2. Idempotencia por leadgen_id.
+  // 2. Idempotencia por leadgen_id (interacción ya registrada).
   const { data: existing } = await supabase
-    .from('negocios')
+    .from('contacto_interacciones')
     .select('id')
     .eq('workspace_id', workspaceId)
-    .eq('metadata->>leadgen_id', c.leadgen_id)
+    .eq('fuente', 'meta')
+    .eq('fuente_ref', c.leadgen_id)
     .maybeSingle();
   if (existing) {
-    console.log('[meta-leads] lead %s ya ingerido (negocio %s)', c.leadgen_id, (existing as { id: string }).id);
+    console.log('[meta-leads] lead %s ya ingerido (interacción %s)', c.leadgen_id, (existing as { id: string }).id);
     return;
   }
 
@@ -262,14 +251,10 @@ async function handleLead(c: LeadgenChange): Promise<void> {
 
   const fm = cfg.field_map ?? {};
   const nombre = getField(fm.nombre ?? ['full_name', 'nombre', 'name']) ?? 'Lead sin nombre';
-  const email = getField(fm.email ?? ['email', 'correo', 'correo_electronico']);
-  const telefono = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone']);
-  const empresaNombre = fm.empresa ? getField(fm.empresa) : null;
-
-  // Nombre del negocio (opt-in): persona + campos extra (ej. marca-modelo del
-  // vehículo), en MAYÚSCULAS si se pide. El contacto conserva el nombre de la
-  // persona; solo el negocio lleva el nombre compuesto para identificarlo en el pipeline.
-  const negocioNombre = construirNombreNegocio(nombre, cfg.nombre_negocio, getField);
+  const emailRaw = getField(fm.email ?? ['email', 'correo', 'correo_electronico']);
+  const telefonoRaw = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone']);
+  const email = norm(emailRaw);
+  const telefono = normTel(telefonoRaw); // solo dígitos, para dedup robusto
 
   // Defaults del contacto creado desde el lead (opt-in): fuente = pauta digital,
   // rol = decisor si el lead es persona natural. Solo aplican al CREAR el contacto;
@@ -280,26 +265,60 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     && tipoPersona.trim().toLowerCase().replace(/_+$/, '') === (cc.natural_value ?? 'natural').toLowerCase();
   const contactoRol = esNatural ? (cc.rol_natural ?? null) : null;
 
-  // 4. Dedup de contacto (por teléfono, luego email).
+  // 3. Dedup de contacto — EMAIL-first. El email identifica mejor a una persona
+  //    que el teléfono (un teléfono se comparte entre familiares/empresa). Reglas:
+  //    a) hay email y matchea un contacto → fusiona con ese contacto.
+  //    b) no hay match por email → intenta por teléfono; si matchea, fusiona.
+  //    c) el teléfono matchea pero el email declarado DIFIERE del contacto hallado
+  //       → NO fusiona (usa/crea el contacto por email) y marca la interacción
+  //       'posible_duplicado' para revisión humana (dos personas, un teléfono).
+  //    d) sin email ni teléfono → crea contacto igual (no se puede deduplicar).
   let contactoId: string | null = null;
-  if (telefono) {
+  let estadoInteraccion = 'nueva';
+
+  // Buscar por email normalizado. El email es la llave dura del dedup. Se escapan
+  // los comodines de `ilike` ('%' y '_') para que un email con esos caracteres
+  // válidos en la parte local (ej. "a_b@x.com") no active un patrón amplio y
+  // fusione dos contactos distintos (merge automático → sin falsos positivos).
+  if (email) {
     const { data } = await supabase
-      .from('contactos').select('id').eq('workspace_id', workspaceId).eq('telefono', telefono).maybeSingle();
+      .from('contactos').select('id, email').eq('workspace_id', workspaceId).ilike('email', escapeLike(email)).maybeSingle();
     contactoId = (data as { id: string } | null)?.id ?? null;
   }
-  if (!contactoId && email) {
+
+  // Sin match por email → intentar por teléfono normalizado. La columna `telefono`
+  // guarda el valor con formato ("+57 314 …"), así que no se puede normalizar en
+  // la query PostgREST: traemos los candidatos del workspace y comparamos por solo
+  // dígitos en memoria. Así "+57 314 536 2841", "3145362841" y "+573145362841"
+  // deduplican igual.
+  if (!contactoId && telefono) {
     const { data } = await supabase
-      .from('contactos').select('id').eq('workspace_id', workspaceId).eq('email', email).maybeSingle();
-    contactoId = (data as { id: string } | null)?.id ?? null;
+      .from('contactos').select('id, email, telefono')
+      .eq('workspace_id', workspaceId)
+      .not('telefono', 'is', null);
+    const candidatos = (data ?? []) as Array<{ id: string; email: string | null; telefono: string | null }>;
+    const encontrado = candidatos.find((c) => normTel(c.telefono) === telefono) ?? null;
+    if (encontrado) {
+      const emailContacto = norm(encontrado.email);
+      // Conflicto: teléfono igual pero email distinto → dos personas, un teléfono.
+      // No fusionar; se creará (o buscará) un contacto por email y se marca duplicado.
+      if (email && emailContacto && emailContacto !== email) {
+        estadoInteraccion = 'posible_duplicado';
+      } else {
+        contactoId = encontrado.id;
+      }
+    }
   }
+
+  // Crear contacto si no se resolvió por dedup.
   if (!contactoId) {
     const { data, error } = await supabase
       .from('contactos')
       .insert({
         workspace_id: workspaceId,
         nombre,
-        telefono: telefono ?? null,
-        email: email ?? null,
+        telefono: telefonoRaw ?? null,
+        email: emailRaw ?? null,
         fuente_adquisicion: cc.fuente_adquisicion ?? null,
         fuente_detalle: cc.fuente_detalle ?? null,
         rol: contactoRol,
@@ -313,37 +332,9 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     contactoId = (data as { id: string }).id;
   }
 
-  // 5. Empresa opcional (solo si el field_map la mapea).
-  let empresaId: string | null = null;
-  if (empresaNombre) {
-    const { data } = await supabase
-      .from('empresas')
-      .insert({ workspace_id: workspaceId, nombre: empresaNombre, tipo_persona: 'juridica' })
-      .select('id').single();
-    empresaId = (data as { id: string } | null)?.id ?? null;
-  }
-
-  // 6. Etapa de entrada (default: primera etapa activa por orden asc = Validación).
-  const stagesActivos = ws.stages_activos ?? ['venta', 'ejecucion', 'cobro'];
-  const { data: etapas } = await supabase
-    .from('etapas_negocio')
-    .select('id, stage, orden')
-    .eq('linea_id', lineaId)
-    .in('stage', stagesActivos)
-    .order('orden', { ascending: true });
-  const etapasList = (etapas ?? []) as Array<{ id: string; stage: string; orden: number }>;
-  let etapa = etapasList[0];
-  if (cfg.etapa_entrada_orden != null) {
-    const match = etapasList.find((e) => e.orden === cfg.etapa_entrada_orden);
-    if (match) etapa = match;
-  }
-  if (!etapa) {
-    console.error('[meta-leads] no se encontró etapa de entrada para línea %s', lineaId);
-    return;
-  }
-
-  // 7. Crear el negocio shell. El código (V000N) lo auto-genera el trigger.
-  const metadata = {
+  // 4. Registrar la INTERACCIÓN (no un negocio). El humano la convierte luego.
+  //    payload = field_data crudo + metadata de campaña (para conservar contexto).
+  const payload = {
     leadgen_id: c.leadgen_id,
     form_id: c.form_id ?? lead.form_id ?? null,
     ad_id: c.ad_id ?? lead.ad_id ?? null,
@@ -354,81 +345,31 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     campaign_name: lead.campaign_name ?? null,
     platform: lead.platform ?? null,
     created_time: c.created_time ?? lead.created_time ?? null,
-    fuente_cargue: 'meta_lead',
     field_data: fieldData,
   };
-  const { data: neg, error: negErr } = await supabase
-    .from('negocios')
+  const createdTime = c.created_time ?? lead.created_time ?? null;
+  const ocurridaAt = createdTime != null ? new Date(Number(createdTime) * 1000).toISOString() : null;
+
+  const { data: inter, error: interErr } = await supabase
+    .from('contacto_interacciones')
     .insert({
       workspace_id: workspaceId,
-      linea_id: lineaId,
       contacto_id: contactoId,
-      empresa_id: empresaId,
-      nombre: negocioNombre,
-      etapa_actual_id: etapa.id,
-      stage_actual: etapa.stage,
-      estado: 'abierto',
-      metadata,
+      fuente: 'meta',
+      fuente_ref: c.leadgen_id,
+      payload,
+      estado: estadoInteraccion,
+      ocurrida_at: ocurridaAt,
     })
-    .select('id, codigo').single();
-  if (negErr) {
-    console.error('[meta-leads] error creando negocio:', negErr.message);
+    .select('id').single();
+  if (interErr) {
+    // El índice único (workspace_id, 'meta', leadgen_id) protege de doble ingesta;
+    // si dos entregas de Meta corren en paralelo, una gana y la otra choca aquí.
+    console.error('[meta-leads] error registrando interacción:', interErr.message);
     return;
   }
-  const created = neg as { id: string; codigo: string | null };
   console.log(
-    '[meta-leads] negocio creado %s (%s) desde lead %s en ws %s',
-    created.codigo ?? created.id, nombre, c.leadgen_id, workspaceId,
+    '[meta-leads] interacción %s (estado=%s) registrada para contacto %s desde lead %s en ws %s',
+    (inter as { id: string }).id, estadoInteraccion, contactoId, c.leadgen_id, workspaceId,
   );
-
-  // 8. Disparar la carpeta de Drive AL INSTANTE (opción 1). El insert directo
-  //    se salta crearNegocio, así que sin esto la carpeta la crearía solo el
-  //    cron diario → un lead que entra entre corridas queda sin carpeta y su
-  //    propuesta económica sale sin PDF. Llamamos el endpoint puntual con
-  //    service role (no es tenant-scoped). Fail-soft: cualquier fallo se loguea
-  //    y NUNCA se propaga — el cron diario es el backstop.
-  await dispararCarpetaDrive(created.id, created.codigo);
-}
-
-// Dispara la creación de la carpeta de Drive del negocio recién creado, vía el
-// endpoint puntual del app (`/api/crons/ensure-negocio-folders?negocio_id=`).
-// Fail-soft por diseño: no lanza. Si faltan CRON_SECRET o APP_BASE_URL, o el
-// fetch falla, solo se loguea; el cron diario reconcilia después.
-async function dispararCarpetaDrive(negocioId: string, codigo: string | null): Promise<void> {
-  const codigoLog = codigo ?? negocioId;
-  const baseUrl = Deno.env.get('APP_BASE_URL');
-  const cronSecret = Deno.env.get('CRON_SECRET');
-  if (!baseUrl || !cronSecret) {
-    console.warn(
-      '[meta-leads] carpeta Drive no disparada para %s: falta %s (backstop: cron diario)',
-      codigoLog,
-      !baseUrl ? 'APP_BASE_URL' : 'CRON_SECRET',
-    );
-    return;
-  }
-  try {
-    const url = `${baseUrl.replace(/\/+$/, '')}/api/crons/ensure-negocio-folders?negocio_id=${negocioId}`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${cronSecret}` },
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.error(
-        '[meta-leads] carpeta Drive: endpoint respondió %s para %s — %s (backstop: cron diario)',
-        res.status, codigoLog, txt.slice(0, 300),
-      );
-      return;
-    }
-    const out = await res.json().catch(() => ({}));
-    console.log(
-      '[meta-leads] carpeta Drive disparada para %s: created=%s reason=%s',
-      codigoLog, out?.created, out?.reason,
-    );
-  } catch (e) {
-    console.error(
-      '[meta-leads] carpeta Drive: fetch falló para %s: %s (backstop: cron diario)',
-      codigoLog, e instanceof Error ? e.message : e,
-    );
-  }
 }
