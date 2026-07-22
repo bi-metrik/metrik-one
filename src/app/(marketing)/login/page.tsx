@@ -7,7 +7,11 @@ import LoginClient from './login-client'
 // desde el Host (sin sesion): el slug -> workspace -> name + logo_url. Solo esos
 // dos campos cruzan al browser; el service role nunca sale del servidor.
 export default async function LoginPage() {
-  const host = (await headers()).get('host') || ''
+  // En las funciones serverless de Vercel, `host` puede traer el host interno
+  // del deployment (no el subdominio del cliente); el host externo real llega en
+  // `x-forwarded-host`. Preferirlo y caer a `host` en local/dev (donde no existe).
+  const h = await headers()
+  const host = h.get('x-forwarded-host') || h.get('host') || ''
   const slug = extractSlug(host)
 
   let tenantBranding: { name: string; logoUrl: string | null } | null = null
