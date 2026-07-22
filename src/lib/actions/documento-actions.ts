@@ -462,11 +462,14 @@ export async function procesarDocumento(
     }
 
     // ── 9b. Cross-check contra datos de otros bloques ───────────────────
-    const crossCheckSpec = configExtra.cross_check as { checks?: CrossCheckSpec[] } | undefined
+    const crossCheckSpec = configExtra.cross_check as { checks?: CrossCheckSpec[]; solo_alerta?: boolean } | undefined
+    const crossCheckSoloAlerta = crossCheckSpec?.solo_alerta === true
     if (crossCheckSpec?.checks && crossCheckSpec.checks.length > 0 && camposResult) {
       const cc = await runCrossCheck(supabase, negocioId, crossCheckSpec.checks, camposResult)
-      newData._cross_check = cc
-      console.log(`[documento] Step 9b cross_check: passed=${cc.passed} (${cc.results.filter(r => !r.ok).map(r => r.slug).join(',')})`)
+      // solo_alerta: el cross-check detecta y reporta la discrepancia (panel), pero NO
+      // bloquea el gate. El operador corrige si aplica. Sin el flag, comportamiento gate.
+      newData._cross_check = { ...cc, solo_alerta: crossCheckSoloAlerta }
+      console.log(`[documento] Step 9b cross_check: passed=${cc.passed} solo_alerta=${crossCheckSoloAlerta} (${cc.results.filter(r => !r.ok).map(r => r.slug).join(',')})`)
     }
 
     // ── 10. Determinar si el bloque está completo ───────────────────────
@@ -483,9 +486,10 @@ export async function procesarDocumento(
       }
     }
 
-    // Cross-check bloquea gate si no pasa
-    const ccData = newData._cross_check as { passed: boolean } | undefined
-    if (ccData && !ccData.passed) {
+    // Cross-check bloquea el gate si no pasa, SALVO en modo solo_alerta (la
+    // discrepancia se reporta en el panel pero no impide completar el bloque).
+    const ccData = newData._cross_check as { passed: boolean; solo_alerta?: boolean } | undefined
+    if (ccData && !ccData.passed && !ccData.solo_alerta) {
       isComplete = false
     }
 
@@ -607,17 +611,19 @@ export async function reprocesarDocumento(
     let isComplete = requiredCampos.every(c => mergedCampos[c.slug]?.value !== null && mergedCampos[c.slug]?.value !== undefined)
 
     // 6b. Cross-check contra datos de otros bloques
-    const crossCheckSpec = configExtra.cross_check as { checks?: CrossCheckSpec[] } | undefined
+    const crossCheckSpec = configExtra.cross_check as { checks?: CrossCheckSpec[]; solo_alerta?: boolean } | undefined
+    const crossCheckSoloAlerta = crossCheckSpec?.solo_alerta === true
     let ccResult: { passed: boolean; results: CrossCheckResult[] } | null = null
     if (crossCheckSpec?.checks && crossCheckSpec.checks.length > 0) {
       ccResult = await runCrossCheck(supabase, negocioId, crossCheckSpec.checks, mergedCampos)
-      if (!ccResult.passed) isComplete = false
+      // solo_alerta: reporta pero no bloquea (ver procesarDocumento).
+      if (!ccResult.passed && !crossCheckSoloAlerta) isComplete = false
     }
 
     const now = new Date().toISOString()
     const newData: Record<string, unknown> = { ...currentData, campos: mergedCampos, _extraction_status: 'ok' }
     delete newData._extraction_error
-    if (ccResult) newData._cross_check = ccResult
+    if (ccResult) newData._cross_check = { ...ccResult, solo_alerta: crossCheckSoloAlerta }
 
     await db(supabase)
       .from('negocio_bloques')
