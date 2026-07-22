@@ -932,6 +932,8 @@ export default function BloqueDocumento({
 
 type CrossCheckPanelData = {
   passed: boolean
+  // solo_alerta: la discrepancia se reporta como alerta (no bloquea el avance).
+  solo_alerta?: boolean
   results: Array<{
     slug: string
     label: string
@@ -943,24 +945,32 @@ type CrossCheckPanelData = {
 
 function CrossCheckPanel({ cross_check }: { cross_check: CrossCheckPanelData }) {
   const fallos = cross_check.results.filter(r => !r.ok)
+  // Modo alerta: hay discrepancia pero NO bloquea (solo_alerta). Se muestra en ámbar
+  // (revisar/corregir si aplica), no en rojo de bloqueo.
+  const esAlerta = !cross_check.passed && cross_check.solo_alerta === true
+  const falloIconColor = esAlerta ? 'text-amber-600' : 'text-red-600'
   return (
     <div
       className={`rounded-lg border p-3 space-y-2 ${
         cross_check.passed
           ? 'border-green-200 bg-green-50/40'
-          : 'border-red-200 bg-red-50/40'
+          : esAlerta
+            ? 'border-amber-200 bg-amber-50/40'
+            : 'border-red-200 bg-red-50/40'
       }`}
     >
       <div className="flex items-center gap-2">
         {cross_check.passed ? (
           <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
         ) : (
-          <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+          <AlertTriangle className={`h-4 w-4 shrink-0 ${esAlerta ? 'text-amber-600' : 'text-red-600'}`} />
         )}
-        <p className={`text-xs font-semibold ${cross_check.passed ? 'text-green-700' : 'text-red-700'}`}>
+        <p className={`text-xs font-semibold ${cross_check.passed ? 'text-green-700' : esAlerta ? 'text-amber-700' : 'text-red-700'}`}>
           {cross_check.passed
             ? 'Certificado validado: los datos coinciden con el negocio.'
-            : `Discrepancia detectada (${fallos.length} de ${cross_check.results.length}). Sube un nuevo certificado o resuelve con UPME.`}
+            : esAlerta
+              ? `Alerta: ${fallos.length} de ${cross_check.results.length} campo(s) no coinciden con el negocio. Revisa y corrige el dato si aplica. No bloquea el avance.`
+              : `Discrepancia detectada (${fallos.length} de ${cross_check.results.length}). Sube un nuevo certificado o resuelve con UPME.`}
         </p>
       </div>
       <div className="space-y-1.5">
@@ -972,7 +982,7 @@ function CrossCheckPanel({ cross_check }: { cross_check: CrossCheckPanelData }) 
             {r.ok ? (
               <Check className="h-3.5 w-3.5 text-green-600 shrink-0 mt-0.5" />
             ) : (
-              <AlertTriangle className="h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" />
+              <AlertTriangle className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${falloIconColor}`} />
             )}
             <div className="flex-1 min-w-0 text-[11px]">
               <p className="font-medium text-foreground">{r.label}</p>
