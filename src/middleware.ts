@@ -1,37 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import { landingForWorkspace } from '@/lib/auth/landing'
+import { extractSlug } from '@/lib/tenant/extract-slug'
 
 // Base domain — dev: localhost, prod: metrikone.co
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
 const IS_DEV = process.env.NODE_ENV === 'development'
-
-// Reserved slugs that are NOT tenants
-const RESERVED_SLUGS = ['www', 'api', 'admin', 'app', 'test', 'demo', 'staging', 'mail', 'ftp']
-
-/**
- * Extract tenant slug from subdomain
- * Production: ana.metrikone.co → "ana"
- * Development: ana.localhost:3000 → "ana"
- */
-function extractSlug(hostname: string): string | null {
-  const hostWithoutPort = hostname.split(':')[0]
-  const baseDomainWithoutPort = BASE_DOMAIN.split(':')[0]
-
-  if (IS_DEV) {
-    if (hostWithoutPort !== baseDomainWithoutPort && hostWithoutPort.endsWith(`.${baseDomainWithoutPort}`)) {
-      const slug = hostWithoutPort.replace(`.${baseDomainWithoutPort}`, '')
-      if (slug && !RESERVED_SLUGS.includes(slug)) return slug
-    }
-  } else {
-    if (hostname.endsWith(BASE_DOMAIN) && hostname !== BASE_DOMAIN) {
-      const slug = hostname.replace(`.${BASE_DOMAIN}`, '')
-      if (slug && !RESERVED_SLUGS.includes(slug)) return slug
-    }
-  }
-
-  return null
-}
 
 /**
  * Propaga las cookies de sesion refrescadas (las que `updateSession` escribio en

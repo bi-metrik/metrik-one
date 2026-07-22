@@ -805,7 +805,7 @@ export default function AppShell({
       {/* ── Main Area ── */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Desktop header — greeting + date left, bell + brand logo right */}
-        <header className="hidden md:flex h-12 items-center justify-between border-b border-border bg-background px-6 shrink-0">
+        <header className="hidden md:flex h-14 items-center justify-between border-b border-border bg-background px-6 shrink-0">
           <div className="flex items-center gap-3">
             <p className="text-sm font-semibold text-foreground">
               Hola {fullName.split(' ')[0]}
@@ -819,7 +819,7 @@ export default function AppShell({
             {notificationBell}
             {hasLogo && (
               // eslint-disable-next-line @next/next/no-img-element -- dinámico desde Supabase storage, tamaño variable
-              <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[120px] object-contain" />
+              <img src={branding!.logoUrl} alt={workspaceName} className="h-10 max-w-[180px] object-contain" />
             )}
           </div>
         </header>
@@ -838,7 +838,7 @@ export default function AppShell({
             </Link>
             {hasLogo && (
               // eslint-disable-next-line @next/next/no-img-element -- dinámico desde Supabase storage, tamaño variable
-              <img src={branding!.logoUrl} alt={workspaceName} className="h-7 max-w-[120px] object-contain" />
+              <img src={branding!.logoUrl} alt={workspaceName} className="h-8 max-w-[140px] object-contain" />
             )}
             {!hasLogo && (
               <span className="truncate text-sm font-semibold">{workspaceName}</span>
