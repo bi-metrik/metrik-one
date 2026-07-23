@@ -472,7 +472,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     const timer = setTimeout(async () => {
       if (cancelled) return
       setEpaycoStatus('loading')
-      const res = await consultarEpayco(referencia, false)
+      const res = await consultarEpayco(referencia, true)
       if (cancelled) return
       if (res.success) {
         setEpaycoStatus('success')
