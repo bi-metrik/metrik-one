@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText, Loader2, Wallet } from 'lucide-react'
+import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText, Loader2, Wallet, CheckCircle, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
 } from './timer-actions'
 import { FEATURES } from '@/lib/feature-flags'
 import { agregarPagoFab, getNegociosParaPagoFab, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+import { consultarEpayco } from '@/lib/actions/epayco-actions'
+import type { EpaycoDesglose } from '@/lib/epayco'
 
 const VERDE = '#10B981'
 
@@ -443,6 +445,11 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [needJust, setNeedJust] = useState(false)
   const [pending, startTransition] = useTransition()
 
+  // Estado de verificacion ePayco
+  const [epaycoStatus, setEpaycoStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [epaycoData, setEpaycoData] = useState<EpaycoDesglose | null>(null)
+  const [epaycoError, setEpaycoError] = useState<string | null>(null)
+
   const esEpayco = fuente === 'epayco'
 
   useEffect(() => {
@@ -456,9 +463,41 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     return () => { cancel = true }
   }, [])
 
+  // Debounce de verificacion ePayco
+  useEffect(() => {
+    if (!esEpayco || !referencia || referencia.length < 5) return
+
+    let cancelled = false
+
+    const timer = setTimeout(async () => {
+      if (cancelled) return
+      setEpaycoStatus('loading')
+      const res = await consultarEpayco(referencia, true)
+      if (cancelled) return
+      if (res.success) {
+        setEpaycoStatus('success')
+        setEpaycoData(res.data)
+        setMonto(String(res.data.monto_bruto))
+        const fechaIso = res.data.fecha
+          ? new Date(res.data.fecha).toISOString().slice(0, 10)
+          : ''
+        setFecha(fechaIso)
+      } else {
+        setEpaycoStatus('error')
+        setEpaycoError(res.error)
+      }
+    }, 600)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [esEpayco, referencia])
+
   function handleSubmit() {
     if (!negocioId) return toast.error('Elige el negocio')
     if (!referencia.trim()) return toast.error('Ingresa la referencia del pago')
+    if (esEpayco && epaycoStatus !== 'success') return toast.error('Verifica la referencia ePayco antes de registrar')
     if (!esEpayco && (!Number(monto) || Number(monto) <= 0)) return toast.error('Ingresa el monto del pago')
 
     startTransition(async () => {
@@ -519,7 +558,15 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
               {(['epayco'] as const).map((f) => (
                 <button
                   key={f}
-                  onClick={() => { setFuente(f); setNeedJust(false) }}
+                  onClick={() => {
+                    setFuente(f)
+                    setNeedJust(false)
+                    setEpaycoStatus('idle')
+                    setEpaycoData(null)
+                    setEpaycoError(null)
+                    setMonto('')
+                    setFecha('')
+                  }}
                   className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
                   style={fuente === f
                     ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
@@ -533,16 +580,64 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
           </PagoField>
 
           <PagoField label={esEpayco ? 'Referencia ePayco (ref_payco)' : 'Referencia / comprobante'}>
-            <input
-              value={referencia}
-              onChange={(e) => setReferencia(esEpayco ? e.target.value.replace(/[^\d]/g, '') : e.target.value)}
-              inputMode={esEpayco ? 'numeric' : 'text'}
-              placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
-              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-              style={{ borderColor: '#E5E7EB' }}
-            />
-            {esEpayco && <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Se valida con ePayco: solo se registra si está Aceptada.</p>}
+            <div className="relative">
+              <input
+                value={referencia}
+                onChange={(e) => {
+                const val = esEpayco ? e.target.value.replace(/[^\d]/g, '') : e.target.value
+                setReferencia(val)
+                if (esEpayco) {
+                  setEpaycoStatus('idle')
+                  setEpaycoData(null)
+                  setEpaycoError(null)
+                }
+              }}
+                inputMode={esEpayco ? 'numeric' : 'text'}
+                placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
+                className="w-full rounded-md border px-2.5 py-1.5 pr-8 text-[13px] outline-none"
+                style={{ borderColor: epaycoStatus === 'success' ? VERDE : epaycoStatus === 'error' ? '#DC2626' : '#E5E7EB' }}
+              />
+              {esEpayco && epaycoStatus === 'loading' && (
+                <Loader2 className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" style={{ color: '#9CA3AF' }} />
+              )}
+              {esEpayco && epaycoStatus === 'success' && (
+                <CheckCircle className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: VERDE }} />
+              )}
+              {esEpayco && epaycoStatus === 'error' && (
+                <XCircle className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: '#DC2626' }} />
+              )}
+            </div>
+            {esEpayco && epaycoStatus === 'idle' && (
+              <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Se valida con ePayco: solo se registra si está Aceptada.</p>
+            )}
+            {esEpayco && epaycoStatus === 'error' && epaycoError && (
+              <p className="mt-1 text-[11px]" style={{ color: '#DC2626' }}>{epaycoError}</p>
+            )}
+            {esEpayco && epaycoStatus === 'success' && (
+              <p className="mt-1 text-[11px] font-medium" style={{ color: VERDE }}>Transaccion ePayco verificada</p>
+            )}
           </PagoField>
+
+          {esEpayco && epaycoStatus === 'success' && epaycoData && (
+            <div className="grid grid-cols-2 gap-3">
+              <PagoField label="Valor (ePayco)">
+                <input
+                  value={Number(monto).toLocaleString('es-CO')}
+                  readOnly
+                  className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none"
+                  style={{ borderColor: VERDE, backgroundColor: '#ECFDF5', color: '#065F46' }}
+                />
+              </PagoField>
+              <PagoField label="Fecha (ePayco)">
+                <input
+                  value={fecha}
+                  readOnly
+                  className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
+                  style={{ borderColor: VERDE, backgroundColor: '#ECFDF5', color: '#065F46' }}
+                />
+              </PagoField>
+            </div>
+          )}
 
           {!esEpayco && (
             <div className="grid grid-cols-2 gap-3">
@@ -564,7 +659,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
           <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
-          <button onClick={handleSubmit} disabled={pending || loadingNegocios} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
+          <button onClick={handleSubmit} disabled={pending || loadingNegocios || (esEpayco && epaycoStatus !== 'success')} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
             Registrar pago
           </button>
