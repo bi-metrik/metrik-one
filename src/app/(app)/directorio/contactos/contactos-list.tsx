@@ -3,14 +3,21 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown } from 'lucide-react'
+import { Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown, UserCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/catalogos/constants'
-import { deleteContacto, updateContactoSegmento, type ContactoConMeta } from '../actions'
+import { deleteContacto, updateContactoSegmento, type ContactoConMeta, type StaffOption } from '../actions'
 
 interface Props {
   contactos: ContactoConMeta[]
+  staff: StaffOption[]
+  // staff.id del usuario logueado; se usa para pre-filtrar "Mis contactos" al entrar.
+  miStaffId: string | null
 }
+
+// Valores especiales del filtro de responsable (fuera de un staff.id real).
+const RESP_TODOS = '__todos__'
+const RESP_SIN = '__sin__'
 
 // Orden de la vista general. Default: ultima interaccion (cualquiera).
 type SortKey = 'ultima_interaccion' | 'ultima_interaccion_meta' | 'alfabetico' | 'creacion'
@@ -23,11 +30,14 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 
 const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const
 
-export default function ContactosList({ contactos }: Props) {
+export default function ContactosList({ contactos, staff, miStaffId }: Props) {
   const [search, setSearch] = useState('')
   const [rolFilter, setRolFilter] = useState<string | null>(null)
   const [segmentoFilter, setSegmentoFilter] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortKey>('ultima_interaccion')
+  // Filtro de responsable. Pre-filtrado a "Mis contactos" (staff del usuario) al
+  // entrar; el supervisor lo cambia a Todos / Sin responsable / otro comercial.
+  const [responsableFilter, setResponsableFilter] = useState<string>(miStaffId ?? RESP_TODOS)
   const [, startTransition] = useTransition()
   const router = useRouter()
 
@@ -96,7 +106,10 @@ export default function ContactosList({ contactos }: Props) {
     const matchSearch = !search || c.nombre.toLowerCase().includes(search.toLowerCase())
     const matchRol = !rolFilter || c.rol === rolFilter
     const matchSegmento = !segmentoFilter || c.segmento === segmentoFilter
-    return matchSearch && matchRol && matchSegmento
+    const matchResponsable =
+      responsableFilter === RESP_TODOS ||
+      (responsableFilter === RESP_SIN ? c.responsable_id === null : c.responsable_id === responsableFilter)
+    return matchSearch && matchRol && matchSegmento && matchResponsable
   })
 
   // Orden. Fechas ISO comparadas como string (mismo formato timestamptz) — nulls al final.
@@ -162,6 +175,35 @@ export default function ContactosList({ contactos }: Props) {
             ))}
           </select>
         </div>
+      </div>
+
+      {/* Filtro de responsable (pre-filtrado a "Mis contactos" al entrar) */}
+      <div className="relative">
+        <UserCircle className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <select
+          value={responsableFilter}
+          onChange={e => setResponsableFilter(e.target.value)}
+          className="w-full appearance-none rounded-lg border bg-background py-2 pl-9 pr-3 text-sm font-medium"
+          aria-label="Filtrar por responsable"
+        >
+          {miStaffId && (
+            <option value={miStaffId}>
+              Mis contactos ({contactos.filter(c => c.responsable_id === miStaffId).length})
+            </option>
+          )}
+          <option value={RESP_TODOS}>Todos los responsables ({contactos.length})</option>
+          <option value={RESP_SIN}>
+            Sin responsable ({contactos.filter(c => c.responsable_id === null).length})
+          </option>
+          {staff
+            .filter(s => s.id !== miStaffId)
+            .map(s => {
+              const count = contactos.filter(c => c.responsable_id === s.id).length
+              return (
+                <option key={s.id} value={s.id}>{s.full_name} ({count})</option>
+              )
+            })}
+        </select>
       </div>
 
       {/* Filters */}
@@ -306,6 +348,14 @@ export default function ContactosList({ contactos }: Props) {
                       )}
                     </p>
                   )}
+
+                  {/* Responsable del contacto */}
+                  <p className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#6B7280]">
+                    <UserCircle className="h-2.5 w-2.5 shrink-0 text-[#6B7280]/70" />
+                    {c.responsable_nombre
+                      ? <>Responsable: <span className="font-medium text-[#1A1A1A]">{c.responsable_nombre}</span></>
+                      : <span className="italic text-[#6B7280]/70">Sin responsable</span>}
+                  </p>
                 </div>
 
                 {/* Acciones */}
