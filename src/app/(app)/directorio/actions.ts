@@ -33,15 +33,19 @@ export interface ContactoConMeta {
   ultima_interaccion_at: string | null
   ultima_interaccion_meta_at: string | null
   origen: OrigenContacto | null
+  responsable_id: string | null
+  responsable_nombre: string | null
 }
 
 export async function getContactos(): Promise<ContactoConMeta[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
-  const { data: contactos } = await supabase
+  // responsable_id aun no esta en database.ts generado (migracion reciente) → cast.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: contactos } = await (supabase as any)
     .from('contactos')
-    .select('id, nombre, telefono, email, fuente_adquisicion, rol, segmento, comision_porcentaje, created_at, custom_data')
+    .select('id, nombre, telefono, email, fuente_adquisicion, rol, segmento, comision_porcentaje, created_at, custom_data, responsable_id')
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
 
@@ -56,8 +60,18 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
     comision_porcentaje: number | null
     created_at: string | null
     custom_data: { origen?: OrigenContacto } | null
+    responsable_id: string | null
   }>
   if (rows.length === 0) return []
+
+  // Mapa de nombres de staff para resolver el responsable de cada contacto.
+  const { data: staffRows } = await supabase
+    .from('staff')
+    .select('id, full_name')
+    .eq('workspace_id', workspaceId)
+  const staffMap = new Map<string, string>(
+    ((staffRows ?? []) as Array<{ id: string; full_name: string }>).map((s) => [s.id, s.full_name]),
+  )
 
   // Agregado de interacciones por contacto (a 95 contactos, un solo fetch + reduce
   // en memoria es suficiente; no amerita columnas cacheadas ni triggers).
@@ -95,8 +109,18 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
       ultima_interaccion_at: a?.last ?? null,
       ultima_interaccion_meta_at: a?.lastMeta ?? null,
       origen: c.custom_data?.origen ?? null,
+      responsable_id: c.responsable_id,
+      responsable_nombre: c.responsable_id ? (staffMap.get(c.responsable_id) ?? null) : null,
     }
   })
+}
+
+// staff.id del usuario logueado (para pre-filtrar contactos "Mis contactos").
+// null si el usuario no es staff del workspace.
+export async function getMiStaffId(): Promise<string | null> {
+  const { staffId, error } = await getWorkspace()
+  if (error) return null
+  return staffId ?? null
 }
 
 export async function getContacto(id: string) {
