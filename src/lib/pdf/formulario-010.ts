@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { formatearTelefonoFijo } from '@/lib/dian/indicativos'
-import { drawFixed, type Cell } from './acroform'
+import { drawFixed, drawCells, type Cell, type CellGroup } from './acroform'
 
 // Sobre el PDF oficial de la DIAN (Formato 010). El fondo no se modifica.
 // TODAS las casillas (datos variables + deterministas) se ESTAMPAN como texto
@@ -73,11 +73,12 @@ const TEMPLATE_PATH = path.join(process.cwd(), 'src/lib/pdf/templates/formulario
 
 // ── Página 1 (Datos solicitante + Formas de pago + Firma) ────────────────────
 const P1 = {
-  // Header: Casilla 2 Concepto — label en (33.3, 721.9). Caja pequeña a la
-  // derecha del label (tipo 2 dígitos). Valor centrado en esa caja.
-  // x corrido +2mm (5.669pt) a la derecha: el "3" quedaba pegado al divisor
-  // central de la casilla; el shift centra el par "03" en su box (76 → 81.7).
-  concepto: { x: 81.7, y: 718 },
+  // Header: Casilla 2 Concepto — DOS cuadros (un dígito por cuadro). Medido con
+  // pdfplumber sobre el template: el box es la curva x0=72.25 x1=92.75, con divisor
+  // central en x=82.50 (path de la casilla). Cada dígito se centra en SU cuadro vía
+  // drawCells (no como cadena corrida). xStart=72.25 (borde izq. del 1er cuadro),
+  // pitch=10.25 (=82.50-72.25). y en PDF (bottom-left): box de 717.25 a 730 → 718.
+  concepto: { x: 72.25, y: 718 },
   // Datos solicitante (fila y = 615.4, valor baseline ~599)
   tipo_documento: { x: 28, y: 599, maxWidth: 35 },
   nit: { x: 65, y: 599, maxWidth: 100 },
@@ -160,8 +161,13 @@ const P2 = {
   // concepto del saldo ("175" = IVA/UPME). Va entre el texto del concepto (termina
   // en x≈198) y la casilla 52 "Año grav." (x≈224).
   codigo_concepto_saldo_1: { x: 207, y: 455, maxWidth: 16, size: 8 },
-  anio_gravable_1: { x: 226, y: 455, maxWidth: 40 },
-  periodo_1: { x: 270, y: 455, maxWidth: 35 },
+  // Casilla 52 (Año gravable) — CUATRO cuadros (un dígito por cuadro). Box medido
+  // con pdfplumber: x0=222.25 x1=266.75, divisores en 222.25/233.38/244.5/255.63/266.75
+  // → 4 celdas, pitch≈11.125. Se estampa AAAA por celda (drawCells), no cadena corrida.
+  anio_gravable_1: { x: 222.25, y: 455 },
+  // Casilla 53 (Período) — DOS cuadros. Box medido: x0=266.25 x1=305.75, divisor en
+  // x=286.0 → 2 celdas, pitch≈19.75. Valor FIJO "1" centrado en el 1er cuadro.
+  periodo_1: { x: 266.25, y: 455 },
   // Casilla 55 (No. documento que origina el saldo) — la DIAN exige aquí el
   // número de factura de venta del vehículo. La 54 (No. doc/acto, x≈308) queda
   // vacía: solo aplica a pago en exceso aduanero.
@@ -170,8 +176,10 @@ const P2 = {
   // 57 Nombre del documento de reconocimiento (fila inferior, izq. de la fecha):
   // la DIAN exige "Factura electrónica de ventas".
   nombre_documento_1: { x: 245, y: 434, maxWidth: 140, size: 7 },
-  // 58 Fecha documento (y=450 → 434)
-  fecha_factura_1: { x: 393, y: 434, maxWidth: 70 },
+  // 58 Fecha documento (AAAA MM DD) — OCHO cuadros equiespaciados. Box medido con
+  // pdfplumber: curva x0=390.5 x1=467.75, 8 celdas de pitch≈9.72 (año 4 + mes 2 + día 2).
+  // Se estampa por celda (drawCells con grupos), no cadena "AAAA MM DD" corrida.
+  fecha_factura_1: { x: 390.5, y: 434 },
   // 59 Valor solicitado por origen (y=447.4 → 431)
   valor_origen_1: { x: 471, y: 431, maxWidth: 115 },
   // Casilla 45 sub-casilla "Cód." del tipo de documento del titular (entre el
@@ -278,9 +286,18 @@ export async function generarFormulario010(
   const tipoDocSolicitante = (datos.tipo_documento && datos.tipo_documento.trim()) || '31'
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
-  // Concepto (casilla 2) — DETERMINISTA, Bold pequeño por estar en caja chica.
-  // La casilla es de 2 dígitos: se rellena con cero a la izquierda ("3" → "03").
-  fixed1(constantes.concepto ? constantes.concepto.padStart(2, '0') : constantes.concepto, { ...P1.concepto, size: 10 }, fontBold)
+  // Concepto (casilla 2) — DETERMINISTA, Bold. DOS cuadros: un dígito por cuadro,
+  // cada uno centrado en su celda (drawCells, no cadena corrida). Se rellena con
+  // cero a la izquierda ("3" → "03"). xStart/pitch medidos del template (ver P1.concepto).
+  if (constantes.concepto) {
+    drawCells(
+      page1,
+      fontBold,
+      constantes.concepto.padStart(2, '0'),
+      { y: P1.concepto.y, size: 10, xStart: P1.concepto.x, pitch: 10.25 },
+      Y_NUDGE,
+    )
+  }
 
   // Datos solicitante (casilla 20). Default "13" (Cédula); override del operador
   // manda. Ver `tipoDocSolicitante` arriba.
@@ -363,14 +380,26 @@ export async function generarFormulario010(
   fixed2(constantes.concepto_saldo, P2.concepto_saldo_1) // Casilla 51 texto ("IVA") DETERMINISTA
   // Casilla 51 sub-casilla "Cód." — "175" (IVA/UPME). DETERMINISTA config-driven.
   if (constantes.codigo_concepto_saldo) fixed2(constantes.codigo_concepto_saldo, P2.codigo_concepto_saldo_1)
-  edit2('anio_gravable', fecha.anio, P2.anio_gravable_1)
+  // Casilla 52 (Año gravable) — AAAA, un dígito por cuadro (4 celdas). drawCells.
+  drawCells(page2, font, fecha.anio, { y: P2.anio_gravable_1.y, size: 8, xStart: P2.anio_gravable_1.x, pitch: 11.125 }, Y_NUDGE)
   // Casilla 53 (Período) — FIJO "1" (sin cero a la izquierda; NO es el bimestre
-  // calculado de la fecha de factura).
-  fixed2('1', P2.periodo_1)
+  // calculado de la fecha de factura). Centrado en el 1er cuadro (2 celdas, pitch≈19.75).
+  drawCells(page2, font, '1', { y: P2.periodo_1.y, size: 8, xStart: P2.periodo_1.x, pitch: 19.75 }, Y_NUDGE)
   edit2('numero_factura', datos.numero_factura, P2.numero_factura_1)
   // Casilla 57 — nombre del documento que origina el saldo (constante DETERMINISTA)
   if (constantes.nombre_documento) fixed2(constantes.nombre_documento, P2.nombre_documento_1)
-  edit2('fecha_factura', fecha.compacto, P2.fecha_factura_1)
+  // Casilla 58 (Fecha documento) — AAAA MM DD, un dígito por cuadro (8 celdas
+  // equiespaciadas). Se separan los grupos vía parseFecha (anio/mes/dia), NO se usa
+  // `compacto`. Las 8 celdas son uniformes (pitch≈9.72 desde xStart=390.5), así que
+  // año/mes/día caen en su grupo por posición contigua.
+  if (fecha.anio && fecha.mes && fecha.dia) {
+    const gruposFecha: CellGroup[] = [
+      { count: 4, xStart: P2.fecha_factura_1.x, pitch: 9.72 }, // AAAA (celdas 0-3)
+      { count: 2, xStart: P2.fecha_factura_1.x + 4 * 9.72, pitch: 9.72 }, // MM (celdas 4-5)
+      { count: 2, xStart: P2.fecha_factura_1.x + 6 * 9.72, pitch: 9.72 }, // DD (celdas 6-7)
+    ]
+    drawCells(page2, font, `${fecha.anio}${fecha.mes}${fecha.dia}`, { y: P2.fecha_factura_1.y, size: 8, groups: gruposFecha }, Y_NUDGE)
+  }
   edit2('valor', valorFmt, P2.valor_origen_1)
 
   // Responsable de la fila 1 (casillas 60-63): "NIT" en el campo + "31" en la
