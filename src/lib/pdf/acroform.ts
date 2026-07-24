@@ -45,3 +45,64 @@ export function drawFixed(
   }
   page.drawText(toDraw, { x: cell.x, y: cell.y + yNudge, size, font, color: rgb(0, 0, 0) })
 }
+
+// Un grupo de celdas contiguas equiespaciadas dentro de una casilla del formato.
+// `count` = cuántos caracteres consume; `xStart` = borde IZQUIERDO de la 1ª celda
+// del grupo; `pitch` = paso horizontal (ancho de celda). Los grupos se estampan en
+// orden, cada carácter centrado en su celda.
+export type CellGroup = { count: number; xStart: number; pitch: number }
+
+// Config del estampado por celda. `y` = baseline; `size` = tamaño de fuente.
+// Dos modos:
+//  - Uniforme: dar `xStart` + `pitch` (celdas equiespaciadas desde xStart).
+//  - Por grupos: dar `groups` (año 4 celdas, gap, mes 2, gap, día 2, etc.), cada
+//    grupo con su propio xStart/pitch. Cuando hay `groups`, `xStart`/`pitch` se ignoran.
+export type CellsConfig = {
+  y: number
+  size: number
+  xStart?: number
+  pitch?: number
+  groups?: CellGroup[]
+}
+
+// Estampa una cadena de caracteres, uno por celda, cada glifo CENTRADO en su celda
+// (usa `font.widthOfTextAtSize` por carácter). No altera la estructura del formato;
+// misma vía plana que `drawFixed`. Los caracteres que exceden las celdas disponibles
+// se descartan (no invaden casillas vecinas).
+//
+// Centrado por celda: x_glifo = xCeldaIzq + (pitch - anchoGlifo) / 2.
+export function drawCells(
+  page: PDFPage,
+  font: PDFFont,
+  chars: string | null | undefined,
+  config: CellsConfig,
+  yNudge = 0,
+) {
+  const text = sanitize(chars)
+  if (!text) return
+  const { y, size } = config
+  const yPos = y + yNudge
+
+  const drawGlyph = (ch: string, xCellLeft: number, pitch: number) => {
+    const w = font.widthOfTextAtSize(ch, size)
+    const x = xCellLeft + (pitch - w) / 2
+    page.drawText(ch, { x, y: yPos, size, font, color: rgb(0, 0, 0) })
+  }
+
+  if (config.groups && config.groups.length > 0) {
+    let idx = 0
+    for (const g of config.groups) {
+      for (let i = 0; i < g.count && idx < text.length; i++, idx++) {
+        drawGlyph(text[idx], g.xStart + i * g.pitch, g.pitch)
+      }
+    }
+    return
+  }
+
+  // Modo uniforme.
+  const xStart = config.xStart ?? 0
+  const pitch = config.pitch ?? 0
+  for (let i = 0; i < text.length; i++) {
+    drawGlyph(text[i], xStart + i * pitch, pitch)
+  }
+}
