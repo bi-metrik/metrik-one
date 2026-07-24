@@ -8,7 +8,7 @@ import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
-import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -2471,7 +2471,7 @@ export async function cambiarEtapaNegocioConGate(
         .reduce((sum, c) => sum + (c.monto ?? 0), 0)
       const saldo = precio - totalCobrado
 
-      if (saldo > 0) {
+      if (saldo > TOLERANCIA_SALDO_COP) {
         const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
         return {
           error: 'gate_bloqueado',

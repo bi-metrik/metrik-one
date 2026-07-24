@@ -28,6 +28,14 @@
  * REGLA DURA: nada aquí bloquea, descarta ni "gatea" — solo compone y reparte.
  */
 
+/**
+ * Tolerancia de materialidad de saldo (piso de Carmen, CFO). Un residuo ≤ $1.000 COP
+ * no bloquea los gates de avance: no es cobrable en la práctica. La tolerancia SOLO
+ * destraba la comparación del gate — NUNCA genera cobro ni reconoce ingreso, no toca
+ * `precio_aprobado` ni el P&L/EBITDA. Faltantes > $1.000 siguen bloqueando.
+ */
+export const TOLERANCIA_SALDO_COP = 1000
+
 /** Modelo de dinero de un negocio, leído de su propuesta aprobada + tarifa confirmada. */
 export interface ModeloDinero {
   /**
@@ -136,7 +144,7 @@ export interface PendienteHandoff {
   pendienteUpme: number
   /** Falta del componente honorario del plan. */
   pendienteHonorario: number
-  /** true si el recaudo cubre el umbral (con tolerancia de 1 peso por redondeo). */
+  /** true si el recaudo cubre el umbral (con tolerancia de materialidad `TOLERANCIA_SALDO_COP`). */
   cubierto: boolean
 }
 
@@ -173,7 +181,7 @@ export function calcularPendienteHandoff(
     pendienteTotal,
     pendienteUpme,
     pendienteHonorario,
-    cubierto: pendienteTotal <= 1,
+    cubierto: pendienteTotal <= TOLERANCIA_SALDO_COP,
   }
 }
 
