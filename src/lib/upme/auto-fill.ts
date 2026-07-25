@@ -13,6 +13,11 @@
  *  - 'tarifa_upme'   : tarifa UPME por año a partir del valor sin IVA (Res. UPME).
  *  - 'nit_con_guion' : NIT/cédula con DV separado por guion (NNNNNNNNN-D), DV
  *                      recalculado por módulo 11 desde el número base limpio.
+ *  - 'tipo_documento_label' : label legible del tipo de documento (Cédula de
+ *                      Ciudadanía, Cédula de Extranjería, NIT, Pasaporte, ...) a
+ *                      partir de la etiqueta o código extraído de la casilla 25.
+ *                      Fallback: si la fuente no trae tipo_documento, deriva del
+ *                      tipo_persona del mismo bloque (natural->CC, jurídica->NIT).
  *
  * El resultado es un valor pre-llenado editable por el operador (no es gate ni
  * bloqueo). Para 'nit_con_guion', al ser determinista, es también robusto a que
@@ -21,6 +26,7 @@
 
 import { calcularTarifaUpmePorAnio } from './tarifa'
 import { nitConGuion } from '@/lib/dian/nit'
+import { labelTipoDocumento } from '@/lib/dian/tipo-documento'
 
 /** Parsea un valor que puede venir como número o string con separadores COP. */
 function aNumero(raw: unknown): number | null {
@@ -40,7 +46,7 @@ function aNumero(raw: unknown): number | null {
 export function aplicarComputedAutoFill(
   computed: string,
   rawVal: unknown,
-  opts?: { anio?: number },
+  opts?: { anio?: number; srcData?: Record<string, unknown> },
 ): unknown {
   switch (computed) {
     case 'tarifa_upme': {
@@ -59,6 +65,23 @@ export function aplicarComputedAutoFill(
       const con = nitConGuion(typeof rawVal === 'string' || typeof rawVal === 'number' ? String(rawVal) : null)
       if (con == null || con === '') return undefined
       return con
+    }
+    case 'tipo_documento_label': {
+      // Label legible del tipo de documento (casilla 25 del RUT). Tolera etiqueta
+      // ("Cédula de Extranjería") o código ("22").
+      const label = labelTipoDocumento(
+        typeof rawVal === 'string' || typeof rawVal === 'number' ? String(rawVal) : null,
+      )
+      if (label) return label
+      // Fallback graceful: si el RUT aún no tiene tipo_documento poblado (negocio
+      // sin reprocesar), derivar del tipo_persona del mismo bloque (natural -> CC,
+      // jurídica -> NIT), replicando el comportamiento previo por mapping. Nunca
+      // deja el campo peor que antes. Si tampoco hay tipo_persona, undefined.
+      const tp = String((opts?.srcData?.['tipo_persona'] ?? '') as string)
+        .toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      if (tp.includes('natural')) return 'CC'
+      if (tp.includes('juridica')) return 'NIT'
+      return undefined
     }
     default:
       return undefined
