@@ -7,6 +7,7 @@ import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { getNotificaciones } from '@/lib/actions/notificaciones'
 
 export default async function AppLayout({
   children,
@@ -133,6 +134,11 @@ export default async function AppLayout({
 
   const platformAdminState = await getPlatformAdminState()
 
+  // Notificaciones pendientes resueltas aquí (server) para que la campana pinte
+  // el contador en el primer render. Antes el componente arrancaba vacío y solo
+  // consultaba al abrir el panel → el badge siempre marcaba cero.
+  const notificacionesIniciales = await getNotificaciones()
+
   return (
     <>
       <AppShell
@@ -152,7 +158,7 @@ export default async function AppLayout({
         modoVitrina={modoVitrina}
         hasLineas={hasLineas}
         conciliacionPendientes={conciliacionPendientes}
-        notificationBell={<NotificationBell userId={user.id} />}
+        notificationBell={<NotificationBell userId={user.id} initialItems={notificacionesIniciales} />}
       >
         {children}
       </AppShell>

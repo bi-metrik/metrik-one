@@ -5,6 +5,11 @@ import { revalidatePath } from 'next/cache'
 
 // ── Tipos ─────────────────────────────────────────────
 
+// Los tipos que el producto conoce y sabe iconizar. NO es exhaustivo por diseño:
+// la columna `notificaciones.tipo` es texto libre y los crons/triggers pueden
+// escribir tipos que el front todavía no conoce. Por eso `NotificacionItem.tipo`
+// es `string` y el render siempre cae a un default — un tipo nuevo en datos
+// nunca puede romper la campana.
 export type NotificacionTipo =
   | 'inactividad_oportunidad'
   | 'handoff'
@@ -15,12 +20,16 @@ export type NotificacionTipo =
   | 'inactividad_proyecto'
   | 'proyecto_entregado'
   | 'proyecto_cerrado'
+  | 'responsable_faltante_area'
+  | 'cobro_vencido'
+  | 'cuenta_cobro_pendiente_aprobacion'
 
 export type NotificacionEstado = 'pendiente' | 'completada' | 'descartada'
 
 export type NotificacionItem = {
   id: string
-  tipo: NotificacionTipo
+  /** Texto libre en DB. Ver nota en NotificacionTipo: el render nunca asume exhaustividad. */
+  tipo: NotificacionTipo | (string & {})
   estado: NotificacionEstado
   contenido: string
   entidad_tipo: string | null
