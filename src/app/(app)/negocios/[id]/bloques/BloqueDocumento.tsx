@@ -454,6 +454,21 @@ export default function BloqueDocumento({
       return
     }
 
+    // Aviso antes de perder correcciones manuales: `procesarDocumento` reemplaza
+    // `data.campos` COMPLETO con lo que extraiga la IA del archivo nuevo (no hace
+    // merge — es lo correcto: el caso de uso real es "quedó cargada la factura
+    // equivocada, subo la correcta", donde preservar campos del documento viejo
+    // sería peor). Lo que faltaba era avisar.
+    const camposCorregidos = Object.values(campos).filter(c => c?.manual === true).length
+    if (camposCorregidos > 0) {
+      const plural = camposCorregidos === 1
+        ? 'Este documento tiene 1 campo corregido a mano.'
+        : `Este documento tiene ${camposCorregidos} campos corregidos a mano.`
+      if (!confirm(`${plural} Al reemplazarlo se perderán esas correcciones. ¿Continuar?`)) {
+        return
+      }
+    }
+
     setUploadState('uploading')
     setFileName(file.name)
     setErrorMsg(null)
