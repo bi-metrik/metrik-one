@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
+import { puedeCorregirDocumentos } from '@/lib/roles'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
@@ -691,7 +692,7 @@ export async function actualizarCampoDocumento(
   // para no romper correcciones ya habilitadas en otros workspaces.
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) {
-    let permitido = ['owner', 'admin', 'supervisor'].includes(role ?? '')
+    let permitido = puedeCorregirDocumentos(role)
     if (!permitido && camposExtraccion.find(c => c.slug === slug)?.alerta_revision === true) {
       const { data: bc } = await db(supabase)
         .from('negocio_bloques')

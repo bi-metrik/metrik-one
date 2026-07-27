@@ -20,6 +20,7 @@ import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
+import { puedeCorregirDocumentos } from '@/lib/roles'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado, CampoEdicion } from '@/lib/ai/extract-fields'
 
@@ -396,7 +397,7 @@ export default function BloqueDocumento({
   // Corrección gerencial en modo visible: owner/admin/supervisor pueden editar
   // TODOS los campos extraídos una vez el negocio avanzó (opt-in por config).
   const corregirGerencial = configExtra.corregir_campos_gerencial === true
-  const puedeCorregirVisible = ['owner', 'admin', 'supervisor'].includes(userRole ?? '')
+  const puedeCorregirVisible = puedeCorregirDocumentos(userRole)
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
     if (saved.drive_url) return 'uploaded'

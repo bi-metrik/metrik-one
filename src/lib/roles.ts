@@ -246,6 +246,22 @@ export function getRolePermissions(role: string) {
   return ROLE_PERMISSIONS[role as RoleKey] || ROLE_PERMISSIONS.read_only
 }
 
+// ── Corrección de documentos (fuente única) ─────────────────────────────────
+//
+// Roles que pueden corregir un documento (campos extraídos, reprocesar,
+// re-subir) aunque el bloque ya no esté en su etapa activa. El literal
+// ['owner','admin','supervisor'] estaba duplicado en varios sitios; aquí queda
+// una sola definición para que el criterio no se desincronice.
+//
+// OJO: NO confundir con `esGerencial()` de src/lib/permissions/guard-negocio.ts,
+// que significa owner|admin (sin supervisor) y sirve para overrides de gate.
+
+export const ROLES_CORRECCION_DOCUMENTOS = ['owner', 'admin', 'supervisor'] as const
+
+export function puedeCorregirDocumentos(role?: string | null): boolean {
+  return (ROLES_CORRECCION_DOCUMENTOS as readonly string[]).includes(role ?? '')
+}
+
 // ── UI metadata para config de equipo ────────────────────────────────────────
 
 export const ROLE_UI_CONFIG = [
