@@ -6,7 +6,7 @@ import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
-import { nitSinDv } from '@/lib/dian/nit'
+import { nitSinDv, calcularDvNit } from '@/lib/dian/nit'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 
 const BUCKET = 've-documentos'
@@ -270,6 +270,40 @@ async function runCrossCheck(
   return { passed: results.every(r => r.ok), results }
 }
 
+/**
+ * Normalizaciones deterministas post-extracción (config-driven, opt-in por campo
+ * vía `campos_extraccion[].normalizar`). Muta `campos` en sitio.
+ *
+ * Orden importa: primero `nit_sin_dv` (limpia el NIT base quitando el DV pegado),
+ * luego `dv_desde_nit` (recalcula el DV por módulo 11 sobre el NIT ya limpio). Así
+ * el DV nunca depende de la lectura inestable de la IA en las casillas 5/6.
+ */
+function aplicarNormalizaciones(
+  campos: CampoExtraccion[],
+  resultado: Record<string, CampoResultado>,
+): void {
+  // Pasada 1: nit_sin_dv (deja el NIT base sin el DV pegado).
+  for (const campo of campos) {
+    if (campo.normalizar === 'nit_sin_dv') {
+      const cr = resultado[campo.slug]
+      if (cr?.value) cr.value = nitSinDv(cr.value)
+    }
+  }
+  // Pasada 2: dv_desde_nit (recalcula el DV desde el NIT base ya normalizado).
+  for (const campo of campos) {
+    if (campo.normalizar === 'dv_desde_nit') {
+      const nitSlug = campo.normalizar_desde ?? 'nit'
+      const nitVal = resultado[nitSlug]?.value ?? null
+      const dvCalc = calcularDvNit(nitVal)
+      if (dvCalc != null) {
+        const cr = resultado[campo.slug]
+        if (cr) cr.value = dvCalc
+        else resultado[campo.slug] = { value: dvCalc, confidence: 1, manual: false }
+      }
+    }
+  }
+}
+
 // ── 1. Procesar documento ya subido a Storage ─────────────────────────────────
 
 /**
@@ -435,13 +469,9 @@ export async function procesarDocumento(
         if (extraction.data) {
           camposResult = extraction.data
           // Normalización determinista post-extracción (config-driven). Ej.:
-          // nit_sin_dv deja el NIT base sin el DV pegado por la extracción.
-          for (const campo of camposExtraccion) {
-            if (campo.normalizar === 'nit_sin_dv') {
-              const cr = camposResult[campo.slug]
-              if (cr?.value) cr.value = nitSinDv(cr.value)
-            }
-          }
+          // nit_sin_dv deja el NIT base sin el DV pegado por la extracción;
+          // dv_desde_nit recalcula el DV por módulo 11 desde el NIT base.
+          aplicarNormalizaciones(camposExtraccion, camposResult)
           newData.campos = camposResult
           extraccionStatus = 'ok'
           console.log('[documento] Step 9 OK: AI extraction done')
@@ -590,12 +620,7 @@ export async function reprocesarDocumento(
     }
 
     // 4b. Normalización determinista post-extracción (config-driven, ver procesarDocumento)
-    for (const campo of camposExtraccion) {
-      if (campo.normalizar === 'nit_sin_dv') {
-        const cr = extraction.data[campo.slug]
-        if (cr?.value) cr.value = nitSinDv(cr.value)
-      }
-    }
+    aplicarNormalizaciones(camposExtraccion, extraction.data)
 
     // 5. Merge con data existente preservando campos manuales
     const existingCampos = (currentData.campos as Record<string, CampoResultado>) ?? {}
