@@ -4,15 +4,18 @@ import { extractSlug } from '@/lib/tenant/extract-slug'
 import LoginClient from './login-client'
 
 // El login del subdominio muestra el logo del cliente. Se resuelve server-side
-// desde el Host (sin sesion): el slug -> workspace -> name + logo_url. Solo esos
-// dos campos cruzan al browser; el service role nunca sale del servidor.
+// desde el slug del tenant (sin sesion): slug -> workspace -> name + logo_url.
+// Solo esos dos campos cruzan al browser; el service role nunca sale del servidor.
 export default async function LoginPage() {
-  // En las funciones serverless de Vercel, `host` puede traer el host interno
-  // del deployment (no el subdominio del cliente); el host externo real llega en
-  // `x-forwarded-host`. Preferirlo y caer a `host` en local/dev (donde no existe).
   const h = await headers()
-  const host = h.get('x-forwarded-host') || h.get('host') || ''
-  const slug = extractSlug(host)
+  // Fuente de verdad del slug: el header `x-tenant-slug` que inyecta el middleware
+  // (corre en el edge, donde el host SI es el subdominio del cliente). En la funcion
+  // serverless, headers().get('host')/x-forwarded-host NO traen el subdominio, por
+  // eso no se puede resolver aqui a partir del host. Fallback a extraerlo del host
+  // solo para dev local (donde middleware y funcion comparten el mismo host real).
+  const slug =
+    h.get('x-tenant-slug') ||
+    extractSlug(h.get('x-forwarded-host') || h.get('host') || '')
 
   let tenantBranding: { name: string; logoUrl: string | null } | null = null
 

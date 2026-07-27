@@ -54,7 +54,18 @@ export async function middleware(request: NextRequest) {
 
     // Rutas publicas permitidas en el subdomain sin sesion
     if (pathname.startsWith('/auth/callback')) return supabaseResponse
-    if (pathname === '/login') return supabaseResponse
+    if (pathname === '/login') {
+      // Reenviar el slug del tenant al server component via header de REQUEST.
+      // En el edge (aqui) el host es correcto; en la funcion serverless que
+      // renderiza /login, headers().get('host')/x-forwarded-host NO traen el
+      // subdominio del cliente. El login lo lee para pintar el logo del workspace.
+      const requestHeaders = new Headers(request.headers)
+      requestHeaders.set('x-tenant-slug', slug)
+      return withAuthCookies(
+        NextResponse.next({ request: { headers: requestHeaders } }),
+        supabaseResponse
+      )
+    }
     if (pathname === '/sin-espacio') return supabaseResponse
     // Signup cerrado: registro / onboarding / invitaciones ya no existen -> al login
     if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {
