@@ -18,6 +18,45 @@ interface FaseSpec {
   active: { bg: string; text: string; border: string }
 }
 
+/**
+ * Filtros transversales de la lista (todos menos fase/etapa y motivo de cierre).
+ * `term` llega ya normalizado (trim + lowercase); cadena vacía = sin búsqueda.
+ */
+type FiltrosLista = {
+  seccional: string
+  responsable: string
+  term: string
+}
+
+/**
+ * Fuente única del filtrado de la lista de negocios.
+ *
+ * Antes esta lógica estaba copiada literalmente en tres `useMemo` (lista visible,
+ * base de contadores de fase, cerrados). Cada filtro nuevo había que escribirlo
+ * tres veces y cualquier olvido producía contadores que no cuadraban con la lista.
+ */
+function aplicarFiltros(lista: NegocioResumen[], f: FiltrosLista): NegocioResumen[] {
+  let res = lista
+  if (f.seccional !== 'todas') {
+    res = res.filter((n) => n.seccional_label === f.seccional)
+  }
+  if (f.responsable !== 'todos') {
+    res = res.filter((n) => n.responsables.some((r) => r.id === f.responsable))
+  }
+  if (f.term) {
+    res = res.filter((n) => {
+      const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
+        n.cedula, n.radicado, n.numero_factura, n.seccional_label,
+        ...n.responsables.map((r) => r.full_name)]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(f.term)
+    })
+  }
+  return res
+}
+
 // Tokens MeTRIK (no Tailwind generico)
 const ALL_FASES: FaseSpec[] = [
   {
@@ -114,75 +153,23 @@ export default function NegociosClient({
 
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
-  const currentFiltrado = useMemo(() => {
-    let res = current
-    if (seccional !== 'todas') {
-      res = res.filter((n) => n.seccional_label === seccional)
-    }
-    if (responsable !== 'todos') {
-      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
-    }
-    if (term) {
-      res = res.filter((n) => {
-        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
-          ...n.responsables.map((r) => r.full_name)]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(term)
-      })
-    }
-    return res
-  }, [current, term, seccional, responsable])
+  const filtros = useMemo<FiltrosLista>(
+    () => ({ seccional, responsable, term }),
+    [seccional, responsable, term],
+  )
+
+  const currentFiltrado = useMemo(() => aplicarFiltros(current, filtros), [current, filtros])
 
   // Negocios con todos los filtros activos EXCEPTO fase/etapa (responsable + seccional + búsqueda).
   // Base para los contadores de fase: refleja el filtro de responsable, seccional y búsqueda libre
   // sin que el tab de fase seleccionado distorsione los totales de los demás tabs.
-  const negociosFiltrados = useMemo(() => {
-    let res = negocios
-    if (seccional !== 'todas') {
-      res = res.filter((n) => n.seccional_label === seccional)
-    }
-    if (responsable !== 'todos') {
-      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
-    }
-    if (term) {
-      res = res.filter((n) => {
-        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
-          ...n.responsables.map((r) => r.full_name)]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(term)
-      })
-    }
-    return res
-  }, [negocios, seccional, responsable, term])
+  const negociosFiltrados = useMemo(() => aplicarFiltros(negocios, filtros), [negocios, filtros])
 
   // Cerrados con los mismos filtros de responsable + seccional + búsqueda (ya filtrados por motivo).
-  const cerradosFiltradosConFiltros = useMemo(() => {
-    let res = cerradosFiltrados
-    if (seccional !== 'todas') {
-      res = res.filter((n) => n.seccional_label === seccional)
-    }
-    if (responsable !== 'todos') {
-      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
-    }
-    if (term) {
-      res = res.filter((n) => {
-        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
-          ...n.responsables.map((r) => r.full_name)]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(term)
-      })
-    }
-    return res
-  }, [cerradosFiltrados, seccional, responsable, term])
+  const cerradosFiltradosConFiltros = useMemo(
+    () => aplicarFiltros(cerradosFiltrados, filtros),
+    [cerradosFiltrados, filtros],
+  )
 
   // ── Contadores — reflejan todos los filtros activos excepto la fase/etapa. ──
   const faseCount = (key: FaseFilter) =>
