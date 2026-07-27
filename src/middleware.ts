@@ -55,14 +55,17 @@ export async function middleware(request: NextRequest) {
     // Rutas publicas permitidas en el subdomain sin sesion
     if (pathname.startsWith('/auth/callback')) return supabaseResponse
     if (pathname === '/login') {
-      // Reenviar el slug del tenant al server component via header de REQUEST.
-      // En el edge (aqui) el host es correcto; en la funcion serverless que
-      // renderiza /login, headers().get('host')/x-forwarded-host NO traen el
-      // subdominio del cliente. El login lo lee para pintar el logo del workspace.
+      // Reenviar el slug del tenant al server component. En el edge (aqui) el host
+      // es correcto; en la funcion serverless que renderiza /login,
+      // headers().get('host')/x-forwarded-host NO traen el subdominio. Se pasa por
+      // DOS vias: (1) rewrite con ?__ws=slug (URL que la funcion SIEMPRE recibe) y
+      // (2) header de request x-tenant-slug (belt-and-suspenders).
       const requestHeaders = new Headers(request.headers)
       requestHeaders.set('x-tenant-slug', slug)
+      const rwUrl = request.nextUrl.clone()
+      rwUrl.searchParams.set('__ws', slug)
       const res = withAuthCookies(
-        NextResponse.next({ request: { headers: requestHeaders } }),
+        NextResponse.rewrite(rwUrl, { request: { headers: requestHeaders } }),
         supabaseResponse
       )
       res.headers.set('x-diag-mw-slug', slug) // DIAG TEMP: qué computó el edge

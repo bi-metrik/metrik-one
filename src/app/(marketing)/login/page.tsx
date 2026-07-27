@@ -12,10 +12,12 @@ export default async function LoginPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const h = await headers()
+  const sp = await searchParams
+  const wsParam = typeof sp?.__ws === 'string' ? sp.__ws : ''
   const xTenantSlug = h.get('x-tenant-slug')
   const xfh = h.get('x-forwarded-host')
   const host = h.get('host')
-  const slug = xTenantSlug || extractSlug(xfh || host || '')
+  const slug = wsParam || xTenantSlug || extractSlug(xfh || host || '')
 
   let tenantBranding: { name: string; logoUrl: string | null } | null = null
   let diagErr: string | null = null
@@ -36,13 +38,13 @@ export default async function LoginPage({
   }
 
   // DIAGNOSTICO TEMPORAL (rama diag). Solo con ?__diag=1, div oculto, sin secretos.
-  const sp = await searchParams
   let diag: React.ReactNode = null
   if (sp?.__diag === '1') {
     const headerKeys = Array.from(h.keys()).filter((k) =>
       /tenant|forwarded|host|middleware|vercel/i.test(k)
     )
     const parts = [
+      `wsParam=${wsParam || 'NULL'}`,
       `xTenantSlug=${xTenantSlug ?? 'NULL'}`,
       `host=${host ?? ''}`,
       `xfh=${xfh ?? 'NULL'}`,
