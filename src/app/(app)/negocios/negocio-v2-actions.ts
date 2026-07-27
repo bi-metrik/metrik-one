@@ -958,12 +958,37 @@ export async function getNegocioDetalle(id: string): Promise<{
       // capacitación DIAN y ratificado por Juan David para todos los casos.
       for (const bc of ((bloqueConfigs ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }>)) {
         const ccfg = (bc.config_extra?.cita_dian_confirmacion ?? null) as
-          | { enabled?: boolean; rut_slug?: string; seccional_field?: string; seccional_ref_field?: string; requiere_field?: string; tipo_persona_slug?: string }
+          | {
+              enabled?: boolean
+              rut_slug?: string
+              seccional_field?: string
+              seccional_ref_field?: string
+              requiere_field?: string
+              tipo_persona_slug?: string
+              solo_si?: { bloque_slug: string; field: string; value: string }
+            }
           | null
         if (bc.bloque_definitions?.tipo !== 'datos' || ccfg?.enabled !== true) continue
         if ((bc.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
         const inst = instanciasMap[bc.id]
         if (!inst) continue
+        // Guard `solo_si`: la pregunta "¿requiere cita?" solo tiene sentido en la
+        // rama de devolución de IVA. Dejar el campo vacío fuera de esa rama es
+        // deliberado: así ninguna condición del routing de Entrega matchea y el
+        // negocio cae al default (Facturación) sin necesidad de condiciones
+        // compuestas en el motor.
+        if (ccfg.solo_si) {
+          const { data: guardBloques } = await db(supabase)
+            .from('negocio_bloques')
+            .select('data, bloque_configs!inner(slug)')
+            .eq('negocio_id', id)
+            .eq('bloque_configs.slug', ccfg.solo_si.bloque_slug)
+          let cumple = false
+          for (const gb of ((guardBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+            if (String((gb.data ?? {})[ccfg.solo_si.field] ?? '') === ccfg.solo_si.value) { cumple = true; break }
+          }
+          if (!cumple) continue
+        }
         const requiereField = ccfg.requiere_field ?? 'requiere_cita_dian'
         const seccionalRefField = ccfg.seccional_ref_field ?? 'seccional_ref'
         const data = ((inst.data ?? {}) as Record<string, unknown>)
@@ -1005,8 +1030,11 @@ export async function getNegocioDetalle(id: string): Promise<{
         const { seccional, requiere_cita } = resolucion
         if (requiere_cita === null) continue // seccional no reconocida → decide el comercial
         const nuevoData = {
+          // Se persiste como string 'true'/'false', no boolean: el campo se rinde
+          // como select y el routing compara con String(valor). Un boolean no
+          // casaría con las opciones del select en la UI.
           ...data,
-          [requiereField]: requiere_cita,
+          [requiereField]: requiere_cita ? 'true' : 'false',
           [seccionalRefField]: seccional?.nombre_oficial ?? nombreOficialSeccional(seccionalRut),
         }
         try {
