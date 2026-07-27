@@ -55,6 +55,8 @@ interface WorkspaceModules {
   fab_registrar_pago?: boolean
   /** Tablero comercial sobre negocios. Abre /equipo (hoja por persona) al rol operator. */
   comercial_negocios?: boolean
+  /** Directorio de aliados (/directorio/aliados). Contrapartes comerciales con acuerdo. */
+  aliados?: boolean
   [key: string]: boolean | undefined
 }
 
