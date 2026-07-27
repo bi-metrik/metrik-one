@@ -5367,6 +5367,34 @@ async function sincronizarResponsablePrincipal(
     .eq('workspace_id', workspaceId)
 }
 
+/**
+ * Staff asignable como responsable de un negocio (para el selector inline de la
+ * lista). Devuelve el staff ACTIVO del workspace, sin filtrar por área: la
+ * responsabilidad sobre un negocio recorre las tres áreas a lo largo del flujo
+ * (comercial vende, operaciones ejecuta, financiera cobra), y `agregarResponsable`
+ * valida exactamente eso — que el staff pertenezca al workspace.
+ *
+ * NO se reusa `getStaffParaResponsable()` del directorio: ese acota a área
+ * comercial, que es lo correcto para el responsable de un CONTACTO pero dejaría
+ * fuera del selector a la mayoría de responsables reales de negocios.
+ */
+export async function getStaffParaAsignarNegocio(): Promise<Array<{ id: string; full_name: string }>> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  const { data } = await supabase
+    .from('staff')
+    .select('id, full_name')
+    .eq('workspace_id', workspaceId)
+    .eq('is_active', true)
+    .order('full_name', { ascending: true })
+
+  return ((data ?? []) as Array<{ id: string; full_name: string | null }>).map((s) => ({
+    id: s.id,
+    full_name: s.full_name ?? '—',
+  }))
+}
+
 export async function agregarResponsable(
   negocioId: string,
   staffMiembroId: string,

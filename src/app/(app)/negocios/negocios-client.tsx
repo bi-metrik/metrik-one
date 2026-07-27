@@ -1,7 +1,7 @@
 'use client'
 import { useState, useMemo } from 'react'
 import { Search, X } from 'lucide-react'
-import NegocioCard from './negocio-card'
+import NegocioCard, { type StaffAsignable } from './negocio-card'
 import EmptyState from '@/components/empty-state'
 import type { NegocioResumen } from './negocio-v2-actions'
 
@@ -92,12 +92,18 @@ export default function NegociosClient({
   stagesActivos,
   etapas,
   defaultStage = 'todos',
+  staffList = [],
+  canAsignar = false,
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
   stagesActivos: string[]
   etapas: EtapaSeg[]
   defaultStage?: FaseFilter
+  /** Staff activo del workspace, para el selector de responsable de la tarjeta. */
+  staffList?: StaffAsignable[]
+  /** Rol gerencial (owner/admin/supervisor): habilita asignar/quitar desde la lista. */
+  canAsignar?: boolean
 }) {
   // Segmentador jerárquico: fase (stage) → etapa (numero dentro de la fase).
   const [fase, setFase] = useState<FaseFilter>(defaultStage)
@@ -394,7 +400,7 @@ export default function NegociosClient({
       ) : (
         <div className="space-y-3">
           {currentFiltrado.map((n) => (
-            <NegocioCard key={n.id} negocio={n} />
+            <NegocioCard key={n.id} negocio={n} staffList={staffList} canAsignar={canAsignar} />
           ))}
         </div>
       )}
