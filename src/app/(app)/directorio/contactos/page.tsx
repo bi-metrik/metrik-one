@@ -1,14 +1,14 @@
-import { getContactos, getStaffParaResponsable, getMiStaffId } from '../actions'
+import { getContactos, getStaffParaResponsable, getMiStaffContexto } from '../actions'
 import DirectorioTabs from '../directorio-tabs'
 import ContactosList from './contactos-list'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
 
 export default async function ContactosPage() {
-  const [contactos, staff, miStaffId] = await Promise.all([
+  const [contactos, staff, yo] = await Promise.all([
     getContactos(),
     getStaffParaResponsable(),
-    getMiStaffId(),
+    getMiStaffContexto(),
   ])
 
   return (
@@ -32,7 +32,7 @@ export default async function ContactosPage() {
       <DirectorioTabs />
 
       {/* List */}
-      <ContactosList contactos={contactos} staff={staff} miStaffId={miStaffId} />
+      <ContactosList contactos={contactos} staff={staff} miStaffId={yo.staffId} miRol={yo.role} />
     </div>
   )
 }

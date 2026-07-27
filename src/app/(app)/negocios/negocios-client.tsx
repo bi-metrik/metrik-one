@@ -1,7 +1,7 @@
 'use client'
 import { useState, useMemo } from 'react'
-import { Search, X } from 'lucide-react'
-import NegocioCard from './negocio-card'
+import { Search, X, Clock } from 'lucide-react'
+import NegocioCard, { type StaffAsignable } from './negocio-card'
 import EmptyState from '@/components/empty-state'
 import type { NegocioResumen } from './negocio-v2-actions'
 
@@ -16,6 +16,61 @@ interface FaseSpec {
   label: string
   /** Tokens MeTRIK por stage. */
   active: { bg: string; text: string; border: string }
+}
+
+/**
+ * Filtros transversales de la lista (todos menos fase/etapa y motivo de cierre).
+ * `term` llega ya normalizado (trim + lowercase); cadena vacía = sin búsqueda.
+ */
+type FiltrosLista = {
+  seccional: string
+  responsable: string
+  term: string
+  /** Solo negocios que pasaron el SLA de su etapa (etapas sin SLA nunca entran). */
+  soloAtrasados: boolean
+}
+
+/** Orden de la lista. Default: el del servidor (más reciente primero). */
+type SortKey = 'reciente' | 'atraso'
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'reciente', label: 'Mas reciente' },
+  { value: 'atraso', label: 'Mas atrasado' },
+]
+
+/** ¿El negocio pasó el SLA de su etapa? false si la etapa no tiene SLA configurado. */
+const estaAtrasado = (n: NegocioResumen) =>
+  n.sla_exceso_horas !== null && n.sla_exceso_horas > 0
+
+/**
+ * Fuente única del filtrado de la lista de negocios.
+ *
+ * Antes esta lógica estaba copiada literalmente en tres `useMemo` (lista visible,
+ * base de contadores de fase, cerrados). Cada filtro nuevo había que escribirlo
+ * tres veces y cualquier olvido producía contadores que no cuadraban con la lista.
+ */
+function aplicarFiltros(lista: NegocioResumen[], f: FiltrosLista): NegocioResumen[] {
+  let res = lista
+  if (f.soloAtrasados) {
+    res = res.filter(estaAtrasado)
+  }
+  if (f.seccional !== 'todas') {
+    res = res.filter((n) => n.seccional_label === f.seccional)
+  }
+  if (f.responsable !== 'todos') {
+    res = res.filter((n) => n.responsables.some((r) => r.id === f.responsable))
+  }
+  if (f.term) {
+    res = res.filter((n) => {
+      const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
+        n.cedula, n.radicado, n.numero_factura, n.seccional_label,
+        ...n.responsables.map((r) => r.full_name)]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(f.term)
+    })
+  }
+  return res
 }
 
 // Tokens MeTRIK (no Tailwind generico)
@@ -53,12 +108,18 @@ export default function NegociosClient({
   stagesActivos,
   etapas,
   defaultStage = 'todos',
+  staffList = [],
+  canAsignar = false,
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
   stagesActivos: string[]
   etapas: EtapaSeg[]
   defaultStage?: FaseFilter
+  /** Staff activo del workspace, para el selector de responsable de la tarjeta. */
+  staffList?: StaffAsignable[]
+  /** Rol gerencial (owner/admin/supervisor): habilita asignar/quitar desde la lista. */
+  canAsignar?: boolean
 }) {
   // Segmentador jerárquico: fase (stage) → etapa (numero dentro de la fase).
   const [fase, setFase] = useState<FaseFilter>(defaultStage)
@@ -67,6 +128,8 @@ export default function NegociosClient({
   const [q, setQ] = useState('')
   const [seccional, setSeccional] = useState<string>('todas')
   const [responsable, setResponsable] = useState<string>('todos')
+  const [soloAtrasados, setSoloAtrasados] = useState(false)
+  const [sortBy, setSortBy] = useState<SortKey>('reciente')
 
   // Seccionales DIAN presentes en los negocios (para el filtro). Solo las que existen.
   const seccionalesDisponibles = useMemo(() => {
@@ -114,75 +177,37 @@ export default function NegociosClient({
 
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
+  const filtros = useMemo<FiltrosLista>(
+    () => ({ seccional, responsable, term, soloAtrasados }),
+    [seccional, responsable, term, soloAtrasados],
+  )
+
+  const currentFiltradoSinOrden = useMemo(
+    () => aplicarFiltros(current, filtros),
+    [current, filtros],
+  )
+
+  // Orden. 'reciente' respeta el orden del servidor (created_at desc).
+  // 'atraso' pone primero al más atrasado; los que no tienen SLA (o van a
+  // tiempo) quedan al final, sin reordenarse entre sí.
   const currentFiltrado = useMemo(() => {
-    let res = current
-    if (seccional !== 'todas') {
-      res = res.filter((n) => n.seccional_label === seccional)
-    }
-    if (responsable !== 'todos') {
-      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
-    }
-    if (term) {
-      res = res.filter((n) => {
-        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
-          ...n.responsables.map((r) => r.full_name)]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(term)
-      })
-    }
-    return res
-  }, [current, term, seccional, responsable])
+    if (sortBy !== 'atraso') return currentFiltradoSinOrden
+    // Clave finita (no -Infinity): restar dos infinitos da NaN y un comparador
+    // que devuelve NaN deja el orden indefinido.
+    const exceso = (n: NegocioResumen) => n.sla_exceso_horas ?? -1e9
+    return [...currentFiltradoSinOrden].sort((a, b) => exceso(b) - exceso(a))
+  }, [currentFiltradoSinOrden, sortBy])
 
   // Negocios con todos los filtros activos EXCEPTO fase/etapa (responsable + seccional + búsqueda).
   // Base para los contadores de fase: refleja el filtro de responsable, seccional y búsqueda libre
   // sin que el tab de fase seleccionado distorsione los totales de los demás tabs.
-  const negociosFiltrados = useMemo(() => {
-    let res = negocios
-    if (seccional !== 'todas') {
-      res = res.filter((n) => n.seccional_label === seccional)
-    }
-    if (responsable !== 'todos') {
-      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
-    }
-    if (term) {
-      res = res.filter((n) => {
-        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
-          ...n.responsables.map((r) => r.full_name)]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(term)
-      })
-    }
-    return res
-  }, [negocios, seccional, responsable, term])
+  const negociosFiltrados = useMemo(() => aplicarFiltros(negocios, filtros), [negocios, filtros])
 
   // Cerrados con los mismos filtros de responsable + seccional + búsqueda (ya filtrados por motivo).
-  const cerradosFiltradosConFiltros = useMemo(() => {
-    let res = cerradosFiltrados
-    if (seccional !== 'todas') {
-      res = res.filter((n) => n.seccional_label === seccional)
-    }
-    if (responsable !== 'todos') {
-      res = res.filter((n) => n.responsables.some((r) => r.id === responsable))
-    }
-    if (term) {
-      res = res.filter((n) => {
-        const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-          n.cedula, n.radicado, n.numero_factura, n.seccional_label,
-          ...n.responsables.map((r) => r.full_name)]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(term)
-      })
-    }
-    return res
-  }, [cerradosFiltrados, seccional, responsable, term])
+  const cerradosFiltradosConFiltros = useMemo(
+    () => aplicarFiltros(cerradosFiltrados, filtros),
+    [cerradosFiltrados, filtros],
+  )
 
   // ── Contadores — reflejan todos los filtros activos excepto la fase/etapa. ──
   const faseCount = (key: FaseFilter) =>
@@ -191,6 +216,13 @@ export default function NegociosClient({
       : key === 'cerrados'
         ? cerradosFiltradosConFiltros.length
         : negociosFiltrados.filter((n) => n.stage_actual === key).length
+
+  // Atrasados dentro de la fase/etapa seleccionada, ignorando el propio toggle
+  // (si no, al activarlo el contador se congelaría en su propio resultado).
+  const atrasadosCount = useMemo(
+    () => aplicarFiltros(current, { ...filtros, soloAtrasados: false }).filter(estaAtrasado).length,
+    [current, filtros],
+  )
 
   // etapaCount cuenta sobre currentFiltrado (fase + responsable + seccional + búsqueda).
   const etapaCount = (numero: number) =>
@@ -339,6 +371,43 @@ export default function NegociosClient({
         </select>
       )}
 
+      {/* Atrasados + orden. El toggle solo aparece si hay algo atrasado que
+          mostrar (etapas sin SLA nunca cuentan como atraso). */}
+      {(atrasadosCount > 0 || soloAtrasados) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSoloAtrasados((v) => !v)}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+              soloAtrasados
+                ? 'border-[#EF4444] bg-[#EF4444]/10 text-[#EF4444]'
+                : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#EF4444]/40 hover:text-[#EF4444]'
+            }`}
+            aria-pressed={soloAtrasados}
+          >
+            <Clock className="h-3 w-3" />
+            Atrasados
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                soloAtrasados ? 'bg-black/10' : 'bg-[#F5F4F2]'
+              }`}
+            >
+              {atrasadosCount}
+            </span>
+          </button>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            aria-label="Ordenar negocios"
+            className="rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Sub-filtros Cerrados (motivo) */}
       {fase === 'cerrados' && cerrados.length > 0 && (
         <div className="scrollbar-none flex gap-1.5 overflow-x-auto pb-1 text-xs">
@@ -407,7 +476,7 @@ export default function NegociosClient({
       ) : (
         <div className="space-y-3">
           {currentFiltrado.map((n) => (
-            <NegocioCard key={n.id} negocio={n} />
+            <NegocioCard key={n.id} negocio={n} staffList={staffList} canAsignar={canAsignar} />
           ))}
         </div>
       )}

@@ -1,8 +1,14 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
-import { getNegociosV2, getWorkspaceStagesActivos, getEtapasSegmentador } from './negocio-v2-actions'
+import {
+  getNegociosV2,
+  getWorkspaceStagesActivos,
+  getEtapasSegmentador,
+  getStaffParaAsignarNegocio,
+} from './negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
+import { getRolePermissions } from '@/lib/roles'
 import NegociosClient from './negocios-client'
 
 type StageFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro'
@@ -23,14 +29,18 @@ function defaultStageFilter(role: string | null, areas: string[]): StageFilter {
 }
 
 export default async function NegociosPage() {
-  const [abiertos, cerrados, stagesActivos, etapas, ws] = await Promise.all([
+  const [abiertos, cerrados, stagesActivos, etapas, ws, staffList] = await Promise.all([
     getNegociosV2('abierto'),
     getNegociosV2('completado'),
     getWorkspaceStagesActivos(),
     getEtapasSegmentador(),
     getWorkspace(),
+    getStaffParaAsignarNegocio(),
   ])
   const defaultStage = defaultStageFilter(ws.role, ws.areas)
+  // Mismo gate que validan `agregarResponsable`/`quitarResponsable` server-side
+  // (owner/admin/supervisor): replicado en UI para no ofrecer un control que fallaría.
+  const canAsignar = getRolePermissions(ws.role ?? 'read_only').canAssignResponsable
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
@@ -49,7 +59,15 @@ export default async function NegociosPage() {
           Nuevo negocio
         </Link>
       </div>
-      <NegociosClient negocios={abiertos} cerrados={cerrados} stagesActivos={stagesActivos} etapas={etapas} defaultStage={defaultStage} />
+      <NegociosClient
+        negocios={abiertos}
+        cerrados={cerrados}
+        stagesActivos={stagesActivos}
+        etapas={etapas}
+        defaultStage={defaultStage}
+        staffList={staffList}
+        canAsignar={canAsignar}
+      />
     </div>
   )
 }
