@@ -4416,7 +4416,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           const rawVal = srcData[f.auto_fill.field]
           if (f.auto_fill.computed) {
             // Referencia calculada (informativa, editable) — ej. tarifa UPME.
-            const computed = aplicarComputedAutoFill(f.auto_fill.computed, rawVal, { anio: f.auto_fill.computed_anio })
+            const computed = aplicarComputedAutoFill(f.auto_fill.computed, rawVal, { anio: f.auto_fill.computed_anio, srcData })
             if (computed !== undefined) autoFillHist[f.slug] = computed
           } else if (f.auto_fill.mapping) {
             const srcVal = String(rawVal ?? '').toLowerCase().trim()
@@ -4541,7 +4541,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
             // Referencia calculada (informativa, editable) — ej. tarifa UPME
             // (Res. UPME 135/2025). NUNCA es gate ni bloquea; el operador la
             // sobrescribe y el valor final lo tiene la plataforma UPME.
-            const computed = aplicarComputedAutoFill(f.auto_fill.computed, rawVal, { anio: f.auto_fill.computed_anio })
+            const computed = aplicarComputedAutoFill(f.auto_fill.computed, rawVal, { anio: f.auto_fill.computed_anio, srcData })
             if (computed !== undefined) autoFill[f.slug] = computed
           } else if (f.auto_fill.mapping) {
             const srcVal = String(rawVal ?? '').toLowerCase().trim()
