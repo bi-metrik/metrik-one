@@ -6,7 +6,7 @@ import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
-import { mapCiudadASeccional } from '@/lib/dian/seccionales'
+import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
@@ -936,6 +936,92 @@ export async function getNegocioDetalle(id: string): Promise<{
           instanciasMap[bc.id] = { ...inst, data: nuevoData } as NegocioBloque
         } catch (e) {
           console.error('[getNegocioDetalle] auto-init tarifa UPME falló:', e)
+        }
+      }
+
+      // Auto-init "Cita DIAN" (SOENA): un bloque `datos` con
+      // config_extra.cita_dian_confirmacion lee la Dirección Seccional del RUT
+      // (casilla 12) y persiste si el caso requiere cita previa en la DIAN. Solo
+      // Bogotá, Medellín, Cali y Bucaramanga la exigen; el resto va directo a
+      // certificado bancario.
+      //
+      // La fuente es el flag `cita` del catálogo de seccionales, el mismo que
+      // gobierna la Guía de Devolución del cliente, para que el flujo interno y el
+      // documento que recibe el cliente no puedan contradecirse.
+      //
+      // Idempotente: solo inyecta cuando el campo aún no está, así que NO pisa una
+      // confirmación manual del comercial. Si el RUT todavía no se ha cargado, o su
+      // seccional no se puede resolver, no escribe nada y el comercial decide.
+      //
+      // ⚠️ La fuente de la seccional ya cambió tres veces (factura → RUT → factura →
+      // RUT). Vigente desde 2026-07-24: RUT casilla 12, confirmado por Deisy tras
+      // capacitación DIAN y ratificado por Juan David para todos los casos.
+      for (const bc of ((bloqueConfigs ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }>)) {
+        const ccfg = (bc.config_extra?.cita_dian_confirmacion ?? null) as
+          | { enabled?: boolean; rut_slug?: string; seccional_field?: string; seccional_ref_field?: string; requiere_field?: string; tipo_persona_slug?: string }
+          | null
+        if (bc.bloque_definitions?.tipo !== 'datos' || ccfg?.enabled !== true) continue
+        if ((bc.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
+        const inst = instanciasMap[bc.id]
+        if (!inst) continue
+        const requiereField = ccfg.requiere_field ?? 'requiere_cita_dian'
+        const seccionalRefField = ccfg.seccional_ref_field ?? 'seccional_ref'
+        const data = ((inst.data ?? {}) as Record<string, unknown>)
+        if (data[requiereField] != null) continue // ya inicializado — no pisar confirmación manual
+        const rutSlug = ccfg.rut_slug ?? 'rut'
+        const seccionalField = ccfg.seccional_field ?? 'direccion_seccional'
+        const { data: rutBloques } = await db(supabase)
+          .from('negocio_bloques')
+          .select('data, bloque_configs!inner(slug)')
+          .eq('negocio_id', id)
+          .eq('bloque_configs.slug', rutSlug)
+        let seccionalRut = ''
+        for (const rb of ((rutBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+          const campos = (rb.data?.campos ?? {}) as Record<string, { value?: unknown }>
+          const v = String(campos[seccionalField]?.value ?? '').trim()
+          if (v) { seccionalRut = v; break }
+        }
+        if (!seccionalRut) continue // RUT sin cargar o sin el campo → reintenta en próxima carga
+        let resolucion = requiereCitaDian(seccionalRut)
+        // Bogotá es la única seccional con dos buzones (naturales / jurídicas), así
+        // que solo ahí hace falta el tipo de persona. La fuente canónica es el
+        // bloque "tipo de solicitante" (valores ya normalizados), no el campo
+        // homónimo del RUT, que viene con formatos libres ("Natural",
+        // "Persona jurídica").
+        if (resolucion.seccional?.slug.startsWith('bogota')) {
+          const tipoSlug = ccfg.tipo_persona_slug ?? 'tipo_de_solicitante'
+          const { data: tipoBloques } = await db(supabase)
+            .from('negocio_bloques')
+            .select('data, bloque_configs!inner(slug)')
+            .eq('negocio_id', id)
+            .eq('bloque_configs.slug', tipoSlug)
+          let tipoPersona = ''
+          for (const tb of ((tipoBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+            const v = String(tb.data?.tipo_persona ?? '').trim()
+            if (v) { tipoPersona = v; break }
+          }
+          if (tipoPersona) resolucion = requiereCitaDian(seccionalRut, tipoPersona)
+        }
+        const { seccional, requiere_cita } = resolucion
+        if (requiere_cita === null) continue // seccional no reconocida → decide el comercial
+        const nuevoData = {
+          ...data,
+          [requiereField]: requiere_cita,
+          [seccionalRefField]: seccional?.nombre_oficial ?? nombreOficialSeccional(seccionalRut),
+        }
+        try {
+          await db(supabase).from('negocio_bloques').update({ data: nuevoData }).eq('id', inst.id)
+          instanciasMap[bc.id] = { ...inst, data: nuevoData } as NegocioBloque
+          // Sembrar la seccional del negocio si aún no la tiene. Es la fuente única
+          // que leen los formularios DIAN (casilla 12 del 010) vía
+          // aplicarSeccionalPreset. No pisa un override manual ya existente.
+          if (seccional && !negocioMetadata.seccional) {
+            const metadataActualizada = { ...negocioMetadata, seccional: seccional.label }
+            await db(supabase).from('negocios').update({ metadata: metadataActualizada }).eq('id', id)
+            negocioMetadata.seccional = seccional.label
+          }
+        } catch (e) {
+          console.error('[getNegocioDetalle] auto-init cita DIAN falló:', e)
         }
       }
 
