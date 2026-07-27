@@ -70,22 +70,40 @@ interface NotificationBellProps {
    * anunciaba nada y el usuario tenía que hacer clic para que aparecieran.
    */
   initialItems?: NotificacionItem[]
+  /** Total real de pendientes (puede superar lo cargado: la consulta pagina). */
+  initialTotal?: number
 }
 
-export default function NotificationBell({ userId, initialItems }: NotificationBellProps) {
+export default function NotificationBell({ userId, initialItems, initialTotal }: NotificationBellProps) {
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<NotificacionItem[]>(initialItems ?? [])
+  const [total, setTotal] = useState(initialTotal ?? initialItems?.length ?? 0)
   const [loading, setLoading] = useState(false)
+  const [cargandoMas, setCargandoMas] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
   // Cargar notificaciones
   const cargar = useCallback(async () => {
     setLoading(true)
-    const data = await getNotificaciones()
+    const { items: data, total: t } = await getNotificaciones()
     setItems(data)
+    setTotal(t)
     setLoading(false)
   }, [])
+
+  // Traer la siguiente página. Con backlog alto (hay usuarios con 68 pendientes)
+  // las más viejas quedaban fuera del corte y eran invisibles.
+  const cargarMas = useCallback(async () => {
+    setCargandoMas(true)
+    const { items: data, total: t } = await getNotificaciones(items.length)
+    setItems(prev => {
+      const vistos = new Set(prev.map(n => n.id))
+      return [...prev, ...data.filter(n => !vistos.has(n.id))]
+    })
+    setTotal(t)
+    setCargandoMas(false)
+  }, [items.length])
 
   // Abrir panel carga datos
   useEffect(() => {
@@ -146,23 +164,30 @@ export default function NotificationBell({ userId, initialItems }: NotificationB
   }, [open])
 
   const pendientes = items.filter(n => n.estado === 'pendiente')
-  const count = pendientes.length
+  // El badge muestra el total del server, no lo que alcanzó a cargarse: con
+  // backlog alto la primera página no es todo. Si el realtime trajo algo nuevo
+  // que aún no cuenta el total, gana lo cargado.
+  const count = Math.max(total, pendientes.length)
+  const hayMas = pendientes.length < total
 
   // Acciones
   async function handleCompletar(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     setItems(prev => prev.filter(n => n.id !== id))
+    setTotal(t => Math.max(0, t - 1))
     await marcarCompletada(id)
   }
 
   async function handleDescartar(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     setItems(prev => prev.filter(n => n.id !== id))
+    setTotal(t => Math.max(0, t - 1))
     await descartarNotificacion(id)
   }
 
   async function handleMarcarTodas() {
     setItems([])
+    setTotal(0)
     await marcarTodasCompletadas()
   }
 
@@ -174,6 +199,7 @@ export default function NotificationBell({ userId, initialItems }: NotificationB
     // Marcar como completada al hacer click en la notificación
     marcarCompletada(item.id)
     setItems(prev => prev.filter(n => n.id !== item.id))
+    setTotal(t => Math.max(0, t - 1))
   }
 
   return (
@@ -308,6 +334,18 @@ export default function NotificationBell({ userId, initialItems }: NotificationB
                 </div>
               )
             })}
+
+            {!loading && hayMas && (
+              <button
+                onClick={cargarMas}
+                disabled={cargandoMas}
+                className="w-full py-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-50"
+              >
+                {cargandoMas
+                  ? 'Cargando…'
+                  : `Ver ${total - pendientes.length} más`}
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -137,7 +137,7 @@ export default async function AppLayout({
   // Notificaciones pendientes resueltas aquí (server) para que la campana pinte
   // el contador en el primer render. Antes el componente arrancaba vacío y solo
   // consultaba al abrir el panel → el badge siempre marcaba cero.
-  const notificacionesIniciales = await getNotificaciones()
+  const { items: notificacionesIniciales, total: notificacionesTotal } = await getNotificaciones()
 
   return (
     <>
@@ -158,7 +158,13 @@ export default async function AppLayout({
         modoVitrina={modoVitrina}
         hasLineas={hasLineas}
         conciliacionPendientes={conciliacionPendientes}
-        notificationBell={<NotificationBell userId={user.id} initialItems={notificacionesIniciales} />}
+        notificationBell={
+          <NotificationBell
+            userId={user.id}
+            initialItems={notificacionesIniciales}
+            initialTotal={notificacionesTotal}
+          />
+        }
       >
         {children}
       </AppShell>

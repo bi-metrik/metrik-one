@@ -192,16 +192,21 @@ export async function reabrirNegocio(
       .eq('role', 'owner')
     for (const o of (owners ?? []) as Array<{ id: string }>) {
       if (o.id === userId) continue
-      await supabase.from('notificaciones').insert({
+      // Mismo bug que en cierre-adelantado: 'cambio_estado' no pasa el CHECK.
+      // El aviso de reapertura nunca llego a nadie.
+      const { error: notifError } = await supabase.from('notificaciones').insert({
         workspace_id: workspaceId,
         destinatario_id: o.id,
-        tipo: 'cambio_estado',
+        tipo: 'negocio_reabierto',
         contenido: `Se reabrio un negocio cancelado. Revisalo cuando puedas.`,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
         estado: 'pendiente',
         deep_link: `/negocios/${negocioId}`,
       })
+      if (notifError) {
+        console.error('[reapertura] no se pudo notificar la reapertura:', notifError.message)
+      }
     }
   }
 
