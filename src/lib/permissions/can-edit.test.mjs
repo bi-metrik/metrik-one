@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import {
   canEditBloque,
   canEditHeader,
+  canGestionarAliados,
   canViewNegocio,
   canWriteActivityLog,
   getAreasEfectivas,
@@ -227,6 +228,41 @@ test('canViewNegocio: contador NO ve negocios', () => {
 test('canViewNegocio: operator solo si responsable', () => {
   assert.equal(canViewNegocio(user('operator', ['comercial']), ['u1']), true)
   assert.equal(canViewNegocio(user('operator', ['comercial']), ['u2']), false)
+})
+
+// ── canGestionarAliados ────────────────────────────────────────────
+// Matriz verificada en prod (workspace SOENA, 2026-07-27).
+test('canGestionarAliados: owner siempre puede', () => {
+  assert.equal(canGestionarAliados(user('owner', [])), true)
+  assert.equal(canGestionarAliados(user('owner', ['financiera'])), true)
+})
+
+test('canGestionarAliados: supervisor solo con area comercial', () => {
+  // Daniela Jativa (supervisor, comercial) → si
+  assert.equal(canGestionarAliados(user('supervisor', ['comercial'])), true)
+  // Deisy Ramirez (supervisor, operaciones) → no
+  assert.equal(canGestionarAliados(user('supervisor', ['operaciones'])), false)
+  // Leidy Llanos (supervisor, financiera) → no
+  assert.equal(canGestionarAliados(user('supervisor', ['financiera'])), false)
+  // Supervisor sin area asignada: no tiene comercial efectiva → no
+  assert.equal(canGestionarAliados(user('supervisor', [])), false)
+})
+
+test('canGestionarAliados: direccion expande a comercial', () => {
+  assert.equal(canGestionarAliados(user('supervisor', ['direccion'])), true)
+})
+
+test('canGestionarAliados: admin NO puede (exclusion explicita)', () => {
+  // Diana Parra (admin, financiera) → no. Tampoco un admin con comercial.
+  assert.equal(canGestionarAliados(user('admin', ['financiera'])), false)
+  assert.equal(canGestionarAliados(user('admin', [])), false)
+  assert.equal(canGestionarAliados(user('admin', ['comercial'])), false)
+})
+
+test('canGestionarAliados: operator/contador/read_only NO pueden', () => {
+  assert.equal(canGestionarAliados(user('operator', ['comercial'])), false)
+  assert.equal(canGestionarAliados(user('contador', [])), false)
+  assert.equal(canGestionarAliados(user('read_only', [])), false)
 })
 
 // ── canWriteActivityLog ────────────────────────────────────────────
