@@ -324,16 +324,24 @@ export async function cerrarNegocioCancelado(
     .eq('role', 'owner')
   for (const o of (owners ?? []) as Array<{ id: string }>) {
     if (o.id === userId) continue // no notificarse a si mismo
-    await supabase.from('notificaciones').insert({
+    // El tipo era 'cambio_estado' (copiado del enum de activity_log): NO existe
+    // en el CHECK de notificaciones, asi que este insert fallaba SIEMPRE y el
+    // error no se capturaba. Ningun owner supo nunca de una cancelacion.
+    const { error: notifError } = await supabase.from('notificaciones').insert({
       workspace_id: workspaceId,
       destinatario_id: o.id,
-      tipo: 'cambio_estado',
+      tipo: 'negocio_cancelado',
       contenido: `Negocio cancelado. Motivo: ${payload.razon.trim()}`,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       estado: 'pendiente',
       deep_link: `/negocios/${negocioId}`,
     })
+    // La cancelacion ya ocurrio: no se revierte por un fallo de aviso, pero
+    // tampoco se traga en silencio.
+    if (notifError) {
+      console.error('[cierre-adelantado] no se pudo notificar la cancelación:', notifError.message)
+    }
   }
 
   revalidatePath(`/negocios/${negocioId}`)
