@@ -576,8 +576,18 @@ export async function reprocesarDocumento(
   campos?: Record<string, CampoResultado>
   error?: string
 }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // Guard de permiso (mismo criterio que actualizarCampoDocumento): en la etapa
+  // activa re-extrae quien puede editar el bloque; si el negocio ya avanzó, solo
+  // un rol de corrección (owner/admin/supervisor). Antes NO tenía guard alguno:
+  // cualquier autenticado del workspace podía re-extraer cualquier bloque y
+  // sobrescribir los campos.
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok && !puedeCorregirDocumentos(role)) {
+    return { success: false, error: guard.error ?? 'Tu rol no permite reprocesar este documento' }
+  }
 
   try {
     // 1. Leer bloque + config
