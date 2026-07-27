@@ -45,6 +45,11 @@ export async function middleware(request: NextRequest) {
   const slug = extractSlug(hostname)
   const { pathname } = request.nextUrl
 
+  // DIAG TEMP: siempre logea para /login (aun si slug es null en el edge).
+  if (pathname === '/login') {
+    console.log('[MW-TOP-DIAG]', JSON.stringify({ hostname, slug, baseDomain: process.env.NEXT_PUBLIC_BASE_DOMAIN ?? null }))
+  }
+
   // Refresh Supabase session
   const { user, supabaseResponse, supabase } = await updateSession(request)
 
@@ -60,6 +65,7 @@ export async function middleware(request: NextRequest) {
       // headers().get('host')/x-forwarded-host NO traen el subdominio. Se pasa por
       // DOS vias: (1) rewrite con ?__ws=slug (URL que la funcion SIEMPRE recibe) y
       // (2) header de request x-tenant-slug (belt-and-suspenders).
+      console.log('[MW-LOGIN-DIAG]', JSON.stringify({ host: request.headers.get('host'), slug }))
       const requestHeaders = new Headers(request.headers)
       requestHeaders.set('x-tenant-slug', slug)
       const rwUrl = request.nextUrl.clone()
