@@ -7,6 +7,7 @@ import {
   umbralRecaudoHandoff,
   calcularPendienteHandoff,
   esCeroDeliberado,
+  TOLERANCIA_SALDO_COP,
   type ModeloDinero,
   type PropuestaBloqueData,
 } from './modelo-dinero'
@@ -182,9 +183,31 @@ describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
     }
   })
 
-  it('tolerancia de 1 peso: recaudo a un peso del umbral se considera cubierto', () => {
-    const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar - 1)
+  // Tolerancia de materialidad (piso de Carmen, CFO): residuos ≤ TOLERANCIA_SALDO_COP
+  // ($1.000) no bloquean el avance; faltantes mayores sí. La tolerancia solo destraba
+  // el gate — no genera cobro ni ingreso.
+  it('residuo de $85 bajo el umbral → cubierto (materialidad)', () => {
+    const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar - 85)
+    expect(p.pendienteTotal).toBe(85)
     expect(p.cubierto).toBe(true)
+  })
+
+  it('faltante de $3.000 → NO cubierto (excede la tolerancia)', () => {
+    const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar - 3_000)
+    expect(p.pendienteTotal).toBe(3_000)
+    expect(p.cubierto).toBe(false)
+  })
+
+  it('faltante de exactamente $1.000 (TOLERANCIA_SALDO_COP) → cubierto (límite inclusivo)', () => {
+    const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar - TOLERANCIA_SALDO_COP)
+    expect(p.pendienteTotal).toBe(TOLERANCIA_SALDO_COP)
+    expect(p.cubierto).toBe(true)
+  })
+
+  it('faltante de $1.001 (un peso sobre la tolerancia) → NO cubierto', () => {
+    const p = calcularPendienteHandoff(HONORARIO, modeloP2, valorRecaudar - (TOLERANCIA_SALDO_COP + 1))
+    expect(p.pendienteTotal).toBe(TOLERANCIA_SALDO_COP + 1)
+    expect(p.cubierto).toBe(false)
   })
 })
 
