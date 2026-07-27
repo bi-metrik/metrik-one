@@ -61,10 +61,12 @@ export async function middleware(request: NextRequest) {
       // subdominio del cliente. El login lo lee para pintar el logo del workspace.
       const requestHeaders = new Headers(request.headers)
       requestHeaders.set('x-tenant-slug', slug)
-      return withAuthCookies(
+      const res = withAuthCookies(
         NextResponse.next({ request: { headers: requestHeaders } }),
         supabaseResponse
       )
+      res.headers.set('x-diag-mw-slug', slug) // DIAG TEMP: qué computó el edge
+      return res
     }
     if (pathname === '/sin-espacio') return supabaseResponse
     // Signup cerrado: registro / onboarding / invitaciones ya no existen -> al login
