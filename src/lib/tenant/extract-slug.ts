@@ -1,5 +1,8 @@
 // Base domain — dev: localhost, prod: metrikone.co
-const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
+// .trim() defensivo: la env var NEXT_PUBLIC_BASE_DOMAIN en prod trae un salto de
+// linea final ("metrikone.co\n") que rompia `hostname.endsWith(BASE_DOMAIN)` y
+// hacia que extractSlug devolviera null para TODOS los tenants.
+const BASE_DOMAIN = (process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000').trim()
 const IS_DEV = process.env.NODE_ENV === 'development'
 
 // Reserved slugs that are NOT tenants
