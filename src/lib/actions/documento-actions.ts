@@ -305,6 +305,37 @@ function aplicarNormalizaciones(
   }
 }
 
+// ── Instancias heredadas: copias de solo lectura ─────────────────────────────
+//
+// Un bloque cuyo `config_extra.source_etapa_orden` está definido es una COPIA de
+// solo lectura del bloque de esa etapa de origen. Escribir sobre él falla EN
+// SILENCIO, por dos vías:
+//   (a) el render sobrescribe el `data` de la copia con el del origen
+//       (negocio-v2-actions, herencia readonly de documento) → la corrección
+//       desaparece de pantalla al recargar;
+//   (b) `resolverCamposFuente` indexa los bloques por slug y estas copias tienen
+//       `slug = null` → el valor corregido nunca llega al PDF del formulario.
+// Por eso se rechaza con un mensaje que apunta a la etapa de origen, en vez de
+// dejar que el usuario "corrija" en el vacío.
+async function bloqueHeredadoError(
+  supabase: unknown,
+  negocioBloqueId: string,
+): Promise<string | null> {
+  const { data } = await db(supabase)
+    .from('negocio_bloques')
+    .select('bloque_configs(config_extra)')
+    .eq('id', negocioBloqueId)
+    .single()
+
+  const cfg =
+    ((data?.bloque_configs as { config_extra?: Record<string, unknown> } | null)?.config_extra ??
+      {}) as Record<string, unknown>
+  const srcOrden = cfg.source_etapa_orden
+  if (typeof srcOrden !== 'number') return null
+
+  return `Este bloque es una copia de solo lectura de la etapa ${srcOrden}. Corrige el documento en su etapa de origen.`
+}
+
 // ── 1. Procesar documento ya subido a Storage ─────────────────────────────────
 
 /**
@@ -330,6 +361,9 @@ export async function procesarDocumento(
 
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
+
+  const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
+  if (heredado) return { success: false, error: heredado }
 
   const admin = createServiceClient()
   const mimeType = mimeTypeFromName(fileName)
@@ -589,6 +623,9 @@ export async function reprocesarDocumento(
     return { success: false, error: guard.error ?? 'Tu rol no permite reprocesar este documento' }
   }
 
+  const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
+  if (heredado) return { success: false, error: heredado }
+
   try {
     // 1. Leer bloque + config
     const { data: bloqueData } = await db(supabase)
@@ -713,6 +750,9 @@ export async function actualizarCampoDocumento(
     }
     if (!permitido) return { success: false, error: guard.error ?? 'Tu rol no permite corregir este campo' }
   }
+
+  const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
+  if (heredado) return { success: false, error: heredado }
 
   // Nombre del editor para la marca de trazabilidad (snapshot).
   let editorNombre = 'Usuario'
