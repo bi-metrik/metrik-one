@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2 } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
@@ -46,6 +46,15 @@ const CIERRE_LABELS = {
   perdido: 'Perdido',
   cancelado: 'Cancelado',
 } as const
+
+/**
+ * Etiqueta compacta del atraso: horas hábiles si es menos de un día hábil,
+ * días hábiles a partir de ahí (24h = 1 día hábil, misma equivalencia que el SLA).
+ */
+function formatAtraso(horas: number): string {
+  if (horas < 24) return `${Math.max(1, Math.round(horas))}h`
+  return `${Math.floor(horas / 24)}d`
+}
 
 function formatDateShort(iso: string | null): string {
   if (!iso) return ''
@@ -304,6 +313,19 @@ export default function NegocioCard({
               <span className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]">
                 <Pause className="h-2.5 w-2.5" />
                 Pausado
+              </span>
+            )}
+            {/* Atraso de etapa. Solo se pinta cuando la etapa TIENE sla_horas
+                configurado y ya se pasó. Sin SLA: silencio (ni "a tiempo" ni
+                "sin SLA") — hoy la mayoría de etapas no tiene SLA y un badge
+                permanente sería ruido, no señal. */}
+            {!isCerrado && negocio.sla_exceso_horas !== null && negocio.sla_exceso_horas > 0 && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[#EF4444]/10 px-2 py-0.5 text-[10px] font-medium text-[#EF4444]"
+                title={`Lleva ${Math.round(negocio.horas_habiles_en_etapa ?? 0)}h hábiles en esta etapa; el SLA es de ${negocio.etapa_sla_horas}h`}
+              >
+                <Clock className="h-2.5 w-2.5" />
+                {formatAtraso(negocio.sla_exceso_horas)} de atraso
               </span>
             )}
             {negocio.es_meta_lead && (

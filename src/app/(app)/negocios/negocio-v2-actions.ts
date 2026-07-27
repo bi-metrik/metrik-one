@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
+import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional } from '@/lib/dian/seccionales'
@@ -207,6 +208,15 @@ export type NegocioResumen = {
   responsables: Array<{ id: string; full_name: string }>
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
   es_meta_lead: boolean
+  // ── SLA de etapa (mismo criterio que /flujo y /equipo) ────────────────────
+  /** Último avance de etapa. Base del cálculo de atraso. */
+  etapa_cambiada_at: string | null
+  /** SLA en horas hábiles configurado en la etapa (etapas_negocio.config_extra.sla_horas). null = etapa sin SLA. */
+  etapa_sla_horas: number | null
+  /** Horas hábiles Colombia transcurridas en la etapa. null si no hay etapa_cambiada_at o no hay SLA. */
+  horas_habiles_en_etapa: number | null
+  /** Horas hábiles por encima del SLA. >0 = atrasado. null si la etapa no tiene SLA. */
+  sla_exceso_horas: number | null
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -364,8 +374,9 @@ export async function getNegociosV2(
       closed_at,
       razon_cierre,
       metadata,
+      etapa_cambiada_at,
       lineas_negocio(nombre, numero),
-      etapas_negocio(nombre, stage, numero),
+      etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
       contactos(nombre)
     `)
@@ -388,7 +399,7 @@ export async function getNegociosV2(
 
   // Batch: gastos por negocio
   const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
-  const [gastosRes, horasRes, staffRes, wsRes, respRes] = await Promise.all([
+  const [gastosRes, horasRes, staffRes, wsRes, respRes, festivosRes] = await Promise.all([
     db(supabase).from('gastos').select('negocio_id, monto').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     db(supabase).from('horas').select('negocio_id, horas, staff_id').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     supabase.from('staff').select('id, salary').eq('workspace_id', workspaceId),
@@ -398,7 +409,15 @@ export async function getNegociosV2(
       .select('negocio_id, assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name)')
       .in('negocio_id', negocioIds)
       .order('assigned_at', { ascending: true }),
+    // Calendario de festivos: misma tabla que usa la función SQL horas_habiles_entre.
+    db(supabase).from('festivos_colombia').select('fecha'),
   ])
+
+  // SLA: se evalúa contra un único "ahora" por request (misma foto para toda la lista).
+  const ahoraMs = Date.now()
+  const festivos = new Set(
+    ((festivosRes.data ?? []) as Array<{ fecha: string }>).map((f) => f.fecha),
+  )
 
   // Responsables por negocio (orden estable por assigned_at = más antiguo primero).
   const responsablesPorNeg: Record<string, Array<{ id: string; full_name: string }>> = {}
@@ -499,6 +518,17 @@ export async function getNegociosV2(
 
   return (data as Record<string, unknown>[]).map(row => {
     const id = row.id as string
+    const etapaRow = row.etapas_negocio as
+      | { nombre: string; stage: string; numero: number; config_extra: unknown }
+      | null
+    // SLA de etapa. Sin sla_horas configurado no se calcula nada: la tarjeta
+    // guarda silencio (no pinta "a tiempo" ni "sin SLA").
+    const etapaCambiadaAt = (row.etapa_cambiada_at as string | null) ?? null
+    const slaHoras = slaHorasDeEtapa(etapaRow?.config_extra)
+    const horasEnEtapa =
+      slaHoras !== null && etapaCambiadaAt
+        ? horasHabilesEntre(etapaCambiadaAt, ahoraMs, festivos)
+        : null
     return {
       id,
       nombre: row.nombre as string,
@@ -536,6 +566,11 @@ export async function getNegociosV2(
       numero_factura: facturaPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
+      etapa_cambiada_at: etapaCambiadaAt,
+      etapa_sla_horas: slaHoras,
+      horas_habiles_en_etapa: horasEnEtapa,
+      sla_exceso_horas:
+        slaHoras !== null && horasEnEtapa !== null ? horasEnEtapa - slaHoras : null,
     }
   })
 }
