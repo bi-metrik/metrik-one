@@ -3578,31 +3578,15 @@ export async function actualizarPrecioAprobado(
   return { error: null }
 }
 
-// ── Agregar comentario al activity log del negocio ────────────────────────────
-
-export async function agregarComentarioNegocio(
-  negocioId: string,
-  contenido: string
-): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
-  if (error || !workspaceId) return { error: 'No autenticado' }
-  if (!staffId) return { error: 'Sin perfil de staff' }
-
-  const { error: insertError } = await supabase
-    .from('activity_log')
-    .insert({
-      workspace_id: workspaceId,
-      entidad_tipo: 'negocio',
-      entidad_id: negocioId,
-      tipo: 'comentario',
-      autor_id: staffId,
-      contenido,
-    })
-
-  if (insertError) return { error: (insertError as { message: string }).message }
-  revalidatePath(`/negocios/${negocioId}`)
-  return { error: null }
-}
+// ── Comentarios del negocio ───────────────────────────────────────────────────
+//
+// `agregarComentarioNegocio` se eliminó el 2026-07-27: era código muerto (cero
+// callers) y además insertaba en activity_log SIN `mencion_id`, por lo que el
+// trigger `trg_notif_mencion` nunca disparaba desde ese camino. Dejarlo vivo era
+// una trampa: el día que alguien lo usara, las menciones dejarían de notificar.
+//
+// Vía única para comentar: `addComment` (src/app/(app)/activity-actions.ts).
+// Acepta `mencionId` y el trigger de DB crea la notificación.
 
 // ── Actualizar aprobación de bloque ──────────────────────────────────────────
 
