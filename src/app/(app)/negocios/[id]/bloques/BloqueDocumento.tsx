@@ -20,6 +20,7 @@ import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
+import { puedeCorregirDocumentos } from '@/lib/roles'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado, CampoEdicion } from '@/lib/ai/extract-fields'
 
@@ -396,7 +397,7 @@ export default function BloqueDocumento({
   // Corrección gerencial en modo visible: owner/admin/supervisor pueden editar
   // TODOS los campos extraídos una vez el negocio avanzó (opt-in por config).
   const corregirGerencial = configExtra.corregir_campos_gerencial === true
-  const puedeCorregirVisible = ['owner', 'admin', 'supervisor'].includes(userRole ?? '')
+  const puedeCorregirVisible = puedeCorregirDocumentos(userRole)
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
     if (saved.drive_url) return 'uploaded'
@@ -451,6 +452,21 @@ export default function BloqueDocumento({
     if (resolvedType && !ALLOWED.includes(resolvedType)) {
       toast.error('Solo PDF, JPG, PNG o WebP')
       return
+    }
+
+    // Aviso antes de perder correcciones manuales: `procesarDocumento` reemplaza
+    // `data.campos` COMPLETO con lo que extraiga la IA del archivo nuevo (no hace
+    // merge — es lo correcto: el caso de uso real es "quedó cargada la factura
+    // equivocada, subo la correcta", donde preservar campos del documento viejo
+    // sería peor). Lo que faltaba era avisar.
+    const camposCorregidos = Object.values(campos).filter(c => c?.manual === true).length
+    if (camposCorregidos > 0) {
+      const plural = camposCorregidos === 1
+        ? 'Este documento tiene 1 campo corregido a mano.'
+        : `Este documento tiene ${camposCorregidos} campos corregidos a mano.`
+      if (!confirm(`${plural} Al reemplazarlo se perderán esas correcciones. ¿Continuar?`)) {
+        return
+      }
     }
 
     setUploadState('uploading')

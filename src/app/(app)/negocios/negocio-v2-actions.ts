@@ -14,6 +14,7 @@ import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
+import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
@@ -4754,8 +4755,15 @@ export async function actualizarNombreNegocio(
   negocioId: string,
   nombre: string,
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Guard de rol (mismo patrón que agregarResponsable). Antes solo se validaba
+  // la sesión: cualquier autenticado del workspace renombraba cualquier negocio
+  // llamando la action directo; el único control era el canEdit de la UI.
+  if (!puedeCorregirDocumentos(role)) {
+    return { error: 'Sin permisos para renombrar el negocio' }
+  }
 
   const nuevo = nombre.trim()
   if (!nuevo) return { error: 'El nombre no puede estar vacío' }

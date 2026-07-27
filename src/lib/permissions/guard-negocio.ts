@@ -88,7 +88,13 @@ export async function guardAvanzarStage(
   return { ok: true }
 }
 
-/** ¿El usuario actual es owner/admin? Para overrides (omitir gate, retroceder). */
+/**
+ * ¿El usuario actual es owner/admin? Para overrides (omitir gate, retroceder).
+ *
+ * OJO — el nombre engaña: esto NO incluye `supervisor`. Es estrictamente
+ * owner|admin. Para "¿puede corregir documentos?" (owner/admin/supervisor) usar
+ * `puedeCorregirDocumentos(role)` de `src/lib/roles.ts`.
+ */
 export async function esGerencial(): Promise<boolean> {
   const c = await resolverCtx()
   if (!c) return false
