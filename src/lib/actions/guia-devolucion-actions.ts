@@ -109,7 +109,11 @@ export async function generarVersionGuia(
       const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
       ciudadVenta = String(campos.ciudad_venta?.value ?? '')
     } else if (esFechaCita(slug, nombre)) {
-      fechaCitaIso = (bnData.fecha_cita_dian as string | null) ?? null
+      // El bloque de fecha existe en DOS etapas: agendamiento directo (la registra
+      // operaciones) y confirmación por PQR (la registra el comercial con la fecha
+      // que el cliente eligió). Solo una de las dos trae valor según la vía, así que
+      // se conserva la primera con dato y no se sobrescribe con la instancia vacía.
+      fechaCitaIso = fechaCitaIso ?? ((bnData.fecha_cita_dian as string | null) || null)
     }
   }
 
