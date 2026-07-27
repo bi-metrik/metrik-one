@@ -64,12 +64,10 @@ export async function middleware(request: NextRequest) {
       requestHeaders.set('x-tenant-slug', slug)
       const rwUrl = request.nextUrl.clone()
       rwUrl.searchParams.set('__ws', slug)
-      const res = withAuthCookies(
+      return withAuthCookies(
         NextResponse.rewrite(rwUrl, { request: { headers: requestHeaders } }),
         supabaseResponse
       )
-      res.headers.set('x-diag-mw-slug', slug) // DIAG TEMP: qué computó el edge
-      return res
     }
     if (pathname === '/sin-espacio') return supabaseResponse
     // Signup cerrado: registro / onboarding / invitaciones ya no existen -> al login
