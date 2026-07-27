@@ -123,6 +123,15 @@ export async function getMiStaffId(): Promise<string | null> {
   return staffId ?? null
 }
 
+// staff.id + rol efectivo del usuario logueado. El rol decide el pre-filtro por
+// defecto del directorio: quien coordina equipo entra viendo TODO, quien ejecuta
+// entra viendo lo suyo. Ver `contactos-list.tsx`.
+export async function getMiStaffContexto(): Promise<{ staffId: string | null; role: string | null }> {
+  const { staffId, role, error } = await getWorkspace()
+  if (error) return { staffId: null, role: null }
+  return { staffId: staffId ?? null, role: role ?? null }
+}
+
 export async function getContacto(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return null

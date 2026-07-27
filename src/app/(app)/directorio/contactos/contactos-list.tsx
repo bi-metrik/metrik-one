@@ -13,11 +13,33 @@ interface Props {
   staff: StaffOption[]
   // staff.id del usuario logueado; se usa para pre-filtrar "Mis contactos" al entrar.
   miStaffId: string | null
+  // Rol efectivo del usuario; decide si el pre-filtro por defecto es propio o todo.
+  miRol: string | null
 }
 
 // Valores especiales del filtro de responsable (fuera de un staff.id real).
 const RESP_TODOS = '__todos__'
 const RESP_SIN = '__sin__'
+
+// Roles que coordinan equipo: entran viendo TODO el directorio, no solo lo suyo.
+// Se define explícito (y no vía `puedeCorregirDocumentos`, que coincide en la
+// lista de roles pero significa otra cosa) para que los dos criterios puedan
+// evolucionar por separado.
+const ROLES_VEN_TODO_EL_DIRECTORIO = ['owner', 'admin', 'supervisor']
+
+/**
+ * Pre-filtro de responsable al entrar.
+ *
+ * Antes se pre-filtraba a cualquiera con `staff.id`, sin mirar rol: a las
+ * supervisoras (que no son responsables de contactos) la lista les aparecía
+ * vacía cada vez que entraban. "Mis contactos" sigue disponible en el selector,
+ * solo deja de ser el default para roles gerenciales.
+ */
+function responsableFilterInicial(miStaffId: string | null, miRol: string | null): string {
+  if (!miStaffId) return RESP_TODOS
+  if (ROLES_VEN_TODO_EL_DIRECTORIO.includes(miRol ?? '')) return RESP_TODOS
+  return miStaffId
+}
 
 // Orden de la vista general. Default: ultima interaccion (cualquiera).
 type SortKey = 'ultima_interaccion' | 'ultima_interaccion_meta' | 'alfabetico' | 'creacion'
@@ -30,14 +52,16 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 
 const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const
 
-export default function ContactosList({ contactos, staff, miStaffId }: Props) {
+export default function ContactosList({ contactos, staff, miStaffId, miRol }: Props) {
   const [search, setSearch] = useState('')
   const [rolFilter, setRolFilter] = useState<string | null>(null)
   const [segmentoFilter, setSegmentoFilter] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortKey>('ultima_interaccion')
-  // Filtro de responsable. Pre-filtrado a "Mis contactos" (staff del usuario) al
-  // entrar; el supervisor lo cambia a Todos / Sin responsable / otro comercial.
-  const [responsableFilter, setResponsableFilter] = useState<string>(miStaffId ?? RESP_TODOS)
+  // Filtro de responsable. Quien ejecuta entra pre-filtrado a "Mis contactos";
+  // quien coordina (owner/admin/supervisor) entra en Todos y puede acotar.
+  const [responsableFilter, setResponsableFilter] = useState<string>(
+    responsableFilterInicial(miStaffId, miRol),
+  )
   const [, startTransition] = useTransition()
   const router = useRouter()
 
@@ -177,7 +201,8 @@ export default function ContactosList({ contactos, staff, miStaffId }: Props) {
         </div>
       </div>
 
-      {/* Filtro de responsable (pre-filtrado a "Mis contactos" al entrar) */}
+      {/* Filtro de responsable. Default segun rol: gerencial entra en Todos,
+          el resto en "Mis contactos" (la opcion sigue disponible para todos). */}
       <div className="relative">
         <UserCircle className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <select
