@@ -1,9 +1,9 @@
-import { getEmpresas } from '../actions'
+import { getEmpresas, tieneModuloAliados } from '../actions'
 import DirectorioTabs from '../directorio-tabs'
 import EmpresasList from './empresas-list'
 
 export default async function EmpresasPage() {
-  const empresas = await getEmpresas()
+  const [empresas, showAliados] = await Promise.all([getEmpresas(), tieneModuloAliados()])
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -14,7 +14,7 @@ export default async function EmpresasPage() {
       </div>
 
       {/* Tabs */}
-      <DirectorioTabs />
+      <DirectorioTabs showAliados={showAliados} />
 
       {/* List */}
       <EmpresasList empresas={empresas} />
