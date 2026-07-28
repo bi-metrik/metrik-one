@@ -39,12 +39,17 @@ export const SECCIONALES_DIAN: SeccionalDIAN[] = [
   { slug: 'bucaramanga', label: 'Bucaramanga', codigo: '04',
     nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Bucaramanga',
     email: 'dsia_bucaramanga_devoluciones@dian.gov.co', cita: true, ciudad: 'bucaramanga' },
+  // Barranquilla y Grandes Contribuyentes pasaron a `cita: false` el 2026-07-26.
+  // La v3 de la Guia de Devolucion los traia con cita, pero en la reunion de cierre
+  // VE (2026-07-24, posterior y con capacitacion DIAN de por medio) Deisy acoto la
+  // exigencia de cita a cuatro seccionales: Bogota, Medellin, Cali y Bucaramanga.
+  // Juan David lo reforzo en la misma sesion: los clientes de la costa no requieren cita.
   { slug: 'barranquilla', label: 'Barranquilla', codigo: '02',
     nombre_oficial: 'Dirección Seccional de Impuestos de Barranquilla',
-    email: 'dsi_barranquilla_devoluciones@dian.gov.co', cita: true, ciudad: 'barranquilla' },
+    email: 'dsi_barranquilla_devoluciones@dian.gov.co', cita: false, ciudad: 'barranquilla' },
   { slug: 'grandes', label: 'Grandes Contribuyentes', codigo: '31',
     nombre_oficial: 'Dirección Operativa de Grandes Contribuyentes',
-    email: 'dsi_grandesc_devoluciones@dian.gov.co', cita: true, ciudad: '' },
+    email: 'dsi_grandesc_devoluciones@dian.gov.co', cita: false, ciudad: '' },
   { slug: 'armenia', label: 'Armenia', codigo: '01',
     nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Armenia',
     email: 'dsia_armenia_devoluciones@dian.gov.co', cita: false, ciudad: 'armenia' },
@@ -250,4 +255,72 @@ export function nombreOficialSeccional(input: string | null | undefined): string
   if (porCiudad) return porCiudad.nombre_oficial
   // 3) sin match: devolver el original tal cual (operador puede corregir)
   return input
+}
+
+/**
+ * Resuelve el texto de la "Dirección seccional" del RUT (casilla 12) a la entrada
+ * COMPLETA del catálogo. El RUT la trae con prefijo variable — "Impuestos de Cali",
+ * "Impuestos y Aduanas de Bucaramanga", a veces solo la ciudad — por eso el match
+ * nunca es literal.
+ *
+ * Devuelve null si no logra mapearla; quien llama decide qué hacer con esa duda.
+ */
+export function seccionalDesdeRut(
+  input: string | null | undefined,
+  tipo_persona?: string | null,
+): SeccionalDIAN | null {
+  if (!input) return null
+  const n = normalize(input)
+  if (!n) return null
+
+  // Bogotá: dos buzones con el mismo código; tipo_persona elige cuál.
+  if (n.includes('bogota')) {
+    const tp = normalize(tipo_persona ?? '')
+    const slug = tp.includes('juridic') ? 'bogota-juridicas' : 'bogota-naturales'
+    return SECCIONALES_DIAN.find(s => s.slug === slug) ?? null
+  }
+
+  const porNombre = SECCIONALES_DIAN.find(s => {
+    const no = normalize(s.nombre_oficial)
+    return no === n || no.includes(n) || n.includes(no)
+  })
+  if (porNombre) return porNombre
+
+  const porCiudad = SECCIONALES_DIAN.find(
+    s => s.ciudad && (normalize(s.ciudad) === n || n.includes(normalize(s.ciudad))),
+  )
+  if (porCiudad) return porCiudad
+
+  return SECCIONALES_DIAN.find(s => normalize(s.label) === n) ?? null
+}
+
+export type ResolucionCitaDian = {
+  /** Entrada del catálogo, o null si el texto del RUT no se pudo mapear. */
+  seccional: SeccionalDIAN | null
+  /**
+   * `true`/`false` cuando el catálogo lo determina.
+   * `null` cuando NO se pudo resolver la seccional: el sistema no adivina y el
+   * comercial debe confirmarlo. Asumir `false` ante la duda haría que un caso que
+   * sí necesita cita se salte la etapa y llegue a la DIAN sin ella.
+   */
+  requiere_cita: boolean | null
+}
+
+/**
+ * Determina si un caso requiere cita previa en la DIAN, a partir de la dirección
+ * seccional del RUT.
+ *
+ * La verdad vive en el flag `cita` del catálogo, que es también el que gobierna la
+ * Guía de Devolución que recibe el cliente. Derivar de ahí (y no de una lista
+ * paralela) garantiza que el flujo de trabajo y el documento del cliente nunca se
+ * contradigan.
+ *
+ * Vigente desde 2026-07-26: solo Bogotá, Medellín, Cali y Bucaramanga exigen cita.
+ */
+export function requiereCitaDian(
+  direccionSeccionalRut: string | null | undefined,
+  tipo_persona?: string | null,
+): ResolucionCitaDian {
+  const seccional = seccionalDesdeRut(direccionSeccionalRut, tipo_persona)
+  return { seccional, requiere_cita: seccional ? seccional.cita : null }
 }

@@ -1180,6 +1180,33 @@ export async function leerModeloDineroCompleto(
     }
   }
 
+  // Si el negocio NO contrató la certificación UPME, no hay tarifa que pasar al
+  // cliente: se vendió solo la gestión de devolución de IVA. La tarifa se computa
+  // temprano (en Validación, desde la Factura) y la decisión comercial llega
+  // después, así que sin este corte el negocio arrastraría un valor que no le
+  // corresponde. Y como este es el único lugar donde se arma el ModeloDinero, basta
+  // anularla aquí para que queden bien el gate de handoff, el saldo de Cobros y el
+  // reparto pasante/honorario.
+  const { data: servicioBloques } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug)')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.slug', 'certificacion_upme')
+  let sinCertificacionUpme = false
+  for (const sb of ((servicioBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+    const d = (sb.data ?? {}) as Record<string, unknown>
+    // Solo cuenta como "no la contrató" si el campo existe y está en false. Un
+    // bloque sin tocar no debe anular la tarifa de un negocio normal.
+    if ('requiere_certificacion_upme' in d && d.requiere_certificacion_upme === false) {
+      sinCertificacionUpme = true
+      break
+    }
+  }
+  if (sinCertificacionUpme) {
+    tarifaConfirmada = 0
+    tarifaRef = 0
+  }
+
   if (plan == null && honorario == null && !(tarifaConfirmada > 0) && !(tarifaRef > 0)) return null
   const modelo: ModeloDinero = { tarifa_upme: tarifaConfirmada, aprobado_plan: plan, aprobado_honorario: honorario }
   if (tarifaRef > 0) modelo.tarifa_upme_ref = tarifaRef

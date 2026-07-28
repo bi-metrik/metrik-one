@@ -7,7 +7,7 @@ import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
-import { mapCiudadASeccional } from '@/lib/dian/seccionales'
+import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
@@ -208,6 +208,10 @@ export type NegocioResumen = {
   responsables: Array<{ id: string; full_name: string }>
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
   es_meta_lead: boolean
+  // Reproceso abierto (metadata.reproceso.activo). Un tercero rechazó el trabajo y
+  // hay que rehacer un tramo, con un cliente esperando algo que creía resuelto: se
+  // muestra en la tarjeta para que sea visible sin abrir el negocio.
+  reproceso: { tipo: string; ciclo: number; etapa_retorno: string | null } | null
   // ── SLA de etapa (mismo criterio que /flujo y /equipo) ────────────────────
   /** Último avance de etapa. Base del cálculo de atraso. */
   etapa_cambiada_at: string | null
@@ -566,6 +570,14 @@ export async function getNegociosV2(
       numero_factura: facturaPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
+      reproceso: (() => {
+        const r = (row.metadata as Record<string, unknown> | null)?.reproceso as
+          | { activo?: boolean; tipo?: string; ciclo?: number; etapa_retorno?: string | null }
+          | null
+          | undefined
+        if (!r?.activo) return null
+        return { tipo: String(r.tipo ?? ''), ciclo: Number(r.ciclo ?? 1), etapa_retorno: r.etapa_retorno ?? null }
+      })(),
       etapa_cambiada_at: etapaCambiadaAt,
       etapa_sla_horas: slaHoras,
       horas_habiles_en_etapa: horasEnEtapa,
@@ -972,6 +984,120 @@ export async function getNegocioDetalle(id: string): Promise<{
           instanciasMap[bc.id] = { ...inst, data: nuevoData } as NegocioBloque
         } catch (e) {
           console.error('[getNegocioDetalle] auto-init tarifa UPME falló:', e)
+        }
+      }
+
+      // Auto-init "Cita DIAN" (SOENA): un bloque `datos` con
+      // config_extra.cita_dian_confirmacion lee la Dirección Seccional del RUT
+      // (casilla 12) y persiste si el caso requiere cita previa en la DIAN. Solo
+      // Bogotá, Medellín, Cali y Bucaramanga la exigen; el resto va directo a
+      // certificado bancario.
+      //
+      // La fuente es el flag `cita` del catálogo de seccionales, el mismo que
+      // gobierna la Guía de Devolución del cliente, para que el flujo interno y el
+      // documento que recibe el cliente no puedan contradecirse.
+      //
+      // Idempotente: solo inyecta cuando el campo aún no está, así que NO pisa una
+      // confirmación manual del comercial. Si el RUT todavía no se ha cargado, o su
+      // seccional no se puede resolver, no escribe nada y el comercial decide.
+      //
+      // ⚠️ La fuente de la seccional ya cambió tres veces (factura → RUT → factura →
+      // RUT). Vigente desde 2026-07-24: RUT casilla 12, confirmado por Deisy tras
+      // capacitación DIAN y ratificado por Juan David para todos los casos.
+      for (const bc of ((bloqueConfigs ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }>)) {
+        const ccfg = (bc.config_extra?.cita_dian_confirmacion ?? null) as
+          | {
+              enabled?: boolean
+              rut_slug?: string
+              seccional_field?: string
+              seccional_ref_field?: string
+              requiere_field?: string
+              tipo_persona_slug?: string
+              solo_si?: { bloque_slug: string; field: string; value: string }
+            }
+          | null
+        if (bc.bloque_definitions?.tipo !== 'datos' || ccfg?.enabled !== true) continue
+        if ((bc.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
+        const inst = instanciasMap[bc.id]
+        if (!inst) continue
+        // Guard `solo_si`: la pregunta "¿requiere cita?" solo tiene sentido en la
+        // rama de devolución de IVA. Dejar el campo vacío fuera de esa rama es
+        // deliberado: así ninguna condición del routing de Entrega matchea y el
+        // negocio cae al default (Facturación) sin necesidad de condiciones
+        // compuestas en el motor.
+        if (ccfg.solo_si) {
+          const { data: guardBloques } = await db(supabase)
+            .from('negocio_bloques')
+            .select('data, bloque_configs!inner(slug)')
+            .eq('negocio_id', id)
+            .eq('bloque_configs.slug', ccfg.solo_si.bloque_slug)
+          let cumple = false
+          for (const gb of ((guardBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+            if (String((gb.data ?? {})[ccfg.solo_si.field] ?? '') === ccfg.solo_si.value) { cumple = true; break }
+          }
+          if (!cumple) continue
+        }
+        const requiereField = ccfg.requiere_field ?? 'requiere_cita_dian'
+        const seccionalRefField = ccfg.seccional_ref_field ?? 'seccional_ref'
+        const data = ((inst.data ?? {}) as Record<string, unknown>)
+        if (data[requiereField] != null) continue // ya inicializado — no pisar confirmación manual
+        const rutSlug = ccfg.rut_slug ?? 'rut'
+        const seccionalField = ccfg.seccional_field ?? 'direccion_seccional'
+        const { data: rutBloques } = await db(supabase)
+          .from('negocio_bloques')
+          .select('data, bloque_configs!inner(slug)')
+          .eq('negocio_id', id)
+          .eq('bloque_configs.slug', rutSlug)
+        let seccionalRut = ''
+        for (const rb of ((rutBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+          const campos = (rb.data?.campos ?? {}) as Record<string, { value?: unknown }>
+          const v = String(campos[seccionalField]?.value ?? '').trim()
+          if (v) { seccionalRut = v; break }
+        }
+        if (!seccionalRut) continue // RUT sin cargar o sin el campo → reintenta en próxima carga
+        let resolucion = requiereCitaDian(seccionalRut)
+        // Bogotá es la única seccional con dos buzones (naturales / jurídicas), así
+        // que solo ahí hace falta el tipo de persona. La fuente canónica es el
+        // bloque "tipo de solicitante" (valores ya normalizados), no el campo
+        // homónimo del RUT, que viene con formatos libres ("Natural",
+        // "Persona jurídica").
+        if (resolucion.seccional?.slug.startsWith('bogota')) {
+          const tipoSlug = ccfg.tipo_persona_slug ?? 'tipo_de_solicitante'
+          const { data: tipoBloques } = await db(supabase)
+            .from('negocio_bloques')
+            .select('data, bloque_configs!inner(slug)')
+            .eq('negocio_id', id)
+            .eq('bloque_configs.slug', tipoSlug)
+          let tipoPersona = ''
+          for (const tb of ((tipoBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+            const v = String(tb.data?.tipo_persona ?? '').trim()
+            if (v) { tipoPersona = v; break }
+          }
+          if (tipoPersona) resolucion = requiereCitaDian(seccionalRut, tipoPersona)
+        }
+        const { seccional, requiere_cita } = resolucion
+        if (requiere_cita === null) continue // seccional no reconocida → decide el comercial
+        const nuevoData = {
+          // Se persiste como string 'true'/'false', no boolean: el campo se rinde
+          // como select y el routing compara con String(valor). Un boolean no
+          // casaría con las opciones del select en la UI.
+          ...data,
+          [requiereField]: requiere_cita ? 'true' : 'false',
+          [seccionalRefField]: seccional?.nombre_oficial ?? nombreOficialSeccional(seccionalRut),
+        }
+        try {
+          await db(supabase).from('negocio_bloques').update({ data: nuevoData }).eq('id', inst.id)
+          instanciasMap[bc.id] = { ...inst, data: nuevoData } as NegocioBloque
+          // Sembrar la seccional del negocio si aún no la tiene. Es la fuente única
+          // que leen los formularios DIAN (casilla 12 del 010) vía
+          // aplicarSeccionalPreset. No pisa un override manual ya existente.
+          if (seccional && !negocioMetadata.seccional) {
+            const metadataActualizada = { ...negocioMetadata, seccional: seccional.label }
+            await db(supabase).from('negocios').update({ metadata: metadataActualizada }).eq('id', id)
+            negocioMetadata.seccional = seccional.label
+          }
+        } catch (e) {
+          console.error('[getNegocioDetalle] auto-init cita DIAN falló:', e)
         }
       }
 

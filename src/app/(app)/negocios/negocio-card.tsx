@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
@@ -335,6 +335,22 @@ export default function NegocioCard({
               >
                 <Megaphone className="h-2.5 w-2.5" />
                 Meta
+              </span>
+            )}
+            {/* Reproceso: relleno sólido, no tinte suave como los demás. Un caso
+                reprocesado tiene un cliente esperando algo que ya creía resuelto,
+                y debe saltar a la vista en una lista larga. */}
+            {negocio.reproceso && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[#DC2626] px-2 py-0.5 text-[10px] font-semibold text-white"
+                title={
+                  `Reproceso ${negocio.reproceso.ciclo}` +
+                  (negocio.reproceso.etapa_retorno ? ` — devuelto a ${negocio.reproceso.etapa_retorno}` : '') +
+                  '. Prioridad máxima.'
+                }
+              >
+                <RotateCcw className="h-2.5 w-2.5" />
+                Reproceso {negocio.reproceso.ciclo > 1 ? negocio.reproceso.ciclo : ''}
               </span>
             )}
           </div>
