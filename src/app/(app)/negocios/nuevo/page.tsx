@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { getAliadosActivos } from '@/app/(app)/directorio/aliados/actions'
 import NuevoNegocioForm from './nuevo-negocio-form'
 
 export default async function NuevoNegocioPage() {
@@ -30,7 +31,7 @@ export default async function NuevoNegocioPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: ws } = await (supabase as any)
     .from('workspaces')
-    .select('config_extra')
+    .select('config_extra, modules')
     .eq('id', profile.workspace_id)
     .single()
   const codigoFormat = (ws?.config_extra?.negocio_codigo_format ?? []) as Array<{ linea_id?: string; nombre_auto?: string }>
@@ -38,5 +39,18 @@ export default async function NuevoNegocioPage() {
     ? codigoFormat.filter(r => r.nombre_auto === 'contacto' && r.linea_id).map(r => r.linea_id as string)
     : []
 
-  return <NuevoNegocioForm lineas={lineas} lineasAutoNombre={lineasAutoNombre} />
+  // Aliados activos para el origen 'alianza'. Solo se cargan (y solo se ofrece
+  // la opción) si el workspace tiene el módulo `aliados`: sin él no hay contra
+  // qué marcar la alianza y ofrecerla dejaría el negocio en un callejón sin salida.
+  const aliadosHabilitado = (ws?.modules as Record<string, boolean> | null)?.aliados === true
+  const aliados = aliadosHabilitado ? await getAliadosActivos() : []
+
+  return (
+    <NuevoNegocioForm
+      lineas={lineas}
+      lineasAutoNombre={lineasAutoNombre}
+      aliados={aliados}
+      aliadosHabilitado={aliadosHabilitado}
+    />
+  )
 }

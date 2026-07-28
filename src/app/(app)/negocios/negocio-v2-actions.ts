@@ -2,7 +2,8 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
-import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
+import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
+import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
@@ -212,6 +213,13 @@ export type NegocioResumen = {
   // hay que rehacer un tramo, con un cliente esperando algo que creía resuelto: se
   // muestra en la tarjeta para que sea visible sin abrir el negocio.
   reproceso: { tipo: string; ciclo: number; etapa_retorno: string | null } | null
+  // ── Origen del negocio (columna, catálogo ORIGENES_NEGOCIO) ───────────────
+  /** De dónde vino. null solo en negocios anteriores a la captura de origen. */
+  origen: string | null
+  /** Nombre del aliado cuando origen = 'alianza'. null en el resto. */
+  aliado_nombre: string | null
+  /** Marcas de condición económica (negocios.metadata.marcas). Vacío si no tiene. */
+  marcas: MarcaCondicion[]
   // ── SLA de etapa (mismo criterio que /flujo y /equipo) ────────────────────
   /** Último avance de etapa. Base del cálculo de atraso. */
   etapa_cambiada_at: string | null
@@ -379,6 +387,8 @@ export async function getNegociosV2(
       razon_cierre,
       metadata,
       etapa_cambiada_at,
+      origen,
+      aliado_id,
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
@@ -428,6 +438,28 @@ export async function getNegociosV2(
   for (const r of ((respRes.data ?? []) as Array<{ negocio_id: string; staff: { id: string; full_name: string | null } | null }>)) {
     if (!r.staff) continue
     ;(responsablesPorNeg[r.negocio_id] ??= []).push({ id: r.staff.id, full_name: r.staff.full_name ?? '—' })
+  }
+
+  // Nombre del aliado de los negocios de origen 'alianza'. Query aparte (no
+  // embedding de PostgREST) para no depender del refresco del schema cache tras
+  // la migración: la tarjeta debe mostrar el aliado desde el primer render.
+  const aliadoIds = Array.from(
+    new Set(
+      (data as Record<string, unknown>[])
+        .map((r) => r.aliado_id as string | null)
+        .filter((v): v is string => !!v),
+    ),
+  )
+  const aliadoNombres: Record<string, string> = {}
+  if (aliadoIds.length > 0) {
+    const { data: aliadosRows } = await db(supabase)
+      .from('aliados')
+      .select('id, nombre')
+      .eq('workspace_id', workspaceId)
+      .in('id', aliadoIds)
+    for (const a of ((aliadosRows ?? []) as Array<{ id: string; nombre: string }>)) {
+      aliadoNombres[a.id] = a.nombre
+    }
   }
 
   // Staff salary map for hour cost calculation
@@ -578,6 +610,9 @@ export async function getNegociosV2(
         if (!r?.activo) return null
         return { tipo: String(r.tipo ?? ''), ciclo: Number(r.ciclo ?? 1), etapa_retorno: r.etapa_retorno ?? null }
       })(),
+      origen: (row.origen as string | null) ?? null,
+      aliado_nombre: row.aliado_id ? (aliadoNombres[row.aliado_id as string] ?? null) : null,
+      marcas: leerMarcasDeMetadata(row.metadata),
       etapa_cambiada_at: etapaCambiadaAt,
       etapa_sla_horas: slaHoras,
       horas_habiles_en_etapa: horasEnEtapa,
@@ -1390,9 +1425,40 @@ export async function crearNegocio(input: {
   empresa_nombre?: string
   empresa_sector?: string
   es_persona_natural?: boolean
+  /** De dónde vino el negocio. Obligatorio (catálogo ORIGENES_NEGOCIO). */
+  origen?: string
+  /** Aliado que lo originó. Obligatorio si origen = 'alianza'; ignorado si no. */
+  aliado_id?: string
 }): Promise<{ negocio_id: string | null; error: string | null }> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
+
+  // ── Origen: validación server-side (la del formulario es solo UX) ──
+  // Se exige AL CREAR y no después: un origen que se pide "más tarde" no se
+  // registra nunca. El catálogo vive en src/lib/catalogos/constants.ts.
+  const origen = input.origen?.trim() ?? ''
+  if (!origen) return { negocio_id: null, error: 'Falta el origen del negocio' }
+  if (!esOrigenNegocioValido(origen)) {
+    return { negocio_id: null, error: `Origen no válido: ${origen}` }
+  }
+  // Solo 'alianza' guarda aliado; en cualquier otro origen se descarta (evita
+  // que un cambio de origen en el formulario deje un aliado colgado).
+  let aliadoId: string | null = null
+  if (origen === ORIGEN_ALIANZA) {
+    const candidato = input.aliado_id?.trim()
+    if (!candidato) {
+      return { negocio_id: null, error: 'Un negocio de alianza necesita el aliado' }
+    }
+    // El id debe ser un aliado real de ESTE workspace (barrera cross-tenant).
+    const { data: aliadoRow } = await db(supabase)
+      .from('aliados')
+      .select('id')
+      .eq('id', candidato)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (!aliadoRow) return { negocio_id: null, error: 'Aliado no encontrado' }
+    aliadoId = candidato
+  }
 
   // Get workspace config: stages_activos + linea_activa_id + config_extra
   const { data: wsConfig } = await db(supabase)
@@ -1518,6 +1584,8 @@ export async function crearNegocio(input: {
       etapa_actual_id: primeraEtapa?.id ?? null,
       stage_actual: primeraEtapa?.stage ?? null,
       estado: 'abierto',
+      origen,
+      aliado_id: aliadoId,
     })
     .select('id')
     .single()
@@ -1716,7 +1784,7 @@ export async function crearNegocioDesdeInteraccion(input: {
   // 1. Cargar la interacción (RLS ya la acota al workspace del usuario).
   const { data: interRaw, error: interErr } = await db(supabase)
     .from('contacto_interacciones')
-    .select('id, contacto_id, estado, negocio_id, payload')
+    .select('id, contacto_id, estado, negocio_id, payload, fuente')
     .eq('id', input.interaccion_id)
     .eq('workspace_id', workspaceId)
     .maybeSingle()
@@ -1726,6 +1794,7 @@ export async function crearNegocioDesdeInteraccion(input: {
     estado: string
     negocio_id: string | null
     payload: Record<string, unknown> | null
+    fuente: string | null
   } | null
   if (interErr || !inter) return { negocio_id: null, error: 'Interacción no encontrada' }
   if (inter.estado === 'convertida' && inter.negocio_id) {
@@ -1808,11 +1877,16 @@ export async function crearNegocioDesdeInteraccion(input: {
 
   // 5. Crear el negocio reusando crearNegocio (etapa de entrada = Validación por
   //    config entrada_manual_orden, bloques, carpeta de Drive, auto-init).
+  //    El origen NO se le pregunta a nadie: sale del canal de la interacción
+  //    (contacto_interacciones.fuente). Si el negocio nace de un lead de Meta,
+  //    el origen ES Meta. Preguntarlo abriría la puerta a marcarlo mal justo en
+  //    el camino donde el dato ya es certero.
   const res = await crearNegocio({
     nombre: nombreNegocio,
     contacto_id: inter.contacto_id,
     empresa_id: empresaId,
     es_persona_natural: input.tipo_persona === 'natural',
+    origen: origenDesdeFuenteInteraccion(inter.fuente),
   })
   if (res.error || !res.negocio_id) {
     return { negocio_id: null, error: res.error ?? 'No se pudo crear el negocio' }

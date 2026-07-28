@@ -11,6 +11,8 @@ import {
   descartarInteraccion,
 } from '../../../negocios/negocio-v2-actions'
 import { formatCOP } from '@/lib/contacts/constants'
+import { origenDesdeFuenteInteraccion } from '@/lib/negocios/constants'
+import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import type { InteraccionContacto } from '../../actions'
 
 // ── Presentación por fuente / estado ────────────────────────────────
@@ -220,6 +222,7 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
       {showForm && !yaConvertida && (
         <CrearNegocioForm
           interaccionId={it.id}
+          fuente={it.fuente}
           tipoSugerido={tipoDetectado}
           onCancel={() => setShowForm(false)}
           onDone={() => {
@@ -234,11 +237,14 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
 
 function CrearNegocioForm({
   interaccionId,
+  fuente,
   tipoSugerido,
   onCancel,
   onDone,
 }: {
   interaccionId: string
+  /** Canal de la interacción: determina el origen del negocio (no se pregunta). */
+  fuente: string
   tipoSugerido: 'natural' | 'juridica' | null
   onCancel: () => void
   onDone: () => void
@@ -269,8 +275,25 @@ function CrearNegocioForm({
     })
   }
 
+  // El origen NO se pregunta: lo determina el canal de la interacción. Se
+  // muestra resuelto para que quede a la vista con qué origen nace el negocio.
+  const origenResuelto = origenDesdeFuenteInteraccion(fuente)
+  const origenCfg = origenNegocioConfig(origenResuelto)
+
   return (
     <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
+      <div>
+        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Origen del negocio</label>
+        <div className="flex items-center gap-2">
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${origenCfg?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]'}`}
+          >
+            {origenCfg?.label ?? origenResuelto}
+          </span>
+          <span className="text-[10px] text-muted-foreground">Se toma del canal de la interacción</span>
+        </div>
+      </div>
+
       <div>
         <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Tipo de persona</label>
         <div className="flex gap-2">

@@ -8,7 +8,7 @@ import {
 } from './negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
-import { getRolePermissions } from '@/lib/roles'
+import { getRolePermissions, puedeMarcarCondicionNegocio } from '@/lib/roles'
 import NegociosClient from './negocios-client'
 
 type StageFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro'
@@ -41,6 +41,8 @@ export default async function NegociosPage() {
   // Mismo gate que validan `agregarResponsable`/`quitarResponsable` server-side
   // (owner/admin/supervisor): replicado en UI para no ofrecer un control que fallaría.
   const canAsignar = getRolePermissions(ws.role ?? 'read_only').canAssignResponsable
+  // Mismo guard que validan `agregarMarcaNegocio`/`quitarMarcaNegocio`.
+  const canMarcar = puedeMarcarCondicionNegocio(ws.role)
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
@@ -67,6 +69,7 @@ export default async function NegociosPage() {
         defaultStage={defaultStage}
         staffList={staffList}
         canAsignar={canAsignar}
+        canMarcar={canMarcar}
       />
     </div>
   )

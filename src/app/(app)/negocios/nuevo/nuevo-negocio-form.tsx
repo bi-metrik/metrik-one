@@ -6,12 +6,13 @@ import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } f
 import { toast } from 'sonner'
 import { crearNegocio } from '../negocio-v2-actions'
 import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
-import { SECTORES_EMPRESA } from '@/lib/catalogos/constants'
+import { SECTORES_EMPRESA, ORIGENES_NEGOCIO, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { PhoneInput } from '@/components/phone-input'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }
 type Linea = { id: string; nombre: string; descripcion: string | null; numero: number }
+type AliadoOpcion = { id: string; nombre: string }
 
 const STEPS = [
   { label: 'Contacto', icon: User },
@@ -22,10 +23,16 @@ const STEPS = [
 export default function NuevoNegocioForm({
   lineas = [],
   lineasAutoNombre = [],
+  aliados = [],
+  aliadosHabilitado = false,
 }: {
   lineas?: Linea[]
   /** Líneas cuyo negocio toma el nombre del contacto: se oculta el campo nombre. */
   lineasAutoNombre?: string[]
+  /** Aliados activos del workspace (solo si el módulo está activo). */
+  aliados?: AliadoOpcion[]
+  /** ¿El workspace tiene el módulo aliados? Sin él no se ofrece origen 'alianza'. */
+  aliadosHabilitado?: boolean
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -61,6 +68,20 @@ export default function NuevoNegocioForm({
   const [lineaId, setLineaId] = useState<string | null>(
     lineas.length === 1 ? lineas[0].id : null
   )
+
+  // Origen del negocio — obligatorio. Se pide AL CREAR (no después) porque un
+  // origen que se pide "cuando se pueda" no se registra nunca. Sin default: el
+  // usuario tiene que elegir, para que nadie herede un origen por descuido.
+  const [origen, setOrigen] = useState('')
+  const [aliadoId, setAliadoId] = useState('')
+
+  // 'alianza' solo se ofrece si el workspace tiene el módulo aliados Y hay al
+  // menos un aliado activo que elegir.
+  const puedeAlianza = aliadosHabilitado && aliados.length > 0
+  const origenesDisponibles = puedeAlianza
+    ? ORIGENES_NEGOCIO
+    : ORIGENES_NEGOCIO.filter((o) => o.value !== ORIGEN_ALIANZA)
+  const esAlianza = origen === ORIGEN_ALIANZA
 
   // Cuando persona natural, saltamos el paso de empresa
   const totalSteps = esPersonaNatural ? 2 : 3
@@ -149,6 +170,9 @@ export default function NuevoNegocioForm({
       if (lineas.length > 0 && !lineaId) return false
       // El nombre solo es obligatorio si la línea NO usa nombre automático
       if (!autoNombre && !nombre.trim()) return false
+      // Origen siempre obligatorio; con alianza, además el aliado.
+      if (!origen) return false
+      if (esAlianza && !aliadoId) return false
       return true
     }
     return false
@@ -163,6 +187,8 @@ export default function NuevoNegocioForm({
     if (!esPersonaNatural && !empresaNombre.trim()) {
       toast.error('La empresa es requerida'); return
     }
+    if (!origen) { toast.error('Elige de dónde vino el negocio'); return }
+    if (esAlianza && !aliadoId) { toast.error('Elige el aliado de la alianza'); return }
 
     startTransition(async () => {
       const result = await crearNegocio({
@@ -175,6 +201,8 @@ export default function NuevoNegocioForm({
         empresa_nombre: (esPersonaNatural || empresaId) ? undefined : empresaNombre.trim(),
         empresa_sector: (esPersonaNatural || empresaId) ? undefined : (empresaSector || undefined),
         es_persona_natural: esPersonaNatural,
+        origen,
+        aliado_id: esAlianza ? aliadoId : undefined,
       })
 
       if (result.error) {
@@ -462,6 +490,53 @@ export default function NuevoNegocioForm({
                   Esta es la única línea activa de tu negocio en MeTRIK ONE.
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Origen — obligatorio. Sin esto no se sabe qué canal trae negocio
+              (ni se pueden liquidar comisiones), y preguntarlo después es
+              garantía de que no se registre. */}
+          <div>
+            <label htmlFor="origen-negocio" className="mb-1 block text-xs font-medium text-muted-foreground">
+              ¿De dónde vino este negocio? *
+            </label>
+            <select
+              id="origen-negocio"
+              value={origen}
+              onChange={e => {
+                setOrigen(e.target.value)
+                if (e.target.value !== ORIGEN_ALIANZA) setAliadoId('')
+              }}
+              className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+            >
+              <option value="">Seleccionar origen...</option>
+              {origenesDisponibles.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Aliado — solo para origen alianza, y también obligatorio: una
+              alianza sin contraparte no se puede contar ni comisionar. */}
+          {esAlianza && (
+            <div>
+              <label htmlFor="aliado-negocio" className="mb-1 block text-xs font-medium text-muted-foreground">
+                ¿Con cuál aliado? *
+              </label>
+              <select
+                id="aliado-negocio"
+                value={aliadoId}
+                onChange={e => setAliadoId(e.target.value)}
+                className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              >
+                <option value="">Seleccionar aliado...</option>
+                {aliados.map(a => (
+                  <option key={a.id} value={a.id}>{a.nombre}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-muted-foreground/70">
+                Un aliado por negocio. Se administran en Directorio → Aliados.
+              </p>
             </div>
           )}
 

@@ -3,6 +3,8 @@ import { useState, useMemo } from 'react'
 import { Search, X, Clock } from 'lucide-react'
 import NegocioCard, { type StaffAsignable } from './negocio-card'
 import EmptyState from '@/components/empty-state'
+import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
+import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import type { NegocioResumen } from './negocio-v2-actions'
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
@@ -25,10 +27,15 @@ interface FaseSpec {
 type FiltrosLista = {
   seccional: string
   responsable: string
+  /** Valor de ORIGENES_NEGOCIO, 'todos', o 'sin_origen' (negocios previos a la captura). */
+  origen: string
   term: string
   /** Solo negocios que pasaron el SLA de su etapa (etapas sin SLA nunca entran). */
   soloAtrasados: boolean
 }
+
+/** Valor del filtro para los negocios que no tienen origen registrado. */
+const SIN_ORIGEN = 'sin_origen'
 
 /** Orden de la lista. Default: el del servidor (más reciente primero). */
 type SortKey = 'reciente' | 'atraso'
@@ -40,6 +47,15 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 /** ¿El negocio pasó el SLA de su etapa? false si la etapa no tiene SLA configurado. */
 const estaAtrasado = (n: NegocioResumen) =>
   n.sla_exceso_horas !== null && n.sla_exceso_horas > 0
+
+/**
+ * Origen que se muestra y se filtra. Misma regla que el badge de la tarjeta:
+ * mientras el backfill de la columna no esté aplicado, un negocio marcado por la
+ * integración de Meta cuenta como origen 'meta'. Una sola definición para que
+ * filtro y badge no digan cosas distintas.
+ */
+const origenEfectivo = (n: NegocioResumen): string | null =>
+  n.origen ?? (n.es_meta_lead ? 'meta' : null)
 
 /**
  * Fuente única del filtrado de la lista de negocios.
@@ -59,10 +75,19 @@ function aplicarFiltros(lista: NegocioResumen[], f: FiltrosLista): NegocioResume
   if (f.responsable !== 'todos') {
     res = res.filter((n) => n.responsables.some((r) => r.id === f.responsable))
   }
+  if (f.origen !== 'todos') {
+    // 'sin_origen' aísla los negocios anteriores a la captura obligatoria: son
+    // los que la financiera tiene que resolver a mano, no un caso a esconder.
+    res = res.filter((n) =>
+      f.origen === SIN_ORIGEN ? !origenEfectivo(n) : origenEfectivo(n) === f.origen,
+    )
+  }
   if (f.term) {
     res = res.filter((n) => {
       const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
         n.cedula, n.radicado, n.numero_factura, n.seccional_label,
+        origenNegocioLabel(origenEfectivo(n)), n.aliado_nombre,
+        ...n.marcas.map((m) => marcaCondicionLabel(m.tipo)),
         ...n.responsables.map((r) => r.full_name)]
         .filter(Boolean)
         .join(' ')
@@ -110,6 +135,7 @@ export default function NegociosClient({
   defaultStage = 'todos',
   staffList = [],
   canAsignar = false,
+  canMarcar = false,
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
@@ -120,6 +146,8 @@ export default function NegociosClient({
   staffList?: StaffAsignable[]
   /** Rol gerencial (owner/admin/supervisor): habilita asignar/quitar desde la lista. */
   canAsignar?: boolean
+  /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */
+  canMarcar?: boolean
 }) {
   // Segmentador jerárquico: fase (stage) → etapa (numero dentro de la fase).
   const [fase, setFase] = useState<FaseFilter>(defaultStage)
@@ -128,6 +156,7 @@ export default function NegociosClient({
   const [q, setQ] = useState('')
   const [seccional, setSeccional] = useState<string>('todas')
   const [responsable, setResponsable] = useState<string>('todos')
+  const [origen, setOrigen] = useState<string>('todos')
   const [soloAtrasados, setSoloAtrasados] = useState(false)
   const [sortBy, setSortBy] = useState<SortKey>('reciente')
 
@@ -178,8 +207,8 @@ export default function NegociosClient({
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
   const filtros = useMemo<FiltrosLista>(
-    () => ({ seccional, responsable, term, soloAtrasados }),
-    [seccional, responsable, term, soloAtrasados],
+    () => ({ seccional, responsable, origen, term, soloAtrasados }),
+    [seccional, responsable, origen, term, soloAtrasados],
   )
 
   const currentFiltradoSinOrden = useMemo(
@@ -223,6 +252,27 @@ export default function NegociosClient({
     () => aplicarFiltros(current, { ...filtros, soloAtrasados: false }).filter(estaAtrasado).length,
     [current, filtros],
   )
+
+  // Orígenes presentes en la lista (abiertos + cerrados), con su conteo. Solo se
+  // ofrecen los que existen: un desplegable con orígenes vacíos es ruido.
+  const origenesDisponibles = useMemo(() => {
+    const conteo = new Map<string, number>()
+    for (const n of [...negocios, ...cerrados]) {
+      const key = origenEfectivo(n) ?? SIN_ORIGEN
+      conteo.set(key, (conteo.get(key) ?? 0) + 1)
+    }
+    const orden = ORIGENES_NEGOCIO.map((o) => o.value as string)
+    return Array.from(conteo, ([value, count]) => ({
+      value,
+      label: value === SIN_ORIGEN ? 'Sin origen registrado' : (origenNegocioLabel(value) ?? value),
+      count,
+    })).sort((a, b) => {
+      // Catálogo en su orden; 'sin origen' de último (es el residuo histórico).
+      const ia = a.value === SIN_ORIGEN ? 999 : orden.indexOf(a.value)
+      const ib = b.value === SIN_ORIGEN ? 999 : orden.indexOf(b.value)
+      return ia - ib
+    })
+  }, [negocios, cerrados])
 
   // etapaCount cuenta sobre currentFiltrado (fase + responsable + seccional + búsqueda).
   const etapaCount = (numero: number) =>
@@ -356,6 +406,21 @@ export default function NegociosClient({
         </select>
       )}
 
+      {/* Filtro por origen del negocio (solo si hay más de un origen distinto) */}
+      {origenesDisponibles.length > 1 && (
+        <select
+          value={origen}
+          onChange={(e) => setOrigen(e.target.value)}
+          aria-label="Filtrar por origen del negocio"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+        >
+          <option value="todos">Todos los orígenes</option>
+          {origenesDisponibles.map((o) => (
+            <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
+          ))}
+        </select>
+      )}
+
       {/* Filtro por responsable asignado (solo si hay responsables en los negocios) */}
       {responsablesDisponibles.length > 0 && (
         <select
@@ -476,7 +541,13 @@ export default function NegociosClient({
       ) : (
         <div className="space-y-3">
           {currentFiltrado.map((n) => (
-            <NegocioCard key={n.id} negocio={n} staffList={staffList} canAsignar={canAsignar} />
+            <NegocioCard
+              key={n.id}
+              negocio={n}
+              staffList={staffList}
+              canAsignar={canAsignar}
+              canMarcar={canMarcar}
+            />
           ))}
         </div>
       )}

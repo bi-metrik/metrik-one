@@ -162,7 +162,10 @@ async function procesar(c:Caso) {
       const { data, error } = await supabase.from('contactos').insert({ workspace_id:WS, telefono:c.celular, nombre:c.nombre, email:rut.email?.value ?? null }).select('id').single()
       if (error) throw new Error(`contacto: ${error.message}`); contactoId = (data as {id:string}).id
     }
-    const { data: neg, error: nerr } = await supabase.from('negocios').insert({ workspace_id:WS, linea_id:LINEA, contacto_id:contactoId, empresa_id:null, nombre:`${c.nombre} - ${marca}`, codigo:c.codigo, responsable_id:JESSICA_STAFF, etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto', metadata:{ id_hubspot:c.id, fuente_cargue:'iva_devolucion' } }).select('id').single()
+    // origen:'otro' — el cargue viene de HubSpot y no trae el canal real por
+    // caso. Ningún negocio debe nacer sin origen; inventar el canal falsearía
+    // el conteo de la financiera.
+    const { data: neg, error: nerr } = await supabase.from('negocios').insert({ workspace_id:WS, linea_id:LINEA, contacto_id:contactoId, empresa_id:null, nombre:`${c.nombre} - ${marca}`, codigo:c.codigo, responsable_id:JESSICA_STAFF, etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto', origen:'otro', metadata:{ id_hubspot:c.id, fuente_cargue:'iva_devolucion' } }).select('id').single()
     if (nerr) throw new Error(`negocio: ${nerr.message}`)
     negocioId = (neg as {id:string}).id
     await supabase.from('negocio_responsables').insert({ negocio_id:negocioId, staff_id:JESSICA_STAFF, assigned_by:JESSICA_PROFILE })
