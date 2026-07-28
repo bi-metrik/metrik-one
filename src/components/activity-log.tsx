@@ -4,10 +4,17 @@ import { useState, useEffect, useTransition, useRef } from 'react'
 import {
   MessageSquare, Send, Trash2, Link as LinkIcon, AtSign,
   ArrowRight, X, CheckCircle2, XCircle, Shield, Banknote,
-  CheckSquare, FolderOpen, Filter,
+  CheckSquare, FolderOpen, Filter, Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { getActivityLog, addComment, deleteActivity } from '@/app/(app)/activity-actions'
+import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from '@/app/(app)/activity-actions'
+
+/**
+ * Equipos etiquetables. Son las áreas que ya gobiernan permisos y routing en el
+ * producto (`staff_areas`), así que el tag hereda una definición que el equipo
+ * ya usa — no inventa una agrupación paralela.
+ */
+const AREAS_MENCIONABLES: AreaMencionable[] = ['comercial', 'operaciones', 'financiera']
 
 interface StaffOption {
   id: string
@@ -89,7 +96,10 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
 
   // Form state
   const [content, setContent] = useState('')
-  const [mencionId, setMencionId] = useState<string | null>(null)
+  // Antes era UNA sola mención (`mencionId`), así que pedirle algo a tres
+  // personas obligaba a escribir el mismo comentario tres veces.
+  const [mencionIds, setMencionIds] = useState<string[]>([])
+  const [areasSel, setAreasSel] = useState<AreaMencionable[]>([])
   const [linkUrl, setLinkUrl] = useState('')
   const [showMention, setShowMention] = useState(false)
   const [showLink, setShowLink] = useState(false)
@@ -129,13 +139,21 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
   const handleSubmit = () => {
     if (!content.trim()) return
     startTransition(async () => {
-      const res = await addComment(entidadTipo, entidadId, content.trim(), mencionId, linkUrl || null)
+      const res = await addComment(
+        entidadTipo,
+        entidadId,
+        content.trim(),
+        null,
+        linkUrl || null,
+        { staffIds: mencionIds, areas: areasSel },
+      )
       if (res.success) {
         // Reload to get full entry with joins
         const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)
         setEntries(data as ActivityEntry[])
         setContent('')
-        setMencionId(null)
+        setMencionIds([])
+        setAreasSel([])
         setLinkUrl('')
         setShowMention(false)
         setShowLink(false)
@@ -156,7 +174,13 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
     })
   }
 
-  const selectedMencion = staffList.find(s => s.id === mencionId)
+  const seleccionados = staffList.filter(s => mencionIds.includes(s.id))
+  const hayMenciones = mencionIds.length > 0 || areasSel.length > 0
+
+  const togglePersona = (id: string) =>
+    setMencionIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
+  const toggleArea = (a: AreaMencionable) =>
+    setAreasSel(prev => (prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]))
 
   if (loading) {
     return (
@@ -198,9 +222,9 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
             <button
               onClick={() => { setShowMention(!showMention); setShowLink(false) }}
               className={`rounded-md p-1.5 text-xs transition-colors ${
-                showMention || mencionId ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'text-muted-foreground hover:bg-accent'
+                showMention || hayMenciones ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'text-muted-foreground hover:bg-accent'
               }`}
-              title="Mencionar equipo"
+              title="Mencionar personas o equipos"
             >
               <AtSign className="h-3.5 w-3.5" />
             </button>
@@ -221,25 +245,74 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
 
         {/* Mention selector */}
         {showMention && (
-          <div className="rounded-lg border bg-background p-2 space-y-1">
-            {selectedMencion && (
-              <div className="flex items-center justify-between rounded-md bg-blue-50 px-2 py-1 dark:bg-blue-900/20">
-                <span className="text-xs font-medium text-blue-700 dark:text-blue-300">@{selectedMencion.full_name}</span>
-                <button onClick={() => setMencionId(null)} className="text-blue-500 hover:text-blue-700">
-                  <X className="h-3 w-3" />
-                </button>
+          <div className="rounded-lg border bg-background p-2 space-y-2">
+            {/* Lo elegido, siempre visible: personas y equipos juntos */}
+            {hayMenciones && (
+              <div className="flex flex-wrap gap-1">
+                {areasSel.map(a => (
+                  <span
+                    key={a}
+                    className="flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
+                  >
+                    <Users className="h-3 w-3" />@{a}
+                    <button onClick={() => toggleArea(a)} className="text-emerald-500 hover:text-emerald-700">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                {seleccionados.map(s => (
+                  <span
+                    key={s.id}
+                    className="flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300"
+                  >
+                    @{s.full_name}
+                    <button onClick={() => togglePersona(s.id)} className="text-blue-500 hover:text-blue-700">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
               </div>
             )}
-            <div className="max-h-32 overflow-y-auto space-y-0.5">
-              {staffList.filter(s => s.id !== mencionId).map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => { setMencionId(s.id); setShowMention(false) }}
-                  className="w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent transition-colors"
-                >
-                  {s.full_name}
-                </button>
-              ))}
+
+            {/* Equipos: le llega a todos; el primero que lo atienda lo resuelve */}
+            <div>
+              <p className="px-1 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Equipos
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {AREAS_MENCIONABLES.map(a => (
+                  <button
+                    key={a}
+                    onClick={() => toggleArea(a)}
+                    className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                      areasSel.includes(a)
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                        : 'hover:bg-accent'
+                    }`}
+                  >
+                    <Users className="h-3 w-3" />@{a}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="px-1 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Personas
+              </p>
+              <div className="max-h-32 overflow-y-auto space-y-0.5">
+                {staffList.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => togglePersona(s.id)}
+                    className={`w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                      mencionIds.includes(s.id) ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'hover:bg-accent'
+                    }`}
+                  >
+                    {s.full_name}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
