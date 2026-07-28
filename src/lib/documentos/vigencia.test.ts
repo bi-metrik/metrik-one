@@ -3,10 +3,10 @@ import { documentoVigenteEn, diasAlObjetivo, parseFechaISO } from './vigencia'
 
 describe('documentoVigenteEn', () => {
   it('reproduce el caso real que originó la regla (cliente de Cali)', () => {
-    // Certificado bancario del 17 de julio, vigencia operativa de 20 días.
-    // Sirve para una cita de comienzos de agosto; no sirve para la tercera semana.
-    expect(documentoVigenteEn('2026-07-17', '2026-08-03', 20)).toBe(true)
-    expect(documentoVigenteEn('2026-07-17', '2026-08-19', 20)).toBe(false)
+    // Certificado bancario del 17 de julio, umbral operativo de 10 días.
+    // Sirve para una cita del 25 de julio; no sirve para la tercera semana de agosto.
+    expect(documentoVigenteEn('2026-07-17', '2026-07-25', 10)).toBe(true)
+    expect(documentoVigenteEn('2026-07-17', '2026-08-19', 10)).toBe(false)
   })
 
   it('valida contra el día de la cita, no contra el día de carga', () => {
