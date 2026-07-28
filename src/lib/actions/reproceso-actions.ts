@@ -266,16 +266,20 @@ export async function reprocesarNegocio(
   const etiqueta = n.codigo ? `${n.codigo} — ${n.nombre ?? ''}`.trim() : (n.nombre ?? 'Negocio')
   for (const d of ((destinatarios ?? []) as Array<{ id: string }>)) {
     if (d.id === userId) continue // quien lo abrió ya lo sabe
-    await db(supabase).from('notificaciones').insert({
-      workspace_id: workspaceId,
-      destinatario_id: d.id,
-      tipo: 'reproceso',
-      contenido: `Reproceso ${ciclo} en ${etiqueta}: ${LABEL_TIPO[input.tipo]}. Vuelve a ${destino.nombre}.`,
-      entidad_tipo: 'negocio',
-      entidad_id: negocioId,
-      estado: 'pendiente',
-      deep_link: `/negocios/${negocioId}`,
-      metadata: { tipo_reproceso: input.tipo, causa: input.causa, ciclo },
+    // Vía canónica `crear_notificacion` en vez de insert directo, para heredar lo
+    // que se le agregue (correos, etc.). `permitir_repetidas` porque cada ciclo es
+    // un hecho distinto: el dedup por defecto suprimiría el aviso del ciclo 2 si el
+    // del ciclo 1 sigue pendiente, que es justo cuando más hay que avisar.
+    await db(supabase).rpc('crear_notificacion', {
+      p_workspace_id: workspaceId,
+      p_destinatario_id: d.id,
+      p_tipo: 'reproceso',
+      p_contenido: `Reproceso ${ciclo} en ${etiqueta}: ${LABEL_TIPO[input.tipo]}. Vuelve a ${destino.nombre}.`,
+      p_entidad_tipo: 'negocio',
+      p_entidad_id: negocioId,
+      p_deep_link: `/negocios/${negocioId}`,
+      p_metadata: { tipo_reproceso: input.tipo, causa: input.causa, ciclo },
+      p_permitir_repetidas: true,
     })
   }
 

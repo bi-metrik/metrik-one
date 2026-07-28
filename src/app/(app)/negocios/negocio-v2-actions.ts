@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS } from '@/lib/negocios/constants'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
+import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
@@ -14,6 +15,7 @@ import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
+import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
@@ -210,6 +212,15 @@ export type NegocioResumen = {
   // hay que rehacer un tramo, con un cliente esperando algo que creía resuelto: se
   // muestra en la tarjeta para que sea visible sin abrir el negocio.
   reproceso: { tipo: string; ciclo: number; etapa_retorno: string | null } | null
+  // ── SLA de etapa (mismo criterio que /flujo y /equipo) ────────────────────
+  /** Último avance de etapa. Base del cálculo de atraso. */
+  etapa_cambiada_at: string | null
+  /** SLA en horas hábiles configurado en la etapa (etapas_negocio.config_extra.sla_horas). null = etapa sin SLA. */
+  etapa_sla_horas: number | null
+  /** Horas hábiles Colombia transcurridas en la etapa. null si no hay etapa_cambiada_at o no hay SLA. */
+  horas_habiles_en_etapa: number | null
+  /** Horas hábiles por encima del SLA. >0 = atrasado. null si la etapa no tiene SLA. */
+  sla_exceso_horas: number | null
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -367,8 +378,9 @@ export async function getNegociosV2(
       closed_at,
       razon_cierre,
       metadata,
+      etapa_cambiada_at,
       lineas_negocio(nombre, numero),
-      etapas_negocio(nombre, stage, numero),
+      etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
       contactos(nombre)
     `)
@@ -391,7 +403,7 @@ export async function getNegociosV2(
 
   // Batch: gastos por negocio
   const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
-  const [gastosRes, horasRes, staffRes, wsRes, respRes] = await Promise.all([
+  const [gastosRes, horasRes, staffRes, wsRes, respRes, festivosRes] = await Promise.all([
     db(supabase).from('gastos').select('negocio_id, monto').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     db(supabase).from('horas').select('negocio_id, horas, staff_id').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
     supabase.from('staff').select('id, salary').eq('workspace_id', workspaceId),
@@ -401,7 +413,15 @@ export async function getNegociosV2(
       .select('negocio_id, assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name)')
       .in('negocio_id', negocioIds)
       .order('assigned_at', { ascending: true }),
+    // Calendario de festivos: misma tabla que usa la función SQL horas_habiles_entre.
+    db(supabase).from('festivos_colombia').select('fecha'),
   ])
+
+  // SLA: se evalúa contra un único "ahora" por request (misma foto para toda la lista).
+  const ahoraMs = Date.now()
+  const festivos = new Set(
+    ((festivosRes.data ?? []) as Array<{ fecha: string }>).map((f) => f.fecha),
+  )
 
   // Responsables por negocio (orden estable por assigned_at = más antiguo primero).
   const responsablesPorNeg: Record<string, Array<{ id: string; full_name: string }>> = {}
@@ -502,6 +522,17 @@ export async function getNegociosV2(
 
   return (data as Record<string, unknown>[]).map(row => {
     const id = row.id as string
+    const etapaRow = row.etapas_negocio as
+      | { nombre: string; stage: string; numero: number; config_extra: unknown }
+      | null
+    // SLA de etapa. Sin sla_horas configurado no se calcula nada: la tarjeta
+    // guarda silencio (no pinta "a tiempo" ni "sin SLA").
+    const etapaCambiadaAt = (row.etapa_cambiada_at as string | null) ?? null
+    const slaHoras = slaHorasDeEtapa(etapaRow?.config_extra)
+    const horasEnEtapa =
+      slaHoras !== null && etapaCambiadaAt
+        ? horasHabilesEntre(etapaCambiadaAt, ahoraMs, festivos)
+        : null
     return {
       id,
       nombre: row.nombre as string,
@@ -547,6 +578,11 @@ export async function getNegociosV2(
         if (!r?.activo) return null
         return { tipo: String(r.tipo ?? ''), ciclo: Number(r.ciclo ?? 1), etapa_retorno: r.etapa_retorno ?? null }
       })(),
+      etapa_cambiada_at: etapaCambiadaAt,
+      etapa_sla_horas: slaHoras,
+      horas_habiles_en_etapa: horasEnEtapa,
+      sla_exceso_horas:
+        slaHoras !== null && horasEnEtapa !== null ? horasEnEtapa - slaHoras : null,
     }
   })
 }
@@ -3704,31 +3740,15 @@ export async function actualizarPrecioAprobado(
   return { error: null }
 }
 
-// ── Agregar comentario al activity log del negocio ────────────────────────────
-
-export async function agregarComentarioNegocio(
-  negocioId: string,
-  contenido: string
-): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
-  if (error || !workspaceId) return { error: 'No autenticado' }
-  if (!staffId) return { error: 'Sin perfil de staff' }
-
-  const { error: insertError } = await supabase
-    .from('activity_log')
-    .insert({
-      workspace_id: workspaceId,
-      entidad_tipo: 'negocio',
-      entidad_id: negocioId,
-      tipo: 'comentario',
-      autor_id: staffId,
-      contenido,
-    })
-
-  if (insertError) return { error: (insertError as { message: string }).message }
-  revalidatePath(`/negocios/${negocioId}`)
-  return { error: null }
-}
+// ── Comentarios del negocio ───────────────────────────────────────────────────
+//
+// `agregarComentarioNegocio` se eliminó el 2026-07-27: era código muerto (cero
+// callers) y además insertaba en activity_log SIN `mencion_id`, por lo que el
+// trigger `trg_notif_mencion` nunca disparaba desde ese camino. Dejarlo vivo era
+// una trampa: el día que alguien lo usara, las menciones dejarían de notificar.
+//
+// Vía única para comentar: `addComment` (src/app/(app)/activity-actions.ts).
+// Acepta `mencionId` y el trigger de DB crea la notificación.
 
 // ── Actualizar aprobación de bloque ──────────────────────────────────────────
 
@@ -4896,8 +4916,15 @@ export async function actualizarNombreNegocio(
   negocioId: string,
   nombre: string,
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+
+  // Guard de rol (mismo patrón que agregarResponsable). Antes solo se validaba
+  // la sesión: cualquier autenticado del workspace renombraba cualquier negocio
+  // llamando la action directo; el único control era el canEdit de la UI.
+  if (!puedeCorregirDocumentos(role)) {
+    return { error: 'Sin permisos para renombrar el negocio' }
+  }
 
   const nuevo = nombre.trim()
   if (!nuevo) return { error: 'El nombre no puede estar vacío' }
@@ -5499,6 +5526,34 @@ async function sincronizarResponsablePrincipal(
     .update({ responsable_id: principal })
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
+}
+
+/**
+ * Staff asignable como responsable de un negocio (para el selector inline de la
+ * lista). Devuelve el staff ACTIVO del workspace, sin filtrar por área: la
+ * responsabilidad sobre un negocio recorre las tres áreas a lo largo del flujo
+ * (comercial vende, operaciones ejecuta, financiera cobra), y `agregarResponsable`
+ * valida exactamente eso — que el staff pertenezca al workspace.
+ *
+ * NO se reusa `getStaffParaResponsable()` del directorio: ese acota a área
+ * comercial, que es lo correcto para el responsable de un CONTACTO pero dejaría
+ * fuera del selector a la mayoría de responsables reales de negocios.
+ */
+export async function getStaffParaAsignarNegocio(): Promise<Array<{ id: string; full_name: string }>> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  const { data } = await supabase
+    .from('staff')
+    .select('id, full_name')
+    .eq('workspace_id', workspaceId)
+    .eq('is_active', true)
+    .order('full_name', { ascending: true })
+
+  return ((data ?? []) as Array<{ id: string; full_name: string | null }>).map((s) => ({
+    id: s.id,
+    full_name: s.full_name ?? '—',
+  }))
 }
 
 export async function agregarResponsable(

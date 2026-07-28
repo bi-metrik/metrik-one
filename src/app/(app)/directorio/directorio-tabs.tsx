@@ -8,12 +8,20 @@ const TABS = [
   { href: '/directorio/empresas', label: 'Empresas' },
 ] as const
 
-export default function DirectorioTabs() {
+const TAB_ALIADOS = { href: '/directorio/aliados', label: 'Aliados' } as const
+
+interface Props {
+  /** Solo si el workspace tiene modules.aliados (lo resuelve la page server-side). */
+  showAliados?: boolean
+}
+
+export default function DirectorioTabs({ showAliados = false }: Props) {
   const pathname = usePathname()
+  const tabs = showAliados ? [...TABS, TAB_ALIADOS] : [...TABS]
 
   return (
     <div className="flex gap-1 rounded-lg bg-muted/50 p-1">
-      {TABS.map(tab => {
+      {tabs.map(tab => {
         const active = pathname === tab.href
         return (
           <Link

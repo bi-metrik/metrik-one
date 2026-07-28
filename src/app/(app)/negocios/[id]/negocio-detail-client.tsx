@@ -29,6 +29,7 @@ import type {
 import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
+import { puedeCorregirDocumentos } from '@/lib/roles'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
 
@@ -1957,7 +1958,7 @@ export default function NegocioDetailClient({
           <NombreNegocioEditable
             negocioId={negocio.id}
             initialNombre={negocio.nombre}
-            canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
+            canEdit={puedeCorregirDocumentos(userRole)}
           />
         </h1>
       </div>

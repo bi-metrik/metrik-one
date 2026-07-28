@@ -1,6 +1,8 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
+import { puedeCorregirDocumentos } from '@/lib/roles'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
@@ -38,6 +40,25 @@ export interface CamposExtraidos {
   direccion_propietario?: string
 }
 
+// ── Guard de permiso ──────────────────────────────────────────────────────────
+//
+// Las 4 acciones de este archivo no tenian guard: cualquier usuario autenticado
+// del workspace podia pedir URL de subida, confirmar el upload, disparar la
+// extraccion IA o sobrescribir los campos de CUALQUIER bloque. Mismo patron que
+// documento-actions: en la etapa activa edita quien puede editar el bloque; si
+// el negocio ya avanzo, solo un rol de correccion (owner/admin/supervisor).
+//
+// Los 4 callers son de UI (BloqueDocumentos.tsx). Ningun cron ni flujo
+// server-side sin usuario las invoca — verificado por grep.
+async function guardDocumentoNegocio(
+  negocioBloqueId: string,
+  role?: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (guard.ok || puedeCorregirDocumentos(role)) return { ok: true }
+  return { ok: false, error: guard.error ?? 'Tu rol no permite editar este documento' }
+}
+
 // ── 1. Generar URL firmada de upload ──────────────────────────────────────────
 
 export async function getUploadUrlDocumentoNegocio(
@@ -46,8 +67,11 @@ export async function getUploadUrlDocumentoNegocio(
   slug: string,
   fileExtension: string,
 ): Promise<{ success: boolean; path?: string; token?: string; error?: string }> {
-  const { workspaceId, error } = await getWorkspace()
+  const { workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const permiso = await guardDocumentoNegocio(negocioBloqueId, role)
+  if (!permiso.ok) return { success: false, error: permiso.error }
 
   const ext = fileExtension.toLowerCase().replace(/^\./, '') || 'pdf'
   const filePath = `${workspaceId}/negocios/${negocioId}/${negocioBloqueId}/${slug}.${ext}`
@@ -71,8 +95,11 @@ export async function confirmarUploadDocumentoNegocio(
   slug: string,
   filePath: string,
 ): Promise<{ success: boolean; url?: string; error?: string }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const permiso = await guardDocumentoNegocio(negocioBloqueId, role)
+  if (!permiso.ok) return { success: false, error: permiso.error }
 
   const admin = createServiceClient()
 
@@ -170,8 +197,11 @@ export async function procesarDocumentoNegocio(
     return { success: false, error: `'${slug}' no requiere procesamiento AI` }
   }
 
-  const { supabase, error } = await getWorkspace()
+  const { supabase, role, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  const permiso = await guardDocumentoNegocio(negocioBloqueId, role)
+  if (!permiso.ok) return { success: false, error: permiso.error }
 
   const { data: bloque } = await db(supabase)
     .from('negocio_bloques')
@@ -279,8 +309,11 @@ export async function actualizarCamposNegocioBloque(
   negocioBloqueId: string,
   campos: CamposExtraidos,
 ): Promise<{ success: boolean; error?: string }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, role, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  const permiso = await guardDocumentoNegocio(negocioBloqueId, role)
+  if (!permiso.ok) return { success: false, error: permiso.error }
 
   const { data: bloque } = await db(supabase)
     .from('negocio_bloques')

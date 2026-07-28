@@ -5,6 +5,11 @@ import { revalidatePath } from 'next/cache'
 
 // ── Tipos ─────────────────────────────────────────────
 
+// Los tipos que el producto conoce y sabe iconizar. NO es exhaustivo por diseño:
+// la columna `notificaciones.tipo` es texto libre y los crons/triggers pueden
+// escribir tipos que el front todavía no conoce. Por eso `NotificacionItem.tipo`
+// es `string` y el render siempre cae a un default — un tipo nuevo en datos
+// nunca puede romper la campana.
 export type NotificacionTipo =
   | 'inactividad_oportunidad'
   | 'handoff'
@@ -15,12 +20,16 @@ export type NotificacionTipo =
   | 'inactividad_proyecto'
   | 'proyecto_entregado'
   | 'proyecto_cerrado'
+  | 'responsable_faltante_area'
+  | 'cobro_vencido'
+  | 'cuenta_cobro_pendiente_aprobacion'
 
 export type NotificacionEstado = 'pendiente' | 'completada' | 'descartada'
 
 export type NotificacionItem = {
   id: string
-  tipo: NotificacionTipo
+  /** Texto libre en DB. Ver nota en NotificacionTipo: el render nunca asume exhaustividad. */
+  tipo: NotificacionTipo | (string & {})
   estado: NotificacionEstado
   contenido: string
   entidad_tipo: string | null
@@ -32,19 +41,38 @@ export type NotificacionItem = {
 
 // ── Obtener notificaciones del usuario actual ─────────
 
-export async function getNotificaciones(): Promise<NotificacionItem[]> {
-  const { supabase, userId, error } = await getWorkspace()
-  if (error || !userId) return []
+// Sin `export`: este archivo es 'use server' y ahí solo pueden exportarse
+// funciones async (Next falla el build con una constante exportada).
+const NOTIFICACIONES_PAGE_SIZE = 50
 
-  const { data } = await supabase
+export type NotificacionesPagina = {
+  items: NotificacionItem[]
+  /** Total de pendientes del usuario, independiente de cuántas se trajeron. */
+  total: number
+}
+
+/**
+ * Trae una página de pendientes MÁS el total real.
+ *
+ * Antes devolvía un array topado en 50 sin decirlo: quien tenía 68 pendientes
+ * veía 50 (las más recientes) y perdía de vista las 18 más viejas — que suelen
+ * ser las urgentes. El badge tampoco podía ser honesto, contaba solo lo cargado.
+ */
+export async function getNotificaciones(offset = 0): Promise<NotificacionesPagina> {
+  const { supabase, userId, error } = await getWorkspace()
+  if (error || !userId) return { items: [], total: 0 }
+
+  const { data, count } = await supabase
     .from('notificaciones')
-    .select('id, tipo, estado, contenido, entidad_tipo, entidad_id, deep_link, metadata, created_at')
+    .select('id, tipo, estado, contenido, entidad_tipo, entidad_id, deep_link, metadata, created_at', {
+      count: 'exact',
+    })
     .eq('destinatario_id', userId)
     .eq('estado', 'pendiente')
     .order('created_at', { ascending: false })
-    .limit(50)
+    .range(offset, offset + NOTIFICACIONES_PAGE_SIZE - 1)
 
-  return (data ?? []) as NotificacionItem[]
+  return { items: (data ?? []) as NotificacionItem[], total: count ?? 0 }
 }
 
 // ── Marcar una notificación como completada ───────────

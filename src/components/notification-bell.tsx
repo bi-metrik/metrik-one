@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package } from 'lucide-react'
+import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -11,7 +11,6 @@ import {
   descartarNotificacion,
   marcarTodasCompletadas,
   type NotificacionItem,
-  type NotificacionTipo,
 } from '@/lib/actions/notificaciones'
 
 // ── Helpers ───────────────────────────────────────────
@@ -28,7 +27,10 @@ function tiempoRelativo(fechaIso: string): string {
   return `Hace ${Math.floor(diff / 86400)} d`
 }
 
-const TIPO_ICON: Record<NotificacionTipo, React.ElementType> = {
+// Mapas indexados por string (no por NotificacionTipo): la DB puede traer tipos
+// que el front todavía no conoce y el acceso siempre cae al default. Un tipo
+// nuevo pierde su ícono propio, jamás rompe el render de la lista.
+const TIPO_ICON: Record<string, React.ElementType> = {
   inactividad_oportunidad: Flame,
   handoff: Package,
   asignacion_responsable: UserCheck,
@@ -38,9 +40,12 @@ const TIPO_ICON: Record<NotificacionTipo, React.ElementType> = {
   inactividad_proyecto: FolderKanban,
   proyecto_entregado: FolderKanban,
   proyecto_cerrado: FolderKanban,
+  responsable_faltante_area: UserPlus,
+  cobro_vencido: CircleDollarSign,
+  cuenta_cobro_pendiente_aprobacion: CircleDollarSign,
 }
 
-const TIPO_COLOR: Record<NotificacionTipo, string> = {
+const TIPO_COLOR: Record<string, string> = {
   inactividad_oportunidad: '#F59E0B',
   handoff: '#8B5CF6',
   asignacion_responsable: '#10B981',
@@ -50,28 +55,55 @@ const TIPO_COLOR: Record<NotificacionTipo, string> = {
   inactividad_proyecto: '#F59E0B',
   proyecto_entregado: '#10B981',
   proyecto_cerrado: '#6B7280',
+  responsable_faltante_area: '#F59E0B',
+  cobro_vencido: '#EF4444',
+  cuenta_cobro_pendiente_aprobacion: '#8B5CF6',
 }
 
 // ── Componente principal ──────────────────────────────
 
 interface NotificationBellProps {
   userId: string
+  /**
+   * Notificaciones pendientes resueltas en el server (layout). Sin esto la campana
+   * arrancaba SIEMPRE en cero y solo cargaba al abrir el panel: el badge no
+   * anunciaba nada y el usuario tenía que hacer clic para que aparecieran.
+   */
+  initialItems?: NotificacionItem[]
+  /** Total real de pendientes (puede superar lo cargado: la consulta pagina). */
+  initialTotal?: number
 }
 
-export default function NotificationBell({ userId }: NotificationBellProps) {
+export default function NotificationBell({ userId, initialItems, initialTotal }: NotificationBellProps) {
   const [open, setOpen] = useState(false)
-  const [items, setItems] = useState<NotificacionItem[]>([])
+  const [items, setItems] = useState<NotificacionItem[]>(initialItems ?? [])
+  const [total, setTotal] = useState(initialTotal ?? initialItems?.length ?? 0)
   const [loading, setLoading] = useState(false)
+  const [cargandoMas, setCargandoMas] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
   // Cargar notificaciones
   const cargar = useCallback(async () => {
     setLoading(true)
-    const data = await getNotificaciones()
+    const { items: data, total: t } = await getNotificaciones()
     setItems(data)
+    setTotal(t)
     setLoading(false)
   }, [])
+
+  // Traer la siguiente página. Con backlog alto (hay usuarios con 68 pendientes)
+  // las más viejas quedaban fuera del corte y eran invisibles.
+  const cargarMas = useCallback(async () => {
+    setCargandoMas(true)
+    const { items: data, total: t } = await getNotificaciones(items.length)
+    setItems(prev => {
+      const vistos = new Set(prev.map(n => n.id))
+      return [...prev, ...data.filter(n => !vistos.has(n.id))]
+    })
+    setTotal(t)
+    setCargandoMas(false)
+  }, [items.length])
 
   // Abrir panel carga datos
   useEffect(() => {
@@ -79,6 +111,17 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
       cargar()
     }
   }, [open, cargar])
+
+  // Refresco al volver a la pestaña. Respaldo del realtime: si el canal se cayó
+  // (o la tabla no está en la publicación), el conteo igual se pone al día
+  // cuando el usuario regresa, sin polling permanente.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') cargar()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [cargar])
 
   // Supabase Realtime: escuchar cambios en notificaciones del usuario
   useEffect(() => {
@@ -96,7 +139,9 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
         },
         (payload) => {
           const nueva = payload.new as NotificacionItem
-          setItems(prev => [nueva, ...prev])
+          // Dedup por id: la misma notificación puede llegar por realtime y por
+          // un `cargar()` concurrente (apertura del panel o vuelta a la pestaña).
+          setItems(prev => (prev.some(n => n.id === nueva.id) ? prev : [nueva, ...prev]))
         }
       )
       .subscribe()
@@ -119,23 +164,30 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
   }, [open])
 
   const pendientes = items.filter(n => n.estado === 'pendiente')
-  const count = pendientes.length
+  // El badge muestra el total del server, no lo que alcanzó a cargarse: con
+  // backlog alto la primera página no es todo. Si el realtime trajo algo nuevo
+  // que aún no cuenta el total, gana lo cargado.
+  const count = Math.max(total, pendientes.length)
+  const hayMas = pendientes.length < total
 
   // Acciones
   async function handleCompletar(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     setItems(prev => prev.filter(n => n.id !== id))
+    setTotal(t => Math.max(0, t - 1))
     await marcarCompletada(id)
   }
 
   async function handleDescartar(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     setItems(prev => prev.filter(n => n.id !== id))
+    setTotal(t => Math.max(0, t - 1))
     await descartarNotificacion(id)
   }
 
   async function handleMarcarTodas() {
     setItems([])
+    setTotal(0)
     await marcarTodasCompletadas()
   }
 
@@ -147,6 +199,7 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
     // Marcar como completada al hacer click en la notificación
     marcarCompletada(item.id)
     setItems(prev => prev.filter(n => n.id !== item.id))
+    setTotal(t => Math.max(0, t - 1))
   }
 
   return (
@@ -281,6 +334,18 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
                 </div>
               )
             })}
+
+            {!loading && hayMas && (
+              <button
+                onClick={cargarMas}
+                disabled={cargandoMas}
+                className="w-full py-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-50"
+              >
+                {cargandoMas
+                  ? 'Cargando…'
+                  : `Ver ${total - pendientes.length} más`}
+              </button>
+            )}
           </div>
         </div>
       )}

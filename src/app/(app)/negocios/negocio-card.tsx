@@ -1,10 +1,13 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, RotateCcw } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
+import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
+
+export type StaffAsignable = { id: string; full_name: string }
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -44,6 +47,15 @@ const CIERRE_LABELS = {
   cancelado: 'Cancelado',
 } as const
 
+/**
+ * Etiqueta compacta del atraso: horas hábiles si es menos de un día hábil,
+ * días hábiles a partir de ahí (24h = 1 día hábil, misma equivalencia que el SLA).
+ */
+function formatAtraso(horas: number): string {
+  if (horas < 24) return `${Math.max(1, Math.round(horas))}h`
+  return `${Math.floor(horas / 24)}d`
+}
+
 function formatDateShort(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -56,7 +68,170 @@ function openFolder(url: string, e: React.MouseEvent) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
+/**
+ * La tarjeta entera es un <Link>: TODO control interactivo dentro de ella debe
+ * frenar la navegación antes de hacer lo suyo. Helper único para no olvidarlo.
+ */
+function frenarNavegacion(e: React.MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+/**
+ * Responsables del negocio, asignables desde el listado (Daniela/Deisy pedían no
+ * tener que entrar al detalle para repartir trabajo).
+ *
+ * `canAsignar` refleja el gate de rol (owner/admin/supervisor) que las server
+ * actions ya validan server-side; aquí solo evita mostrar un control que iba a
+ * fallar. Sin permiso, se conserva la vista de solo lectura de siempre.
+ */
+function ResponsablesInline({
+  negocioId,
+  responsables,
+  staffList,
+  canAsignar,
+}: {
+  negocioId: string
+  responsables: Array<{ id: string; full_name: string }>
+  staffList: StaffAsignable[]
+  canAsignar: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [isPending, startTransition] = useTransition()
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  // Cerrar al hacer click fuera del selector.
+  useEffect(() => {
+    if (!open) return
+    function handleClick(ev: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(ev.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const asignados = new Set(responsables.map((r) => r.id))
+  const term = search.trim().toLowerCase()
+  const disponibles = staffList.filter(
+    (s) => !asignados.has(s.id) && (!term || s.full_name.toLowerCase().includes(term)),
+  )
+
+  const handleToggleOpen = (e: React.MouseEvent) => {
+    frenarNavegacion(e)
+    setSearch('')
+    setOpen((v) => !v)
+  }
+
+  const handleAdd = (e: React.MouseEvent, staffId: string, nombre: string) => {
+    frenarNavegacion(e)
+    setOpen(false)
+    setSearch('')
+    startTransition(async () => {
+      const res = await agregarResponsable(negocioId, staffId)
+      if (res.error) toast.error(res.error)
+      else toast.success(`Responsable agregado: ${nombre}`)
+    })
+  }
+
+  const handleRemove = (e: React.MouseEvent, staffId: string) => {
+    frenarNavegacion(e)
+    startTransition(async () => {
+      const res = await quitarResponsable(negocioId, staffId)
+      if (res.error) toast.error(res.error)
+      else toast.success('Responsable removido')
+    })
+  }
+
+  return (
+    <div className="relative mt-1.5 flex flex-wrap items-center gap-1" ref={popoverRef}>
+      <User className="h-3 w-3 shrink-0 text-[#6B7280]/70" />
+      {responsables.map((r) => (
+        <span
+          key={r.id}
+          className="inline-flex max-w-[140px] items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+          title={r.full_name}
+        >
+          <span className="truncate">{r.full_name}</span>
+          {canAsignar && (
+            <button
+              type="button"
+              onClick={(e) => handleRemove(e, r.id)}
+              disabled={isPending}
+              className="-mr-0.5 shrink-0 rounded-full p-0.5 transition-colors hover:bg-white hover:text-[#1A1A1A] disabled:opacity-60"
+              title={`Quitar a ${r.full_name}`}
+              aria-label={`Quitar a ${r.full_name}`}
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          )}
+        </span>
+      ))}
+
+      {responsables.length === 0 && !canAsignar && (
+        <span className="text-[10px] italic text-[#6B7280]/60">Sin responsable</span>
+      )}
+
+      {canAsignar && (
+        <button
+          type="button"
+          onClick={handleToggleOpen}
+          disabled={isPending}
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-[#6B7280] transition-colors hover:border-[#10B981] hover:text-[#10B981] disabled:opacity-60"
+          aria-label="Asignar responsable"
+        >
+          {isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+          {responsables.length === 0 ? 'Asignar' : ''}
+        </button>
+      )}
+
+      {open && (
+        <div
+          onClick={frenarNavegacion}
+          className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white shadow-lg"
+        >
+          <div className="relative border-b border-[#E5E7EB]">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#6B7280]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar persona…"
+              aria-label="Buscar persona"
+              className="w-full py-1.5 pl-7 pr-2 text-xs text-[#1A1A1A] placeholder:text-[#6B7280] focus:outline-none"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {disponibles.length === 0 ? (
+              <p className="px-3 py-2 text-[11px] text-[#6B7280]">Sin personas disponibles</p>
+            ) : (
+              disponibles.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={(e) => handleAdd(e, s.id, s.full_name)}
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-[#1A1A1A] transition-colors hover:bg-[#F5F4F2]"
+                >
+                  {s.full_name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function NegocioCard({
+  negocio,
+  staffList = [],
+  canAsignar = false,
+}: {
+  negocio: NegocioResumen
+  staffList?: StaffAsignable[]
+  canAsignar?: boolean
+}) {
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
 
   // Copiar el radicado al portapapeles (para pegarlo rápido en la plataforma UPME).
@@ -138,6 +313,19 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               <span className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]">
                 <Pause className="h-2.5 w-2.5" />
                 Pausado
+              </span>
+            )}
+            {/* Atraso de etapa. Solo se pinta cuando la etapa TIENE sla_horas
+                configurado y ya se pasó. Sin SLA: silencio (ni "a tiempo" ni
+                "sin SLA") — hoy la mayoría de etapas no tiene SLA y un badge
+                permanente sería ruido, no señal. */}
+            {!isCerrado && negocio.sla_exceso_horas !== null && negocio.sla_exceso_horas > 0 && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[#EF4444]/10 px-2 py-0.5 text-[10px] font-medium text-[#EF4444]"
+                title={`Lleva ${Math.round(negocio.horas_habiles_en_etapa ?? 0)}h hábiles en esta etapa; el SLA es de ${negocio.etapa_sla_horas}h`}
+              >
+                <Clock className="h-2.5 w-2.5" />
+                {formatAtraso(negocio.sla_exceso_horas)} de atraso
               </span>
             )}
             {negocio.es_meta_lead && (
@@ -223,23 +411,13 @@ export default function NegocioCard({ negocio }: { negocio: NegocioResumen }) {
               </button>
             </div>
           )}
-          {/* Responsables asignados */}
-          <div className="mt-1.5 flex flex-wrap items-center gap-1">
-            <User className="h-3 w-3 shrink-0 text-[#6B7280]/70" />
-            {negocio.responsables.length > 0 ? (
-              negocio.responsables.map((r) => (
-                <span
-                  key={r.id}
-                  className="inline-flex max-w-[140px] items-center truncate rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
-                  title={r.full_name}
-                >
-                  {r.full_name}
-                </span>
-              ))
-            ) : (
-              <span className="text-[10px] italic text-[#6B7280]/60">Sin responsable</span>
-            )}
-          </div>
+          {/* Responsables asignados (asignables inline si el rol lo permite) */}
+          <ResponsablesInline
+            negocioId={negocio.id}
+            responsables={negocio.responsables}
+            staffList={staffList}
+            canAsignar={canAsignar}
+          />
           {isCerrado && negocio.closed_at && (
             <p className="mt-1 text-[10px] text-[#6B7280]">
               Cerrado {formatDateShort(negocio.closed_at)}

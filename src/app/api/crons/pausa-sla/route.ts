@@ -109,7 +109,13 @@ export async function GET(req: NextRequest) {
           deep_link: `/negocios/${n.id}`,
           metadata: { fecha_reapertura: n.pausado_hasta },
         })
-        if (!notifErr) notificacionesCreadas++
+        // Antes el error se descartaba: el tipo 'negocio_reactivado' no pasaba
+        // el CHECK y el cron reportaba ok con 0 creadas, sin decir por que.
+        if (notifErr) {
+          console.error('[pausa-sla] no se pudo notificar la reactivación:', notifErr.message)
+        } else {
+          notificacionesCreadas++
+        }
       }
     }
   }

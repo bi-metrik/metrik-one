@@ -123,6 +123,15 @@ export async function getMiStaffId(): Promise<string | null> {
   return staffId ?? null
 }
 
+// staff.id + rol efectivo del usuario logueado. El rol decide el pre-filtro por
+// defecto del directorio: quien coordina equipo entra viendo TODO, quien ejecuta
+// entra viendo lo suyo. Ver `contactos-list.tsx`.
+export async function getMiStaffContexto(): Promise<{ staffId: string | null; role: string | null }> {
+  const { staffId, role, error } = await getWorkspace()
+  if (error) return { staffId: null, role: null }
+  return { staffId: staffId ?? null, role: role ?? null }
+}
+
 export async function getContacto(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return null
@@ -662,4 +671,24 @@ export async function confirmRutData(
   revalidatePath(`/directorio/empresa/${empresaId}`)
   revalidatePath('/negocios')
   return { success: true }
+}
+
+// ── Modulos del directorio ────────────────────────────────
+
+/**
+ * ¿El workspace tiene el modulo de aliados activo? Lo usan las pages del
+ * directorio para mostrar (o no) la pestana "Aliados".
+ */
+export async function tieneModuloAliados(): Promise<boolean> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return false
+
+  const { data: ws } = await supabase
+    .from('workspaces')
+    .select('modules')
+    .eq('id', workspaceId)
+    .single()
+
+  const modules = (ws as { modules: Record<string, boolean> | null } | null)?.modules
+  return Boolean(modules?.aliados)
 }

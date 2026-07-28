@@ -152,6 +152,30 @@ export function canEditHeader(user: UserContext): boolean {
   return getAreasEfectivas(user).has('comercial')
 }
 
+// ── canGestionarAliados ──────────────────────────────────────────────
+
+/**
+ * Directorio de aliados (contrapartes comerciales con acuerdo): ¿puede el
+ * usuario crear / editar / activar / desactivar?
+ *
+ * Regla (decisión de producto, Mauricio 2026-07-27):
+ *   - owner: sí, siempre.
+ *   - supervisor: sí, solo si su área efectiva incluye 'comercial'
+ *     (directa o vía 'direccion', que expande a las 3 áreas operativas).
+ *   - admin: NO. Aunque es rol alto, el directorio de aliados es del área
+ *     comercial. Es exclusión explícita, por eso NO se reusa `canEditHeader`
+ *     (que sí deja pasar a admin) ni ningún helper genérico de rol.
+ *   - operator / contador / read_only: NO.
+ *
+ * LEER la lista no pasa por aquí: cualquier usuario autenticado del workspace
+ * puede verla (la necesita para marcar negocios de tipo alianza).
+ */
+export function canGestionarAliados(user: UserContext): boolean {
+  if (user.role === 'owner') return true
+  if (user.role !== 'supervisor') return false
+  return getAreasEfectivas(user).has('comercial')
+}
+
 // ── canViewNegocio ───────────────────────────────────────────────────
 
 /**
