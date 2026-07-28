@@ -262,6 +262,24 @@ export function puedeCorregirDocumentos(role?: string | null): boolean {
   return (ROLES_CORRECCION_DOCUMENTOS as readonly string[]).includes(role ?? '')
 }
 
+// ── Marcas de condición económica del negocio ───────────────────────────────
+//
+// Quién puede marcar un negocio como "con descuento" / "sin honorario". Mismo
+// trío de roles que la corrección de documentos, pero es OTRA decisión: aquí se
+// está afirmando algo sobre la plata del negocio, no corrigiendo un dato mal
+// extraído. Si mañana el negocio decide que un supervisor no puede declarar un
+// descuento, se cambia aquí sin tocar el flujo de documentos — por eso no se
+// reusa `puedeCorregirDocumentos` aunque hoy la lista coincida.
+//
+// Un operator NO marca: la condición económica es una afirmación de dirección
+// que la financiera después cuenta.
+
+export const ROLES_MARCAS_NEGOCIO = ['owner', 'admin', 'supervisor'] as const
+
+export function puedeMarcarCondicionNegocio(role?: string | null): boolean {
+  return (ROLES_MARCAS_NEGOCIO as readonly string[]).includes(role ?? '')
+}
+
 // ── UI metadata para config de equipo ────────────────────────────────────────
 
 export const ROLE_UI_CONFIG = [

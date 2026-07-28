@@ -1,10 +1,13 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
+import { agregarMarcaNegocio, quitarMarcaNegocio } from './marcas-actions'
+import { MARCAS_CONDICION, type MarcaCondicion } from '@/lib/negocios/constants'
+import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 
 export type StaffAsignable = { id: string; full_name: string }
@@ -223,14 +226,166 @@ function ResponsablesInline({
   )
 }
 
+/**
+ * Marcas de condición económica (descuento, sin honorario, otra), editables
+ * desde el listado. Mismo patrón que ResponsablesInline: la tarjeta es un Link,
+ * así que todo control frena la navegación antes de actuar.
+ *
+ * `canMarcar` refleja el guard de rol que ya valida el server (owner/admin/
+ * supervisor); aquí solo evita mostrar un control que iba a fallar. Sin permiso
+ * las marcas se ven, pero no se tocan.
+ */
+function MarcasInline({
+  negocioId,
+  marcas,
+  canMarcar,
+}: {
+  negocioId: string
+  marcas: MarcaCondicion[]
+  canMarcar: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [nota, setNota] = useState('')
+  const [isPending, startTransition] = useTransition()
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(ev: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(ev.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  // Sin marcas y sin permiso no hay nada que mostrar: la fila desaparece en vez
+  // de ocupar espacio con un "sin marcas" que no aporta.
+  if (marcas.length === 0 && !canMarcar) return null
+
+  const puestas = new Set(marcas.map((m) => m.tipo))
+  const disponibles = MARCAS_CONDICION.filter((m) => !puestas.has(m.value))
+
+  const handleToggleOpen = (e: React.MouseEvent) => {
+    frenarNavegacion(e)
+    setNota('')
+    setOpen((v) => !v)
+  }
+
+  const handleAdd = (e: React.MouseEvent, tipo: string, label: string) => {
+    frenarNavegacion(e)
+    const notaFinal = nota.trim()
+    setOpen(false)
+    setNota('')
+    startTransition(async () => {
+      const res = await agregarMarcaNegocio(negocioId, tipo, notaFinal || undefined)
+      if (res.error) toast.error(res.error)
+      else toast.success(`Marcado: ${label}`)
+    })
+  }
+
+  const handleRemove = (e: React.MouseEvent, tipo: string) => {
+    frenarNavegacion(e)
+    startTransition(async () => {
+      const res = await quitarMarcaNegocio(negocioId, tipo)
+      if (res.error) toast.error(res.error)
+      else toast.success('Marca quitada')
+    })
+  }
+
+  return (
+    <div className="relative mt-1.5 flex flex-wrap items-center gap-1" ref={popoverRef}>
+      <Tag className="h-3 w-3 shrink-0 text-[#6B7280]/70" />
+      {marcas.map((m) => {
+        const cfg = MARCAS_CONDICION.find((x) => x.value === m.tipo)
+        const detalle = [
+          m.nota,
+          m.marcado_por_nombre ? `Marcó ${m.marcado_por_nombre}` : null,
+          m.marcado_en ? formatDateShort(m.marcado_en) : null,
+        ].filter(Boolean).join(' · ')
+        return (
+          <span
+            key={m.tipo}
+            className={`inline-flex max-w-[180px] items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cfg?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]'}`}
+            title={detalle || cfg?.label}
+          >
+            <span className="truncate">
+              {cfg?.label ?? m.tipo}
+              {m.nota ? `: ${m.nota}` : ''}
+            </span>
+            {canMarcar && (
+              <button
+                type="button"
+                onClick={(e) => handleRemove(e, m.tipo)}
+                disabled={isPending}
+                className="-mr-0.5 shrink-0 rounded-full p-0.5 transition-colors hover:bg-white disabled:opacity-60"
+                title={`Quitar ${cfg?.label ?? m.tipo}`}
+                aria-label={`Quitar ${cfg?.label ?? m.tipo}`}
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            )}
+          </span>
+        )
+      })}
+
+      {canMarcar && disponibles.length > 0 && (
+        <button
+          type="button"
+          onClick={handleToggleOpen}
+          disabled={isPending}
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-[#6B7280] transition-colors hover:border-[#F59E0B] hover:text-[#B45309] disabled:opacity-60"
+          aria-label="Marcar condicion economica"
+        >
+          {isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+          {marcas.length === 0 ? 'Marcar condición' : ''}
+        </button>
+      )}
+
+      {open && (
+        <div
+          onClick={frenarNavegacion}
+          className="absolute left-0 top-full z-20 mt-1 w-60 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white shadow-lg"
+        >
+          <div className="border-b border-[#E5E7EB] p-2">
+            <input
+              type="text"
+              value={nota}
+              onChange={(e) => setNota(e.target.value)}
+              placeholder="Detalle (opcional): 20% por volumen"
+              aria-label="Detalle de la marca"
+              maxLength={120}
+              className="w-full rounded border border-[#E5E7EB] px-2 py-1 text-xs text-[#1A1A1A] placeholder:text-[#6B7280] focus:border-[#1A1A1A]/30 focus:outline-none"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {disponibles.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={(e) => handleAdd(e, m.value, m.label)}
+                className="block w-full truncate px-3 py-1.5 text-left text-xs text-[#1A1A1A] transition-colors hover:bg-[#F5F4F2]"
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function NegocioCard({
   negocio,
   staffList = [],
   canAsignar = false,
+  canMarcar = false,
 }: {
   negocio: NegocioResumen
   staffList?: StaffAsignable[]
   canAsignar?: boolean
+  /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */
+  canMarcar?: boolean
 }) {
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
 
@@ -253,6 +408,24 @@ export default function NegocioCard({
 
   const isCerrado = negocio.cierre_motivo !== null
   const motivoCierre = negocio.cierre_motivo
+
+  // Badge de origen. `es_meta_lead` sigue siendo el respaldo mientras el backfill
+  // de la columna no esté aplicado: un negocio marcado por la integración de Meta
+  // no debe perder su señal en la tarjeta por un tema de orden de despliegue.
+  const origenValue = negocio.origen ?? (negocio.es_meta_lead ? 'meta' : null)
+  const origenCfg = origenNegocioConfig(origenValue)
+  const origenBadge = origenValue
+    ? {
+        value: origenValue,
+        // Con alianza el badge nombra al aliado: "de dónde vino" sin la
+        // contraparte concreta no le sirve a nadie.
+        label: negocio.aliado_nombre
+          ? `${origenCfg?.label ?? origenValue}: ${negocio.aliado_nombre}`
+          : (origenCfg?.label ?? origenValue),
+        chipClass: origenCfg?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]',
+        title: `Origen: ${origenCfg?.label ?? origenValue}${negocio.aliado_nombre ? ` — ${negocio.aliado_nombre}` : ''}`,
+      }
+    : null
 
   const stageKey = negocio.stage_actual as WorkflowStage | null
   const pillClass = isCerrado
@@ -328,13 +501,16 @@ export default function NegocioCard({
                 {formatAtraso(negocio.sla_exceso_horas)} de atraso
               </span>
             )}
-            {negocio.es_meta_lead && (
+            {/* Origen del negocio. Absorbe el antiguo badge "Meta": un negocio
+                de Meta ahora es simplemente origen = meta, con su mismo color e
+                ícono. Un solo badge para no repetir la misma información. */}
+            {origenBadge && (
               <span
-                className="inline-flex items-center gap-1 rounded-full bg-[#1877F2]/10 px-2 py-0.5 text-[10px] font-medium text-[#1877F2]"
-                title="Lead recibido automáticamente desde Meta (Facebook)"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${origenBadge.chipClass}`}
+                title={origenBadge.title}
               >
-                <Megaphone className="h-2.5 w-2.5" />
-                Meta
+                {origenBadge.value === 'meta' && <Megaphone className="h-2.5 w-2.5" />}
+                {origenBadge.label}
               </span>
             )}
             {/* Reproceso: relleno sólido, no tinte suave como los demás. Un caso
@@ -417,6 +593,12 @@ export default function NegocioCard({
             responsables={negocio.responsables}
             staffList={staffList}
             canAsignar={canAsignar}
+          />
+          {/* Marcas de condición económica (eje aparte del origen) */}
+          <MarcasInline
+            negocioId={negocio.id}
+            marcas={negocio.marcas}
+            canMarcar={canMarcar}
           />
           {isCerrado && negocio.closed_at && (
             <p className="mt-1 text-[10px] text-[#6B7280]">
