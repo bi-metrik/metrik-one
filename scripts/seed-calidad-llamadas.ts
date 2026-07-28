@@ -42,8 +42,34 @@ const svc = createClient(URL, KEY, { auth: { persistSession: false } })
 const SLUG = 'regat'
 const LOTE = 'muestra-2026-07'
 
-/** Dia de la muestra. Fijo: la demo no puede cambiar de numeros segun el dia. */
-const DIA = '2026-05-21'
+/**
+ * Dia ancla = el dia en que se corre el seed.
+ *
+ * NO es una fecha fija. El muro consulta el dia en curso, asi que anclar la
+ * muestra a una fecha del pasado deja el televisor en blanco todos los dias,
+ * incluido el de la reunion. Que la muestra viva "hoy" es lo que la vuelve
+ * proyectable cualquier dia sin volver a sembrar.
+ *
+ * Esto NO rompe el determinismo: el PRNG esta sembrado por indice, asi que dos
+ * corridas del mismo dia producen exactamente los mismos numeros. Lo unico que
+ * se mueve entre dias es la fecha.
+ */
+const hoy = new Date()
+const DIA = [
+  hoy.getFullYear(),
+  String(hoy.getMonth() + 1).padStart(2, '0'),
+  String(hoy.getDate()).padStart(2, '0'),
+].join('-')
+
+/**
+ * Fecha y hora VERDADERAS de la grabacion auditada. Esta no se mueve.
+ *
+ * La llamada se muestra en el dia ancla para que el muro tenga contenido, pero
+ * el detalle dice de cuando es la grabacion de verdad. El workspace esta
+ * rotulado como demostracion, asi que reubicarla es legitimo; perder la fecha
+ * real no lo es.
+ */
+const GRABACION_REAL = '2026-05-21T17:23:01-05:00'
 
 // ── PRNG determinista ───────────────────────────────────────────────────────
 //
@@ -272,6 +298,8 @@ async function main() {
   if (eWs || !ws) throw new Error(`No existe el workspace ${SLUG}. Correr antes setup-regat-workspace.ts`)
   const workspaceId = ws.id as string
 
+  console.log(`dia ancla      ${DIA}  (la muestra se siembra en el dia de hoy)`)
+
   // ── staff de Felipe: POR profile_id, no por nombre ────────────────────────
   //
   // Este es el paso que rompe la demo si se hace mal. getWorkspace() auto-crea
@@ -331,7 +359,10 @@ async function main() {
     id: idReal,
     workspace_id: workspaceId,
     cliente_ref: 'LL-0000',
+    // Se muestra en el dia ancla, conservando su hora real (17:23).
     fecha_hora: `${DIA}T17:23:01-05:00`,
+    // Y la fecha verdadera de la grabacion queda registrada aparte.
+    fecha_grabacion: GRABACION_REAL,
     direccion: 'entrante',
     duracion_seg: 3914,
     agente_staff_id: staffFelipe,
@@ -364,6 +395,8 @@ async function main() {
     workspace_id: workspaceId,
     cliente_ref: 'LL-0099',
     fecha_hora: `${DIA}T16:02:00-05:00`,
+    // Guion simulado: no hay grabacion que fechar.
+    fecha_grabacion: null,
     direccion: 'saliente',
     duracion_seg: DUR_SIM,
     agente_staff_id: null,
@@ -423,6 +456,7 @@ async function main() {
       workspace_id: workspaceId,
       cliente_ref: `LL-${String(idx).padStart(4, '0')}`,
       fecha_hora: `${DIA}T${String(hora).padStart(2, '0')}:${String(minuto).padStart(2, '0')}:00-05:00`,
+      fecha_grabacion: null,
       direccion: r() < 0.55 ? 'entrante' : 'saliente',
       duracion_seg: entre(r, 480, 4200),
       agente_staff_id: esDeFelipe ? staffFelipe : null,
@@ -485,8 +519,9 @@ async function main() {
 
   // ── Cobertura ─────────────────────────────────────────────────────────────
   //
-  // Hoy: 100 recibidas, 100 auditadas, baseline 5 (lo que se audita a mano).
-  // Los ~10 dias previos son el contrafactual: auditadas ~= 5% de recibidas.
+  // Dia ancla: 100 recibidas, 100 auditadas, baseline 5 (lo que se audita a
+  // mano). Los 10 dias previos son el contrafactual: auditadas ~= 5% de
+  // recibidas. Todo relativo al dia ancla, nunca a una fecha fija.
   const cobertura: Record<string, unknown>[] = [
     { workspace_id: workspaceId, fecha: DIA, recibidas: 100, auditadas: 100, baseline_manual: 5 },
   ]

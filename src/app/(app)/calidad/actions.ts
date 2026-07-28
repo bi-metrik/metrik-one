@@ -82,6 +82,7 @@ type FilaLlamada = {
   id: string
   cliente_ref: string
   fecha_hora: string
+  fecha_grabacion: string | null
   direccion: string
   duracion_seg: number
   agente_nombre: string
@@ -107,7 +108,7 @@ export async function getLlamadas(): Promise<LlamadaResumen[]> {
   let q = sinTipar(ctx.supabase)
     .from('calidad_llamadas')
     .select(
-      'id, cliente_ref, fecha_hora, direccion, duracion_seg, agente_nombre, puntaje_tecnico, semaforo, detalle_completo, es_real',
+      'id, cliente_ref, fecha_hora, fecha_grabacion, direccion, duracion_seg, agente_nombre, puntaje_tecnico, semaforo, detalle_completo, es_real',
     )
     .eq('workspace_id', ctx.workspaceId)
     .order('fecha_hora', { ascending: false })
@@ -148,6 +149,7 @@ export async function getLlamadas(): Promise<LlamadaResumen[]> {
       id: f.id,
       clienteRef: f.cliente_ref,
       fechaHora: f.fecha_hora,
+      fechaGrabacion: f.fecha_grabacion,
       direccion: f.direccion as LlamadaResumen['direccion'],
       duracionSeg: f.duracion_seg,
       agenteNombre: f.agente_nombre,
@@ -241,6 +243,7 @@ export async function getLlamadaDetalle(id: string): Promise<LlamadaDetalle | nu
     id: l.id,
     clienteRef: l.cliente_ref,
     fechaHora: l.fecha_hora,
+    fechaGrabacion: l.fecha_grabacion,
     direccion: l.direccion as LlamadaResumen['direccion'],
     duracionSeg: l.duracion_seg,
     agenteNombre: l.agente_nombre,

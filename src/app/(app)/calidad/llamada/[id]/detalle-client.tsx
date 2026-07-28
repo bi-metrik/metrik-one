@@ -74,6 +74,40 @@ export default function DetalleClient({ llamada }: { llamada: LlamadaDetalle }) 
             ? ' Auditada sobre transcripción literal con marca de tiempo por turno. Cada hallazgo de abajo tiene su minuto.'
             : ' Guion simulado de demostración. Agente y cliente ficticios: no corresponden a ninguna persona real.'}
         </p>
+
+        {/*
+          Procedencia de la grabación. En un espacio de trabajo de muestra las
+          llamadas se listan en el día en curso para que el tablero tenga
+          contenido; esta línea dice de cuándo es la grabación de verdad, para
+          que reubicarla no equivalga a perder el dato.
+        */}
+        {llamada.fechaGrabacion && (
+          <p
+            style={{
+              marginTop: 10,
+              fontSize: 12.5,
+              color: C.inkMuted,
+              background: C.surfaceAlt,
+              border: `1px dashed ${C.lineStrong}`,
+              borderRadius: 6,
+              padding: '9px 12px',
+              display: 'inline-block',
+            }}
+          >
+            Grabación del{' '}
+            <b style={{ color: C.ink }}>
+              {new Date(llamada.fechaGrabacion).toLocaleString('es-CO', {
+                day: '2-digit',
+                month: 'long',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+              })}
+            </b>
+            . Se lista en la fecha de arriba porque este es un espacio de trabajo de demostración.
+          </p>
+        )}
       </div>
 
       {/* ── Los dos ejes, lado a lado y sin promediar ──────────────────── */}

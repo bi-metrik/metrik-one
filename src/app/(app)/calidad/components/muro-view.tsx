@@ -106,12 +106,24 @@ export default function MuroView({
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-          <div style={{ fontFamily: MONO, fontSize: 24, color: M.muted }}>
-            {new Date(`${data.fecha}T12:00:00`).toLocaleDateString('es-CO', {
-              day: '2-digit',
-              month: 'long',
-              year: 'numeric',
-            })}
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: MONO, fontSize: 24, color: M.muted }}>
+              {new Date(`${data.fecha}T12:00:00`).toLocaleDateString('es-CO', {
+                day: '2-digit',
+                month: 'long',
+                year: 'numeric',
+              })}
+            </div>
+            {/*
+              El día pedido no tenía actividad y esto es el último día con
+              llamadas. Se dice en pantalla en vez de mostrar la fecha de otro
+              día como si fuera hoy.
+            */}
+            {data.esFallback && (
+              <div style={{ fontFamily: MONO, fontSize: 17, color: M.high, marginTop: 2 }}>
+                último día con actividad
+              </div>
+            )}
           </div>
           {proyectable && (
             <button

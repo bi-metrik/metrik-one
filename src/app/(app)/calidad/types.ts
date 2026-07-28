@@ -16,7 +16,14 @@ export interface LlamadaResumen {
   id: string
   /** Identificador opaco. La tabla no guarda el nombre del cliente final. */
   clienteRef: string
+  /** Marca de tiempo con la que la llamada se lista y se agrupa por dia. */
   fechaHora: string
+  /**
+   * Fecha y hora VERDADERAS de la grabacion auditada. null en datos de
+   * demostracion. En un workspace de muestra `fechaHora` se ancla al dia en
+   * curso para que el muro tenga contenido; esto no se mueve nunca.
+   */
+  fechaGrabacion: string | null
   direccion: Direccion
   duracionSeg: number
   agenteNombre: string
@@ -68,7 +75,13 @@ export interface LlamadaDetalle extends LlamadaResumen {
 }
 
 export interface MuroData {
+  /** Fecha EFECTIVA de los datos mostrados, no necesariamente la pedida. */
   fecha: string
+  /**
+   * true = el dia pedido no tenia actividad y esto es el ultimo dia con
+   * llamadas. Red de seguridad para que el televisor nunca quede en blanco.
+   */
+  esFallback: boolean
   cobertura: {
     recibidas: number
     auditadas: number
