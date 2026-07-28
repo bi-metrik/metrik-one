@@ -1,6 +1,7 @@
 import { getContactos, getStaffParaResponsable, getMiStaffContexto, tieneModuloAliados } from '../actions'
 import DirectorioTabs from '../directorio-tabs'
 import ContactosList from './contactos-list'
+import { getRolePermissions } from '@/lib/roles'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
 
@@ -11,6 +12,11 @@ export default async function ContactosPage() {
     getMiStaffContexto(),
     tieneModuloAliados(),
   ])
+
+  // Mismo flag que validan `asignarResponsableContacto` /
+  // `asignarResponsableContactosMasivo` server-side: replicado en UI solo para no
+  // ofrecer un control que fallaría. La barrera real está en la action.
+  const canAsignar = getRolePermissions(yo.role ?? 'read_only').canAssignResponsable
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -33,7 +39,13 @@ export default async function ContactosPage() {
       <DirectorioTabs showAliados={showAliados} />
 
       {/* List */}
-      <ContactosList contactos={contactos} staff={staff} miStaffId={yo.staffId} miRol={yo.role} />
+      <ContactosList
+        contactos={contactos}
+        staff={staff}
+        miStaffId={yo.staffId}
+        miRol={yo.role}
+        canAsignar={canAsignar}
+      />
     </div>
   )
 }
