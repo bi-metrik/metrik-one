@@ -837,6 +837,56 @@ export async function actualizarCampoDocumento(
   return { success: true, isComplete: !!isComplete }
 }
 
+// ── Pantallazo pegado → Supabase Storage (campo imagen_clipboard de BloqueDatos) ──
+// El valor persistido del campo es la URL pública, NUNCA el data URL. Guardar el
+// PNG en base64 dentro de `negocio_bloques.data` hacía que cada lectura del bloque
+// arrastrara cientos de kB: la lista de negocios movía 22 MB por carga para pintar
+// cuatro campos de texto, y era el 32% del tiempo total de base de datos.
+// Postgres además descomprime el jsonb completo aunque se pida una sola clave, así
+// que proyectar menos campos no evitaba el costo: la imagen tenía que salir de ahí.
+// Los valores legacy (`data:image/...`) se siguen renderizando igual — el <img> no
+// distingue entre data URL y URL, así que este cambio es retrocompatible.
+export async function subirImagenClipboard(
+  negocioBloqueId: string,
+  fieldSlug: string,
+  dataUrl: string,
+): Promise<{ success: true; url: string } | { success: false; error: string }> {
+  const { workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
+
+  const m = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(dataUrl)
+  if (!m) return { success: false, error: 'Imagen inválida' }
+  const mimeType = m[1].toLowerCase()
+  const buffer = Buffer.from(m[2], 'base64')
+
+  const admin = createServiceClient()
+  const { data: bloque } = await db(admin)
+    .from('negocio_bloques')
+    .select('negocio_id')
+    .eq('id', negocioBloqueId)
+    .single()
+  const negocioId = bloque?.negocio_id as string | undefined
+  if (!negocioId) return { success: false, error: 'Bloque no encontrado' }
+
+  const ext = mimeType.split('/')[1]?.replace(/\+.*$/, '') ?? 'png'
+  // El slug viene de config; se sanea para que no arrastre nada al path de Storage.
+  const safeSlug = fieldSlug.replace(/[^a-z0-9_-]/gi, '_')
+  const storagePath = `${workspaceId}/negocios/${negocioId}/${negocioBloqueId}/${safeSlug}.${ext}`
+
+  const { error: upErr } = await admin.storage
+    .from(BUCKET)
+    .upload(storagePath, buffer, { contentType: mimeType, upsert: true })
+  if (upErr) return { success: false, error: upErr.message }
+
+  const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
+  // `upsert` reescribe el mismo path: sin este sufijo, al reemplazar el pantallazo
+  // el navegador seguiría mostrando el anterior desde su caché.
+  return { success: true, url: `${publicData.publicUrl}?v=${Date.now()}` }
+}
+
 // ── Extracción AI desde un pantallazo pegado (campo imagen_clipboard de BloqueDatos) ──
 // A diferencia de procesarDocumento (bloques tipo 'documento' que suben a Storage+Drive),
 // aquí la imagen llega como data URL pegada del portapapeles en un bloque tipo 'datos'.
