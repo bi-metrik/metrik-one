@@ -4,9 +4,20 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getMuroPorWorkspace } from '@/app/(app)/calidad/actions'
 import MuroView from '@/app/(app)/calidad/components/muro-view'
 
+// Desde v2 el muro lleva facturacion (cierres del dia y montos en dolares), asi
+// que ningun buscador debe levantarlo ni cachearlo. `noarchive` + `nosnippet`
+// ademas evitan que quede una copia o un extracto en resultados aunque alguien
+// enlace la URL desde otra parte.
 export const metadata: Metadata = {
   title: 'Muro de calidad',
-  robots: { index: false, follow: false },
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    noarchive: true,
+    nosnippet: true,
+    googleBot: { index: false, follow: false, noimageindex: true },
+  },
 }
 
 // El muro cambia con cada llamada que entra: nunca cachear.

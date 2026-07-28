@@ -74,6 +74,14 @@ export interface LlamadaDetalle extends LlamadaResumen {
   eventos: EventoCinta[]
 }
 
+/**
+ * Datos del muro proyectable. Tres zonas y nada mas: es lo que cabe en un
+ * televisor y se lee a tres metros.
+ *
+ * La cobertura NO es el heroe. Una vez instalado el producto marca 100% todos
+ * los dias: informa una vez y despues es constante. Lo que se mueve durante el
+ * dia, y sobre lo que el piso puede actuar, son los cierres.
+ */
 export interface MuroData {
   /** Fecha EFECTIVA de los datos mostrados, no necesariamente la pedida. */
   fecha: string
@@ -82,23 +90,43 @@ export interface MuroData {
    * llamadas. Red de seguridad para que el televisor nunca quede en blanco.
    */
   esFallback: boolean
-  cobertura: {
-    recibidas: number
-    auditadas: number
-    baseline: number
-    pct: number
-    pctBaseline: number
+
+  /**
+   * Zona 1 — el heroe. Cierres del dia partidos por forma de pago.
+   *
+   * `tarjeta` es caja: entra completo hoy. `cuenta` es una promesa a seis
+   * cuotas, y si el cliente deja de pagar el servicio se suspende. Contar los
+   * dos como "una venta" es el error del Excel que hoy se proyecta.
+   */
+  cierres: {
+    total: number
+    montoUsd: number
+    llamadas: number
+    tarjeta: { n: number; montoUsd: number }
+    cuenta: { n: number; montoUsd: number; primeraCuotaUsd: number }
   } | null
-  ultimas: {
-    hora: string
-    /** Nombre de pila unicamente: el muro es publico por enlace. */
+
+  /** Zona 2 — el ranking del dia. Agentes por nombre de pila. */
+  ranking: {
     agente: string
-    duracion: number
-    tecnica: number
+    cierres: number
+    /** Cuantos de esos cierres fueron con tarjeta. */
+    tarjeta: number
+    montoUsd: number
+    llamadas: number
     semaforo: Semaforo
   }[]
-  semaforos: { verde: number; amarillo: number; rojo: number; total: number } | null
-  banderaTop: { codigo: string; titulo: string; veces: number } | null
+
+  /** Zona 3 — el pie. Discreto: contexto, no protagonismo. */
+  pie: {
+    recobro: {
+      debitosRebotados: number
+      pendientesRecobro: number
+      montoEnRiesgoUsd: number
+    } | null
+    cobertura: { recibidas: number; auditadas: number; baseline: number; pct: number } | null
+    banderaTop: { codigo: string; titulo: string; veces: number } | null
+  }
 }
 
 export interface DineroCuota {

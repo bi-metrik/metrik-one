@@ -265,15 +265,42 @@ const EVENTOS_SIM = [
 
 // ── Relleno ─────────────────────────────────────────────────────────────────
 
-/** Agentes ficticios del relleno. Ninguno tiene cuenta: agente_staff_id = NULL. */
-const AGENTES_RELLENO = [
-  'Diego Rincón',
-  'Karina Villalba',
-  'Óscar Peñaloza',
-  'Tatiana Bermúdez',
-  'Héctor Salgado',
-  'Liliana Prieto',
-]
+/**
+ * Perfiles de agente para el relleno.
+ *
+ * NO es un sorteo: cada agente tiene su reparto de semaforo, su tasa de cierre
+ * y su afinidad por la tarjeta. Un sorteo uniforme produce siete agentes
+ * mediocres iguales y el ranking del muro no dice nada; lo que hace util esa
+ * pantalla es el CONTRASTE, y el contraste hay que diseñarlo.
+ *
+ * Los dos casos que sostienen el argumento:
+ *   - Felipe: el que mas cierra y esta en ROJO. Es la conversacion del dia, y
+ *     no es invento: su llamada real auditada da 73 de tecnica y semaforo rojo.
+ *   - Tatiana: pocas llamadas, todas limpias, todos sus cierres con tarjeta.
+ *     Es la que hoy nadie ve porque el Excel del televisor solo cuenta ventas.
+ *
+ * Los totales de semaforo suman exactamente el objetivo global del relleno
+ * (17 verde / 33 amarillo / 46 rojo sobre 96), asi que la distribucion general
+ * no cambia: solo cambia COMO se reparte entre personas.
+ *
+ * Los nombres NO se tocan (decision de Mauricio): que el relleno tenga un
+ * "Felipe" y un "Diego" que coinciden con los agentes de las dos auditorias es
+ * deliberado — es la misma persona en el caso de Felipe, y en el de Diego el
+ * nombre ficticio ya estaba elegido.
+ */
+const PERFILES_AGENTE = [
+  // nombre, llamadas, [verde, amarillo, rojo], cierres, de esos con tarjeta
+  { nombre: 'Felipe Sandoval',  llamadas: 15, semaforos: [1, 4, 10], cierres: 5, tarjeta: 1 },
+  { nombre: 'Tatiana Bermúdez', llamadas: 8,  semaforos: [8, 0, 0],  cierres: 3, tarjeta: 3 },
+  { nombre: 'Diego Rincón',     llamadas: 15, semaforos: [1, 4, 10], cierres: 2, tarjeta: 1 },
+  { nombre: 'Karina Villalba',  llamadas: 15, semaforos: [3, 7, 5],  cierres: 4, tarjeta: 2 },
+  { nombre: 'Óscar Peñaloza',   llamadas: 15, semaforos: [2, 6, 7],  cierres: 3, tarjeta: 1 },
+  { nombre: 'Liliana Prieto',   llamadas: 14, semaforos: [1, 6, 7],  cierres: 2, tarjeta: 1 },
+  { nombre: 'Héctor Salgado',   llamadas: 14, semaforos: [1, 6, 7],  cierres: 2, tarjeta: 0 },
+] as const
+
+/** Precio del programa, del guion real: US$799 en seis cuotas o de una vez. */
+const PRECIO_PROGRAMA = 799
 
 const CODIGOS = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6'] as const
 const SEVERIDAD_POR_CODIGO: Record<string, string> = {
@@ -346,6 +373,7 @@ async function main() {
   }
   await svc.from('calidad_cobertura_dia').delete().eq('workspace_id', workspaceId)
   await svc.from('calidad_dinero_cuotas').delete().eq('workspace_id', workspaceId)
+  await svc.from('calidad_recobro_dia').delete().eq('workspace_id', workspaceId)
 
   const llamadas: Record<string, unknown>[] = []
   const bloques: Record<string, unknown>[] = []
@@ -376,6 +404,12 @@ async function main() {
     monologos_45s: 15,
     detalle_completo: true,
     es_real: true,
+    // Cerro venta POR CUENTA: el plan que se dicta fecha por fecha en 48:39 es
+    // 5x$120 + $199 = $799 en seis cuotas, y en 23:03 se toma el numero de ruta
+    // y transito del banco. Es el caso de riesgo: promesa a seis cuotas, no caja.
+    cerro_venta: true,
+    forma_pago: 'cuenta',
+    monto_usd: PRECIO_PROGRAMA,
     lote: LOTE,
   })
   for (const b of BLOQUES_REAL) {
@@ -410,6 +444,14 @@ async function main() {
     monologos_45s: 3,
     detalle_completo: true,
     es_real: false,
+    // Cerro venta POR TARJETA: entre los turnos 17 y 22 toma los 16 digitos, el
+    // vencimiento y el codigo de seguridad, y en el 25 anuncia que el cobro
+    // entra hoy o manana. Caja inmediata... y bandera critica en la misma
+    // llamada. Ese es el punto: cobrar bien y exponer a la empresa no son cosas
+    // opuestas.
+    cerro_venta: true,
+    forma_pago: 'tarjeta',
+    monto_usd: PRECIO_PROGRAMA,
     lote: LOTE,
   })
   for (const b of BLOQUES_SIM) {
@@ -422,84 +464,114 @@ async function main() {
     hallazgos.push({ workspace_id: workspaceId, llamada_id: idSim, eje: 'tecnica', ...e })
   }
 
-  // ── 3. 96 de relleno ──────────────────────────────────────────────────────
+  // ── 3. 96 de relleno, por perfil de agente ────────────────────────────────
   //
-  // Distribucion objetivo ~18% verde / 34% amarillo / 48% rojo. Se reparte por
-  // posicion (no por sorteo) para que el conteo sea exacto y estable; el PRNG
-  // solo decide puntaje, duracion, hora y banderas dentro de cada franja.
+  // Se genera agente por agente segun PERFILES_AGENTE: cada uno aporta su
+  // reparto exacto de semaforo, sus cierres y su mezcla de forma de pago. El
+  // PRNG (sembrado por indice global) decide puntaje, duracion, hora y que
+  // banderas caen — nunca a quien le toca que.
   //
-  // ~15 quedan asignadas al staff real de Felipe para que su vista de ejecutor
-  // tenga volumen; el resto va con agente_staff_id NULL → un ejecutor no las ve
-  // por construccion.
-  const N = 96
-  const nVerde = 17
-  const nAmarillo = 33
-  for (let i = 0; i < N; i++) {
-    const r = prng(1000 + i)
-    const semaforo = i < nVerde ? 'verde' : i < nVerde + nAmarillo ? 'amarillo' : 'rojo'
+  // Las 15 de Felipe llevan su `agente_staff_id` real: son las que ve en su
+  // vista de ejecutor. Las de los agentes ficticios van con NULL, asi que un
+  // ejecutor no las ve por construccion.
+  let idxGlobal = 0
+  for (const perfil of PERFILES_AGENTE) {
+    const [nVerde, nAmarillo] = perfil.semaforos
+    const esFelipe = perfil.nombre === 'Felipe Sandoval'
 
-    const tecnica =
-      semaforo === 'verde' ? entre(r, 74, 92) : semaforo === 'amarillo' ? entre(r, 62, 84) : entre(r, 38, 81)
+    // Llamadas del agente, con su semaforo ya asignado por posicion.
+    // Se guarda `ref` (el cliente_ref) porque el desempate de cierres tiene que
+    // ser determinista: el `id` es un UUID aleatorio y usarlo para ordenar hace
+    // que dos corridas repartan las tarjetas distinto.
+    const delAgente: { id: string; ref: string; semaforo: string; tecnica: number }[] = []
 
-    // Las primeras 15 del relleno son de Felipe (tiene cuenta); el resto, de los
-    // agentes ficticios sin cuenta.
-    const esDeFelipe = i < 15
-    const agenteNombre = esDeFelipe ? 'Felipe Sandoval' : elegir(r, AGENTES_RELLENO)
+    for (let j = 0; j < perfil.llamadas; j++) {
+      const r = prng(1000 + idxGlobal)
+      const semaforo = j < nVerde ? 'verde' : j < nVerde + nAmarillo ? 'amarillo' : 'rojo'
+      const tecnica =
+        semaforo === 'verde' ? entre(r, 74, 92)
+        : semaforo === 'amarillo' ? entre(r, 62, 84)
+        : entre(r, 38, 81)
 
-    const hora = entre(r, 8, 18)
-    const minuto = entre(r, 0, 59)
-    const idx = i + 1
-    const id = nuevoId()
+      const hora = entre(r, 8, 18)
+      const minuto = entre(r, 0, 59)
+      const id = nuevoId()
+      idxGlobal += 1
+      const ref = `LL-${String(idxGlobal).padStart(4, '0')}`
 
-    llamadas.push({
-      id,
-      workspace_id: workspaceId,
-      cliente_ref: `LL-${String(idx).padStart(4, '0')}`,
-      fecha_hora: `${DIA}T${String(hora).padStart(2, '0')}:${String(minuto).padStart(2, '0')}:00-05:00`,
-      fecha_grabacion: null,
-      direccion: r() < 0.55 ? 'entrante' : 'saliente',
-      duracion_seg: entre(r, 480, 4200),
-      agente_staff_id: esDeFelipe ? staffFelipe : null,
-      agente_nombre: agenteNombre,
-      puntaje_tecnico: tecnica,
-      semaforo,
-      habla_agente_pct: null,
-      habla_cliente_pct: null,
-      turnos: null,
-      repreguntas: null,
-      monologos_45s: null,
-      // Sin transcripcion: no hay pantalla de detalle para estas.
-      detalle_completo: false,
-      es_real: false,
-      lote: LOTE,
-    })
-
-    // 0 a 3 banderas, agregadas: sin cita y sin segundo real (segundo = 0).
-    const nBanderas = semaforo === 'verde' ? 0 : semaforo === 'amarillo' ? entre(r, 1, 2) : entre(r, 1, 3)
-    const usados = new Set<string>()
-    for (let k = 0; k < nBanderas; k++) {
-      // Verde no llega aqui. Amarillo nunca levanta critica (C1/C2): eso es lo
-      // que hace que el semaforo signifique algo.
-      const pool = semaforo === 'amarillo' ? (['C3', 'C4', 'C5', 'C6'] as const) : CODIGOS
-      let cod = elegir(r, pool)
-      let intentos = 0
-      while (usados.has(cod) && intentos < 8) {
-        cod = elegir(r, pool)
-        intentos++
-      }
-      if (usados.has(cod)) continue
-      usados.add(cod)
-      hallazgos.push({
+      llamadas.push({
+        id,
         workspace_id: workspaceId,
-        llamada_id: id,
-        eje: 'cumplimiento',
-        codigo: cod,
-        severidad: SEVERIDAD_POR_CODIGO[cod],
-        titulo: TITULO_POR_CODIGO[cod],
-        hecho: null,
-        cita: null,
-        segundo: 0,
+        cliente_ref: ref,
+        fecha_hora: `${DIA}T${String(hora).padStart(2, '0')}:${String(minuto).padStart(2, '0')}:00-05:00`,
+        fecha_grabacion: null,
+        direccion: r() < 0.55 ? 'entrante' : 'saliente',
+        duracion_seg: entre(r, 480, 4200),
+        agente_staff_id: esFelipe ? staffFelipe : null,
+        agente_nombre: perfil.nombre,
+        puntaje_tecnico: tecnica,
+        semaforo,
+        habla_agente_pct: null,
+        habla_cliente_pct: null,
+        turnos: null,
+        repreguntas: null,
+        monologos_45s: null,
+        // Sin transcripcion: no hay pantalla de detalle para estas.
+        detalle_completo: false,
+        es_real: false,
+        // Se decide abajo, cuando ya estan todas las del agente.
+        cerro_venta: false,
+        forma_pago: null,
+        monto_usd: null,
+        lote: LOTE,
       })
+      delAgente.push({ id, ref, semaforo, tecnica })
+
+      // 0 a 3 banderas, agregadas: sin cita y sin segundo real (segundo = 0).
+      const nBanderas = semaforo === 'verde' ? 0 : semaforo === 'amarillo' ? entre(r, 1, 2) : entre(r, 1, 3)
+      const usados = new Set<string>()
+      for (let k = 0; k < nBanderas; k++) {
+        // Verde no llega aqui. Amarillo nunca levanta critica (C1/C2): eso es lo
+        // que hace que el semaforo signifique algo.
+        const pool = semaforo === 'amarillo' ? (['C3', 'C4', 'C5', 'C6'] as const) : CODIGOS
+        let cod = elegir(r, pool)
+        let intentos = 0
+        while (usados.has(cod) && intentos < 8) {
+          cod = elegir(r, pool)
+          intentos++
+        }
+        if (usados.has(cod)) continue
+        usados.add(cod)
+        hallazgos.push({
+          workspace_id: workspaceId,
+          llamada_id: id,
+          eje: 'cumplimiento',
+          codigo: cod,
+          severidad: SEVERIDAD_POR_CODIGO[cod],
+          titulo: TITULO_POR_CODIGO[cod],
+          hecho: null,
+          cita: null,
+          segundo: 0,
+        })
+      }
+    }
+
+    // ── Cierres del agente ───────────────────────────────────────────────
+    //
+    // Cierran las de mejor tecnica, y de esas las mejores llevan tarjeta. No es
+    // una ley del negocio, es una regla legible y determinista: una llamada
+    // bien llevada tiene mas chance de cerrar, y la tarjeta se consigue cuando
+    // la conversacion fue solida. Sergio no da tasas ("depende de la base"),
+    // asi que el mix se diseña, no se estima.
+    // Desempate por `ref`, NUNCA por `id`: el id es un UUID aleatorio y ordenar
+    // por el hace que dos corridas del mismo dia repartan las tarjetas distinto.
+    const orden = [...delAgente].sort((a, b) => b.tecnica - a.tecnica || a.ref.localeCompare(b.ref))
+    const porId = new Map(llamadas.map((l) => [l.id as string, l]))
+    for (let c = 0; c < perfil.cierres && c < orden.length; c++) {
+      const fila = porId.get(orden[c].id)!
+      fila.cerro_venta = true
+      fila.forma_pago = c < perfil.tarjeta ? 'tarjeta' : 'cuenta'
+      fila.monto_usd = PRECIO_PROGRAMA
     }
   }
 
@@ -519,11 +591,21 @@ async function main() {
 
   // ── Cobertura ─────────────────────────────────────────────────────────────
   //
-  // Dia ancla: 100 recibidas, 100 auditadas, baseline 5 (lo que se audita a
-  // mano). Los 10 dias previos son el contrafactual: auditadas ~= 5% de
-  // recibidas. Todo relativo al dia ancla, nunca a una fecha fija.
+  // Dia ancla: todo auditado, baseline 5 (lo que se audita a mano). Los 10 dias
+  // previos son el contrafactual: auditadas ~= 5% de recibidas. Todo relativo
+  // al dia ancla, nunca a una fecha fija.
+  //
+  // Recibidas = auditadas = las llamadas realmente sembradas, para que el pie
+  // del muro ("98 de 98 auditadas") cuadre con la lista y con el ranking. Si se
+  // pone un redondo a mano, la pantalla se contradice sola.
   const cobertura: Record<string, unknown>[] = [
-    { workspace_id: workspaceId, fecha: DIA, recibidas: 100, auditadas: 100, baseline_manual: 5 },
+    {
+      workspace_id: workspaceId,
+      fecha: DIA,
+      recibidas: llamadas.length,
+      auditadas: llamadas.length,
+      baseline_manual: 5,
+    },
   ]
   for (let d = 1; d <= 10; d++) {
     const r = prng(500 + d)
@@ -562,6 +644,39 @@ async function main() {
   if (eDin) throw new Error(`dinero: ${eDin.message}`)
   console.log(`dinero         ${dinero.length} cuotas`)
 
+  // ── Ciclo de recobro ──────────────────────────────────────────────────────
+  //
+  // "Cuando hacen un debito y el pago no se ve efectivo, se ve fondos
+  // insuficientes, se reporta y ellos tienen que volver a llamarle."
+  // Es trabajo real que hoy nadie cuantifica. Solo aplica a los cierres por
+  // cuenta: la tarjeta se cobro de una vez y no rebota.
+  const CUOTA_CUENTA = PRECIO_PROGRAMA / 6
+  const recobro: Record<string, unknown>[] = [
+    {
+      workspace_id: workspaceId,
+      fecha: DIA,
+      debitos_rebotados: 4,
+      pendientes_recobro: 3,
+      monto_en_riesgo_usd: Number((4 * CUOTA_CUENTA).toFixed(2)),
+    },
+  ]
+  for (let d = 1; d <= 10; d++) {
+    const r = prng(700 + d)
+    const fecha = new Date(`${DIA}T12:00:00Z`)
+    fecha.setUTCDate(fecha.getUTCDate() - d)
+    const rebotados = entre(r, 1, 6)
+    recobro.push({
+      workspace_id: workspaceId,
+      fecha: fecha.toISOString().slice(0, 10),
+      debitos_rebotados: rebotados,
+      pendientes_recobro: entre(r, 0, rebotados),
+      monto_en_riesgo_usd: Number((rebotados * CUOTA_CUENTA).toFixed(2)),
+    })
+  }
+  const { error: eRec } = await svc.from('calidad_recobro_dia').insert(recobro)
+  if (eRec) throw new Error(`recobro: ${eRec.message}`)
+  console.log(`recobro        ${recobro.length} dias`)
+
   // ── Verificacion: suma(bloques) == puntaje_tecnico ────────────────────────
   const sumaReal = BLOQUES_REAL.reduce((a, b) => a + b.puntaje, 0)
   const sumaSim = BLOQUES_SIM.reduce((a, b) => a + b.puntaje, 0)
@@ -578,6 +693,66 @@ async function main() {
   console.log(
     `de Felipe      ${llamadas.filter((l) => l.agente_staff_id === staffFelipe).length} llamadas`,
   )
+
+  // ── Verificacion: el ranking tiene que producir el contraste ──────────────
+  //
+  // Se comprueba, no se espera. Si un cambio de perfiles deja al primero en
+  // cierres en verde, o deja a todos en rojo, el muro pierde su razon de ser y
+  // el seed tiene que fallar ruidosamente en vez de sembrar una pantalla que no
+  // dice nada.
+  const RANK_SEV = { rojo: 3, amarillo: 2, verde: 1 } as const
+  const rank = new Map<string, { cierres: number; tarjeta: number; peor: number }>()
+  for (const l of llamadas) {
+    const agente = (l.agente_nombre as string).split(' ')[0]
+    const acc = rank.get(agente) ?? { cierres: 0, tarjeta: 0, peor: 0 }
+    if (l.cerro_venta) {
+      acc.cierres += 1
+      if (l.forma_pago === 'tarjeta') acc.tarjeta += 1
+    }
+    acc.peor = Math.max(acc.peor, RANK_SEV[l.semaforo as keyof typeof RANK_SEV])
+    rank.set(agente, acc)
+  }
+  const tabla = [...rank.entries()]
+    .map(([agente, v]) => ({
+      agente,
+      ...v,
+      semaforo: v.peor === 3 ? 'rojo' : v.peor === 2 ? 'amarillo' : 'verde',
+    }))
+    .sort((a, b) => b.cierres - a.cierres || a.agente.localeCompare(b.agente))
+
+  const lider = tabla[0]
+  const limpioQueCierra = tabla.find(
+    (a) => a.semaforo === 'verde' && a.cierres > 0 && a.tarjeta === a.cierres,
+  )
+  if (lider.semaforo !== 'rojo') {
+    throw new Error(
+      `El primero en cierres (${lider.agente}) esta en ${lider.semaforo}. El muro necesita que ` +
+        `el que mas cierra tenga bandera: sin eso el ranking no genera ninguna conversacion.`,
+    )
+  }
+  if (!limpioQueCierra) {
+    throw new Error(
+      'No hay ningun agente en verde que cierre y cierre solo con tarjeta. Ese es el caso ' +
+        'invisible que el muro tiene que sacar a la luz; sin el, la pantalla solo premia volumen.',
+    )
+  }
+
+  const cierres = llamadas.filter((l) => l.cerro_venta)
+  const conTarjeta = cierres.filter((l) => l.forma_pago === 'tarjeta').length
+  console.log(
+    `cierres        ${cierres.length} de ${llamadas.length} llamadas · ` +
+      `${conTarjeta} tarjeta / ${cierres.length - conTarjeta} cuenta · ` +
+      `US$${cierres.length * PRECIO_PROGRAMA}`,
+  )
+  console.log(`contraste      lider ${lider.agente} (${lider.cierres} cierres, ${lider.semaforo}) · ` +
+    `limpio ${limpioQueCierra.agente} (${limpioQueCierra.cierres} cierres, todo tarjeta, verde)`)
+  console.log('ranking')
+  for (const a of tabla) {
+    console.log(
+      `               ${a.agente.padEnd(9)} ${String(a.cierres).padStart(2)} cierres · ` +
+        `${a.tarjeta} tarjeta · ${a.semaforo}`,
+    )
+  }
 }
 
 main().catch((e) => {

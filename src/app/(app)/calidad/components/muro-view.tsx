@@ -2,21 +2,32 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Maximize2 } from 'lucide-react'
-import { mmss, type MuroData } from '../types'
+import type { MuroData } from '../types'
 
 /**
- * Muro proyectable.
+ * Muro proyectable, v2.
  *
- * Vive en un televisor que ve todo el piso e incluso visitas. Dos consecuencias
- * de diseno que no son negociables:
- *   1. NO lleva dinero ni el identificador del cliente. La RPC que lo alimenta
- *      tampoco los devuelve, asi que meterlos exigiria cambiar SQL.
- *   2. Los agentes salen por NOMBRE DE PILA. Como el muro es publico por enlace,
- *      en internet un nombre de pila no identifica a nadie; en el piso todos se
- *      conocen igual. Misma logica de minimizacion que la transcripcion.
+ * Vive en un televisor que ve todo el piso e incluso visitas. Tres zonas:
  *
- * Forma: h-dvh sin scroll, fondo oscuro, numero heroe grande, tres bloques,
- * todo legible a tres metros.
+ *   1. HEROE — cierres de hoy partidos por forma de pago. Tarjeta es caja que
+ *      entro; cuenta es una promesa a seis cuotas que puede caerse (y si se
+ *      cae, el servicio se suspende). Contar los dos como "una venta" es el
+ *      error del Excel que este muro viene a reemplazar.
+ *   2. RANKING — el corazon de la pantalla. El que va primero cerrando pero con
+ *      bandera roja es la conversacion del dia; el que cierra menos, todo en
+ *      tarjeta y sin banderas, es el que hoy nadie ve.
+ *   3. PIE — recobro pendiente, cobertura y la bandera que mas se repite.
+ *
+ * Por que la cobertura NO es el heroe: una vez instalado el producto marca 100%
+ * todos los dias. Informa una vez y despues es constante. Un televisor necesita
+ * algo que se mueva durante el dia y sobre lo que el piso pueda actuar.
+ *
+ * Que NO lleva, y no es negociable: `cliente_ref`. El muro nunca identifica al
+ * cliente final, y la RPC que lo alimenta tampoco lo devuelve. Los agentes
+ * salen por NOMBRE DE PILA porque el enlace es publico: en el piso todos se
+ * conocen, en internet un nombre de pila no identifica a nadie.
+ *
+ * Que SI lleva desde v2: montos en dolares. Decision explicita de Mauricio.
  */
 
 const M = {
@@ -38,6 +49,8 @@ const COLOR_SEMAFORO: Record<string, string> = {
   amarillo: M.high,
   verde: M.ok,
 }
+
+const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
 
 export default function MuroView({
   data,
@@ -70,8 +83,8 @@ export default function MuroView({
     }
   }
 
-  const cob = data.cobertura
-  const sem = data.semaforos
+  const c = data.cierres
+  const pie = data.pie
 
   return (
     <div
@@ -83,31 +96,31 @@ export default function MuroView({
         color: M.ink,
         display: 'flex',
         flexDirection: 'column',
-        padding: '28px 40px',
+        padding: '24px 36px 18px',
         boxSizing: 'border-box',
       }}
     >
-      {/* Encabezado */}
+      {/* ── Encabezado ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 20 }}>
         <div>
           <div
             style={{
               fontFamily: MONO,
-              fontSize: 24,
+              fontSize: 22,
               letterSpacing: '.12em',
               textTransform: 'uppercase',
               color: M.muted,
             }}
           >
-            Calidad de llamadas
+            Cierres de hoy
           </div>
-          <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: '-.5px', marginTop: 2 }}>
+          <div style={{ fontSize: 30, fontWeight: 700, letterSpacing: '-.5px', marginTop: 2 }}>
             {nombreWorkspace}
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: MONO, fontSize: 24, color: M.muted }}>
+            <div style={{ fontFamily: MONO, fontSize: 22, color: M.muted }}>
               {new Date(`${data.fecha}T12:00:00`).toLocaleDateString('es-CO', {
                 day: '2-digit',
                 month: 'long',
@@ -120,7 +133,7 @@ export default function MuroView({
               día como si fuera hoy.
             */}
             {data.esFallback && (
-              <div style={{ fontFamily: MONO, fontSize: 17, color: M.high, marginTop: 2 }}>
+              <div style={{ fontFamily: MONO, fontSize: 16, color: M.high, marginTop: 2 }}>
                 último día con actividad
               </div>
             )}
@@ -140,29 +153,29 @@ export default function MuroView({
                 display: 'flex',
               }}
             >
-              <Maximize2 style={{ width: 20, height: 20 }} />
+              <Maximize2 style={{ width: 18, height: 18 }} />
             </button>
           )}
         </div>
       </div>
 
-      {/* Tres bloques, no más */}
+      {/* ── Zonas 1 y 2 ────────────────────────────────────────────── */}
       <div
         style={{
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: '1.1fr 1fr 1.2fr',
-          gap: 22,
-          marginTop: 26,
+          gridTemplateColumns: '0.85fr 1.15fr',
+          gap: 20,
+          marginTop: 20,
         }}
       >
-        {/* 1. Cobertura — el número héroe */}
-        <Panel titulo="Cobertura de auditoría">
+        {/* ── Zona 1: el héroe ── */}
+        <Panel titulo="Cerrado hoy">
           <div
             style={{
               fontFamily: MONO,
-              fontSize: 140,
+              fontSize: 132,
               fontWeight: 600,
               lineHeight: 1,
               letterSpacing: '-4px',
@@ -170,135 +183,160 @@ export default function MuroView({
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {cob ? cob.pct : 0}
-            <span style={{ fontSize: 56, letterSpacing: 0 }}>%</span>
+            {c?.total ?? 0}
           </div>
-          <div style={{ fontSize: 26, color: M.muted, marginTop: 14, lineHeight: 1.35 }}>
-            {cob ? (
-              <>
-                {cob.auditadas} de {cob.recibidas} llamadas
-                <br />
-                <span style={{ color: M.high }}>
-                  antes {cob.pctBaseline}% · {cob.baseline} a mano
-                </span>
-              </>
-            ) : (
-              'Sin registros del día'
-            )}
+          <div style={{ fontSize: 24, color: M.muted, marginTop: 6 }}>
+            de {c?.llamadas ?? 0} llamadas · {usd(c?.montoUsd ?? 0)}
+          </div>
+
+          {/* El desglose que hace la diferencia */}
+          <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormaPago
+              etiqueta="Con tarjeta"
+              nota="cobrado, entró completo"
+              n={c?.tarjeta.n ?? 0}
+              monto={c?.tarjeta.montoUsd ?? 0}
+              color={M.ok}
+            />
+            <FormaPago
+              etiqueta="Por cuenta"
+              nota={`a seis cuotas · ${usd(c?.cuenta.primeraCuotaUsd ?? 0)} este mes`}
+              n={c?.cuenta.n ?? 0}
+              monto={c?.cuenta.montoUsd ?? 0}
+              color={M.high}
+            />
           </div>
         </Panel>
 
-        {/* 2. Semáforo del día + bandera que más se repite */}
-        <Panel titulo="Cumplimiento del día">
-          {sem ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {(['rojo', 'amarillo', 'verde'] as const).map((k) => {
-                const n = sem[k]
-                const pct = sem.total > 0 ? (n / sem.total) * 100 : 0
-                return (
-                  <div key={k}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <span style={{ fontSize: 26, textTransform: 'capitalize' }}>{k}</span>
-                      <span
-                        style={{
-                          fontFamily: MONO,
-                          fontSize: 34,
-                          fontWeight: 600,
-                          color: COLOR_SEMAFORO[k],
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        {n}
-                      </span>
-                    </div>
-                    <div style={{ height: 8, background: M.line, borderRadius: 4, marginTop: 6, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: COLOR_SEMAFORO[k] }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+        {/* ── Zona 2: el ranking ── */}
+        <Panel titulo="Quién cerró, y cómo">
+          {data.ranking.length === 0 ? (
+            <div style={{ fontSize: 24, color: M.muted }}>Sin cierres registrados hoy.</div>
           ) : (
-            <div style={{ fontSize: 26, color: M.muted }}>Sin registros del día</div>
-          )}
-
-          {data.banderaTop && (
-            <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: `1px solid ${M.line}` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
               <div
                 style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 76px 100px 20px',
+                  gap: 12,
+                  paddingBottom: 8,
+                  borderBottom: `1px solid ${M.line}`,
                   fontFamily: MONO,
-                  fontSize: 20,
-                  letterSpacing: '.1em',
+                  fontSize: 15,
+                  letterSpacing: '.08em',
                   textTransform: 'uppercase',
                   color: M.muted,
                 }}
               >
-                Se repite más
+                <span>Agente</span>
+                <span style={{ textAlign: 'right' }}>Cierres</span>
+                <span style={{ textAlign: 'right' }}>Tarjeta</span>
+                <span />
               </div>
-              <div style={{ fontSize: 28, marginTop: 6, lineHeight: 1.3 }}>
-                <b style={{ fontFamily: MONO, color: M.crit }}>{data.banderaTop.codigo}</b>{' '}
-                {data.banderaTop.titulo}
-                <span style={{ color: M.muted }}> · {data.banderaTop.veces} veces</span>
-              </div>
+
+              {data.ranking.slice(0, 7).map((a) => (
+                <div
+                  key={a.agente}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 76px 100px 20px',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 0',
+                    borderBottom: `1px solid ${M.line}`,
+                    fontSize: 27,
+                  }}
+                >
+                  {/* Nombre de pila. El muro es público por enlace. */}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {a.agente}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: MONO,
+                      fontWeight: 600,
+                      textAlign: 'right',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {a.cierres}
+                  </span>
+                  {/* Verde cuando TODO lo que cerró fue con tarjeta: es el dato
+                      que el conteo de ventas esconde. */}
+                  <span
+                    style={{
+                      fontFamily: MONO,
+                      textAlign: 'right',
+                      color: a.cierres > 0 && a.tarjeta === a.cierres ? M.ok : M.muted,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {a.tarjeta} de {a.cierres}
+                  </span>
+                  <span
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: COLOR_SEMAFORO[a.semaforo] ?? M.muted,
+                      justifySelf: 'end',
+                    }}
+                  />
+                </div>
+              ))}
             </div>
           )}
         </Panel>
+      </div>
 
-        {/* 3. Últimas llamadas cayendo */}
-        <Panel titulo="Últimas llamadas">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0, overflow: 'hidden' }}>
-            {data.ultimas.slice(0, 9).map((u, i) => (
-              <div
-                key={`${u.hora}-${i}`}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '82px 1fr 78px 20px',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '11px 0',
-                  borderTop: i === 0 ? 'none' : `1px solid ${M.line}`,
-                  fontSize: 26,
-                }}
-              >
-                <span style={{ fontFamily: MONO, color: M.muted, fontVariantNumeric: 'tabular-nums' }}>
-                  {u.hora}
-                </span>
-                {/* Nombre de pila. El muro es público por enlace. */}
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {u.agente}
-                </span>
-                <span
-                  style={{
-                    fontFamily: MONO,
-                    textAlign: 'right',
-                    color: M.muted,
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {mmss(u.duracion)}
-                </span>
-                <span
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    background: COLOR_SEMAFORO[u.semaforo] ?? M.muted,
-                    justifySelf: 'end',
-                  }}
-                />
-              </div>
-            ))}
-            {data.ultimas.length === 0 && (
-              <div style={{ fontSize: 26, color: M.muted }}>Sin llamadas registradas hoy.</div>
-            )}
-          </div>
-        </Panel>
+      {/* ── Zona 3: el pie ─────────────────────────────────────────── */}
+      <div
+        style={{
+          marginTop: 16,
+          paddingTop: 14,
+          borderTop: `1px solid ${M.line}`,
+          display: 'grid',
+          gridTemplateColumns: 'auto auto 1fr',
+          gap: 32,
+          alignItems: 'baseline',
+          fontSize: 21,
+          color: M.muted,
+        }}
+      >
+        <span>
+          <b style={{ fontFamily: MONO, color: pie.recobro?.pendientesRecobro ? M.high : M.muted }}>
+            {pie.recobro?.pendientesRecobro ?? 0}
+          </b>{' '}
+          débitos rebotados por recobrar
+          {pie.recobro?.montoEnRiesgoUsd ? ` · ${usd(pie.recobro.montoEnRiesgoUsd)} en riesgo` : ''}
+        </span>
+
+        <span>
+          <b style={{ fontFamily: MONO, color: M.ink }}>
+            {pie.cobertura?.auditadas ?? 0} de {pie.cobertura?.recibidas ?? 0}
+          </b>{' '}
+          llamadas auditadas
+          {pie.cobertura?.baseline ? ` · antes ${pie.cobertura.baseline} a mano` : ''}
+        </span>
+
+        <span style={{ textAlign: 'right' }}>
+          {pie.banderaTop ? (
+            <>
+              Se repite más:{' '}
+              <b style={{ fontFamily: MONO, color: M.crit }}>{pie.banderaTop.codigo}</b>{' '}
+              {pie.banderaTop.titulo}
+              <span style={{ color: M.muted }}> · {pie.banderaTop.veces} veces</span>
+            </>
+          ) : (
+            'Sin banderas hoy'
+          )}
+        </span>
       </div>
 
       <div
         style={{
-          marginTop: 18,
-          fontSize: 18,
+          marginTop: 10,
+          fontSize: 16,
           color: M.muted,
           display: 'flex',
           justifyContent: 'space-between',
@@ -314,6 +352,44 @@ export default function MuroView({
   )
 }
 
+function FormaPago({
+  etiqueta,
+  nota,
+  n,
+  monto,
+  color,
+}: {
+  etiqueta: string
+  nota: string
+  n: number
+  monto: number
+  color: string
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
+      <span
+        style={{
+          fontFamily: MONO,
+          fontSize: 46,
+          fontWeight: 600,
+          color,
+          lineHeight: 1,
+          fontVariantNumeric: 'tabular-nums',
+          minWidth: 62,
+        }}
+      >
+        {n}
+      </span>
+      <span style={{ flex: 1 }}>
+        <span style={{ display: 'block', fontSize: 25, color: M.ink }}>
+          {etiqueta} <span style={{ fontFamily: MONO, color: M.muted }}>{usd(monto)}</span>
+        </span>
+        <span style={{ display: 'block', fontSize: 19, color: M.muted, marginTop: 1 }}>{nota}</span>
+      </span>
+    </div>
+  )
+}
+
 function Panel({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return (
     <section
@@ -321,7 +397,7 @@ function Panel({ titulo, children }: { titulo: string; children: React.ReactNode
         background: M.panel,
         border: `1px solid ${M.line}`,
         borderRadius: 10,
-        padding: '22px 26px',
+        padding: '20px 24px',
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
@@ -331,12 +407,12 @@ function Panel({ titulo, children }: { titulo: string; children: React.ReactNode
       <h2
         style={{
           fontFamily: MONO,
-          fontSize: 22,
+          fontSize: 20,
           fontWeight: 600,
           letterSpacing: '.1em',
           textTransform: 'uppercase',
           color: M.muted,
-          margin: '0 0 18px',
+          margin: '0 0 16px',
         }}
       >
         {titulo}
