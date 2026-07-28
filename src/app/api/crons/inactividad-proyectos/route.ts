@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  getConfigNotificaciones,
+  supervisoresDeArea,
+  type ConfigNotificaciones,
+} from '@/lib/notificaciones/routing'
 
 // N7 — Cron de inactividad en negocios (etapa ejecución)
-// Día 2: Supervisor. Día 5: Supervisor + Owner
+// Con routing por responsable: responsable de operaciones desde el día 2,
+// supervisor del área a partir del día configurado. Sin el flag: legacy (día 5 -> owner).
 // Señales que reinician el reloj: horas, gastos, comentario
 
 export async function GET(req: NextRequest) {
@@ -21,6 +27,7 @@ export async function GET(req: NextRequest) {
   const now = new Date()
   let procesadas = 0
   let notificacionesCreadas = 0
+  const configCache = new Map<string, ConfigNotificaciones>()
 
   const { data: negocios } = await supabase
     .from('negocios')
@@ -76,30 +83,50 @@ export async function GET(req: NextRequest) {
 
     const contenido = `"${negocio.nombre}" lleva ${diasSinActividad} días sin actividad`
 
-    const { data: perfiles } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('workspace_id', negocio.workspace_id)
-
-    if (!perfiles) continue
-
     const destinatarios = new Set<string>()
+    const cfg = await getConfigNotificaciones(supabase, negocio.workspace_id, configCache)
 
-    const supervisorOperaciones = perfiles.find(p => p.role === 'supervisor')
-    const admin = perfiles.find(p => p.role === 'admin')
-    const owner = perfiles.find(p => p.role === 'owner')
+    if (cfg.routing_por_responsable) {
+      // El negocio está en ejecución -> le toca al responsable de operaciones.
+      // `destinatarios_negocio` cae al supervisor del área si el puesto está vacío.
+      const { data: dest } = await supabase.rpc('destinatarios_negocio', {
+        p_negocio_id: negocio.id,
+      })
+      for (const d of (dest ?? []) as Array<{ profile_id: string }>) {
+        if (d.profile_id) destinatarios.add(d.profile_id)
+      }
 
-    if (diasSinActividad >= 2) {
-      if (supervisorOperaciones) {
-        destinatarios.add(supervisorOperaciones.id)
-      } else if (admin) {
-        destinatarios.add(admin.id)
-      } else if (owner) {
+      if (diasSinActividad >= cfg.escalar_supervisor_dias) {
+        for (const id of await supervisoresDeArea(supabase, negocio.workspace_id, 'operaciones')) {
+          destinatarios.add(id)
+        }
+      }
+      // El `>= 5 && owner` de abajo era la fuente del ruido: mandaba al owner
+      // TODOS los negocios en ejecución del workspace. Aquí no existe.
+    } else {
+      const { data: perfiles } = await supabase
+        .from('profiles')
+        .select('id, role')
+        .eq('workspace_id', negocio.workspace_id)
+
+      if (!perfiles) continue
+
+      const supervisorOperaciones = perfiles.find(p => p.role === 'supervisor')
+      const admin = perfiles.find(p => p.role === 'admin')
+      const owner = perfiles.find(p => p.role === 'owner')
+
+      if (diasSinActividad >= 2) {
+        if (supervisorOperaciones) {
+          destinatarios.add(supervisorOperaciones.id)
+        } else if (admin) {
+          destinatarios.add(admin.id)
+        } else if (owner) {
+          destinatarios.add(owner.id)
+        }
+      }
+      if (diasSinActividad >= 5 && owner) {
         destinatarios.add(owner.id)
       }
-    }
-    if (diasSinActividad >= 5 && owner) {
-      destinatarios.add(owner.id)
     }
 
     for (const destinatarioId of destinatarios) {

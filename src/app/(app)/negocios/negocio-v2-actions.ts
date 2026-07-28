@@ -5461,12 +5461,38 @@ export async function agregarResponsable(
     .single()
   if (!staff) return { error: 'Staff no encontrado' }
 
+  // El rol (comercial | operaciones) se deriva del área del staff: es lo que
+  // decide a quién se le notifica según el stage de la etapa. Sin rol, el
+  // responsable queda invisible para el routing de notificaciones.
+  // Un negocio admite UN comercial y UN operativo (índice único parcial):
+  // asignar otro del mismo área REEMPLAZA al anterior, no lo suma.
+  const { data: areasStaff } = await db(supabase)
+    .from('staff_areas')
+    .select('area')
+    .eq('staff_id', staffMiembroId)
+
+  const areas = ((areasStaff ?? []) as Array<{ area: string }>).map(a => a.area)
+  const rol = areas.includes('comercial')
+    ? 'comercial'
+    : areas.includes('operaciones')
+      ? 'operaciones'
+      : null
+
+  if (rol) {
+    // Libera el puesto antes de ocuparlo (el índice único no deja dos del mismo rol)
+    await db(supabase)
+      .from('negocio_responsables')
+      .delete()
+      .eq('negocio_id', negocioId)
+      .eq('rol', rol)
+  }
+
   // assigned_by es FK → profiles(id): debe ser userId (profile.id), NO staffId.
   const { error: insErr } = await db(supabase)
     .from('negocio_responsables')
     .upsert(
-      { negocio_id: negocioId, staff_id: staffMiembroId, assigned_by: userId ?? null },
-      { onConflict: 'negocio_id,staff_id', ignoreDuplicates: true },
+      { negocio_id: negocioId, staff_id: staffMiembroId, assigned_by: userId ?? null, rol },
+      { onConflict: 'negocio_id,staff_id', ignoreDuplicates: false },
     )
   if (insErr) return { error: (insErr as { message: string }).message }
 
