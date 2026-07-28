@@ -206,6 +206,10 @@ export type NegocioResumen = {
   responsables: Array<{ id: string; full_name: string }>
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
   es_meta_lead: boolean
+  // Reproceso abierto (metadata.reproceso.activo). Un tercero rechazó el trabajo y
+  // hay que rehacer un tramo, con un cliente esperando algo que creía resuelto: se
+  // muestra en la tarjeta para que sea visible sin abrir el negocio.
+  reproceso: { tipo: string; ciclo: number; etapa_retorno: string | null } | null
 }
 
 // Helper: cast Supabase client a untyped para tablas nuevas no en database.ts
@@ -535,6 +539,14 @@ export async function getNegociosV2(
       numero_factura: facturaPorNeg[id] ?? null,
       responsables: responsablesPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
+      reproceso: (() => {
+        const r = (row.metadata as Record<string, unknown> | null)?.reproceso as
+          | { activo?: boolean; tipo?: string; ciclo?: number; etapa_retorno?: string | null }
+          | null
+          | undefined
+        if (!r?.activo) return null
+        return { tipo: String(r.tipo ?? ''), ciclo: Number(r.ciclo ?? 1), etapa_retorno: r.etapa_retorno ?? null }
+      })(),
     }
   })
 }

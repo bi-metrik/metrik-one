@@ -27,6 +27,7 @@ import type {
   NegocioBloque,
 } from '../negocio-v2-actions'
 import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -610,6 +611,8 @@ function SelectorEtapa({
   pausaEnabled,
   pausado,
   vecesPausado,
+  userRole,
+  reprocesoMarca,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -622,6 +625,8 @@ function SelectorEtapa({
   pausado: boolean
   pausadoHasta: string | null
   vecesPausado: number
+  userRole: string
+  reprocesoMarca: ReprocesoVista | null
 }) {
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
@@ -787,6 +792,11 @@ function SelectorEtapa({
                 <span className="hidden sm:inline">Pausar</span>
               </button>
             )}
+            <ReprocesoBoton
+              negocioId={negocioId}
+              reprocesoActivo={Boolean(reprocesoMarca?.activo)}
+              userRole={userRole}
+            />
             <button
               onClick={() => setShowCierreDialog(true)}
               disabled={isPending}
@@ -1833,6 +1843,10 @@ export default function NegocioDetailClient({
     if (d) Object.assign(datosEtapa, d)
   }
 
+  // Reproceso abierto: gobierna el banner de arriba y oculta el boton de abrir otro.
+  const reprocesoMarca = (((negocio as unknown as { metadata?: Record<string, unknown> | null }).metadata
+    ?.reproceso ?? null) as ReprocesoVista | null)
+
   const bloquesExtendidos = allBloques.filter(b => {
     // Bloques marcados no-visibles (ej. "Tipo de solicitante", auto-poblado en la
     // creación) no se renderizan, pero su data ya alimentó `datosEtapa` arriba.
@@ -1863,6 +1877,9 @@ export default function NegocioDetailClient({
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-4">
+      {/* Reproceso abierto: lo primero que se ve al abrir el negocio. */}
+      <ReprocesoBanner negocioId={negocio.id} reproceso={reprocesoMarca} userRole={userRole} />
+
       {/* ── HEADER NOOR 5 FILAS ── */}
       {/* Fila 1 — nav (scrollea) */}
       <div className="flex items-center mb-2.5">
@@ -1924,6 +1941,8 @@ export default function NegocioDetailClient({
             pausado={negocio.pausado}
             pausadoHasta={negocio.pausado_hasta}
             vecesPausado={negocio.veces_pausado}
+            userRole={userRole}
+            reprocesoMarca={reprocesoMarca}
           />
         </div>
         </div>
