@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 
 // ── Contactos ─────────────────────────────────────────────
@@ -178,8 +179,8 @@ export async function createContacto(formData: FormData) {
 }
 
 export async function updateContacto(id: string, formData: FormData) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const updates: Record<string, unknown> = {}
   const fields = ['nombre', 'telefono', 'email', 'fuente_adquisicion', 'fuente_detalle', 'rol', 'segmento'] as const
@@ -196,9 +197,31 @@ export async function updateContacto(id: string, formData: FormData) {
     updates.comision_porcentaje = raw ? parseFloat(raw) : null
   }
   // Responsable comercial del contacto (staff.id). Cadena vacía → sin responsable.
+  // Asignar responsable es gerencial (ver `asignarResponsableContacto`), pero el
+  // formulario del Contacto 360 reenvía TODOS los campos en cada guardado: se
+  // compara contra el valor actual y solo se exige permiso si de verdad cambia.
+  // Así un ejecutor sigue editando teléfono/email sin chocar con el guard.
   if (formData.get('responsable_id') !== null) {
     const raw = (formData.get('responsable_id') as string).trim()
-    updates.responsable_id = raw || null
+    const nuevo = raw || null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: actual } = await (supabase as any)
+      .from('contactos')
+      .select('responsable_id')
+      .eq('id', id)
+      .eq('workspace_id', workspaceId)
+      .single()
+    const previo = (actual as { responsable_id: string | null } | null)?.responsable_id ?? null
+    if (nuevo !== previo) {
+      if (!getRolePermissions(role ?? 'read_only').canAssignResponsable) {
+        return { success: false, error: 'Sin permisos para asignar responsable' }
+      }
+      if (nuevo) {
+        const valido = await staffDelWorkspace(supabase, workspaceId, nuevo)
+        if (!valido) return { success: false, error: 'Responsable no válido' }
+      }
+      updates.responsable_id = nuevo
+    }
   }
 
   const { error: dbError } = await supabase
@@ -245,6 +268,144 @@ export async function updateContactoSegmento(id: string, segmento: string) {
   revalidatePath('/directorio/contactos')
   revalidatePath(`/directorio/contacto/${id}`)
   return { success: true }
+}
+
+// ── Asignación de responsable de contacto ─────────────────
+//
+// Repartir contactos es trabajo gerencial (owner/admin/supervisor). El criterio
+// se toma de `getRolePermissions(role).canAssignResponsable` —el mismo flag que
+// gobierna la asignación de responsable de negocio— para que ambos módulos no se
+// desincronicen. NO se define un literal local de roles aquí: `src/lib/roles.ts`
+// ya es la fuente única.
+//
+// El guard va SIEMPRE server-side. Ocultar el control en la UI es solo UX.
+
+/**
+ * ¿El staff pertenece al workspace y está activo? Barrera de tenant: sin esto,
+ * un `responsable_id` fabricado a mano asignaría un contacto a alguien de otro
+ * workspace (la FK sola no valida el tenant).
+ */
+async function staffDelWorkspace(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  staffId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('workspace_id', workspaceId)
+    .eq('is_active', true)
+    .maybeSingle()
+  return Boolean(data)
+}
+
+/**
+ * Asigna (o quita, con `responsableId = null`) el responsable de UN contacto.
+ *
+ * Action dedicada en vez de reusar `actualizarContacto`: esa recibe FormData y
+ * reescribe medio contacto; para un desplegable inline del listado se quiere una
+ * firma directa (id + responsable) y un guard de rol acotado. Contactos es 1:1
+ * (`contactos.responsable_id`), no N:M como negocios.
+ */
+export async function asignarResponsableContacto(
+  contactoId: string,
+  responsableId: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  if (!getRolePermissions(role ?? 'read_only').canAssignResponsable) {
+    return { success: false, error: 'Sin permisos para asignar responsable' }
+  }
+
+  if (responsableId) {
+    const valido = await staffDelWorkspace(supabase, workspaceId, responsableId)
+    if (!valido) return { success: false, error: 'Responsable no válido' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: dbError } = await (supabase as any)
+    .from('contactos')
+    .update({ responsable_id: responsableId })
+    .eq('id', contactoId)
+    .eq('workspace_id', workspaceId)
+    .select('id')
+
+  if (dbError) return { success: false, error: (dbError as { message: string }).message }
+  if (!data || data.length === 0) return { success: false, error: 'Contacto no encontrado' }
+
+  // ENGANCHE DE NOTIFICACIÓN (no implementado a propósito, dueño único en otra
+  // sesión): aquí es donde avisarle al responsable que le asignaron el contacto.
+  // Insertar en `notificaciones` con destinatario = responsableId.
+
+  revalidatePath('/directorio/contactos')
+  revalidatePath(`/directorio/contacto/${contactoId}`)
+  return { success: true }
+}
+
+// Tope de selección masiva. 172 contactos en el workspace más grande hoy; 200
+// deja aire sin volver la operación un cargue masivo encubierto.
+const MAX_ASIGNACION_MASIVA = 200
+// Los ids viajan en el query string de PostgREST (`id=in.(...)`). Se reparte en
+// lotes para no acercarse al límite de longitud de URL. Siguen siendo 1-2
+// requests, no un bucle de N.
+const LOTE_ASIGNACION_MASIVA = 100
+
+/**
+ * Asigna (o quita) el responsable de VARIOS contactos de una vez.
+ *
+ * Un solo UPDATE por lote (`.in('id', ids)`), no N llamadas. Los leads de Meta
+ * nacen sin responsable y se acumulan: repartirlos uno por uno desde el detalle
+ * no escala.
+ */
+export async function asignarResponsableContactosMasivo(
+  contactoIds: string[],
+  responsableId: string | null,
+): Promise<{ success: boolean; error?: string; actualizados?: number }> {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  if (!getRolePermissions(role ?? 'read_only').canAssignResponsable) {
+    return { success: false, error: 'Sin permisos para asignar responsable' }
+  }
+
+  const ids = Array.from(new Set((contactoIds ?? []).filter(Boolean)))
+  if (ids.length === 0) return { success: false, error: 'No hay contactos seleccionados' }
+  if (ids.length > MAX_ASIGNACION_MASIVA) {
+    return { success: false, error: `Máximo ${MAX_ASIGNACION_MASIVA} contactos por asignación` }
+  }
+
+  if (responsableId) {
+    const valido = await staffDelWorkspace(supabase, workspaceId, responsableId)
+    if (!valido) return { success: false, error: 'Responsable no válido' }
+  }
+
+  let actualizados = 0
+  for (let i = 0; i < ids.length; i += LOTE_ASIGNACION_MASIVA) {
+    const lote = ids.slice(i, i + LOTE_ASIGNACION_MASIVA)
+    // El filtro por workspace_id es la barrera de tenant: ids de otro workspace
+    // simplemente no matchean (y no se cuentan como actualizados).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error: dbError } = await (supabase as any)
+      .from('contactos')
+      .update({ responsable_id: responsableId })
+      .in('id', lote)
+      .eq('workspace_id', workspaceId)
+      .select('id')
+
+    if (dbError) return { success: false, error: (dbError as { message: string }).message }
+    actualizados += (data as { id: string }[] | null)?.length ?? 0
+  }
+
+  // ENGANCHE DE NOTIFICACIÓN (no implementado a propósito, dueño único en otra
+  // sesión): aquí avisaría al responsable de la asignación. OJO: repartir 100
+  // contactos de golpe dispararía 100 avisos — quien lo implemente debe AGRUPAR
+  // (un aviso por lote: "te asignaron N contactos"), no uno por fila.
+
+  revalidatePath('/directorio/contactos')
+  return { success: true, actualizados }
 }
 
 export async function searchContactos(query: string) {
