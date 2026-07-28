@@ -35,7 +35,8 @@ alter table public.notificaciones add constraint notificaciones_tipo_check check
     'plan_terminado', 'cuenta_cobro_pendiente_aprobacion', 'cuenta_cobro_enviada',
     'cuenta_cobro_envio_fallo', 'responsable_faltante_area',
     'negocio_cancelado', 'negocio_reabierto', 'negocio_reactivado',
-    'conciliacion_solicitada', 'mencion_equipo', 'reproceso_solicitado',
+    'conciliacion_solicitada', 'mencion_equipo',
+    'reproceso',          -- S1 (su migracion de tipo aun no estaba aplicada en prod)
     'negocio_en_etapa'   -- el negocio entro a una etapa que pide aviso
   ])
 );
