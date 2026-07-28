@@ -102,19 +102,44 @@ export interface MuroData {
     total: number
     montoUsd: number
     llamadas: number
+    /** Precio del programa segun los cierres del dia. Define "cobrado" en el pie. */
+    montoUnitarioUsd: number
     tarjeta: { n: number; montoUsd: number }
     cuenta: { n: number; montoUsd: number; primeraCuotaUsd: number }
   } | null
 
-  /** Zona 2 — el ranking del dia. Agentes por nombre de pila. */
+  /**
+   * Zona 2a — el ranking: el ACUMULADO del dia. Agentes por nombre de pila.
+   *
+   * `tarjeta` es la forma de pago en el dato, pero en pantalla se llama
+   * "cobrado": lo que importa no es el instrumento sino que el dinero entro
+   * completo hoy. "Tarjeta · 1 de 6" solo se entiende si ya sabes que tarjeta
+   * significa cobro inmediato, y una pantalla que se mira de reojo no puede
+   * pedir eso.
+   */
   ranking: {
     agente: string
     cierres: number
-    /** Cuantos de esos cierres fueron con tarjeta. */
+    /** Cuantos de esos cierres se cobraron completos (forma de pago tarjeta). */
     tarjeta: number
     montoUsd: number
     llamadas: number
     semaforo: Semaforo
+  }[]
+
+  /**
+   * Zona 2b — el flujo: lo que esta pasando AHORA.
+   *
+   * El ranking es el acumulado y no se mueve mucho durante el dia; esto si. Sin
+   * duraciones (se leian como horas del dia al lado de la columna de hora), sin
+   * apellidos y sin `cliente_ref`.
+   */
+  ultimas: {
+    hora: string
+    agente: string
+    tecnica: number
+    semaforo: Semaforo
+    cerroVenta: boolean
   }[]
 
   /** Zona 3 — el pie. Discreto: contexto, no protagonismo. */

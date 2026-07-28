@@ -9,14 +9,19 @@ import type { MuroData } from '../types'
  *
  * Vive en un televisor que ve todo el piso e incluso visitas. Tres zonas:
  *
- *   1. HEROE — cierres de hoy partidos por forma de pago. Tarjeta es caja que
- *      entro; cuenta es una promesa a seis cuotas que puede caerse (y si se
- *      cae, el servicio se suspende). Contar los dos como "una venta" es el
- *      error del Excel que este muro viene a reemplazar.
- *   2. RANKING — el corazon de la pantalla. El que va primero cerrando pero con
- *      bandera roja es la conversacion del dia; el que cierra menos, todo en
- *      tarjeta y sin banderas, es el que hoy nadie ve.
- *   3. PIE — recobro pendiente, cobertura y la bandera que mas se repite.
+ *   1. HEROE (banda superior) — cierres de hoy partidos por forma de pago.
+ *      Cobrado completo es caja que entro; a seis cuotas es una promesa que
+ *      puede caerse (y si se cae, el servicio se suspende). Contar los dos como
+ *      "una venta" es el error del Excel que este muro viene a reemplazar.
+ *   2. DOS COLUMNAS —
+ *      · RANKING: el ACUMULADO del dia. El que va primero cerrando pero con
+ *        bandera roja es la conversacion del dia; el que cierra menos, todo
+ *        cobrado y sin banderas, es el que hoy nadie ve.
+ *      · ULTIMAS LLAMADAS: el FLUJO, lo que esta pasando ahora. Es lo que
+ *        mantiene la pantalla viva durante el dia; el ranking casi no se mueve.
+ *      Son dos preguntas distintas y el televisor tiene ancho para las dos.
+ *   3. PIE — recobro pendiente, cobertura, bandera que mas se repite y la
+ *      definicion de "cobrado", dicha una sola vez.
  *
  * Por que la cobertura NO es el heroe: una vez instalado el producto marca 100%
  * todos los dias. Informa una vez y despues es constante. Un televisor necesita
@@ -159,56 +164,80 @@ export default function MuroView({
         </div>
       </div>
 
-      {/* ── Zonas 1 y 2 ────────────────────────────────────────────── */}
+      {/* ── Zona 1: el héroe, en banda ─────────────────────────────── */}
       <div
         style={{
-          flex: 1,
-          minHeight: 0,
+          marginTop: 18,
+          background: M.panel,
+          border: `1px solid ${M.line}`,
+          borderRadius: 10,
+          padding: '18px 26px',
           display: 'grid',
-          gridTemplateColumns: '0.85fr 1.15fr',
-          gap: 20,
-          marginTop: 20,
+          gridTemplateColumns: 'auto 1fr',
+          gap: 40,
+          alignItems: 'center',
         }}
       >
-        {/* ── Zona 1: el héroe ── */}
-        <Panel titulo="Cerrado hoy">
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
           <div
             style={{
               fontFamily: MONO,
-              fontSize: 132,
+              fontSize: 104,
               fontWeight: 600,
               lineHeight: 1,
-              letterSpacing: '-4px',
+              letterSpacing: '-3px',
               color: M.brand,
               fontVariantNumeric: 'tabular-nums',
             }}
           >
             {c?.total ?? 0}
           </div>
-          <div style={{ fontSize: 24, color: M.muted, marginTop: 6 }}>
+          <div style={{ fontSize: 23, color: M.muted, lineHeight: 1.35 }}>
+            <div
+              style={{
+                fontFamily: MONO,
+                fontSize: 19,
+                letterSpacing: '.1em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Cerrado hoy
+            </div>
             de {c?.llamadas ?? 0} llamadas · {usd(c?.montoUsd ?? 0)}
           </div>
+        </div>
 
-          {/* El desglose que hace la diferencia */}
-          <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <FormaPago
-              etiqueta="Con tarjeta"
-              nota="cobrado, entró completo"
-              n={c?.tarjeta.n ?? 0}
-              monto={c?.tarjeta.montoUsd ?? 0}
-              color={M.ok}
-            />
-            <FormaPago
-              etiqueta="Por cuenta"
-              nota={`a seis cuotas · ${usd(c?.cuenta.primeraCuotaUsd ?? 0)} este mes`}
-              n={c?.cuenta.n ?? 0}
-              monto={c?.cuenta.montoUsd ?? 0}
-              color={M.high}
-            />
-          </div>
-        </Panel>
+        {/* El desglose que hace la diferencia */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 30 }}>
+          <FormaPago
+            etiqueta="cobrado completo"
+            nota="el dinero ya entró"
+            n={c?.tarjeta.n ?? 0}
+            monto={c?.tarjeta.montoUsd ?? 0}
+            color={M.ok}
+          />
+          <FormaPago
+            etiqueta="a seis cuotas"
+            nota={`${usd(c?.cuenta.primeraCuotaUsd ?? 0)} entra este mes`}
+            n={c?.cuenta.n ?? 0}
+            monto={c?.cuenta.montoUsd ?? 0}
+            color={M.high}
+          />
+        </div>
+      </div>
 
-        {/* ── Zona 2: el ranking ── */}
+      {/* ── Zona 2: acumulado y flujo, lado a lado ─────────────────── */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'grid',
+          gridTemplateColumns: '1.08fr 0.92fr',
+          gap: 18,
+          marginTop: 18,
+        }}
+      >
+        {/* ── Zona 2a: el ranking (el acumulado) ── */}
         <Panel titulo="Quién cerró, y cómo">
           {data.ranking.length === 0 ? (
             <div style={{ fontSize: 24, color: M.muted }}>Sin cierres registrados hoy.</div>
@@ -230,7 +259,9 @@ export default function MuroView({
               >
                 <span>Agente</span>
                 <span style={{ textAlign: 'right' }}>Cierres</span>
-                <span style={{ textAlign: 'right' }}>Tarjeta</span>
+                {/* "Tarjeta" era el instrumento de pago; lo que importa es que
+                    el dinero entró completo. Ver la definición en el pie. */}
+                <span style={{ textAlign: 'right' }}>Cobrado</span>
                 <span />
               </div>
 
@@ -261,8 +292,8 @@ export default function MuroView({
                   >
                     {a.cierres}
                   </span>
-                  {/* Verde cuando TODO lo que cerró fue con tarjeta: es el dato
-                      que el conteo de ventas esconde. */}
+                  {/* Verde cuando TODO lo que cerró se cobró completo: es el
+                      dato que el conteo de ventas esconde. */}
                   <span
                     style={{
                       fontFamily: MONO,
@@ -271,7 +302,7 @@ export default function MuroView({
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >
-                    {a.tarjeta} de {a.cierres}
+                    {a.tarjeta} cobrado
                   </span>
                   <span
                     style={{
@@ -279,6 +310,80 @@ export default function MuroView({
                       height: 16,
                       borderRadius: '50%',
                       background: COLOR_SEMAFORO[a.semaforo] ?? M.muted,
+                      justifySelf: 'end',
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        {/* ── Zona 2b: el flujo (lo que está pasando ahora) ── */}
+        <Panel titulo="Últimas llamadas">
+          {data.ultimas.length === 0 ? (
+            <div style={{ fontSize: 24, color: M.muted }}>Sin llamadas registradas hoy.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '76px 1fr 62px 20px',
+                  gap: 12,
+                  paddingBottom: 8,
+                  borderBottom: `1px solid ${M.line}`,
+                  fontFamily: MONO,
+                  fontSize: 15,
+                  letterSpacing: '.08em',
+                  textTransform: 'uppercase',
+                  color: M.muted,
+                }}
+              >
+                <span>Hora</span>
+                <span>Agente</span>
+                <span style={{ textAlign: 'right' }}>Técnica</span>
+                <span />
+              </div>
+
+              {data.ultimas.slice(0, 8).map((u, i) => (
+                <div
+                  key={`${u.hora}-${i}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '76px 1fr 62px 20px',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 0',
+                    borderBottom: `1px solid ${M.line}`,
+                    fontSize: 26,
+                  }}
+                >
+                  <span style={{ fontFamily: MONO, color: M.muted, fontVariantNumeric: 'tabular-nums' }}>
+                    {u.hora}
+                  </span>
+                  {/* Nombre de pila. El muro es público por enlace. */}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {u.agente}
+                    {/* Marca discreta de que esa llamada cerró venta: conecta el
+                        flujo con el número de arriba sin agregar otra columna. */}
+                    {u.cerroVenta && <span style={{ color: M.brand, marginLeft: 8 }}>·cerró</span>}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: MONO,
+                      textAlign: 'right',
+                      color: M.muted,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {u.tecnica}
+                  </span>
+                  <span
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: COLOR_SEMAFORO[u.semaforo] ?? M.muted,
                       justifySelf: 'end',
                     }}
                   />
@@ -341,9 +446,22 @@ export default function MuroView({
           display: 'flex',
           justifyContent: 'space-between',
           gap: 16,
+          flexWrap: 'wrap',
         }}
       >
-        <span>Datos de demostración. Una llamada real; el resto es muestra.</span>
+        {/*
+          "Cobrado" se define UNA vez, aquí abajo. La columna del ranking no
+          puede explicarse sola en una pantalla que se mira de reojo, y repetir
+          la aclaración en cada fila sería ruido. El monto sale del dato, no
+          escrito a mano: si el precio del programa cambia, la línea lo sigue.
+        */}
+        <span>
+          {c?.montoUnitarioUsd
+            ? `Cobrado = pagó los ${usd(c.montoUnitarioUsd)} completos hoy; el resto queda a seis cuotas.`
+            : 'Cobrado = pagó completo hoy; el resto queda a seis cuotas.'}
+          {'  ·  '}
+          Datos de demostración: una llamada real, el resto es muestra.
+        </span>
         <span>Powered by MéTRIK</span>
       </div>
 
