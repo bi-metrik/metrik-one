@@ -1,11 +1,19 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Maximize2 } from 'lucide-react'
-import type { MuroData, Semaforo } from '../types'
+import {
+  PERIODO_LABEL,
+  PERIODO_RANGO,
+  type MuroData,
+  type Periodo,
+  type Semaforo,
+  type UmbralesRanking,
+} from '../types'
 
 /**
- * Muro proyectable, v4.
+ * Muro proyectable, v5.
  *
  * Vive en un televisor que ve todo el piso e incluso visitas. Criterio de
  * aceptacion, y es el que manda sobre cualquier otro: TODO se lee a tres
@@ -25,14 +33,17 @@ import type { MuroData, Semaforo } from '../types'
  *      suspende). Contar los dos como "una venta" es el error del Excel que
  *      este muro viene a reemplazar.
  *   3. DOS COLUMNAS —
- *      · TABLA DE AGENTES: el ACUMULADO del dia, TODOS sin recortar. Con
- *        llamadas y % de cierre al lado de los cierres aparece el dato que el
- *        conteo simple esconde: quien cierra al mismo ritmo con la mitad de
- *        llamadas. La columna de cumplimiento lleva encabezado y PALABRA, no
- *        solo color: a tres metros un punto sin etiqueta no comunica, y el
- *        color solo tampoco sirve para quien no lo distingue.
+ *      · RANKING: el acumulado, TODOS los agentes sin recortar, y ROTANDO solo
+ *        entre dia, semana y mes. Con llamadas y % de cierre al lado de los
+ *        cierres aparece el dato que el conteo simple esconde: quien cierra al
+ *        mismo ritmo con la mitad de llamadas. Y los dos ejes de la rubrica van
+ *        en columnas SEPARADAS — tecnica (como ejecuta) y banderas (a que
+ *        expone) — porque son independientes: hay quien tiene la tecnica mas
+ *        baja del piso y casi ningun error critico, y al reves.
  *      · ULTIMAS LLAMADAS: el FLUJO, lo que esta pasando ahora. Es lo que
  *        mantiene la pantalla viva durante el dia; la tabla casi no se mueve.
+ *        Aqui el cumplimiento SI es un semaforo con palabra: es UNA llamada, que
+ *        es para lo que el semaforo esta diseñado.
  *   4. BANDA — la bandera que mas se repite hoy. Es lo unico realmente
  *      accionable para el piso, asi que va en grande y no en letra chica.
  *
@@ -74,8 +85,24 @@ const CUMPLIMIENTO: Record<Semaforo, { texto: string; color: string }> = {
 
 const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
 
-const COLS_AGENTES = '1fr 112px 104px 112px 118px 158px 196px'
+const COLS_AGENTES = '1fr 130px 120px 124px 130px 144px'
 const COLS_ULTIMAS = '98px 1fr 94px 178px'
+
+const PERIODOS: Periodo[] = ['dia', 'semana', 'mes']
+
+/**
+ * Cada cuanto gira la tabla. Nadie toca un televisor, asi que la temporalidad
+ * tiene que cambiar sola.
+ *
+ * 20 s es lo que toma recorrer siete filas por seis columnas a tres metros sin
+ * apurarse, con margen para el que levanta la vista a mitad de camino. Mas
+ * corto obliga a leer contrarreloj; mas largo hace que quien pasa por el piso
+ * vea siempre la misma pantalla y las otras dos no existan.
+ */
+const ROTACION_MS = 20_000
+
+/** Cada cuanto se vuelven a pedir los datos al servidor. */
+const REFRESCO_MS = 30_000
 
 /**
  * "martes 28 de julio". `toLocaleDateString` devuelve "martes, 28 de julio" y
@@ -101,14 +128,34 @@ export default function MuroView({
   proyectable?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const router = useRouter()
 
-  // Auto-refresh cada 30 s. Solo en el muro proyectable: dentro de la app
-  // recargar la pagina cada medio minuto seria hostil.
+  /*
+   * Refresco de datos SIN recargar la pagina.
+   *
+   * Antes esto era `window.location.reload()`, que ahora seria un bug: la
+   * recarga reinicia el estado del cliente, o sea el ciclo de rotacion. Cada 30
+   * s el muro volveria a la vista de dia y las de semana y mes no alcanzarian a
+   * mostrarse nunca. `router.refresh()` vuelve a correr el componente de
+   * servidor y entrega props nuevas conservando el estado: los datos se
+   * actualizan y el giro sigue su curso.
+   */
   useEffect(() => {
     if (!proyectable) return
-    const t = setInterval(() => window.location.reload(), 30_000)
+    const t = setInterval(() => router.refresh(), REFRESCO_MS)
     return () => clearInterval(t)
-  }, [proyectable])
+  }, [proyectable, router])
+
+  // Rotacion de la temporalidad. Independiente del refresco: son dos relojes
+  // distintos y no se pisan porque ninguno reinicia al otro.
+  const [iPeriodo, setIPeriodo] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setIPeriodo((i) => (i + 1) % PERIODOS.length), ROTACION_MS)
+    return () => clearInterval(t)
+  }, [])
+
+  const periodo = PERIODOS[iPeriodo]
+  const ranking = data.rankings?.[periodo]
 
   const [pantallaCompleta, setPantallaCompleta] = useState(false)
   const alternarPantallaCompleta = () => {
@@ -271,10 +318,14 @@ export default function MuroView({
           marginTop: 16,
         }}
       >
-        {/* ── Zona 2a: la tabla de agentes (el acumulado) ── */}
-        <Panel titulo="Quién cerró, y cómo">
-          {data.ranking.length === 0 ? (
-            <div style={{ fontSize: 26, color: M.muted }}>Sin llamadas registradas hoy.</div>
+        {/* ── Zona 2a: el ranking (rota entre día, semana y mes) ── */}
+        <Panel
+          titulo={PERIODO_LABEL[periodo]}
+          rango={PERIODO_RANGO[periodo]}
+          extra={<Puntos total={PERIODOS.length} activo={iPeriodo} />}
+        >
+          {!ranking || ranking.filas.length === 0 ? (
+            <div style={{ fontSize: 26, color: M.muted }}>Sin llamadas en este período.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
               <Encabezados
@@ -286,17 +337,14 @@ export default function MuroView({
                   { texto: 'Llamadas', der: true },
                   { texto: 'Cierres', der: true },
                   { texto: '% cierre', der: true },
-                  // "Tarjeta" era el instrumento de pago; lo que importa es que
-                  // el dinero entró completo. La definición va una vez, al pie.
-                  { texto: 'Cobrado', der: true },
-                  { texto: 'US$', der: true },
-                  { texto: 'Cumplimiento' },
+                  { texto: 'Técnica', der: true },
+                  { texto: 'Banderas', der: true },
                 ]}
               />
 
               {/* TODOS los agentes. Truncar la lista sesga: si alguien no
                   aparece, el piso no sabe si es que no cerró o que no cupo. */}
-              {data.ranking.map((a, i) => (
+              {ranking.filas.map((a, i) => (
                 <div
                   key={a.agente}
                   style={{
@@ -321,17 +369,15 @@ export default function MuroView({
                   </span>
                   <Num>{a.llamadas}</Num>
                   <Num destacado>{a.cierres}</Num>
-                  {/* El % va en tinta plena: es el dato nuevo de v4 y el unico
-                      que permite comparar agentes con distinto volumen. En gris
-                      se pierde al lado del conteo de cierres. */}
+                  {/* El % en tinta plena: es lo único que permite comparar
+                      agentes con distinto volumen. En gris se pierde al lado
+                      del conteo de cierres. */}
                   <Num color={M.ink}>{a.pctCierre}%</Num>
-                  {/* Verde cuando TODO lo que cerró se cobró completo: es el
-                      dato que el conteo de ventas esconde. */}
-                  <Num color={a.cierres > 0 && a.tarjeta === a.cierres ? M.ok : undefined}>
-                    {a.tarjeta}
-                  </Num>
-                  <Num>{a.montoUsd > 0 ? usd(a.montoUsd) : '—'}</Num>
-                  <Cumplimiento semaforo={a.semaforo} />
+                  {/* Los dos ejes, separados y con color por umbral del propio
+                      dato. Ejecutar bien la venta y exponer a la empresa son
+                      cosas independientes: con una sola columna eso no se veía. */}
+                  <Num color={colorTecnica(a.tecnica, ranking.umbrales)}>{a.tecnica}</Num>
+                  <Num color={colorBanderas(a.banderas, ranking.umbrales)}>{a.banderas}</Num>
                 </div>
               ))}
             </div>
@@ -462,12 +508,20 @@ export default function MuroView({
         }}
       >
         {/*
-          "Cobrado" se define UNA vez, aquí abajo. La columna no puede
-          explicarse sola en una pantalla que se mira de reojo, y repetir la
-          aclaración en cada fila sería ruido. El monto sale del dato, no
-          escrito a mano: si el precio del programa cambia, la línea lo sigue.
+          Las dos palabras que no se explican solas se definen UNA vez, aquí
+          abajo. Repetir la aclaración en cada fila sería ruido, y una pantalla
+          que se mira de reojo no puede pedir que se adivine.
+
+          "Banderas" cuenta SOLO los errores críticos, no todos los hallazgos.
+          Sin decirlo, el número parece el total y subestima lo que se ve: es la
+          diferencia entre informar y insinuar.
+
+          El monto de "cobrado" sale del dato, no escrito a mano: si el precio
+          del programa cambia, la línea lo sigue.
         */}
         <span>
+          Banderas = errores críticos.
+          {'  ·  '}
           {c?.montoUnitarioUsd
             ? `Cobrado = pagó los ${usd(c.montoUnitarioUsd)} completos hoy; el resto queda a seis cuotas.`
             : 'Cobrado = pagó completo hoy; el resto queda a seis cuotas.'}
@@ -617,7 +671,18 @@ function Cumplimiento({ semaforo }: { semaforo: Semaforo }) {
   )
 }
 
-function Panel({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+function Panel({
+  titulo,
+  rango,
+  extra,
+  children,
+}: {
+  titulo: string
+  /** De qué ventana de tiempo habla la tabla. Sin esto "semana" es ambiguo. */
+  rango?: string
+  extra?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <section
       style={{
@@ -631,20 +696,76 @@ function Panel({ titulo, children }: { titulo: string; children: React.ReactNode
         overflow: 'hidden',
       }}
     >
-      <h2
+      <div
         style={{
-          fontFamily: MONO,
-          fontSize: 20,
-          fontWeight: 600,
-          letterSpacing: '.1em',
-          textTransform: 'uppercase',
-          color: M.muted,
-          margin: '0 0 14px 10px',
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 16,
+          margin: '0 10px 14px',
         }}
       >
-        {titulo}
-      </h2>
+        <h2
+          style={{
+            fontFamily: MONO,
+            fontSize: 20,
+            fontWeight: 600,
+            letterSpacing: '.1em',
+            textTransform: 'uppercase',
+            color: M.ink,
+            margin: 0,
+          }}
+        >
+          {titulo}
+        </h2>
+        {rango && <span style={{ fontSize: 18, color: M.muted }}>{rango}</span>}
+        {extra && <span style={{ marginLeft: 'auto' }}>{extra}</span>}
+      </div>
       {children}
     </section>
   )
+}
+
+/**
+ * Indicador de la rotación. Un televisor no tiene controles, así que la única
+ * forma de saber que la pantalla va a cambiar sola (y que no se quedó pegada)
+ * es que se vea el ciclo.
+ */
+function Puntos({ total, activo }: { total: number; activo: number }) {
+  return (
+    <span style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+      {Array.from({ length: total }, (_, i) => (
+        <span
+          key={i}
+          style={{
+            width: 11,
+            height: 11,
+            borderRadius: '50%',
+            background: i === activo ? M.brand : M.line,
+          }}
+        />
+      ))}
+    </span>
+  )
+}
+
+/**
+ * Color por umbral, con los umbrales que vienen del dato (terciles del equipo
+ * en ese período), no escritos aquí.
+ *
+ * Si no hay dispersión (`alta <= baja`) no se pinta nada: cuando todos valen lo
+ * mismo no hay a quién señalar, y pintar de todos modos sería inventar una
+ * diferencia. Es el mismo defecto que tenía el semáforo agregado.
+ */
+function colorTecnica(v: number, u: UmbralesRanking): string | undefined {
+  if (!u || u.tecnicaAlta <= u.tecnicaBaja) return undefined
+  if (v >= u.tecnicaAlta) return M.ok
+  if (v <= u.tecnicaBaja) return M.crit
+  return undefined
+}
+
+function colorBanderas(v: number, u: UmbralesRanking): string | undefined {
+  if (!u || u.banderasAlta <= u.banderasBaja) return v === 0 ? M.ok : undefined
+  if (v >= u.banderasAlta) return M.crit
+  if (v <= u.banderasBaja) return M.ok
+  return undefined
 }

@@ -74,6 +74,67 @@ export interface LlamadaDetalle extends LlamadaResumen {
   eventos: EventoCinta[]
 }
 
+export type Periodo = 'dia' | 'semana' | 'mes'
+
+/** Como se titula cada temporalidad y de que rango habla, dicho en pantalla. */
+export const PERIODO_LABEL: Record<Periodo, string> = {
+  dia: 'Ranking día',
+  semana: 'Ranking semana',
+  mes: 'Ranking mes',
+}
+
+export const PERIODO_RANGO: Record<Periodo, string> = {
+  dia: 'hoy',
+  semana: 'últimos 7 días',
+  mes: 'últimos 30 días',
+}
+
+/**
+ * Una fila del ranking. Los DOS EJES de la rubrica, separados:
+ *
+ *   - `tecnica`  — promedio de puntaje del periodo, 0-100. Como ejecuta la venta.
+ *   - `banderas` — CONTEO de errores criticos del periodo. A que expone a la
+ *     empresa. Es conteo y no promedio a proposito: un error critico no se
+ *     promedia con nada, y el promedio de una falla grave con muchas llamadas
+ *     limpias la hace desaparecer.
+ *
+ * Son independientes y por eso van en columnas distintas. Un semaforo unico
+ * (que era lo que habia hasta v4) los fundia y, agregado a un dia entero,
+ * dejaba a casi todos en rojo: una columna donde todos valen lo mismo no
+ * ordena, solo ocupa espacio.
+ */
+export interface FilaRanking {
+  agente: string
+  llamadas: number
+  cierres: number
+  pctCierre: number
+  tecnica: number
+  banderas: number
+}
+
+/**
+ * Umbrales de color, calculados del propio dato: son los terciles (p33/p67) del
+ * equipo EN ESE PERIODO, no numeros escritos a mano en el componente.
+ *
+ * Un umbral fijo ("tecnica bajo 70 es mala") es una opinion sobre una operacion
+ * que no conocemos. Los terciles se auto-normalizan y siempre señalan el mejor
+ * y el peor tercio. Si no hay dispersion (alta = baja) la pantalla no pinta
+ * nada: no hay a quien señalar.
+ */
+export interface UmbralesRanking {
+  tecnicaBaja: number
+  tecnicaAlta: number
+  banderasBaja: number
+  banderasAlta: number
+}
+
+export interface RankingPeriodo {
+  desde: string
+  hasta: string
+  filas: FilaRanking[]
+  umbrales: UmbralesRanking
+}
+
 /**
  * Datos del muro proyectable. Tres zonas y nada mas: es lo que cabe en un
  * televisor y se lee a tres metros.
@@ -111,28 +172,14 @@ export interface MuroData {
   } | null
 
   /**
-   * Tabla de agentes: el ACUMULADO del dia, por nombre de pila. TODOS, sin
-   * recorte — una lista truncada es informacion sesgada: si un agente no
-   * aparece, el piso no puede saber si es que no cerro o que no cupo.
+   * El ranking en tres temporalidades. El muro rota solo entre ellas: nadie
+   * toca un televisor, asi que no puede depender de un clic.
    *
-   * `llamadas` + `pctCierre` son el denominador. Sin ellos "6 cierres" no dice
-   * nada, y con ellos aparece lo que la pantalla existe para mostrar: quien
-   * cierra al mismo ritmo con la mitad de llamadas.
-   *
-   * `tarjeta` es la forma de pago en el dato, pero en pantalla se llama
-   * "cobrado": lo que importa no es el instrumento sino que el dinero entro
-   * completo hoy.
+   * Las tres viajan en la MISMA respuesta a proposito. Re-consultar en cada
+   * giro haria que la rotacion dependa de la red, y un fallo de fetch dejaria
+   * la pantalla en blanco a mitad de ciclo.
    */
-  ranking: {
-    agente: string
-    llamadas: number
-    cierres: number
-    pctCierre: number
-    /** Cuantos de esos cierres se cobraron completos (forma de pago tarjeta). */
-    tarjeta: number
-    montoUsd: number
-    semaforo: Semaforo
-  }[]
+  rankings: Record<Periodo, RankingPeriodo>
 
   /**
    * Zona 2b — el flujo: lo que esta pasando AHORA.

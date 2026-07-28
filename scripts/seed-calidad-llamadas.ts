@@ -302,6 +302,78 @@ const PERFILES_AGENTE = [
 /** Precio del programa, del guion real: US$799 en seis cuotas o de una vez. */
 const PRECIO_PROGRAMA = 799
 
+/**
+ * Dias de operacion que se siembran, contando hoy.
+ *
+ * El muro rota entre dia, semana y mes. Con un solo dia sembrado, dos de las
+ * tres pantallas salen en blanco. Treinta dias es lo minimo para que la vista
+ * de mes signifique algo: por debajo de eso no alcanza a distinguirse un mal
+ * dia de un patron, que es justamente lo que la pantalla tiene que mostrar.
+ *
+ * El dia de hoy NO se genera con esta maquinaria: se siembra aparte, con sus
+ * semillas y sus `cliente_ref` originales, para que los numeros que ya se
+ * revisaron en pantalla no se muevan ni un digito.
+ */
+const DIAS_HISTORIA = 30
+
+/** Fecha (YYYY-MM-DD) a `d` dias antes del dia ancla. */
+function fechaOffset(d: number): string {
+  const f = new Date(`${DIA}T12:00:00Z`)
+  f.setUTCDate(f.getUTCDate() - d)
+  return f.toISOString().slice(0, 10)
+}
+
+type PerfilAgente = (typeof PERFILES_AGENTE)[number]
+type PlanDia = { llamadas: number; semaforos: number[]; cierres: number; tarjeta: number }
+
+/**
+ * Cuanto trabaja y como le va a un agente en un dia del pasado.
+ *
+ * La regla de diseño es una sola: **el caracter del agente no cambia, el
+ * volumen si**. Lo que varia dia a dia es cuantas llamadas tomo y cuantas
+ * cerro; el reparto de semaforo conserva las proporciones de su perfil, y el
+ * jitter solo mueve llamadas entre colores que el perfil YA tiene.
+ *
+ * Esa ultima condicion es la que hace util la vista de mes: Tatiana (8/0/0)
+ * nunca gana un rojo por sorteo, asi que su limpieza se sostiene en el tiempo
+ * en vez de ser la suerte de un dia. Si el jitter pudiera introducir un color
+ * nuevo, el mes promediaria ruido y las tres pantallas dirian lo mismo.
+ */
+function planDelDia(perfil: PerfilAgente, iPerfil: number, d: number): PlanDia {
+  const r = prng(900000 + d * 97 + iPerfil)
+
+  const factor = 0.75 + r() * 0.45 // 0.75 – 1.20
+  const llamadas = Math.max(4, Math.round(perfil.llamadas * factor))
+
+  // Proporciones del perfil, escaladas al volumen del dia.
+  const base = perfil.semaforos as unknown as number[]
+  const total = base.reduce((a, b) => a + b, 0)
+  const sem = base.map((n) => Math.floor((n / total) * llamadas))
+  // El sobrante del redondeo va al color dominante del agente: es su caracter.
+  const dominante = base.indexOf(Math.max(...base))
+  sem[dominante] += llamadas - sem.reduce((a, b) => a + b, 0)
+
+  // Jitter: mueve UNA llamada entre dos colores que el perfil ya tiene.
+  const presentes = base.map((n, i) => (n > 0 ? i : -1)).filter((i) => i >= 0)
+  if (presentes.length > 1) {
+    const desde = elegir(r, presentes)
+    const hacia = elegir(r, presentes.filter((i) => i !== desde))
+    if (sem[desde] > 1) {
+      sem[desde] -= 1
+      sem[hacia] += 1
+    }
+  }
+
+  const cierres = Math.min(
+    llamadas,
+    Math.max(0, Math.round(perfil.cierres * factor * (0.7 + r() * 0.6))),
+  )
+  const propTarjeta = perfil.cierres > 0 ? perfil.tarjeta / perfil.cierres : 0
+  const tarjeta = Math.min(cierres, Math.round(cierres * propTarjeta))
+
+  return { llamadas, semaforos: sem, cierres, tarjeta }
+}
+
 const CODIGOS = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6'] as const
 const SEVERIDAD_POR_CODIGO: Record<string, string> = {
   C1: 'critica', C2: 'critica', C3: 'alta', C4: 'alta', C5: 'media', C6: 'media',
@@ -464,116 +536,182 @@ async function main() {
     hallazgos.push({ workspace_id: workspaceId, llamada_id: idSim, eje: 'tecnica', ...e })
   }
 
-  // ── 3. 96 de relleno, por perfil de agente ────────────────────────────────
+  // ── 3. Relleno de un dia, por perfil de agente ────────────────────────────
   //
-  // Se genera agente por agente segun PERFILES_AGENTE: cada uno aporta su
+  // Se genera agente por agente segun el plan del dia: cada uno aporta su
   // reparto exacto de semaforo, sus cierres y su mezcla de forma de pago. El
-  // PRNG (sembrado por indice global) decide puntaje, duracion, hora y que
-  // banderas caen — nunca a quien le toca que.
+  // PRNG decide puntaje, duracion, hora y que banderas caen — nunca a quien le
+  // toca que.
   //
-  // Las 15 de Felipe llevan su `agente_staff_id` real: son las que ve en su
-  // vista de ejecutor. Las de los agentes ficticios van con NULL, asi que un
-  // ejecutor no las ve por construccion.
-  let idxGlobal = 0
-  for (const perfil of PERFILES_AGENTE) {
-    const [nVerde, nAmarillo] = perfil.semaforos
-    const esFelipe = perfil.nombre === 'Felipe Sandoval'
+  // Las de Felipe llevan su `agente_staff_id` real: son las que ve en su vista
+  // de ejecutor. Las de los agentes ficticios van con NULL, asi que un ejecutor
+  // no las ve por construccion.
+  //
+  // `semilla` y `ref` entran como parametro para que el dia de hoy conserve
+  // EXACTAMENTE las suyas (1000+idx y LL-0001…): los numeros de esa pantalla ya
+  // se revisaron y no se pueden mover al agregar historia detras.
+  function sembrarDia(opts: {
+    fecha: string
+    planes: { perfil: PerfilAgente; plan: PlanDia }[]
+    semilla: (idx: number) => number
+    ref: (idx: number) => string
+  }): Record<string, unknown>[] {
+    const delDia: Record<string, unknown>[] = []
+    let idx = 0
 
-    // Llamadas del agente, con su semaforo ya asignado por posicion.
-    // Se guarda `ref` (el cliente_ref) porque el desempate de cierres tiene que
-    // ser determinista: el `id` es un UUID aleatorio y usarlo para ordenar hace
-    // que dos corridas repartan las tarjetas distinto.
-    const delAgente: { id: string; ref: string; semaforo: string; tecnica: number }[] = []
+    for (const { perfil, plan } of opts.planes) {
+      const [nVerde, nAmarillo] = plan.semaforos
+      const esFelipe = perfil.nombre === 'Felipe Sandoval'
 
-    for (let j = 0; j < perfil.llamadas; j++) {
-      const r = prng(1000 + idxGlobal)
-      const semaforo = j < nVerde ? 'verde' : j < nVerde + nAmarillo ? 'amarillo' : 'rojo'
-      const tecnica =
-        semaforo === 'verde' ? entre(r, 74, 92)
-        : semaforo === 'amarillo' ? entre(r, 62, 84)
-        : entre(r, 38, 81)
+      // Llamadas del agente, con su semaforo ya asignado por posicion.
+      // Se guarda `ref` (el cliente_ref) porque el desempate de cierres tiene
+      // que ser determinista: el `id` es un UUID aleatorio y usarlo para
+      // ordenar hace que dos corridas repartan las tarjetas distinto.
+      const delAgente: { id: string; ref: string; semaforo: string; tecnica: number }[] = []
 
-      const hora = entre(r, 8, 18)
-      const minuto = entre(r, 0, 59)
-      const id = nuevoId()
-      idxGlobal += 1
-      const ref = `LL-${String(idxGlobal).padStart(4, '0')}`
+      for (let j = 0; j < plan.llamadas; j++) {
+        const r = prng(opts.semilla(idx))
+        const semaforo = j < nVerde ? 'verde' : j < nVerde + nAmarillo ? 'amarillo' : 'rojo'
+        const tecnica =
+          semaforo === 'verde' ? entre(r, 74, 92)
+          : semaforo === 'amarillo' ? entre(r, 62, 84)
+          : entre(r, 38, 81)
 
-      llamadas.push({
-        id,
-        workspace_id: workspaceId,
-        cliente_ref: ref,
-        fecha_hora: `${DIA}T${String(hora).padStart(2, '0')}:${String(minuto).padStart(2, '0')}:00-05:00`,
-        fecha_grabacion: null,
-        direccion: r() < 0.55 ? 'entrante' : 'saliente',
-        duracion_seg: entre(r, 480, 4200),
-        agente_staff_id: esFelipe ? staffFelipe : null,
-        agente_nombre: perfil.nombre,
-        puntaje_tecnico: tecnica,
-        semaforo,
-        habla_agente_pct: null,
-        habla_cliente_pct: null,
-        turnos: null,
-        repreguntas: null,
-        monologos_45s: null,
-        // Sin transcripcion: no hay pantalla de detalle para estas.
-        detalle_completo: false,
-        es_real: false,
-        // Se decide abajo, cuando ya estan todas las del agente.
-        cerro_venta: false,
-        forma_pago: null,
-        monto_usd: null,
-        lote: LOTE,
-      })
-      delAgente.push({ id, ref, semaforo, tecnica })
+        const hora = entre(r, 8, 18)
+        const minuto = entre(r, 0, 59)
+        const id = nuevoId()
+        idx += 1
+        const ref = opts.ref(idx)
 
-      // 0 a 3 banderas, agregadas: sin cita y sin segundo real (segundo = 0).
-      const nBanderas = semaforo === 'verde' ? 0 : semaforo === 'amarillo' ? entre(r, 1, 2) : entre(r, 1, 3)
-      const usados = new Set<string>()
-      for (let k = 0; k < nBanderas; k++) {
-        // Verde no llega aqui. Amarillo nunca levanta critica (C1/C2): eso es lo
-        // que hace que el semaforo signifique algo.
-        const pool = semaforo === 'amarillo' ? (['C3', 'C4', 'C5', 'C6'] as const) : CODIGOS
-        let cod = elegir(r, pool)
-        let intentos = 0
-        while (usados.has(cod) && intentos < 8) {
-          cod = elegir(r, pool)
-          intentos++
-        }
-        if (usados.has(cod)) continue
-        usados.add(cod)
-        hallazgos.push({
+        const fila = {
+          id,
           workspace_id: workspaceId,
-          llamada_id: id,
-          eje: 'cumplimiento',
-          codigo: cod,
-          severidad: SEVERIDAD_POR_CODIGO[cod],
-          titulo: TITULO_POR_CODIGO[cod],
-          hecho: null,
-          cita: null,
-          segundo: 0,
-        })
+          cliente_ref: ref,
+          fecha_hora: `${opts.fecha}T${String(hora).padStart(2, '0')}:${String(minuto).padStart(2, '0')}:00-05:00`,
+          fecha_grabacion: null,
+          direccion: r() < 0.55 ? 'entrante' : 'saliente',
+          duracion_seg: entre(r, 480, 4200),
+          agente_staff_id: esFelipe ? staffFelipe : null,
+          agente_nombre: perfil.nombre,
+          puntaje_tecnico: tecnica,
+          semaforo,
+          habla_agente_pct: null,
+          habla_cliente_pct: null,
+          turnos: null,
+          repreguntas: null,
+          monologos_45s: null,
+          // Sin transcripcion: no hay pantalla de detalle para estas.
+          detalle_completo: false,
+          es_real: false,
+          // Se decide abajo, cuando ya estan todas las del agente.
+          cerro_venta: false,
+          forma_pago: null as string | null,
+          monto_usd: null as number | null,
+          lote: LOTE,
+        }
+        delDia.push(fila)
+        delAgente.push({ id, ref, semaforo, tecnica })
+
+        // 0 a 3 banderas, agregadas: sin cita y sin segundo real (segundo = 0).
+        const nBanderas = semaforo === 'verde' ? 0 : semaforo === 'amarillo' ? entre(r, 1, 2) : entre(r, 1, 3)
+        const usados = new Set<string>()
+        for (let k = 0; k < nBanderas; k++) {
+          // Verde no llega aqui. Amarillo nunca levanta critica (C1/C2): eso es
+          // lo que hace que el semaforo signifique algo.
+          const pool = semaforo === 'amarillo' ? (['C3', 'C4', 'C5', 'C6'] as const) : CODIGOS
+          let cod = elegir(r, pool)
+          let intentos = 0
+          while (usados.has(cod) && intentos < 8) {
+            cod = elegir(r, pool)
+            intentos++
+          }
+          if (usados.has(cod)) continue
+          usados.add(cod)
+          hallazgos.push({
+            workspace_id: workspaceId,
+            llamada_id: id,
+            eje: 'cumplimiento',
+            codigo: cod,
+            severidad: SEVERIDAD_POR_CODIGO[cod],
+            titulo: TITULO_POR_CODIGO[cod],
+            hecho: null,
+            cita: null,
+            segundo: 0,
+          })
+        }
+      }
+
+      // ── Cierres del agente ─────────────────────────────────────────────
+      //
+      // Cierran las de mejor tecnica, y de esas las mejores llevan tarjeta. No
+      // es una ley del negocio, es una regla legible y determinista: una
+      // llamada bien llevada tiene mas chance de cerrar, y la tarjeta se
+      // consigue cuando la conversacion fue solida. Sergio no da tasas
+      // ("depende de la base"), asi que el mix se diseña, no se estima.
+      // Desempate por `ref`, NUNCA por `id`: el id es un UUID aleatorio y
+      // ordenar por el hace que dos corridas repartan las tarjetas distinto.
+      const orden = [...delAgente].sort((a, b) => b.tecnica - a.tecnica || a.ref.localeCompare(b.ref))
+      const porId = new Map(delDia.map((l) => [l.id as string, l]))
+      for (let c = 0; c < plan.cierres && c < orden.length; c++) {
+        const fila = porId.get(orden[c].id)!
+        fila.cerro_venta = true
+        fila.forma_pago = c < plan.tarjeta ? 'tarjeta' : 'cuenta'
+        fila.monto_usd = PRECIO_PROGRAMA
       }
     }
 
-    // ── Cierres del agente ───────────────────────────────────────────────
-    //
-    // Cierran las de mejor tecnica, y de esas las mejores llevan tarjeta. No es
-    // una ley del negocio, es una regla legible y determinista: una llamada
-    // bien llevada tiene mas chance de cerrar, y la tarjeta se consigue cuando
-    // la conversacion fue solida. Sergio no da tasas ("depende de la base"),
-    // asi que el mix se diseña, no se estima.
-    // Desempate por `ref`, NUNCA por `id`: el id es un UUID aleatorio y ordenar
-    // por el hace que dos corridas del mismo dia repartan las tarjetas distinto.
-    const orden = [...delAgente].sort((a, b) => b.tecnica - a.tecnica || a.ref.localeCompare(b.ref))
-    const porId = new Map(llamadas.map((l) => [l.id as string, l]))
-    for (let c = 0; c < perfil.cierres && c < orden.length; c++) {
-      const fila = porId.get(orden[c].id)!
-      fila.cerro_venta = true
-      fila.forma_pago = c < perfil.tarjeta ? 'tarjeta' : 'cuenta'
-      fila.monto_usd = PRECIO_PROGRAMA
-    }
+    return delDia
   }
+
+  // ── 3a. Hoy ───────────────────────────────────────────────────────────────
+  //
+  // Semillas y refs originales: esta es la pantalla que ya se reviso.
+  const rellenoHoy = sembrarDia({
+    fecha: DIA,
+    planes: PERFILES_AGENTE.map((perfil) => ({
+      perfil,
+      plan: {
+        llamadas: perfil.llamadas,
+        semaforos: perfil.semaforos as unknown as number[],
+        cierres: perfil.cierres,
+        tarjeta: perfil.tarjeta,
+      },
+    })),
+    // `semilla` recibe el indice ANTES de incrementar y `ref` despues: asi
+    // quedan 1000+0 para la primera llamada y LL-0001 para su referencia,
+    // identico a como se sembro la pantalla que ya se reviso.
+    semilla: (idx) => 1000 + idx,
+    ref: (idx) => `LL-${String(idx).padStart(4, '0')}`,
+  })
+  llamadas.push(...rellenoHoy)
+
+  // Las de hoy (relleno + las dos auditadas) son las que verifica el contraste
+  // y las que alimentan el heroe del muro. La historia va aparte.
+  const llamadasHoy = [...llamadas]
+
+  // ── 3b. Historia ──────────────────────────────────────────────────────────
+  //
+  // Los dias previos existen para que el muro pueda rotar a semana y a mes.
+  // Nada de esto se ve en el detalle: son llamadas sin transcripcion, y las dos
+  // auditadas siguen siendo de hoy.
+  //
+  // NOTA ABIERTA: se siembran los 30 dias corridos, sin calendario laboral.
+  // Sergio no dijo si operan fines de semana y no vamos a inventarle una
+  // jornada al cliente; el volumen varia dia a dia pero ningun dia queda en
+  // cero. Si confirma que no operan domingos, es una linea aqui.
+  const porDia = new Map<string, number>([[DIA, llamadasHoy.length]])
+  for (let d = 1; d < DIAS_HISTORIA; d++) {
+    const fecha = fechaOffset(d)
+    const filas = sembrarDia({
+      fecha,
+      planes: PERFILES_AGENTE.map((perfil, i) => ({ perfil, plan: planDelDia(perfil, i, d) })),
+      semilla: (idx) => 200000 + d * 5000 + idx,
+      ref: (idx) => `LL-D${String(d).padStart(2, '0')}-${String(idx).padStart(4, '0')}`,
+    })
+    llamadas.push(...filas)
+    porDia.set(fecha, filas.length)
+  }
+  console.log(`historia       ${DIAS_HISTORIA} dias · ${llamadas.length} llamadas en total`)
 
   // ── Insercion ─────────────────────────────────────────────────────────────
   const enLotes = async (tabla: string, filas: Record<string, unknown>[]) => {
@@ -591,35 +729,23 @@ async function main() {
 
   // ── Cobertura ─────────────────────────────────────────────────────────────
   //
-  // Dia ancla: todo auditado, baseline 5 (lo que se audita a mano). Los 10 dias
-  // previos son el contrafactual: auditadas ~= 5% de recibidas. Todo relativo
-  // al dia ancla, nunca a una fecha fija.
+  // Recibidas = auditadas = las llamadas realmente sembradas ESE dia, para que
+  // el sello del muro ("98 de 98 auditadas") cuadre con la lista y con el
+  // ranking. Si se pone un redondo a mano, la pantalla se contradice sola.
   //
-  // Recibidas = auditadas = las llamadas realmente sembradas, para que el pie
-  // del muro ("98 de 98 auditadas") cuadre con la lista y con el ranking. Si se
-  // pone un redondo a mano, la pantalla se contradice sola.
-  const cobertura: Record<string, unknown>[] = [
-    {
-      workspace_id: workspaceId,
-      fecha: DIA,
-      recibidas: llamadas.length,
-      auditadas: llamadas.length,
-      baseline_manual: 5,
-    },
-  ]
-  for (let d = 1; d <= 10; d++) {
-    const r = prng(500 + d)
-    const fecha = new Date(`${DIA}T12:00:00Z`)
-    fecha.setUTCDate(fecha.getUTCDate() - d)
-    const recibidas = entre(r, 82, 118)
-    cobertura.push({
-      workspace_id: workspaceId,
-      fecha: fecha.toISOString().slice(0, 10),
-      recibidas,
-      auditadas: Math.max(3, Math.round(recibidas * 0.05)),
-      baseline_manual: Math.max(3, Math.round(recibidas * 0.05)),
-    })
-  }
+  // `baseline_manual` es el contrafactual: lo que alcanzaban a escuchar a mano,
+  // ~5% de las recibidas. Antes ese 5% se ponia en `auditadas` para los dias
+  // previos, pero ahora esos dias TIENEN sus llamadas auditadas sembradas (la
+  // vista de mes las agrega): decir que solo se auditaron 5 mientras el ranking
+  // del mes suma 2.900 seria contradecirse en la misma pantalla. El argumento
+  // no se pierde, vive donde corresponde.
+  const cobertura = [...porDia.entries()].map(([fecha, n]) => ({
+    workspace_id: workspaceId,
+    fecha,
+    recibidas: n,
+    auditadas: n,
+    baseline_manual: Math.max(3, Math.round(n * 0.05)),
+  }))
   const { error: eCob } = await svc.from('calidad_cobertura_dia').insert(cobertura)
   if (eCob) throw new Error(`cobertura: ${eCob.message}`)
   console.log(`cobertura      ${cobertura.length} dias`)
@@ -660,14 +786,12 @@ async function main() {
       monto_en_riesgo_usd: Number((4 * CUOTA_CUENTA).toFixed(2)),
     },
   ]
-  for (let d = 1; d <= 10; d++) {
+  for (let d = 1; d < DIAS_HISTORIA; d++) {
     const r = prng(700 + d)
-    const fecha = new Date(`${DIA}T12:00:00Z`)
-    fecha.setUTCDate(fecha.getUTCDate() - d)
     const rebotados = entre(r, 1, 6)
     recobro.push({
       workspace_id: workspaceId,
-      fecha: fecha.toISOString().slice(0, 10),
+      fecha: fechaOffset(d),
       debitos_rebotados: rebotados,
       pendientes_recobro: entre(r, 0, rebotados),
       monto_en_riesgo_usd: Number((rebotados * CUOTA_CUENTA).toFixed(2)),
@@ -684,14 +808,15 @@ async function main() {
   if (sumaSim !== 36) throw new Error(`suma(bloques) simulada = ${sumaSim}, se esperaba 36`)
   console.log(`verificado     suma(bloques) real=${sumaReal} simulada=${sumaSim}`)
 
-  const porSemaforo = llamadas.reduce<Record<string, number>>((acc, l) => {
+  const porSemaforo = llamadasHoy.reduce<Record<string, number>>((acc, l) => {
     const s = l.semaforo as string
     acc[s] = (acc[s] ?? 0) + 1
     return acc
   }, {})
-  console.log(`semáforos      ${JSON.stringify(porSemaforo)}`)
+  console.log(`semáforos hoy  ${JSON.stringify(porSemaforo)}`)
   console.log(
-    `de Felipe      ${llamadas.filter((l) => l.agente_staff_id === staffFelipe).length} llamadas`,
+    `de Felipe      ${llamadasHoy.filter((l) => l.agente_staff_id === staffFelipe).length} hoy · ` +
+      `${llamadas.filter((l) => l.agente_staff_id === staffFelipe).length} en el mes`,
   )
 
   // ── Verificacion: el ranking tiene que producir el contraste ──────────────
@@ -700,11 +825,28 @@ async function main() {
   // cierres en verde, o deja a todos en rojo, el muro pierde su razon de ser y
   // el seed tiene que fallar ruidosamente en vez de sembrar una pantalla que no
   // dice nada.
+  // Se verifica el DIA: es la pantalla con la que se abre la reunion. La
+  // historia hereda los mismos perfiles, asi que si el dia tiene contraste el
+  // mes tambien — y si no lo tuviera, es porque los perfiles cambiaron y hay
+  // que enterarse aqui, no en el televisor.
+  const criticasPorLlamada = new Map<string, number>()
+  for (const h of hallazgos) {
+    if (h.severidad !== 'critica') continue
+    const k = h.llamada_id as string
+    criticasPorLlamada.set(k, (criticasPorLlamada.get(k) ?? 0) + 1)
+  }
+
   const RANK_SEV = { rojo: 3, amarillo: 2, verde: 1 } as const
-  const rank = new Map<string, { cierres: number; tarjeta: number; peor: number }>()
-  for (const l of llamadas) {
+  const rank = new Map<
+    string,
+    { llamadas: number; cierres: number; tarjeta: number; peor: number; tecnica: number; criticas: number }
+  >()
+  for (const l of llamadasHoy) {
     const agente = (l.agente_nombre as string).split(' ')[0]
-    const acc = rank.get(agente) ?? { cierres: 0, tarjeta: 0, peor: 0 }
+    const acc = rank.get(agente) ?? { llamadas: 0, cierres: 0, tarjeta: 0, peor: 0, tecnica: 0, criticas: 0 }
+    acc.llamadas += 1
+    acc.tecnica += l.puntaje_tecnico as number
+    acc.criticas += criticasPorLlamada.get(l.id as string) ?? 0
     if (l.cerro_venta) {
       acc.cierres += 1
       if (l.forma_pago === 'tarjeta') acc.tarjeta += 1
@@ -716,6 +858,7 @@ async function main() {
     .map(([agente, v]) => ({
       agente,
       ...v,
+      tecnica: Math.round(v.tecnica / v.llamadas),
       semaforo: v.peor === 3 ? 'rojo' : v.peor === 2 ? 'amarillo' : 'verde',
     }))
     .sort((a, b) => b.cierres - a.cierres || a.agente.localeCompare(b.agente))
@@ -737,20 +880,41 @@ async function main() {
     )
   }
 
-  const cierres = llamadas.filter((l) => l.cerro_venta)
+  // Contraste v5: la tabla ahora muestra TECNICA y BANDERAS, no un semaforo.
+  // Si el que mas cierra fuera tambien el de mejor tecnica y sin criticas, las
+  // dos columnas nuevas no aportarian nada y sobrarian.
+  const mejorTecnica = [...tabla].sort((a, b) => b.tecnica - a.tecnica)[0]
+  if (mejorTecnica.agente === lider.agente) {
+    throw new Error(
+      `${lider.agente} lidera en cierres Y en tecnica. Las columnas de tecnica y banderas existen ` +
+        `para desmentir o confirmar el ranking de ventas: si coinciden, no dicen nada.`,
+    )
+  }
+  if (!tabla.some((a) => a.criticas === 0)) {
+    throw new Error(
+      'Todos los agentes tienen al menos un error critico. Una columna donde todos valen lo mismo ' +
+        'no ordena, solo ocupa espacio — que fue exactamente el reclamo sobre el semaforo.',
+    )
+  }
+
+  const cierres = llamadasHoy.filter((l) => l.cerro_venta)
   const conTarjeta = cierres.filter((l) => l.forma_pago === 'tarjeta').length
   console.log(
-    `cierres        ${cierres.length} de ${llamadas.length} llamadas · ` +
+    `cierres hoy    ${cierres.length} de ${llamadasHoy.length} llamadas · ` +
       `${conTarjeta} tarjeta / ${cierres.length - conTarjeta} cuenta · ` +
       `US$${cierres.length * PRECIO_PROGRAMA}`,
   )
-  console.log(`contraste      lider ${lider.agente} (${lider.cierres} cierres, ${lider.semaforo}) · ` +
-    `limpio ${limpioQueCierra.agente} (${limpioQueCierra.cierres} cierres, todo tarjeta, verde)`)
-  console.log('ranking')
+  console.log(
+    `contraste      lider ${lider.agente} (${lider.cierres} cierres · técnica ${lider.tecnica} · ` +
+      `${lider.criticas} críticas) · mejor técnica ${mejorTecnica.agente} (${mejorTecnica.tecnica} · ` +
+      `${mejorTecnica.criticas} críticas)`,
+  )
+  console.log('ranking día    AGENTE     LLAM CIER  %CIE  TEC  BAND')
   for (const a of tabla) {
     console.log(
-      `               ${a.agente.padEnd(9)} ${String(a.cierres).padStart(2)} cierres · ` +
-        `${a.tarjeta} tarjeta · ${a.semaforo}`,
+      `               ${a.agente.padEnd(9)} ${String(a.llamadas).padStart(4)} ` +
+        `${String(a.cierres).padStart(4)} ${String(Math.round((100 * a.cierres) / a.llamadas)).padStart(4)}% ` +
+        `${String(a.tecnica).padStart(4)} ${String(a.criticas).padStart(5)}`,
     )
   }
 }
