@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  getConfigNotificaciones,
+  supervisoresDeArea,
+  type ConfigNotificaciones,
+} from '@/lib/notificaciones/routing'
 
 // N1 — Cron de inactividad en negocios (etapa venta)
 // Escalamiento: 3d (ejecutor), 5d (ejecutor+supervisor), 7d (ejecutor+supervisor+admin), 15d (todos)
@@ -21,6 +26,8 @@ export async function GET(req: NextRequest) {
   const now = new Date()
   let procesadas = 0
   let notificacionesCreadas = 0
+  // El loop recorre negocios; la config es por workspace y se repite mucho.
+  const configCache = new Map<string, ConfigNotificaciones>()
 
   // Obtener negocios en venta (abiertos)
   const { data: negocios } = await supabase
@@ -82,28 +89,54 @@ export async function GET(req: NextRequest) {
       ? `"${negocio.nombre}" lleva ${diasSinActividad} días sin gestión — ¿cerrar como perdido?`
       : `"${negocio.nombre}" lleva ${diasSinActividad} días sin actividad`
 
-    const { data: perfiles } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('workspace_id', negocio.workspace_id)
-
-    if (!perfiles) continue
-
     const destinatarios = new Set<string>()
+    const cfg = await getConfigNotificaciones(supabase, negocio.workspace_id, configCache)
 
-    for (const rol of nivelActual.roles) {
-      if (rol === 'supervisor') {
-        const supervisorComercial = perfiles.find(p => p.role === 'supervisor')
-        if (supervisorComercial) destinatarios.add(supervisorComercial.id)
-      } else {
-        const perfil = perfiles.find(p => p.role === rol)
-        if (perfil) destinatarios.add(perfil.id)
+    if (cfg.routing_por_responsable) {
+      // ── Routing por responsable (opt-in por workspace) ──────────────────
+      // El aviso sigue a QUIEN LLEVA EL NEGOCIO. Antes se elegía por rol
+      // global del workspace (el primer operator, el primer supervisor, el
+      // owner) sin mirar el caso: medido en SOENA, el 96% de los avisos
+      // llegaba a gente ajena al negocio — incluido el owner de MeTRIK.
+      const { data: dest } = await supabase.rpc('destinatarios_negocio', {
+        p_negocio_id: negocio.id,
+      })
+      for (const d of (dest ?? []) as Array<{ profile_id: string }>) {
+        if (d.profile_id) destinatarios.add(d.profile_id)
       }
-    }
 
-    if (destinatarios.size === 0) {
-      const owner = perfiles.find(p => p.role === 'owner')
-      if (owner) destinatarios.add(owner.id)
+      // El supervisor entra recién cuando el caso de verdad se estancó, no
+      // desde el primer aviso (evita que vea 50 avisos al día).
+      if (diasSinActividad >= cfg.escalar_supervisor_dias) {
+        for (const id of await supervisoresDeArea(supabase, negocio.workspace_id, 'comercial')) {
+          destinatarios.add(id)
+        }
+      }
+      // Sin fallback a owner: es deliberado. El owner de un workspace Clarity
+      // puede ser MeTRIK, que no opera el día a día del cliente.
+    } else {
+      // ── Comportamiento histórico (workspaces sin el flag) ───────────────
+      const { data: perfiles } = await supabase
+        .from('profiles')
+        .select('id, role')
+        .eq('workspace_id', negocio.workspace_id)
+
+      if (!perfiles) continue
+
+      for (const rol of nivelActual.roles) {
+        if (rol === 'supervisor') {
+          const supervisorComercial = perfiles.find(p => p.role === 'supervisor')
+          if (supervisorComercial) destinatarios.add(supervisorComercial.id)
+        } else {
+          const perfil = perfiles.find(p => p.role === rol)
+          if (perfil) destinatarios.add(perfil.id)
+        }
+      }
+
+      if (destinatarios.size === 0) {
+        const owner = perfiles.find(p => p.role === 'owner')
+        if (owner) destinatarios.add(owner.id)
+      }
     }
 
     for (const destinatarioId of destinatarios) {
