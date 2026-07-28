@@ -48,6 +48,57 @@ export const FUENTES_ADQUISICION = [
 
 export type FuenteAdquisicion = typeof FUENTES_ADQUISICION[number]['value']
 
+// ── Origen del negocio ───────────────────────────────────────
+//
+// FUENTE ÚNICA del catálogo de `negocios.origen`. Si hay que agregar, quitar o
+// renombrar un origen, se hace AQUÍ y en ningún otro sitio: no hay CHECK en la
+// base de datos ni copia en la UI (el formulario, el badge de la tarjeta y el
+// filtro del listado leen esta lista).
+//
+// NO es lo mismo que FUENTES_ADQUISICION (arriba), que describe cómo se
+// consiguió un CONTACTO. El origen responde de dónde vino el NEGOCIO y es la
+// base del cálculo de comisiones, por eso vive en columna propia y se captura
+// obligatoriamente al crearlo. Un negocio tiene un solo origen.
+//
+// `alianza` es el único que exige contraparte concreta: el formulario pide
+// además el aliado (negocios.aliado_id) y solo se ofrece en workspaces con el
+// módulo `aliados` activo.
+//
+// `chipClass` es el token del badge en la tarjeta del listado (paleta MeTRIK,
+// no Tailwind genérico). El azul de `meta` es el de la marca Facebook, que ya
+// se usaba en el marcador de leads de Meta.
+export const ORIGENES_NEGOCIO = [
+  { value: 'meta', label: 'Meta (Facebook / Instagram)', chipClass: 'bg-[#1877F2]/10 text-[#1877F2]' },
+  { value: 'alianza', label: 'Alianza', chipClass: 'bg-[#8B5CF6]/10 text-[#7C3AED]' },
+  { value: 'referido', label: 'Referido', chipClass: 'bg-[#10B981]/10 text-[#059669]' },
+  { value: 'promotor', label: 'Promotor', chipClass: 'bg-[#F59E0B]/10 text-[#B45309]' },
+  { value: 'contacto_directo', label: 'Contacto directo', chipClass: 'bg-[#F5F4F2] text-[#6B7280]' },
+  { value: 'evento', label: 'Evento / Networking', chipClass: 'bg-[#0EA5E9]/10 text-[#0284C7]' },
+  { value: 'web_organico', label: 'Web / Orgánico', chipClass: 'bg-[#14B8A6]/10 text-[#0F766E]' },
+  { value: 'otro', label: 'Otro', chipClass: 'bg-[#F5F4F2] text-[#6B7280]' },
+] as const
+
+export type OrigenNegocio = typeof ORIGENES_NEGOCIO[number]['value']
+
+/** Origen que exige elegir un aliado concreto (negocios.aliado_id). */
+export const ORIGEN_ALIANZA: OrigenNegocio = 'alianza'
+
+/** ¿El valor pertenece al catálogo? Usado por la validación server-side. */
+export function esOrigenNegocioValido(value: unknown): value is OrigenNegocio {
+  return ORIGENES_NEGOCIO.some((o) => o.value === value)
+}
+
+export function origenNegocioConfig(value: string | null | undefined) {
+  if (!value) return null
+  return ORIGENES_NEGOCIO.find((o) => o.value === value) ?? null
+}
+
+/** Etiqueta legible; si el valor no está en el catálogo, se muestra tal cual. */
+export function origenNegocioLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return origenNegocioConfig(value)?.label ?? value
+}
+
 // ── Roles de contacto (D2) ───────────────────────────────────
 
 export const ROLES_CONTACTO = [

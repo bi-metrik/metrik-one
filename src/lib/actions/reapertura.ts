@@ -225,11 +225,14 @@ export async function crearNegocioDesdeCerrado(
     return { ok: false, error: 'No autenticado' }
   }
 
-  // Cargar origen
-  const { data: origen } = await supabase
+  // Cargar origen. Cast del cliente: `negocios.origen`/`aliado_id` son columnas
+  // nuevas que aún no están en database.ts generado (mismo patrón `db()` que
+  // usa negocio-v2-actions.ts para el resto del schema nuevo).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: origen } = await (supabase as any)
     .from('negocios')
     .select(
-      'id, workspace_id, codigo, nombre, empresa_id, contacto_id, linea_id, stage_actual, cierre_motivo',
+      'id, workspace_id, codigo, nombre, empresa_id, contacto_id, linea_id, stage_actual, cierre_motivo, origen, aliado_id',
     )
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
@@ -244,6 +247,8 @@ export async function crearNegocioDesdeCerrado(
     linea_id: string | null
     stage_actual: string | null
     cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
+    origen: string | null
+    aliado_id: string | null
   }
 
   if (o.stage_actual !== 'cerrado') {
@@ -281,6 +286,12 @@ export async function crearNegocioDesdeCerrado(
     linea_id: o.linea_id,
     etapa_actual_id: etapaInicialId,
     estado: 'abierto',
+    // El negocio nuevo hereda el origen del cerrado: es el mismo cliente que
+    // llegó por el mismo canal. Sin esto, una reapertura nacería sin origen y
+    // el conteo perdería el negocio. Se hereda tal cual, incluso NULL (negocio
+    // anterior a la captura de origen): no se inventa un dato que no existe.
+    origen: o.origen,
+    aliado_id: o.aliado_id,
   }
 
   const { data: nuevo, error: insErr } = await supabase

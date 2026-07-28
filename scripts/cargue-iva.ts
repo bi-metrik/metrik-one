@@ -177,6 +177,10 @@ async function main() {
     nombre: `${CASO.nombre} - ${CASO.marca}`, codigo: CASO.codigo,
     precio_estimado: null, precio_aprobado: null, responsable_id: JESSICA_STAFF,
     etapa_actual_id: ENVIO_ETAPA, stage_actual: 'ejecucion', estado: 'abierto',
+    // Origen: cargue de casos que venían de HubSpot. No hay registro del canal
+    // real por caso, así que 'otro' — ningún negocio debe nacer sin origen, y
+    // adivinar el canal contaminaría el conteo de la financiera.
+    origen: 'otro',
   }).select('id').single()
   if (nerr) throw new Error(`negocio: ${nerr.message}`)
   const negocioId = (neg as { id: string }).id
