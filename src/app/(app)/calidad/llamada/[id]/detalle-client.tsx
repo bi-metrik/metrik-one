@@ -8,7 +8,7 @@ import { CintaTemporal } from '../../components/cinta-temporal'
 import { BloquesTecnica } from '../../components/bloques-tecnica'
 import { HablaSplit } from '../../components/habla-split'
 import { OrigenBadge, SeveridadBadge } from '../../components/semaforo-badge'
-import { DISCLAIMER_BANDERAS, mmss, SEMAFORO_LABEL, type LlamadaDetalle } from '../../types'
+import { DISCLAIMER_BANDERAS, duracion, mmss, SEMAFORO_LABEL, type LlamadaDetalle } from '../../types'
 
 export default function DetalleClient({ llamada }: { llamada: LlamadaDetalle }) {
   // Clic en una bandera → la cinta salta a su segundo. Es el gesto que conecta
@@ -69,7 +69,7 @@ export default function DetalleClient({ llamada }: { llamada: LlamadaDetalle }) 
           <OrigenBadge esReal={llamada.esReal} />
         </h1>
         <p style={{ color: C.inkMuted, marginTop: 5, maxWidth: '66ch', fontSize: 14 }}>
-          {mmss(llamada.duracionSeg)} minutos, llamada {llamada.direccion}, cliente {llamada.clienteRef}.
+          {duracion(llamada.duracionSeg)} de llamada {llamada.direccion}, cliente {llamada.clienteRef}.
           {llamada.esReal
             ? ' Auditada sobre transcripción literal con marca de tiempo por turno. Cada hallazgo de abajo tiene su minuto.'
             : ' Guion simulado de demostración. Agente y cliente ficticios: no corresponden a ninguna persona real.'}

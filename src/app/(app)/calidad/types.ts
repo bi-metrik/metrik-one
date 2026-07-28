@@ -166,9 +166,33 @@ export const SEMAFORO_LABEL: Record<Semaforo, string> = {
   rojo: 'Rojo',
 }
 
-/** mm:ss a partir de segundos. 3914 → "65:14". */
+/**
+ * POSICION dentro de la grabacion, en mm:ss. 1497 → "24:57".
+ *
+ * Este formato es canonico y no se toca: la auditoria cita los minutos asi
+ * ("el codigo de seguridad se pidio en 24:57") y el memo legal los reproduce
+ * textualmente. Cambiarlo desalinearia la pantalla del documento.
+ *
+ * NO usar para duraciones — para eso esta `duracion()`.
+ */
 export function mmss(segundos: number): string {
   const m = Math.floor(segundos / 60)
   const s = segundos % 60
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/**
+ * DURACION de una llamada, con unidad explicita. 3914 → "1 h 05 min".
+ *
+ * En mm:ss una llamada de 66 minutos se muestra "66:02", y al lado de una
+ * columna de horas se lee como una hora del dia. La unidad quita la ambiguedad
+ * sin obligar a leer dos veces.
+ */
+export function duracion(segundos: number): string {
+  const h = Math.floor(segundos / 3600)
+  const m = Math.floor((segundos % 3600) / 60)
+  const s = segundos % 60
+  if (h > 0) return `${h} h ${String(m).padStart(2, '0')} min`
+  if (m > 0) return `${m} min ${String(s).padStart(2, '0')} s`
+  return `${s} s`
 }

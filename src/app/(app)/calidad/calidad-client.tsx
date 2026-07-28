@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { C, MONO } from './components/tokens'
 import { OrigenBadge, SemaforoBadge } from './components/semaforo-badge'
-import { mmss, type LlamadaResumen, type Semaforo } from './types'
+import { duracion, type LlamadaResumen, type Semaforo } from './types'
 
 const FILTROS = [
   { key: 'todas', label: 'Todas' },
@@ -174,7 +174,7 @@ export default function CalidadClient({
                     </td>
                     <td style={td}>{l.agenteNombre}</td>
                     <td style={{ ...td, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
-                      {mmss(l.duracionSeg)}
+                      {duracion(l.duracionSeg)}
                     </td>
                     <td style={{ ...td, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
                       {l.puntajeTecnico}
