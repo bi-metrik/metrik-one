@@ -1436,3 +1436,110 @@ export async function rechazarRepartoComercial(
   revalidatePath('/conciliacion')
   return { success: true, eliminados: comercial.length }
 }
+
+// ── Pago fuera de ePayco (registro excepcional del área financiera) ───────────
+
+/** Negocio elegible para recibir un pago que no entró por ePayco. */
+export interface NegocioParaPagoFueraEpayco {
+  negocio_id: string
+  codigo: string | null
+  nombre: string | null
+  empresa: string | null
+}
+
+/**
+ * Lista los negocios abiertos del workspace para el buscador del registro de pago
+ * fuera de ePayco. Solo área financiera (ctxFinanciero).
+ */
+export async function getNegociosParaPagoFueraEpayco(): Promise<{
+  negocios: NegocioParaPagoFueraEpayco[]
+  error?: string
+}> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { negocios: [], error: ctx.error }
+  const { supabase, workspaceId } = ctx
+
+  const { data: raw } = await db(supabase)
+    .from('negocios')
+    .select('id, codigo, nombre, empresas:empresa_id ( nombre )')
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'abierto')
+    .order('created_at', { ascending: false })
+
+  const negocios: NegocioParaPagoFueraEpayco[] = ((raw ?? []) as Array<{
+    id: string
+    codigo: string | null
+    nombre: string | null
+    empresas: { nombre: string | null } | null
+  }>).map((n) => ({
+    negocio_id: n.id,
+    codigo: n.codigo,
+    nombre: n.nombre,
+    empresa: n.empresas?.nombre ?? null,
+  }))
+
+  return { negocios }
+}
+
+export interface PagoFueraEpaycoInput {
+  negocio_id: string
+  /** Valor recibido, en pesos. */
+  monto: number
+  /** 'YYYY-MM-DD'. Default: hoy (Bogotá). */
+  fecha?: string
+  /** Cuenta por la que entró el dinero. Se guarda en `cobros.fuente`. */
+  fuente: 'davivienda' | 'otra'
+}
+
+/**
+ * Registra un pago que NO entró por ePayco: solo negocio + valor + fecha + fuente.
+ *
+ * NO es conciliación ni reparto — es la captura de un ingreso excepcional que llegó
+ * a una cuenta bancaria (Davivienda u otra). Exclusivo del área financiera
+ * (ctxFinanciero aquí + el blindaje de `registrarPagoEnNegocio`, que revalida la
+ * sesión en su rama no-ePayco).
+ *
+ * No hay referencia de pasarela, así que se genera una interna trazable
+ * (`FUERA-EPAYCO-...`): `cobros.external_ref` es la llave del registro de pagos y
+ * del control de duplicados, no puede quedar vacía. La `fuente` se persiste aunque
+ * hoy no alimente ningún cálculo: habilita un control de saldo por cuenta a futuro.
+ */
+export async function registrarPagoFueraEpayco(
+  input: PagoFueraEpaycoInput,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const monto = Number(input.monto)
+  if (!Number.isFinite(monto) || monto <= 0) {
+    return { success: false, error: 'El valor del pago debe ser mayor a cero' }
+  }
+  if (input.fuente !== 'davivienda' && input.fuente !== 'otra') {
+    return { success: false, error: 'Elige la cuenta por la que entró el pago' }
+  }
+
+  const fecha = (input.fecha ?? '').trim() || todayBogotaISO()
+  const referencia = `FUERA-EPAYCO-${fecha.replace(/-/g, '')}-${randomUUID().slice(0, 6).toUpperCase()}`
+
+  const res = await registrarPagoEnNegocio(
+    supabase,
+    workspaceId,
+    staffId,
+    {
+      negocio_id: input.negocio_id,
+      fuente: input.fuente,
+      // `registrarPagoEnNegocio` exige nombre cuando la fuente es 'otra'; el
+      // formulario es mínimo y no lo pide → queda etiquetado como 'otra'.
+      fuente_nombre: input.fuente === 'otra' ? 'otra' : undefined,
+      referencia,
+      monto,
+      fecha,
+      tipo_cobro: 'externo',
+    },
+    'conciliacion',
+  )
+
+  if (!res.success) return { success: false, error: res.error }
+  return { success: true }
+}
