@@ -44,6 +44,10 @@ export const ROLE_PERMISSIONS = {
     canViewFlujo: true,
     canConfigSlaEtapas: true,         // Solo owner configura SLA
     canViewSlaLog: true,              // owner/admin/supervisor ven historial de SLA
+    // ── Calidad de llamadas (modulo calidad_llamadas) ───────
+    canViewCalidad: true,             // Entrar a /calidad
+    canViewCalidadTodos: true,        // Ver las llamadas de TODOS los agentes
+    canViewCalidadDinero: true,       // Vista de dueno: vendido vs recaudado
   },
   admin: {
     label: 'Admin',
@@ -78,6 +82,10 @@ export const ROLE_PERMISSIONS = {
     canViewFlujo: true,
     canConfigSlaEtapas: false,        // Solo owner configura SLA
     canViewSlaLog: true,
+    // Calidad — admin ve toda la operacion pero no la plata del dueno
+    canViewCalidad: true,
+    canViewCalidadTodos: true,
+    canViewCalidadDinero: false,
   },
   supervisor: {
     label: 'Supervisor',
@@ -112,6 +120,11 @@ export const ROLE_PERMISSIONS = {
     canViewFlujo: true,
     canConfigSlaEtapas: false,
     canViewSlaLog: true,
+    // Calidad — el supervisor de calidad es quien audita: ve todos los agentes,
+    // no ve el dinero (esa vista es exclusiva del dueno).
+    canViewCalidad: true,
+    canViewCalidadTodos: true,
+    canViewCalidadDinero: false,
   },
   operator: {
     label: 'Ejecutor',
@@ -146,6 +159,12 @@ export const ROLE_PERMISSIONS = {
     canViewFlujo: false,              // Operador ve negocios directamente, no necesita vista de proceso
     canConfigSlaEtapas: false,
     canViewSlaLog: false,
+    // Calidad — el ejecutor (agente) entra a /calidad pero SOLO ve sus propias
+    // llamadas. El filtro es server-side por agente_staff_id, en la lista Y en
+    // el detalle (ver src/app/(app)/calidad/actions.ts).
+    canViewCalidad: true,
+    canViewCalidadTodos: false,
+    canViewCalidadDinero: false,
   },
   contador: {
     label: 'Contador',
@@ -180,6 +199,10 @@ export const ROLE_PERMISSIONS = {
     canViewFlujo: false,
     canConfigSlaEtapas: false,
     canViewSlaLog: false,
+    // Calidad — el contador no tiene nada que hacer en auditoria de llamadas
+    canViewCalidad: false,
+    canViewCalidadTodos: false,
+    canViewCalidadDinero: false,
   },
   read_only: {
     label: 'Lectura',
@@ -214,6 +237,10 @@ export const ROLE_PERMISSIONS = {
     canViewFlujo: false,
     canConfigSlaEtapas: false,
     canViewSlaLog: false,
+    // Calidad — auditor: ve todas las llamadas, no ve la plata
+    canViewCalidad: true,
+    canViewCalidadTodos: true,
+    canViewCalidadDinero: false,
   },
 } as const
 

@@ -28,6 +28,9 @@ export function landingForWorkspace(
     // ALMA y similares con consulta de listas (flag dual) -> Listas Restrictivas
     if (mods.compliance_dual_informa) return '/compliance/listas';
     if (mods.compliance) return '/riesgos';
+    // Call center de solo calidad. Sin esta rama caeria a /mi-negocio, que el
+    // ejecutor no puede ver (roles owner/admin/supervisor) -> aterrizaje roto.
+    if (mods.calidad_llamadas) return '/calidad';
     return '/mi-negocio';
   }
 

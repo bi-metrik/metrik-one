@@ -78,6 +78,10 @@ export async function middleware(request: NextRequest) {
     // flag del workspace y solo expone lotes estado='publicado' via service-role.
     if (pathname.startsWith('/cert/')) return supabaseResponse
     if (pathname.startsWith('/c/')) return supabaseResponse
+    // Muro proyectable (televisor del piso, sin login). La pagina valida el
+    // modulo, el opt-in config_extra.muro_publico y el token de la URL, y solo
+    // expone agregados sin dinero ni identificador de cliente.
+    if (pathname.startsWith('/muro/')) return supabaseResponse
 
     // No autenticado → login DEL MISMO SUBDOMAIN (no marketing). Asi el magic link
     // siembra sesion en este subdomain via /auth/callback, en lugar de pasar por
@@ -205,7 +209,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected app routes — redirect to login if not authenticated
-  const protectedPaths = ['/numeros', '/negocios', '/directorio', '/nuevo', '/gastos', '/config', '/mi-negocio', '/story-mode', '/tableros', '/revision', '/equipo', '/movimientos']
+  const protectedPaths = ['/numeros', '/negocios', '/directorio', '/nuevo', '/gastos', '/config', '/mi-negocio', '/story-mode', '/tableros', '/revision', '/equipo', '/movimientos', '/calidad']
   if (protectedPaths.some(p => pathname.startsWith(p)) && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', pathname)

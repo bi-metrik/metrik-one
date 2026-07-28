@@ -27,6 +27,9 @@ import {
   Scale,
   Sliders,
   Receipt,
+  Headphones,
+  MonitorPlay,
+  Landmark,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -57,6 +60,8 @@ interface WorkspaceModules {
   comercial_negocios?: boolean
   /** Directorio de aliados (/directorio/aliados). Contrapartes comerciales con acuerdo. */
   aliados?: boolean
+  /** Auditoria de calidad de llamadas (/calidad). Multi-cliente: call centers. */
+  calidad_llamadas?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -147,6 +152,25 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   { href: '/compliance/listas', label: 'Listas Restrictivas', icon: ListChecks, roles: ['owner', 'admin', 'supervisor', 'read_only', 'operator'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Comparativa interna MeTRIK — solo workspace metrik
   { href: '/compliance/comparativa-informa', label: 'Comparativa Informa', icon: Scale, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_audit', value: true } },
+]
+
+// Calidad de llamadas (activable por flag calidad_llamadas). Grupo propio.
+//
+// Ruta propia y NO un tab de /tableros: ese archivo esta acoplado a
+// mod.business y tocarlo arriesga los workspaces que ya lo usan.
+//
+// Tres items con visibilidad distinta a proposito:
+//   - Llamadas: todos los roles con acceso. El ejecutor entra pero solo ve las
+//     suyas (filtro server-side por agente_staff_id).
+//   - Muro: sin operator. Es el televisor del piso, no una herramienta del agente.
+//   - Vista de dueño: solo owner. Lleva dinero.
+//
+// Ocultar un item del menu NO impide teclear la URL: cada page.tsx guarda por
+// su cuenta. Esto es solo la capa visual.
+const CALIDAD_NAV_ITEMS = [
+  { href: '/calidad', label: 'Llamadas', icon: Headphones, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+  { href: '/calidad/muro', label: 'Muro', icon: MonitorPlay, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  { href: '/calidad/dueno', label: 'Vista de dueño', icon: Landmark, roles: ['owner'] },
 ]
 
 // Valida (extra inferior, activable por flag)
@@ -341,6 +365,11 @@ export default function AppShell({
     : [])
   // En modo vitrina, Valida se muestra aunque el flag valida_consulta no esté (el
   // shell vitrina ES para clientes Valida-only). Fuera de vitrina, opt-in normal.
+  // Calidad de llamadas — opt-in por flag. Sin el flag, ningun workspace
+  // existente cambia su sidebar (el grupo queda vacio y no se renderiza).
+  const calidadItems = vitrinaGate(mod.calidad_llamadas
+    ? filterByRole(applyOverride(CALIDAD_NAV_ITEMS), role)
+    : [])
   const validaItems = (modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : []
   const certItems = vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : [])
   const extrasItems = [...validaItems, ...certItems]
@@ -354,14 +383,23 @@ export default function AppShell({
 
   // Home href based on active modules. En modo vitrina el home es Valida (la única
   // superficie funcional); /numeros y /mi-negocio podrían estar ocultos.
-  const homeHref = modoVitrina ? '/valida' : (mod.business ? '/numeros' : (mod.compliance ? '/riesgos' : '/mi-negocio'))
+  const homeHref = modoVitrina
+    ? '/valida'
+    : (mod.business
+      ? '/numeros'
+      : (mod.compliance
+        ? '/riesgos'
+        : (mod.calidad_llamadas ? '/calidad' : '/mi-negocio')))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...sharedItems, ...validaItems, ...certItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...validaItems, ...certItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
     ? ['/valida', '/tableros', '/numeros']
     : (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
+    // Workspace de solo calidad (call center): sus tres rutas son las primarias.
+    : (!mod.business && mod.calidad_llamadas)
+    ? ['/calidad', '/calidad/muro', '/calidad/dueno', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
   const mobilePrimary = allMobileItems.filter(item => primaryHrefs.includes(item.href))
   const mobileSecondary = allMobileItems.filter(item => !primaryHrefs.includes(item.href))
@@ -599,6 +637,46 @@ export default function AppShell({
               )}
               {validacionItems.map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={!sidebarExpanded ? item.label : undefined}
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${
+                      isActive
+                        ? 'shadow-sm'
+                        : 'hover:opacity-90'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>{item.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Calidad de llamadas — activable por flag calidad_llamadas */}
+          {calidadItems.length > 0 && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
+              {sidebarExpanded && (
+                <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sidebar-muted)' }}>
+                  Calidad
+                </p>
+              )}
+              {calidadItems.map((item) => {
+                // '/calidad' hace prefix-match con '/calidad/muro' y '/calidad/dueno':
+                // sin el exacto, los tres items quedarian activos a la vez.
+                const isActive = item.href === '/calidad'
+                  ? pathname === '/calidad' || pathname.startsWith('/calidad/llamada/')
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (
                   <Link
