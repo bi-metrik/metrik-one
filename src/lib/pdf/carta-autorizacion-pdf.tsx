@@ -12,10 +12,11 @@ import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
  * No lleva marca MéTRIK: es una comunicación del cliente a la DIAN, igual que la
  * Declaración Juramentada.
  *
- * QUIÉN AUTORIZA A QUIÉN: el beneficiario es el solicitante PRINCIPAL (bloque `rut`),
- * porque es el que figura como titular en los formularios DIAN del mismo expediente;
- * el segundo solicitante (`rut_solicitante_2`) es quien cede. Mantenerlo al revés
- * dejaría la carta contradiciendo al 010.
+ * QUIÉN AUTORIZA A QUIÉN: el beneficiario es el solicitante PRINCIPAL (bloque `rut`)
+ * y el segundo solicitante (`rut_solicitante_2`) es quien cede. Confirmado por
+ * Mauricio el 2026-07-28: "el primer RUT es el del beneficiario". Coincide con los
+ * formularios DIAN del mismo expediente, que nombran al principal como titular;
+ * invertirlo dejaría la carta contradiciendo al 010.
  *
  * GÉNERO GRAMATICAL: el sistema no captura el género de los solicitantes, así que se
  * usan formas dobles ("identificado(a)", "domiciliado(a)"). La proforma original venía
