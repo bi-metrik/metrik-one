@@ -10,6 +10,7 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
 import { generarFormulario1668, type Formulario1668Datos, type Formulario1668Constantes } from '@/lib/pdf/formulario-1668'
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
+import CartaAutorizacionPDF from '@/lib/pdf/carta-autorizacion-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
@@ -291,6 +292,21 @@ function getTemplateComponent(
         fechaGeneracion,
         codigoNegocio,
       })
+    case 'carta-autorizacion':
+      return createElement(CartaAutorizacionPDF, {
+        datos: datos as {
+          autorizante_nombre: string | null
+          autorizante_identificacion: string | null
+          autorizante_domicilio: string | null
+          beneficiario_nombre: string | null
+          beneficiario_identificacion: string | null
+          beneficiario_domicilio: string | null
+          numero_factura: string | null
+          municipio: string | null
+        },
+        fechaGeneracion,
+        codigoNegocio,
+      })
     case 'relacion-facturas':
       return createElement(RelacionFacturasPDF, {
         datos: datos as {
@@ -389,6 +405,42 @@ export async function generarFormularioCore(
     const constantes = (configExtra.campos_constantes ?? {}) as Record<string, string>
 
     if (!template) return { success: false, error: 'Template no configurado' }
+
+    // 1b. Prerrequisitos: documentos que deben existir ANTES de poder generar.
+    // Sin esto el PDF sale con los placeholders puestos y alguien lo manda al
+    // cliente creyendo que está completo. El caso concreto: la carta de
+    // autorización necesita los DOS RUT cargados, porque nombra e identifica a
+    // ambos comparecientes.
+    const requiereBloques = (configExtra.requiere_bloques ?? []) as Array<{ slug: string; label?: string }>
+    if (requiereBloques.length > 0) {
+      const slugs = requiereBloques.map(r => r.slug)
+      const { data: previos } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data, estado, bloque_configs!inner(slug)')
+        .eq('negocio_id', negocioId)
+        .in('bloque_configs.slug', slugs)
+
+      const conDato = new Set<string>()
+      for (const p of ((previos ?? []) as Array<{ data: Record<string, unknown> | null; bloque_configs: { slug: string } | null }>)) {
+        const slug = p.bloque_configs?.slug
+        if (!slug) continue
+        const d = (p.data ?? {}) as Record<string, unknown>
+        // Un bloque de documento cuenta como presente cuando tiene archivo o campos
+        // extraídos; `data` vacío significa que nadie lo ha cargado todavía.
+        const tieneArchivo = Boolean(d.drive_url || d.storage_path || d.url)
+        const tieneCampos = Boolean(d.campos && Object.keys(d.campos as object).length > 0)
+        if (tieneArchivo || tieneCampos) conDato.add(slug)
+      }
+
+      const faltan = requiereBloques.filter(r => !conDato.has(r.slug))
+      if (faltan.length > 0) {
+        const nombres = faltan.map(f => f.label ?? f.slug).join(', ')
+        return {
+          success: false,
+          error: `Falta cargar antes: ${nombres}. El documento nombra e identifica a cada parte, así que no se puede generar sin esos datos.`,
+        }
+      }
+    }
 
     // 2. Resolve source campos
     const { datos, faltantes } = await resolverCamposFuente(
