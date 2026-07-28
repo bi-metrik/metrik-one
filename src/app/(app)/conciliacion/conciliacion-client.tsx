@@ -19,6 +19,7 @@ import {
   type NegocioSaldo,
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
+import { MAX_LARGO_REF_EXTERNA, referenciaVisible } from '@/lib/cobros/referencia-externa'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -153,7 +154,7 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
       {/* Encabezado: referencia + total + badge propuesto */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: '#F3F4F6' }}>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{r.external_ref}</span>
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]" title={r.external_ref}>{referenciaVisible(r.external_ref)}</span>
           {r.fuente && <FuenteBadge fuente={r.fuente} small />}
           {esReparto && (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
@@ -362,7 +363,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                 >
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     {open ? <ChevronDown className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} /> : <ChevronRight className="h-4 w-4 shrink-0" style={{ color: '#9CA3AF' }} />}
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]">{r.external_ref}</span>
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]" title={r.external_ref}>{referenciaVisible(r.external_ref)}</span>
                     {r.fuente && <FuenteBadge fuente={r.fuente} small />}
                     {multi && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
@@ -584,7 +585,7 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
                 <div className="mt-2 flex flex-wrap gap-1.5 border-t pt-2" style={{ borderColor: '#F3F4F6' }}>
                   {n.referencias.map((r) => (
                     <span key={r.external_ref} className="inline-flex items-center gap-1 rounded bg-gray-50 px-1.5 py-0.5 text-[11px]" style={{ color: '#6B7280' }}>
-                      <span className="font-mono">{r.external_ref}</span>
+                      <span className="font-mono" title={r.external_ref}>{referenciaVisible(r.external_ref)}</span>
                       {r.fuente && <FuenteBadge fuente={r.fuente} small />}
                       <span className="tabular-nums">{fmtCOP(r.monto)}</span>
                       {r.fecha && <span style={{ color: '#9CA3AF' }}>· {r.fecha}</span>}
@@ -606,9 +607,11 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
 
 /**
  * Registro de un pago que NO entró por la pasarela: cayó a Davivienda u otra cuenta.
- * Formulario mínimo — negocio, valor, fecha y cuenta. NO pide referencia de pasarela,
- * NO reparte y NO concilia: es solo la captura del ingreso contra el negocio.
- * Deliberadamente separado de la bandeja de aceptar/rechazar repartos.
+ * Formulario mínimo — negocio, valor, fecha, cuenta y referencia OPCIONAL (número de
+ * consignación o comprobante, para trazabilidad). Sin referencia el registro NO se
+ * bloquea: el sistema genera una interna. NO reparte y NO concilia: es solo la captura
+ * del ingreso contra el negocio. Deliberadamente separado de la bandeja de
+ * aceptar/rechazar repartos.
  */
 function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
   const hoyBogota = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
@@ -622,6 +625,7 @@ function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState(hoyBogota)
   const [fuente, setFuente] = useState<'davivienda' | 'otra'>('davivienda')
+  const [referencia, setReferencia] = useState('')
   const [pending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -660,10 +664,11 @@ function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
         monto: valor,
         fecha: fecha || undefined,
         fuente,
+        referencia: referencia.trim() || undefined,
       })
       if (res.success) {
         toast.success('Pago registrado')
-        setNegocioId(''); setQ(''); setMonto(''); setFecha(hoyBogota); setFuente('davivienda')
+        setNegocioId(''); setQ(''); setMonto(''); setFecha(hoyBogota); setFuente('davivienda'); setReferencia('')
         onDone()
       } else {
         toast.error(res.error)
@@ -795,6 +800,25 @@ function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
             ))}
           </div>
         </div>
+
+        {/* Referencia — opcional. Si no la tienes a mano, el sistema genera una interna. */}
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>
+            Referencia <span className="font-normal" style={{ color: '#9CA3AF' }}>(opcional)</span>
+          </span>
+          <input
+            value={referencia}
+            onChange={(e) => setReferencia(e.target.value.slice(0, MAX_LARGO_REF_EXTERNA))}
+            placeholder="N.º de consignación o comprobante"
+            maxLength={MAX_LARGO_REF_EXTERNA}
+            className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
+            style={{ borderColor: '#E5E7EB' }}
+          />
+          <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>
+            Si no la tienes a mano, déjala vacía: el sistema genera una referencia interna.
+            Un mismo comprobante no se puede registrar dos veces.
+          </p>
+        </label>
 
         <div className="flex justify-end">
           <button

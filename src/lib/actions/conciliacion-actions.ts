@@ -13,6 +13,11 @@ import {
   type ModeloDinero,
 } from '@/lib/upme/modelo-dinero'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
+import {
+  construirRefExterna,
+  normalizarRefExterna,
+  MAX_LARGO_REF_EXTERNA,
+} from '@/lib/cobros/referencia-externa'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -1516,20 +1521,36 @@ export interface PagoFueraEpaycoInput {
   fecha?: string
   /** Cuenta por la que entró el dinero. Se guarda en `cobros.fuente`. */
   fuente: 'davivienda' | 'otra'
+  /**
+   * OPCIONAL. Número de consignación o comprobante real, escrito por la financiera.
+   * Se persiste prefijada (`EXT-…`) en `cobros.external_ref`. Vacío → referencia
+   * interna autogenerada.
+   */
+  referencia?: string
 }
 
 /**
- * Registra un pago que NO entró por ePayco: solo negocio + valor + fecha + fuente.
+ * Registra un pago que NO entró por ePayco: negocio + valor + fecha + fuente, con
+ * referencia opcional (número de consignación o comprobante).
  *
  * NO es conciliación ni reparto — es la captura de un ingreso excepcional que llegó
  * a una cuenta bancaria (Davivienda u otra). Exclusivo del área financiera
  * (ctxFinanciero aquí + el blindaje de `registrarPagoEnNegocio`, que revalida la
  * sesión en su rama no-ePayco).
  *
- * No hay referencia de pasarela, así que se genera una interna trazable
- * (`FUERA-EPAYCO-...`): `cobros.external_ref` es la llave del registro de pagos y
- * del control de duplicados, no puede quedar vacía. La `fuente` se persiste aunque
- * hoy no alimente ningún cálculo: habilita un control de saldo por cuenta a futuro.
+ * `cobros.external_ref` es la llave del registro de pagos y del control de duplicados
+ * (`refDuplicadaNoSplit`), no puede quedar vacía. Dos casos:
+ *   - Con referencia escrita: se guarda prefijada `EXT-{referencia}` (ver
+ *     `referencia-externa.ts`). Vive en su propio espacio de nombres → un comprobante
+ *     NO puede hacerse pasar por una referencia real de ePayco (siempre numérica
+ *     pura), y a la vez SÍ cuenta para el control de duplicados: teclear dos veces el
+ *     mismo comprobante queda frenado (en el mismo negocio es idempotente, en otro se
+ *     rechaza).
+ *   - Sin referencia (la financiera no la tiene a mano): no se bloquea el registro; se
+ *     genera una interna trazable (`FUERA-EPAYCO-...`), única por construcción.
+ *
+ * La `fuente` se persiste aunque hoy no alimente ningún cálculo: habilita un control
+ * de saldo por cuenta a futuro.
  */
 export async function registrarPagoFueraEpayco(
   input: PagoFueraEpaycoInput,
@@ -1546,8 +1567,15 @@ export async function registrarPagoFueraEpayco(
     return { success: false, error: 'Elige la cuenta por la que entró el pago' }
   }
 
+  const refEscrita = normalizarRefExterna(input.referencia)
+  if (refEscrita && refEscrita.length > MAX_LARGO_REF_EXTERNA) {
+    return { success: false, error: `La referencia no puede superar ${MAX_LARGO_REF_EXTERNA} caracteres` }
+  }
+
   const fecha = (input.fecha ?? '').trim() || todayBogotaISO()
-  const referencia = `FUERA-EPAYCO-${fecha.replace(/-/g, '')}-${randomUUID().slice(0, 6).toUpperCase()}`
+  const referencia =
+    construirRefExterna(refEscrita) ??
+    `FUERA-EPAYCO-${fecha.replace(/-/g, '')}-${randomUUID().slice(0, 6).toUpperCase()}`
 
   const res = await registrarPagoEnNegocio(
     supabase,
