@@ -48,6 +48,24 @@ async function ctxFinanciero(): Promise<
   return { ok: true, supabase, workspaceId, staffId, user }
 }
 
+/**
+ * ¿La sesión actual pertenece al área financiera? Mismo criterio que `ctxFinanciero`
+ * (canEditBloque del stage 'cobro'), pero resuelto SIEMPRE desde la sesión — no desde
+ * el contexto que ya trae el caller. Se usa para blindar el registro de pagos que NO
+ * entraron por ePayco dentro de la vía única de escritura, para que ninguna ruta de
+ * entrada (FAB, panel, acción futura) pueda saltárselo por olvido.
+ */
+async function esAreaFinanciera(): Promise<boolean> {
+  const { workspaceId, staffId, role, areas, error } = await getWorkspace()
+  if (error || !workspaceId) return false
+  const user: UserContext = {
+    id: staffId ?? '',
+    role: (role ?? 'read_only') as Role,
+    areas: (areas ?? []) as Area[],
+  }
+  return canEditBloque(user, { stage: 'cobro' }, [])
+}
+
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
 /** Un negocio elegible para recibir una porción de un pago repartido. */
@@ -949,6 +967,18 @@ export async function registrarPagoEnNegocio(
 > {
   const negocioId = input.negocio_id
   if (!negocioId) return { success: false, error: 'Elige el negocio al que se asigna el pago' }
+
+  // Un pago que NO entra por ePayco (Davivienda u otra cuenta) es un registro
+  // EXCEPCIONAL y solo lo hace el área financiera. El comercial sigue registrando
+  // sus pagos ePayco como siempre (esa rama no cambia). El chequeo vive aquí, en la
+  // vía única de escritura, y se resuelve desde la sesión: así ningún caller —
+  // presente o futuro — puede registrar un pago fuera de ePayco sin ser financiera.
+  if (input.fuente !== 'epayco' && !(await esAreaFinanciera())) {
+    return {
+      success: false,
+      error: 'Solo el área financiera puede registrar pagos que no entraron por ePayco.',
+    }
+  }
 
   const { data: neg } = await db(supabase)
     .from('negocios').select('id').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
