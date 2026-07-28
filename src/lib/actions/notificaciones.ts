@@ -37,6 +37,13 @@ export type NotificacionItem = {
   deep_link: string | null
   metadata: Record<string, unknown>
   created_at: string
+  /**
+   * Presente cuando el aviso es de EQUIPO: varias personas ven el mismo hecho.
+   * Al completarlo uno, se resuelve para todos (ver `marcarCompletada`).
+   * Descartar, en cambio, es personal: "yo no me ocupo" no cierra el pendiente
+   * de los demás.
+   */
+  grupo_clave?: string | null
 }
 
 // ── Obtener notificaciones del usuario actual ─────────
@@ -64,22 +71,49 @@ export async function getNotificaciones(offset = 0): Promise<NotificacionesPagin
 
   const { data, count } = await supabase
     .from('notificaciones')
-    .select('id, tipo, estado, contenido, entidad_tipo, entidad_id, deep_link, metadata, created_at', {
-      count: 'exact',
-    })
+    .select(
+      'id, tipo, estado, contenido, entidad_tipo, entidad_id, deep_link, metadata, created_at, grupo_clave',
+      { count: 'exact' },
+    )
     .eq('destinatario_id', userId)
     .eq('estado', 'pendiente')
     .order('created_at', { ascending: false })
     .range(offset, offset + NOTIFICACIONES_PAGE_SIZE - 1)
 
-  return { items: (data ?? []) as NotificacionItem[], total: count ?? 0 }
+  // Cast puntual: `grupo_clave` es columna nueva y `database.ts` aún no se
+  // regeneró (mismo patrón que kyc_expediente_ref / drive-health en el repo).
+  return { items: (data ?? []) as unknown as NotificacionItem[], total: count ?? 0 }
 }
 
 // ── Marcar una notificación como completada ───────────
 
 export async function marcarCompletada(id: string) {
-  const { supabase, userId, error } = await getWorkspace()
+  const { supabase, userId, workspaceId, error } = await getWorkspace()
   if (error || !userId) return { success: false, error: 'No autenticado' }
+
+  // ¿Es un pendiente de equipo? (varias personas viendo el mismo hecho)
+  const { data: fila } = await supabase
+    .from('notificaciones')
+    .select('grupo_clave')
+    .eq('id', id)
+    .eq('destinatario_id', userId)
+    .maybeSingle()
+
+  const grupoClave = (fila as { grupo_clave: string | null } | null)?.grupo_clave
+
+  if (grupoClave && workspaceId) {
+    // Lo atendió uno -> desaparece de la campana de todos. Es la diferencia
+    // entre "ya se resolvió" y "cada quien arrastra su copia del pendiente".
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: rpcError } = await (supabase as any).rpc('resolver_grupo_notificaciones', {
+      p_workspace_id: workspaceId,
+      p_grupo_clave: grupoClave,
+      p_resuelta_por: userId,
+    })
+    if (rpcError) return { success: false, error: rpcError.message }
+    revalidatePath('/', 'layout')
+    return { success: true }
+  }
 
   const { error: dbError } = await supabase
     .from('notificaciones')

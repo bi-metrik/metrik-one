@@ -329,7 +329,7 @@ export async function repartirPagoComercial(
     montoTotal = Math.min(montoTotal, desglose.monto_bruto)
   }
 
-  return repartirPagoCore(
+  const resultado = await repartirPagoCore(
     supabase,
     workspaceId,
     staffId,
@@ -337,6 +337,46 @@ export async function repartirPagoComercial(
     'comercial',
     { validarNegociosAbiertos: true, bloquearReferenciaExistente: true },
   )
+
+  // El reparto queda PROPUESTO: no está conciliado hasta que el área financiera
+  // lo acepte. Ese pendiente le pertenece al EQUIPO financiero (en SOENA, Diana
+  // y Leidy), no a una persona: le llega a las dos y basta con que una lo
+  // resuelva para que desaparezca de la campana de la otra.
+  if (resultado.success) {
+    await avisarConciliacionPendiente(supabase, workspaceId, referencia, montoTotal)
+  }
+
+  return resultado
+}
+
+/** Clave del pendiente de equipo: un aviso por referencia de pago. */
+function claveConciliacion(referencia: string) {
+  return `conciliacion:${referencia}`
+}
+
+/** Le avisa al área financiera que hay un reparto esperando su decisión. */
+async function avisarConciliacionPendiente(
+  supabase: unknown,
+  workspaceId: string,
+  referencia: string,
+  monto: number,
+) {
+  try {
+    await db(supabase).rpc('crear_notificacion_equipo', {
+      p_workspace_id: workspaceId,
+      p_area: 'financiera',
+      p_tipo: 'conciliacion_solicitada',
+      p_contenido: `Reparto propuesto para la referencia ${referencia} (${monto.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}) — pendiente de conciliar.`,
+      p_grupo_clave: claveConciliacion(referencia),
+      p_entidad_tipo: null,
+      p_entidad_id: null,
+      p_deep_link: '/conciliacion',
+      p_metadata: { referencia, monto },
+      p_excluir_profile_id: null,
+    })
+  } catch {
+    // El reparto ya se registró: un fallo del aviso no lo revierte.
+  }
 }
 
 /**
@@ -1389,9 +1429,30 @@ export async function aceptarRepartoComercial(
     }
   }
 
+  // Lo resolvió una de las dos -> el pendiente desaparece de la campana de
+  // TODA el área financiera, no solo de quien hizo clic.
+  await resolverPendienteConciliacion(supabase, workspaceId, ref)
+
   for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
   revalidatePath('/conciliacion')
   return { success: true, conciliados: negociosTocados.length }
+}
+
+/** Cierra el aviso de equipo de una referencia (la atendió alguien del área). */
+async function resolverPendienteConciliacion(
+  supabase: unknown,
+  workspaceId: string,
+  referencia: string,
+) {
+  try {
+    await db(supabase).rpc('resolver_grupo_notificaciones', {
+      p_workspace_id: workspaceId,
+      p_grupo_clave: claveConciliacion(referencia),
+      p_resuelta_por: null,
+    })
+  } catch {
+    /* la decisión ya se registró; el aviso se limpia igual al recargar */
+  }
 }
 
 // ── rechazarRepartoComercial — la financiera devuelve el reparto al comercial ─
@@ -1463,6 +1524,10 @@ export async function rechazarRepartoComercial(
       } catch { /* no bloquear por el log */ }
     }
   }
+
+  // Rechazar tambien resuelve el pendiente del equipo: la decision ya se tomo.
+  // El comercial se entera por el activity_log de cada negocio.
+  await resolverPendienteConciliacion(supabase, workspaceId, ref)
 
   for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
   revalidatePath('/conciliacion')
