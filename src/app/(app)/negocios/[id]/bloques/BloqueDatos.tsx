@@ -4,7 +4,7 @@ import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
-import { extraerCampoDesdeImagen } from '@/lib/actions/documento-actions'
+import { extraerCampoDesdeImagen, subirImagenClipboard } from '@/lib/actions/documento-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
@@ -195,6 +195,8 @@ export default function BloqueDatos({
   // `aiFilled`: por slug del campo destino, true si su valor lo puso la IA y aún no
   // se ha verificado a mano (controla el badge "Revisar"; se limpia al editar).
   const [extrayendo, setExtrayendo] = useState<Record<string, boolean>>({})
+  // `subiendo`: por slug del campo imagen, true mientras el pantallazo viaja a Storage.
+  const [subiendo, setSubiendo] = useState<Record<string, boolean>>({})
   const [aiFilled, setAiFilled] = useState<Record<string, boolean>>({})
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Guardado: estado pasivo + refs para flush al desmontar (cero pérdida de datos).
@@ -441,11 +443,33 @@ export default function BloqueDatos({
     const reader = new FileReader()
     reader.onload = ev => {
       const dataUrl = ev.target?.result as string
+      // Preview inmediato desde el portapapeles. Lo que se PERSISTE es la URL de
+      // Storage, no el data URL: guardar la imagen dentro del jsonb del bloque es
+      // lo que hacía lenta la lista de negocios (ver subirImagenClipboard).
       setPasteImgs(prev => ({ ...prev, [slug]: dataUrl }))
-      handleToggleChange(slug, dataUrl)
       // Si el campo de imagen declara extracción IA, dispararla con el pantallazo.
       const field = fields.find(f => f.slug === slug)
       if (field?.extrae) void runExtraccion(slug, dataUrl)
+      void (async () => {
+        setSubiendo(prev => ({ ...prev, [slug]: true }))
+        try {
+          const r = await subirImagenClipboard(negocioBloqueId, slug, dataUrl)
+          if (!r.success) {
+            toast.error(`No se pudo guardar la imagen: ${r.error}`)
+            // Sin URL no hay nada que persistir: se retira el preview para no
+            // aparentar que quedó guardada.
+            setPasteImgs(prev => {
+              const next = { ...prev }
+              delete next[slug]
+              return next
+            })
+            return
+          }
+          handleToggleChange(slug, r.url)
+        } finally {
+          setSubiendo(prev => ({ ...prev, [slug]: false }))
+        }
+      })()
     }
     reader.readAsDataURL(file)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -779,6 +803,9 @@ export default function BloqueDatos({
                     alt={f.label}
                     className="max-h-32 rounded object-contain"
                   />
+                  {subiendo[f.slug] && (
+                    <span className="text-[10px] text-[#6B7280] font-medium">Guardando imagen…</span>
+                  )}
                   {extrayendo[f.slug] && (
                     <span className="text-[10px] text-[#059669] font-medium">Extrayendo dato del pantallazo…</span>
                   )}
