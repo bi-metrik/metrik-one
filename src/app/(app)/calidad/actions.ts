@@ -351,6 +351,32 @@ export async function getDatosDueno(): Promise<DuenoData | null> {
     agg.set(h.codigo, { titulo: prev?.titulo ?? h.titulo, veces: (prev?.veces ?? 0) + 1 })
   }
 
+  /*
+   * Recobro. Vivia en el pie del muro del piso y se movio aqui: un debito que
+   * rebota por fondos insuficientes es cobranza, no operacion del dia. El muro
+   * responde "que esta pasando ahora"; esta pantalla responde "cuanto se esta
+   * cayendo", que es pregunta de dueno y va pegada al recaudo a seis cuotas.
+   *
+   * Se muestran las dos escalas a proposito: el dia solo no alcanza para ver
+   * el tamaño del hueco, y el acumulado solo esconde si hoy fue un mal dia.
+   */
+  const { data: recobroRaw } = await sinTipar(ctx.supabase)
+    .from('calidad_recobro_dia')
+    .select('fecha, debitos_rebotados, pendientes_recobro, monto_en_riesgo_usd')
+    .eq('workspace_id', ctx.workspaceId)
+    .order('fecha', { ascending: false })
+
+  const recobroDias = ((recobroRaw ?? []) as {
+    fecha: string
+    debitos_rebotados: number
+    pendientes_recobro: number
+    monto_en_riesgo_usd: string | number
+  }[]).map((r) => ({
+    debitosRebotados: r.debitos_rebotados,
+    pendientesRecobro: r.pendientes_recobro,
+    montoEnRiesgoUsd: Number(r.monto_en_riesgo_usd),
+  }))
+
   return {
     cuotas,
     vendidoTotal,
@@ -361,5 +387,17 @@ export async function getDatosDueno(): Promise<DuenoData | null> {
     criticasAbiertas: [...agg.entries()]
       .map(([codigo, v]) => ({ codigo, ...v }))
       .sort((a, b) => b.veces - a.veces),
+    recobro: {
+      hoy: recobroDias[0] ?? null,
+      acumulado: recobroDias.reduce(
+        (a, r) => ({
+          debitosRebotados: a.debitosRebotados + r.debitosRebotados,
+          pendientesRecobro: a.pendientesRecobro + r.pendientesRecobro,
+          montoEnRiesgoUsd: a.montoEnRiesgoUsd + r.montoEnRiesgoUsd,
+        }),
+        { debitosRebotados: 0, pendientesRecobro: 0, montoEnRiesgoUsd: 0 },
+      ),
+      dias: recobroDias.length,
+    },
   }
 }

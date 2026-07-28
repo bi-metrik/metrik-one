@@ -2,30 +2,39 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Maximize2 } from 'lucide-react'
-import type { MuroData } from '../types'
+import type { MuroData, Semaforo } from '../types'
 
 /**
- * Muro proyectable, v2.
+ * Muro proyectable, v4.
  *
- * Vive en un televisor que ve todo el piso e incluso visitas. Tres zonas:
+ * Vive en un televisor que ve todo el piso e incluso visitas. Criterio de
+ * aceptacion, y es el que manda sobre cualquier otro: TODO se lee a tres
+ * metros. Si algo obliga a acercarse, o sobra o tiene que crecer. Por eso la
+ * pantalla prefiere pocas cosas grandes antes que muchas comodas.
  *
- *   1. HEROE (banda superior) — cierres de hoy partidos por forma de pago.
- *      Cobrado completo es caja que entro; a seis cuotas es una promesa que
- *      puede caerse (y si se cae, el servicio se suspende). Contar los dos como
- *      "una venta" es el error del Excel que este muro viene a reemplazar.
- *   2. DOS COLUMNAS —
- *      · RANKING: el ACUMULADO del dia. El que va primero cerrando pero con
- *        bandera roja es la conversacion del dia; el que cierra menos, todo
- *        cobrado y sin banderas, es el que hoy nadie ve.
+ * Cuatro zonas:
+ *
+ *   1. ENCABEZADO — "HOY · martes 28 de julio". La ambigüedad temporal se
+ *      resuelve de una vez: nadie deberia tener que adivinar si lo que ve es
+ *      de hoy o el acumulado del mes. La cobertura viaja aqui como sello
+ *      discreto, no como heroe: una vez instalado el producto marca 100% todos
+ *      los dias, informa una vez y despues es constante.
+ *   2. HEROE — cierres de hoy con su denominador (llamadas y % de cierre) y
+ *      partidos por forma de pago. Cobrado completo es caja que entro; a seis
+ *      cuotas es una promesa que puede caerse (y si se cae, el servicio se
+ *      suspende). Contar los dos como "una venta" es el error del Excel que
+ *      este muro viene a reemplazar.
+ *   3. DOS COLUMNAS —
+ *      · TABLA DE AGENTES: el ACUMULADO del dia, TODOS sin recortar. Con
+ *        llamadas y % de cierre al lado de los cierres aparece el dato que el
+ *        conteo simple esconde: quien cierra al mismo ritmo con la mitad de
+ *        llamadas. La columna de cumplimiento lleva encabezado y PALABRA, no
+ *        solo color: a tres metros un punto sin etiqueta no comunica, y el
+ *        color solo tampoco sirve para quien no lo distingue.
  *      · ULTIMAS LLAMADAS: el FLUJO, lo que esta pasando ahora. Es lo que
- *        mantiene la pantalla viva durante el dia; el ranking casi no se mueve.
- *      Son dos preguntas distintas y el televisor tiene ancho para las dos.
- *   3. PIE — recobro pendiente, cobertura, bandera que mas se repite y la
- *      definicion de "cobrado", dicha una sola vez.
- *
- * Por que la cobertura NO es el heroe: una vez instalado el producto marca 100%
- * todos los dias. Informa una vez y despues es constante. Un televisor necesita
- * algo que se mueva durante el dia y sobre lo que el piso pueda actuar.
+ *        mantiene la pantalla viva durante el dia; la tabla casi no se mueve.
+ *   4. BANDA — la bandera que mas se repite hoy. Es lo unico realmente
+ *      accionable para el piso, asi que va en grande y no en letra chica.
  *
  * Que NO lleva, y no es negociable: `cliente_ref`. El muro nunca identifica al
  * cliente final, y la RPC que lo alimenta tampoco lo devuelve. Los agentes
@@ -33,6 +42,9 @@ import type { MuroData } from '../types'
  * conocen, en internet un nombre de pila no identifica a nadie.
  *
  * Que SI lleva desde v2: montos en dolares. Decision explicita de Mauricio.
+ *
+ * Los debitos rebotados salieron de aqui en v4: son cobranza, no operacion de
+ * piso. Viven en la vista de dueno, junto al recaudo a seis cuotas.
  */
 
 const M = {
@@ -49,13 +61,34 @@ const M = {
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
 
-const COLOR_SEMAFORO: Record<string, string> = {
-  rojo: M.crit,
-  amarillo: M.high,
-  verde: M.ok,
+/**
+ * Cumplimiento en palabra, no en punto de color. Un circulo sin etiqueta no
+ * dice nada a tres metros, y quien no distingue rojo de verde se queda sin la
+ * columna entera. El color acompaña; la palabra es la que informa.
+ */
+const CUMPLIMIENTO: Record<Semaforo, { texto: string; color: string }> = {
+  verde: { texto: 'Sin banderas', color: M.ok },
+  amarillo: { texto: 'Revisar', color: M.high },
+  rojo: { texto: 'Crítico', color: M.crit },
 }
 
 const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
+
+const COLS_AGENTES = '1fr 112px 104px 112px 118px 158px 196px'
+const COLS_ULTIMAS = '98px 1fr 94px 178px'
+
+/**
+ * "martes 28 de julio". `toLocaleDateString` devuelve "martes, 28 de julio" y
+ * `text-transform: capitalize` convertiria cada palabra ("Martes, 28 De
+ * Julio"), que no es como se escribe una fecha en español. Se arma a mano:
+ * fuera la coma, mayuscula solo en la primera letra.
+ */
+function fechaLegible(iso: string): string {
+  const t = new Date(`${iso}T12:00:00`)
+    .toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })
+    .replace(',', '')
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
 
 export default function MuroView({
   data,
@@ -89,7 +122,9 @@ export default function MuroView({
   }
 
   const c = data.cierres
-  const pie = data.pie
+  const cob = data.cobertura
+
+  const fechaLarga = fechaLegible(data.fecha)
 
   return (
     <div
@@ -101,48 +136,36 @@ export default function MuroView({
         color: M.ink,
         display: 'flex',
         flexDirection: 'column',
-        padding: '24px 36px 18px',
+        padding: '22px 34px 16px',
         boxSizing: 'border-box',
       }}
     >
-      {/* ── Encabezado ─────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 20 }}>
-        <div>
-          <div
-            style={{
-              fontFamily: MONO,
-              fontSize: 22,
-              letterSpacing: '.12em',
-              textTransform: 'uppercase',
-              color: M.muted,
-            }}
-          >
-            Cierres de hoy
-          </div>
-          <div style={{ fontSize: 30, fontWeight: 700, letterSpacing: '-.5px', marginTop: 2 }}>
-            {nombreWorkspace}
-          </div>
+      {/* ── Encabezado: cuándo es "ahora", dicho sin rodeos ─────────── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 20, minWidth: 0 }}>
+          {/*
+            El dia pedido no tenia actividad y esto es el ultimo dia con
+            llamadas. Se dice en pantalla en vez de rotularlo "HOY" y mostrar
+            los datos de otro dia.
+          */}
+          <span style={{ fontSize: 40, fontWeight: 700, letterSpacing: '-.5px', whiteSpace: 'nowrap' }}>
+            <span style={{ color: data.esFallback ? M.high : M.brand }}>
+              {data.esFallback ? 'ÚLTIMO DÍA CON ACTIVIDAD' : 'HOY'}
+            </span>
+            <span style={{ color: M.muted, margin: '0 14px' }}>·</span>
+            <span>{fechaLarga}</span>
+          </span>
+          {/* Sello, no titular: la cobertura informa una vez y luego es constante. */}
+          {cob && (
+            <span style={{ fontFamily: MONO, fontSize: 22, color: M.muted, whiteSpace: 'nowrap' }}>
+              {cob.auditadas} de {cob.recibidas} llamadas auditadas
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: MONO, fontSize: 22, color: M.muted }}>
-              {new Date(`${data.fecha}T12:00:00`).toLocaleDateString('es-CO', {
-                day: '2-digit',
-                month: 'long',
-                year: 'numeric',
-              })}
-            </div>
-            {/*
-              El día pedido no tenía actividad y esto es el último día con
-              llamadas. Se dice en pantalla en vez de mostrar la fecha de otro
-              día como si fuera hoy.
-            */}
-            {data.esFallback && (
-              <div style={{ fontFamily: MONO, fontSize: 16, color: M.high, marginTop: 2 }}>
-                último día con actividad
-              </div>
-            )}
-          </div>
+          <span style={{ fontSize: 26, fontWeight: 600, color: M.muted, whiteSpace: 'nowrap' }}>
+            {nombreWorkspace}
+          </span>
           {proyectable && (
             <button
               type="button"
@@ -164,25 +187,26 @@ export default function MuroView({
         </div>
       </div>
 
-      {/* ── Zona 1: el héroe, en banda ─────────────────────────────── */}
+      {/* ── Zona 1: el héroe, con denominador ──────────────────────── */}
       <div
         style={{
-          marginTop: 18,
+          marginTop: 16,
           background: M.panel,
           border: `1px solid ${M.line}`,
           borderRadius: 10,
-          padding: '18px 26px',
+          padding: '16px 26px',
           display: 'grid',
-          gridTemplateColumns: 'auto 1fr',
-          gap: 40,
+          gridTemplateColumns: 'auto auto 1fr',
+          gap: 44,
           alignItems: 'center',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
-          <div
+        {/* Cierres: el numero que el piso persigue */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
+          <span
             style={{
               fontFamily: MONO,
-              fontSize: 104,
+              fontSize: 96,
               fontWeight: 600,
               lineHeight: 1,
               letterSpacing: '-3px',
@@ -191,24 +215,34 @@ export default function MuroView({
             }}
           >
             {c?.total ?? 0}
-          </div>
-          <div style={{ fontSize: 23, color: M.muted, lineHeight: 1.35 }}>
-            <div
+          </span>
+          <span style={{ lineHeight: 1.3 }}>
+            <span
               style={{
+                display: 'block',
                 fontFamily: MONO,
-                fontSize: 19,
+                fontSize: 21,
                 letterSpacing: '.1em',
                 textTransform: 'uppercase',
+                color: M.muted,
               }}
             >
-              Cerrado hoy
-            </div>
-            de {c?.llamadas ?? 0} llamadas · {usd(c?.montoUsd ?? 0)}
-          </div>
+              Cierres
+            </span>
+            <span style={{ display: 'block', fontSize: 26, color: M.ink }}>
+              de {c?.llamadas ?? 0} llamadas
+            </span>
+          </span>
+        </div>
+
+        {/* El denominador convertido en el numero que la operación entiende */}
+        <div style={{ display: 'grid', gap: 6 }}>
+          <Kpi valor={`${c?.pctCierre ?? 0}%`} etiqueta="de cierre" color={M.ink} />
+          <Kpi valor={usd(c?.montoUsd ?? 0)} etiqueta="vendido hoy" color={M.ink} />
         </div>
 
         {/* El desglose que hace la diferencia */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 30 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
           <FormaPago
             etiqueta="cobrado completo"
             nota="el dinero ya entró"
@@ -232,87 +266,72 @@ export default function MuroView({
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: '1.08fr 0.92fr',
-          gap: 18,
-          marginTop: 18,
+          gridTemplateColumns: '1.44fr 0.86fr',
+          gap: 16,
+          marginTop: 16,
         }}
       >
-        {/* ── Zona 2a: el ranking (el acumulado) ── */}
+        {/* ── Zona 2a: la tabla de agentes (el acumulado) ── */}
         <Panel titulo="Quién cerró, y cómo">
           {data.ranking.length === 0 ? (
-            <div style={{ fontSize: 24, color: M.muted }}>Sin cierres registrados hoy.</div>
+            <div style={{ fontSize: 26, color: M.muted }}>Sin llamadas registradas hoy.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 76px 100px 20px',
-                  gap: 12,
-                  paddingBottom: 8,
-                  borderBottom: `1px solid ${M.line}`,
-                  fontFamily: MONO,
-                  fontSize: 15,
-                  letterSpacing: '.08em',
-                  textTransform: 'uppercase',
-                  color: M.muted,
-                }}
-              >
-                <span>Agente</span>
-                <span style={{ textAlign: 'right' }}>Cierres</span>
-                {/* "Tarjeta" era el instrumento de pago; lo que importa es que
-                    el dinero entró completo. Ver la definición en el pie. */}
-                <span style={{ textAlign: 'right' }}>Cobrado</span>
-                <span />
-              </div>
+              <Encabezados
+                columnas={COLS_AGENTES}
+                gap={18}
+                lateral={12}
+                celdas={[
+                  { texto: 'Agente' },
+                  { texto: 'Llamadas', der: true },
+                  { texto: 'Cierres', der: true },
+                  { texto: '% cierre', der: true },
+                  // "Tarjeta" era el instrumento de pago; lo que importa es que
+                  // el dinero entró completo. La definición va una vez, al pie.
+                  { texto: 'Cobrado', der: true },
+                  { texto: 'US$', der: true },
+                  { texto: 'Cumplimiento' },
+                ]}
+              />
 
-              {data.ranking.slice(0, 7).map((a) => (
+              {/* TODOS los agentes. Truncar la lista sesga: si alguien no
+                  aparece, el piso no sabe si es que no cerró o que no cupo. */}
+              {data.ranking.map((a, i) => (
                 <div
                   key={a.agente}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '1fr 76px 100px 20px',
+                    gridTemplateColumns: COLS_AGENTES,
                     alignItems: 'center',
-                    gap: 12,
-                    padding: '12px 0',
-                    borderBottom: `1px solid ${M.line}`,
-                    fontSize: 27,
+                    gap: 18,
+                    padding: '16px 12px',
+                    // Alternancia de fondo: a tres metros es lo que impide que
+                    // la vista salte de fila al recorrer la columna de la derecha.
+                    background: i % 2 === 0 ? 'rgba(255,255,255,.035)' : 'transparent',
+                    borderRadius: 6,
+                    fontSize: 32,
+                    // El interlineado por defecto (1.5) le da a cada fila 12 px
+                    // que nadie ve y que se pagan cortando la ultima fila.
+                    lineHeight: 1.15,
                   }}
                 >
                   {/* Nombre de pila. El muro es público por enlace. */}
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {a.agente}
                   </span>
-                  <span
-                    style={{
-                      fontFamily: MONO,
-                      fontWeight: 600,
-                      textAlign: 'right',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {a.cierres}
-                  </span>
+                  <Num>{a.llamadas}</Num>
+                  <Num destacado>{a.cierres}</Num>
+                  {/* El % va en tinta plena: es el dato nuevo de v4 y el unico
+                      que permite comparar agentes con distinto volumen. En gris
+                      se pierde al lado del conteo de cierres. */}
+                  <Num color={M.ink}>{a.pctCierre}%</Num>
                   {/* Verde cuando TODO lo que cerró se cobró completo: es el
                       dato que el conteo de ventas esconde. */}
-                  <span
-                    style={{
-                      fontFamily: MONO,
-                      textAlign: 'right',
-                      color: a.cierres > 0 && a.tarjeta === a.cierres ? M.ok : M.muted,
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {a.tarjeta} cobrado
-                  </span>
-                  <span
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: '50%',
-                      background: COLOR_SEMAFORO[a.semaforo] ?? M.muted,
-                      justifySelf: 'end',
-                    }}
-                  />
+                  <Num color={a.cierres > 0 && a.tarjeta === a.cierres ? M.ok : undefined}>
+                    {a.tarjeta}
+                  </Num>
+                  <Num>{a.montoUsd > 0 ? usd(a.montoUsd) : '—'}</Num>
+                  <Cumplimiento semaforo={a.semaforo} />
                 </div>
               ))}
             </div>
@@ -322,40 +341,37 @@ export default function MuroView({
         {/* ── Zona 2b: el flujo (lo que está pasando ahora) ── */}
         <Panel titulo="Últimas llamadas">
           {data.ultimas.length === 0 ? (
-            <div style={{ fontSize: 24, color: M.muted }}>Sin llamadas registradas hoy.</div>
+            <div style={{ fontSize: 26, color: M.muted }}>Sin llamadas registradas hoy.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '76px 1fr 62px 20px',
-                  gap: 12,
-                  paddingBottom: 8,
-                  borderBottom: `1px solid ${M.line}`,
-                  fontFamily: MONO,
-                  fontSize: 15,
-                  letterSpacing: '.08em',
-                  textTransform: 'uppercase',
-                  color: M.muted,
-                }}
-              >
-                <span>Hora</span>
-                <span>Agente</span>
-                <span style={{ textAlign: 'right' }}>Técnica</span>
-                <span />
-              </div>
+              <Encabezados
+                columnas={COLS_ULTIMAS}
+                gap={16}
+                lateral={10}
+                celdas={[
+                  { texto: 'Hora' },
+                  { texto: 'Agente' },
+                  { texto: 'Técnica', der: true },
+                  { texto: 'Cumplimiento' },
+                ]}
+              />
 
-              {data.ultimas.slice(0, 8).map((u, i) => (
+              {data.ultimas.map((u, i) => (
                 <div
                   key={`${u.hora}-${i}`}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '76px 1fr 62px 20px',
+                    gridTemplateColumns: COLS_ULTIMAS,
                     alignItems: 'center',
-                    gap: 12,
-                    padding: '12px 0',
-                    borderBottom: `1px solid ${M.line}`,
-                    fontSize: 26,
+                    gap: 16,
+                    padding: '10px',
+                    background: i % 2 === 0 ? 'rgba(255,255,255,.035)' : 'transparent',
+                    borderRadius: 6,
+                    fontSize: 27,
+                    // Sin esto la decima llamada queda cortada por el borde del
+                    // panel, y una lista que se corta sola miente sobre cuantas
+                    // llamadas hubo.
+                    lineHeight: 1.15,
                   }}
                 >
                   <span style={{ fontFamily: MONO, color: M.muted, fontVariantNumeric: 'tabular-nums' }}>
@@ -368,25 +384,8 @@ export default function MuroView({
                         flujo con el número de arriba sin agregar otra columna. */}
                     {u.cerroVenta && <span style={{ color: M.brand, marginLeft: 8 }}>·cerró</span>}
                   </span>
-                  <span
-                    style={{
-                      fontFamily: MONO,
-                      textAlign: 'right',
-                      color: M.muted,
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {u.tecnica}
-                  </span>
-                  <span
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: '50%',
-                      background: COLOR_SEMAFORO[u.semaforo] ?? M.muted,
-                      justifySelf: 'end',
-                    }}
-                  />
+                  <Num>{u.tecnica}</Num>
+                  <Cumplimiento semaforo={u.semaforo} />
                 </div>
               ))}
             </div>
@@ -394,65 +393,78 @@ export default function MuroView({
         </Panel>
       </div>
 
-      {/* ── Zona 3: el pie ─────────────────────────────────────────── */}
+      {/* ── Zona 3: la banda accionable ─────────────────────────────── */}
       <div
         style={{
-          marginTop: 16,
-          paddingTop: 14,
-          borderTop: `1px solid ${M.line}`,
-          display: 'grid',
-          gridTemplateColumns: 'auto auto 1fr',
-          gap: 32,
+          marginTop: 14,
+          background: data.banderaTop ? 'rgba(248,113,113,.10)' : M.panel,
+          border: `1px solid ${data.banderaTop ? 'rgba(248,113,113,.35)' : M.line}`,
+          borderRadius: 10,
+          padding: '14px 26px',
+          display: 'flex',
           alignItems: 'baseline',
-          fontSize: 21,
-          color: M.muted,
+          gap: 26,
         }}
       >
-        <span>
-          <b style={{ fontFamily: MONO, color: pie.recobro?.pendientesRecobro ? M.high : M.muted }}>
-            {pie.recobro?.pendientesRecobro ?? 0}
-          </b>{' '}
-          débitos rebotados por recobrar
-          {pie.recobro?.montoEnRiesgoUsd ? ` · ${usd(pie.recobro.montoEnRiesgoUsd)} en riesgo` : ''}
+        <span
+          style={{
+            fontFamily: MONO,
+            fontSize: 20,
+            letterSpacing: '.1em',
+            textTransform: 'uppercase',
+            color: M.muted,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Lo que más se repite hoy
         </span>
-
-        <span>
-          <b style={{ fontFamily: MONO, color: M.ink }}>
-            {pie.cobertura?.auditadas ?? 0} de {pie.cobertura?.recibidas ?? 0}
-          </b>{' '}
-          llamadas auditadas
-          {pie.cobertura?.baseline ? ` · antes ${pie.cobertura.baseline} a mano` : ''}
-        </span>
-
-        <span style={{ textAlign: 'right' }}>
-          {pie.banderaTop ? (
-            <>
-              Se repite más:{' '}
-              <b style={{ fontFamily: MONO, color: M.crit }}>{pie.banderaTop.codigo}</b>{' '}
-              {pie.banderaTop.titulo}
-              <span style={{ color: M.muted }}> · {pie.banderaTop.veces} veces</span>
-            </>
-          ) : (
-            'Sin banderas hoy'
-          )}
-        </span>
+        {data.banderaTop ? (
+          <span
+            style={{
+              fontSize: 34,
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 16,
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
+            <b style={{ fontFamily: MONO, color: M.crit }}>{data.banderaTop.codigo}</b>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {data.banderaTop.titulo}
+            </span>
+            <b
+              style={{
+                fontFamily: MONO,
+                color: M.crit,
+                marginLeft: 'auto',
+                whiteSpace: 'nowrap',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {data.banderaTop.veces} veces
+            </b>
+          </span>
+        ) : (
+          <span style={{ fontSize: 34, color: M.muted }}>Sin banderas hoy</span>
+        )}
       </div>
 
+      {/* ── Pie mínimo: una definición, una advertencia, una firma ──── */}
       <div
         style={{
           marginTop: 10,
-          fontSize: 16,
+          fontSize: 17,
           color: M.muted,
           display: 'flex',
           justifyContent: 'space-between',
           gap: 16,
-          flexWrap: 'wrap',
         }}
       >
         {/*
-          "Cobrado" se define UNA vez, aquí abajo. La columna del ranking no
-          puede explicarse sola en una pantalla que se mira de reojo, y repetir
-          la aclaración en cada fila sería ruido. El monto sale del dato, no
+          "Cobrado" se define UNA vez, aquí abajo. La columna no puede
+          explicarse sola en una pantalla que se mira de reojo, y repetir la
+          aclaración en cada fila sería ruido. El monto sale del dato, no
           escrito a mano: si el precio del programa cambia, la línea lo sigue.
         */}
         <span>
@@ -462,10 +474,31 @@ export default function MuroView({
           {'  ·  '}
           Datos de demostración: una llamada real, el resto es muestra.
         </span>
-        <span>Powered by MéTRIK</span>
+        <span style={{ whiteSpace: 'nowrap' }}>Powered by MéTRIK</span>
       </div>
 
       {pantallaCompleta && <span hidden />}
+    </div>
+  )
+}
+
+function Kpi({ valor, etiqueta, color }: { valor: string; etiqueta: string; color: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+      <span
+        style={{
+          fontFamily: MONO,
+          fontSize: 44,
+          fontWeight: 600,
+          lineHeight: 1.05,
+          color,
+          fontVariantNumeric: 'tabular-nums',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {valor}
+      </span>
+      <span style={{ fontSize: 21, color: M.muted, whiteSpace: 'nowrap' }}>{etiqueta}</span>
     </div>
   )
 }
@@ -493,18 +526,94 @@ function FormaPago({
           color,
           lineHeight: 1,
           fontVariantNumeric: 'tabular-nums',
-          minWidth: 62,
+          minWidth: 58,
         }}
       >
         {n}
       </span>
-      <span style={{ flex: 1 }}>
+      <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 25, color: M.ink }}>
           {etiqueta} <span style={{ fontFamily: MONO, color: M.muted }}>{usd(monto)}</span>
         </span>
         <span style={{ display: 'block', fontSize: 19, color: M.muted, marginTop: 1 }}>{nota}</span>
       </span>
     </div>
+  )
+}
+
+/**
+ * `gap` y `lateral` deben ser los MISMOS que los de las filas: si no, los
+ * encabezados quedan corridos respecto de la columna que titulan y a tres
+ * metros la tabla deja de leerse como tabla.
+ */
+function Encabezados({
+  columnas,
+  celdas,
+  gap,
+  lateral,
+}: {
+  columnas: string
+  celdas: { texto: string; der?: boolean }[]
+  gap: number
+  lateral: number
+}) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: columnas,
+        gap,
+        padding: `0 ${lateral}px 10px`,
+        borderBottom: `1px solid ${M.line}`,
+        marginBottom: 4,
+        fontFamily: MONO,
+        fontSize: 16,
+        letterSpacing: '.08em',
+        textTransform: 'uppercase',
+        color: M.muted,
+      }}
+    >
+      {celdas.map((c) => (
+        <span key={c.texto} style={{ textAlign: c.der ? 'right' : 'left' }}>
+          {c.texto}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** Alineación numérica a la derecha y ancho tabular: las columnas se comparan de un vistazo. */
+function Num({
+  children,
+  color,
+  destacado = false,
+}: {
+  children: React.ReactNode
+  color?: string
+  destacado?: boolean
+}) {
+  return (
+    <span
+      style={{
+        fontFamily: MONO,
+        textAlign: 'right',
+        fontVariantNumeric: 'tabular-nums',
+        fontWeight: destacado ? 600 : 400,
+        color: color ?? (destacado ? M.ink : M.muted),
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function Cumplimiento({ semaforo }: { semaforo: Semaforo }) {
+  const { texto, color } = CUMPLIMIENTO[semaforo] ?? CUMPLIMIENTO.verde
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <span style={{ width: 14, height: 14, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span style={{ fontSize: 24, color, whiteSpace: 'nowrap' }}>{texto}</span>
+    </span>
   )
 }
 
@@ -515,7 +624,7 @@ function Panel({ titulo, children }: { titulo: string; children: React.ReactNode
         background: M.panel,
         border: `1px solid ${M.line}`,
         borderRadius: 10,
-        padding: '20px 24px',
+        padding: '18px 18px 14px',
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
@@ -530,7 +639,7 @@ function Panel({ titulo, children }: { titulo: string; children: React.ReactNode
           letterSpacing: '.1em',
           textTransform: 'uppercase',
           color: M.muted,
-          margin: '0 0 16px',
+          margin: '0 0 14px 10px',
         }}
       >
         {titulo}

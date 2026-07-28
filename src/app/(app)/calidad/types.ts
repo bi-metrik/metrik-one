@@ -102,6 +102,8 @@ export interface MuroData {
     total: number
     montoUsd: number
     llamadas: number
+    /** % de conversion del dia: el numero que la operacion entiende. */
+    pctCierre: number
     /** Precio del programa segun los cierres del dia. Define "cobrado" en el pie. */
     montoUnitarioUsd: number
     tarjeta: { n: number; montoUsd: number }
@@ -109,21 +111,26 @@ export interface MuroData {
   } | null
 
   /**
-   * Zona 2a — el ranking: el ACUMULADO del dia. Agentes por nombre de pila.
+   * Tabla de agentes: el ACUMULADO del dia, por nombre de pila. TODOS, sin
+   * recorte — una lista truncada es informacion sesgada: si un agente no
+   * aparece, el piso no puede saber si es que no cerro o que no cupo.
+   *
+   * `llamadas` + `pctCierre` son el denominador. Sin ellos "6 cierres" no dice
+   * nada, y con ellos aparece lo que la pantalla existe para mostrar: quien
+   * cierra al mismo ritmo con la mitad de llamadas.
    *
    * `tarjeta` es la forma de pago en el dato, pero en pantalla se llama
    * "cobrado": lo que importa no es el instrumento sino que el dinero entro
-   * completo hoy. "Tarjeta · 1 de 6" solo se entiende si ya sabes que tarjeta
-   * significa cobro inmediato, y una pantalla que se mira de reojo no puede
-   * pedir eso.
+   * completo hoy.
    */
   ranking: {
     agente: string
+    llamadas: number
     cierres: number
+    pctCierre: number
     /** Cuantos de esos cierres se cobraron completos (forma de pago tarjeta). */
     tarjeta: number
     montoUsd: number
-    llamadas: number
     semaforo: Semaforo
   }[]
 
@@ -142,16 +149,14 @@ export interface MuroData {
     cerroVenta: boolean
   }[]
 
-  /** Zona 3 — el pie. Discreto: contexto, no protagonismo. */
-  pie: {
-    recobro: {
-      debitosRebotados: number
-      pendientesRecobro: number
-      montoEnRiesgoUsd: number
-    } | null
-    cobertura: { recibidas: number; auditadas: number; baseline: number; pct: number } | null
-    banderaTop: { codigo: string; titulo: string; veces: number } | null
-  }
+  /** Sello discreto del encabezado: "98 de 98 llamadas auditadas". */
+  cobertura: { recibidas: number; auditadas: number; baseline: number; pct: number } | null
+
+  /**
+   * Banda destacada. Es lo unico realmente accionable para el piso, asi que
+   * va en grande y no en letra chica al pie.
+   */
+  banderaTop: { codigo: string; titulo: string; veces: number } | null
 }
 
 export interface DineroCuota {
@@ -169,6 +174,17 @@ export interface DuenoData {
   ventasCerradas: number
   llegaronCuota6: number
   criticasAbiertas: { codigo: string; titulo: string; veces: number }[]
+  /**
+   * Debitos rebotados por fondos insuficientes. Vivia en el muro del piso y se
+   * movio aqui: es cobranza, no operacion del dia. El muro responde "que esta
+   * pasando ahora"; esto responde "cuanto se esta cayendo", que es pregunta de
+   * dueno y va junto al recaudo a seis cuotas.
+   */
+  recobro: {
+    hoy: { debitosRebotados: number; pendientesRecobro: number; montoEnRiesgoUsd: number } | null
+    acumulado: { debitosRebotados: number; pendientesRecobro: number; montoEnRiesgoUsd: number }
+    dias: number
+  }
 }
 
 /**

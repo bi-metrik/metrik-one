@@ -105,6 +105,51 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
         </div>
       </section>
 
+      {/*
+        Débitos rebotados. Estaban en el pie del muro del piso y se movieron
+        aquí: un débito que rebota por fondos insuficientes no es operación del
+        día, es cobranza, y va pegado al recaudo de arriba porque es la misma
+        pregunta vista un paso antes: la cuota que no entró empezó por rebotar.
+      */}
+      <section style={{ marginTop: 26 }}>
+        <h2 style={h2}>Débitos que rebotaron</h2>
+        <div style={{ ...card, padding: '16px 18px' }}>
+          {datos.recobro.dias === 0 ? (
+            <p style={{ fontSize: 13.5, color: C.inkMuted, margin: 0 }}>
+              Sin débitos rebotados registrados.
+            </p>
+          ) : (
+            <section style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+              {/* Las dos escalas juntas: el día solo no deja ver el tamaño del
+                  hueco, y el acumulado solo esconde si hoy fue un mal día. */}
+              <Kpi
+                label="Rebotaron hoy"
+                valor={String(datos.recobro.hoy?.debitosRebotados ?? 0)}
+                nota={`${datos.recobro.hoy?.pendientesRecobro ?? 0} sin volver a llamar`}
+                tono={datos.recobro.hoy?.debitosRebotados ? 'bad' : undefined}
+              />
+              <Kpi
+                label="Rebotaron en total"
+                valor={String(datos.recobro.acumulado.debitosRebotados)}
+                nota={`en ${datos.recobro.dias} ${datos.recobro.dias === 1 ? 'día' : 'días'} con registro`}
+                tono="bad"
+              />
+              <Kpi
+                label="En riesgo"
+                valor={usd(datos.recobro.acumulado.montoEnRiesgoUsd)}
+                nota={`${datos.recobro.acumulado.pendientesRecobro} pendientes de recobro`}
+                tono="bad"
+              />
+            </section>
+          )}
+          <p style={nota}>
+            Cuando el débito no pasa por fondos insuficientes, alguien tiene que volver a llamar. Si
+            nadie llama, el cliente deja de pagar y el servicio se suspende: la venta no solo deja de
+            recaudar, se cae.
+          </p>
+        </div>
+      </section>
+
       {/* Banderas críticas abiertas */}
       <section style={{ marginTop: 26 }}>
         <h2 style={h2}>Banderas críticas abiertas</h2>
