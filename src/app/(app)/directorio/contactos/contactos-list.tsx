@@ -1,12 +1,22 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown, UserCircle } from 'lucide-react'
+import {
+  Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown, UserCircle,
+  Plus, X, Loader2, CheckSquare, Square,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/catalogos/constants'
-import { deleteContacto, updateContactoSegmento, type ContactoConMeta, type StaffOption } from '../actions'
+import {
+  deleteContacto,
+  updateContactoSegmento,
+  asignarResponsableContacto,
+  asignarResponsableContactosMasivo,
+  type ContactoConMeta,
+  type StaffOption,
+} from '../actions'
 
 interface Props {
   contactos: ContactoConMeta[]
@@ -15,6 +25,169 @@ interface Props {
   miStaffId: string | null
   // Rol efectivo del usuario; decide si el pre-filtro por defecto es propio o todo.
   miRol: string | null
+  // ¿Puede asignar responsable (owner/admin/supervisor)? Solo UX: el guard real
+  // vive en las server actions de asignación.
+  canAsignar: boolean
+}
+
+/**
+ * La tarjeta entera es un <Link>: TODO control interactivo dentro de ella debe
+ * frenar la navegación antes de hacer lo suyo. Helper único para no olvidarlo.
+ * (Mismo patrón que `negocio-card.tsx`.)
+ */
+function frenarNavegacion(e: React.MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+/**
+ * Responsable del contacto, asignable desde el listado sin abrir el detalle.
+ *
+ * Calca el patrón de `ResponsablesInline` de negocios, con una diferencia de
+ * modelo: negocios es N:M (`negocio_responsables`), contactos es 1:1
+ * (`contactos.responsable_id`) → aquí hay UN responsable, que se reemplaza o se
+ * quita, no una lista de chips.
+ */
+function ResponsableInline({
+  contactoId,
+  responsableId,
+  responsableNombre,
+  staff,
+  canAsignar,
+  onDone,
+}: {
+  contactoId: string
+  responsableId: string | null
+  responsableNombre: string | null
+  staff: StaffOption[]
+  canAsignar: boolean
+  onDone: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [isPending, startTransition] = useTransition()
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  // Cerrar al hacer click fuera del selector.
+  useEffect(() => {
+    if (!open) return
+    function handleClick(ev: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(ev.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const term = search.trim().toLowerCase()
+  const disponibles = staff.filter(
+    s => s.id !== responsableId && (!term || s.full_name.toLowerCase().includes(term)),
+  )
+
+  const handleToggleOpen = (e: React.MouseEvent) => {
+    frenarNavegacion(e)
+    setSearch('')
+    setOpen(v => !v)
+  }
+
+  const aplicar = (nuevoId: string | null, mensaje: string) => {
+    startTransition(async () => {
+      const res = await asignarResponsableContacto(contactoId, nuevoId)
+      if (res.success) {
+        toast.success(mensaje)
+        onDone()
+      } else {
+        toast.error(res.error ?? 'Error')
+      }
+    })
+  }
+
+  const handleAsignar = (e: React.MouseEvent, staffId: string, nombre: string) => {
+    frenarNavegacion(e)
+    setOpen(false)
+    setSearch('')
+    aplicar(staffId, `Responsable: ${nombre}`)
+  }
+
+  const handleQuitar = (e: React.MouseEvent) => {
+    frenarNavegacion(e)
+    aplicar(null, 'Responsable removido')
+  }
+
+  return (
+    <div className="relative mt-1 flex flex-wrap items-center gap-1" ref={popoverRef}>
+      <UserCircle className="h-2.5 w-2.5 shrink-0 text-[#6B7280]/70" />
+      {responsableNombre ? (
+        <span
+          className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+          title={responsableNombre}
+        >
+          <span className="truncate">{responsableNombre}</span>
+          {canAsignar && (
+            <button
+              type="button"
+              onClick={handleQuitar}
+              disabled={isPending}
+              className="-mr-0.5 shrink-0 rounded-full p-0.5 transition-colors hover:bg-white hover:text-[#1A1A1A] disabled:opacity-60"
+              title={`Quitar a ${responsableNombre}`}
+              aria-label={`Quitar a ${responsableNombre}`}
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          )}
+        </span>
+      ) : (
+        !canAsignar && <span className="text-[10px] italic text-[#6B7280]/70">Sin responsable</span>
+      )}
+
+      {canAsignar && (
+        <button
+          type="button"
+          onClick={handleToggleOpen}
+          disabled={isPending}
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-[#6B7280] transition-colors hover:border-[#10B981] hover:text-[#10B981] disabled:opacity-60"
+          aria-label={responsableNombre ? 'Cambiar responsable' : 'Asignar responsable'}
+        >
+          {isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+          {responsableNombre ? '' : 'Asignar'}
+        </button>
+      )}
+
+      {open && (
+        <div
+          onClick={frenarNavegacion}
+          className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white shadow-lg"
+        >
+          <div className="relative border-b border-[#E5E7EB]">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#6B7280]" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar persona…"
+              aria-label="Buscar persona"
+              className="w-full py-1.5 pl-7 pr-2 text-xs text-[#1A1A1A] placeholder:text-[#6B7280] focus:outline-none"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {disponibles.length === 0 ? (
+              <p className="px-3 py-2 text-[11px] text-[#6B7280]">Sin personas disponibles</p>
+            ) : (
+              disponibles.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={e => handleAsignar(e, s.id, s.full_name)}
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-[#1A1A1A] transition-colors hover:bg-[#F5F4F2]"
+                >
+                  {s.full_name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Valores especiales del filtro de responsable (fuera de un staff.id real).
@@ -52,7 +225,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 
 const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const
 
-export default function ContactosList({ contactos, staff, miStaffId, miRol }: Props) {
+export default function ContactosList({ contactos, staff, miStaffId, miRol, canAsignar }: Props) {
   const [search, setSearch] = useState('')
   const [rolFilter, setRolFilter] = useState<string | null>(null)
   const [segmentoFilter, setSegmentoFilter] = useState<string | null>(null)
@@ -62,7 +235,12 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol }: Pr
   const [responsableFilter, setResponsableFilter] = useState<string>(
     responsableFilterInicial(miStaffId, miRol),
   )
-  const [, startTransition] = useTransition()
+  // Selección múltiple para asignación masiva. Se guarda por id; lo que se
+  // actúa es SIEMPRE la intersección con la lista visible (ver `seleccionados`),
+  // así nunca se asigna un contacto que el filtro actual está escondiendo.
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
+  const [destinoMasivo, setDestinoMasivo] = useState('')
+  const [isPending, startTransition] = useTransition()
   const router = useRouter()
 
   const getFuenteLabel = (value: string | null) =>
@@ -157,6 +335,53 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol }: Pr
         return 0
     }
   })
+
+  // Selección efectiva = lo seleccionado que además está visible con el filtro
+  // actual. Si cambias de filtro con cosas marcadas, la barra deja de contarlas
+  // (y la asignación no las toca); vuelven a contar si vuelves al filtro. Evita
+  // el caso feo de "asigné 40 y no sé cuáles eran".
+  const seleccionados = sorted.filter(c => seleccion.has(c.id))
+  const todosVisiblesSeleccionados = sorted.length > 0 && seleccionados.length === sorted.length
+
+  const toggleSeleccion = (id: string) => {
+    setSeleccion(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSeleccionarVisibles = () => {
+    setSeleccion(prev => {
+      const next = new Set(prev)
+      if (todosVisiblesSeleccionados) sorted.forEach(c => next.delete(c.id))
+      else sorted.forEach(c => next.add(c.id))
+      return next
+    })
+  }
+
+  const limpiarSeleccion = () => {
+    setSeleccion(new Set())
+    setDestinoMasivo('')
+  }
+
+  const handleAsignarMasivo = () => {
+    if (!destinoMasivo || seleccionados.length === 0) return
+    const responsableId = destinoMasivo === RESP_SIN ? null : destinoMasivo
+    const nombre = staff.find(s => s.id === responsableId)?.full_name ?? 'Sin responsable'
+    const ids = seleccionados.map(c => c.id)
+    startTransition(async () => {
+      const res = await asignarResponsableContactosMasivo(ids, responsableId)
+      if (res.success) {
+        toast.success(`${res.actualizados ?? ids.length} contacto(s) → ${nombre}`)
+        limpiarSeleccion()
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Error')
+      }
+    })
+  }
 
   if (contactos.length === 0) {
     return (
@@ -293,6 +518,66 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol }: Pr
         </div>
       </div>
 
+      {/* Barra de asignación masiva. Aparece con la primera selección; sticky
+          para que quede a la mano al bajar por la lista. Sin selección no ocupa
+          espacio (repartir es una tarea puntual, no el modo por defecto). */}
+      {canAsignar && (
+        <div className="sticky top-0 z-30 -mx-1 space-y-2 rounded-lg border border-[#E5E7EB] bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={toggleSeleccionarVisibles}
+              disabled={sorted.length === 0}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#6B7280] transition-colors hover:text-[#1A1A1A] disabled:opacity-50"
+            >
+              {todosVisiblesSeleccionados
+                ? <CheckSquare className="h-3.5 w-3.5 text-[#10B981]" />
+                : <Square className="h-3.5 w-3.5" />}
+              {todosVisiblesSeleccionados ? 'Quitar selección' : `Seleccionar los ${sorted.length} visibles`}
+            </button>
+            {seleccionados.length > 0 && (
+              <span className="text-xs font-semibold text-[#1A1A1A]">
+                {seleccionados.length} seleccionado{seleccionados.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+
+          {seleccionados.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                value={destinoMasivo}
+                onChange={e => setDestinoMasivo(e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-[#E5E7EB] bg-white py-1.5 pl-2 pr-2 text-xs"
+                aria-label="Asignar seleccionados a"
+              >
+                <option value="">Asignar a…</option>
+                {staff.map(s => (
+                  <option key={s.id} value={s.id}>{s.full_name}</option>
+                ))}
+                <option value={RESP_SIN}>Sin responsable (quitar)</option>
+              </select>
+              <button
+                type="button"
+                onClick={handleAsignarMasivo}
+                disabled={!destinoMasivo || isPending}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[#10B981] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+              >
+                {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                Aplicar
+              </button>
+              <button
+                type="button"
+                onClick={limpiarSeleccion}
+                disabled={isPending}
+                className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A] disabled:opacity-50"
+              >
+                Limpiar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Cards (calcado del patron de /negocios) */}
       <div className="space-y-2">
         {sorted.map(c => {
@@ -303,14 +588,31 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol }: Pr
           const fuenteLabel = getFuenteLabel(c.fuente_adquisicion)
           const cuando = fechaCorta(c.ultima_interaccion_at ?? c.created_at)
           const campana = c.origen?.campaign_name?.trim() || null
+          const marcado = seleccion.has(c.id)
 
           return (
             <Link
               key={c.id}
               href={`/directorio/contacto/${c.id}`}
-              className="block rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+              className={`block rounded-xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${
+                marcado ? 'border-[#10B981] ring-1 ring-[#10B981]/20' : 'border-[#E5E7EB]'
+              }`}
             >
               <div className="flex items-start justify-between gap-2">
+                {canAsignar && (
+                  <button
+                    type="button"
+                    onClick={e => { frenarNavegacion(e); toggleSeleccion(c.id) }}
+                    className="mt-0.5 shrink-0 rounded p-0.5 text-[#6B7280] transition-colors hover:text-[#1A1A1A]"
+                    role="checkbox"
+                    aria-checked={marcado}
+                    aria-label={`Seleccionar ${c.nombre}`}
+                  >
+                    {marcado
+                      ? <CheckSquare className="h-4 w-4 text-[#10B981]" />
+                      : <Square className="h-4 w-4" />}
+                  </button>
+                )}
                 <div className="min-w-0 flex-1">
                   {/* Fila 1: badges */}
                   <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -374,13 +676,15 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol }: Pr
                     </p>
                   )}
 
-                  {/* Responsable del contacto */}
-                  <p className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#6B7280]">
-                    <UserCircle className="h-2.5 w-2.5 shrink-0 text-[#6B7280]/70" />
-                    {c.responsable_nombre
-                      ? <>Responsable: <span className="font-medium text-[#1A1A1A]">{c.responsable_nombre}</span></>
-                      : <span className="italic text-[#6B7280]/70">Sin responsable</span>}
-                  </p>
+                  {/* Responsable del contacto — asignable sin abrir el detalle */}
+                  <ResponsableInline
+                    contactoId={c.id}
+                    responsableId={c.responsable_id}
+                    responsableNombre={c.responsable_nombre}
+                    staff={staff}
+                    canAsignar={canAsignar}
+                    onDone={() => router.refresh()}
+                  />
                 </div>
 
                 {/* Acciones */}
