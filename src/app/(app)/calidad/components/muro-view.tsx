@@ -202,10 +202,24 @@ export default function MuroView({
             <span style={{ color: M.muted, margin: '0 14px' }}>·</span>
             <span>{fechaLarga}</span>
           </span>
-          {/* Sello, no titular: la cobertura informa una vez y luego es constante. */}
+          {/*
+            Sello, no titular: la cobertura informa una vez y luego es constante.
+
+            El contrafactual va PEGADO al sello y no aparte. El 100% solo
+            significa algo contra lo que habia antes: sin "antes se auditaban 5"
+            el numero se lee como una obviedad. Y el baseline sale del dato
+            (`cobertura.baseline`, que la RPC trae de `baseline_manual`), no
+            escrito a mano: si cambia, la linea lo sigue.
+          */}
           {cob && (
             <span style={{ fontFamily: MONO, fontSize: 22, color: M.muted, whiteSpace: 'nowrap' }}>
               {cob.auditadas} de {cob.recibidas} llamadas auditadas
+              {cob.baseline > 0 && (
+                <>
+                  <span style={{ margin: '0 10px' }}>·</span>
+                  antes se auditaban {cob.baseline}
+                </>
+              )}
             </span>
           )}
         </div>
