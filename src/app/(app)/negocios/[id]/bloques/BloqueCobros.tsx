@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
 import { eliminarPorcionPago } from '@/lib/actions/conciliacion-actions'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
+import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 
@@ -127,7 +128,11 @@ function CobroConfirmadoRow({
               </span>
             )}
           </p>
-          {cobro.external_ref && <p className="text-[10px] text-[#6B7280]">Ref: {cobro.external_ref}</p>}
+          {cobro.external_ref && (
+            <p className="text-[10px] text-[#6B7280]" title={cobro.external_ref}>
+              Ref: {referenciaVisible(cobro.external_ref)}
+            </p>
+          )}
           {cobro.fecha && <p className="text-[10px] text-[#6B7280]">{fmtDate(cobro.fecha)}</p>}
         </div>
         <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
