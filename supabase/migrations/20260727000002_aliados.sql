@@ -48,6 +48,11 @@ create policy aliados_rw on public.aliados
 
 grant select, insert, update, delete on public.aliados to authenticated;
 
+-- Una tabla nueva hereda privilegios de `anon` por default privilege del schema, y
+-- la anon key viaja en el bundle del browser. Se revoca explícito para que un
+-- entorno limpio nazca igual que prod (donde ya se revocó a mano).
+revoke all on public.aliados from anon;
+
 -- Listado del directorio y selector de aliados activos.
 create index if not exists idx_aliados_workspace
   on public.aliados (workspace_id);
