@@ -191,6 +191,16 @@ export async function reprocesarNegocio(
     // borraría información de una etapa que no se está reprocesando.
     if (b.bloque_configs?.config_extra?.source_etapa_orden !== undefined) continue
 
+    // `conservar_en_reproceso`: documentos que siguen sirviendo en el ciclo nuevo y
+    // no hay por qué volver a pedirle al cliente. El caso es el certificado
+    // bancario: dura 30 días, así que si el reproceso consigue una cita pronto el
+    // mismo documento vale. Se conserva y es su cross-check de vigencia el que
+    // avisa, ya contra la fecha de la cita NUEVA, si esta vez sí venció.
+    //
+    // Limpiarlo sin más haría que cada reproceso pidiera certificado nuevo, aunque
+    // el que está sirva.
+    if (b.bloque_configs?.config_extra?.conservar_en_reproceso === true) continue
+
     const dataActual = (b.data ?? {}) as Record<string, unknown>
     const ciclosPrevios = (dataActual._ciclos ?? []) as unknown[]
     const { _ciclos: _omit, ...datosDelCiclo } = dataActual

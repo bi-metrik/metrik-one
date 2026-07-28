@@ -9,6 +9,7 @@ import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
 import { nitSinDv, calcularDvNit } from '@/lib/dian/nit'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
+import { documentoVigenteEn } from '@/lib/documentos/vigencia'
 
 const BUCKET = 've-documentos'
 
@@ -61,7 +62,7 @@ async function extractWithRetry(
 // en bloques de etapas anteriores (RUT, Factura, etc). Devolvemos un detalle de
 // cada match. El gate del bloque solo se cumple si todas las comparaciones pasan.
 
-export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 'overlap'
+export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 'overlap' | 'vigencia'
 
 // Fuente de datos para un check: una etapa + bloque + cómo resolver el valor
 // esperado (un campo, varios concatenados, o varias alternativas de campo).
@@ -88,6 +89,9 @@ export type CrossCheckSpec = CrossCheckSource & {
   // se prueba cada alternativa. El check pasa si la principal O alguna alternativa
   // valida; el valor esperado del reporte sale de la primera fuente con dato.
   source_alternatives?: CrossCheckSource[]
+  // Solo para match_mode 'vigencia': días que el documento sigue siendo válido
+  // desde su fecha de expedición. Default 30.
+  vigencia_dias?: number
   // Si el valor EXTRAÍDO del documento viene vacío, el check pasa (no aplica).
   // Ej.: el 2º beneficiario del Concepto UPME — solo se valida si el certificado
   // lista un segundo solicitante.
@@ -121,7 +125,22 @@ function tokensOf(s: string): string[] {
   return normalizeText(s).split(/\s+/).filter(Boolean)
 }
 
-function compareValues(expected: string, extracted: string, mode: CrossCheckMatchMode = 'exact'): boolean {
+function compareValues(
+  expected: string,
+  extracted: string,
+  mode: CrossCheckMatchMode = 'exact',
+  opts?: { vigencia_dias?: number },
+): boolean {
+  // La vigencia se evalúa ANTES del guard de vacíos: en una seccional que no exige
+  // cita no hay fecha objetivo, y ahí el check no aplica en vez de fallar. Solo un
+  // vencimiento comprobado marca el check como no cumplido.
+  if (mode === 'vigencia') {
+    // `extracted` = fecha de expedición del documento; `expected` = fecha objetivo
+    // (la cita). El documento debe seguir vigente ESE día, no el día que se carga:
+    // un certificado bancario de hace tres semanas sirve hoy y no sirve para una
+    // cita del mes entrante.
+    return documentoVigenteEn(extracted, expected, opts?.vigencia_dias) !== false
+  }
   if (!expected || !extracted) return false
   if (mode === 'tokens') {
     const a = tokensOf(expected).sort()
@@ -209,21 +228,22 @@ async function runCrossCheck(
     srcData: Record<string, unknown>,
     extractedRaw: string,
     mode: CrossCheckMatchMode,
+    opts?: { vigencia_dias?: number },
   ): { expected: string; ok: boolean } => {
     if (src.source_fields && src.source_fields.length > 0) {
       const join = src.join ?? ' '
       const expected = src.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
-      return { expected, ok: compareValues(expected, extractedRaw, mode) }
+      return { expected, ok: compareValues(expected, extractedRaw, mode, opts) }
     }
     if (src.source_field_alternatives && src.source_field_alternatives.length > 0) {
       // Probar cada alternativa de campo; pasar si CUALQUIERA matchea
       const candidates = src.source_field_alternatives.map(f => String(srcData[f] ?? '')).filter(s => s)
-      const matched = candidates.find(c => compareValues(c, extractedRaw, mode))
+      const matched = candidates.find(c => compareValues(c, extractedRaw, mode, opts))
       return { expected: matched ?? candidates[0] ?? '', ok: !!matched }
     }
     if (src.source_field) {
       const expected = String(srcData[src.source_field] ?? '')
-      return { expected, ok: compareValues(expected, extractedRaw, mode) }
+      return { expected, ok: compareValues(expected, extractedRaw, mode, opts) }
     }
     return { expected: '', ok: false }
   }
@@ -252,7 +272,7 @@ async function runCrossCheck(
         (src.source_bloque_slug ? dataPorSlug.get(src.source_bloque_slug) : undefined) ??
         dataPorBloque.get(`${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`) ??
         {}
-      const r = resolveFromSource(src, srcData, extractedRaw, mode)
+      const r = resolveFromSource(src, srcData, extractedRaw, mode, { vigencia_dias: check.vigencia_dias })
       if (r.ok) { expectedRaw = r.expected; ok = true; break }
       // Recordar el primer valor esperado no vacío para el reporte si nada matchea
       if (!expectedRaw && r.expected) expectedRaw = r.expected
