@@ -414,3 +414,8 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # service key legacy ya no es aceptado por el gateway). Se protege con un secreto
 # interno (CARDUMEN_CRON_SECRET) verificado dentro de la funcion.
 verify_jwt = false
+
+[functions.notificar-etapa]
+# Disparada por el trigger `trg_avisar_entrada_etapa` via pg_net: NO lleva JWT
+# de Supabase. Se autentica con secret compartido (NOTIFICAR_ETAPA_SECRET).
+verify_jwt = false
