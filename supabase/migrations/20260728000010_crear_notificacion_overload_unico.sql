@@ -1,0 +1,26 @@
+-- Deja UNA sola version de crear_notificacion.
+--
+-- EL PROBLEMA
+--   La higiene de notificaciones (20260727000002) agrego el parametro
+--   `p_permitir_repetidas` para no suprimir menciones legitimas. Como el parametro
+--   trae default, `CREATE OR REPLACE` no reemplazo la funcion: creo un SEGUNDO
+--   overload. Quedaron dos, de 8 y de 9 argumentos.
+--
+--   Con las dos presentes, llamarla con exactamente 8 argumentos es AMBIGUO y
+--   revienta en runtime:
+--     ERROR 42725: function crear_notificacion(...) is not unique
+--
+--   Hoy nadie se estrella porque todos los callers pasan el 9o argumento o usan
+--   parametros nombrados. Pero es una trampa puesta: el proximo que la llame "como
+--   siempre" falla, y en notificaciones eso falla MUDO — que es exactamente el
+--   problema que 20260727000002 vino a corregir.
+--
+-- EL FIX
+--   Eliminar la version de 8. La de 9 la cubre por completo: su ultimo parametro
+--   tiene default `false`, que es el comportamiento historico. Ningun caller cambia.
+--
+--   Verificado en prod con BEGIN/ROLLBACK antes de aplicar: tras el drop, tanto la
+--   llamada de 8 como la de 9 resuelven a la unica funcion que queda. Ambas
+--   versiones tenian identicos privilegios, asi que no cambia ningun permiso.
+
+drop function if exists public.crear_notificacion(uuid, uuid, text, text, text, uuid, text, jsonb);
