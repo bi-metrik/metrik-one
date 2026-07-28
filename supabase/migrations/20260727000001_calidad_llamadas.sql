@@ -262,17 +262,26 @@ grant  execute on function public.get_calidad_muro(uuid, date) to service_role;
 
 -- ── Revoke de los grants por defecto de la instancia ────────────────────────
 --
--- OJO, esto no es redundante con los `grant select` de arriba. La instancia de
--- ONE tiene ALTER DEFAULT PRIVILEGES que otorga TODOS los privilegios (select,
--- insert, update, delete, truncate…) a anon, authenticated y service_role sobre
--- cada tabla nueva de `public`. Se comprobo al aplicar esta migracion: las cinco
--- tablas nacieron con grant completo a `anon`, igual que `ventas_hechos`.
+-- Endurecimiento explicito, no correccion de una fuga.
 --
--- Es decir: en ESTA instancia el riesgo no es que falte el grant y la tabla
--- quede invisible para PostgREST — es el inverso. Toda tabla nueva nace
--- sobre-expuesta y hay que revocar lo que sobra. El RLS la salva de fugar
--- datos, pero el privilegio no deberia existir (defensa en profundidad: si
--- manana alguien agrega una policy permisiva, el grant ya esta ahi).
+-- OJO, esto no es redundante con los `grant select` de arriba. La instancia de
+-- ONE tiene ALTER DEFAULT PRIVILEGES (`pg_default_acl`) que otorga TODOS los
+-- privilegios (select, insert, update, delete, truncate…) a anon, authenticated
+-- y service_role sobre cada tabla nueva de `public`. Se comprobo al aplicar esta
+-- migracion: las cinco tablas nacieron con grant completo a `anon`, igual que
+-- `ventas_hechos`.
+--
+-- Que NO significa: `calidad_dinero_cuotas` ya estaba cerrada de verdad con RLS
+-- activo y sin policy — sin policy no hay fila que pase el filtro, para ningun
+-- rol. Este revoke no destapa ni tapa ningun dato expuesto.
+--
+-- Que SI significa, y es la razon de dejarlo: la convencion escrita en
+-- `metrik-one/CLAUDE.md` ("una tabla sin GRANT explicito es invisible para
+-- PostgREST") NO describe esta instancia. Quien la siga al pie de la letra puede
+-- concluir que basta con omitir el grant y ahorrarse el RLS — y esa tabla si
+-- nace abierta a `anon`. Aqui el RLS es la unica barrera real, asi que se quita
+-- el privilegio que no deberia existir en vez de dejar dos capas donde solo una
+-- funciona.
 revoke all on public.calidad_llamadas            from anon, authenticated;
 revoke all on public.calidad_llamadas_bloques    from anon, authenticated;
 revoke all on public.calidad_llamadas_hallazgos  from anon, authenticated;
