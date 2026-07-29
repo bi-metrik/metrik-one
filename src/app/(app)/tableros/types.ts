@@ -272,6 +272,17 @@ export interface ProcesoSeccionalEtapa {
   nombre: string
   /** Conteo por seccional dentro de esta etapa. */
   celdas: ProcesoSeccionalCelda[]
+  /** Total de la etapa: la suma de sus seccionales, para la vista contraída. */
+  total: ProcesoSeccionalCelda
+  reprocesos: ReprocesosEtapa
+  slaHoras: number | null
+}
+
+/** Reprocesos abiertos en una etapa, por tipo. Son los dos cuadros de calidad del
+ *  comité: certificados UPME que salieron mal y devoluciones que la DIAN rechazó. */
+export interface ReprocesosEtapa {
+  certificacionUpme: number
+  devolucionDian: number
 }
 
 export interface ProcesoSeccionalData {
@@ -285,4 +296,9 @@ export interface ProcesoSeccionalData {
   total: number
   /** Fecha de la foto contra la que se compara. `null` = aún no hay foto previa. */
   fechaFotoPrevia: string | null
+  /** Reprocesos abiertos en todo el proceso, por tipo. */
+  reprocesosTotal: ReprocesosEtapa
+  /** Cuántas etapas tienen tiempo máximo configurado, de cuántas hay. */
+  etapasConSla: number
+  etapasTotales: number
 }

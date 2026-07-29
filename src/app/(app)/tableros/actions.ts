@@ -866,6 +866,21 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
   const seccionalesVistas = new Set<string>()
   let sinRegistrar = 0
 
+  // Reprocesos abiertos por etapa y tipo. La marca vive en `negocios.metadata.reproceso`
+  // (S1) y sus dos tipos coinciden con los dos cuadros de calidad del comite:
+  // certificado UPME que salio mal, y devolucion que la DIAN rechazo.
+  const reprocesosPorEtapa = new Map<string, { certificacionUpme: number; devolucionDian: number }>()
+  const reprocesosTotal = { certificacionUpme: 0, devolucionDian: 0 }
+  for (const n of filas) {
+    if (!n.etapa_actual_id) continue
+    const marca = n.metadata?.reproceso as { activo?: boolean; tipo?: string } | undefined
+    if (marca?.activo !== true) continue
+    const acc = reprocesosPorEtapa.get(n.etapa_actual_id) ?? { certificacionUpme: 0, devolucionDian: 0 }
+    if (marca.tipo === 'certificacion_upme') { acc.certificacionUpme++; reprocesosTotal.certificacionUpme++ }
+    else if (marca.tipo === 'devolucion_dian') { acc.devolucionDian++; reprocesosTotal.devolucionDian++ }
+    reprocesosPorEtapa.set(n.etapa_actual_id, acc)
+  }
+
   for (const n of filas) {
     if (!n.etapa_actual_id) continue
     const sec = (n.metadata?.seccional as string | undefined)?.trim() || null
@@ -893,21 +908,37 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
   const etapas: ProcesoSeccionalEtapa[] = Array.from(porEtapa.entries())
     .map(([etapaId, m]) => {
       const info = etapaInfo.get(etapaId)
+      const celdas = Array.from(m.entries()).map(([seccional, v]) => {
+        const k = `${etapaId}::${seccional ?? ''}`
+        const prev = antes.get(k)
+        return {
+          seccional,
+          abiertos: v.abiertos,
+          vencidos: vencidosHoy.get(k) ?? 0,
+          abiertosAntes: fechaFotoPrevia ? (prev?.abiertos ?? 0) : null,
+          vencidosAntes: fechaFotoPrevia ? (prev?.vencidos ?? 0) : null,
+        }
+      })
+      // El total de la etapa es la suma de sus seccionales: asi la vista contraida y la
+      // expandida no pueden contar distinto, por construccion.
+      const total = celdas.reduce(
+        (acc, c) => ({
+          seccional: null,
+          abiertos: acc.abiertos + c.abiertos,
+          vencidos: acc.vencidos + c.vencidos,
+          abiertosAntes: c.abiertosAntes === null ? acc.abiertosAntes : (acc.abiertosAntes ?? 0) + c.abiertosAntes,
+          vencidosAntes: c.vencidosAntes === null ? acc.vencidosAntes : (acc.vencidosAntes ?? 0) + c.vencidosAntes,
+        }),
+        { seccional: null, abiertos: 0, vencidos: 0, abiertosAntes: null as number | null, vencidosAntes: null as number | null },
+      )
       return {
         etapaId,
         numero: info?.numero ?? 0,
         nombre: info?.nombre ?? '\u2014',
-        celdas: Array.from(m.entries()).map(([seccional, v]) => {
-          const k = `${etapaId}::${seccional ?? ''}`
-          const prev = antes.get(k)
-          return {
-            seccional,
-            abiertos: v.abiertos,
-            vencidos: vencidosHoy.get(k) ?? 0,
-            abiertosAntes: fechaFotoPrevia ? (prev?.abiertos ?? 0) : null,
-            vencidosAntes: fechaFotoPrevia ? (prev?.vencidos ?? 0) : null,
-          }
-        }),
+        celdas,
+        total,
+        reprocesos: reprocesosPorEtapa.get(etapaId) ?? { certificacionUpme: 0, devolucionDian: 0 },
+        slaHoras: info?.slaHoras ?? null,
       }
     })
     .sort((a, b) => a.numero - b.numero)
@@ -926,5 +957,17 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
     else sinCita.push(sc)
   }
 
-  return { etapas, conCita, sinCita, sinRegistrar, total: filas.length, fechaFotoPrevia }
+  const etapasConSla = etapas.filter(e => (e.slaHoras ?? 0) > 0).length
+
+  return {
+    etapas,
+    conCita,
+    sinCita,
+    sinRegistrar,
+    total: filas.length,
+    fechaFotoPrevia,
+    reprocesosTotal,
+    etapasConSla,
+    etapasTotales: etapas.length,
+  }
 }
