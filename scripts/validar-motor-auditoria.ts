@@ -130,16 +130,25 @@ async function main() {
   const auditoria = JSON.parse(crudoJson) as {
     resumen: string
     tecnica: { puntaje: number; bloques: { nombre: string; puntaje: number; maximo: number }[] }
-    cumplimiento: { semaforo: string; errores_criticos: number; banderas: { codigo: string; momento: string; hecho: string }[] }
+    cumplimiento: {
+      semaforo: string
+      errores_criticos: number
+      // Desde la calibracion del prompt las SEIS banderas vienen siempre, con
+      // veredicto presente/ausente. Solo las presentes son hallazgos.
+      banderas: { codigo: string; momento: string; hecho: string; presente?: boolean }[]
+    }
     conversacion?: Record<string, number>
   }
   const suma = auditoria.tecnica.bloques.reduce((a, b) => a + b.puntaje, 0)
   console.log(`\n3 auditar      ${seg(tAuditar)}`)
   console.log(`   tecnica      ${auditoria.tecnica.puntaje}/100 (suma de bloques ${suma}${suma === auditoria.tecnica.puntaje ? ' ✓' : ' ✗ NO CUADRA'})`)
   console.log(`   semaforo     ${auditoria.cumplimiento.semaforo} · ${auditoria.cumplimiento.errores_criticos} criticas`)
-  for (const b of auditoria.cumplimiento.banderas ?? []) {
+  const presentes = (auditoria.cumplimiento.banderas ?? []).filter((b) => b.presente !== false)
+  const ausentes = (auditoria.cumplimiento.banderas ?? []).length - presentes.length
+  for (const b of presentes) {
     console.log(`   ${b.codigo} en ${b.momento} · ${b.hecho.slice(0, 84)}`)
   }
+  console.log(`   banderas     ${presentes.length} presentes · ${ausentes} descartadas por ausentes`)
   console.log(`   bloques      ${auditoria.tecnica.bloques.map((b) => `${b.puntaje}/${b.maximo}`).join(' · ')}`)
 
   // Segunda comprobacion: que la auditoria no haya copiado un numero sensible
@@ -201,7 +210,9 @@ async function main() {
   if (eB) throw new Error(`insert bloques: ${eB.message}`)
 
   const SEV: Record<string, string> = { C1: 'critica', C2: 'critica', C3: 'alta', C4: 'alta', C5: 'media', C6: 'media' }
-  const hallazgos = (auditoria.cumplimiento.banderas ?? []).map((b) => ({
+  // Solo las presentes se guardan: una bandera con veredicto "ausente" es
+  // parte del rastro de la auditoria, no un hallazgo de la llamada.
+  const hallazgos = presentes.map((b) => ({
     workspace_id: workspaceId,
     llamada_id: llamadaId,
     eje: 'cumplimiento',
