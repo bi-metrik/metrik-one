@@ -971,3 +971,98 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
     etapasTotales: etapas.length,
   }
 }
+
+// ── Drill-down: qué casos hay detrás de un número de la tabla de proceso ────
+// Al hacer clic en una celda (etapa + seccional, atrasados o todos) se abre la lista
+// concreta. Sin esto el tablero dice "17 en Precobro" y hay que ir a buscarlos a mano.
+export interface CasoEnEtapa {
+  id: string
+  codigo: string | null
+  nombre: string
+  seccional: string | null
+  responsable: string | null
+  horasEnEtapa: number | null
+  vencido: boolean
+  reproceso: string | null
+}
+
+export async function getCasosDeEtapa(input: {
+  etapaId: string
+  /** `undefined` = todas las seccionales. `null` = solo los que no la tienen registrada. */
+  seccional?: string | null
+  soloVencidos: boolean
+}): Promise<CasoEnEtapa[]> {
+  const { supabase, workspaceId } = await getWorkspace()
+  if (!supabase || !workspaceId) return []
+
+  const { data: negocios } = await supabase
+    .from('negocios')
+    .select('id, codigo, nombre, metadata, etapa_cambiada_at, responsable_id')
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'abierto')
+    .eq('etapa_actual_id', input.etapaId)
+
+  const filas = (negocios ?? []) as unknown as Array<{
+    id: string
+    codigo: string | null
+    nombre: string | null
+    metadata: Record<string, unknown> | null
+    etapa_cambiada_at: string | null
+    responsable_id: string | null
+  }>
+  if (filas.length === 0) return []
+
+  // El tiempo máximo y el cálculo de atraso son los MISMOS que usa la tabla: horas
+  // hábiles contra el sla de la etapa. Si difirieran, el drill-down mostraría una
+  // lista que no cuadra con el número en el que el usuario hizo clic.
+  const { data: etapa } = await supabase
+    .from('etapas_negocio')
+    .select('config_extra')
+    .eq('id', input.etapaId)
+    .single()
+  const slaHoras = ((etapa as { config_extra?: { sla_horas?: number } } | null)?.config_extra?.sla_horas) ?? null
+
+  const staffIds = Array.from(new Set(filas.map(f => f.responsable_id).filter((v): v is string => !!v)))
+  const nombrePorStaff = new Map<string, string>()
+  if (staffIds.length > 0) {
+    const { data: staff } = await supabase.from('staff').select('id, full_name').in('id', staffIds)
+    for (const s of ((staff ?? []) as Array<{ id: string; full_name: string | null }>)) {
+      nombrePorStaff.set(s.id, s.full_name ?? '—')
+    }
+  }
+
+  let horasPorNegocio = new Map<string, number>()
+  if (slaHoras && slaHoras > 0) {
+    // Se pide el cálculo a la misma función SQL que alimenta la vista de SLA, en vez de
+    // replicarlo en TypeScript: ya hay dos implementaciones del algoritmo y no conviene
+    // una tercera.
+    const ids = filas.map(f => f.id)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: horas } = await (supabase as any).rpc('horas_habiles_negocios', { p_ids: ids })
+    if (Array.isArray(horas)) {
+      horasPorNegocio = new Map(
+        (horas as Array<{ negocio_id: string; horas: number }>).map(h => [h.negocio_id, Number(h.horas)]),
+      )
+    }
+  }
+
+  const casos: CasoEnEtapa[] = filas.map(f => {
+    const h = horasPorNegocio.get(f.id) ?? null
+    const marca = f.metadata?.reproceso as { activo?: boolean; tipo?: string } | undefined
+    return {
+      id: f.id,
+      codigo: f.codigo,
+      nombre: f.nombre ?? '—',
+      seccional: ((f.metadata?.seccional as string | undefined)?.trim() || null),
+      responsable: f.responsable_id ? (nombrePorStaff.get(f.responsable_id) ?? null) : null,
+      horasEnEtapa: h,
+      vencido: Boolean(slaHoras && slaHoras > 0 && h !== null && h > slaHoras),
+      reproceso: marca?.activo === true ? (marca.tipo ?? null) : null,
+    }
+  })
+
+  return casos
+    .filter(c => (input.seccional === undefined ? true : c.seccional === input.seccional))
+    .filter(c => (input.soloVencidos ? c.vencido : true))
+    .sort((a, b) => (b.horasEnEtapa ?? 0) - (a.horasEnEtapa ?? 0))
+}

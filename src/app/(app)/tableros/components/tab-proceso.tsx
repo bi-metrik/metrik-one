@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ArrowDown, ArrowUp, Info, Minus, RotateCcw } from 'lucide-react'
 import type { ProcesoSeccionalData, ProcesoSeccionalEtapa, ProcesoSeccionalCelda } from '../types'
 import { ChartCard } from './chart-card'
+import { CasosDrawer, type CeldaSeleccionada } from './casos-drawer'
 
 // Paleta MeTRIK (tokens del manual de marca, no Tailwind generico).
 const VERDE = '#10B981'
@@ -42,6 +43,17 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
 
   const [detalle, setDetalle] = useState<'totales' | 'seccional'>('totales')
   const [metrica, setMetrica] = useState<'abiertos' | 'vencidos'>('abiertos')
+  // Celda en la que se hizo clic: abre el panel con los casos concretos detrás del numero.
+  const [seleccion, setSeleccion] = useState<CeldaSeleccionada | null>(null)
+
+  const abrir = (e: ProcesoSeccionalEtapa, seccional?: string | null) =>
+    setSeleccion({
+      etapaId: e.etapaId,
+      etapaNombre: e.nombre,
+      etapaNumero: e.numero,
+      seccional,
+      soloVencidos: metrica === 'vencidos',
+    })
 
   const valorDe = (c?: ProcesoSeccionalCelda) =>
     c ? (metrica === 'abiertos' ? c.abiertos : c.vencidos) : 0
@@ -186,13 +198,26 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
                     <>
                       {conCita.map(c => {
                         const cel = celda(e, c)
-                        return <Celda key={c} hoy={valorDe(cel)} antes={antesDe(cel)} color={AMBAR} />
+                        return (
+                          <Celda
+                            key={c}
+                            hoy={valorDe(cel)}
+                            antes={antesDe(cel)}
+                            color={AMBAR}
+                            onClick={() => abrir(e, c)}
+                          />
+                        )
                       })}
                       <Celda {...sumaGrupo(e, sinCita)} />
-                      <Celda hoy={valorDe(celda(e, null))} antes={antesDe(celda(e, null))} color={OCRE} />
+                      <Celda
+                        hoy={valorDe(celda(e, null))}
+                        antes={antesDe(celda(e, null))}
+                        color={OCRE}
+                        onClick={() => abrir(e, null)}
+                      />
                     </>
                   )}
-                  <Celda hoy={valorDe(e.total)} antes={antesDe(e.total)} negrita />
+                  <Celda hoy={valorDe(e.total)} antes={antesDe(e.total)} negrita onClick={() => abrir(e)} />
                   <ReprocesoCelda r={e.reprocesos} />
                 </tr>
               ))}
@@ -267,6 +292,14 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
           </p>
         )}
       </ChartCard>
+
+      {seleccion && (
+        <CasosDrawer
+          key={[seleccion.etapaId, seleccion.seccional ?? 'todas', seleccion.soloVencidos].join('|')}
+          celda={seleccion}
+          onClose={() => setSeleccion(null)}
+        />
+      )}
     </div>
   )
 }
@@ -329,16 +362,28 @@ function Celda({
   antes,
   color = CARBON,
   negrita,
+  onClick,
 }: {
   hoy: number
   antes: number | null
   color?: string
   negrita?: boolean
+  /** Solo se ofrece el clic cuando hay casos que mostrar. */
+  onClick?: () => void
 }) {
   const delta = antes === null ? null : hoy - antes
+  const clicable = Boolean(onClick) && hoy > 0
   return (
     <td className="py-2 text-right tabular-nums">
-      <span style={{ color: hoy > 0 ? color : BORDE, fontWeight: negrita || hoy > 0 ? 600 : 400 }}>
+      <span
+        onClick={clicable ? onClick : undefined}
+        role={clicable ? 'button' : undefined}
+        tabIndex={clicable ? 0 : undefined}
+        onKeyDown={clicable ? (ev => { if (ev.key === 'Enter') onClick!() }) : undefined}
+        className={clicable ? 'cursor-pointer underline-offset-2 hover:underline' : ''}
+        title={clicable ? 'Ver los casos' : undefined}
+        style={{ color: hoy > 0 ? color : BORDE, fontWeight: negrita || hoy > 0 ? 600 : 400 }}
+      >
         {hoy || '·'}
       </span>
       {antes !== null && (
