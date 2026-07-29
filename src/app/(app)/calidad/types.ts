@@ -12,6 +12,31 @@ export type Semaforo = 'verde' | 'amarillo' | 'rojo'
 export type Severidad = 'critica' | 'alta' | 'media'
 export type Direccion = 'entrante' | 'saliente'
 
+/**
+ * Lo que la lista necesita para no mentir: las filas del periodo, sus KPIs
+ * calculados sobre el periodo COMPLETO (no sobre la pagina) y el tope
+ * declarado, para poder decir cuantas se muestran de cuantas.
+ */
+export interface ListaLlamadas {
+  /** Inicio del periodo, `YYYY-MM-DD` en hora de Bogota. */
+  desde: string
+  /** Fin del periodo: la fecha actual. Los dias sembrados por delante no salen. */
+  hasta: string
+  dias: number
+  /** Llamadas del periodo. */
+  total: number
+  /** Cuantas se devolvieron: `total` si cabe, el tope si no. */
+  mostradas: number
+  kpis: {
+    llamadas: number
+    rojo: number
+    amarillo: number
+    verde: number
+    tecnica: number
+  }
+  filas: LlamadaResumen[]
+}
+
 export interface LlamadaResumen {
   id: string
   /** Identificador opaco. La tabla no guarda el nombre del cliente final. */
@@ -246,6 +271,19 @@ export interface DineroCuota {
 }
 
 export interface DuenoData {
+  /** Inicio del periodo, `YYYY-MM-DD` en Bogota. */
+  desde: string
+  /** Fin: la fecha actual. Mismo corte que el muro. */
+  hasta: string
+  dias: number
+  /** US$799. Viaja desde la base para no quedar escrito en dos sitios. */
+  precioUsd: number
+  /**
+   * Fraccion que se cae en cada cuota, derivada del recobro real del periodo
+   * (`pendientes_recobro / ventas`). No es una constante escrita a mano: si el
+   * recobro mejora, la curva mejora sola.
+   */
+  tasaCaida: number
   cuotas: DineroCuota[]
   vendidoTotal: number
   recaudadoTotal: number

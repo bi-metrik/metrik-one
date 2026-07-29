@@ -4,6 +4,10 @@ import { DISCLAIMER_BANDERAS, type DuenoData } from '../types'
 const usd = (n: number) =>
   `US$${n.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 
+/** `2026-06-29` → `29 de jun`. */
+const fmtDia = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+
 /**
  * Vendido contra recaudado, cuota por cuota.
  *
@@ -29,7 +33,11 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
       </div>
 
       <section style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-        <Kpi label="Ventas cerradas" valor={String(datos.ventasCerradas)} nota="a US$799, en 6 cuotas" />
+        <Kpi
+          label="Ventas cerradas"
+          valor={datos.ventasCerradas.toLocaleString('es-CO')}
+          nota={`a ${usd(datos.precioUsd)}, en 6 cuotas · ${fmtDia(datos.desde)} a ${fmtDia(datos.hasta)}`}
+        />
         <Kpi
           label="Llegaron a cuota 6"
           valor={String(datos.llegaronCuota6)}
@@ -100,7 +108,11 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
 
           <p style={nota}>
             La venta no termina cuando el agente cierra: termina en la cuota 6. El tablero que hoy se
-            proyecta en el piso muestra ventas, no plata recaudada.
+            proyecta en el piso muestra ventas, no plata recaudada. Las{' '}
+            <b>{datos.ventasCerradas.toLocaleString('es-CO')}</b> ventas y los {usd(datos.vendidoTotal)}{' '}
+            son los mismos del muro, contados sobre las llamadas del período. El reparto a seis
+            cuotas aplica la caída de <b>{Math.round(datos.tasaCaida * 100)}%</b> por cuota que sale
+            del recobro real de abajo.
           </p>
         </div>
       </section>
@@ -122,10 +134,18 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
             <section style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
               {/* Las dos escalas juntas: el día solo no deja ver el tamaño del
                   hueco, y el acumulado solo esconde si hoy fue un mal día. */}
+              {/* `hoy` es HOY. Antes se tomaba la fila mas reciente de la
+                  tabla, y con la historia sembrada hasta el dia de la
+                  presentacion esa fila era del futuro: el dueño leia como "hoy"
+                  un dato de tres dias adelante. */}
               <Kpi
                 label="Rebotaron hoy"
-                valor={String(datos.recobro.hoy?.debitosRebotados ?? 0)}
-                nota={`${datos.recobro.hoy?.pendientesRecobro ?? 0} sin volver a llamar`}
+                valor={datos.recobro.hoy ? String(datos.recobro.hoy.debitosRebotados) : '—'}
+                nota={
+                  datos.recobro.hoy
+                    ? `${datos.recobro.hoy.pendientesRecobro} sin volver a llamar`
+                    : 'sin registro del día'
+                }
                 tono={datos.recobro.hoy?.debitosRebotados ? 'bad' : undefined}
               />
               <Kpi

@@ -5,13 +5,13 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getRolePermissions } from '@/lib/roles'
 import { slugAgente } from './types'
 import type {
-  DineroCuota,
   DuenoData,
   PerfilAgente,
   EventoCinta,
   Hallazgo,
   LlamadaDetalle,
   LlamadaResumen,
+  ListaLlamadas,
   MuroData,
   Semaforo,
   Severidad,
@@ -103,66 +103,39 @@ type FilaLlamada = {
  * la policy RLS aisla por workspace, no por agente. No es una regresion
  * (replica el modelo vigente del producto), pero tampoco cierra ese hueco.
  */
-export async function getLlamadas(): Promise<LlamadaResumen[]> {
+/**
+ * Lista de llamadas del periodo, con sus banderas, sus KPIs y su tope.
+ *
+ * Todo sale de UNA consulta (`get_calidad_lista`). Antes eran dos: una traia
+ * las filas y otra pedia los hallazgos con `.in('llamada_id', [...ids])`. Esa
+ * segunda consulta se rompia en silencio pasados ~300 ids (la URL supera los
+ * 14 KB) y la columna de banderas quedaba vacia en TODAS las filas, incluida la
+ * llamada real que tiene seis. Comprobado midiendo el corte, no supuesto.
+ *
+ * El tope es explicito y viaja de vuelta (`total` y `mostradas`) para que la
+ * pantalla pueda decir cuantas enseña de cuantas, en vez de presentar el limite
+ * por defecto de PostgREST como si fuera el dato.
+ */
+export async function getLlamadas(dias = 30, limite = 300): Promise<ListaLlamadas | null> {
   const ctx = await ctxCalidad()
-  if (!ctx) return []
+  if (!ctx) return null
 
-  let q = sinTipar(ctx.supabase)
-    .from('calidad_llamadas')
-    .select(
-      'id, cliente_ref, fecha_hora, fecha_grabacion, direccion, duracion_seg, agente_nombre, puntaje_tecnico, semaforo, detalle_completo, es_real',
-    )
-    .eq('workspace_id', ctx.workspaceId)
-    .order('fecha_hora', { ascending: false })
-
+  // Fail-closed: un ejecutor sin staff resuelto no ve nada. Devolver todo seria
+  // exactamente el agujero que este filtro existe para tapar.
+  let staffId: string | null = null
   if (!ctx.perms.canViewCalidadTodos) {
-    // Fail-closed: sin staff resuelto no se devuelve nada. Devolver todo seria
-    // exactamente el bug que este filtro existe para evitar.
-    if (!ctx.staffId) return []
-    q = q.eq('agente_staff_id', ctx.staffId)
+    if (!ctx.staffId) return null
+    staffId = ctx.staffId
   }
 
-  const { data, error } = await q
-  if (error || !data) return []
-
-  const filas = data as FilaLlamada[]
-  const ids = filas.map((f) => f.id)
-  if (ids.length === 0) return []
-
-  const { data: hallazgos } = await sinTipar(ctx.supabase)
-    .from('calidad_llamadas_hallazgos')
-    .select('llamada_id, codigo, severidad')
-    .eq('workspace_id', ctx.workspaceId)
-    .eq('eje', 'cumplimiento')
-    .in('llamada_id', ids)
-
-  const porLlamada = new Map<string, { codigos: Set<string>; criticas: number }>()
-  for (const h of (hallazgos ?? []) as { llamada_id: string; codigo: string | null; severidad: string | null }[]) {
-    if (!h.codigo) continue
-    const acc = porLlamada.get(h.llamada_id) ?? { codigos: new Set<string>(), criticas: 0 }
-    acc.codigos.add(h.codigo)
-    if (h.severidad === 'critica') acc.criticas += 1
-    porLlamada.set(h.llamada_id, acc)
-  }
-
-  return filas.map((f) => {
-    const agg = porLlamada.get(f.id)
-    return {
-      id: f.id,
-      clienteRef: f.cliente_ref,
-      fechaHora: f.fecha_hora,
-      fechaGrabacion: f.fecha_grabacion,
-      direccion: f.direccion as LlamadaResumen['direccion'],
-      duracionSeg: f.duracion_seg,
-      agenteNombre: f.agente_nombre,
-      puntajeTecnico: f.puntaje_tecnico,
-      semaforo: f.semaforo as Semaforo,
-      detalleCompleto: f.detalle_completo,
-      esReal: f.es_real,
-      codigos: agg ? [...agg.codigos].sort() : [],
-      criticas: agg?.criticas ?? 0,
-    }
+  const { data, error } = await sinTipar(ctx.supabase).rpc('get_calidad_lista', {
+    p_workspace_id: ctx.workspaceId,
+    p_staff_id: staffId,
+    p_dias: dias,
+    p_limite: limite,
   })
+  if (error || !data) return null
+  return data as ListaLlamadas
 }
 
 /**
@@ -310,33 +283,32 @@ export async function getMuroPorWorkspace(workspaceId: string, fecha?: string): 
  * SOLO con service_role. Por eso este action valida el rol a mano antes de
  * tocar la tabla — no hay RLS que lo respalde aguas abajo.
  */
+/**
+ * Vista de dueño: vendido contra recaudado, cuota por cuota.
+ *
+ * Las ventas y el vendido salen de `get_calidad_dinero`, que los cuenta sobre
+ * `calidad_llamadas` — la MISMA fuente y el mismo corte que el muro. Antes
+ * venian de `calidad_dinero_cuotas`, una tabla sembrada aparte, y al reanclar
+ * la historia las dos pantallas quedaron diciendo cosas distintas del mismo
+ * mes: 37 ventas aqui contra 626 cierres alla. Con una sola fuente esa
+ * contradiccion deja de ser posible, que es la razon del cambio y no el ahorro
+ * de una consulta.
+ *
+ * El reparto a seis cuotas se deriva con la regla escrita en la migracion, a
+ * partir del recobro real. Las banderas criticas siguen contandose sobre los
+ * hallazgos.
+ */
 export async function getDatosDueno(): Promise<DuenoData | null> {
   const ctx = await ctxCalidad()
   if (!ctx) return null
   if (!ctx.perms.canViewCalidadDinero) return null
 
-  const svc = createServiceClient()
-
-  const { data: cuotasRaw } = await sinTipar(svc)
-    .from('calidad_dinero_cuotas')
-    .select('cuota, ventas, vendido_usd, recaudado_usd')
-    .eq('workspace_id', ctx.workspaceId)
-    .order('cuota')
-
-  const cuotas: DineroCuota[] = ((cuotasRaw ?? []) as {
-    cuota: number
-    ventas: number
-    vendido_usd: string | number
-    recaudado_usd: string | number
-  }[]).map((c) => ({
-    cuota: c.cuota,
-    ventas: c.ventas,
-    vendidoUsd: Number(c.vendido_usd),
-    recaudadoUsd: Number(c.recaudado_usd),
-  }))
-
-  const vendidoTotal = cuotas.reduce((a, c) => a + c.vendidoUsd, 0)
-  const recaudadoTotal = cuotas.reduce((a, c) => a + c.recaudadoUsd, 0)
+  const { data, error } = await sinTipar(ctx.supabase).rpc('get_calidad_dinero', {
+    p_workspace_id: ctx.workspaceId,
+    p_dias: 30,
+  })
+  if (error || !data) return null
+  const dinero = data as Omit<DuenoData, 'criticasAbiertas'>
 
   // Banderas criticas abiertas del workspace, agregadas por codigo.
   const { data: criticasRaw } = await sinTipar(ctx.supabase)
@@ -353,54 +325,11 @@ export async function getDatosDueno(): Promise<DuenoData | null> {
     agg.set(h.codigo, { titulo: prev?.titulo ?? h.titulo, veces: (prev?.veces ?? 0) + 1 })
   }
 
-  /*
-   * Recobro. Vivia en el pie del muro del piso y se movio aqui: un debito que
-   * rebota por fondos insuficientes es cobranza, no operacion del dia. El muro
-   * responde "que esta pasando ahora"; esta pantalla responde "cuanto se esta
-   * cayendo", que es pregunta de dueno y va pegada al recaudo a seis cuotas.
-   *
-   * Se muestran las dos escalas a proposito: el dia solo no alcanza para ver
-   * el tamaño del hueco, y el acumulado solo esconde si hoy fue un mal dia.
-   */
-  const { data: recobroRaw } = await sinTipar(ctx.supabase)
-    .from('calidad_recobro_dia')
-    .select('fecha, debitos_rebotados, pendientes_recobro, monto_en_riesgo_usd')
-    .eq('workspace_id', ctx.workspaceId)
-    .order('fecha', { ascending: false })
-
-  const recobroDias = ((recobroRaw ?? []) as {
-    fecha: string
-    debitos_rebotados: number
-    pendientes_recobro: number
-    monto_en_riesgo_usd: string | number
-  }[]).map((r) => ({
-    debitosRebotados: r.debitos_rebotados,
-    pendientesRecobro: r.pendientes_recobro,
-    montoEnRiesgoUsd: Number(r.monto_en_riesgo_usd),
-  }))
-
   return {
-    cuotas,
-    vendidoTotal,
-    recaudadoTotal,
-    recaudoPct: vendidoTotal > 0 ? Math.round((recaudadoTotal / vendidoTotal) * 100) : 0,
-    ventasCerradas: cuotas[0]?.ventas ?? 0,
-    llegaronCuota6: cuotas[cuotas.length - 1]?.ventas ?? 0,
+    ...dinero,
     criticasAbiertas: [...agg.entries()]
       .map(([codigo, v]) => ({ codigo, ...v }))
       .sort((a, b) => b.veces - a.veces),
-    recobro: {
-      hoy: recobroDias[0] ?? null,
-      acumulado: recobroDias.reduce(
-        (a, r) => ({
-          debitosRebotados: a.debitosRebotados + r.debitosRebotados,
-          pendientesRecobro: a.pendientesRecobro + r.pendientesRecobro,
-          montoEnRiesgoUsd: a.montoEnRiesgoUsd + r.montoEnRiesgoUsd,
-        }),
-        { debitosRebotados: 0, pendientesRecobro: 0, montoEnRiesgoUsd: 0 },
-      ),
-      dias: recobroDias.length,
-    },
   }
 }
 
