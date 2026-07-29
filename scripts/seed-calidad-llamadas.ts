@@ -862,9 +862,20 @@ async function main() {
   })
   llamadas.push(...rellenoHoy)
 
-  // Las de hoy (relleno + las dos auditadas) son las que verifica el contraste
-  // y las que alimentan el heroe del muro. La historia va aparte.
-  const llamadasHoy = [...llamadas]
+  // OJO: aqui NO se decide que es "el dia ancla". Se decide abajo, agrupando
+  // por la fecha real de cada llamada.
+  //
+  // Antes esta linea era `[...llamadas]` — el relleno del dia mas las dos
+  // auditadas, que entonces vivian en el ancla. Al moverlas cuatro dias atras,
+  // la variable siguio contandolas como del ancla y el resumen empezo a
+  // reportar 98 llamadas y 23 cierres donde la base tenia 96 y 21. Peor: ese
+  // mismo conteo alimenta `calidad_cobertura_dia`, asi que la cobertura del
+  // ancla contaba dos llamadas que ya no estaban ahi.
+  //
+  // La leccion, que vale mas que el arreglo: el resumen que uno usa para
+  // verificar tiene que derivarse del DATO, no de la variable que uno creia
+  // que lo representaba. Si no, la comprobacion hereda el mismo supuesto que
+  // el codigo.
 
   // ── 3b. Historia ──────────────────────────────────────────────────────────
   //
@@ -876,7 +887,6 @@ async function main() {
   // Sergio no dijo si operan fines de semana y no vamos a inventarle una
   // jornada al cliente; el volumen varia dia a dia pero ningun dia queda en
   // cero. Si confirma que no operan domingos, es una linea aqui.
-  const porDia = new Map<string, number>([[DIA, llamadasHoy.length]])
   for (let d = 1; d < DIAS_HISTORIA; d++) {
     const fecha = fechaOffset(d)
     const filas = sembrarDia({
@@ -887,8 +897,19 @@ async function main() {
       ref: (idx) => `LL-D${String(d).padStart(2, '0')}-${String(idx).padStart(4, '0')}`,
     })
     llamadas.push(...filas)
-    porDia.set(fecha, filas.length)
   }
+
+  // Cuantas llamadas quedaron en cada dia, contadas por su FECHA REAL. Cubre
+  // cualquier llamada que se mueva de dia sin que haya que acordarse de
+  // ajustar el conteo a mano.
+  const porDia = new Map<string, number>()
+  for (const l of llamadas) {
+    const f = String(l.fecha_hora).slice(0, 10)
+    porDia.set(f, (porDia.get(f) ?? 0) + 1)
+  }
+
+  /** Las del dia ancla: lo que se proyecta el dia de la demo. */
+  const llamadasHoy = llamadas.filter((l) => String(l.fecha_hora).slice(0, 10) === DIA)
   console.log(`historia       ${DIAS_HISTORIA} dias · ${llamadas.length} llamadas en total`)
 
   // ── Insercion ─────────────────────────────────────────────────────────────
@@ -991,7 +1012,7 @@ async function main() {
     acc[s] = (acc[s] ?? 0) + 1
     return acc
   }, {})
-  console.log(`semáforos hoy  ${JSON.stringify(porSemaforo)}`)
+  console.log(`semáforos ${DIA}  ${JSON.stringify(porSemaforo)}`)
   console.log(
     `de Felipe      ${llamadasHoy.filter((l) => l.agente_staff_id === staffFelipe).length} hoy · ` +
       `${llamadas.filter((l) => l.agente_staff_id === staffFelipe).length} en el mes`,
@@ -1078,7 +1099,7 @@ async function main() {
   const cierres = llamadasHoy.filter((l) => l.cerro_venta)
   const conTarjeta = cierres.filter((l) => l.forma_pago === 'tarjeta').length
   console.log(
-    `cierres hoy    ${cierres.length} de ${llamadasHoy.length} llamadas · ` +
+    `cierres ${DIA}  ${cierres.length} de ${llamadasHoy.length} llamadas · ` +
       `${conTarjeta} tarjeta / ${cierres.length - conTarjeta} cuenta · ` +
       `US$${cierres.length * PRECIO_PROGRAMA}`,
   )
