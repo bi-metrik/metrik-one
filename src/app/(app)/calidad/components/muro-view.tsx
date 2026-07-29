@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Maximize2 } from 'lucide-react'
 import {
+  PERIODO_BANDA,
   PERIODO_LABEL,
-  PERIODO_RANGO,
+  PERIODO_TITULO,
   type MuroData,
   type Periodo,
   type Semaforo,
@@ -84,6 +85,8 @@ const CUMPLIMIENTO: Record<Semaforo, { texto: string; color: string }> = {
 }
 
 const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
+/** Separador de miles: a tres metros "2817" se lee peor que "2.817". */
+const num = (n: number) => n.toLocaleString('es-CO')
 
 const COLS_AGENTES = '1fr 130px 120px 124px 130px 144px'
 const COLS_ULTIMAS = '98px 1fr 94px 178px'
@@ -104,6 +107,9 @@ const ROTACION_MS = 20_000
 /** Cada cuanto se vuelven a pedir los datos al servidor. */
 const REFRESCO_MS = 30_000
 
+/** Duracion del fundido al girar. Corto: ordena el cambio sin hacerlo esperar. */
+const FUNDIDO_MS = 220
+
 /**
  * "martes 28 de julio". `toLocaleDateString` devuelve "martes, 28 de julio" y
  * `text-transform: capitalize` convertiria cada palabra ("Martes, 28 De
@@ -115,6 +121,14 @@ function fechaLegible(iso: string): string {
     .toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })
     .replace(',', '')
   return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+/** "29 de junio" — para los extremos del rango de semana y mes. */
+function fechaCorta(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', {
+    day: 'numeric',
+    month: 'long',
+  })
 }
 
 export default function MuroView({
@@ -146,16 +160,45 @@ export default function MuroView({
     return () => clearInterval(t)
   }, [proyectable, router])
 
-  // Rotacion de la temporalidad. Independiente del refresco: son dos relojes
-  // distintos y no se pisan porque ninguno reinicia al otro.
+  /*
+   * Rotacion de la temporalidad, con fundido.
+   *
+   * Un solo reloj hace las dos cosas: baja la opacidad, cambia el periodo con
+   * la pantalla ya invisible, y vuelve a subir. Al girar cambian una docena de
+   * numeros a la vez y tambien el ancho de los textos (no mide igual "HOY ·
+   * Martes 28 de julio" que "ÚLTIMOS 30 DÍAS"); de golpe, a tres metros eso se
+   * lee como un error de la pantalla y no como un cambio de vista.
+   *
+   * Es independiente del refresco de datos: son dos relojes y ninguno reinicia
+   * al otro, que es lo que garantiza que el ciclo no se quede pegado en el dia.
+   */
   const [iPeriodo, setIPeriodo] = useState(0)
+  const [fundido, setFundido] = useState(false)
+  const relojFundido = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
-    const t = setInterval(() => setIPeriodo((i) => (i + 1) % PERIODOS.length), ROTACION_MS)
-    return () => clearInterval(t)
+    const t = setInterval(() => {
+      setFundido(true)
+      relojFundido.current = setTimeout(() => {
+        setIPeriodo((i) => (i + 1) % PERIODOS.length)
+        setFundido(false)
+      }, FUNDIDO_MS)
+    }, ROTACION_MS)
+    return () => {
+      clearInterval(t)
+      if (relojFundido.current) clearTimeout(relojFundido.current)
+    }
   }, [])
 
   const periodo = PERIODOS[iPeriodo]
-  const ranking = data.rankings?.[periodo]
+  const bloque = data.periodos?.[periodo]
+  const ranking = bloque?.ranking
+
+  /** Todo lo que rota comparte el mismo fundido: cambian juntos o no cambian. */
+  const rotante = {
+    opacity: fundido ? 0 : 1,
+    transition: `opacity ${FUNDIDO_MS}ms ease`,
+  } as const
 
   const [pantallaCompleta, setPantallaCompleta] = useState(false)
   const alternarPantallaCompleta = () => {
@@ -168,10 +211,26 @@ export default function MuroView({
     }
   }
 
-  const c = data.cierres
-  const cob = data.cobertura
+  const c = bloque?.cierres
+  const cob = bloque?.cobertura
+  const bandera = bloque?.banderaTop
 
-  const fechaLarga = fechaLegible(data.fecha)
+  /*
+   * Que dice el encabezado, segun el periodo.
+   *
+   * El dia se nombra por su fecha ("HOY · Martes 28 de julio") porque es la
+   * unidad que el piso vive; semana y mes se nombran por su ventana y llevan el
+   * rango explicito, porque "la semana" sin fechas no dice de cual habla.
+   */
+  const titulo = data.esFallback && periodo === 'dia'
+    ? 'ÚLTIMO DÍA CON ACTIVIDAD'
+    : PERIODO_TITULO[periodo]
+  const subtitulo =
+    periodo === 'dia'
+      ? fechaLegible(data.fecha)
+      : bloque
+        ? `${fechaCorta(bloque.desde)} – ${fechaCorta(bloque.hasta)}`
+        : ''
 
   return (
     <div
@@ -189,18 +248,29 @@ export default function MuroView({
     >
       {/* ── Encabezado: cuándo es "ahora", dicho sin rodeos ─────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 20, minWidth: 0 }}>
+        {/*
+          Título y sello van en DOS LÍNEAS, no en una.
+
+          En vista de mes la línea completa ("ÚLTIMOS 30 DÍAS · 29 de junio –
+          28 de julio" + "2.817 de 2.817 auditadas · antes se auditaban 143")
+          se pasa del ancho y se monta sobre el nombre del workspace. Apilarlas
+          hace que el encabezado quepa en cualquier período sin encoger nada.
+        */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, ...rotante }}>
           {/*
-            El dia pedido no tenia actividad y esto es el ultimo dia con
-            llamadas. Se dice en pantalla en vez de rotularlo "HOY" y mostrar
-            los datos de otro dia.
+            El encabezado ROTA con la tabla. Si dijera siempre "HOY" mientras
+            abajo se muestra el mes, quien mira ve dos periodos al tiempo y no
+            sabe cual esta leyendo — que es exactamente lo que pasaba en v5.
+
+            `esFallback` solo aplica al dia: si el dia pedido no tuvo actividad
+            se dice en pantalla, en vez de rotular "HOY" datos de otro dia.
           */}
           <span style={{ fontSize: 40, fontWeight: 700, letterSpacing: '-.5px', whiteSpace: 'nowrap' }}>
-            <span style={{ color: data.esFallback ? M.high : M.brand }}>
-              {data.esFallback ? 'ÚLTIMO DÍA CON ACTIVIDAD' : 'HOY'}
+            <span style={{ color: data.esFallback && periodo === 'dia' ? M.high : M.brand }}>
+              {titulo}
             </span>
             <span style={{ color: M.muted, margin: '0 14px' }}>·</span>
-            <span>{fechaLarga}</span>
+            <span>{subtitulo}</span>
           </span>
           {/*
             Sello, no titular: la cobertura informa una vez y luego es constante.
@@ -213,17 +283,20 @@ export default function MuroView({
           */}
           {cob && (
             <span style={{ fontFamily: MONO, fontSize: 22, color: M.muted, whiteSpace: 'nowrap' }}>
-              {cob.auditadas} de {cob.recibidas} llamadas auditadas
+              {num(cob.auditadas)} de {num(cob.recibidas)} llamadas auditadas
               {cob.baseline > 0 && (
                 <>
                   <span style={{ margin: '0 10px' }}>·</span>
-                  antes se auditaban {cob.baseline}
+                  antes se auditaban {num(cob.baseline)}
                 </>
               )}
             </span>
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* El ciclo lo marca el encabezado porque ahora rota la pantalla
+              entera, no solo la tabla. */}
+          <Puntos total={PERIODOS.length} activo={iPeriodo} />
           <span style={{ fontSize: 26, fontWeight: 600, color: M.muted, whiteSpace: 'nowrap' }}>
             {nombreWorkspace}
           </span>
@@ -248,9 +321,10 @@ export default function MuroView({
         </div>
       </div>
 
-      {/* ── Zona 1: el héroe, con denominador ──────────────────────── */}
+      {/* ── Zona 1: el héroe del PERÍODO, con denominador ──────────── */}
       <div
         style={{
+          ...rotante,
           marginTop: 16,
           background: M.panel,
           border: `1px solid ${M.line}`,
@@ -275,7 +349,7 @@ export default function MuroView({
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {c?.total ?? 0}
+            {num(c?.total ?? 0)}
           </span>
           <span style={{ lineHeight: 1.3 }}>
             <span
@@ -291,7 +365,7 @@ export default function MuroView({
               Cierres
             </span>
             <span style={{ display: 'block', fontSize: 26, color: M.ink }}>
-              de {c?.llamadas ?? 0} llamadas
+              de {num(c?.llamadas ?? 0)} llamadas
             </span>
           </span>
         </div>
@@ -299,7 +373,7 @@ export default function MuroView({
         {/* El denominador convertido en el numero que la operación entiende */}
         <div style={{ display: 'grid', gap: 6 }}>
           <Kpi valor={`${c?.pctCierre ?? 0}%`} etiqueta="de cierre" color={M.ink} />
-          <Kpi valor={usd(c?.montoUsd ?? 0)} etiqueta="vendido hoy" color={M.ink} />
+          <Kpi valor={usd(c?.montoUsd ?? 0)} etiqueta="vendido" color={M.ink} />
         </div>
 
         {/* El desglose que hace la diferencia */}
@@ -313,7 +387,7 @@ export default function MuroView({
           />
           <FormaPago
             etiqueta="a seis cuotas"
-            nota={`${usd(c?.cuenta.primeraCuotaUsd ?? 0)} entra este mes`}
+            nota={`${usd(c?.cuenta.primeraCuotaUsd ?? 0)} en la primera cuota`}
             n={c?.cuenta.n ?? 0}
             monto={c?.cuenta.montoUsd ?? 0}
             color={M.high}
@@ -333,11 +407,7 @@ export default function MuroView({
         }}
       >
         {/* ── Zona 2a: el ranking (rota entre día, semana y mes) ── */}
-        <Panel
-          titulo={PERIODO_LABEL[periodo]}
-          rango={PERIODO_RANGO[periodo]}
-          extra={<Puntos total={PERIODOS.length} activo={iPeriodo} />}
-        >
+        <Panel titulo={PERIODO_LABEL[periodo]} estilo={rotante}>
           {!ranking || ranking.filas.length === 0 ? (
             <div style={{ fontSize: 26, color: M.muted }}>Sin llamadas en este período.</div>
           ) : (
@@ -399,7 +469,9 @@ export default function MuroView({
         </Panel>
 
         {/* ── Zona 2b: el flujo (lo que está pasando ahora) ── */}
-        <Panel titulo="Últimas llamadas">
+        {/* El flujo NO entra al fundido: no rota. La nota lo dice para que
+            nadie lo lea como "las últimas del mes". */}
+        <Panel titulo="Últimas llamadas" nota="en vivo">
           {data.ultimas.length === 0 ? (
             <div style={{ fontSize: 26, color: M.muted }}>Sin llamadas registradas hoy.</div>
           ) : (
@@ -456,9 +528,10 @@ export default function MuroView({
       {/* ── Zona 3: la banda accionable ─────────────────────────────── */}
       <div
         style={{
+          ...rotante,
           marginTop: 14,
-          background: data.banderaTop ? 'rgba(248,113,113,.10)' : M.panel,
-          border: `1px solid ${data.banderaTop ? 'rgba(248,113,113,.35)' : M.line}`,
+          background: bandera ? 'rgba(248,113,113,.10)' : M.panel,
+          border: `1px solid ${bandera ? 'rgba(248,113,113,.35)' : M.line}`,
           borderRadius: 10,
           padding: '14px 26px',
           display: 'flex',
@@ -476,9 +549,9 @@ export default function MuroView({
             whiteSpace: 'nowrap',
           }}
         >
-          Lo que más se repite hoy
+          Lo que más se repite {PERIODO_BANDA[periodo]}
         </span>
-        {data.banderaTop ? (
+        {bandera ? (
           <span
             style={{
               fontSize: 34,
@@ -489,9 +562,9 @@ export default function MuroView({
               flex: 1,
             }}
           >
-            <b style={{ fontFamily: MONO, color: M.crit }}>{data.banderaTop.codigo}</b>
+            <b style={{ fontFamily: MONO, color: M.crit }}>{bandera.codigo}</b>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {data.banderaTop.titulo}
+              {bandera.titulo}
             </span>
             <b
               style={{
@@ -502,11 +575,13 @@ export default function MuroView({
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {data.banderaTop.veces} veces
+              {bandera.veces} veces
             </b>
           </span>
         ) : (
-          <span style={{ fontSize: 34, color: M.muted }}>Sin banderas hoy</span>
+          <span style={{ fontSize: 34, color: M.muted }}>
+            Sin banderas {PERIODO_BANDA[periodo]}
+          </span>
         )}
       </div>
 
@@ -537,8 +612,8 @@ export default function MuroView({
           Banderas = errores críticos.
           {'  ·  '}
           {c?.montoUnitarioUsd
-            ? `Cobrado = pagó los ${usd(c.montoUnitarioUsd)} completos hoy; el resto queda a seis cuotas.`
-            : 'Cobrado = pagó completo hoy; el resto queda a seis cuotas.'}
+            ? `Cobrado = pagó los ${usd(c.montoUnitarioUsd)} de una vez; el resto queda a seis cuotas.`
+            : 'Cobrado = pagó de una vez; el resto queda a seis cuotas.'}
           {'  ·  '}
           Datos de demostración: una llamada real, el resto es muestra.
         </span>
@@ -687,19 +762,21 @@ function Cumplimiento({ semaforo }: { semaforo: Semaforo }) {
 
 function Panel({
   titulo,
-  rango,
-  extra,
+  nota,
+  estilo,
   children,
 }: {
   titulo: string
-  /** De qué ventana de tiempo habla la tabla. Sin esto "semana" es ambiguo. */
-  rango?: string
-  extra?: React.ReactNode
+  /** Aclaración corta al lado del título. */
+  nota?: string
+  /** Para que el panel entre (o no) en el fundido de la rotación. */
+  estilo?: React.CSSProperties
   children: React.ReactNode
 }) {
   return (
     <section
       style={{
+        ...estilo,
         background: M.panel,
         border: `1px solid ${M.line}`,
         borderRadius: 10,
@@ -731,8 +808,7 @@ function Panel({
         >
           {titulo}
         </h2>
-        {rango && <span style={{ fontSize: 18, color: M.muted }}>{rango}</span>}
-        {extra && <span style={{ marginLeft: 'auto' }}>{extra}</span>}
+        {nota && <span style={{ fontSize: 18, color: M.muted }}>{nota}</span>}
       </div>
       {children}
     </section>

@@ -90,6 +90,25 @@ export const PERIODO_RANGO: Record<Periodo, string> = {
 }
 
 /**
+ * Titulo del ENCABEZADO, que desde v6 tambien rota.
+ *
+ * Antes decia siempre "HOY" mientras la tabla mostraba el mes: quien miraba
+ * veia el mes abajo y el dia arriba sin saber cual estaba leyendo.
+ */
+export const PERIODO_TITULO: Record<Periodo, string> = {
+  dia: 'HOY',
+  semana: 'ÚLTIMOS 7 DÍAS',
+  mes: 'ÚLTIMOS 30 DÍAS',
+}
+
+/** Coletilla de la banda: "lo que más se repite HOY / EN LA SEMANA / EN EL MES". */
+export const PERIODO_BANDA: Record<Periodo, string> = {
+  dia: 'hoy',
+  semana: 'en la semana',
+  mes: 'en el mes',
+}
+
+/**
  * Una fila del ranking. Los DOS EJES de la rubrica, separados:
  *
  *   - `tecnica`  — promedio de puntaje del periodo, 0-100. Como ejecuta la venta.
@@ -129,19 +148,63 @@ export interface UmbralesRanking {
 }
 
 export interface RankingPeriodo {
-  desde: string
-  hasta: string
   filas: FilaRanking[]
   umbrales: UmbralesRanking
 }
 
 /**
- * Datos del muro proyectable. Tres zonas y nada mas: es lo que cabe en un
- * televisor y se lee a tres metros.
+ * TODO lo agregado de un periodo, en un solo bloque.
  *
- * La cobertura NO es el heroe. Una vez instalado el producto marca 100% todos
- * los dias: informa una vez y despues es constante. Lo que se mueve durante el
- * dia, y sobre lo que el piso puede actuar, son los cierres.
+ * Es una sola fuente a proposito: si el heroe y el ranking se calcularan por
+ * separado, en algun borde (zona horaria, limite del dia) darian numeros
+ * distintos y la pantalla se contradiria a si misma sin que nadie pueda decir
+ * cual de los dos miente.
+ *
+ * Las ULTIMAS LLAMADAS no estan aqui: son el pulso en vivo, no un agregado, y
+ * no rotan.
+ */
+export interface BloquePeriodo {
+  desde: string
+  hasta: string
+
+  /**
+   * El heroe del periodo. Cierres partidos por forma de pago.
+   *
+   * `tarjeta` es caja: entra completo. `cuenta` es una promesa a seis cuotas, y
+   * si el cliente deja de pagar el servicio se suspende. Contar los dos como
+   * "una venta" es el error del Excel que hoy se proyecta.
+   */
+  cierres: {
+    total: number
+    montoUsd: number
+    llamadas: number
+    /** % de conversion: el numero que la operacion entiende. */
+    pctCierre: number
+    /** Precio del programa segun los cierres. Define "cobrado" en el pie. */
+    montoUnitarioUsd: number
+    tarjeta: { n: number; montoUsd: number }
+    cuenta: { n: number; montoUsd: number; primeraCuotaUsd: number }
+  } | null
+
+  /**
+   * Sello del encabezado. `baseline` es el contrafactual (lo que se auditaba a
+   * mano) SUMADO en el periodo: 5 al dia son 150 en 30 dias. Sale del dato.
+   */
+  cobertura: { recibidas: number; auditadas: number; baseline: number; pct: number } | null
+
+  /** Banda destacada: lo unico realmente accionable para el piso. */
+  banderaTop: { codigo: string; titulo: string; veces: number } | null
+
+  ranking: RankingPeriodo
+}
+
+/**
+ * Datos del muro proyectable.
+ *
+ * Desde v6 el PERIODO manda sobre toda la pantalla: encabezado, cobertura,
+ * heroe, banda y ranking salen del mismo bloque. Antes solo rotaba la tabla y
+ * el resto se quedaba en el dia, asi que con "Ranking mes" abajo el encabezado
+ * seguia diciendo "HOY" — el que miraba no sabia cual de los dos leer.
  */
 export interface MuroData {
   /** Fecha EFECTIVA de los datos mostrados, no necesariamente la pedida. */
@@ -153,40 +216,18 @@ export interface MuroData {
   esFallback: boolean
 
   /**
-   * Zona 1 — el heroe. Cierres del dia partidos por forma de pago.
-   *
-   * `tarjeta` es caja: entra completo hoy. `cuenta` es una promesa a seis
-   * cuotas, y si el cliente deja de pagar el servicio se suspende. Contar los
-   * dos como "una venta" es el error del Excel que hoy se proyecta.
+   * Los tres periodos, en la MISMA respuesta. Re-consultar en cada giro haria
+   * que la rotacion dependa de la red, y un fallo de fetch dejaria la pantalla
+   * en blanco a mitad de ciclo.
    */
-  cierres: {
-    total: number
-    montoUsd: number
-    llamadas: number
-    /** % de conversion del dia: el numero que la operacion entiende. */
-    pctCierre: number
-    /** Precio del programa segun los cierres del dia. Define "cobrado" en el pie. */
-    montoUnitarioUsd: number
-    tarjeta: { n: number; montoUsd: number }
-    cuenta: { n: number; montoUsd: number; primeraCuotaUsd: number }
-  } | null
+  periodos: Record<Periodo, BloquePeriodo>
 
   /**
-   * El ranking en tres temporalidades. El muro rota solo entre ellas: nadie
-   * toca un televisor, asi que no puede depender de un clic.
+   * El flujo: lo que esta pasando AHORA. NO rota — es el pulso en vivo, no un
+   * agregado, y en vista de mes serian las mismas diez que en vista de dia.
    *
-   * Las tres viajan en la MISMA respuesta a proposito. Re-consultar en cada
-   * giro haria que la rotacion dependa de la red, y un fallo de fetch dejaria
-   * la pantalla en blanco a mitad de ciclo.
-   */
-  rankings: Record<Periodo, RankingPeriodo>
-
-  /**
-   * Zona 2b — el flujo: lo que esta pasando AHORA.
-   *
-   * El ranking es el acumulado y no se mueve mucho durante el dia; esto si. Sin
-   * duraciones (se leian como horas del dia al lado de la columna de hora), sin
-   * apellidos y sin `cliente_ref`.
+   * Sin duraciones (se leian como horas del dia al lado de la columna de hora),
+   * sin apellidos y sin `cliente_ref`.
    */
   ultimas: {
     hora: string
@@ -195,15 +236,6 @@ export interface MuroData {
     semaforo: Semaforo
     cerroVenta: boolean
   }[]
-
-  /** Sello discreto del encabezado: "98 de 98 llamadas auditadas". */
-  cobertura: { recibidas: number; auditadas: number; baseline: number; pct: number } | null
-
-  /**
-   * Banda destacada. Es lo unico realmente accionable para el piso, asi que
-   * va en grande y no en letra chica al pie.
-   */
-  banderaTop: { codigo: string; titulo: string; veces: number } | null
 }
 
 export interface DineroCuota {
