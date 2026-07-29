@@ -316,3 +316,130 @@ export function duracion(segundos: number): string {
   if (m > 0) return `${m} min ${String(s).padStart(2, '0')} s`
   return `${s} s`
 }
+
+// ── Perfil de agente ────────────────────────────────────────────────────────
+
+/**
+ * Slug estable del agente para la URL. `Óscar Peñaloza` → `oscar-penaloza`.
+ * Se normaliza sin acentos para que la URL no dependa de como venga escrito el
+ * nombre en la fuente.
+ */
+export function slugAgente(nombre: string): string {
+  return nombre
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+/** Una llamada como punto de la dispersion. */
+export interface PuntoPerfil {
+  id: string
+  ref: string
+  /** `YYYY-MM-DDTHH:MM` en hora de Bogota. */
+  fecha: string
+  dia: string
+  tecnica: number
+  semaforo: Semaforo
+  cerroVenta: boolean
+  /** true = tiene transcripcion auditada, o sea hay pantalla de detalle. */
+  detalle: boolean
+}
+
+/**
+ * Tendencia del score en el periodo.
+ *
+ * `t` es la pendiente dividida por su propio error estandar. Es lo que permite
+ * decir "va al alza" sin inventarse un umbral: con |t| >= 2 la subida es mayor
+ * que la dispersion del propio agente. Es `null` cuando no hay puntos
+ * suficientes (menos de 3) — y en ese caso la pantalla lo dice, no rellena.
+ */
+export interface TendenciaPerfil {
+  n: number
+  porSemana: number | null
+  t: number | null
+  primeraMitad: number | null
+  segundaMitad: number | null
+}
+
+/** Un bloque de la rubrica, promediado en el periodo. */
+export interface BloquePerfil {
+  orden: number
+  nombre: string
+  promedio: number
+  maximo: number
+  /** Puntos de score que quedan sobre la mesa en este bloque. */
+  enJuego: number
+  pctLogro: number
+  llamadas: number
+}
+
+export interface PerfilAgente {
+  agente: string
+  desde: string
+  hasta: string
+  kpis: {
+    llamadas: number
+    tecnica: number
+    cierres: number
+    pctCierre: number
+    criticas: number
+    verde: number
+    amarillo: number
+    rojo: number
+  }
+  puntos: PuntoPerfil[]
+  tendencia: TendenciaPerfil
+  /** Ya vienen ordenados por puntos en juego, de mayor a menor. */
+  bloques: BloquePerfil[]
+}
+
+export type LecturaTendencia = 'alza' | 'baja' | 'estable' | 'sin_datos'
+
+/**
+ * Traduce la tendencia a una de cuatro lecturas.
+ *
+ * El corte es |t| >= 2 (≈95% de confianza), NO una cantidad de puntos. Un
+ * umbral en puntos seria una opinion disfrazada: 3 puntos son mucho en un
+ * agente parejo y ruido en uno errativo. Con el t, "al alza" significa que la
+ * subida es mayor que la dispersion del propio agente — lo unico que se puede
+ * afirmar sin inventar.
+ *
+ * `estable` no es un consuelo por no encontrar nada: es un hallazgo. Dice que
+ * el agente rinde igual que hace un mes, que es informacion accionable para
+ * quien entrena.
+ */
+export function leerTendencia(t: TendenciaPerfil): LecturaTendencia {
+  if (t.n < 3 || t.t === null) return 'sin_datos'
+  if (t.t >= 2) return 'alza'
+  if (t.t <= -2) return 'baja'
+  return 'estable'
+}
+
+/**
+ * Que hacer para subir, por bloque. Es entrenamiento, no expediente: cada linea
+ * dice una conducta concreta, no un juicio sobre la persona.
+ *
+ * El texto va atado al bloque de la rubrica, no al agente: quien salga bajo en
+ * Escucha recibe el mismo consejo, porque el consejo es sobre la conducta. Lo
+ * que cambia entre personas es CUALES aparecen y en que orden, y eso lo decide
+ * su propio dato.
+ */
+export const COMO_SUBIR: Record<string, string> = {
+  'Apertura e identificación':
+    'Da nombre completo, empresa y motivo en los primeros treinta segundos, y confirma que hablas con el titular antes de avanzar.',
+  Descubrimiento:
+    'Antes de proponer, pregunta por la situación y deja que la responda: qué le está pasando, desde cuándo y qué ha intentado.',
+  'Escucha y control':
+    'Corta los monólogos: haz una pregunta cada dos minutos y repite con tus palabras lo que entendiste antes de seguir.',
+  'Educación técnica':
+    'Explica el qué y el cómo del servicio antes del precio, y comprueba que quedó claro pidiendo que lo repita.',
+  'Propuesta y precio':
+    'Presenta el precio completo de una vez, sin condicionarlo a cerrar hoy, y deja explícito qué incluye y qué no.',
+  'Manejo de objeciones':
+    'Cuando aparezca una objeción, pregunta antes de responder: qué le preocupa exactamente y por qué. Rebatir sin entender la refuerza.',
+  'Cierre y próximos pasos':
+    'Cierra diciendo qué pasa después, quién lo hace y cuándo, y confirma que la persona lo repite.',
+}
