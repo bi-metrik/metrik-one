@@ -17,6 +17,7 @@ import { AlertTriangle, Clock, Eye, GitBranch, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
 import { STAGE_LABELS } from './types'
+import { SlaConfig } from './workflow-diagram'
 
 const CARBON = '#1A1A1A'
 const GRIS = '#6B7280'
@@ -90,15 +91,61 @@ function recorrer(etapas: WorkflowEtapa[], respuestas: Record<string, string>): 
   return camino
 }
 
+/**
+ * Decisiones que la ruta elegida NO fija. Se ofrecen como interruptores para armar el
+ * caso concreto que se quiere ver.
+ *
+ * Lo motivó la etapa Inclusión: solo se recorre cuando el vehículo NO está en UPME, que
+ * es una variante menor y no justifica una ruta propia. Sin el interruptor, esa etapa no
+ * aparecía en ninguna ruta y parecía haberse perdido.
+ */
+interface DecisionLibre {
+  campo: string
+  pregunta: string
+  /** Valor que activa la rama: es lo que responde "sí" al interruptor. */
+  valorRama: string
+}
+
+function decisionesLibres(
+  etapas: WorkflowEtapa[],
+  fijadas: Record<string, string>,
+): DecisionLibre[] {
+  const vistos = new Set<string>()
+  const libres: DecisionLibre[] = []
+  for (const e of [...etapas].sort((a, b) => a.orden - b.orden)) {
+    for (const regla of e.routing?.conditional ?? []) {
+      const campo = regla.condition.field
+      if (fijadas[campo] !== undefined || vistos.has(campo)) continue
+      vistos.add(campo)
+      libres.push({
+        campo,
+        pregunta:
+          (e.config_extra as { label_pregunta?: string } | undefined)?.label_pregunta ?? `¿${campo}?`,
+        valorRama: String(regla.condition.value ?? ''),
+      })
+    }
+  }
+  return libres
+}
+
 export function WorkflowRutas({
   etapas,
   rutas,
+  canConfigSla,
+  onUpdateSla,
 }: {
   etapas: WorkflowEtapa[]
   rutas: RutaDeclarada[]
+  canConfigSla?: boolean
+  onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
 }) {
   const activas = etapas.filter(e => e.is_active !== false)
   const [rutaSel, setRutaSel] = useState(0)
+  // Respuestas elegidas a mano para las decisiones que la ruta no fija.
+  const [extras, setExtras] = useState<Record<string, string>>({})
+  // "Qué quedó en cada etapa" es el uso principal de esta pantalla, así que los bloques
+  // se pueden abrir todos de una vez en vez de etapa por etapa.
+  const [verBloques, setVerBloques] = useState(false)
 
   if (activas.length === 0) {
     return (
@@ -112,8 +159,11 @@ export function WorkflowRutas({
 
   // Sin rutas declaradas: el proceso completo en su orden real.
   const rutaActual = rutas[rutaSel]
+  const fijadas = rutaActual?.respuestas ?? {}
+  const libres = decisionesLibres(activas, fijadas)
+  const respuestas = { ...fijadas, ...extras }
   const camino = rutaActual
-    ? recorrer(activas, rutaActual.respuestas)
+    ? recorrer(activas, respuestas)
     : [...activas].sort((a, b) => num(a) - num(b))
 
   const maxAbiertos = camino.reduce((m, e) => Math.max(m, e.abiertos ?? 0), 0)
@@ -155,10 +205,46 @@ export function WorkflowRutas({
         </div>
       )}
 
-      <p className="mb-3 text-xs" style={{ color: GRIS }}>
-        <strong style={{ color: CARBON }}>{camino.length} etapas</strong> · {totalAbiertos} negocios
-        abiertos en este recorrido
-      </p>
+      {libres.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+          {libres.map(d => {
+            const activo = extras[d.campo] === d.valorRama
+            return (
+              <label key={d.campo} className="flex cursor-pointer items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={activo}
+                  onChange={e =>
+                    setExtras(prev => {
+                      const next = { ...prev }
+                      if (e.target.checked) next[d.campo] = d.valorRama
+                      else delete next[d.campo]
+                      return next
+                    })
+                  }
+                  className="h-3.5 w-3.5 accent-[#10B981]"
+                />
+                <span style={{ color: activo ? CARBON : GRIS }}>{d.pregunta}</span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-xs" style={{ color: GRIS }}>
+          <strong style={{ color: CARBON }}>{camino.length} etapas</strong> · {totalAbiertos} negocios
+          abiertos en este recorrido
+        </p>
+        <button
+          type="button"
+          onClick={() => setVerBloques(v => !v)}
+          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[#F5F4F2]"
+          style={{ color: '#10B981' }}
+        >
+          {verBloques ? 'Ocultar bloques' : 'Ver qué hay en cada etapa'}
+        </button>
+      </div>
 
       <div className="space-y-2">
         {camino.map((etapa, i) => {
@@ -179,7 +265,15 @@ export function WorkflowRutas({
                   </span>
                 </div>
               )}
-              <EtapaFila etapa={etapa} numero={num(etapa)} color={color} maxAbiertos={maxAbiertos} />
+              <EtapaFila
+                etapa={etapa}
+                numero={num(etapa)}
+                color={color}
+                maxAbiertos={maxAbiertos}
+                abrirBloques={verBloques}
+                canConfigSla={canConfigSla}
+                onUpdateSla={onUpdateSla}
+              />
             </div>
           )
         })}
@@ -208,13 +302,20 @@ function EtapaFila({
   numero,
   color,
   maxAbiertos,
+  abrirBloques,
+  canConfigSla,
+  onUpdateSla,
 }: {
   etapa: WorkflowEtapa
   numero: number
   color: string
   maxAbiertos: number
+  abrirBloques: boolean
+  canConfigSla?: boolean
+  onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
 }) {
-  const [abierto, setAbierto] = useState(false)
+  const [abiertoLocal, setAbiertoLocal] = useState(false)
+  const abierto = abrirBloques || abiertoLocal
   const abiertos = etapa.abiertos ?? 0
   const vencidos = etapa.vencidos ?? 0
   const pct = maxAbiertos > 0 ? (abiertos / maxAbiertos) * 100 : 0
@@ -227,7 +328,7 @@ function EtapaFila({
     >
       <button
         type="button"
-        onClick={() => setAbierto(v => !v)}
+        onClick={() => setAbiertoLocal(v => !v)}
         className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
       >
         {/* 1. Identidad */}
@@ -296,7 +397,16 @@ function EtapaFila({
       </button>
 
       {abierto && (
-        <div className="border-t px-3 py-2" style={{ borderColor: BORDE }}>
+        <div className="border-t" style={{ borderColor: BORDE }}>
+          {/* Editor de tiempo maximo: mismo componente que el diagrama, para que las dos
+              vistas no diverjan en como se configura. */}
+          <SlaConfig
+            etapaId={etapa.id}
+            slaHoras={etapa.sla_horas}
+            canEdit={Boolean(canConfigSla)}
+            onUpdateSla={onUpdateSla}
+          />
+          <div className="px-3 py-2">
           {etapa.bloques.length === 0 ? (
             <p className="text-[11px] italic" style={{ color: GRIS }}>
               Sin bloques configurados.
@@ -308,6 +418,7 @@ function EtapaFila({
               ))}
             </ul>
           )}
+          </div>
         </div>
       )}
     </div>
