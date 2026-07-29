@@ -1,13 +1,13 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSemanalData, ProcesoSeccionalData } from './types'
+import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSeccionalData } from './types'
 import { TabComercial } from './components/tab-comercial'
 import { TabOperativo } from './components/tab-operativo'
 import { TabFinanciero } from './components/tab-financiero'
 import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercial'
 import { TabComercialSoena } from './components/tab-comercial-soena'
-import { TabProceso, ProcesoPorSeccional } from './components/tab-proceso'
+import { TabProceso } from './components/tab-proceso'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { ShieldCheck } from 'lucide-react'
 import type {
@@ -56,7 +56,6 @@ interface TablerosClientProps {
   initialFinanciero: FinancieroData | null
   initialRentabilidad?: RentabilidadComercialData | null
   initialComercialNegocios?: ComercialNegociosBundle | null
-  initialProceso?: ProcesoSemanalData | null
   initialProcesoSeccional?: ProcesoSeccionalData | null
   modules?: Record<string, boolean>
 }
@@ -67,7 +66,6 @@ export default function TablerosClient({
   initialFinanciero,
   initialRentabilidad,
   initialComercialNegocios,
-  initialProceso,
   initialProcesoSeccional,
   modules,
 }: TablerosClientProps) {
@@ -90,11 +88,11 @@ export default function TablerosClient({
         t.push(...BUSINESS_TABS)
       }
       // Va despues de Comercial: primero cuanto se vendio, luego donde esta atascado.
-      if (mod.proceso_semanal && initialProceso) t.splice(1, 0, PROCESO_TAB)
+      if (mod.proceso_semanal && initialProcesoSeccional) t.splice(1, 0, PROCESO_TAB)
     }
     if (mod.compliance) t.push(COMPLIANCE_TAB)
     return t
-  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, initialComercialNegocios, initialProceso])
+  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, initialComercialNegocios, initialProcesoSeccional])
 
   const defaultTab = tabs[0]?.key ?? 'cumplimiento'
   const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
@@ -183,11 +181,8 @@ export default function TablerosClient({
             puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
           />
         )}
-        {activeTab === 'proceso' && initialProceso && (
-          <div className="space-y-6">
-            <TabProceso data={initialProceso} />
-            {initialProcesoSeccional && <ProcesoPorSeccional data={initialProcesoSeccional} />}
-          </div>
+        {activeTab === 'proceso' && initialProcesoSeccional && (
+          <TabProceso data={initialProcesoSeccional} />
         )}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
