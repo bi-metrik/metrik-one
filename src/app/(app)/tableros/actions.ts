@@ -758,10 +758,15 @@ export async function getProcesoSemanal(semanas = 8): Promise<ProcesoSemanalData
   // Delta contra la foto anterior. Es el dato que Juan David mira: no cuantos hay,
   // sino si esa fila crecio o bajo. Si aun no hay foto previa, queda null (no cero:
   // "sin comparacion" y "sin cambio" no son lo mismo).
-  const previa = fotos[0]?.etapas ?? []
-  const previaPorEtapa = new Map(previa.map(e => [e.etapaId, e.abiertos]))
+  //
+  // La foto de HOY se excluye a proposito. La columna "Ahora" ya sale en vivo, asi que
+  // comparar contra la foto de hoy daria cero en todas las etapas y se leeria como
+  // "nada se movio esta semana", que es justo la lectura falsa que hay que evitar.
+  const hoyISO = todayBogotaISO()
+  const fotoPrevia = fotos.find(f => f.fecha < hoyISO) ?? null
+  const previaPorEtapa = new Map((fotoPrevia?.etapas ?? []).map(e => [e.etapaId, e.abiertos]))
   const etapas: ProcesoEtapaConDelta[] = hoy.map(e => {
-    const antes = previaPorEtapa.get(e.etapaId)
+    const antes = fotoPrevia ? previaPorEtapa.get(e.etapaId) ?? 0 : undefined
     return { ...e, antes: antes ?? null, delta: antes == null ? null : e.abiertos - antes }
   })
 
@@ -769,7 +774,7 @@ export async function getProcesoSemanal(semanas = 8): Promise<ProcesoSemanalData
     etapas,
     fotos,
     totalAbiertos: hoy.reduce((s, e) => s + e.abiertos, 0),
-    fechaFotoPrevia: fotos[0]?.fecha ?? null,
+    fechaFotoPrevia: fotoPrevia?.fecha ?? null,
     // Cuantas etapas tienen SLA configurado. Si son pocas, el conteo de vencidos no
     // es representativo y la UI debe decirlo en vez de pintar un cero tranquilizador.
     etapasConSla: hoy.filter(e => e.slaHoras != null && e.slaHoras > 0).length,
