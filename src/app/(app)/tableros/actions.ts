@@ -704,31 +704,45 @@ export async function getProcesoSemanal(semanas = 8): Promise<ProcesoSemanalData
   const { supabase, workspaceId } = await getWorkspace()
   if (!supabase || !workspaceId) return null
 
+  // ⚠️ El `orden` de una etapa NO es la secuencia del proceso. Las etapas nuevas se
+  // insertaron al final del orden para no correr las existentes, asi que Cita,
+  // Notificacion y Anexos quedaron en 16/17/18 aunque van ANTES de Generacion, Envio y
+  // Facturacion (13/14/15). Ordenar por `orden` muestra el proceso al reves: Facturacion
+  // en la mitad y la Cita despues del cierre. El `numero` si es la secuencia real.
+  const { data: etapasRows } = await supabase
+    .from('etapas_negocio')
+    .select('id, numero')
+
+  const numeroPorEtapa = new Map<string, number>(
+    ((etapasRows ?? []) as Array<{ id: string; numero: number | null }>)
+      .map(e => [e.id, e.numero ?? 0]),
+  )
+
   // Foto de hoy: en vivo, no del snapshot. Asi la pantalla nunca muestra un dato
   // rancio si el cron no ha corrido todavia.
   const { data: hoyRows } = await supabase
     .from('v_negocios_etapa_vencimiento')
     .select('etapa_id, etapa_nombre, etapa_orden, abiertos, vencidos, sla_horas')
     .eq('workspace_id', workspaceId)
-    .order('etapa_orden', { ascending: true })
 
   const hoy: ProcesoEtapaFoto[] = ((hoyRows ?? []) as Array<Record<string, unknown>>)
     .filter(r => Number(r.abiertos ?? 0) > 0)
     .map(r => ({
       etapaId: r.etapa_id as string,
       nombre: r.etapa_nombre as string,
-      orden: Number(r.etapa_orden ?? 0),
+      orden: numeroPorEtapa.get(r.etapa_id as string) ?? Number(r.etapa_orden ?? 0),
       abiertos: Number(r.abiertos ?? 0),
       vencidos: Number(r.vencidos ?? 0),
       slaHoras: r.sla_horas == null ? null : Number(r.sla_horas),
     }))
+    .sort((a, b) => a.orden - b.orden)
 
   // `proceso_snapshots` es tabla nueva y todavia no esta en database.ts. Cast puntual,
   // mismo patron que el resto del repo. Deuda: regenerar tipos y re-agregar los aliases.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: snapRows } = await (supabase as any)
     .from('proceso_snapshots')
-    .select('tomado_en, etapa_id, etapa_nombre, etapa_orden, abiertos, vencidos')
+    .select('tomado_en, etapa_id, etapa_nombre, etapa_orden, etapa_numero, abiertos, vencidos')
     .eq('workspace_id', workspaceId)
     .order('tomado_en', { ascending: false })
     .limit(semanas * 40)
@@ -741,7 +755,9 @@ export async function getProcesoSemanal(semanas = 8): Promise<ProcesoSemanalData
     porFecha.get(fecha)!.push({
       etapaId: r.etapa_id as string,
       nombre: r.etapa_nombre as string,
-      orden: Number(r.etapa_orden ?? 0),
+      // La foto congela el numero que la etapa tenia ese dia; si falta (fotos previas a
+      // que existiera la columna), se cae al numero actual y por ultimo al orden.
+      orden: Number(r.etapa_numero ?? numeroPorEtapa.get(r.etapa_id as string) ?? r.etapa_orden ?? 0),
       abiertos: Number(r.abiertos ?? 0),
       vencidos: Number(r.vencidos ?? 0),
       slaHoras: null,
