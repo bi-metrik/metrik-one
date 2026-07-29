@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
 import { getContextoCalidad } from '../actions'
-import { MAX_MINUTOS_AUDIO } from '@/lib/calidad/transcribir'
 import AuditarClient from './auditar-client'
 
 export const runtime = 'nodejs'
@@ -18,5 +17,5 @@ export default async function AuditarPage() {
   if (!ctx) redirect('/')
   if (!ctx.canViewCalidadTodos) redirect('/calidad')
 
-  return <AuditarClient maxMinutos={MAX_MINUTOS_AUDIO} />
+  return <AuditarClient />
 }

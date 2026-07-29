@@ -2,26 +2,10 @@ import 'server-only'
 import { MODELO_AUDITORIA } from './motor-auditoria'
 
 /**
- * Tope de duracion del audio.
- *
- * LOS 60 SEGUNDOS NO APLICAN A ESTE PROYECTO. La tabla del plan Hobby dice 60,
- * pero eso rige para proyectos anteriores a abril de 2025 sin Fluid compute;
- * este lo tiene activo y su presupuesto por funcion es de 300 s. Lo di por
- * cierto sin verificarlo y estuve a punto de recortar el producto a la mitad
- * por un limite que no existia aqui.
- *
- * Con 300 s el reloj deja de mandar y vuelve a mandar el peso, que era el
- * criterio original: 20 minutos pesan 4,6 MB y caben en una sola peticion.
- * Medido: 8 min → 25 s, 12 min → 56 s, 20 min → 81 s. Sobra margen.
- *
- * El tope se avisa ANTES de procesar, no a mitad de la barra: un cliente
- * esperando un minuto para que le digan que no, es peor que un rechazo
- * inmediato.
+ * El tope del audio vive en `./tope-audio`, sin `server-only`: la validacion
+ * que de verdad protege al usuario corre en el navegador, porque la plataforma
+ * corta el cuerpo de la peticion antes de que este archivo se ejecute.
  */
-export const MAX_MINUTOS_AUDIO = 20
-
-/** Margen de tolerancia: nadie recorta un audio al segundo exacto. */
-export const TOLERANCIA_SEG = 30
 
 /**
  * Instruccion de transcripcion.

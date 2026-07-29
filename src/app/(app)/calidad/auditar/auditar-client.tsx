@@ -3,6 +3,8 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { C, MONO } from '../components/tokens'
+import { MAX_BYTES_AUDIO, MINUTOS_APROX_AUDIO, mb, mensajeAudioMuyPesado } from '@/lib/calidad/tope-audio'
+import { leerRespuesta } from '@/lib/calidad/respuesta'
 
 /**
  * Auditar una llamada en vivo.
@@ -15,9 +17,12 @@ import { C, MONO } from '../components/tokens'
  * servidor piensa es mentira, y si algo falla se queda clavada en un punto que
  * no significa nada — aquí el error cae en la etapa donde de verdad ocurrió.
  *
- * EL LÍMITE SE AVISA ANTES DE PROCESAR. La duración se lee en el navegador con
- * los metadatos del archivo, así que un audio largo se rechaza en el acto y no
- * después de un minuto de espera.
+ * EL LÍMITE SE AVISA ANTES DE PROCESAR, Y AQUÍ NO ES UN LUJO: por encima de
+ * 4.500.000 bytes la plataforma rechaza el cuerpo de la petición antes de que
+ * corra una sola línea nuestra, así que ninguna validación del servidor puede
+ * dar la cara. Si el archivo no cabe, la única forma de que el usuario lea un
+ * mensaje escrito por nosotros es no mandarlo. El criterio es el peso; la
+ * duración se sigue leyendo, pero para acompañar el mensaje y para el registro.
  */
 
 const ETAPAS = [
@@ -36,7 +41,7 @@ interface Resultado {
   banderas: number
 }
 
-export default function AuditarClient({ maxMinutos }: { maxMinutos: number }) {
+export default function AuditarClient() {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -74,17 +79,14 @@ export default function AuditarClient({ maxMinutos }: { maxMinutos: number }) {
     setResultado(null)
     setHechas([])
 
-    const duracionSeg = await duracionDe(archivo)
-    const minutos = duracionSeg / 60
-
-    // El aviso ocurre ANTES de procesar: si el archivo no cabe, decirlo ahora.
-    if (duracionSeg > 0 && minutos > maxMinutos) {
-      setError(
-        `El audio dura ${Math.round(minutos)} minutos y el máximo son ${maxMinutos}. ` +
-          `Sube un fragmento más corto: la parte donde se toman los datos de pago suele ser la más reveladora.`,
-      )
+    // El aviso ocurre ANTES de subir, y por peso: si el archivo no cabe, este
+    // es el ÚNICO punto donde todavía podemos decirlo con nuestras palabras.
+    if (archivo.size > MAX_BYTES_AUDIO) {
+      setError(mensajeAudioMuyPesado(archivo.size))
       return
     }
+
+    const duracionSeg = await duracionDe(archivo)
     if (duracionSeg === 0) {
       setNota('No se pudo leer la duración del archivo; se intentará de todos modos.')
     }
@@ -94,15 +96,16 @@ export default function AuditarClient({ maxMinutos }: { maxMinutos: number }) {
       setEtapa('subiendo')
       const form = new FormData()
       form.append('audio', archivo)
-      form.append('duracionSeg', String(Math.round(duracionSeg)))
 
       setEtapa('transcribiendo')
       const rT = await fetch('/api/calidad/transcribir', { method: 'POST', body: form })
-      const dT = await rT.json()
-      if (!rT.ok) throw new Error(dT.error ?? 'Falló la transcripción')
+      const { datos: dT, error: eT } = await leerRespuesta(rT, 'Falló la transcripción')
+      if (eT) throw new Error(eT)
+      const turnos = Number(dT.turnos ?? 0)
+      const redacciones = Number(dT.redacciones ?? 0)
       setHechas((h) => [...h, 'subiendo', 'transcribiendo'])
       setNota(
-        `${dT.turnos} turnos transcritos · ${dT.redacciones} dato${dT.redacciones === 1 ? '' : 's'} sensible${dT.redacciones === 1 ? '' : 's'} redactado${dT.redacciones === 1 ? '' : 's'} antes de guardar nada`,
+        `${turnos} turnos transcritos · ${redacciones} dato${redacciones === 1 ? '' : 's'} sensible${redacciones === 1 ? '' : 's'} redactado${redacciones === 1 ? '' : 's'} antes de guardar nada`,
       )
 
       // ── 3. Auditar ──────────────────────────────────────────────────────
@@ -112,8 +115,8 @@ export default function AuditarClient({ maxMinutos }: { maxMinutos: number }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcripcion: dT.transcripcion }),
       })
-      const dA = await rA.json()
-      if (!rA.ok) throw new Error(dA.error ?? 'Falló la auditoría')
+      const { datos: dA, error: eA } = await leerRespuesta(rA, 'Falló la auditoría')
+      if (eA) throw new Error(eA)
       setHechas((h) => [...h, 'auditando'])
 
       // ── 4. Guardar ──────────────────────────────────────────────────────
@@ -128,11 +131,11 @@ export default function AuditarClient({ maxMinutos }: { maxMinutos: number }) {
           duracionSeg: Math.round(duracionSeg),
         }),
       })
-      const dG = await rG.json()
-      if (!rG.ok) throw new Error(dG.error ?? 'No se pudo guardar')
+      const { datos: dG, error: eG } = await leerRespuesta(rG, 'No se pudo guardar')
+      if (eG) throw new Error(eG)
       setHechas((h) => [...h, 'guardando'])
       setEtapa(null)
-      setResultado(dG as Resultado)
+      setResultado(dG as unknown as Resultado)
       router.refresh()
     } catch (e) {
       setEtapa(null)
@@ -205,7 +208,9 @@ export default function AuditarClient({ maxMinutos }: { maxMinutos: number }) {
           {corriendo ? 'Procesando…' : 'Arrastra el audio aquí'}
         </div>
         <div style={{ fontSize: 13, color: C.inkMuted, marginTop: 6 }}>
-          {corriendo ? 'No cierres esta pestaña' : `MP3, M4A o WAV · hasta ${maxMinutos} minutos`}
+          {corriendo
+            ? 'No cierres esta pestaña'
+            : `MP3, M4A o WAV · hasta ${mb(MAX_BYTES_AUDIO)} MB, unos ${MINUTOS_APROX_AUDIO} minutos`}
         </div>
         <input
           ref={inputRef}
