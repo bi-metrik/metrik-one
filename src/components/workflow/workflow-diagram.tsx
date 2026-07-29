@@ -39,6 +39,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
+import { siguienteOrdenPorDefecto } from '@/lib/negocios/flujo'
 import { STAGE_COLORS, STAGE_LABELS } from './types'
 
 interface Props {
@@ -110,14 +111,10 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
   while (cur && !visited.has(cur.orden)) {
     visited.add(cur.orden)
     mainlineOrdens.add(cur.orden)
-    const routing = cur.routing
-    let nextOrden: number
-    if (routing) {
-      if (routing.default_etapa_orden === cur.orden) break
-      nextOrden = routing.default_etapa_orden
-    } else {
-      nextOrden = cur.orden + 1
-    }
+    // Fuente única con el botón "Avanzar": el diagrama no puede tener su propia
+    // idea de por dónde sigue el proceso, o dibuja un flujo que no es el que corre.
+    const nextOrden: number | null = siguienteOrdenPorDefecto(cur, sorted)
+    if (nextOrden === null) break
     cur = sorted.find(e => e.orden === nextOrden)
   }
 
@@ -143,16 +140,11 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
         }
         chainVisited.add(cur2.orden)
         chain.push(cur2.orden)
-        const r = cur2.routing
-        let nextOrden: number
-        if (r) {
-          if (r.default_etapa_orden === cur2.orden) {
-            cur2 = undefined
-            break
-          }
-          nextOrden = r.default_etapa_orden
-        } else {
-          nextOrden = cur2.orden + 1
+        // Misma fuente única que el mainline y que el botón "Avanzar".
+        const nextOrden: number | null = siguienteOrdenPorDefecto(cur2, sorted)
+        if (nextOrden === null) {
+          cur2 = undefined
+          break
         }
         cur2 = sorted.find(s => s.orden === nextOrden)
       }

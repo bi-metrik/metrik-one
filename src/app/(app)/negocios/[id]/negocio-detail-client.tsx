@@ -29,6 +29,7 @@ import type {
 import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
+import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -658,12 +659,10 @@ function SelectorEtapa({
 
   const etapaActual = etapasLinea.find(e => e.id === etapaActualId)
 
-  // La siguiente etapa por orden ascendente (robusto a huecos en 'orden',
-  // p.ej. tras fusionar etapas el orden interno puede no ser contiguo).
+  // Fuente única con el diagrama de `/flujo`: si cada superficie decide por su
+  // cuenta por dónde sigue el proceso, el dibujo deja de ser el proceso.
   const siguienteEtapa = etapaActual
-    ? [...etapasLinea]
-        .sort((a, b) => a.orden - b.orden)
-        .find(e => e.orden > etapaActual.orden) ?? null
+    ? siguienteEtapaPorDefecto(etapaActual, etapasLinea)
     : null
 
 
