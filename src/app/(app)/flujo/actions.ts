@@ -84,6 +84,7 @@ interface EtapaRow {
   nombre: string
   stage: 'venta' | 'ejecucion' | 'cobro'
   orden: number
+  numero: number | null
   config_extra:
     | {
         sla_horas?: number | null
@@ -170,7 +171,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
   // 2) Etapas de la linea
   const { data: etapasRaw } = await supabase
     .from('etapas_negocio')
-    .select('id, nombre, stage, orden, config_extra')
+    .select('id, nombre, stage, orden, numero, config_extra')
     .eq('linea_id', selectedLineaId)
     .eq('is_active', true)
     .order('orden')
@@ -320,6 +321,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       nombre: e.nombre,
       stage: e.stage,
       orden: e.orden,
+      numero: e.numero ?? null,
       sla_horas: e.config_extra?.sla_horas ?? null,
       bloques: (bloquesByEtapa.get(e.id) ?? []).sort((a, b) => a.orden - b.orden),
       abiertos: venc.abiertos,

@@ -25,6 +25,7 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
       nombre: e.nombre,
       stage: e.stage,
       orden: e.orden,
+      numero: e.numero ?? null,
       sla_horas: slaHoras,
       bloques: e.bloques.map(b => {
         const ce = (b.config_extra ?? {}) as {

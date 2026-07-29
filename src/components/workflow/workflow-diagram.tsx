@@ -156,6 +156,51 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
   return { mainlineOrdens, branchChains, ordenIndex }
 }
 
+// ── Salidas de una decisión ────────────────────────────────────────────────
+
+/** Una salida del rombo: qué respuesta lleva a qué etapa. */
+interface SalidaDecision {
+  /** "Sí", "No", o el valor tal cual si no es booleano. */
+  respuesta: string
+  destinoLabel: string
+  esRama: boolean
+  /** Condición cruda, para el modo detallado. `null` en la salida por defecto. */
+  condicion: string | null
+}
+
+/**
+ * Etiqueta visible de una etapa: usa `numero`, NO `orden`.
+ * El `orden` es interno y no coincide con lo que el usuario ve (Cargue es la etapa 6
+ * para el equipo, pero su orden interno es 7).
+ */
+function etiquetaEtapa(e: WorkflowEtapa): string {
+  const n = e.numero
+  return typeof n === 'number' ? `${String(n).padStart(2, '0')} ${e.nombre}` : e.nombre
+}
+
+/** Traduce el valor de una condición a la respuesta que el usuario reconoce. */
+function etiquetaRespuesta(value: string): string {
+  const v = String(value ?? '').trim().toLowerCase()
+  if (v === 'true' || v === 'si' || v === 'sí') return 'Sí'
+  if (v === 'false' || v === 'no') return 'No'
+  return String(value)
+}
+
+/**
+ * Qué respuesta corresponde al camino por defecto.
+ *
+ * Con UNA sola condición booleana, el default es su complemento: si la rama es "No",
+ * el default es "Sí". Es lo que hace legible el rombo. Con varias condiciones, o con
+ * valores que no son booleanos, no hay complemento único y se dice "En otro caso".
+ */
+function respuestaDelDefault(conditional: Array<{ condition: { value: string } }>): string {
+  if (conditional.length !== 1) return 'En otro caso'
+  const r = etiquetaRespuesta(conditional[0].condition.value)
+  if (r === 'Sí') return 'No'
+  if (r === 'No') return 'Sí'
+  return 'En otro caso'
+}
+
 // ── Resolver label_pregunta para una decisión ──────────────────────────────
 
 /**
@@ -208,8 +253,9 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
         branchLabel: string
         defaultLabel: string
         defaultTargetNombre: string | null
+        salidas: SalidaDecision[]
       }
-    | { type: 'decision'; sourceEtapa: WorkflowEtapa; defaultLabel: string }
+    | { type: 'decision'; sourceEtapa: WorkflowEtapa; defaultLabel: string; salidas: SalidaDecision[] }
     | { type: 'terminal' }
 
   const rows: Row[] = []
@@ -236,9 +282,28 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
         : ''
 
       const defaultTarget = sorted.find(t => t.orden === e.routing!.default_etapa_orden)
-      const defaultLabel = defaultTarget
-        ? `${String(defaultTarget.orden).padStart(2, '0')} ${defaultTarget.nombre}`
-        : 'Cierre'
+      const defaultLabel = defaultTarget ? etiquetaEtapa(defaultTarget) : 'Cierre'
+
+      // Todas las salidas de la decisión, con la respuesta que lleva a cada una.
+      // Antes se pintaba "SÍ" sobre la rama y "NO" sobre el default, sin mirar el VALOR
+      // de la condición: con una condición `= false` las respuestas salían invertidas
+      // ("¿pasa por certificación UPME? NO → Cargue", cuando NO lleva al bypass).
+      // Y con dos condiciones solo se dibujaba una.
+      const salidas: SalidaDecision[] = (e.routing.conditional ?? []).map(rule => {
+        const destino = sorted.find(t => t.orden === rule.etapa_orden)
+        return {
+          respuesta: etiquetaRespuesta(rule.condition.value),
+          destinoLabel: destino ? etiquetaEtapa(destino) : `Etapa ${rule.etapa_orden}`,
+          esRama: layout.branchChains.has(rule.etapa_orden),
+          condicion: `${rule.condition.field} = ${rule.condition.value}`,
+        }
+      })
+      salidas.push({
+        respuesta: respuestaDelDefault(e.routing.conditional ?? []),
+        destinoLabel: defaultLabel,
+        esRama: false,
+        condicion: null,
+      })
 
       if (branchEtapas.length > 0) {
         rows.push({
@@ -248,9 +313,10 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
           branchLabel,
           defaultLabel,
           defaultTargetNombre: defaultTarget?.nombre ?? null,
+          salidas,
         })
       } else {
-        rows.push({ type: 'decision', sourceEtapa: e, defaultLabel })
+        rows.push({ type: 'decision', sourceEtapa: e, defaultLabel, salidas })
       }
     }
   }
@@ -286,12 +352,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
             return (
               <div key={`dec-${idx}`} className="grid grid-cols-1 md:grid-cols-2 md:gap-3">
                 <div>
-                  <DecisionDiamond
-                    question={question}
-                    branchLabel={null}
-                    branchTargetNombre={null}
-                    defaultLabel={row.defaultLabel}
-                  />
+                  <DecisionDiamond question={question} salidas={row.salidas} />
                   <Connector />
                 </div>
                 <div className="hidden md:block" />
@@ -310,12 +371,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
               >
                 {/* Decision diamond (mainline) */}
                 <div>
-                  <DecisionDiamond
-                    question={question}
-                    branchLabel={row.branchLabel}
-                    branchTargetNombre={firstBranch?.nombre ?? null}
-                    defaultLabel={row.defaultLabel}
-                  />
+                  <DecisionDiamond question={question} salidas={row.salidas} />
                   <Connector />
                 </div>
                 {/* Branch chain (1+ etapas en orden) */}
@@ -455,14 +511,10 @@ function BranchReturnConnector() {
 
 function DecisionDiamond({
   question,
-  branchLabel,
-  branchTargetNombre,
-  defaultLabel,
+  salidas,
 }: {
   question: string
-  branchLabel: string | null
-  branchTargetNombre: string | null
-  defaultLabel: string
+  salidas: SalidaDecision[]
 }) {
   return (
     <div className="my-2 flex flex-col items-center">
@@ -496,27 +548,24 @@ function DecisionDiamond({
             </p>
           </div>
         </div>
-        {/* Etiquetas de salida */}
+        {/* Salidas: una por cada respuesta posible, con su destino real. */}
         <div className="mt-2 flex flex-col gap-1 text-[12px]">
-          {branchLabel && (
-            <div className="flex items-center justify-center gap-1.5">
-              <span className="font-semibold text-[#10B981]">SÍ</span>
-              <ArrowDown className="h-3.5 w-3.5 text-[#10B981]" />
-              <span className="text-[#1A1A1A]">
-                {branchTargetNombre ? `Rama: ${branchTargetNombre}` : 'Rama lateral'}
+          {salidas.map((s, i) => (
+            <div key={`${s.respuesta}-${i}`} className="flex items-center justify-center gap-1.5">
+              <span
+                className="font-semibold"
+                style={{ color: s.esRama ? '#10B981' : '#6B7280' }}
+              >
+                {s.respuesta}
               </span>
-              <span className="text-[#6B7280]">({branchLabel})</span>
+              {s.esRama ? (
+                <ArrowRight className="h-3.5 w-3.5" style={{ color: '#10B981' }} />
+              ) : (
+                <ArrowDown className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+              )}
+              <span className="text-[#1A1A1A]">{s.destinoLabel}</span>
             </div>
-          )}
-          <div className="flex items-center justify-center gap-1.5">
-            <span className="font-semibold text-[#6B7280]">NO</span>
-            {branchLabel ? (
-              <ArrowRight className="h-3.5 w-3.5 text-[#6B7280]" />
-            ) : (
-              <ArrowDown className="h-3.5 w-3.5 text-[#6B7280]" />
-            )}
-            <span className="text-[#1A1A1A]">{defaultLabel}</span>
-          </div>
+          ))}
         </div>
       </div>
     </div>

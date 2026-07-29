@@ -39,7 +39,10 @@ export interface WorkflowEtapa {
   id: string
   nombre: string
   stage: WorkflowStage
+  /** Orden INTERNO. No es la secuencia visible: puede tener huecos y no seguir el proceso. */
   orden: number
+  /** Número visible de la etapa (`etapas_negocio.numero`). Es el que ve el usuario. */
+  numero?: number | null
   sla_horas: number | null
   bloques: WorkflowBloque[]
   abiertos: number
