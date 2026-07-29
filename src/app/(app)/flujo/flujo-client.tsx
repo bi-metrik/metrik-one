@@ -1,16 +1,21 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { GitFork } from 'lucide-react'
+import { GitFork, List, GitBranch } from 'lucide-react'
 import type { FlujoData } from './actions'
 import { updateEtapaSla } from './actions'
 import { WorkflowDiagram } from '@/components/workflow/workflow-diagram'
+import { WorkflowRutas } from '@/components/workflow/workflow-rutas'
 import { WorkflowConventions } from '@/components/workflow/workflow-conventions'
 import type { WorkflowEtapa } from '@/components/workflow/types'
 import { SlaChangeLogSection } from './sla-change-log-section'
 
 export default function FlujoClient({ data }: { data: FlujoData }) {
   const router = useRouter()
+  // Prototipo lado a lado: la vista de rutas se propone como reemplazo del diagrama,
+  // pero se compara en produccion antes de decidir. El diagrama no se toca.
+  const [vista, setVista] = useState<'rutas' | 'diagrama'>('rutas')
   const { lineas, selectedLineaId, etapas, canConfigSla, canViewSlaLog } = data
 
   const handleLineaChange = (id: string) => {
@@ -106,14 +111,41 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
         </div>
       )}
 
-      {workflowEtapas.length > 0 && <WorkflowConventions />}
+      {workflowEtapas.length > 0 && (
+        <div className="flex gap-1 rounded-xl bg-gray-100 p-1 w-fit">
+          <button
+            onClick={() => setVista('rutas')}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+              vista === 'rutas' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <List className="h-3.5 w-3.5" />
+            Cómo avanza un caso
+          </button>
+          <button
+            onClick={() => setVista('diagrama')}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+              vista === 'diagrama' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <GitBranch className="h-3.5 w-3.5" />
+            Diagrama
+          </button>
+        </div>
+      )}
 
-      <WorkflowDiagram
-        etapas={workflowEtapas}
-        mode="simplified"
-        canConfigSla={canConfigSla}
-        onUpdateSla={updateEtapaSla}
-      />
+      {vista === 'diagrama' && workflowEtapas.length > 0 && <WorkflowConventions />}
+
+      {vista === 'rutas' ? (
+        <WorkflowRutas etapas={workflowEtapas} />
+      ) : (
+        <WorkflowDiagram
+          etapas={workflowEtapas}
+          mode="simplified"
+          canConfigSla={canConfigSla}
+          onUpdateSla={updateEtapaSla}
+        />
+      )}
 
       {canViewSlaLog && selectedLineaId && (
         <SlaChangeLogSection key={selectedLineaId} lineaId={selectedLineaId} />
