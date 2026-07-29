@@ -7,6 +7,7 @@ import { formatCOP } from '@/lib/contacts/constants'
 import {
   generarVersionPropuesta,
   aprobarVersionPropuesta,
+  corregirValorAprobado,
 } from '@/lib/actions/propuesta-economica-actions'
 
 interface PropuestaVersion {
@@ -34,6 +35,10 @@ interface PropuestaData {
   aprobado_por?: string | null
   aprobado_version?: number | null
   aprobado_plan?: 1 | 2 | null
+  /** Honorario efectivamente aprobado. Es lo que corrige `corregirValorAprobado`
+   *  cuando quedó mal registrado; las `versiones[]` conservan lo que se le envió
+   *  al cliente y no se tocan. */
+  aprobado_honorario?: number | null
 }
 
 interface ConfigExtra {
@@ -42,6 +47,12 @@ interface ConfigExtra {
   umbral_aprobacion_pct?: number
   servicio_id?: string
   template_slug?: string
+  /**
+   * Lo resuelve el servidor: el usuario está declarado en
+   * `workspaces.config_extra.correccion_precio.staff_ids` (o es el owner) y por
+   * tanto puede corregir el valor aprobado. NO se deriva del rol.
+   */
+  _puedeCorregirPrecio?: boolean
 }
 
 interface BloqueInstancia {
@@ -52,6 +63,7 @@ interface BloqueInstancia {
 
 interface Props {
   negocioBloqueId: string
+  negocioId: string
   instancia: BloqueInstancia | null
   modo: 'editable' | 'visible'
   configExtra: ConfigExtra
@@ -78,11 +90,16 @@ function pctStr(n: number): string {
 
 export default function BloquePropuestaEconomica({
   negocioBloqueId,
+  negocioId,
   instancia,
   modo,
   configExtra,
   userRole,
 }: Props) {
+  // Corrección del valor aprobado (no genera versión ni PDF: ver la action).
+  const [corrigiendoValor, setCorrigiendoValor] = useState(false)
+  const [valorCorregido, setValorCorregido] = useState('')
+  const [motivoCorreccion, setMotivoCorreccion] = useState('')
   const [isPending, startTransition] = useTransition()
   const data = (instancia?.data ?? {}) as PropuestaData
   const precioBase = data.precio_base_con_iva ?? 0
@@ -260,6 +277,70 @@ export default function BloquePropuestaEconomica({
           />
         ) : (
           <p className="text-sm text-muted-foreground">Sin versiones generadas.</p>
+        )}
+
+        {/* Corrección del valor aprobado. Solo para quien está declarado en la
+            config del workspace. No toca las versiones ni el PDF enviado. */}
+        {aprobada && configExtra._puedeCorregirPrecio && !corrigiendoValor && (
+          <button
+            type="button"
+            onClick={() => {
+              setValorCorregido(String(data.aprobado_honorario ?? valorAprobado ?? ''))
+              setCorrigiendoValor(true)
+            }}
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Corregir valor aprobado
+          </button>
+        )}
+        {corrigiendoValor && (
+          <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs text-amber-900">
+              Corrige el valor registrado cuando quedó mal cargado. No genera propuesta nueva
+              ni cambia el PDF que ya recibió el cliente. Queda registrado con tu nombre y se
+              le avisa al comercial del negocio.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                type="number"
+                value={valorCorregido}
+                onChange={e => setValorCorregido(e.target.value)}
+                placeholder="Valor correcto"
+                className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm sm:w-40"
+              />
+              <input
+                type="text"
+                value={motivoCorreccion}
+                onChange={e => setMotivoCorreccion(e.target.value)}
+                placeholder="¿Por qué se corrige?"
+                className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={isPending || !motivoCorreccion.trim() || !valorCorregido}
+                onClick={() => startTransition(async () => {
+                  const r = await corregirValorAprobado(negocioId, Number(valorCorregido), motivoCorreccion)
+                  if (!r.ok) { toast.error(r.error ?? 'No se pudo corregir'); return }
+                  toast.success('Valor corregido')
+                  setCorrigiendoValor(false)
+                  setMotivoCorreccion('')
+                })}
+                className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                Guardar corrección
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCorrigiendoValor(false); setMotivoCorreccion('') }}
+                className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         )}
       </div>
     )

@@ -774,3 +774,133 @@ export async function actualizarTarifaUpmePropuesta(
   revalidatePath(`/negocios/${ctx.negocioId}`)
   return { ok: true, tarifa_upme: nuevaTarifa }
 }
+
+// ── Corrección del valor aprobado ───────────────────────────────────────────
+//
+// Camino APARTE del flujo de aprobación: no genera versión ni PDF, no toca lo que
+// se le envió al cliente. Solo corrige el valor que quedó mal registrado (caso
+// canónico: V0048, cargue histórico que puso el precio estándar 637.500 cuando lo
+// pactado y cobrado eran 634.500, dejando $3.000 de saldo que iban a trabar el
+// gate de cierre en Cobro).
+//
+// PERMISO PROPIO, declarado por persona (decisión de Mauricio, 2026-07-29):
+//   workspaces.config_extra.correccion_precio.staff_ids = ["<staff_id>", ...]
+//
+// No se ancla al rol. Un `admin` no puede por ser admin, ni un supervisor del área
+// financiera por serlo: si mañana alguien se vuelve admin por otra razón, heredaría
+// en silencio el permiso de cambiar plata. El owner sí pasa siempre, por ser el
+// dueño del workspace. FAIL-CLOSED: sin lista, no puede nadie.
+//
+// Es el mismo criterio que ya separa `ROLES_MARCAS_NEGOCIO` de
+// `ROLES_CORRECCION_DOCUMENTOS` en src/lib/roles.ts: afirmar algo sobre la plata
+// del negocio es otra decisión que corregir un dato mal leído.
+
+export async function corregirValorAprobado(
+  negocioId: string,
+  nuevoHonorario: number,
+  motivo: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { supabase, workspaceId, role, staffId, userId, error } = await getWorkspace()
+  if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const razon = (motivo ?? '').trim()
+  if (!razon) return { ok: false, error: 'Escribe por qué se corrige el valor' }
+  if (!Number.isFinite(nuevoHonorario) || nuevoHonorario <= 0) {
+    return { ok: false, error: 'El valor debe ser un número mayor que cero' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+
+  // Permiso: owner, o staff declarado en la lista del workspace. Sin lista, nadie.
+  const { data: ws } = await sb
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', workspaceId)
+    .single()
+  const permitidos = ((ws?.config_extra as { correccion_precio?: { staff_ids?: unknown } } | null)
+    ?.correccion_precio?.staff_ids ?? []) as string[]
+  const autorizado = role === 'owner' || (!!staffId && permitidos.includes(staffId))
+  if (!autorizado) {
+    return { ok: false, error: 'Solo quien tiene autorización para cambios de valor puede corregir este dato' }
+  }
+
+  const { data: negocio } = await sb
+    .from('negocios')
+    .select('id, codigo, nombre, precio_aprobado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  if (!negocio) return { ok: false, error: 'Negocio no encontrado' }
+
+  const anterior = Number(negocio.precio_aprobado ?? 0)
+  const nuevo = Math.round(nuevoHonorario)
+  if (anterior === nuevo) return { ok: false, error: 'El valor es el mismo que ya está registrado' }
+
+  // El honorario aprobado vive en el bloque origen Y en sus copias heredadas: si
+  // solo se corrigiera el origen, las etapas siguientes seguirían mostrando el
+  // valor viejo y nadie sabría cuál creer. Las `versiones[]` NO se tocan: son el
+  // registro de lo que se le mandó al cliente.
+  const { data: instancias } = await sb
+    .from('negocio_bloques')
+    .select('id, data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .eq('negocio_id', negocioId)
+  for (const inst of (instancias ?? []) as Array<{ id: string; data: Record<string, unknown>; bloque_configs?: { bloque_definitions?: { tipo?: string } } }>) {
+    if (inst.bloque_configs?.bloque_definitions?.tipo !== 'propuesta_economica') continue
+    if (!(inst.data ?? {}).hasOwnProperty('aprobado_honorario')) continue
+    await sb
+      .from('negocio_bloques')
+      .update({ data: { ...inst.data, aprobado_honorario: nuevo }, updated_at: new Date().toISOString() })
+      .eq('id', inst.id)
+  }
+
+  await sb
+    .from('negocios')
+    .update({ precio_aprobado: nuevo, updated_at: new Date().toISOString() })
+    .eq('id', negocioId)
+
+  // Rastro. `tipo` debe existir en el CHECK de activity_log (solo admite
+  // comentario|cambio|sistema|cambio_etapa|cambio_estado|solicitud_conciliacion|
+  // conciliacion_atendida): se usa 'cambio', no un tipo nuevo — un tipo fuera del
+  // CHECK hace fallar el insert EN SILENCIO, y eso ya costó tres incidentes.
+  // `contenido` tiene tope de 280 caracteres por CHECK.
+  await sb.from('activity_log').insert({
+    workspace_id: workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: negocioId,
+    tipo: 'cambio',
+    autor_id: staffId,
+    campo_modificado: 'precio_aprobado',
+    valor_anterior: String(anterior),
+    valor_nuevo: String(nuevo),
+    contenido: `Valor aprobado corregido: ${formatCOP(anterior)} → ${formatCOP(nuevo)}. ${razon}`.slice(0, 280),
+  })
+
+  // Aviso al comercial responsable: le cambió el valor de SU negocio y no fue él.
+  // No se avisa al área financiera porque quien corrige ya es de esa área.
+  const { data: resp } = await sb
+    .from('negocio_responsables')
+    .select('staff_id, rol')
+    .eq('negocio_id', negocioId)
+    .eq('rol', 'comercial')
+    .maybeSingle()
+  if (resp?.staff_id) {
+    const { data: st } = await sb.from('staff').select('profile_id').eq('id', resp.staff_id).single()
+    if (st?.profile_id && st.profile_id !== userId) {
+      await sb.rpc('crear_notificacion', {
+        p_workspace_id: workspaceId,
+        p_destinatario_id: st.profile_id,
+        p_tipo: 'precio_corregido',
+        p_contenido: `${negocio.codigo ?? 'Negocio'}: el valor aprobado cambió a ${formatCOP(nuevo)}`.slice(0, 280),
+        p_entidad_tipo: 'negocio',
+        p_entidad_id: negocioId,
+        p_deep_link: `/negocios/${negocioId}`,
+        p_metadata: { anterior, nuevo, motivo: razon },
+        p_permitir_repetidas: true,
+      })
+    }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { ok: true }
+}
