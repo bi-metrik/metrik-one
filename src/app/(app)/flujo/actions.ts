@@ -324,6 +324,9 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       bloques: (bloquesByEtapa.get(e.id) ?? []).sort((a, b) => a.orden - b.orden),
       abiertos: venc.abiertos,
       vencidos: venc.vencidos,
+      // El diagrama lee `label_pregunta` de aquí: la pregunta de una decisión
+      // pertenece a la etapa que la declara, no al campo que la alimenta.
+      config_extra: (e.config_extra ?? null) as Record<string, unknown> | null,
       routing: e.config_extra?.routing ?? null,
       gates: Array.isArray(e.config_extra?.gates) ? (e.config_extra.gates as string[]) : [],
     }
