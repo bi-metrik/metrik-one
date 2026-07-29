@@ -190,15 +190,24 @@ function etiquetaRespuesta(value: string): string {
  * Qué respuesta corresponde al camino por defecto.
  *
  * Con UNA sola condición booleana, el default es su complemento: si la rama es "No",
- * el default es "Sí". Es lo que hace legible el rombo. Con varias condiciones, o con
- * valores que no son booleanos, no hay complemento único y se dice "En otro caso".
+ * el default es "Sí". Es lo que hace legible el rombo.
+ *
+ * Con VARIAS condiciones el default no es otro valor de la misma pregunta: es que la
+ * pregunta NO APLICA a ese caso (el campo nunca se respondió porque su bloque no se
+ * mostró). "En otro caso" ocultaba eso y dejaba al lector buscando un tercer valor que
+ * no existe. Por eso la etapa puede declarar `routing.label_default` y explicar cuándo
+ * se toma ese camino; sin él, se dice al menos que la pregunta no aplica.
  */
-function respuestaDelDefault(conditional: Array<{ condition: { value: string } }>): string {
-  if (conditional.length !== 1) return 'En otro caso'
+function respuestaDelDefault(
+  conditional: Array<{ condition: { value: string } }>,
+  labelDefault?: string | null,
+): string {
+  if (typeof labelDefault === 'string' && labelDefault.trim().length > 0) return labelDefault
+  if (conditional.length !== 1) return 'Si no aplica'
   const r = etiquetaRespuesta(conditional[0].condition.value)
   if (r === 'Sí') return 'No'
   if (r === 'No') return 'Sí'
-  return 'En otro caso'
+  return 'Si no aplica'
 }
 
 // ── Resolver label_pregunta para una decisión ──────────────────────────────
@@ -307,7 +316,10 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
         }
       })
       salidas.push({
-        respuesta: respuestaDelDefault(e.routing.conditional ?? []),
+        respuesta: respuestaDelDefault(
+          e.routing.conditional ?? [],
+          (e.routing as { label_default?: string }).label_default,
+        ),
         destinoLabel: defaultLabel,
         esRama: false,
         condicion: null,
@@ -684,9 +696,12 @@ function EtapaCard({
                 color: '#1A1A1A',
                 fontFamily: 'var(--font-montserrat), Montserrat, sans-serif',
               }}
-              aria-label={`Etapa ${etapa.orden}`}
+              // El número VISIBLE de la etapa, el mismo que usan las salidas de las
+              // decisiones. Mostrar aquí el `orden` interno hacía que la tarjeta y las
+              // flechas que apuntan a ella dijeran números distintos.
+              aria-label={`Etapa ${etapa.numero ?? etapa.orden}`}
             >
-              {etapa.orden}
+              {etapa.numero ?? etapa.orden}
             </span>
             <h3 className="truncate text-sm font-bold text-[#1A1A1A]">{etapa.nombre}</h3>
             {isBranch && (
