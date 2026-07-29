@@ -5,7 +5,7 @@
  *   - 1 llamada REAL auditada (Felipe Sandoval, 65:14, tecnica 73, ROJO) con sus
  *     7 bloques, 6 banderas con cita y segundo, y los eventos de contexto que
  *     alimentan la cinta temporal.
- *   - 1 llamada SIMULADA (agente ficticio Diego Rincon, 9:00, tecnica 36, ROJO)
+ *   - 1 llamada SIMULADA (guion ficticio, 9:00, tecnica 36, ROJO)
  *     con la misma estructura. El remate de la muestra es 73 contra 36 y las dos
  *     en ROJO: el problema no es del agente, es del proceso.
  *   - 96 llamadas de relleno para dar volumen, sin transcripcion.
@@ -201,7 +201,7 @@ const EVENTOS_REAL = [
   { segundo: 3555, titulo: 'La clienta pregunta cómo funciona el servicio que ya aceptó pagar.' },
 ]
 
-// ── Llamada simulada: Diego Rincón (ficticio) ───────────────────────────────
+// ── Llamada simulada (guion ficticio) ───────────────────────────────────────
 
 const DUR_SIM = 540
 const TURNOS_SIM = 28
@@ -300,19 +300,29 @@ const EVENTOS_SIM = [
  * no cambia: solo cambia COMO se reparte entre personas.
  *
  * Los nombres NO se tocan (decision de Mauricio): que el relleno tenga un
- * "Felipe" y un "Diego" que coinciden con los agentes de las dos auditorias es
- * deliberado — es la misma persona en el caso de Felipe, y en el de Diego el
- * nombre ficticio ya estaba elegido.
+ * "Felipe" que coincide con el agente de la llamada real auditada es
+ * deliberado: es la misma persona.
  */
 const PERFILES_AGENTE = [
   // nombre, llamadas, [verde, amarillo, rojo], cierres, de esos con tarjeta
-  { nombre: 'Felipe Sandoval',  llamadas: 15, semaforos: [1, 4, 10], cierres: 5, tarjeta: 1 },
-  { nombre: 'Tatiana Bermúdez', llamadas: 8,  semaforos: [8, 0, 0],  cierres: 3, tarjeta: 3 },
-  { nombre: 'Diego Rincón',     llamadas: 15, semaforos: [1, 4, 10], cierres: 2, tarjeta: 1 },
-  { nombre: 'Karina Villalba',  llamadas: 15, semaforos: [3, 7, 5],  cierres: 4, tarjeta: 2 },
-  { nombre: 'Óscar Peñaloza',   llamadas: 15, semaforos: [2, 6, 7],  cierres: 3, tarjeta: 1 },
-  { nombre: 'Liliana Prieto',   llamadas: 14, semaforos: [1, 6, 7],  cierres: 2, tarjeta: 1 },
-  { nombre: 'Héctor Salgado',   llamadas: 14, semaforos: [1, 6, 7],  cierres: 2, tarjeta: 0 },
+  //
+  // CUATRO AGENTES, no siete: Sergio confirmo que Regat tiene cuatro de
+  // ventas. Cada uno sostiene una parte del argumento y ninguno sobra:
+  //   Felipe  — la llamada real auditada; el caso de referencia.
+  //   Oscar   — viene bajando; el agente que necesita reentrenamiento.
+  //   Hector  — viene subiendo; la prueba de que tambien detecta mejora.
+  //   Tatiana — la limpia; sin ella el semaforo no significa nada porque
+  //             todos serian rojos y el color dejaria de ordenar.
+  //
+  // EL VOLUMEN TOTAL NO CAMBIA, se reparte entre cuatro: 96 llamadas al dia,
+  // 21 cierres, 9 con tarjeta — los mismos que con siete. Eso sube a cada
+  // agente de ~400 a ~700 llamadas al mes, que es alto y se sabe: el dato real
+  // de Sergio esta pendiente y cuando llegue se ajusta la escala, no el
+  // elenco.
+  { nombre: 'Felipe Sandoval',  llamadas: 28, semaforos: [2, 7, 19],  cierres: 8, tarjeta: 2 },
+  { nombre: 'Tatiana Bermúdez', llamadas: 15, semaforos: [15, 0, 0],  cierres: 5, tarjeta: 5 },
+  { nombre: 'Óscar Peñaloza',   llamadas: 28, semaforos: [4, 11, 13], cierres: 5, tarjeta: 2 },
+  { nombre: 'Héctor Salgado',   llamadas: 25, semaforos: [2, 11, 12], cierres: 3, tarjeta: 0 },
 ] as const
 
 /** Precio del programa, del guion real: US$799 en seis cuotas o de una vez. */
@@ -445,6 +455,19 @@ function planTendencia(nombre: string): PlanTendencia | null {
   planCache.set(nombre, plan)
   return plan
 }
+
+/**
+ * Cuantos dias ANTES del ancla se muestran las dos llamadas auditadas.
+ *
+ * No van en el dia ancla. Si van ahi, la lista —que corta el futuro— las
+ * esconde hasta el dia de la presentacion, y no se puede ni ensayar ni
+ * revisar antes. Puestas unos dias atras son visibles hoy Y el viernes, en la
+ * lista y en la vista de semana.
+ *
+ * Cuatro dias: dentro de la semana en cualquiera de los dos momentos, y lejos
+ * del borde por si el ancla se mueve un dia.
+ */
+const DIAS_ANTES_AUDITADAS = 4
 
 /** Fecha (YYYY-MM-DD) a `d` dias antes del dia ancla. */
 function fechaOffset(d: number): string {
@@ -597,8 +620,9 @@ async function main() {
     id: idReal,
     workspace_id: workspaceId,
     cliente_ref: 'LL-0000',
-    // Se muestra en el dia ancla, conservando su hora real (17:23).
-    fecha_hora: `${DIA}T17:23:01-05:00`,
+    // Unos dias antes del ancla, conservando su hora real (17:23): asi es
+    // visible hoy y sigue estandolo el dia de la presentacion.
+    fecha_hora: `${fechaOffset(DIAS_ANTES_AUDITADAS)}T17:23:01-05:00`,
     // Y la fecha verdadera de la grabacion queda registrada aparte.
     fecha_grabacion: GRABACION_REAL,
     direccion: 'entrante',
@@ -638,13 +662,17 @@ async function main() {
     id: idSim,
     workspace_id: workspaceId,
     cliente_ref: 'LL-0099',
-    fecha_hora: `${DIA}T16:02:00-05:00`,
+    fecha_hora: `${fechaOffset(DIAS_ANTES_AUDITADAS)}T16:02:00-05:00`,
     // Guion simulado: no hay grabacion que fechar.
     fecha_grabacion: null,
     direccion: 'saliente',
     duracion_seg: DUR_SIM,
     agente_staff_id: null,
-    agente_nombre: 'Diego Rincón',
+    // La simulada pasa a Oscar. Con un elenco de cuatro, dejarla a nombre de
+    // "Diego" metia un quinto agente al ranking con UNA sola llamada: una fila
+    // fantasma que no resiste la primera mirada. Y ademas cuadra: la peor
+    // llamada auditada es del agente que viene bajando.
+    agente_nombre: 'Óscar Peñaloza',
     puntaje_tecnico: 36,
     semaforo: 'rojo',
     habla_agente_pct: 81.0,

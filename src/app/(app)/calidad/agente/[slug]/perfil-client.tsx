@@ -88,6 +88,10 @@ const puntosPorColor: [keyof Fila, string][] = [
   ['yRojo', C.crit],
 ]
 
+/** US$ sin decimales: la cifra importa, los centavos no. */
+const usd = (n: number) =>
+  `US$${Math.round(n).toLocaleString('es-CO')}`
+
 const LECTURA: Record<LecturaTendencia, { titulo: string; tono: string }> = {
   alza: { titulo: 'Viene subiendo', tono: C.ok },
   baja: { titulo: 'Viene bajando', tono: C.crit },
@@ -165,10 +169,13 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
       <section style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
         <Kpi label="Llamadas" valor={String(kpis.llamadas)} nota="auditadas en el período" />
         <Kpi label="Técnica promedio" valor={String(kpis.tecnica)} nota="sobre 100 puntos" />
+        {/* Un agente comercial se mide tambien por lo que cierra. Sin esta
+            cifra el perfil parece un expediente de auditoria y no el panorama
+            de su desempeño. Sale de las mismas llamadas que el ranking. */}
         <Kpi
-          label="Cierre"
-          valor={`${kpis.pctCierre}%`}
-          nota={`${kpis.cierres} de ${kpis.llamadas} llamadas`}
+          label="Ventas cerradas"
+          valor={kpis.cierres.toLocaleString('es-CO')}
+          nota={`${usd(kpis.vendidoUsd)} · ${kpis.pctCierre}% de ${kpis.llamadas.toLocaleString('es-CO')} llamadas`}
         />
         <Kpi
           label="Errores críticos"

@@ -443,6 +443,8 @@ export interface PerfilAgente {
     llamadas: number
     tecnica: number
     cierres: number
+    /** Lo vendido en esas llamadas. Misma fuente que el ranking del muro. */
+    vendidoUsd: number
     pctCierre: number
     criticas: number
     verde: number

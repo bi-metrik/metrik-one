@@ -54,6 +54,7 @@ export default function CalidadClient({
   // Los KPIs NO se recalculan sobre las filas cargadas: vienen contados sobre
   // el periodo entero. Antes se sacaban de la pagina, asi que "51% en rojo" era
   // el 51% de las primeras mil filas, un porcentaje de nada.
+  const conAuditoria = llamadas.filter((l) => l.detalleCompleto).length
   const truncada = total > mostradas
   const periodo = `${fmtDia(datos.desde)} a ${fmtDia(datos.hasta)}`
 
@@ -99,6 +100,42 @@ export default function CalidadClient({
         <Kpi label="En amarillo" valor={num(kpis.amarillo)} nota={`${pct(kpis.amarillo, kpis.llamadas)}% del período`} />
         <Kpi label="Técnica promedio" valor={String(kpis.tecnica)} nota="sobre 100 puntos" />
       </div>
+
+      {/* Acceso directo a las que tienen transcripción.
+          Son las únicas que abren detalle, y son la razón por la que alguien
+          entra aquí. Entre cientos de filas de relleno se pierden, así que se
+          nombran arriba en vez de esperar a que se busquen. */}
+      {conAuditoria > 0 && filtro !== 'auditadas' && (
+        <button
+          type="button"
+          onClick={() => setFiltro('auditadas')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 9,
+            width: '100%',
+            textAlign: 'left',
+            marginBottom: 14,
+            padding: '11px 14px',
+            border: `1px solid ${C.lineStrong}`,
+            borderLeft: `3px solid ${C.brand}`,
+            borderRadius: 6,
+            background: C.surface,
+            cursor: 'pointer',
+            fontSize: 13.5,
+            color: C.ink,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            {conAuditoria} {conAuditoria === 1 ? 'llamada auditada' : 'llamadas auditadas'} con
+            transcripción completa
+          </span>
+          <span style={{ color: C.inkMuted }}>
+            · las únicas que abren el detalle con evidencia minuto a minuto
+          </span>
+          <span style={{ marginLeft: 'auto', color: C.brandDeep, fontWeight: 600 }}>Verlas →</span>
+        </button>
+      )}
 
       {/* Filtros */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -167,7 +204,11 @@ export default function CalidadClient({
                 <tr
                   key={l.id}
                   onClick={l.detalleCompleto ? () => router.push(`/calidad/llamada/${l.id}`) : undefined}
-                  style={l.detalleCompleto ? { cursor: 'pointer' } : undefined}
+                  style={
+                    l.detalleCompleto
+                      ? { cursor: 'pointer', background: C.surfaceAlt, boxShadow: `inset 3px 0 0 ${C.brand}` }
+                      : undefined
+                  }
                 >
                     <td style={td}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
