@@ -1312,6 +1312,16 @@ function BloqueRenderer({
           confirmLabel={configExtra.confirm_label as string | undefined}
           autoFillDefaults={(configExtra._auto_fill ?? undefined) as Record<string, unknown> | undefined}
           datosPorSlug={datosPorSlug}
+          // Corrección post-avance (opt-in). Las tres condiciones se revalidan
+          // server-side en `actualizarBloqueData`; aquí solo se decide si el botón
+          // aparece. `_areaReadonly` lo calcula el servidor: si el área del usuario
+          // no cubre el stage del bloque, no hay corrección que valga.
+          puedeCorregir={
+            modo === 'visible' &&
+            configExtra.corregir_campos_gerencial === true &&
+            puedeCorregirDocumentos(userRole) &&
+            (configExtra as { _areaReadonly?: boolean })._areaReadonly !== true
+          }
         />
       )
     }
@@ -1468,6 +1478,7 @@ function BloqueRenderer({
       return (
         <BloquePropuestaEconomica
           negocioBloqueId={instanciaId}
+          negocioId={negocioId}
           instancia={bloque.instancia ? {
             id: bloque.instancia.id,
             completado: bloque.instancia.estado === 'completo',

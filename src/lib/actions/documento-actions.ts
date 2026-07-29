@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
-import { puedeCorregirDocumentos } from '@/lib/roles'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
@@ -630,17 +629,17 @@ export async function reprocesarDocumento(
   campos?: Record<string, CampoResultado>
   error?: string
 }> {
-  const { supabase, workspaceId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Guard de permiso (mismo criterio que actualizarCampoDocumento): en la etapa
-  // activa re-extrae quien puede editar el bloque; si el negocio ya avanzó, solo
-  // un rol de corrección (owner/admin/supervisor). Antes NO tenía guard alguno:
-  // cualquier autenticado del workspace podía re-extraer cualquier bloque y
-  // sobrescribir los campos.
+  // Guard de permiso (mismo criterio que actualizarCampoDocumento): manda el área.
+  // Reprocesar sobrescribe todos los campos extraídos, así que es una corrección
+  // con otro nombre y no puede tener una puerta más ancha que corregir a mano.
+  // Antes NO tenía guard alguno; después de S2 tuvo el fallback por rol que se
+  // eliminó el 2026-07-29 aquí y en `actualizarCampoDocumento`.
   const guard = await guardEditarBloque(negocioBloqueId)
-  if (!guard.ok && !puedeCorregirDocumentos(role)) {
-    return { success: false, error: guard.error ?? 'Tu rol no permite reprocesar este documento' }
+  if (!guard.ok) {
+    return { success: false, error: guard.error ?? 'Tu área no permite reprocesar este documento' }
   }
 
   const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
@@ -745,30 +744,31 @@ export async function actualizarCampoDocumento(
   value: string,
   camposExtraccion: CampoExtraccion[],
 ): Promise<{ success: boolean; isComplete?: boolean; error?: string }> {
-  const { supabase, role, userId, error } = await getWorkspace()
+  const { supabase, userId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
   // Validar que slug existe en camposExtraccion
   const slugValido = camposExtraccion.some(c => c.slug === slug)
   if (!slugValido) return { success: false, error: 'Campo no válido' }
 
-  // Guard de permiso: en la etapa activa edita el responsable del área
-  // (guardEditarBloque). Una vez el negocio avanzó (bloque en modo visible), la
-  // corrección la hace un rol gerencial (owner/admin/supervisor). Se preserva el
-  // path histórico (campo con alerta_revision en bloque con editar_extraidos)
-  // para no romper correcciones ya habilitadas en otros workspaces.
+  // Guard de permiso: EL ÁREA MANDA, sin importar el rol (decisión de Mauricio,
+  // 2026-07-29). `guardEditarBloque` resuelve área + stage + responsable y es la
+  // única barrera: un supervisor corrige los bloques del stage que cubre su área,
+  // esté el negocio en esa etapa o ya la haya superado.
+  //
+  // Antes había aquí un fallback `puedeCorregirDocumentos(role)` que se saltaba el
+  // área por completo: bastaba ser owner/admin/supervisor para corregir un bloque
+  // de cualquier área. Por eso una supervisora comercial podía corregir documentos
+  // de operaciones. Se elimina, junto con el path histórico `editar_extraidos`
+  // (verificado contra prod el 2026-07-29: CERO bloques lo tienen encendido en
+  // ningún workspace, era código muerto).
+  //
+  // Consecuencia asumida: quien tiene área asignada queda restringido a ella,
+  // incluido `admin`. Es la misma regla que ya aplica `can-edit.ts` desde el
+  // 2026-06-04 para la edición normal; ahora la corrección no la contradice.
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) {
-    let permitido = puedeCorregirDocumentos(role)
-    if (!permitido && camposExtraccion.find(c => c.slug === slug)?.alerta_revision === true) {
-      const { data: bc } = await db(supabase)
-        .from('negocio_bloques')
-        .select('bloque_configs(config_extra)')
-        .eq('id', negocioBloqueId)
-        .single()
-      permitido = (bc?.bloque_configs?.config_extra as { editar_extraidos?: boolean } | null)?.editar_extraidos === true
-    }
-    if (!permitido) return { success: false, error: guard.error ?? 'Tu rol no permite corregir este campo' }
+    return { success: false, error: guard.error ?? 'Tu área no permite corregir este campo' }
   }
 
   const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)

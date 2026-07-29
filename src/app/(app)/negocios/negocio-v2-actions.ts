@@ -3261,6 +3261,74 @@ async function resolverDestinoCompartido(
   return (origen as { id?: string } | null)?.id ?? negocioBloqueId
 }
 
+/**
+ * ¿Se está escribiendo sobre un bloque de una etapa que el negocio YA superó?
+ * Es la diferencia entre "trabajar la etapa" y "corregir hacia atrás", y define
+ * si aplica el opt-in de corrección y la marca de autoría.
+ */
+async function contextoCorreccion(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioBloqueId: string,
+): Promise<{ esPostAvance: boolean; permiteCorregir: boolean; dataPrevia: Record<string, unknown> } | null> {
+  const { data: nb } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, data, bloque_configs!inner(config_extra, etapas_negocio!inner(orden))')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!nb) return null
+
+  const ordenBloque = nb.bloque_configs?.etapas_negocio?.orden as number | undefined
+  const { data: neg } = await db(supabase)
+    .from('negocios')
+    .select('etapa_actual_id')
+    .eq('id', nb.negocio_id)
+    .single()
+  const { data: etapaActual } = neg?.etapa_actual_id
+    ? await db(supabase).from('etapas_negocio').select('orden').eq('id', neg.etapa_actual_id).single()
+    : { data: null }
+
+  const ordenActual = (etapaActual as { orden?: number } | null)?.orden
+  const cfg = (nb.bloque_configs?.config_extra ?? {}) as { corregir_campos_gerencial?: boolean }
+  return {
+    esPostAvance: ordenBloque !== undefined && ordenActual !== undefined && ordenBloque < ordenActual,
+    permiteCorregir: cfg.corregir_campos_gerencial === true,
+    dataPrevia: (nb.data ?? {}) as Record<string, unknown>,
+  }
+}
+
+/**
+ * Estampa `_ediciones[slug] = { por_id, por_nombre, en }` en los campos que
+ * cambiaron. La marca la construye el SERVIDOR comparando contra lo persistido:
+ * lo que mande el cliente en `_ediciones` se descarta, o cualquiera podría
+ * firmar una corrección con el nombre de otro.
+ */
+async function estamparEdiciones(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  userId: string | undefined,
+  previa: Record<string, unknown>,
+  entrante: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { _ediciones: _descartado, ...limpio } = entrante as Record<string, unknown> & { _ediciones?: unknown }
+  const ediciones = { ...((previa._ediciones ?? {}) as Record<string, unknown>) }
+
+  const cambiados = Object.keys(limpio).filter(
+    k => !k.startsWith('_') && JSON.stringify(limpio[k]) !== JSON.stringify(previa[k]),
+  )
+  if (cambiados.length === 0) return { ...limpio, _ediciones: ediciones }
+
+  let nombre = 'Usuario'
+  if (userId) {
+    const { data: prof } = await db(supabase).from('profiles').select('full_name').eq('id', userId).single()
+    nombre = (prof?.full_name as string | null) ?? 'Usuario'
+  }
+  const en = new Date().toISOString()
+  for (const slug of cambiados) ediciones[slug] = { por_id: userId ?? '', por_nombre: nombre, en }
+
+  return { ...limpio, _ediciones: ediciones }
+}
+
 export async function actualizarBloqueData(
   negocioBloqueId: string,
   data: Record<string, unknown>,
@@ -3270,7 +3338,7 @@ export async function actualizarBloqueData(
   // Default true para compatibilidad.
   opts?: { revalidate?: boolean }
 ): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, userId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   // Guard server-side de permisos (rol+área+responsable). El autosave de borrador
@@ -3284,6 +3352,19 @@ export async function actualizarBloqueData(
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
+  // ── Corrección post-avance ────────────────────────────────────────────────
+  // Escribir en un bloque de una etapa YA SUPERADA no es trabajo de la etapa, es
+  // una corrección: exige el opt-in `corregir_campos_gerencial` del bloque y deja
+  // marca de quién y cuándo. El área ya la validó el guard de arriba.
+  const corr = await contextoCorreccion(supabase, negocioBloqueId)
+  let dataFinal = data
+  if (corr?.esPostAvance) {
+    if (!corr.permiteCorregir) {
+      return { error: 'Este bloque no admite correcciones después de avanzar de etapa' }
+    }
+    dataFinal = await estamparEdiciones(supabase, userId, corr.dataPrevia, data)
+  }
+
   // Bloque compartido entre etapas: la escritura va a la fila del origen, no a la copia
   // local. Es lo que hace que el dato sea UNO solo y no dos que pueden divergir.
   const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
@@ -3291,7 +3372,7 @@ export async function actualizarBloqueData(
   const { data: row, error: updateError } = await db(supabase)
     .from('negocio_bloques')
     .update({
-      data,
+      data: dataFinal,
       updated_at: new Date().toISOString(),
     })
     .eq('id', destinoId)
@@ -4111,11 +4192,19 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Feature flag pausa_enabled
   const { data: wsRow } = await db(supabase)
     .from('workspaces')
-    .select('modules')
+    .select('modules, config_extra')
     .eq('id', workspaceId)
     .single()
   const wsModules = (wsRow as { modules: Record<string, unknown> | null } | null)?.modules ?? {}
   const pausaEnabled = wsModules.pausa_enabled === true
+
+  // ¿Este usuario puede corregir el valor aprobado? Capacidad declarada por
+  // persona (`config_extra.correccion_precio.staff_ids`), no heredada del rol.
+  // Fail-closed: sin lista, solo el owner. Espejo exacto del guard de
+  // `corregirValorAprobado`, que es la barrera real.
+  const staffIdsPrecio = (((wsRow as { config_extra?: { correccion_precio?: { staff_ids?: unknown } } } | null)
+    ?.config_extra?.correccion_precio?.staff_ids ?? []) as string[])
+  const puedeCorregirPrecioWs = role === 'owner' || (!!staffId && staffIdsPrecio.includes(staffId))
 
   // Cargar config_extra de los bloque_configs
   const bloqueConfigIds = base.bloques.map(b => b.id)
@@ -4912,6 +5001,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (Object.keys(autoFill).length > 0) enrichedConfigExtra._auto_fill = autoFill
     if (resolvedFields) enrichedConfigExtra.fields = resolvedFields
     if (areaReadonly) enrichedConfigExtra._areaReadonly = true
+    // Corrección del valor aprobado: capacidad declarada por persona en el
+    // workspace, NO derivada del rol (ver `corregirValorAprobado`). Se resuelve
+    // en el servidor y viaja como flag para que el bloque sepa si mostrar el
+    // botón; la action revalida la lista antes de escribir.
+    if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
+      enrichedConfigExtra._puedeCorregirPrecio = true
+    }
 
     // Preview para BloqueGuiaDevolucion: resuelve nombre, NIT, ciudad, fecha cita
     // y seccional sugerida desde otros bloques del negocio.

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
-import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check } from 'lucide-react'
+import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
 import { extraerCampoDesdeImagen, subirImagenClipboard } from '@/lib/actions/documento-actions'
@@ -84,7 +84,16 @@ interface BloqueDatosProps {
   autoFillDefaults?: Record<string, unknown>
   // Datos de otros bloques (por slug estable) para resolver lock_when cross-bloque.
   datosPorSlug?: Record<string, Record<string, unknown>>
+  // Corrección post-avance (opt-in `corregir_campos_gerencial`): el bloque llega en
+  // modo visible desde el historial de etapas anteriores y ofrece un botón para
+  // volverlo editable. Lo calcula el detalle del negocio cruzando el flag del bloque,
+  // el rol y el área (`_areaReadonly`). El servidor revalida las tres cosas: esto es
+  // UX, no seguridad.
+  puedeCorregir?: boolean
 }
+
+/** Marca de quién corrigió un campo después de que el negocio avanzó de etapa. */
+type EdicionCampo = { por_id?: string; por_nombre?: string; en?: string }
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
@@ -166,8 +175,15 @@ export default function BloqueDatos({
   epaycoLookup,
   autoFillDefaults,
   datosPorSlug,
+  puedeCorregir,
 }: BloqueDatosProps) {
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
+  // Corrección post-avance: el bloque entra en modo visible y el usuario habilitado
+  // lo pasa a editable. Se reusa el formulario editable completo en vez de duplicar
+  // inputs de solo-corrección: un solo render que mantener, mismo autosave.
+  const [corrigiendo, setCorrigiendo] = useState(false)
+  const modoEfectivo: 'editable' | 'visible' = corrigiendo ? 'editable' : modo
+  const ediciones = (saved._ediciones ?? {}) as Record<string, EdicionCampo>
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const init: Record<string, unknown> = {}
     fields.forEach(f => {
@@ -400,7 +416,7 @@ export default function BloqueDatos({
     .map(f => (f.lock_when ? String(datosPorSlug?.[f.lock_when.source_bloque_slug]?.[f.lock_when.field]) : ''))
     .join('|')
   useEffect(() => {
-    if (modo !== 'editable') return
+    if (modoEfectivo !== 'editable') return
     const toFix = fields.filter(f => {
       const ls = lockState(f)
       return ls.locked && valuesRef.current[f.slug] !== ls.forced
@@ -411,7 +427,7 @@ export default function BloqueDatos({
     setValues(next)
     void persist(next, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockSignature, modo])
+  }, [lockSignature, modoEfectivo])
 
   // Extrae con IA el campo de texto hermano a partir del pantallazo recién pegado.
   // El valor extraído se autollena editable y queda marcado para revisión.
@@ -475,7 +491,7 @@ export default function BloqueDatos({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [values, negocioBloqueId, fields])
 
-  if (modo === 'visible') {
+  if (modoEfectivo === 'visible') {
     // Para readonly, los campos sin data persistida deben mostrar el valor
     // de autoFillDefaults o, en su defecto, el `default` de config (igual que el
     // modo editable). Sin esto, un campo con solo `default` (sin auto_fill ni
@@ -538,6 +554,14 @@ export default function BloqueDatos({
                     ePayco verificado
                   </span>
                 )}
+                {ediciones[f.slug] && (
+                  <span
+                    title={ediciones[f.slug].en ? `Corregido el ${new Date(ediciones[f.slug].en as string).toLocaleString('es-CO')}` : undefined}
+                    className="inline-flex items-center rounded bg-[#FEF3C7] px-1.5 py-0.5 text-[9px] font-medium text-[#92400E] border border-[#FDE68A]"
+                  >
+                    Editado · {ediciones[f.slug].por_nombre ?? 'Usuario'}
+                  </span>
+                )}
               </div>
               {(f.tipo === 'toggle' || f.tipo === 'checkbox') ? (
                 <span className={`text-xs font-medium ${v ? 'text-[#10B981]' : 'text-[#6B7280]'}`}>
@@ -563,6 +587,16 @@ export default function BloqueDatos({
             </div>
           )
         })}
+        {puedeCorregir && (
+          <button
+            type="button"
+            onClick={() => setCorrigiendo(true)}
+            className="mt-1 inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] px-2 py-1 text-[11px] font-medium text-[#6B7280] hover:bg-[#F5F4F2] hover:text-[#1A1A1A] transition-colors"
+          >
+            <Pencil className="h-3 w-3" />
+            Corregir
+          </button>
+        )}
       </div>
     )
   }
@@ -575,6 +609,22 @@ export default function BloqueDatos({
 
   return (
     <div className="space-y-3">
+      {/* Corrección post-avance: deja claro que se está editando un bloque de una
+          etapa ya superada, no el trabajo de la etapa actual. */}
+      {corrigiendo && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
+          <span className="text-[11px] text-[#92400E]">
+            Corrigiendo un dato de una etapa anterior. Queda registrado con tu nombre.
+          </span>
+          <button
+            type="button"
+            onClick={() => setCorrigiendo(false)}
+            className="shrink-0 rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[#92400E] border border-[#FDE68A] hover:bg-[#FEF3C7] transition-colors"
+          >
+            Listo
+          </button>
+        </div>
+      )}
       {/* Indicador de guardado pasivo (no roba atención: sin toasts por guardado) */}
       <div className="flex h-3 items-center justify-end">
         {saveStatus === 'saving' && <span className="text-[10px] text-[#6B7280]">Guardando…</span>}
