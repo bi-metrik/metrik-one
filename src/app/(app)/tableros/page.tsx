@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
-import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData } from './actions'
+import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoSemanal } from './actions'
 import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales } from '../equipo/comercial-actions'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import TablerosClient from './tableros-client'
@@ -75,8 +75,13 @@ export default async function TablerosPage() {
     }
   }
 
+  // Foto del proceso por etapa (gate propio). La pestaña Operativo generica mide
+  // `proyectos`, vacio en los workspaces Clarity; esta mide `negocios`.
+  const proceso = modules.proceso_semanal ? await getProcesoSemanal() : null
+
   return (
     <TablerosClient
+      initialProceso={proceso}
       initialComercial={comercial}
       initialOperativo={operativo}
       initialFinanciero={financiero}
