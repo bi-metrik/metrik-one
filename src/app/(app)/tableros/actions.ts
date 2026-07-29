@@ -8,6 +8,7 @@ import type {
   ProyectoEstado, AlertaProyecto, StaffProductividad, CostoProyecto, RentabilidadProyecto,
   MesIngresosEgresos, GastoAnomalo, ProyectoCartera,
   Periodo, RentabilidadComercialData, RcFiltrosInput,
+  ProcesoSemanalData, ProcesoEtapaFoto, ProcesoEtapaConDelta, ProcesoFoto,
 } from './types'
 
 // ── Helpers ────────────────────────────────────────────────
@@ -687,4 +688,96 @@ export async function getRentabilidadComercialData(
   // aunque quede vacio para que la UI muestre "sin datos para este filtro".
   if (sinFiltros && (!d.kpis || Number(d.kpis.ventaNeta) === 0)) return null
   return d
+}
+
+// ── Proceso: foto semanal por etapa ─────────────────────────────────────────
+// Responde la pregunta que Juan David (SOENA) puso en la reunion del 2026-07-24:
+// "a la espera de pago UPME tengo 30 y la otra semana vamos en 28". El conteo de hoy
+// sale en vivo de v_negocios_etapa_vencimiento; la comparacion contra semanas previas
+// solo puede salir de proceso_snapshots, porque el historico no existia en ningun lado
+// (etapa_historial esta vacia y apunta al modulo pipeline extirpado, y activity_log
+// guarda el NOMBRE de la etapa, que ya cambio con el renombre del 2026-07-28).
+//
+// Decision de Mauricio (2026-07-28): la serie arranca vacia y se llena hacia adelante.
+// No se reconstruye el pasado: serian numeros que nadie puede validar.
+export async function getProcesoSemanal(semanas = 8): Promise<ProcesoSemanalData | null> {
+  const { supabase, workspaceId } = await getWorkspace()
+  if (!supabase || !workspaceId) return null
+
+  // Foto de hoy: en vivo, no del snapshot. Asi la pantalla nunca muestra un dato
+  // rancio si el cron no ha corrido todavia.
+  const { data: hoyRows } = await supabase
+    .from('v_negocios_etapa_vencimiento')
+    .select('etapa_id, etapa_nombre, etapa_orden, abiertos, vencidos, sla_horas')
+    .eq('workspace_id', workspaceId)
+    .order('etapa_orden', { ascending: true })
+
+  const hoy: ProcesoEtapaFoto[] = ((hoyRows ?? []) as Array<Record<string, unknown>>)
+    .filter(r => Number(r.abiertos ?? 0) > 0)
+    .map(r => ({
+      etapaId: r.etapa_id as string,
+      nombre: r.etapa_nombre as string,
+      orden: Number(r.etapa_orden ?? 0),
+      abiertos: Number(r.abiertos ?? 0),
+      vencidos: Number(r.vencidos ?? 0),
+      slaHoras: r.sla_horas == null ? null : Number(r.sla_horas),
+    }))
+
+  // `proceso_snapshots` es tabla nueva y todavia no esta en database.ts. Cast puntual,
+  // mismo patron que el resto del repo. Deuda: regenerar tipos y re-agregar los aliases.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: snapRows } = await (supabase as any)
+    .from('proceso_snapshots')
+    .select('tomado_en, etapa_id, etapa_nombre, etapa_orden, abiertos, vencidos')
+    .eq('workspace_id', workspaceId)
+    .order('tomado_en', { ascending: false })
+    .limit(semanas * 40)
+
+  // Agrupar por fecha de foto, de la mas reciente a la mas antigua.
+  const porFecha = new Map<string, ProcesoEtapaFoto[]>()
+  for (const r of ((snapRows ?? []) as Array<Record<string, unknown>>)) {
+    const fecha = r.tomado_en as string
+    if (!porFecha.has(fecha)) porFecha.set(fecha, [])
+    porFecha.get(fecha)!.push({
+      etapaId: r.etapa_id as string,
+      nombre: r.etapa_nombre as string,
+      orden: Number(r.etapa_orden ?? 0),
+      abiertos: Number(r.abiertos ?? 0),
+      vencidos: Number(r.vencidos ?? 0),
+      slaHoras: null,
+    })
+  }
+
+  const fotos: ProcesoFoto[] = Array.from(porFecha.entries())
+    .slice(0, semanas)
+    .map(([fecha, etapas]) => ({
+      fecha,
+      etapas: etapas.filter(e => e.abiertos > 0).sort((a, b) => a.orden - b.orden),
+    }))
+
+  // Delta contra la foto anterior. Es el dato que Juan David mira: no cuantos hay,
+  // sino si esa fila crecio o bajo. Si aun no hay foto previa, queda null (no cero:
+  // "sin comparacion" y "sin cambio" no son lo mismo).
+  //
+  // La foto de HOY se excluye a proposito. La columna "Ahora" ya sale en vivo, asi que
+  // comparar contra la foto de hoy daria cero en todas las etapas y se leeria como
+  // "nada se movio esta semana", que es justo la lectura falsa que hay que evitar.
+  const hoyISO = todayBogotaISO()
+  const fotoPrevia = fotos.find(f => f.fecha < hoyISO) ?? null
+  const previaPorEtapa = new Map((fotoPrevia?.etapas ?? []).map(e => [e.etapaId, e.abiertos]))
+  const etapas: ProcesoEtapaConDelta[] = hoy.map(e => {
+    const antes = fotoPrevia ? previaPorEtapa.get(e.etapaId) ?? 0 : undefined
+    return { ...e, antes: antes ?? null, delta: antes == null ? null : e.abiertos - antes }
+  })
+
+  return {
+    etapas,
+    fotos,
+    totalAbiertos: hoy.reduce((s, e) => s + e.abiertos, 0),
+    fechaFotoPrevia: fotoPrevia?.fecha ?? null,
+    // Cuantas etapas tienen SLA configurado. Si son pocas, el conteo de vencidos no
+    // es representativo y la UI debe decirlo en vez de pintar un cero tranquilizador.
+    etapasConSla: hoy.filter(e => e.slaHoras != null && e.slaHoras > 0).length,
+    etapasTotales: hoy.length,
+  }
 }

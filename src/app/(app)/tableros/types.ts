@@ -223,3 +223,34 @@ export interface RcFiltrosInput {
   vendedor?: string | null
   linea?: string | null
 }
+
+// ── Proceso: foto semanal por etapa ────────────────────────
+export interface ProcesoEtapaFoto {
+  etapaId: string
+  nombre: string
+  orden: number
+  abiertos: number
+  vencidos: number
+  slaHoras: number | null
+}
+
+export interface ProcesoEtapaConDelta extends ProcesoEtapaFoto {
+  /** Abiertos en la foto anterior. `null` = todavia no hay con que comparar. */
+  antes: number | null
+  /** Diferencia contra la foto anterior. `null` = sin comparacion, distinto de 0. */
+  delta: number | null
+}
+
+export interface ProcesoFoto {
+  fecha: string
+  etapas: ProcesoEtapaFoto[]
+}
+
+export interface ProcesoSemanalData {
+  etapas: ProcesoEtapaConDelta[]
+  fotos: ProcesoFoto[]
+  totalAbiertos: number
+  fechaFotoPrevia: string | null
+  etapasConSla: number
+  etapasTotales: number
+}

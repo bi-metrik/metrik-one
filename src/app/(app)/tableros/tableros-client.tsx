@@ -1,12 +1,13 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo } from './types'
+import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSemanalData } from './types'
 import { TabComercial } from './components/tab-comercial'
 import { TabOperativo } from './components/tab-operativo'
 import { TabFinanciero } from './components/tab-financiero'
 import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercial'
 import { TabComercialSoena } from './components/tab-comercial-soena'
+import { TabProceso } from './components/tab-proceso'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { ShieldCheck } from 'lucide-react'
 import type {
@@ -16,10 +17,13 @@ import type {
   MetaComercial,
 } from '../equipo/comercial-types'
 
-type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento'
+type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'proceso' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento'
 
 const RENTABILIDAD_TAB: { key: TabKey; label: string } = { key: 'rentabilidad_comercial', label: 'Rentabilidad Comercial' }
 const COMERCIAL_NEGOCIOS_TAB: { key: TabKey; label: string } = { key: 'comercial_negocios', label: 'Comercial' }
+// Foto del proceso por etapa. Gateada por su propio modulo: la pestana Operativo
+// generica mide `proyectos`, que en los workspaces Clarity esta vacio (SOENA: 0).
+const PROCESO_TAB: { key: TabKey; label: string } = { key: 'proceso', label: 'Proceso' }
 
 const BUSINESS_TABS: { key: TabKey; label: string }[] = [
   { key: 'financiero', label: 'Financiero' },
@@ -52,6 +56,7 @@ interface TablerosClientProps {
   initialFinanciero: FinancieroData | null
   initialRentabilidad?: RentabilidadComercialData | null
   initialComercialNegocios?: ComercialNegociosBundle | null
+  initialProceso?: ProcesoSemanalData | null
   modules?: Record<string, boolean>
 }
 
@@ -61,6 +66,7 @@ export default function TablerosClient({
   initialFinanciero,
   initialRentabilidad,
   initialComercialNegocios,
+  initialProceso,
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
@@ -81,10 +87,12 @@ export default function TablerosClient({
       } else {
         t.push(...BUSINESS_TABS)
       }
+      // Va despues de Comercial: primero cuanto se vendio, luego donde esta atascado.
+      if (mod.proceso_semanal && initialProceso) t.splice(1, 0, PROCESO_TAB)
     }
     if (mod.compliance) t.push(COMPLIANCE_TAB)
     return t
-  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, initialComercialNegocios])
+  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, initialComercialNegocios, initialProceso])
 
   const defaultTab = tabs[0]?.key ?? 'cumplimiento'
   const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
@@ -140,7 +148,7 @@ export default function TablerosClient({
         </div>
 
         {/* Periodo selector — only for business tabs (no aplica a Rentabilidad Comercial ni Cumplimiento) */}
-        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && (
+        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && activeTab !== 'proceso' && (
           <div className="flex gap-1">
             {PERIODOS.map(p => (
               <button
@@ -173,6 +181,7 @@ export default function TablerosClient({
             puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
           />
         )}
+        {activeTab === 'proceso' && initialProceso && <TabProceso data={initialProceso} />}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
         {activeTab === 'operativo' && operativo && <TabOperativo data={operativo} />}
