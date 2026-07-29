@@ -17,7 +17,7 @@ const fmtDia = (iso: string) =>
  * solo ve el dueno.
  */
 export default function DuenoClient({ datos }: { datos: DuenoData }) {
-  const maxVendido = Math.max(...datos.cuotas.map((c) => c.vendidoUsd), 1)
+  const maxEsperado = Math.max(...datos.cuotas.map((c) => c.esperadoUsd), 1)
 
   return (
     <div style={{ padding: '26px 30px 64px', maxWidth: 1120, color: C.ink }}>
@@ -36,19 +36,21 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
         <Kpi
           label="Ventas cerradas"
           valor={datos.ventasCerradas.toLocaleString('es-CO')}
-          nota={`a ${usd(datos.precioUsd)}, en 6 cuotas · ${fmtDia(datos.desde)} a ${fmtDia(datos.hasta)}`}
+          nota={`${datos.deUnaVez.n} pagaron completo · ${datos.aCuotas.n} a 6 cuotas · ${fmtDia(datos.desde)} a ${fmtDia(datos.hasta)}`}
         />
+        {/* El embudo corre SOLO sobre las de cuotas: las que pagaron completo
+            ya entraron y no se exponen a que rebote un débito. */}
         <Kpi
-          label="Llegaron a cuota 6"
+          label="Llegan a cuota 6"
           valor={String(datos.llegaronCuota6)}
-          nota={`${pct(datos.llegaronCuota6, datos.ventasCerradas)}% de las cerradas`}
+          nota={`${pct(datos.llegaronCuota6, datos.aCuotas.n)}% de las ${datos.aCuotas.n} a cuotas`}
           tono="bad"
         />
         <Kpi label="Recaudo efectivo" valor={`${datos.recaudoPct}%`} nota="de lo vendido" tono="bad" />
         <Kpi
           label="Dejado de recaudar"
-          valor={usd(datos.vendidoTotal - datos.recaudadoTotal)}
-          nota={`de ${usd(datos.vendidoTotal)} vendidos`}
+          valor={usd(datos.vendidoUsd - datos.recaudadoUsd)}
+          nota={`de ${usd(datos.vendidoUsd)} vendidos`}
           tono="bad"
         />
       </section>
@@ -59,7 +61,7 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
         <div style={{ ...card, padding: '16px 18px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {datos.cuotas.map((c) => {
-              const pctRec = c.vendidoUsd > 0 ? (c.recaudadoUsd / c.vendidoUsd) * 100 : 0
+              const pctRec = c.esperadoUsd > 0 ? (c.entraUsd / c.esperadoUsd) * 100 : 0
               return (
                 <div key={c.cuota}>
                   <div
@@ -73,11 +75,11 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
                   >
                     <span>
                       Cuota {c.cuota}{' '}
-                      <span style={{ color: C.inkMuted }}>· {c.ventas} de {datos.ventasCerradas} pagaron</span>
+                      <span style={{ color: C.inkMuted }}>· {c.ventas} de {datos.aCuotas.n} pagan</span>
                     </span>
                     <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
-                      {usd(c.recaudadoUsd)}{' '}
-                      <span style={{ color: C.inkMuted }}>de {usd(c.vendidoUsd)}</span>
+                      {usd(c.entraUsd)}{' '}
+                      <span style={{ color: C.inkMuted }}>de {usd(c.esperadoUsd)}</span>
                     </span>
                   </div>
                   {/* Barra doble: lo esperado en gris, lo recaudado encima. */}
@@ -89,7 +91,7 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
                       borderRadius: 5,
                       marginTop: 6,
                       overflow: 'hidden',
-                      width: `${(c.vendidoUsd / maxVendido) * 100}%`,
+                      width: `${(c.esperadoUsd / maxEsperado) * 100}%`,
                     }}
                   >
                     <div
@@ -109,10 +111,12 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
           <p style={nota}>
             La venta no termina cuando el agente cierra: termina en la cuota 6. El tablero que hoy se
             proyecta en el piso muestra ventas, no plata recaudada. Las{' '}
-            <b>{datos.ventasCerradas.toLocaleString('es-CO')}</b> ventas y los {usd(datos.vendidoTotal)}{' '}
-            son los mismos del muro, contados sobre las llamadas del período. El reparto a seis
-            cuotas aplica la caída de <b>{Math.round(datos.tasaCaida * 100)}%</b> por cuota que sale
-            del recobro real de abajo.
+            <b>{datos.ventasCerradas.toLocaleString('es-CO')}</b> ventas y los {usd(datos.vendidoUsd)}{' '}
+            son los mismos del muro, contados sobre las llamadas del período. De esas,{' '}
+            <b>{datos.deUnaVez.n}</b> pagaron completo ({usd(datos.deUnaVez.usd)}) y no aparecen
+            arriba: esa plata ya entró. Las <b>{datos.aCuotas.n}</b> restantes se cobran en seis
+            débitos, y en cada uno se cae el <b>{Math.round(datos.tasaCaida * 100)}%</b> que rebota y
+            nadie recupera, según el recobro real de abajo. El muro reparte con esta misma regla.
           </p>
         </div>
       </section>

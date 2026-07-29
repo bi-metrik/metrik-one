@@ -265,9 +265,12 @@ export interface MuroData {
 
 export interface DineroCuota {
   cuota: number
+  /** Cuantas de las ventas a cuotas siguen pagando en esta cuota. */
   ventas: number
-  vendidoUsd: number
-  recaudadoUsd: number
+  /** Lo que deberia entrar: siempre el mismo sexto del total a cuotas. */
+  esperadoUsd: number
+  /** Lo que entra de verdad, ya descontado lo que rebota y no se recupera. */
+  entraUsd: number
 }
 
 export interface DuenoData {
@@ -279,16 +282,34 @@ export interface DuenoData {
   /** US$799. Viaja desde la base para no quedar escrito en dos sitios. */
   precioUsd: number
   /**
-   * Fraccion que se cae en cada cuota, derivada del recobro real del periodo
+   * Fraccion que se cae en CADA cuota, derivada del recobro real del periodo
    * (`pendientes_recobro / ventas`). No es una constante escrita a mano: si el
-   * recobro mejora, la curva mejora sola.
+   * recobro mejora, la curva mejora sola. La calcula `calidad_reparto_cuotas`,
+   * la misma funcion que reparte en el muro.
    */
   tasaCaida: number
   cuotas: DineroCuota[]
-  vendidoTotal: number
-  recaudadoTotal: number
-  recaudoPct: number
   ventasCerradas: number
+  vendidoUsd: number
+  /**
+   * Pago completo al cierre. NO pasa por la curva de caida: esa plata ya
+   * entro, y aplicarle el riesgo de los debitos exageraba el hueco con dinero
+   * que ya estaba en la casa.
+   */
+  deUnaVez: { n: number; usd: number }
+  /** Las que se exponen a la caida, cuota por cuota. */
+  aCuotas: {
+    n: number
+    usd: number
+    /** El sexto que se debe cobrar en cada cuota. */
+    cuotaUsd: number
+    /** Lo que entra de la primera cuota, ya descontado lo que rebota. */
+    primeraCuotaUsd: number
+    /** Lo que entra sumando las seis. */
+    entraUsd: number
+  }
+  recaudadoUsd: number
+  recaudoPct: number
   llegaronCuota6: number
   criticasAbiertas: { codigo: string; titulo: string; veces: number }[]
   /**

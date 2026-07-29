@@ -13,23 +13,10 @@
 -- `calidad_dinero_cuotas` deja de ser fuente de verdad (se conserva por ahora
 -- para no romper nada que la lea; ya no la lee la aplicacion).
 --
--- LA REGLA DEL RECAUDO POR CUOTA, ESCRITA
---
--- El reparto a seis cuotas no vive en las llamadas, asi que se DERIVA de ellas
--- con una regla explicita, no con cifras sembradas por separado:
---
---   1. Cada venta son US$799 en 6 cuotas iguales de US$133,17. Lo que se debe
---      cobrar en cada cuota es siempre lo mismo: ventas x 133,17.
---   2. En cada cuota se cae la fraccion que rebota y NO se recupera. Esa
---      fraccion no es un numero inventado: es `pendientes_recobro /  ventas`
---      del periodo, tomada de `calidad_recobro_dia`, que es justo lo que la
---      pantalla ya afirma mas abajo ("la cuota que no entro empezo por
---      rebotar"). Derivarla de ahi vuelve cierta esa frase.
---   3. La retencion es acumulativa: quien se cayo en la cuota 3 no paga la 4.
---      Retencion(n) = (1 - tasa)^(n-1).
---
--- Si mañana el recobro real mejora, la curva mejora sola. No hay que resembrar
--- nada, que es el punto.
+-- EL REPARTO A CUOTAS LO HACE `calidad_reparto_cuotas`, que es la MISMA funcion
+-- que usa el muro. La regla vive escrita ahi, en un solo sitio: si cada
+-- pantalla implementara la formula por su lado volverian a separarse en el
+-- proximo cambio, que es el error que esta migracion existe para cerrar.
 create or replace function public.get_calidad_dinero(
   p_workspace_id uuid,
   p_dias         integer default 30
@@ -45,73 +32,20 @@ as $$
       (now() at time zone 'America/Bogota')::date                as hasta,
       (now() at time zone 'America/Bogota')::date - (p_dias - 1) as desde
   ),
-  ventas as (
-    -- Misma fuente y mismo corte que el muro. Los dias sembrados por delante
-    -- no cuentan: el dueño no factura contra el futuro.
-    select
-      count(*)                        as n,
-      coalesce(sum(l.monto_usd), 0)   as usd
-    from calidad_llamadas l, rango r
-    where l.workspace_id = p_workspace_id
-      and l.cerro_venta
-      and (l.fecha_hora at time zone 'America/Bogota')::date between r.desde and r.hasta
+  reparto as (
+    select calidad_reparto_cuotas(p_workspace_id, (select desde from rango), (select hasta from rango)) as j
   ),
   recobro as (
     select
-      coalesce(sum(d.debitos_rebotados), 0)               as rebotados,
-      coalesce(sum(d.pendientes_recobro), 0)              as pendientes,
-      coalesce(sum(d.monto_en_riesgo_usd), 0)             as en_riesgo,
-      count(*)                                            as dias
+      coalesce(sum(d.debitos_rebotados), 0)   as rebotados,
+      coalesce(sum(d.pendientes_recobro), 0)  as pendientes,
+      coalesce(sum(d.monto_en_riesgo_usd), 0) as en_riesgo,
+      count(*)                                as dias
     from calidad_recobro_dia d, rango r
-    where d.workspace_id = p_workspace_id
-      and d.fecha between r.desde and r.hasta
-  ),
-  tasa as (
-    -- Fraccion que se cae en cada cuota. Acotada a [0, 0.5]: por encima de la
-    -- mitad la curva dejaria de describir una cartera y describiria un fraude.
-    select least(0.5, greatest(0,
-      (select pendientes from recobro)::numeric / nullif((select n from ventas), 0)
-    )) as valor
-  ),
-  cuotas as (
-    select
-      n                                                        as cuota,
-      round((select usd from ventas) / 6.0, 2)                 as vendido_usd,
-      power(1 - (select valor from tasa), n - 1)               as retencion
-    from generate_series(1, 6) as n
+    where d.workspace_id = p_workspace_id and d.fecha between r.desde and r.hasta
   )
-  select jsonb_build_object(
-    'desde', (select desde from rango),
-    'hasta', (select hasta from rango),
-    'dias',  p_dias,
-
-    'ventasCerradas', (select n from ventas),
-    'vendidoTotal',   (select usd from ventas),
-    'precioUsd',      799,
-    'tasaCaida',      round((select valor from tasa)::numeric, 4),
-
-    'cuotas', coalesce((
-      select jsonb_agg(
-        jsonb_build_object(
-          'cuota',        cuota,
-          'ventas',       round((select n from ventas) * retencion),
-          'vendidoUsd',   vendido_usd,
-          'recaudadoUsd', round(vendido_usd * retencion, 2)
-        ) order by cuota
-      ) from cuotas
-    ), '[]'::jsonb),
-
-    'recaudadoTotal', (select round(sum(vendido_usd * retencion), 2) from cuotas),
-    'recaudoPct',     (
-      select case when (select usd from ventas) > 0
-                  then round(100.0 * sum(vendido_usd * retencion) / (select usd from ventas))
-                  else 0 end
-      from cuotas
-    ),
-    'llegaronCuota6', (
-      select round((select n from ventas) * retencion) from cuotas where cuota = 6
-    ),
-
+  select (select j from reparto) || jsonb_build_object(
+    'dias', p_dias,
     'recobro', jsonb_build_object(
       -- HOY es hoy. Antes se tomaba la fila mas reciente, que con la historia
       -- sembrada hasta el dia de la presentacion era una fila del futuro.
