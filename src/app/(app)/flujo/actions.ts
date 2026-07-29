@@ -52,10 +52,23 @@ export interface FlujoEtapa {
   gates: string[]
 }
 
+/**
+ * Ruta declarada de la línea: un recorrido completo del proceso, definido por las
+ * RESPUESTAS a sus decisiones y no por una lista de etapas. El recorrido se simula
+ * sobre el routing real, así que cambiar el proceso actualiza las rutas solo.
+ */
+export interface FlujoRuta {
+  nombre: string
+  detalle?: string
+  respuestas: Record<string, string>
+}
+
 export interface FlujoData {
   lineas: FlujoLinea[]
   selectedLineaId: string | null
   etapas: FlujoEtapa[]
+  /** Declaradas en `lineas_negocio.config_extra.rutas`. Vacío = una sola ruta. */
+  rutas: FlujoRuta[]
   canConfigSla: boolean
   canViewSlaLog: boolean
 }
@@ -77,6 +90,7 @@ interface LineaRow {
   nombre: string
   tipo: string
   is_active: boolean
+  config_extra: Record<string, unknown> | null
 }
 
 interface EtapaRow {
@@ -139,6 +153,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
     lineas: [],
     selectedLineaId: null,
     etapas: [],
+    rutas: [],
     canConfigSla: false,
     canViewSlaLog: false,
   }
@@ -151,12 +166,14 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
   // 1) Lineas activas del workspace
   const { data: lineasRaw } = await supabase
     .from('lineas_negocio')
-    .select('id, nombre, tipo, is_active')
+    .select('id, nombre, tipo, is_active, config_extra')
     .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .order('nombre')
 
-  const lineas = (lineasRaw ?? []) as LineaRow[]
+  // `config_extra` es columna nueva de `lineas_negocio` y aún no está en database.ts.
+  // Cast puntual, mismo patrón que el resto del repo. Deuda: regenerar tipos.
+  const lineas = (lineasRaw ?? []) as unknown as LineaRow[]
   if (lineas.length === 0) {
     return {
       ...empty,
@@ -182,6 +199,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       lineas,
       selectedLineaId,
       etapas: [],
+      rutas: [],
       canConfigSla: Boolean(perms.canConfigSlaEtapas),
       canViewSlaLog: Boolean(perms.canViewSlaLog),
     }
@@ -334,10 +352,17 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
     }
   })
 
+  // Rutas declaradas de la linea: cada una es un recorrido completo del proceso.
+  const rutasRaw = (selected.config_extra as { rutas?: unknown } | null)?.rutas
+  const rutas: FlujoRuta[] = Array.isArray(rutasRaw)
+    ? (rutasRaw as FlujoRuta[]).filter(r => r && typeof r.nombre === 'string')
+    : []
+
   return {
     lineas,
     selectedLineaId,
     etapas: result,
+    rutas,
     canConfigSla: Boolean(perms.canConfigSlaEtapas),
     canViewSlaLog: Boolean(perms.canViewSlaLog),
   }
