@@ -3068,22 +3068,39 @@ export async function marcarBloqueCompleto(
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
+  // Bloque compartido entre etapas: el DATO vive en la fila del origen, pero la
+  // COMPLETITUD es de cada etapa (cada una tiene su propio gate). Por eso se separan:
+  // el merge se hace sobre el data del origen y el estado se marca en la instancia local.
+  // Cuando el bloque no es compartido, destinoId === negocioBloqueId y todo ocurre en
+  // una sola fila, exactamente como antes.
+  const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
+
   // Leer datos actuales + negocio_id del servidor y hacer merge (evita sobreescribir campos AI)
   const { data: currentBloque } = await db(supabase)
     .from('negocio_bloques')
     .select('data, negocio_id')
-    .eq('id', negocioBloqueId)
+    .eq('id', destinoId)
     .single()
 
   const negocioId = (currentBloque as Record<string, unknown> | null)?.negocio_id as string | null
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
   const mergedData = { ...currentData, ...data }
 
+  if (destinoId !== negocioBloqueId) {
+    const { error: dataError } = await db(supabase)
+      .from('negocio_bloques')
+      .update({ data: mergedData, updated_at: new Date().toISOString() })
+      .eq('id', destinoId)
+    if (dataError) return { error: (dataError as { message: string }).message }
+  }
+
   const { error: updateError } = await db(supabase)
     .from('negocio_bloques')
     .update({
       estado: 'completo',
-      data: mergedData,
+      // Si el bloque es compartido, el dato ya quedó en el origen; escribirlo también
+      // aquí recrearía la copia divergente que este mecanismo viene a eliminar.
+      ...(destinoId === negocioBloqueId ? { data: mergedData } : {}),
       completado_at: new Date().toISOString(),
       // FK → profiles(id) y el display resuelve por profiles. Debe ser el
       // profile.id (userId), NO staff.id. Antes usaba staffId → violaba la FK.
@@ -3201,6 +3218,49 @@ export async function marcarBloqueCompleto(
 
 // ── Actualizar data del bloque sin marcar completo ────────────────────────────
 
+/**
+ * Bloque compartido entre etapas: devuelve la fila donde debe escribirse el dato.
+ *
+ * Un bloque `datos` marcado con `config_extra.compartido_con_origen` es la MISMA casilla
+ * vista desde otra etapa, no una copia. Caso canónico (SOENA): la fecha de la cita DIAN
+ * la registra operaciones en Cita si consiguió agendamiento, o el comercial en
+ * Notificación si la cita salió por PQR y el cliente le reportó la fecha después.
+ *
+ * Sin esto habría dos filas y dos fechas que nadie concilia, y quien lee el dato (el
+ * cross-check de vigencia del certificado bancario) solo miraría una de las dos.
+ *
+ * Devuelve el id recibido cuando el bloque no es compartido, o cuando el origen no se
+ * encuentra: ante la duda se escribe donde el usuario está, nunca se pierde el dato.
+ */
+async function resolverDestinoCompartido(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioBloqueId: string,
+): Promise<string> {
+  const { data: actual } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, bloque_configs!inner(config_extra)')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!actual) return negocioBloqueId
+
+  const cfg = ((actual as Record<string, unknown>).bloque_configs as Record<string, unknown> | null)
+  const ce = (cfg?.config_extra ?? {}) as Record<string, unknown>
+  if (ce.compartido_con_origen !== true) return negocioBloqueId
+
+  const srcSlug = ce.source_bloque_slug as string | undefined
+  if (!srcSlug) return negocioBloqueId
+
+  const { data: origen } = await db(supabase)
+    .from('negocio_bloques')
+    .select('id, bloque_configs!inner(slug)')
+    .eq('negocio_id', (actual as { negocio_id: string }).negocio_id)
+    .eq('bloque_configs.slug', srcSlug)
+    .maybeSingle()
+
+  return (origen as { id?: string } | null)?.id ?? negocioBloqueId
+}
+
 export async function actualizarBloqueData(
   negocioBloqueId: string,
   data: Record<string, unknown>,
@@ -3216,8 +3276,17 @@ export async function actualizarBloqueData(
   // Guard server-side de permisos (rol+área+responsable). El autosave de borrador
   // también escribe negocio_bloques.data → debe validar igual que marcarBloqueCompleto.
   // getBloqueMode (cliente) es solo UX; esta es la barrera real.
+  //
+  // El guard se evalúa sobre el bloque que el usuario TIENE ABIERTO, aunque la escritura
+  // se redirija a otra fila: el permiso lo da la etapa donde se está trabajando. Si se
+  // validara contra el origen, el comercial no podría registrar en Notificación una fecha
+  // cuyo bloque origen vive en Cita, que es de operaciones.
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
+  // Bloque compartido entre etapas: la escritura va a la fila del origen, no a la copia
+  // local. Es lo que hace que el dato sea UNO solo y no dos que pueden divergir.
+  const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
 
   const { data: row, error: updateError } = await db(supabase)
     .from('negocio_bloques')
@@ -3225,7 +3294,7 @@ export async function actualizarBloqueData(
       data,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', negocioBloqueId)
+    .eq('id', destinoId)
     .select('negocio_id')
     .single()
 
@@ -4467,6 +4536,31 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  // ── Bloque compartido entre etapas (config_extra.compartido_con_origen) ──────────
+  // Un bloque `datos` que aparece en dos etapas porque el mismo dato se captura en dos
+  // momentos y por dos areas distintas. Caso canonico (SOENA): la fecha de la cita DIAN
+  // la registra operaciones en Cita cuando consigue agendamiento, o el comercial en
+  // Notificacion cuando la cita salio por PQR y el cliente le reporta la fecha.
+  //
+  // Sin esto son dos bloques con dos filas: se pueden escribir dos fechas distintas y
+  // nadie las concilia, y quien lea el dato (el cross-check de vigencia del certificado
+  // bancario) solo mira una de las dos. La herencia normal no sirve porque los bloques
+  // `datos` heredados COPIAN el dato en su propia fila; aqui hace falta compartirlo.
+  const datosCompartidosPorSlug = new Map<string, Record<string, unknown>>()
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: datosBlocks } = await (db(supabase) as any)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug, bloque_definitions!inner(tipo))')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.bloque_definitions.tipo', 'datos')
+    for (const row of ((datosBlocks ?? []) as Record<string, unknown>[])) {
+      const cfg = row.bloque_configs as Record<string, unknown>
+      const slug = cfg.slug as string | null
+      if (slug && row.data) datosCompartidosPorSlug.set(slug, row.data as Record<string, unknown>)
+    }
+  }
+
   // ── Historial: bloques con data de etapas previas (con orden < etapa actual)
   // Estructura completa para que el cliente los renderice con BloqueRenderer
   // en modo 'visible' (read-only nativo de cada tipo).
@@ -4731,6 +4825,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
       }
     }
+    // Bloque compartido: muestra el dato de la instancia origen, no el propio. La
+    // escritura la redirige `actualizarBloqueData` a esa misma fila, asi que la copia
+    // local nunca se usa y no puede divergir.
+    if (configExtra.compartido_con_origen === true && b.instancia) {
+      const srcSlug = configExtra.source_bloque_slug as string | undefined
+      const srcData = srcSlug ? datosCompartidosPorSlug.get(srcSlug) : undefined
+      if (srcData) {
+        b = { ...b, instancia: { ...b.instancia, data: srcData } }
+      }
+    }
+
     // Si el tipo no se infirio, usamos detector indirecto: si hay srcData
     // disponible Y el config_extra del bloque indica readonly+source, lo
     // tratamos como heredado de propuesta_economica (caso canonico SOENA).
