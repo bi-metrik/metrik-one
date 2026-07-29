@@ -414,3 +414,25 @@ export async function getAgentes(): Promise<{ nombre: string; slug: string }[]> 
   for (const f of (data ?? []) as { agente_nombre: string }[]) set.add(f.agente_nombre)
   return [...set].sort().map((nombre) => ({ nombre, slug: slugAgente(nombre) }))
 }
+
+/**
+ * Nombre del agente que corresponde al usuario actual, si audita llamadas.
+ *
+ * Se resuelve por `agente_staff_id`, no por el nombre del perfil: el vinculo
+ * real entre una persona y sus llamadas es ese, y compararlo por nombre se
+ * rompe con cualquier diferencia de tilde o segundo apellido.
+ */
+export async function getMiAgente(): Promise<string | null> {
+  const ctx = await ctxCalidad()
+  if (!ctx?.staffId) return null
+
+  const { data } = await sinTipar(ctx.supabase)
+    .from('calidad_llamadas')
+    .select('agente_nombre')
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('agente_staff_id', ctx.staffId)
+    .limit(1)
+    .maybeSingle()
+
+  return (data as { agente_nombre: string } | null)?.agente_nombre ?? null
+}

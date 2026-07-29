@@ -92,6 +92,11 @@ as $$
         'llamadas',  count(*),
         'tecnica',   coalesce(round(avg(puntaje_tecnico)), 0),
         'cierres',   count(*) filter (where cerro_venta),
+        -- Lo vendido sale de `monto_usd` de las MISMAS llamadas, que es de
+        -- donde lo saca el ranking del muro. Un agente comercial se mide
+        -- tambien por lo que cierra; sin esta cifra el perfil parece un
+        -- expediente de auditoria y no el panorama de su desempeño.
+        'vendidoUsd', coalesce(sum(monto_usd) filter (where cerro_venta), 0),
         'pctCierre', case when count(*) > 0
                           then round(100.0 * count(*) filter (where cerro_venta) / count(*))
                           else 0 end,

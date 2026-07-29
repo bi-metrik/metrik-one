@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   CartesianGrid,
   ComposedChart,
@@ -76,6 +77,38 @@ const COLOR_SEMAFORO: Record<Semaforo, string> = {
 }
 
 /**
+ * Punto de una llamada auditada: mas grande, con anillo, y clicable.
+ *
+ * Cada punto ES una llamada, pero solo las auditadas tienen detalle que abrir.
+ * Hacer clicables todas llevaria a una pantalla vacia; hacer clicables solo
+ * estas conecta las dos vistas sin prometer lo que no hay: se ve un punto bajo,
+ * se hace clic y se cae en la auditoria de esa llamada, con sus banderas y su
+ * minuto. Antes el grafico decia "tuviste dias malos" y no dejaba ir a ver
+ * cuales.
+ */
+function PuntoAuditado({
+  cx,
+  cy,
+  color,
+  onClick,
+}: {
+  cx?: number
+  cy?: number
+  color: string
+  onClick: () => void
+}) {
+  if (cx == null || cy == null) return null
+  return (
+    <g style={{ cursor: 'pointer' }} onClick={onClick}>
+      {/* Area de clic generosa: el punto visible es de 5 px y nadie acierta a eso. */}
+      <circle cx={cx} cy={cy} r={11} fill="transparent" />
+      <circle cx={cx} cy={cy} r={7} fill="none" stroke={color} strokeWidth={1.5} opacity={0.55} />
+      <circle cx={cx} cy={cy} r={4} fill={color} stroke={C.surface} strokeWidth={1.5} />
+    </g>
+  )
+}
+
+/**
  * Los puntos se dibujan con `Line` sin trazo y con `dot`, no con `Scatter`.
  * Recharts 3.7 revienta en runtime al montar un `Scatter` bajo React 19
  * ("Expected ref to be a function...") y no hay ningun `Scatter` mas en el
@@ -88,6 +121,10 @@ const puntosPorColor: [keyof Fila, string][] = [
   ['yRojo', C.crit],
 ]
 
+/** US$ sin decimales: la cifra importa, los centavos no. */
+const usd = (n: number) =>
+  `US$${Math.round(n).toLocaleString('es-CO')}`
+
 const LECTURA: Record<LecturaTendencia, { titulo: string; tono: string }> = {
   alza: { titulo: 'Viene subiendo', tono: C.ok },
   baja: { titulo: 'Viene bajando', tono: C.crit },
@@ -96,6 +133,7 @@ const LECTURA: Record<LecturaTendencia, { titulo: string; tono: string }> = {
 }
 
 export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente }) {
+  const router = useRouter()
   const { kpis, tendencia, bloques, puntos } = perfil
   const lectura = leerTendencia(tendencia)
   const nombreCorto = perfil.agente.split(' ')[0]
@@ -145,8 +183,11 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
 
   return (
     <div style={{ padding: '26px 30px 64px', maxWidth: 1180, color: C.ink }}>
+      {/* El camino de vuelta tiene que existir en las dos direcciones: si esta
+          es la pantalla de entrada del ejecutor, desde aqui tiene que poder ir a
+          sus llamadas sin pelear. Sin cifras: la respuesta ya esta abajo. */}
       <Link href="/calidad" style={{ fontSize: 13, color: C.inkMuted, textDecoration: 'none' }}>
-        ← Llamadas
+        ← Ver todas las llamadas
       </Link>
 
       <div style={{ margin: '14px 0 20px' }}>
@@ -165,10 +206,13 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
       <section style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
         <Kpi label="Llamadas" valor={String(kpis.llamadas)} nota="auditadas en el período" />
         <Kpi label="Técnica promedio" valor={String(kpis.tecnica)} nota="sobre 100 puntos" />
+        {/* Un agente comercial se mide tambien por lo que cierra. Sin esta
+            cifra el perfil parece un expediente de auditoria y no el panorama
+            de su desempeño. Sale de las mismas llamadas que el ranking. */}
         <Kpi
-          label="Cierre"
-          valor={`${kpis.pctCierre}%`}
-          nota={`${kpis.cierres} de ${kpis.llamadas} llamadas`}
+          label="Ventas cerradas"
+          valor={kpis.cierres.toLocaleString('es-CO')}
+          nota={`${usd(kpis.vendidoUsd)} · ${kpis.pctCierre}% de ${kpis.llamadas.toLocaleString('es-CO')} llamadas`}
         />
         <Kpi
           label="Errores críticos"
@@ -277,7 +321,36 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
                     key={clave}
                     dataKey={clave}
                     stroke="none"
-                    dot={{ r: 3, fill: color, fillOpacity: 0.6, stroke: 'none' }}
+                    dot={(props: { cx?: number; cy?: number; payload?: Fila; index?: number }) => {
+                      const f = props.payload
+                      // Cada Line recorre TODAS las filas, incluidas las de los
+                      // otros dos colores y las de la recta. Sin esta guarda se
+                      // dibuja un punto donde esa serie no tiene valor, y
+                      // Recharts los apila arriba: salia una fila de guiones
+                      // roja pegada al techo del grafico.
+                      if (f == null || f[clave] == null) return <g key={`v-${clave}-${props.index}`} />
+                      if (f.detalle && f.id) {
+                        return (
+                          <PuntoAuditado
+                            key={`aud-${f.id}`}
+                            cx={props.cx}
+                            cy={props.cy}
+                            color={color}
+                            onClick={() => router.push(`/calidad/llamada/${f.id}`)}
+                          />
+                        )
+                      }
+                      return (
+                        <circle
+                          key={`p-${clave}-${props.index}`}
+                          cx={props.cx}
+                          cy={props.cy}
+                          r={3}
+                          fill={color}
+                          fillOpacity={0.6}
+                        />
+                      )
+                    }}
                     activeDot={{ r: 5, fill: color, stroke: C.surface, strokeWidth: 2 }}
                     connectNulls={false}
                     isAnimationActive={false}
@@ -309,6 +382,9 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
             <Leyenda color={C.high} texto={`Con banderas · ${kpis.amarillo}`} />
             <Leyenda color={C.crit} texto={`Con críticas · ${kpis.rojo}`} />
             <span>· La línea es la tendencia del período.</span>
+            {puntos.some((p) => p.detalle) && (
+              <span>· Los puntos con anillo tienen transcripción: haz clic para abrirla.</span>
+            )}
           </div>
         </div>
       </section>

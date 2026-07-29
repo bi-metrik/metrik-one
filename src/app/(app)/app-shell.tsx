@@ -30,6 +30,7 @@ import {
   Headphones,
   MonitorPlay,
   Landmark,
+  TrendingUp,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -169,6 +170,11 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
 // su cuenta. Esto es solo la capa visual.
 const CALIDAD_NAV_ITEMS = [
   { href: '/calidad', label: 'Llamadas', icon: Headphones, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+  // Solo para el ejecutor: su perfil es la pantalla que le dice que mejorar, y
+  // sin esta entrada solo se alcanzaba haciendo clic en un nombre desde la
+  // lista — algo que el no puede hacer, porque solo ve sus propias llamadas.
+  // Los demas roles llegan al perfil de cualquiera desde la lista.
+  { href: '/calidad/mi-perfil', label: 'Mi desempeño', icon: TrendingUp, roles: ['operator'] },
   { href: '/calidad/muro', label: 'Muro', icon: MonitorPlay, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/calidad/dueno', label: 'Vista de dueño', icon: Landmark, roles: ['owner'] },
 ]
@@ -185,7 +191,7 @@ const CERT_NAV_ITEMS = [
 
 // Compartidos (siempre visibles)
 const SHARED_NAV_ITEMS = [
-  { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'] },
+  { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/mi-negocio', label: 'Configuración', icon: Settings, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/tableros', label: 'Tableros', icon: LayoutDashboard, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
 ]
