@@ -227,7 +227,11 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
 
     rows.push({ type: 'etapa', etapa: e, side: 'main' })
 
-    if (e.routing) {
+    // Solo se dibuja un rombo cuando hay algo que decidir. Una etapa puede declarar
+    // `routing` sin condiciones para fijar a donde sigue (o para declarar que cierra,
+    // apuntandose a si misma): eso es enrutamiento, no una decision, y pintarlo como
+    // rombo hacia aparecer una bifurcacion inexistente al final del flujo.
+    if (e.routing && (e.routing.conditional ?? []).length > 0) {
       const branchRule = (e.routing.conditional ?? []).find(r => layout.branchChains.has(r.etapa_orden))
       const branchChain = branchRule ? layout.branchChains.get(branchRule.etapa_orden) : undefined
       const branchEtapas: WorkflowEtapa[] = branchChain
