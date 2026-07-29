@@ -19,6 +19,7 @@ const CARBON = '#1A1A1A'
 const GRIS = '#6B7280'
 const BORDE = '#E5E7EB'
 const ROJO = '#B91C1C'
+const OCRE = '#92400E'
 
 export interface CeldaSeleccionada {
   etapaId: string
@@ -27,6 +28,7 @@ export interface CeldaSeleccionada {
   /** `undefined` = todas las seccionales. `null` = solo los que no la tienen. */
   seccional?: string | null
   soloVencidos: boolean
+  soloReproceso?: boolean
 }
 
 export function CasosDrawer({
@@ -47,13 +49,14 @@ export function CasosDrawer({
       etapaId: celda.etapaId,
       seccional: celda.seccional,
       soloVencidos: celda.soloVencidos,
+      soloReproceso: celda.soloReproceso,
     }).then(r => {
       if (vivo) setCasos(r)
     })
     return () => {
       vivo = false
     }
-  }, [celda.etapaId, celda.seccional, celda.soloVencidos])
+  }, [celda.etapaId, celda.seccional, celda.soloVencidos, celda.soloReproceso])
 
   // Escape cierra, como el resto de los paneles del producto.
   useEffect(() => {
@@ -67,6 +70,7 @@ export function CasosDrawer({
   const alcance = [
     celda.seccional === undefined ? null : celda.seccional ?? 'sin seccional registrada',
     celda.soloVencidos ? 'solo atrasados' : null,
+    celda.soloReproceso ? 'en reproceso' : null,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -151,6 +155,20 @@ export function CasosDrawer({
                           >
                             {c.vencido && <AlertTriangle className="mr-0.5 inline h-2.5 w-2.5" />}
                             {Math.round(c.horasEnEtapa)}h
+                          </span>
+                        )}
+                        {c.diasInactivo !== null && (
+                          <span
+                            className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                            style={{
+                              backgroundColor: c.diasInactivo >= 14 ? '#FEF3C7' : '#F5F4F2',
+                              color: c.diasInactivo >= 14 ? OCRE : GRIS,
+                            }}
+                            title="Días desde la última actividad registrada en el negocio"
+                          >
+                            {c.diasInactivo === 0
+                              ? 'tocado hoy'
+                              : `${c.diasInactivo}d sin tocar`}
                           </span>
                         )}
                         {c.reproceso && (

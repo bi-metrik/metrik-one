@@ -984,6 +984,8 @@ export interface CasoEnEtapa {
   horasEnEtapa: number | null
   vencido: boolean
   reproceso: string | null
+  /** Días desde la última actividad registrada en el negocio. `null` = nunca se tocó. */
+  diasInactivo: number | null
 }
 
 export async function getCasosDeEtapa(input: {
@@ -991,13 +993,15 @@ export async function getCasosDeEtapa(input: {
   /** `undefined` = todas las seccionales. `null` = solo los que no la tienen registrada. */
   seccional?: string | null
   soloVencidos: boolean
+  /** Solo los que tienen un reproceso abierto. */
+  soloReproceso?: boolean
 }): Promise<CasoEnEtapa[]> {
   const { supabase, workspaceId } = await getWorkspace()
   if (!supabase || !workspaceId) return []
 
   const { data: negocios } = await supabase
     .from('negocios')
-    .select('id, codigo, nombre, metadata, etapa_cambiada_at, responsable_id')
+    .select('id, codigo, nombre, metadata, etapa_cambiada_at, responsable_id, created_at')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
     .eq('etapa_actual_id', input.etapaId)
@@ -1009,6 +1013,7 @@ export async function getCasosDeEtapa(input: {
     metadata: Record<string, unknown> | null
     etapa_cambiada_at: string | null
     responsable_id: string | null
+    created_at: string | null
   }>
   if (filas.length === 0) return []
 
@@ -1046,6 +1051,30 @@ export async function getCasosDeEtapa(input: {
     }
   }
 
+  // Dias sin que nadie toque el caso. Sale del timeline del negocio (`activity_log`),
+  // que es lo que el equipo ve cuando lo abre: comentarios y cambios registrados.
+  // Si el negocio no tiene ninguna entrada todavia, se cuenta desde que se creo.
+  const ultimaActividad = new Map<string, string>()
+  {
+    const ids = filas.map(f => f.id)
+    const { data: acts } = await supabase
+      .from('activity_log')
+      .select('entidad_id, created_at')
+      .eq('entidad_tipo', 'negocio')
+      .in('entidad_id', ids)
+      .order('created_at', { ascending: false })
+    for (const a of ((acts ?? []) as Array<{ entidad_id: string; created_at: string }>)) {
+      if (!ultimaActividad.has(a.entidad_id)) ultimaActividad.set(a.entidad_id, a.created_at)
+    }
+  }
+  const ahora = Date.now()
+  const diasDesde = (iso: string | null | undefined): number | null => {
+    if (!iso) return null
+    const t = new Date(iso).getTime()
+    if (Number.isNaN(t)) return null
+    return Math.floor((ahora - t) / 86_400_000)
+  }
+
   const casos: CasoEnEtapa[] = filas.map(f => {
     const h = horasPorNegocio.get(f.id) ?? null
     const marca = f.metadata?.reproceso as { activo?: boolean; tipo?: string } | undefined
@@ -1058,11 +1087,15 @@ export async function getCasosDeEtapa(input: {
       horasEnEtapa: h,
       vencido: Boolean(slaHoras && slaHoras > 0 && h !== null && h > slaHoras),
       reproceso: marca?.activo === true ? (marca.tipo ?? null) : null,
+      diasInactivo: diasDesde(ultimaActividad.get(f.id) ?? f.created_at),
     }
   })
 
   return casos
     .filter(c => (input.seccional === undefined ? true : c.seccional === input.seccional))
     .filter(c => (input.soloVencidos ? c.vencido : true))
-    .sort((a, b) => (b.horasEnEtapa ?? 0) - (a.horasEnEtapa ?? 0))
+    .filter(c => (input.soloReproceso ? c.reproceso !== null : true))
+    // Lo mas atascado primero: primero por tiempo en la etapa, y a igualdad, por
+    // dias sin que nadie lo toque.
+    .sort((a, b) => (b.horasEnEtapa ?? 0) - (a.horasEnEtapa ?? 0) || (b.diasInactivo ?? 0) - (a.diasInactivo ?? 0))
 }

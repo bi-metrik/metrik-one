@@ -46,13 +46,16 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
   // Celda en la que se hizo clic: abre el panel con los casos concretos detrás del numero.
   const [seleccion, setSeleccion] = useState<CeldaSeleccionada | null>(null)
 
-  const abrir = (e: ProcesoSeccionalEtapa, seccional?: string | null) =>
+  const abrir = (e: ProcesoSeccionalEtapa, seccional?: string | null, soloReproceso = false) =>
     setSeleccion({
       etapaId: e.etapaId,
       etapaNombre: e.nombre,
       etapaNumero: e.numero,
       seccional,
-      soloVencidos: metrica === 'vencidos',
+      // Al abrir los reprocesos se muestran todos, no solo los atrasados: son dos
+      // preguntas distintas y cruzarlas escondería casos.
+      soloVencidos: soloReproceso ? false : metrica === 'vencidos',
+      soloReproceso,
     })
 
   const valorDe = (c?: ProcesoSeccionalCelda) =>
@@ -218,7 +221,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
                     </>
                   )}
                   <Celda hoy={valorDe(e.total)} antes={antesDe(e.total)} negrita onClick={() => abrir(e)} />
-                  <ReprocesoCelda r={e.reprocesos} />
+                  <ReprocesoCelda r={e.reprocesos} onClick={() => abrir(e, undefined, true)} />
                 </tr>
               ))}
             </tbody>
@@ -295,7 +298,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
 
       {seleccion && (
         <CasosDrawer
-          key={[seleccion.etapaId, seleccion.seccional ?? 'todas', seleccion.soloVencidos].join('|')}
+          key={[seleccion.etapaId, seleccion.seccional ?? 'todas', seleccion.soloVencidos, seleccion.soloReproceso].join('|')}
           celda={seleccion}
           onClose={() => setSeleccion(null)}
         />
@@ -411,18 +414,25 @@ function Celda({
 function ReprocesoCelda({
   r,
   negrita,
+  onClick,
 }: {
   r: { certificacionUpme: number; devolucionDian: number }
   negrita?: boolean
+  onClick?: () => void
 }) {
   const n = r.certificacionUpme + r.devolucionDian
+  const clicable = Boolean(onClick) && n > 0
   return (
     <td className="py-2 text-right tabular-nums">
       {n > 0 ? (
         <span
-          className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold"
+          onClick={clicable ? onClick : undefined}
+          role={clicable ? 'button' : undefined}
+          tabIndex={clicable ? 0 : undefined}
+          onKeyDown={clicable ? (ev => { if (ev.key === 'Enter') onClick!() }) : undefined}
+          className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold${clicable ? ' cursor-pointer hover:brightness-95' : ''}`}
           style={{ backgroundColor: '#FEE2E2', color: ROJO }}
-          title={`${r.certificacionUpme} por certificado UPME · ${r.devolucionDian} por devolución DIAN`}
+          title={clicable ? 'Ver los casos en reproceso' : `${r.certificacionUpme} por certificado UPME · ${r.devolucionDian} por devolución DIAN`}
         >
           <RotateCcw className="h-3 w-3" />
           {n}
