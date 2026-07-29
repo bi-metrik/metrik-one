@@ -1,30 +1,26 @@
 'use client'
 
 /**
- * <WorkflowRutas> — vista de "¿cómo avanza un caso?"
+ * <WorkflowRutas> — "¿cómo avanza un caso?"
  *
- * Alternativa al diagrama de rombos. Propuesta de Hana + Noor tras cinco correcciones
- * seguidas sobre el diagrama: el problema no eran las etiquetas, era la forma. Un
- * proceso con 4 decisiones, 2 entradas a la misma fase y un tramo que salta 5 etapas
- * no cabe en "columna con rombos y una rama lateral".
+ * Alternativa al diagrama de rombos. En vez de dibujar un grafo con bifurcaciones y
+ * llenarlo de aclaraciones condicionales, se elige ARRIBA el tipo de caso y debajo se
+ * ve su recorrido completo, de principio a fin, sin condicionales que resolver.
  *
- * La idea: el proceso NO se lee como un grafo, se lee como una lista. Todas las etapas
- * en su orden real, agrupadas por área responsable, y los tramos que a veces se omiten
- * marcados con la condición que los omite. Sin rombos, sin ramas, sin combinatoria.
- *
- * Se deriva de la MISMA config que el diagrama (etapas + routing), así que cambiar el
- * proceso actualiza las dos vistas por igual.
+ * Las rutas se declaran en `lineas_negocio.config_extra.rutas` por sus RESPUESTAS a las
+ * decisiones, no por una lista de etapas: el recorrido se simula sobre el routing real,
+ * evaluando las condiciones igual que el motor. Cambiar el proceso actualiza las rutas
+ * solo, sin tocar config aparte.
  */
 
-import { AlertTriangle, Clock } from 'lucide-react'
-import type { WorkflowEtapa } from './types'
+import { AlertTriangle, Clock, Eye, GitBranch, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
+import type { WorkflowEtapa, WorkflowBloque } from './types'
 import { STAGE_LABELS } from './types'
 
-const VERDE = '#10B981'
 const CARBON = '#1A1A1A'
 const GRIS = '#6B7280'
 const BORDE = '#E5E7EB'
-const AMBAR = '#F59E0B'
 
 const STAGE_COLOR: Record<string, string> = {
   venta: '#10B981',
@@ -32,268 +28,328 @@ const STAGE_COLOR: Record<string, string> = {
   cobro: '#3B82F6',
 }
 
-/** Etapa con su posición real en el proceso y por qué podría omitirse. */
-interface EtapaEnRuta {
-  etapa: WorkflowEtapa
-  numero: number
-  /** Textos del tipo "si no contrató certificación UPME". Vacío = siempre se recorre. */
-  omitidaSi: string[]
+const READONLY_TIPOS = new Set([
+  'cobros',
+  'historial',
+  'historial_valida',
+  'resumen_financiero',
+  'ejecucion',
+])
+
+export interface RutaDeclarada {
+  nombre: string
+  detalle?: string
+  respuestas: Record<string, string>
 }
 
 function num(e: WorkflowEtapa): number {
   return typeof e.numero === 'number' ? e.numero : e.orden
 }
 
-function etiquetaRespuesta(value: string): string {
-  const v = String(value ?? '').trim().toLowerCase()
-  if (v === 'true' || v === 'si' || v === 'sí') return 'Sí'
-  if (v === 'false' || v === 'no') return 'No'
-  return String(value)
-}
-
 /**
- * Detecta qué etapas se saltan y bajo qué respuesta.
+ * Recorre el proceso con un juego de respuestas y devuelve las etapas que atraviesa.
  *
- * Regla: si una salida de una etapa E apunta a un destino D que está más de una
- * posición adelante, todas las etapas entre medias se omiten cuando se toma esa salida.
- * Es lo que convierte el grafo en anotaciones sobre una lista.
+ * Evalúa el routing igual que el motor: primero las condiciones (la primera que coincide
+ * gana), si ninguna coincide el camino por defecto, y si no hay routing la siguiente
+ * etapa por orden ascendente. Un routing que se apunta a sí mismo cierra el recorrido.
  */
-function calcularRuta(etapas: WorkflowEtapa[]): EtapaEnRuta[] {
-  const ordenadas = [...etapas].sort((a, b) => num(a) - num(b))
-  const omitidaPor = new Map<number, string[]>()
-  // Motivos por (etapa saltada, etapa origen). Si un origen salta una etapa por TODAS
-  // sus respuestas condicionales, el motivo no es una respuesta concreta: es que el
-  // caso no tomó el camino por defecto. Sin esto, Entrega sale con un texto que se
-  // contradice ("Sí en ¿requiere cita? · No en ¿requiere cita?"), porque desde Cobro
-  // ambas respuestas la saltan.
-  const motivosPorOrigen = new Map<string, { total: number; motivos: string[]; defaultLabel: string }>()
+function recorrer(etapas: WorkflowEtapa[], respuestas: Record<string, string>): WorkflowEtapa[] {
+  const porOrden = [...etapas].sort((a, b) => a.orden - b.orden)
+  if (porOrden.length === 0) return []
 
-  for (const e of ordenadas) {
-    if (!e.routing) continue
-    const salidas: Array<{ destinoOrden: number; respuesta: string }> = [
-      ...(e.routing.conditional ?? []).map(r => ({
-        destinoOrden: r.etapa_orden,
-        respuesta: etiquetaRespuesta(r.condition.value),
-      })),
-      {
-        destinoOrden: e.routing.default_etapa_orden,
-        respuesta:
-          (e.routing as { label_default?: string }).label_default ??
-          ((e.routing.conditional ?? []).length === 1
-            ? etiquetaRespuesta((e.routing.conditional ?? [])[0].condition.value) === 'Sí'
-              ? 'No'
-              : 'Sí'
-            : 'en otro caso'),
-      },
-    ]
+  const camino: WorkflowEtapa[] = []
+  const visitadas = new Set<number>()
+  let actual: WorkflowEtapa | undefined = porOrden[0]
 
-    const pregunta = (e.config_extra as { label_pregunta?: string } | undefined)?.label_pregunta
+  while (actual && !visitadas.has(actual.orden) && camino.length < 60) {
+    visitadas.add(actual.orden)
+    camino.push(actual)
 
-    const defaultLabel = salidas[salidas.length - 1].respuesta
+    const routing: WorkflowEtapa['routing'] = actual.routing
+    let siguienteOrden: number | null = null
 
-    for (const [i, s] of salidas.entries()) {
-      const destino = ordenadas.find(x => x.orden === s.destinoOrden)
-      if (!destino) continue
-      const desde = num(e)
-      const hasta = num(destino)
-      // Solo hacia adelante y saltando algo. Un destino hacia atrás es un reproceso,
-      // no una omisión, y meterlo aquí ensuciaría la lectura.
-      if (hasta <= desde + 1) continue
-      const esDefault = i === salidas.length - 1
-      const motivo = pregunta
-        ? `${s.respuesta} en "${pregunta}"`
-        : `respuesta "${s.respuesta}" en ${e.nombre}`
-      for (const saltada of ordenadas) {
-        const n = num(saltada)
-        if (n > desde && n < hasta) {
-          const lista = omitidaPor.get(n) ?? []
-          if (!lista.includes(motivo)) lista.push(motivo)
-          omitidaPor.set(n, lista)
-          if (!esDefault) {
-            const k = `${n}::${e.id}`
-            const acc = motivosPorOrigen.get(k) ?? { total: 0, motivos: [], defaultLabel }
-            acc.total += 1
-            acc.motivos.push(motivo)
-            motivosPorOrigen.set(k, acc)
-          }
+    if (routing) {
+      if (routing.default_etapa_orden === actual.orden) break // cierra aquí
+      for (const regla of routing.conditional ?? []) {
+        const dado = respuestas[regla.condition.field]
+        if (dado !== undefined && dado === String(regla.condition.value ?? '')) {
+          siguienteOrden = regla.etapa_orden
+          break
         }
       }
-    }
-  }
-
-  // Colapsar: si un origen salta la etapa por todas sus respuestas condicionales, el
-  // motivo real es "no se tomó el camino por defecto", no una respuesta concreta.
-  for (const [k, acc] of motivosPorOrigen) {
-    const [nStr, origenId] = k.split('::')
-    const n = Number(nStr)
-    const origen = ordenadas.find(x => x.id === origenId)
-    if (!origen || acc.total < (origen.routing?.conditional ?? []).length || acc.total < 2) continue
-    const lista = (omitidaPor.get(n) ?? []).filter(m => !acc.motivos.includes(m))
-    const texto = acc.defaultLabel.toLowerCase().startsWith('si ')
-      ? `no se cumple: ${acc.defaultLabel.replace(/^si\s+/i, '')}`
-      : `el caso no sigue por "${acc.defaultLabel}"`
-    if (!lista.includes(texto)) lista.push(texto)
-    omitidaPor.set(n, lista)
-  }
-
-  return ordenadas.map(e => ({
-    etapa: e,
-    numero: num(e),
-    omitidaSi: omitidaPor.get(num(e)) ?? [],
-  }))
-}
-
-/** Tramos contiguos que comparten el mismo motivo de omisión (o ninguno). */
-interface Tramo {
-  stage: string
-  motivo: string | null
-  etapas: EtapaEnRuta[]
-}
-
-function agruparEnTramos(ruta: EtapaEnRuta[]): Tramo[] {
-  const tramos: Tramo[] = []
-  for (const item of ruta) {
-    const motivo = item.omitidaSi.length > 0 ? item.omitidaSi.join(' · ') : null
-    const ultimo = tramos[tramos.length - 1]
-    if (ultimo && ultimo.stage === item.etapa.stage && ultimo.motivo === motivo) {
-      ultimo.etapas.push(item)
+      if (siguienteOrden === null) siguienteOrden = routing.default_etapa_orden
     } else {
-      tramos.push({ stage: item.etapa.stage, motivo, etapas: [item] })
+      const sig: WorkflowEtapa | undefined = porOrden.find(e => e.orden > actual!.orden)
+      siguienteOrden = sig?.orden ?? null
     }
+
+    if (siguienteOrden === null) break
+    actual = porOrden.find(e => e.orden === siguienteOrden)
   }
-  return tramos
+
+  return camino
 }
 
-export function WorkflowRutas({ etapas }: { etapas: WorkflowEtapa[] }) {
-  const ruta = calcularRuta(etapas.filter(e => e.is_active !== false))
-  const tramos = agruparEnTramos(ruta)
+export function WorkflowRutas({
+  etapas,
+  rutas,
+}: {
+  etapas: WorkflowEtapa[]
+  rutas: RutaDeclarada[]
+}) {
+  const activas = etapas.filter(e => e.is_active !== false)
+  const [rutaSel, setRutaSel] = useState(0)
 
-  if (ruta.length === 0) {
+  if (activas.length === 0) {
     return (
       <div className="rounded-xl border border-dashed p-8 text-center" style={{ borderColor: BORDE }}>
-        <p className="text-sm" style={{ color: GRIS }}>Esta línea aún no tiene etapas configuradas.</p>
+        <p className="text-sm" style={{ color: GRIS }}>
+          Esta línea aún no tiene etapas configuradas.
+        </p>
       </div>
     )
   }
 
-  const maxAbiertos = ruta.reduce((m, r) => Math.max(m, r.etapa.abiertos ?? 0), 0)
+  // Sin rutas declaradas: el proceso completo en su orden real.
+  const rutaActual = rutas[rutaSel]
+  const camino = rutaActual
+    ? recorrer(activas, rutaActual.respuestas)
+    : [...activas].sort((a, b) => num(a) - num(b))
+
+  const maxAbiertos = camino.reduce((m, e) => Math.max(m, e.abiertos ?? 0), 0)
+  const totalAbiertos = camino.reduce((s, e) => s + (e.abiertos ?? 0), 0)
 
   return (
-    <div className="space-y-1">
-      <p className="mb-4 text-xs" style={{ color: GRIS }}>
-        El proceso completo, en orden. Los tramos con borde punteado solo se recorren en
-        algunos casos: al lado dice cuándo se omiten.
+    <div>
+      {rutas.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: GRIS }}>
+            ¿Qué tipo de caso?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {rutas.map((r, i) => (
+              <button
+                key={r.nombre}
+                type="button"
+                onClick={() => setRutaSel(i)}
+                className="rounded-lg border px-3 py-2 text-left transition-all"
+                style={{
+                  borderColor: i === rutaSel ? '#10B981' : BORDE,
+                  backgroundColor: i === rutaSel ? '#F0FDF4' : '#FFFFFF',
+                }}
+              >
+                <span
+                  className="block text-xs font-bold"
+                  style={{ color: i === rutaSel ? '#059669' : CARBON }}
+                >
+                  {r.nombre}
+                </span>
+                {r.detalle && (
+                  <span className="mt-0.5 block text-[10px]" style={{ color: GRIS }}>
+                    {r.detalle}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="mb-3 text-xs" style={{ color: GRIS }}>
+        <strong style={{ color: CARBON }}>{camino.length} etapas</strong> · {totalAbiertos} negocios
+        abiertos en este recorrido
       </p>
 
-      {tramos.map((tramo, ti) => {
-        const color = STAGE_COLOR[tramo.stage] ?? VERDE
-        const anterior = tramos[ti - 1]
-        const cambiaArea = !anterior || anterior.stage !== tramo.stage
-
-        return (
-          <div key={`${tramo.stage}-${ti}`}>
-            {cambiaArea && (
-              <div className="mb-1.5 mt-4 flex items-center gap-2">
-                <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{ backgroundColor: color }}
-                  aria-hidden
-                />
-                <span
-                  className="text-[10px] font-bold uppercase tracking-wider"
-                  style={{ color }}
-                >
-                  {STAGE_LABELS[tramo.stage as keyof typeof STAGE_LABELS] ?? tramo.stage}
-                </span>
-              </div>
-            )}
-
-            <div
-              className={tramo.motivo ? 'rounded-lg py-1.5 pl-3' : ''}
-              style={
-                tramo.motivo
-                  ? { borderLeft: `2px dashed ${AMBAR}`, backgroundColor: '#FFFBEB' }
-                  : undefined
-              }
-            >
-              {tramo.motivo && (
-                <p className="mb-1 flex items-start gap-1 pr-2 text-[11px]" style={{ color: '#92400E' }}>
-                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                  <span>Se omite si: {tramo.motivo}</span>
-                </p>
+      <div className="space-y-2">
+        {camino.map((etapa, i) => {
+          const color = STAGE_COLOR[etapa.stage] ?? '#10B981'
+          const anterior = camino[i - 1]
+          const cambiaArea = !anterior || anterior.stage !== etapa.stage
+          return (
+            <div key={etapa.id}>
+              {cambiaArea && (
+                <div className="mb-1.5 mt-4 flex items-center gap-2">
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: color }}
+                    aria-hidden
+                  />
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color }}>
+                    {STAGE_LABELS[etapa.stage as keyof typeof STAGE_LABELS] ?? etapa.stage}
+                  </span>
+                </div>
               )}
-
-              {tramo.etapas.map(({ etapa, numero }) => {
-                const abiertos = etapa.abiertos ?? 0
-                const vencidos = etapa.vencidos ?? 0
-                const pct = maxAbiertos > 0 ? (abiertos / maxAbiertos) * 100 : 0
-                return (
-                  <div
-                    key={etapa.id}
-                    className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-[#F9FAFB]"
-                  >
-                    <span
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
-                      style={{ border: `2px solid ${color}`, color: CARBON }}
-                    >
-                      {numero}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium" style={{ color: CARBON }}>
-                      {etapa.nombre}
-                    </span>
-
-                    {etapa.sla_horas ? (
-                      <span
-                        className="hidden shrink-0 items-center gap-1 text-[10px] sm:flex"
-                        style={{ color: GRIS }}
-                      >
-                        <Clock className="h-3 w-3" />
-                        {etapa.sla_horas}h
-                      </span>
-                    ) : null}
-
-                    {/* Volumen: convierte el mapa del proceso en una foto de dónde está el trabajo. */}
-                    <div className="flex w-24 shrink-0 items-center gap-1.5">
-                      <div className="h-1 flex-1 rounded-full" style={{ backgroundColor: BORDE }}>
-                        <div
-                          className="h-1 rounded-full"
-                          style={{ width: `${pct}%`, backgroundColor: color }}
-                        />
-                      </div>
-                      <span
-                        className="w-6 text-right text-[11px] tabular-nums"
-                        style={{ color: abiertos > 0 ? CARBON : BORDE }}
-                      >
-                        {abiertos}
-                      </span>
-                    </div>
-
-                    {vencidos > 0 && (
-                      <span
-                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                        style={{ backgroundColor: '#FEF2F2', color: '#DC2626' }}
-                      >
-                        {vencidos} vencidos
-                      </span>
-                    )}
-                  </div>
-                )
-              })}
+              <EtapaFila etapa={etapa} numero={num(etapa)} color={color} maxAbiertos={maxAbiertos} />
             </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
 
-      <div className="mt-6 flex items-center gap-2 rounded-lg border px-3 py-2" style={{ borderColor: BORDE }}>
-        <span
-          className="inline-block h-2 w-2 rounded-full"
-          style={{ backgroundColor: CARBON }}
-          aria-hidden
-        />
+      <div
+        className="mt-4 flex items-center gap-2 rounded-lg border px-3 py-2"
+        style={{ borderColor: BORDE }}
+      >
+        <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: CARBON }} aria-hidden />
         <span className="text-xs font-semibold" style={{ color: CARBON }}>
           Cierre del negocio
         </span>
       </div>
     </div>
+  )
+}
+
+/**
+ * Fila de etapa con posiciones FIJAS: cada dato en su columna, siempre en el mismo
+ * sitio. Antes iban en una tira donde el tiempo máximo, la carga y los atrasados
+ * aparecían y desaparecían según el caso, y no se sabía qué era cada número.
+ */
+function EtapaFila({
+  etapa,
+  numero,
+  color,
+  maxAbiertos,
+}: {
+  etapa: WorkflowEtapa
+  numero: number
+  color: string
+  maxAbiertos: number
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const abiertos = etapa.abiertos ?? 0
+  const vencidos = etapa.vencidos ?? 0
+  const pct = maxAbiertos > 0 ? (abiertos / maxAbiertos) * 100 : 0
+  const gates = etapa.bloques.filter(b => b.es_gate).length
+
+  return (
+    <div
+      className="rounded-xl border bg-white"
+      style={{ borderColor: BORDE, borderTop: `3px solid ${color}` }}
+    >
+      <button
+        type="button"
+        onClick={() => setAbierto(v => !v)}
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
+      >
+        {/* 1. Identidad */}
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
+          style={{ border: `2px solid ${color}`, color: CARBON }}
+        >
+          {numero}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-bold" style={{ color: CARBON }}>
+            {etapa.nombre}
+          </span>
+          <span className="block text-[10px]" style={{ color: GRIS }}>
+            {etapa.bloques.length} bloque{etapa.bloques.length === 1 ? '' : 's'}
+            {gates > 0 && ` · ${gates} gate${gates === 1 ? '' : 's'}`}
+          </span>
+        </span>
+
+        {/* 2. Tiempo máximo */}
+        <span
+          className="hidden w-16 shrink-0 items-center justify-end gap-1 text-[11px] sm:flex"
+          style={{ color: etapa.sla_horas ? GRIS : BORDE }}
+          title={etapa.sla_horas ? `Tiempo máximo: ${etapa.sla_horas} horas hábiles` : 'Sin tiempo máximo configurado'}
+        >
+          <Clock className="h-3 w-3" />
+          {etapa.sla_horas ? `${etapa.sla_horas}h` : '—'}
+        </span>
+
+        {/* 3. Carga actual */}
+        <span
+          className="flex w-24 shrink-0 items-center gap-1.5"
+          title={`${abiertos} negocio(s) abierto(s) en esta etapa`}
+        >
+          <span className="h-1.5 flex-1 rounded-full" style={{ backgroundColor: BORDE }}>
+            <span
+              className="block h-1.5 rounded-full"
+              style={{ width: `${pct}%`, backgroundColor: color }}
+            />
+          </span>
+          <span
+            className="w-5 text-right text-[11px] font-semibold tabular-nums"
+            style={{ color: abiertos > 0 ? CARBON : BORDE }}
+          >
+            {abiertos}
+          </span>
+        </span>
+
+        {/* 4. Atrasados */}
+        <span className="w-12 shrink-0 text-right">
+          {vencidos > 0 ? (
+            <span
+              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+              style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}
+              title={`${vencidos} negocio(s) por encima del tiempo máximo`}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              {vencidos}
+            </span>
+          ) : (
+            <span className="text-[10px]" style={{ color: BORDE }}>
+              —
+            </span>
+          )}
+        </span>
+      </button>
+
+      {abierto && (
+        <div className="border-t px-3 py-2" style={{ borderColor: BORDE }}>
+          {etapa.bloques.length === 0 ? (
+            <p className="text-[11px] italic" style={{ color: GRIS }}>
+              Sin bloques configurados.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {etapa.bloques.map(b => (
+                <BloqueFila key={b.config_id} bloque={b} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Misma información que el diagrama: identificador, gate, solo lectura y condicionalidad. */
+function BloqueFila({ bloque }: { bloque: WorkflowBloque }) {
+  const isReadOnly =
+    bloque.readonly === true || bloque.estado === 'visible' || READONLY_TIPOS.has(bloque.tipo)
+  const isCondicional = Boolean(bloque.condition_field)
+  return (
+    <li className="flex items-center gap-2 text-[12px]" style={{ color: isReadOnly ? GRIS : CARBON }}>
+      <span
+        className="inline-block w-10 shrink-0 truncate rounded-md px-1 py-[1px] text-center text-[9px] font-mono font-semibold tracking-wider text-white"
+        style={{ backgroundColor: CARBON }}
+        title={bloque.block_id ? `ID del bloque: ${bloque.block_id}` : undefined}
+      >
+        {bloque.block_id ?? ''}
+      </span>
+      <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
+        {isReadOnly ? (
+          <Eye className="h-3 w-3" style={{ color: GRIS }} aria-hidden />
+        ) : (
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: bloque.es_gate ? '#10B981' : GRIS }}
+            title={bloque.es_gate ? 'Gate: bloquea el avance' : 'Bloque normal'}
+          />
+        )}
+      </span>
+      <span className="flex-1 truncate">{bloque.nombre}</span>
+      {isCondicional && (
+        <span title={`Aparece si ${bloque.condition_field} = ${bloque.condition_value}`}>
+          <GitBranch className="h-3 w-3" style={{ color: GRIS }} />
+        </span>
+      )}
+      {!isReadOnly && bloque.es_gate && (
+        <span title="Gate: bloquea el avance">
+          <ShieldCheck className="h-3 w-3" style={{ color: '#10B981' }} />
+        </span>
+      )}
+    </li>
   )
 }
