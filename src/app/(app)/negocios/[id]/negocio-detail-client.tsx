@@ -1182,8 +1182,15 @@ function BloqueRenderer({
     ) return 'editable'
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
-    // Instance-level: bloque already completed (except datos — auto-save needs re-editing)
-    if (bloque.instancia?.estado === 'completo' && tipo !== 'datos') return 'visible'
+    // Instance-level: bloque already completed.
+    // Excepciones `datos` y `documento`: siguen editables mientras el negocio esté
+    // EN esta etapa (si fuera de una etapa anterior ya habría salido arriba, por
+    // config 'visible' o por _forceReadOnly del historial).
+    // En documento el cierre al completarse dejaba al ejecutor sin salida: carga la
+    // factura, la IA extrae un dato mal, el bloque se marca completo en ese instante
+    // y ya no puede corregirlo aunque el negocio siga en su etapa. Corregir un campo
+    // recién extraído es parte de cargarlo, no una corrección hacia atrás.
+    if (bloque.instancia?.estado === 'completo' && tipo !== 'datos' && tipo !== 'documento') return 'visible'
     switch (tipo) {
       case 'datos':
         return (configExtra.es_multi_pago && !GERENCIAL.includes(userRole)) ? 'visible' : 'editable'
@@ -1403,6 +1410,11 @@ function BloqueRenderer({
             editar_extraidos?: boolean
             corregir_campos_gerencial?: boolean
           }}
+          // El ejecutor responsable del negocio corrige los campos de sus propios
+          // documentos, no solo los roles gerenciales. El servidor ya lo permitía
+          // (`guardEditarBloque`: área que cubre el stage + ser responsable); era la
+          // pantalla la que no le mostraba los campos.
+          esResponsable={bloque._esResponsable ?? false}
         />
       )
 
