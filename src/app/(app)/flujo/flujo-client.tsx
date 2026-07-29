@@ -137,7 +137,12 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
       {vista === 'diagrama' && workflowEtapas.length > 0 && <WorkflowConventions />}
 
       {vista === 'rutas' ? (
-        <WorkflowRutas etapas={workflowEtapas} rutas={data.rutas ?? []} />
+        <WorkflowRutas
+          etapas={workflowEtapas}
+          rutas={data.rutas ?? []}
+          canConfigSla={canConfigSla}
+          onUpdateSla={updateEtapaSla}
+        />
       ) : (
         <WorkflowDiagram
           etapas={workflowEtapas}

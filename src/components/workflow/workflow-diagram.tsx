@@ -1009,7 +1009,7 @@ export function formatSlaLong(slaHoras: number): string {
 
 // ── SLA config inline (compartido ambos modos) ────────────────────────────
 
-function SlaConfig({
+export function SlaConfig({
   etapaId,
   slaHoras,
   canEdit,
