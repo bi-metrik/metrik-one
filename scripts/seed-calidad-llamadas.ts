@@ -332,6 +332,120 @@ const PRECIO_PROGRAMA = 799
  */
 const DIAS_HISTORIA = 30
 
+/**
+ * Agentes cuyo puntaje se mueve a lo largo del periodo.
+ *
+ * POR QUE EXISTE. La pantalla de perfil promete responder si un agente esta
+ * mejorando o empeorando. Con todos los agentes planos la respuesta es siempre
+ * "estable": la pantalla es honesta pero no demuestra lo que promete, y el caso
+ * que Mauricio pidio con nombre propio — el agente que se deteriora y necesita
+ * reentrenamiento — no existe en ningun lado.
+ *
+ * LA TENDENCIA ES REAL EN EL DATO, NO UNA ETIQUETA. Aqui solo se inclina el
+ * puntaje de las llamadas; el detector estadistico del perfil (pendiente contra
+ * su propio error estandar) la encuentra solo, sin que se le toque un umbral.
+ * Si hubiera que aflojar el detector para que apareciera, estaria mal hecho: lo
+ * que se diseña es el dato.
+ *
+ * QUIENES. Dos ficticios, y por dos razones explicitas:
+ *   - El que BAJA no es Felipe. Su llamada real es de un dia puntual; colgarle
+ *     una caida sostenida seria afirmar sobre una persona real algo que no
+ *     podemos sostener.
+ *   - El que SUBE no es Tatiana. Ya es la referencia limpia del ranking; si
+ *     ademas viniera subiendo seria un personaje demasiado perfecto para
+ *     creerselo.
+ *
+ * LA MEDIA NO SE MUEVE. La deriva se centra en la mitad del periodo, asi que
+ * suma cero a lo largo de los 30 dias: el promedio mensual del agente, y con el
+ * su fila del ranking del muro, se queda donde estaba. Lo que cambia es COMO se
+ * reparte ese promedio en el tiempo, que es justo lo que la pantalla mide. El
+ * dia suelto SI se mueve, y tiene que moverse: una tendencia que no se nota en
+ * ningun corte no es una tendencia.
+ */
+const TENDENCIAS: Record<string, number> = {
+  // Puntos de tecnica por dia. Positivo = viene bajando (empeora con el
+  // tiempo); negativo = viene subiendo. 0,6 al dia son ~18 puntos de punta a
+  // punta en 30 dias: se ve la inclinacion en el grafico sin que la nube deje
+  // de solaparse, que es lo que la mantiene creible. Una recta perfecta se lee
+  // como dato inventado; el jitter por llamada la conserva sucia, con buenos
+  // dias por el camino.
+  'Óscar Peñaloza': 0.6,
+  'Héctor Salgado': -0.6,
+}
+
+/**
+ * La deriva, ya resuelta a numeros enteros y con la media intacta.
+ *
+ * Inclinar el puntaje es facil; hacerlo SIN mover el promedio del mes no lo es
+ * tanto. Dos trampas, las dos medidas contra la base:
+ *
+ *   1. Centrar en la mitad del calendario (dia 14,5) no basta: el volumen
+ *      diario varia, asi que el centro tiene que ser el dia medio PONDERADO POR
+ *      LLAMADAS. Con eso la deriva suma cero sobre las llamadas que el agente
+ *      realmente hizo.
+ *
+ *   2. Aun centrada, redondear deja sesgo. La deriva de un dia es la MISMA para
+ *      todas las llamadas de ese dia, asi que al redondear se empujan todas
+ *      hacia el mismo lado y el error no se cancela entre dias: en la primera
+ *      version eso movio dos casillas del ranking mensual un punto (Oscar 68→69,
+ *      Hector 66→65). Se corrige repartiendo el residuo entero entre llamadas
+ *      sueltas, de a un punto, empezando por los dias donde el redondeo se
+ *      equivoco mas.
+ *
+ * El resultado es una inclinacion visible en el grafico con el promedio del mes
+ * exacto: el ranking del muro que Mauricio ya reviso no se mueve.
+ */
+type PlanTendencia = { offset: number[]; correccion: number[]; signo: number }
+const planCache = new Map<string, PlanTendencia | null>()
+
+function planTendencia(nombre: string): PlanTendencia | null {
+  const cacheado = planCache.get(nombre)
+  if (cacheado !== undefined) return cacheado
+
+  const k = TENDENCIAS[nombre]
+  if (!k) {
+    planCache.set(nombre, null)
+    return null
+  }
+
+  const iPerfil = PERFILES_AGENTE.findIndex((p) => p.nombre === nombre)
+  const perfil = PERFILES_AGENTE[iPerfil]
+
+  // Llamadas por dia. El dia 0 no pasa por planDelDia: usa el plan base.
+  const n: number[] = new Array(DIAS_HISTORIA).fill(0)
+  n[0] = perfil.llamadas
+  for (let d = 1; d < DIAS_HISTORIA; d++) n[d] = planDelDia(perfil, iPerfil, d).llamadas
+
+  const total = n.reduce((a, b) => a + b, 0)
+  const centro = n.reduce((a, nd, d) => a + nd * d, 0) / total
+
+  const real = n.map((_, d) => k * (d - centro))
+  const offset = real.map((v) => Math.round(v))
+
+  // Residuo entero que dejo el redondeo, en puntos-llamada.
+  let resto = offset.reduce((a, o, d) => a + n[d] * o, 0)
+  const signo = resto > 0 ? -1 : 1
+  let falta = Math.abs(resto)
+
+  // Se corrige donde el redondeo mas se equivoco, para que la curva quede lo
+  // mas cerca posible de la recta que se diseño.
+  const correccion: number[] = new Array(DIAS_HISTORIA).fill(0)
+  const porError = offset
+    .map((o, d) => ({ d, error: (o - real[d]) * signo }))
+    .sort((a, b) => b.error - a.error || a.d - b.d)
+  for (const { d } of porError) {
+    if (falta <= 0) break
+    const toma = Math.min(n[d], falta)
+    correccion[d] = toma
+    falta -= toma
+  }
+  resto = 0
+
+  const plan = { offset, correccion, signo }
+  planCache.set(nombre, plan)
+  return plan
+}
+
 /** Fecha (YYYY-MM-DD) a `d` dias antes del dia ancla. */
 function fechaOffset(d: number): string {
   const f = new Date(`${DIA}T12:00:00Z`)
@@ -576,6 +690,8 @@ async function main() {
   // se revisaron y no se pueden mover al agregar historia detras.
   function sembrarDia(opts: {
     fecha: string
+    /** Dias hacia atras desde el ancla. 0 = hoy. Lo usa la deriva. */
+    offset: number
     planes: { perfil: PerfilAgente; plan: PlanDia }[]
     semilla: (idx: number) => number
     ref: (idx: number) => string
@@ -596,10 +712,18 @@ async function main() {
       for (let j = 0; j < plan.llamadas; j++) {
         const r = prng(opts.semilla(idx))
         const semaforo = j < nVerde ? 'verde' : j < nVerde + nAmarillo ? 'amarillo' : 'rojo'
-        const tecnica =
+        const base =
           semaforo === 'verde' ? entre(r, 74, 92)
           : semaforo === 'amarillo' ? entre(r, 62, 84)
           : entre(r, 38, 81)
+        // La deriva es la misma para todas las llamadas del dia (salvo el ajuste
+        // de un punto que cuadra la media), asi que practicamente no altera cual
+        // llamada cierra: el orden por tecnica dentro del dia se conserva.
+        const tend = planTendencia(perfil.nombre)
+        const deriva = tend
+          ? tend.offset[opts.offset] + (j < tend.correccion[opts.offset] ? tend.signo : 0)
+          : 0
+        const tecnica = Math.max(0, Math.min(100, base + deriva))
 
         const hora = entre(r, 8, 18)
         const minuto = entre(r, 0, 59)
@@ -692,6 +816,7 @@ async function main() {
   // Semillas y refs originales: esta es la pantalla que ya se reviso.
   const rellenoHoy = sembrarDia({
     fecha: DIA,
+    offset: 0,
     planes: PERFILES_AGENTE.map((perfil) => ({
       perfil,
       plan: {
@@ -728,6 +853,7 @@ async function main() {
     const fecha = fechaOffset(d)
     const filas = sembrarDia({
       fecha,
+      offset: d,
       planes: PERFILES_AGENTE.map((perfil, i) => ({ perfil, plan: planDelDia(perfil, i, d) })),
       semilla: (idx) => 200000 + d * 5000 + idx,
       ref: (idx) => `LL-D${String(d).padStart(2, '0')}-${String(idx).padStart(4, '0')}`,
