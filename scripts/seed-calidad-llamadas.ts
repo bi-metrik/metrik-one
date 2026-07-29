@@ -43,23 +43,39 @@ const SLUG = 'regat'
 const LOTE = 'muestra-2026-07'
 
 /**
- * Dia ancla = el dia en que se corre el seed.
+ * Dia ancla = el dia de la DEMO, no el dia en que se corre el seed.
  *
- * NO es una fecha fija. El muro consulta el dia en curso, asi que anclar la
- * muestra a una fecha del pasado deja el televisor en blanco todos los dias,
- * incluido el de la reunion. Que la muestra viva "hoy" es lo que la vuelve
- * proyectable cualquier dia sin volver a sembrar.
+ * La presentacion a Regat es el viernes 31 de julio de 2026. El seed siembra
+ * ese dia como "hoy" y 30 dias hacia atras, asi que:
+ *
+ *   - El 31 tiene el dia completo y las DOS llamadas con detalle (la real de
+ *     Felipe y la simulada), que es cuando se va a entrar al detalle desde el
+ *     muro.
+ *   - La vista de semana del viernes cubre lunes a viernes completos.
+ *   - Los dias intermedios quedan sembrados, asi que la pantalla funciona
+ *     cualquier dia de esa semana y no solo el viernes. Nadie tiene que
+ *     acordarse de correr el seed esa mañana.
+ *
+ * Los dias posteriores a hoy existen en la base pero NO se ven: la RPC corta
+ * en la fecha actual (ver la migracion `20260728000007`). Hoy el muro muestra
+ * hoy; el viernes mostrara el viernes.
+ *
+ * Parametrizable a proposito: si la reunion se mueve es cambiar este valor (o
+ * pasar la fecha como argumento), no editar logica.
+ *
+ *   npx tsx scripts/seed-calidad-llamadas.ts 2026-08-07
  *
  * Esto NO rompe el determinismo: el PRNG esta sembrado por indice, asi que dos
- * corridas del mismo dia producen exactamente los mismos numeros. Lo unico que
- * se mueve entre dias es la fecha.
+ * corridas producen exactamente los mismos numeros. Lo unico que se mueve al
+ * cambiar el ancla es en que fechas caen.
  */
-const hoy = new Date()
-const DIA = [
-  hoy.getFullYear(),
-  String(hoy.getMonth() + 1).padStart(2, '0'),
-  String(hoy.getDate()).padStart(2, '0'),
-].join('-')
+const ANCLA_POR_DEFECTO = '2026-07-31'
+const DIA = process.argv[2] ?? process.env.CALIDAD_ANCLA ?? ANCLA_POR_DEFECTO
+
+if (!/^\d{4}-\d{2}-\d{2}$/.test(DIA)) {
+  console.error(`Fecha ancla invalida: "${DIA}". Formato esperado YYYY-MM-DD.`)
+  process.exit(1)
+}
 
 /**
  * Fecha y hora VERDADERAS de la grabacion auditada. Esta no se mueve.
@@ -397,7 +413,15 @@ async function main() {
   if (eWs || !ws) throw new Error(`No existe el workspace ${SLUG}. Correr antes setup-regat-workspace.ts`)
   const workspaceId = ws.id as string
 
-  console.log(`dia ancla      ${DIA}  (la muestra se siembra en el dia de hoy)`)
+  // En hora de BOGOTA, no UTC: pasadas las 19:00 locales `toISOString()` ya
+  // reporta el dia siguiente y la linea diria que hoy es mañana. Es el mismo
+  // error de zona que hacia agrupar las llamadas de la noche en el dia
+  // equivocado; la RPC ya usa `America/Bogota` y este log tiene que coincidir.
+  const hoyReal = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
+  console.log(
+    `dia ancla      ${DIA}  (día de la demo)` +
+      (DIA > hoyReal ? `  ·  hoy es ${hoyReal}: el muro mostrará hoy hasta que llegue el ancla` : ''),
+  )
 
   // ── staff de Felipe: POR profile_id, no por nombre ────────────────────────
   //
