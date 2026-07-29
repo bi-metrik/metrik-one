@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { C, MONO } from './components/tokens'
 import { OrigenBadge, SemaforoBadge } from './components/semaforo-badge'
-import { duracion, type LlamadaResumen, type Semaforo } from './types'
+import { duracion, slugAgente, type LlamadaResumen, type Semaforo } from './types'
 
 const FILTROS = [
   { key: 'todas', label: 'Todas' },
@@ -172,7 +172,18 @@ export default function CalidadClient({
                         </span>
                       </div>
                     </td>
-                    <td style={td}>{l.agenteNombre}</td>
+                    <td style={td}>
+                      {/* Puerta al perfil. `stopPropagation` porque la fila
+                          entera navega al detalle de la llamada: sin esto, un
+                          click en el nombre abriria las dos cosas. */}
+                      <a
+                        href={`/calidad/agente/${slugAgente(l.agenteNombre)}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ color: C.ink, textDecoration: 'none', borderBottom: `1px solid ${C.line}` }}
+                      >
+                        {l.agenteNombre}
+                      </a>
+                    </td>
                     <td style={{ ...td, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
                       {duracion(l.duracionSeg)}
                     </td>

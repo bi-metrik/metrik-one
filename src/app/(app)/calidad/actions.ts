@@ -3,9 +3,11 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getRolePermissions } from '@/lib/roles'
+import { slugAgente } from './types'
 import type {
   DineroCuota,
   DuenoData,
+  PerfilAgente,
   EventoCinta,
   Hallazgo,
   LlamadaDetalle,
@@ -400,4 +402,86 @@ export async function getDatosDueno(): Promise<DuenoData | null> {
       dias: recobroDias.length,
     },
   }
+}
+
+/**
+ * Perfil de un agente: como viene, hacia donde va y donde entrenar.
+ *
+ * El agente se identifica por SLUG del nombre, no por su nombre en la URL:
+ * "felipe-sandoval" en vez de "Felipe%20Sandoval". El slug se resuelve contra
+ * los agentes que existen en el workspace, asi que la URL no es un canal para
+ * pedir un nombre arbitrario — solo puede apuntar a alguien que ya audita aqui.
+ *
+ * PERMISOS. Un ejecutor solo puede abrir SU perfil. No es cosmetico: el perfil
+ * lleva el desglose por bloque de otra persona, que es exactamente lo que la
+ * segmentacion por rol existe para no mostrar. Se valida contra el nombre
+ * resuelto desde su `staff_id`, no contra el slug que venga en la URL.
+ */
+export async function getPerfilAgente(
+  slug: string,
+  dias = 30,
+): Promise<PerfilAgente | null> {
+  const ctx = await ctxCalidad()
+  if (!ctx) return null
+
+  // Agentes reales del workspace. `distinct` en el cliente porque PostgREST no
+  // expone DISTINCT: son pocas filas por pagina y solo se leen nombres.
+  const { data: filas } = await sinTipar(ctx.supabase)
+    .from('calidad_llamadas')
+    .select('agente_nombre, agente_staff_id')
+    .eq('workspace_id', ctx.workspaceId)
+    .limit(4000)
+
+  const nombres = new Map<string, string | null>()
+  for (const f of (filas ?? []) as { agente_nombre: string; agente_staff_id: string | null }[]) {
+    if (!nombres.has(f.agente_nombre) || f.agente_staff_id) {
+      nombres.set(f.agente_nombre, f.agente_staff_id ?? nombres.get(f.agente_nombre) ?? null)
+    }
+  }
+
+  const entrada = [...nombres.entries()].find(([n]) => slugAgente(n) === slug)
+  if (!entrada) return null
+  const [nombre, staffDelAgente] = entrada
+
+  // Fail-closed: sin staff resuelto, un ejecutor no abre ningun perfil.
+  if (!ctx.perms.canViewCalidadTodos) {
+    if (!ctx.staffId) return null
+    if (staffDelAgente !== ctx.staffId) return null
+  }
+
+  const hasta = new Date()
+  const desde = new Date(hasta)
+  desde.setDate(desde.getDate() - (dias - 1))
+  const iso = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
+
+  const { data, error } = await sinTipar(ctx.supabase).rpc('get_calidad_perfil_agente', {
+    p_workspace_id: ctx.workspaceId,
+    p_agente: nombre,
+    p_desde: iso(desde),
+    p_hasta: iso(hasta),
+  })
+  if (error || !data) return null
+  return data as PerfilAgente
+}
+
+/** Lista de agentes con llamadas, para el indice del perfil. */
+export async function getAgentes(): Promise<{ nombre: string; slug: string }[]> {
+  const ctx = await ctxCalidad()
+  if (!ctx) return []
+
+  let q = sinTipar(ctx.supabase)
+    .from('calidad_llamadas')
+    .select('agente_nombre, agente_staff_id')
+    .eq('workspace_id', ctx.workspaceId)
+    .limit(4000)
+
+  if (!ctx.perms.canViewCalidadTodos) {
+    if (!ctx.staffId) return []
+    q = q.eq('agente_staff_id', ctx.staffId)
+  }
+
+  const { data } = await q
+  const set = new Set<string>()
+  for (const f of (data ?? []) as { agente_nombre: string }[]) set.add(f.agente_nombre)
+  return [...set].sort().map((nombre) => ({ nombre, slug: slugAgente(nombre) }))
 }
