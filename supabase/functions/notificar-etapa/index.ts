@@ -66,21 +66,50 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   const aviso = (etapa?.config_extra as Record<string, unknown> | null)?.avisar_al_entrar as
-    | { email?: boolean; titulo?: string; mensaje?: string }
+    | { email?: boolean; titulo?: string; mensaje?: string; areas?: string[] }
     | undefined;
 
   // Sin config de aviso o con el correo apagado -> nada que hacer (la
   // notificación in-app ya se creó igual).
   if (!aviso?.email) return json({ ok: true, skipped: 'sin_aviso_email' });
 
-  // ── A quién: el responsable del stage de la etapa ──────────────────────────
-  const { data: destinatarios } = await supabase.rpc('destinatarios_negocio', {
-    p_negocio_id: negocio.id,
-  });
+  // ── A quién ────────────────────────────────────────────────────────────────
+  // Dos modos, y el correo TIENE que resolver igual que el trigger o la campana
+  // y el correo le llegarían a personas distintas:
+  //   · `areas` declarado -> a todo el staff de esas áreas (pendiente de equipo).
+  //     Se reparte por `staff_areas` SIN mirar el rol, igual que
+  //     `crear_notificacion_equipo`: quien lleva un área con rol `admin` en vez de
+  //     `supervisor` también tiene que enterarse.
+  //   · sin `areas` -> comportamiento original: el responsable del stage.
+  let profileIds: string[] = [];
 
-  const profileIds = ((destinatarios ?? []) as Array<{ profile_id: string }>)
-    .map((d) => d.profile_id)
-    .filter(Boolean);
+  if (Array.isArray(aviso.areas) && aviso.areas.length > 0) {
+    const { data: staffRows } = await supabase
+      .from('staff')
+      .select('id, profile_id')
+      .eq('workspace_id', negocio.workspace_id)
+      .not('profile_id', 'is', null);
+
+    const staff = (staffRows ?? []) as Array<{ id: string; profile_id: string }>;
+    if (staff.length > 0) {
+      const { data: areaRows } = await supabase
+        .from('staff_areas')
+        .select('staff_id')
+        .in('staff_id', staff.map((s) => s.id))
+        .in('area', aviso.areas);
+
+      const conArea = new Set(((areaRows ?? []) as Array<{ staff_id: string }>).map((a) => a.staff_id));
+      profileIds = [...new Set(staff.filter((s) => conArea.has(s.id)).map((s) => s.profile_id))];
+    }
+  } else {
+    const { data: destinatarios } = await supabase.rpc('destinatarios_negocio', {
+      p_negocio_id: negocio.id,
+    });
+
+    profileIds = ((destinatarios ?? []) as Array<{ profile_id: string }>)
+      .map((d) => d.profile_id)
+      .filter(Boolean);
+  }
 
   if (profileIds.length === 0) return json({ ok: true, skipped: 'sin_destinatarios' });
 
