@@ -1,13 +1,13 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSemanalData } from './types'
+import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSemanalData, ProcesoSeccionalData } from './types'
 import { TabComercial } from './components/tab-comercial'
 import { TabOperativo } from './components/tab-operativo'
 import { TabFinanciero } from './components/tab-financiero'
 import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercial'
 import { TabComercialSoena } from './components/tab-comercial-soena'
-import { TabProceso } from './components/tab-proceso'
+import { TabProceso, ProcesoPorSeccional } from './components/tab-proceso'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { ShieldCheck } from 'lucide-react'
 import type {
@@ -57,6 +57,7 @@ interface TablerosClientProps {
   initialRentabilidad?: RentabilidadComercialData | null
   initialComercialNegocios?: ComercialNegociosBundle | null
   initialProceso?: ProcesoSemanalData | null
+  initialProcesoSeccional?: ProcesoSeccionalData | null
   modules?: Record<string, boolean>
 }
 
@@ -67,6 +68,7 @@ export default function TablerosClient({
   initialRentabilidad,
   initialComercialNegocios,
   initialProceso,
+  initialProcesoSeccional,
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
@@ -181,7 +183,12 @@ export default function TablerosClient({
             puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
           />
         )}
-        {activeTab === 'proceso' && initialProceso && <TabProceso data={initialProceso} />}
+        {activeTab === 'proceso' && initialProceso && (
+          <div className="space-y-6">
+            <TabProceso data={initialProceso} />
+            {initialProcesoSeccional && <ProcesoPorSeccional data={initialProcesoSeccional} />}
+          </div>
+        )}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
         {activeTab === 'operativo' && operativo && <TabOperativo data={operativo} />}
