@@ -4,7 +4,14 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { C, MONO } from './components/tokens'
 import { OrigenBadge, SemaforoBadge } from './components/semaforo-badge'
-import { duracion, slugAgente, type LlamadaResumen, type Semaforo } from './types'
+import { duracion, slugAgente, type ListaLlamadas, type Semaforo } from './types'
+
+/** Miles con punto: 2533 se lee mal, 2.533 se lee de un golpe. */
+const num = (n: number) => n.toLocaleString('es-CO')
+
+/** `2026-06-29` → `29 de jun`. */
+const fmtDia = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
 
 const FILTROS = [
   { key: 'todas', label: 'Todas' },
@@ -27,13 +34,14 @@ function fmtFecha(iso: string) {
 }
 
 export default function CalidadClient({
-  llamadas,
+  datos,
   soloMias,
 }: {
-  llamadas: LlamadaResumen[]
+  datos: ListaLlamadas
   /** true cuando el usuario es ejecutor: la vista es su hoja, no la del piso. */
   soloMias: boolean
 }) {
+  const { filas: llamadas, kpis, total, mostradas } = datos
   const router = useRouter()
   const [filtro, setFiltro] = useState<FiltroKey>('todas')
 
@@ -43,15 +51,11 @@ export default function CalidadClient({
     return llamadas.filter((l) => l.semaforo === (filtro as Semaforo))
   }, [llamadas, filtro])
 
-  const conteo = useMemo(() => {
-    const c: Record<string, number> = { rojo: 0, amarillo: 0, verde: 0 }
-    for (const l of llamadas) c[l.semaforo] += 1
-    return c
-  }, [llamadas])
-
-  const tecnicaPromedio = llamadas.length
-    ? Math.round(llamadas.reduce((a, l) => a + l.puntajeTecnico, 0) / llamadas.length)
-    : 0
+  // Los KPIs NO se recalculan sobre las filas cargadas: vienen contados sobre
+  // el periodo entero. Antes se sacaban de la pagina, asi que "51% en rojo" era
+  // el 51% de las primeras mil filas, un porcentaje de nada.
+  const truncada = total > mostradas
+  const periodo = `${fmtDia(datos.desde)} a ${fmtDia(datos.hasta)}`
 
   return (
     <div style={{ padding: '26px 30px 64px', maxWidth: 1120, color: C.ink }}>
@@ -86,10 +90,14 @@ export default function CalidadClient({
           marginBottom: 22,
         }}
       >
-        <Kpi label="Llamadas" valor={String(llamadas.length)} nota={soloMias ? 'asignadas a ti' : 'auditadas hoy'} />
-        <Kpi label="En rojo" valor={String(conteo.rojo)} nota={`${pct(conteo.rojo, llamadas.length)}% del total`} tono="bad" />
-        <Kpi label="En amarillo" valor={String(conteo.amarillo)} nota={`${pct(conteo.amarillo, llamadas.length)}% del total`} />
-        <Kpi label="Técnica promedio" valor={String(tecnicaPromedio)} nota="sobre 100 puntos" />
+        <Kpi
+          label="Llamadas"
+          valor={num(kpis.llamadas)}
+          nota={soloMias ? `asignadas a ti · ${periodo}` : `auditadas · ${periodo}`}
+        />
+        <Kpi label="En rojo" valor={num(kpis.rojo)} nota={`${pct(kpis.rojo, kpis.llamadas)}% del período`} tono="bad" />
+        <Kpi label="En amarillo" valor={num(kpis.amarillo)} nota={`${pct(kpis.amarillo, kpis.llamadas)}% del período`} />
+        <Kpi label="Técnica promedio" valor={String(kpis.tecnica)} nota="sobre 100 puntos" />
       </div>
 
       {/* Filtros */}
@@ -201,6 +209,15 @@ export default function CalidadClient({
             </tbody>
           </table>
         </div>
+
+        {/* La tabla avisa cuando corta. Una linea que lo diga es mejor que una
+            fila que desaparece sin que nadie se entere. */}
+        {truncada && (
+          <p style={{ fontSize: 12.5, color: C.inkMuted, padding: '12px 12px 0', margin: 0 }}>
+            Se muestran las <b>{num(mostradas)}</b> llamadas más recientes de las{' '}
+            <b>{num(total)}</b> del período.
+          </p>
+        )}
 
         {visibles.length === 0 && (
           <p style={{ fontSize: 13.5, color: C.inkMuted, padding: '18px 12px 4px', margin: 0 }}>

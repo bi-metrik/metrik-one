@@ -387,7 +387,10 @@ export default function MuroView({
           />
           <FormaPago
             etiqueta="a seis cuotas"
-            nota={`${usd(c?.cuenta.primeraCuotaUsd ?? 0)} en la primera cuota`}
+            // Que la cifra diga lo que es: un numero que baja sin explicacion se
+            // lee como error. Lo que entra ya descuenta lo que historicamente
+            // rebota, no es una division entre seis.
+            nota={`entra ${usd(c?.cuenta.primeraCuotaUsd ?? 0)} en la primera · descontado lo que rebota`}
             n={c?.cuenta.n ?? 0}
             monto={c?.cuenta.montoUsd ?? 0}
             color={M.high}

@@ -4,6 +4,10 @@ import { DISCLAIMER_BANDERAS, type DuenoData } from '../types'
 const usd = (n: number) =>
   `US$${n.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 
+/** `2026-06-29` → `29 de jun`. */
+const fmtDia = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+
 /**
  * Vendido contra recaudado, cuota por cuota.
  *
@@ -13,7 +17,7 @@ const usd = (n: number) =>
  * solo ve el dueno.
  */
 export default function DuenoClient({ datos }: { datos: DuenoData }) {
-  const maxVendido = Math.max(...datos.cuotas.map((c) => c.vendidoUsd), 1)
+  const maxEsperado = Math.max(...datos.cuotas.map((c) => c.esperadoUsd), 1)
 
   return (
     <div style={{ padding: '26px 30px 64px', maxWidth: 1120, color: C.ink }}>
@@ -29,18 +33,24 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
       </div>
 
       <section style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-        <Kpi label="Ventas cerradas" valor={String(datos.ventasCerradas)} nota="a US$799, en 6 cuotas" />
         <Kpi
-          label="Llegaron a cuota 6"
+          label="Ventas cerradas"
+          valor={datos.ventasCerradas.toLocaleString('es-CO')}
+          nota={`${datos.deUnaVez.n} pagaron completo · ${datos.aCuotas.n} a 6 cuotas · ${fmtDia(datos.desde)} a ${fmtDia(datos.hasta)}`}
+        />
+        {/* El embudo corre SOLO sobre las de cuotas: las que pagaron completo
+            ya entraron y no se exponen a que rebote un débito. */}
+        <Kpi
+          label="Llegan a cuota 6"
           valor={String(datos.llegaronCuota6)}
-          nota={`${pct(datos.llegaronCuota6, datos.ventasCerradas)}% de las cerradas`}
+          nota={`${pct(datos.llegaronCuota6, datos.aCuotas.n)}% de las ${datos.aCuotas.n} a cuotas`}
           tono="bad"
         />
         <Kpi label="Recaudo efectivo" valor={`${datos.recaudoPct}%`} nota="de lo vendido" tono="bad" />
         <Kpi
           label="Dejado de recaudar"
-          valor={usd(datos.vendidoTotal - datos.recaudadoTotal)}
-          nota={`de ${usd(datos.vendidoTotal)} vendidos`}
+          valor={usd(datos.vendidoUsd - datos.recaudadoUsd)}
+          nota={`de ${usd(datos.vendidoUsd)} vendidos`}
           tono="bad"
         />
       </section>
@@ -51,7 +61,7 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
         <div style={{ ...card, padding: '16px 18px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {datos.cuotas.map((c) => {
-              const pctRec = c.vendidoUsd > 0 ? (c.recaudadoUsd / c.vendidoUsd) * 100 : 0
+              const pctRec = c.esperadoUsd > 0 ? (c.entraUsd / c.esperadoUsd) * 100 : 0
               return (
                 <div key={c.cuota}>
                   <div
@@ -65,11 +75,11 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
                   >
                     <span>
                       Cuota {c.cuota}{' '}
-                      <span style={{ color: C.inkMuted }}>· {c.ventas} de {datos.ventasCerradas} pagaron</span>
+                      <span style={{ color: C.inkMuted }}>· {c.ventas} de {datos.aCuotas.n} pagan</span>
                     </span>
                     <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
-                      {usd(c.recaudadoUsd)}{' '}
-                      <span style={{ color: C.inkMuted }}>de {usd(c.vendidoUsd)}</span>
+                      {usd(c.entraUsd)}{' '}
+                      <span style={{ color: C.inkMuted }}>de {usd(c.esperadoUsd)}</span>
                     </span>
                   </div>
                   {/* Barra doble: lo esperado en gris, lo recaudado encima. */}
@@ -81,7 +91,7 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
                       borderRadius: 5,
                       marginTop: 6,
                       overflow: 'hidden',
-                      width: `${(c.vendidoUsd / maxVendido) * 100}%`,
+                      width: `${(c.esperadoUsd / maxEsperado) * 100}%`,
                     }}
                   >
                     <div
@@ -100,7 +110,13 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
 
           <p style={nota}>
             La venta no termina cuando el agente cierra: termina en la cuota 6. El tablero que hoy se
-            proyecta en el piso muestra ventas, no plata recaudada.
+            proyecta en el piso muestra ventas, no plata recaudada. Las{' '}
+            <b>{datos.ventasCerradas.toLocaleString('es-CO')}</b> ventas y los {usd(datos.vendidoUsd)}{' '}
+            son los mismos del muro, contados sobre las llamadas del período. De esas,{' '}
+            <b>{datos.deUnaVez.n}</b> pagaron completo ({usd(datos.deUnaVez.usd)}) y no aparecen
+            arriba: esa plata ya entró. Las <b>{datos.aCuotas.n}</b> restantes se cobran en seis
+            débitos, y en cada uno se cae el <b>{Math.round(datos.tasaCaida * 100)}%</b> que rebota y
+            nadie recupera, según el recobro real de abajo. El muro reparte con esta misma regla.
           </p>
         </div>
       </section>
@@ -122,10 +138,18 @@ export default function DuenoClient({ datos }: { datos: DuenoData }) {
             <section style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
               {/* Las dos escalas juntas: el día solo no deja ver el tamaño del
                   hueco, y el acumulado solo esconde si hoy fue un mal día. */}
+              {/* `hoy` es HOY. Antes se tomaba la fila mas reciente de la
+                  tabla, y con la historia sembrada hasta el dia de la
+                  presentacion esa fila era del futuro: el dueño leia como "hoy"
+                  un dato de tres dias adelante. */}
               <Kpi
                 label="Rebotaron hoy"
-                valor={String(datos.recobro.hoy?.debitosRebotados ?? 0)}
-                nota={`${datos.recobro.hoy?.pendientesRecobro ?? 0} sin volver a llamar`}
+                valor={datos.recobro.hoy ? String(datos.recobro.hoy.debitosRebotados) : '—'}
+                nota={
+                  datos.recobro.hoy
+                    ? `${datos.recobro.hoy.pendientesRecobro} sin volver a llamar`
+                    : 'sin registro del día'
+                }
                 tono={datos.recobro.hoy?.debitosRebotados ? 'bad' : undefined}
               />
               <Kpi

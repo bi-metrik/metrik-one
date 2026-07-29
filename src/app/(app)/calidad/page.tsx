@@ -11,7 +11,8 @@ export default async function CalidadPage() {
   const ctx = await getContextoCalidad()
   if (!ctx) redirect('/')
 
-  const llamadas = await getLlamadas()
+  const datos = await getLlamadas()
+  if (!datos) redirect('/')
 
-  return <CalidadClient llamadas={llamadas} soloMias={!ctx.canViewCalidadTodos} />
+  return <CalidadClient datos={datos} soloMias={!ctx.canViewCalidadTodos} />
 }
