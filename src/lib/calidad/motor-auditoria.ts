@@ -67,6 +67,68 @@ export interface Auditoria {
   tiempos: { cumplimientoMs: number; tecnicaMs: number; totalMs: number }
 }
 
+/**
+ * Los SIETE codigos de bloque permitidos, en el orden de la rubrica.
+ *
+ * No es decoracion: el modelo alterna entre `objeciones` y `manejo_objeciones`
+ * de una corrida a otra. Con `unique(llamada_id, bloque_codigo)` eso significa
+ * que la misma llamada auditada dos veces guarda bloques que no se pueden
+ * comparar, y el perfil de agente —que promedia por bloque— empieza a mezclar
+ * peras con manzanas sin que nadie lo note.
+ *
+ * El prompt ya los fija, pero un dato que entra a la base desde una respuesta
+ * generada no se valida en el prompt: se valida aqui. Y un codigo inesperado
+ * FALLA RUIDOSAMENTE en vez de normalizarse en silencio — si el modelo empieza
+ * a devolver otra cosa, queremos enterarnos, no acomodarlo.
+ */
+export const BLOQUES_CANONICOS = [
+  'apertura',
+  'descubrimiento',
+  'escucha',
+  'educacion',
+  'propuesta',
+  'objeciones',
+  'cierre',
+] as const
+
+export type BloqueCodigo = (typeof BLOQUES_CANONICOS)[number]
+
+/** Nombre legible por codigo. La pantalla no depende de como los titule el modelo. */
+export const NOMBRE_BLOQUE: Record<BloqueCodigo, string> = {
+  apertura: 'Apertura e identificación',
+  descubrimiento: 'Descubrimiento',
+  escucha: 'Escucha y control',
+  educacion: 'Educación técnica',
+  propuesta: 'Propuesta y precio',
+  objeciones: 'Manejo de objeciones',
+  cierre: 'Cierre y próximos pasos',
+}
+
+/**
+ * Valida los codigos de bloque de una auditoria antes de que toquen la base.
+ * Lanza con el detalle de lo que llego, para que el error se pueda leer.
+ */
+export function validarBloques(bloques: BloqueTecnica[]): asserts bloques is (BloqueTecnica & { codigo: BloqueCodigo })[] {
+  const permitidos = new Set<string>(BLOQUES_CANONICOS)
+  const llegaron = bloques.map((b) => b.codigo ?? '(sin codigo)')
+
+  const invalidos = llegaron.filter((c) => !permitidos.has(c))
+  if (invalidos.length > 0) {
+    throw new Error(
+      `Codigos de bloque no reconocidos: ${invalidos.join(', ')}. ` +
+        `Permitidos: ${BLOQUES_CANONICOS.join(', ')}. Llegaron: ${llegaron.join(', ')}.`,
+    )
+  }
+  const faltan = BLOQUES_CANONICOS.filter((c) => !llegaron.includes(c))
+  if (faltan.length > 0) {
+    throw new Error(`Faltan bloques en la auditoria: ${faltan.join(', ')}.`)
+  }
+  const repetidos = llegaron.filter((c, i) => llegaron.indexOf(c) !== i)
+  if (repetidos.length > 0) {
+    throw new Error(`Bloques repetidos en la auditoria: ${[...new Set(repetidos)].join(', ')}.`)
+  }
+}
+
 /** Severidad por codigo. La fuente es la rubrica, no lo que devuelva el modelo. */
 export const SEVERIDAD_BANDERA: Record<string, 'critica' | 'alta' | 'media'> = {
   C1: 'critica',
@@ -235,6 +297,10 @@ export async function auditarTranscripcion(
   }
 
   const banderas = cumplimiento.banderas ?? []
+
+  // Antes de cualquier otra cosa: que los siete bloques sean los siete bloques.
+  validarBloques(tecnicaCruda.tecnica.bloques)
+
   const tecnica = derivarItemsDeBanderas(tecnicaCruda.tecnica, banderas)
 
   return {
