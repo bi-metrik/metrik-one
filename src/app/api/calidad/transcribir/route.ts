@@ -14,7 +14,9 @@ import { redactarTranscripcion } from '@/lib/calidad/redactar'
 import { MAX_MINUTOS_AUDIO, TOLERANCIA_SEG, transcribirAudio } from '@/lib/calidad/transcribir'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 300 s: el presupuesto real de este proyecto (Fluid compute activo). Si no se
+// declara, la funcion hereda el default y puede cortar antes.
+export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   const { role, workspaceId, error } = await getWorkspace()

@@ -2,18 +2,23 @@ import 'server-only'
 import { MODELO_AUDITORIA } from './motor-auditoria'
 
 /**
- * Transcripcion del audio de una llamada, con marcas de tiempo por turno.
+ * Tope de duracion del audio.
  *
- * EL LIMITE DE DURACION NO ES POR PESO, ES POR RELOJ. Un audio de 20 minutos
- * pesa 4,6 MB y cabe de sobra en una peticion — pero tarda 81 s en
- * transcribirse, y una funcion de Vercel en plan Hobby corta a los 60. Medido:
- * 8 min → 25 s, 12 min → 56 s, 20 min → 81 s. Por eso el tope se fija en
- * minutos de audio y se avisa ANTES de procesar, no a mitad de la barra.
+ * LOS 60 SEGUNDOS NO APLICAN A ESTE PROYECTO. La tabla del plan Hobby dice 60,
+ * pero eso rige para proyectos anteriores a abril de 2025 sin Fluid compute;
+ * este lo tiene activo y su presupuesto por funcion es de 300 s. Lo di por
+ * cierto sin verificarlo y estuve a punto de recortar el producto a la mitad
+ * por un limite que no existia aqui.
  *
- * Si el proyecto sube a Pro (300 s por funcion), subir esta constante es todo
- * lo que hay que cambiar.
+ * Con 300 s el reloj deja de mandar y vuelve a mandar el peso, que era el
+ * criterio original: 20 minutos pesan 4,6 MB y caben en una sola peticion.
+ * Medido: 8 min → 25 s, 12 min → 56 s, 20 min → 81 s. Sobra margen.
+ *
+ * El tope se avisa ANTES de procesar, no a mitad de la barra: un cliente
+ * esperando un minuto para que le digan que no, es peor que un rechazo
+ * inmediato.
  */
-export const MAX_MINUTOS_AUDIO = 10
+export const MAX_MINUTOS_AUDIO = 20
 
 /** Margen de tolerancia: nadie recorta un audio al segundo exacto. */
 export const TOLERANCIA_SEG = 30

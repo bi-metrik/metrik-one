@@ -24,7 +24,9 @@ import {
 } from '@/lib/calidad/motor-auditoria'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 300 s: el presupuesto real de este proyecto (Fluid compute activo). Si no se
+// declara, la funcion hereda el default y puede cortar antes.
+export const maxDuration = 300
 
 /** Rotulo del lote: distingue lo auditado en vivo de lo sembrado. */
 const LOTE_MOTOR = 'auditada-en-vivo'
