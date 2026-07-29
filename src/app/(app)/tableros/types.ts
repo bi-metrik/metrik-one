@@ -254,3 +254,29 @@ export interface ProcesoSemanalData {
   etapasConSla: number
   etapasTotales: number
 }
+
+// ── Proceso por seccional ──────────────────────────────────────────────────
+export interface ProcesoSeccionalCelda {
+  /** Etiqueta de la seccional tal como quedó registrada, o `null` si no hay. */
+  seccional: string | null
+  abiertos: number
+}
+
+export interface ProcesoSeccionalEtapa {
+  etapaId: string
+  numero: number
+  nombre: string
+  /** Conteo por seccional dentro de esta etapa. */
+  celdas: ProcesoSeccionalCelda[]
+}
+
+export interface ProcesoSeccionalData {
+  etapas: ProcesoSeccionalEtapa[]
+  /** Seccionales que exigen cita previa, derivadas del catálogo DIAN (no una lista fija). */
+  conCita: string[]
+  /** Las demás seccionales con casos, que van directo a certificado bancario. */
+  sinCita: string[]
+  /** Casos cuya seccional aún no se ha registrado. El backfill desde el RUT es de S4. */
+  sinRegistrar: number
+  total: number
+}

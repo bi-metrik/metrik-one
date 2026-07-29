@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowDown, ArrowUp, Minus, Info } from 'lucide-react'
-import type { ProcesoSemanalData } from '../types'
+import type { ProcesoSemanalData, ProcesoSeccionalData, ProcesoSeccionalEtapa } from '../types'
 import { ChartCard } from './chart-card'
 
 // Paleta MeTRIK (tokens del manual de marca, no Tailwind generico).
@@ -157,5 +157,132 @@ function Delta({ delta }: { delta: number | null }) {
       {subio ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
       {subio ? '+' : ''}{delta}
     </span>
+  )
+}
+
+/**
+ * Casos por seccional y etapa.
+ *
+ * Pedido por Juan David: saber cuántos casos hay en cada una de las 4 ciudades que
+ * exigen cita previa en la DIAN, y cuántos en seccionales que no la exigen. Es lo que
+ * le permite decidir dónde puede seguir vendiendo: la cita es el cuello de botella
+ * (la DIAN emite ~200 al mes en Bogotá para todo el país).
+ */
+export function ProcesoPorSeccional({ data }: { data: ProcesoSeccionalData }) {
+  const { etapas, conCita, sinCita, sinRegistrar, total } = data
+
+  const totalDe = (nombre: string) =>
+    etapas.reduce((s, e) => s + (e.celdas.find(c => c.seccional === nombre)?.abiertos ?? 0), 0)
+  const totalSinCita = sinCita.reduce((s, n) => s + totalDe(n), 0)
+  const totalConCita = conCita.reduce((s, n) => s + totalDe(n), 0)
+
+  const sumaSinCitaEnEtapa = (e: ProcesoSeccionalEtapa) =>
+    sinCita.reduce((s, n) => s + (e.celdas.find(c => c.seccional === n)?.abiertos ?? 0), 0)
+  const sinRegistrarEnEtapa = (e: ProcesoSeccionalEtapa) =>
+    e.celdas.find(c => c.seccional === null)?.abiertos ?? 0
+
+  return (
+    <ChartCard title="Casos por seccional" accentColor={VERDE}>
+      <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-xs" style={{ color: GRIS }}>
+        <span>
+          <strong style={{ color: CARBON }}>{totalConCita}</strong> requieren cita previa
+        </span>
+        <span>
+          <strong style={{ color: CARBON }}>{totalSinCita}</strong> van directo a certificado bancario
+        </span>
+        {sinRegistrar > 0 && (
+          <span style={{ color: '#92400E' }}>
+            <strong>{sinRegistrar}</strong> sin seccional registrada
+          </span>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
+          <thead>
+            <tr className="border-b" style={{ borderColor: BORDE }}>
+              <th className="pb-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: GRIS }}>
+                Etapa
+              </th>
+              {conCita.map(c => (
+                <th
+                  key={c}
+                  className="pb-2 text-right text-[10px] font-bold uppercase tracking-wide"
+                  style={{ color: AMBAR }}
+                  title="Seccional que exige cita previa en la DIAN"
+                >
+                  {c}
+                </th>
+              ))}
+              <th className="pb-2 text-right text-[10px] font-medium uppercase tracking-wide" style={{ color: GRIS }} title={sinCita.join(', ') || 'Sin casos'}>
+                Sin cita
+              </th>
+              <th className="pb-2 text-right text-[10px] font-medium uppercase tracking-wide" style={{ color: '#92400E' }}>
+                Sin registrar
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {etapas.map(e => (
+              <tr key={e.etapaId} className="border-b last:border-0" style={{ borderColor: BORDE }}>
+                <td className="py-2 pr-3 text-xs" style={{ color: CARBON }}>
+                  <span className="tabular-nums" style={{ color: GRIS }}>
+                    {String(e.numero).padStart(2, '0')}
+                  </span>{' '}
+                  {e.nombre}
+                </td>
+                {conCita.map(c => {
+                  const n = e.celdas.find(x => x.seccional === c)?.abiertos ?? 0
+                  return (
+                    <td
+                      key={c}
+                      className="py-2 text-right tabular-nums"
+                      style={{ color: n > 0 ? CARBON : BORDE, fontWeight: n > 0 ? 600 : 400 }}
+                    >
+                      {n || '·'}
+                    </td>
+                  )
+                })}
+                <td className="py-2 text-right tabular-nums" style={{ color: sumaSinCitaEnEtapa(e) > 0 ? GRIS : BORDE }}>
+                  {sumaSinCitaEnEtapa(e) || '·'}
+                </td>
+                <td className="py-2 text-right tabular-nums" style={{ color: sinRegistrarEnEtapa(e) > 0 ? '#92400E' : BORDE }}>
+                  {sinRegistrarEnEtapa(e) || '·'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2" style={{ borderColor: BORDE }}>
+              <td className="pt-2 text-[10px] font-bold uppercase tracking-wide" style={{ color: GRIS }}>
+                Total ({total})
+              </td>
+              {conCita.map(c => (
+                <td key={c} className="pt-2 text-right text-sm font-bold tabular-nums" style={{ color: AMBAR }}>
+                  {totalDe(c)}
+                </td>
+              ))}
+              <td className="pt-2 text-right text-sm font-bold tabular-nums" style={{ color: CARBON }}>
+                {totalSinCita}
+              </td>
+              <td className="pt-2 text-right text-sm font-bold tabular-nums" style={{ color: '#92400E' }}>
+                {sinRegistrar}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {sinRegistrar > 0 && (
+        <p className="mt-3 flex items-start gap-1.5 text-[11px]" style={{ color: '#92400E' }}>
+          <Info className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>
+            <strong>{sinRegistrar} de {total}</strong> casos no tienen seccional registrada, así que
+            no se sabe todavía si necesitan cita. La seccional se toma del RUT (casilla 12) y el
+            cargue de los casos antiguos está pendiente.
+          </span>
+        </p>
+      )}
+    </ChartCard>
   )
 }

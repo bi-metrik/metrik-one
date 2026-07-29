@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
+import { SECCIONALES_DIAN } from '@/lib/dian/seccionales'
 import type {
   ComercialData, OperativoData, FinancieroData,
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
@@ -9,6 +10,7 @@ import type {
   MesIngresosEgresos, GastoAnomalo, ProyectoCartera,
   Periodo, RentabilidadComercialData, RcFiltrosInput,
   ProcesoSemanalData, ProcesoEtapaFoto, ProcesoEtapaConDelta, ProcesoFoto,
+  ProcesoSeccionalData, ProcesoSeccionalEtapa,
 } from './types'
 
 // ── Helpers ────────────────────────────────────────────────
@@ -795,5 +797,88 @@ export async function getProcesoSemanal(semanas = 8): Promise<ProcesoSemanalData
     // es representativo y la UI debe decirlo en vez de pintar un cero tranquilizador.
     etapasConSla: hoy.filter(e => e.slaHoras != null && e.slaHoras > 0).length,
     etapasTotales: hoy.length,
+  }
+}
+
+// ── Proceso por seccional: dónde están los casos que necesitan cita ─────────
+// Pedido por Juan David (SOENA): cuántos casos hay en cada una de las 4 ciudades que
+// exigen cita previa en la DIAN, etapa por etapa, y cuántos en seccionales que no la
+// exigen. Es lo que le permite decir "este mes solo pueden vender cuatro de Bogotá".
+//
+// El corte con/sin cita NO se hardcodea: sale del flag `cita` del catálogo
+// SECCIONALES_DIAN. Si la DIAN cambia la exigencia, se actualiza ahí y esta vista sigue.
+export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | null> {
+  const { supabase, workspaceId } = await getWorkspace()
+  if (!supabase || !workspaceId) return null
+
+  const { data: negocios } = await supabase
+    .from('negocios')
+    .select('etapa_actual_id, metadata')
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'abierto')
+
+  const filas = (negocios ?? []) as unknown as Array<{ etapa_actual_id: string | null; metadata: Record<string, unknown> | null }>
+  if (filas.length === 0) return null
+
+  const { data: etapasRows } = await supabase
+    .from('etapas_negocio')
+    .select('id, nombre, numero')
+
+  const etapaInfo = new Map<string, { nombre: string; numero: number }>(
+    ((etapasRows ?? []) as Array<{ id: string; nombre: string; numero: number | null }>)
+      .map(e => [e.id, { nombre: e.nombre, numero: e.numero ?? 0 }]),
+  )
+
+  // Conteo por (etapa, seccional). La seccional se guarda como etiqueta en
+  // `negocios.metadata.seccional` (RUT casilla 12, decisión del 2026-07-24).
+  const porEtapa = new Map<string, Map<string | null, number>>()
+  const seccionalesVistas = new Set<string>()
+  let sinRegistrar = 0
+
+  for (const n of filas) {
+    if (!n.etapa_actual_id) continue
+    const sec = (n.metadata?.seccional as string | undefined)?.trim() || null
+    if (sec === null) sinRegistrar++
+    else seccionalesVistas.add(sec)
+    const m = porEtapa.get(n.etapa_actual_id) ?? new Map<string | null, number>()
+    m.set(sec, (m.get(sec) ?? 0) + 1)
+    porEtapa.set(n.etapa_actual_id, m)
+  }
+
+  const etapas: ProcesoSeccionalEtapa[] = Array.from(porEtapa.entries())
+    .map(([etapaId, m]) => {
+      const info = etapaInfo.get(etapaId)
+      return {
+        etapaId,
+        numero: info?.numero ?? 0,
+        nombre: info?.nombre ?? '—',
+        celdas: Array.from(m.entries()).map(([seccional, abiertos]) => ({ seccional, abiertos })),
+      }
+    })
+    .sort((a, b) => a.numero - b.numero)
+
+  // Clasificar cada seccional vista por su exigencia de cita, comparando de forma
+  // tolerante: lo guardado es una etiqueta escrita por humanos ("Bogotá"), no un slug.
+  const norm = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+  const exigeCita = new Map<string, boolean>()
+  for (const s of SECCIONALES_DIAN) {
+    exigeCita.set(norm(s.label), s.cita)
+    if (s.ciudad) exigeCita.set(norm(s.ciudad), s.cita)
+  }
+
+  const conCita: string[] = []
+  const sinCita: string[] = []
+  for (const s of Array.from(seccionalesVistas).sort()) {
+    if (exigeCita.get(norm(s)) === true) conCita.push(s)
+    else sinCita.push(s)
+  }
+
+  return {
+    etapas,
+    conCita,
+    sinCita,
+    sinRegistrar,
+    total: filas.length,
   }
 }
