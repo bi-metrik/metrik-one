@@ -14,5 +14,11 @@ export default async function CalidadPage() {
   const datos = await getLlamadas()
   if (!datos) redirect('/')
 
-  return <CalidadClient datos={datos} soloMias={!ctx.canViewCalidadTodos} />
+  return (
+    <CalidadClient
+      datos={datos}
+      soloMias={!ctx.canViewCalidadTodos}
+      puedeAuditar={ctx.canViewCalidadTodos}
+    />
+  )
 }

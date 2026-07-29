@@ -1,29 +1,18 @@
 import { redirect } from 'next/navigation'
-import { getContextoCalidad, getDatosDueno } from '../actions'
-import DuenoClient from './dueno-client'
 
-export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
- * Vista de dueno. Privada: plata y riesgo.
+ * La vista de dueño se mudó a `/tableros`.
  *
- * Es lo opuesto al muro. El muro vive en un televisor que ve todo el piso; esta
- * pantalla la ve una sola persona. Por eso no comparten componentes ni datos:
- * fundidas, no sirven para ninguna de las dos audiencias.
+ * Dinero, embudo de cobro y riesgo son decisiones de dueño de empresa, y ONE ya
+ * tenía el sitio para eso. Esta ruta sobrevive como puente porque un enlace
+ * viejo o un marcador no tienen por qué encontrarse con un 404, y porque la
+ * pantalla se enseñó en reunión con esta URL.
  *
- * Guard doble:
- *   - Aqui, por rol (un supervisor que teclee la URL cae en /calidad).
- *   - En getDatosDueno, otra vez, porque `calidad_dinero_cuotas` se lee con
- *     service_role y ahi no hay RLS que respalde nada.
+ * El guard de permiso NO vive aquí: vive en `/tableros`, que es quien decide si
+ * la pestaña existe para quien entra. Redirigir no concede nada.
  */
-export default async function DuenoPage() {
-  const ctx = await getContextoCalidad()
-  if (!ctx) redirect('/')
-  if (!ctx.canViewCalidadDinero) redirect('/calidad')
-
-  const datos = await getDatosDueno()
-  if (!datos) redirect('/calidad')
-
-  return <DuenoClient datos={datos} />
+export default function DuenoPage() {
+  redirect('/tableros')
 }

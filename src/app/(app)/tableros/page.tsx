@@ -3,6 +3,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales } from '../equipo/comercial-actions'
+import { getDatosDueno } from '../calidad/actions'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import TablerosClient from './tableros-client'
 import VitrinaPlaceholder from '@/components/vitrina-placeholder'
@@ -20,7 +21,10 @@ export default async function TablerosPage() {
 
   const perms = getRolePermissions(role || '')
   if (!perms.canViewNumbers) {
-    redirect('/negocios')
+    // En un workspace de solo calidad, `/negocios` es un callejon sin salida:
+    // el modulo no existe y la persona aterriza en una pantalla vacia. Se
+    // resuelve el destino contra lo que el workspace SI tiene.
+    redirect(await destinoSinNumeros(supabase, workspaceId))
   }
 
   // Load workspace modules
@@ -75,6 +79,17 @@ export default async function TablerosPage() {
     }
   }
 
+  // Calidad de llamadas: dinero, embudo de cobro y riesgo. Gateado por su
+  // propio flag Y por el permiso de dinero — es la unica superficie del modulo
+  // que lleva plata, y `canViewNumbers` no alcanza: un supervisor lo tiene.
+  //
+  // No arrastra `mod.business`: la pestaña se empuja fuera de esa rama, igual
+  // que ya lo hace Cumplimiento. Los flags son disjuntos, asi que ningun
+  // workspace existente ve esto.
+  const calidad = modules.calidad_llamadas && getRolePermissions(role || '').canViewCalidadDinero
+    ? await getDatosDueno()
+    : null
+
   // Foto del proceso por etapa (gate propio). La pestaña Operativo generica mide
   // `proyectos`, vacio en los workspaces Clarity; esta mide `negocios`.
   const procesoSeccional = modules.proceso_semanal ? await getProcesoPorSeccional() : null
@@ -87,7 +102,28 @@ export default async function TablerosPage() {
       initialFinanciero={financiero}
       initialRentabilidad={rentabilidad}
       initialComercialNegocios={comercialNegocios}
+      initialCalidad={calidad}
       modules={modules}
     />
   )
+}
+
+
+/**
+ * A donde mandar a quien no puede ver Numeros.
+ *
+ * `/negocios` era el destino unico y es correcto mientras el workspace tenga
+ * el modulo de negocios. En uno de solo calidad no existe, asi que la persona
+ * caia en una pantalla vacia sin forma de volver. El destino se resuelve
+ * contra lo que el workspace realmente tiene.
+ */
+async function destinoSinNumeros(
+  supabase: Awaited<ReturnType<typeof getWorkspace>>['supabase'],
+  workspaceId: string | null,
+): Promise<string> {
+  if (!workspaceId || !supabase) return '/negocios'
+  const { data } = await supabase.from('workspaces').select('modules').eq('id', workspaceId).single()
+  const mods = (data?.modules as Record<string, boolean> | null) ?? {}
+  if (!mods.business && mods.calidad_llamadas) return '/calidad'
+  return '/negocios'
 }
