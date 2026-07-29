@@ -38,9 +38,11 @@ export function CasosDrawer({
 }) {
   const [casos, setCasos] = useState<CasoEnEtapa[] | null>(null)
 
+  // El padre monta este panel con `key` por celda, así que al cambiar de celda el
+  // componente se remonta y el estado arranca vacío solo. No hace falta resetearlo
+  // dentro del efecto, que además dispara renders en cascada.
   useEffect(() => {
     let vivo = true
-    setCasos(null)
     void getCasosDeEtapa({
       etapaId: celda.etapaId,
       seccional: celda.seccional,

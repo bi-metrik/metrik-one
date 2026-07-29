@@ -293,7 +293,13 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
         )}
       </ChartCard>
 
-      {seleccion && <CasosDrawer celda={seleccion} onClose={() => setSeleccion(null)} />}
+      {seleccion && (
+        <CasosDrawer
+          key={[seleccion.etapaId, seleccion.seccional ?? 'todas', seleccion.soloVencidos].join('|')}
+          celda={seleccion}
+          onClose={() => setSeleccion(null)}
+        />
+      )}
     </div>
   )
 }
