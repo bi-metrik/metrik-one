@@ -27,6 +27,7 @@ import {
   Scale,
   Sliders,
   Receipt,
+  FileAudio,
   Headphones,
   MonitorPlay,
   Landmark,
@@ -175,6 +176,9 @@ const CALIDAD_NAV_ITEMS = [
   // lista — algo que el no puede hacer, porque solo ve sus propias llamadas.
   // Los demas roles llegan al perfil de cualquiera desde la lista.
   { href: '/calidad/mi-perfil', label: 'Mi desempeño', icon: TrendingUp, roles: ['operator'] },
+  // Auditar es accion de supervision: quien ve el piso entero puede subir una
+  // grabacion nueva. Un ejecutor no, por la misma razon que no ve llamadas ajenas.
+  { href: '/calidad/auditar', label: 'Auditar llamada', icon: FileAudio, roles: ['owner', 'admin', 'supervisor'] },
   { href: '/calidad/muro', label: 'Muro', icon: MonitorPlay, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/calidad/dueno', label: 'Vista de dueño', icon: Landmark, roles: ['owner'] },
 ]
