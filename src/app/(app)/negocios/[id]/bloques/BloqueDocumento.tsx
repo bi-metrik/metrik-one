@@ -32,6 +32,9 @@ interface BloqueDocumentoProps {
   workspaceId: string
   instancia: NegocioBloque | null
   modo: 'editable' | 'visible'
+  /** El usuario es responsable de ESTE negocio. Habilita al ejecutor a corregir
+   *  los campos de sus documentos (el servidor ya lo permite vía guardEditarBloque). */
+  esResponsable?: boolean
   /** Rol del usuario actual — habilita la corrección gerencial de campos
    *  extraídos en modo visible (etapas posteriores). */
   userRole?: string
@@ -384,6 +387,7 @@ export default function BloqueDocumento({
   modo,
   userRole,
   configExtra,
+  esResponsable,
 }: BloqueDocumentoProps) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -394,10 +398,16 @@ export default function BloqueDocumento({
   const camposVisibles = configExtra.campos_visibles ?? null
   const maxSizeMb = configExtra.max_size_mb ?? 20
   const editarExtraidos = configExtra.editar_extraidos === true
-  // Corrección gerencial en modo visible: owner/admin/supervisor pueden editar
-  // TODOS los campos extraídos una vez el negocio avanzó (opt-in por config).
+  // Corrección en modo visible (opt-in por config `corregir_campos_gerencial`).
+  // Dos perfiles la tienen:
+  //  - roles gerenciales (owner/admin/supervisor), que corrigen cualquier caso;
+  //  - el EJECUTOR RESPONSABLE del negocio, sobre sus propios documentos.
+  // El servidor valida ambos por la misma puerta (`guardEditarBloque`: el área
+  // debe cubrir el stage y, si es operator, debe ser responsable). Antes la
+  // pantalla solo dejaba pasar a los gerenciales, así que el comercial cargaba la
+  // factura, veía el dato mal extraído y no tenía cómo corregirlo.
   const corregirGerencial = configExtra.corregir_campos_gerencial === true
-  const puedeCorregirVisible = puedeCorregirDocumentos(userRole)
+  const puedeCorregirVisible = puedeCorregirDocumentos(userRole) || esResponsable === true
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
     if (saved.drive_url) return 'uploaded'
