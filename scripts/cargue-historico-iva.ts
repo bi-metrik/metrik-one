@@ -283,12 +283,18 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
   const { data: yaExiste } = await supabase.from('negocios').select('id').eq('workspace_id', WS).eq('metadata->>id_hubspot', f.id_hubspot).maybeSingle()
   if (yaExiste) { console.log(`  ↺ ya existe (${(yaExiste as { id: string }).id}), se salta`); return { codigo: f.codigo, saltado: true } }
 
+  // La fecha del negocio es la del Sheet (`Fecha de cierre`), NO la de hoy: si entra
+  // con now(), los 102 casos aterrizan todos en julio de 2026 y las series históricas
+  // por mes quedan falseadas. `etapa_cambiada_at` va con la misma fecha para que el
+  // cálculo de SLA no los lea como recién llegados y los pinte a todos vencidos.
+  const fechaHist = f.fecha_cierre ? `${f.fecha_cierre}T12:00:00Z` : null
   const { data: neg, error: nerr } = await supabase.from('negocios').insert({
     workspace_id: WS, linea_id: LINEA, contacto_id: contactoId, empresa_id: null,
     nombre: f.nombre_negocio, codigo: f.codigo,
     responsable_id: f.responsable_staff_id, etapa_actual_id: f.etapa_id, stage_actual: f.stage,
     estado: 'abierto', origen: 'otro',
-    metadata: { id_hubspot: f.id_hubspot, fuente_cargue: FUENTE, seccional: f.seccional || null },
+    ...(fechaHist ? { created_at: fechaHist, updated_at: fechaHist, etapa_cambiada_at: fechaHist } : {}),
+    metadata: { id_hubspot: f.id_hubspot, fuente_cargue: FUENTE, seccional: f.seccional || null, fecha_cierre_sheet: f.fecha_cierre || null },
   }).select('id').single()
   if (nerr) throw new Error(`negocio: ${nerr.message}`)
   const negocioId = (neg as { id: string }).id
@@ -356,7 +362,10 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
     const ref = f.ref_anticipo || null
     const dup = ref ? await supabase.from('cobros').select('id').eq('workspace_id', WS).eq('external_ref', ref).maybeSingle() : { data: null }
     if (dup.data) console.warn(`      cobro ${ref} ya existe, se salta`)
-    else await supabase.from('cobros').insert({ workspace_id: WS, negocio_id: negocioId, monto: f.primer_pago, tipo_cobro: 'anticipo', external_ref: ref, fecha: null, notas: `Anticipo — cargue histórico ${FUENTE}` })
+    // La fecha del cobro también es la del Sheet: la definición de venta del tablero
+    // comercial es `min(cobros.fecha)`, así que un cobro sin fecha (o con la de hoy)
+    // manda la venta al mes equivocado o la deja fuera del conteo.
+    else await supabase.from('cobros').insert({ workspace_id: WS, negocio_id: negocioId, monto: f.primer_pago, tipo_cobro: 'anticipo', external_ref: ref, fecha: f.fecha_cierre || null, notas: `Anticipo — cargue histórico ${FUENTE}` })
   }
 
   // 8. formularios DIAN solo si el caso ya está en Generación o Envío
@@ -377,8 +386,9 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
 
 function plan(f: Fila) {
   const docs = (['factura', 'rut', 'upme', 'cert_bancario'] as const).filter((k) => f[k])
-  console.log(`${f.codigo}  ${f.nombre_negocio.slice(0, 42).padEnd(42)} → ${f.etapa.padEnd(14)} ${(f.seccional ?? '?').padEnd(12)} resp=${(f.responsable_nombre ?? '—').padEnd(16)} docs=[${docs.join(',')}]`)
+  console.log(`${f.codigo}  ${(f.fecha_cierre || '(sin fecha)').padEnd(11)} ${f.nombre_negocio.slice(0, 36).padEnd(36)} → ${f.etapa.padEnd(14)} ${(f.seccional ?? '?').padEnd(11)} resp=${(f.responsable_nombre ?? '—').padEnd(16)} docs=[${docs.join(',')}]`)
   if (docs.length < 3) console.log(`        ⚠ solo ${docs.length} documentos`)
+  if (!f.fecha_cierre) console.log(`        ⚠ sin fecha: entraría con la de hoy y falsearía la serie histórica`)
 }
 
 async function main() {
