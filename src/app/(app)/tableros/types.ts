@@ -260,6 +260,10 @@ export interface ProcesoSeccionalCelda {
   /** Etiqueta de la seccional tal como quedó registrada, o `null` si no hay. */
   seccional: string | null
   abiertos: number
+  vencidos: number
+  /** Mismos conteos en la foto anterior. `null` = todavía no hay con qué comparar. */
+  abiertosAntes: number | null
+  vencidosAntes: number | null
 }
 
 export interface ProcesoSeccionalEtapa {
@@ -279,4 +283,6 @@ export interface ProcesoSeccionalData {
   /** Casos cuya seccional aún no se ha registrado. El backfill desde el RUT es de S4. */
   sinRegistrar: number
   total: number
+  /** Fecha de la foto contra la que se compara. `null` = aún no hay foto previa. */
+  fechaFotoPrevia: string | null
 }

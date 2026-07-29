@@ -811,6 +811,7 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
   const { supabase, workspaceId } = await getWorkspace()
   if (!supabase || !workspaceId) return null
 
+  // Hoy: en vivo desde `negocios`, para que la pantalla nunca muestre un dato rancio.
   const { data: negocios } = await supabase
     .from('negocios')
     .select('etapa_actual_id, metadata')
@@ -822,16 +823,46 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
 
   const { data: etapasRows } = await supabase
     .from('etapas_negocio')
-    .select('id, nombre, numero')
+    .select('id, nombre, numero, config_extra')
 
-  const etapaInfo = new Map<string, { nombre: string; numero: number }>(
-    ((etapasRows ?? []) as Array<{ id: string; nombre: string; numero: number | null }>)
-      .map(e => [e.id, { nombre: e.nombre, numero: e.numero ?? 0 }]),
+  const etapaInfo = new Map<string, { nombre: string; numero: number; slaHoras: number | null }>(
+    ((etapasRows ?? []) as Array<{ id: string; nombre: string; numero: number | null; config_extra: Record<string, unknown> | null }>)
+      .map(e => [e.id, {
+        nombre: e.nombre,
+        numero: e.numero ?? 0,
+        slaHoras: (e.config_extra?.sla_horas as number | undefined) ?? null,
+      }]),
   )
 
-  // Conteo por (etapa, seccional). La seccional se guarda como etiqueta en
-  // `negocios.metadata.seccional` (RUT casilla 12, decisión del 2026-07-24).
-  const porEtapa = new Map<string, Map<string | null, number>>()
+  // Foto anterior por (etapa, seccional). Se excluye la de hoy: comparar contra ella
+  // daria cero en todo y se leeria como "no se movio nada".
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: snapRows } = await (supabase as any)
+    .from('proceso_snapshots')
+    .select('tomado_en, etapa_id, seccional, abiertos, vencidos')
+    .eq('workspace_id', workspaceId)
+    .lt('tomado_en', todayBogotaISO())
+    .order('tomado_en', { ascending: false })
+    .limit(400)
+
+  const snaps = (snapRows ?? []) as Array<Record<string, unknown>>
+  const fechaFotoPrevia = (snaps[0]?.tomado_en as string | undefined) ?? null
+  const antes = new Map<string, { abiertos: number; vencidos: number }>()
+  if (fechaFotoPrevia) {
+    for (const r of snaps) {
+      if (r.tomado_en !== fechaFotoPrevia) continue
+      antes.set(`${r.etapa_id}::${(r.seccional as string | null) ?? ''}`, {
+        abiertos: Number(r.abiertos ?? 0),
+        vencidos: Number(r.vencidos ?? 0),
+      })
+    }
+  }
+
+  // Conteo de hoy por (etapa, seccional). "Vencido" se calcula con el mismo criterio
+  // que el historico: la vista de SLA agrega por etapa y aqui hace falta abrir por
+  // seccional, asi que el dato de vencidos de HOY se toma del ultimo snapshot del dia
+  // cuando existe; si no, queda en 0 y la columna lo refleja.
+  const porEtapa = new Map<string, Map<string | null, { abiertos: number }>>()
   const seccionalesVistas = new Set<string>()
   let sinRegistrar = 0
 
@@ -840,9 +871,23 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
     const sec = (n.metadata?.seccional as string | undefined)?.trim() || null
     if (sec === null) sinRegistrar++
     else seccionalesVistas.add(sec)
-    const m = porEtapa.get(n.etapa_actual_id) ?? new Map<string | null, number>()
-    m.set(sec, (m.get(sec) ?? 0) + 1)
+    const m = porEtapa.get(n.etapa_actual_id) ?? new Map<string | null, { abiertos: number }>()
+    const prev = m.get(sec)?.abiertos ?? 0
+    m.set(sec, { abiertos: prev + 1 })
     porEtapa.set(n.etapa_actual_id, m)
+  }
+
+  // Vencidos de hoy: del snapshot de hoy, que ya los calculo con horas habiles.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: hoyRows } = await (supabase as any)
+    .from('proceso_snapshots')
+    .select('etapa_id, seccional, vencidos')
+    .eq('workspace_id', workspaceId)
+    .eq('tomado_en', todayBogotaISO())
+
+  const vencidosHoy = new Map<string, number>()
+  for (const r of ((hoyRows ?? []) as Array<Record<string, unknown>>)) {
+    vencidosHoy.set(`${r.etapa_id}::${(r.seccional as string | null) ?? ''}`, Number(r.vencidos ?? 0))
   }
 
   const etapas: ProcesoSeccionalEtapa[] = Array.from(porEtapa.entries())
@@ -851,34 +896,35 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
       return {
         etapaId,
         numero: info?.numero ?? 0,
-        nombre: info?.nombre ?? '—',
-        celdas: Array.from(m.entries()).map(([seccional, abiertos]) => ({ seccional, abiertos })),
+        nombre: info?.nombre ?? '\u2014',
+        celdas: Array.from(m.entries()).map(([seccional, v]) => {
+          const k = `${etapaId}::${seccional ?? ''}`
+          const prev = antes.get(k)
+          return {
+            seccional,
+            abiertos: v.abiertos,
+            vencidos: vencidosHoy.get(k) ?? 0,
+            abiertosAntes: fechaFotoPrevia ? (prev?.abiertos ?? 0) : null,
+            vencidosAntes: fechaFotoPrevia ? (prev?.vencidos ?? 0) : null,
+          }
+        }),
       }
     })
     .sort((a, b) => a.numero - b.numero)
 
-  // Clasificar cada seccional vista por su exigencia de cita, comparando de forma
-  // tolerante: lo guardado es una etiqueta escrita por humanos ("Bogotá"), no un slug.
-  const norm = (s: string) =>
-    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+  const norm = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
   const exigeCita = new Map<string, boolean>()
-  for (const s of SECCIONALES_DIAN) {
-    exigeCita.set(norm(s.label), s.cita)
-    if (s.ciudad) exigeCita.set(norm(s.ciudad), s.cita)
+  for (const sc of SECCIONALES_DIAN) {
+    exigeCita.set(norm(sc.label), sc.cita)
+    if (sc.ciudad) exigeCita.set(norm(sc.ciudad), sc.cita)
   }
 
   const conCita: string[] = []
   const sinCita: string[] = []
-  for (const s of Array.from(seccionalesVistas).sort()) {
-    if (exigeCita.get(norm(s)) === true) conCita.push(s)
-    else sinCita.push(s)
+  for (const sc of Array.from(seccionalesVistas).sort()) {
+    if (exigeCita.get(norm(sc)) === true) conCita.push(sc)
+    else sinCita.push(sc)
   }
 
-  return {
-    etapas,
-    conCita,
-    sinCita,
-    sinRegistrar,
-    total: filas.length,
-  }
+  return { etapas, conCita, sinCita, sinRegistrar, total: filas.length, fechaFotoPrevia }
 }
