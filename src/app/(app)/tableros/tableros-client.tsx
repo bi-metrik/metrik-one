@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSemanalData, ProcesoSeccionalData } from './types'
+import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSeccionalData } from './types'
 import { TabComercial } from './components/tab-comercial'
 import { TabOperativo } from './components/tab-operativo'
 import { TabFinanciero } from './components/tab-financiero'
@@ -56,7 +56,6 @@ interface TablerosClientProps {
   initialFinanciero: FinancieroData | null
   initialRentabilidad?: RentabilidadComercialData | null
   initialComercialNegocios?: ComercialNegociosBundle | null
-  initialProceso?: ProcesoSemanalData | null
   initialProcesoSeccional?: ProcesoSeccionalData | null
   modules?: Record<string, boolean>
 }
@@ -67,7 +66,6 @@ export default function TablerosClient({
   initialFinanciero,
   initialRentabilidad,
   initialComercialNegocios,
-  initialProceso,
   initialProcesoSeccional,
   modules,
 }: TablerosClientProps) {
