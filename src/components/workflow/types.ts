@@ -44,6 +44,9 @@ export interface WorkflowEtapa {
   bloques: WorkflowBloque[]
   abiertos: number
   vencidos: number
+  // Config de la ETAPA. El diagrama la usa para `label_pregunta`: la pregunta de una
+  // decisión pertenece a la etapa que la declara, no al campo que la alimenta.
+  config_extra?: Record<string, unknown> | null
   // Solo en modo 'detailed':
   is_active?: boolean
   routing?: WorkflowRouting | null

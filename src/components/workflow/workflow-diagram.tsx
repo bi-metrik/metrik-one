@@ -165,8 +165,16 @@ function computeLayout(etapas: WorkflowEtapa[]): LayoutInfo {
  */
 function resolveDecisionLabel(
   field: string,
-  etapas: WorkflowEtapa[]
+  etapas: WorkflowEtapa[],
+  // La etapa que DECLARA el routing. Su `label_pregunta` manda sobre la del bloque:
+  // la pregunta pertenece a la decisión, no al campo que la alimenta. Dos etapas
+  // pueden decidir cosas distintas leyendo el mismo campo, y sin esto ambas muestran
+  // el mismo texto y parecen la misma decisión repetida.
+  sourceEtapa?: WorkflowEtapa,
 ): string {
+  const etapaLabel = (sourceEtapa?.config_extra as { label_pregunta?: string } | undefined)?.label_pregunta
+  if (typeof etapaLabel === 'string' && etapaLabel.trim().length > 0) return etapaLabel
+
   for (const etapa of etapas) {
     for (const bloque of etapa.bloques) {
       const ce = bloque.config_extra as
@@ -282,7 +290,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
           }
           if (row.type === 'decision') {
             const field = row.sourceEtapa.routing?.conditional?.[0]?.condition.field ?? '—'
-            const question = resolveDecisionLabel(field, sorted)
+            const question = resolveDecisionLabel(field, sorted, row.sourceEtapa)
             return (
               <div key={`dec-${idx}`} className="grid grid-cols-1 md:grid-cols-2 md:gap-3">
                 <div>
@@ -300,7 +308,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
           }
           if (row.type === 'decision-with-branch') {
             const field = row.sourceEtapa.routing?.conditional?.[0]?.condition.field ?? '—'
-            const question = resolveDecisionLabel(field, sorted)
+            const question = resolveDecisionLabel(field, sorted, row.sourceEtapa)
             const firstBranch = row.branchEtapas[0]
             const restBranch = row.branchEtapas.slice(1)
             return (

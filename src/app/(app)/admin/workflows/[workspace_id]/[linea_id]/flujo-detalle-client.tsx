@@ -51,6 +51,9 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
       abiertos: e.abiertos,
       vencidos: e.vencidos,
       is_active: e.is_active,
+      // El diagrama lee `label_pregunta` de aquí, igual que /flujo: sin esto, las dos
+      // superficies que deben ser espejo mostrarían preguntas distintas.
+      config_extra: ce,
       routing,
       gates,
     }
