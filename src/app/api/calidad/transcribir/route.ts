@@ -11,7 +11,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { redactarTranscripcion } from '@/lib/calidad/redactar'
-import { MAX_MINUTOS_AUDIO, TOLERANCIA_SEG, transcribirAudio } from '@/lib/calidad/transcribir'
+import { MAX_BYTES_AUDIO, mensajeAudioMuyPesado } from '@/lib/calidad/tope-audio'
+import { transcribirAudio } from '@/lib/calidad/transcribir'
 
 export const runtime = 'nodejs'
 // 300 s: el presupuesto real de este proyecto (Fluid compute activo). Si no se
@@ -35,24 +36,18 @@ export async function POST(req: NextRequest) {
 
   const form = await req.formData()
   const archivo = form.get('audio')
-  const duracionSeg = Number(form.get('duracionSeg') ?? 0)
 
   if (!(archivo instanceof File)) {
     return NextResponse.json({ error: 'Falta el archivo de audio.' }, { status: 400 })
   }
 
   // El tope se valida TAMBIEN aqui, no solo en el navegador: el cliente puede
-  // mentir y el costo de un audio largo es una funcion que muere a los 60 s.
-  const tope = MAX_MINUTOS_AUDIO * 60 + TOLERANCIA_SEG
-  if (duracionSeg > tope) {
-    return NextResponse.json(
-      {
-        error:
-          `El audio dura ${Math.round(duracionSeg / 60)} minutos y el máximo son ` +
-          `${MAX_MINUTOS_AUDIO}. Sube un fragmento más corto.`,
-      },
-      { status: 413 },
-    )
+  // mentir. Pero esta validacion es la segunda linea, no la primera: por encima
+  // de 4.500.000 bytes la plataforma corta el cuerpo antes de que este archivo
+  // se ejecute, y entonces quien responde es ella y no nosotros. La defensa que
+  // de verdad protege al usuario vive en el navegador; esta cubre el resto.
+  if (archivo.size > MAX_BYTES_AUDIO) {
+    return NextResponse.json({ error: mensajeAudioMuyPesado(archivo.size) }, { status: 413 })
   }
 
   try {
