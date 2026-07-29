@@ -30,7 +30,17 @@ export function landingForWorkspace(
     if (mods.compliance) return '/riesgos';
     // Call center de solo calidad. Sin esta rama caeria a /mi-negocio, que el
     // ejecutor no puede ver (roles owner/admin/supervisor) -> aterrizaje roto.
-    if (mods.calidad_llamadas) return '/calidad';
+    //
+    // Cada rol aterriza donde esta SU pregunta, y por eso no aterrizan igual:
+    // el dueño llega al dinero, el supervisor a la cola del piso y el agente a
+    // su propio progreso. Si los tres cayeran en el mismo sitio, dos estarian
+    // en la pantalla equivocada.
+    //
+    // El ejecutor va a su perfil: su pregunta no es "que llamadas hice" sino
+    // "voy bien o voy mal", y esa respuesta vive ahi — con la tendencia, la
+    // dispersion y las tres cosas concretas que puede hacer para subir. La
+    // lista sigue a un clic, para cuando lo que quiere es buscar una llamada.
+    if (mods.calidad_llamadas) return role === 'operator' ? '/calidad/mi-perfil' : '/calidad';
     return '/mi-negocio';
   }
 
