@@ -38,6 +38,7 @@ export interface AdminEtapa {
   nombre: string
   stage: 'venta' | 'ejecucion' | 'cobro'
   orden: number
+  numero: number | null
   is_active: boolean
   config_extra: Record<string, unknown>
   bloques: AdminBloque[]
@@ -180,7 +181,7 @@ export async function getAdminFlujoDetalle(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: etapasRaw } = await (svc as any)
     .from('etapas_negocio')
-    .select('id, nombre, stage, orden, is_active, config_extra')
+    .select('id, nombre, stage, orden, numero, is_active, config_extra')
     .eq('linea_id', lineaId)
     .order('orden')
 
@@ -189,6 +190,7 @@ export async function getAdminFlujoDetalle(
     nombre: string
     stage: 'venta' | 'ejecucion' | 'cobro'
     orden: number
+    numero: number | null
     is_active: boolean
     config_extra: Record<string, unknown> | null
   }
@@ -324,6 +326,7 @@ export async function getAdminFlujoDetalle(
       nombre: e.nombre,
       stage: e.stage,
       orden: e.orden,
+      numero: e.numero ?? null,
       is_active: e.is_active,
       config_extra: e.config_extra ?? {},
       bloques: (bloquesByEtapa.get(e.id) ?? []).sort((a, b) => a.orden - b.orden),
