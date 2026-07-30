@@ -1,22 +1,22 @@
-// Bot de customer service por WhatsApp — orquestación para el webhook.
+// Bot de SERVICIO AL CLIENTE por WhatsApp — orquestación para el webhook.
 //
-// Calca el patrón de _shared/venezuela/index.ts (mismas firmas, mismo ciclo
-// de vida), pero el desenlace es distinto: en vez de serializar una historia
-// a una tabla propia, deja un LEAD en `contactos` + `contacto_interacciones`
-// del workspace, que es donde el asesor ya los ve.
+// Atiende a clientes que YA contrataron. Al abrir la conversación resuelve
+// quién escribe contra ONE (contactos + negocios + etapas) y conversa con
+// ese contexto: lo saluda por su nombre, sabe qué producto tiene y en qué
+// etapa va. Lo que no puede resolver lo pasa a llamada y deja el caso en la
+// bandeja para que un agente lo tome.
+//
+// Calca el ciclo de vida de _shared/venezuela/index.ts (sesión por teléfono,
+// tope de turnos, expiración a 24h, salida explícita).
 //
 // ADITIVO Y OPT-IN: solo se activa para workspaces que declaren
-// `config_extra.wa_customer_bot`. Sin esa config, ningún número entra aquí y
-// el webhook se comporta exactamente igual que antes.
-//
-// Quien escribe NO es usuario de ONE: es un cliente final del cliente. Por
-// eso el enganche va ANTES de identificar staff en el webhook.
+// `config_extra.wa_customer_bot`. Sin esa config nada de esto corre.
 
 import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
 import { generate, type Msg } from "../venezuela/gemini.ts";
-import { buildSystem, BLOQUE_DATO_SENSIBLE, type NegocioCtx } from "./prompt.ts";
-import { detectarDatoSensible, extraerCorreo, enmascarar } from "./deteccion.ts";
-import { extraerLead, registrarLead } from "./cierre.ts";
+import { buildSystem, BLOQUE_DATO_SENSIBLE, type Frecuente, type PerfilCliente } from "./prompt.ts";
+import { detectarDatoSensible, enmascarar } from "./deteccion.ts";
+import { escalarALlamada } from "./cierre.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
@@ -24,45 +24,93 @@ type Supa = any;
 const MODEL = "gemini-2.5-flash";
 const TURN_CAP = 20;
 const EXIT_WORDS = ["salir", "cancelar", "terminar", "stop"];
-const MARCADOR_CIERRE = "[LISTO]";
+const RE_RESUELTO = /\[RESUELTO\]/i;
+const RE_LLAMAR = /\[LLAMAR:\s*([^\]]*)\]/i;
 
-export interface CustomerBotConfig extends NegocioCtx {
+export interface CustomerBotConfig {
   trigger: string;
-  /** Saludo determinista. Si no se declara, se arma uno con la marca. */
+  marca: string;
+  frecuentes?: Frecuente[];
+  /** Mapa nombre de etapa -> qué significa, en palabras del cliente. */
+  etapas_explicacion?: Record<string, string>;
+  /** Saludo para cliente reconocido. Admite {nombre}. */
   saludo?: string;
+  /** Saludo cuando no se reconoce el número. */
+  saludo_desconocido?: string;
 }
+
+type PerfilExt = PerfilCliente & { contactoId: string | null; negocioId: string | null };
 
 interface CsState {
   history: { role: "user" | "model"; text: string }[];
   turns: number;
-  correo?: string | null;
-  aviso_dato_sensible?: boolean;
+  perfil: PerfilExt;
 }
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-// Retraso proporcional al texto: una respuesta instantánea a un mensaje
-// largo se siente robótica. Tope bajo para no exceder la ventana del
-// indicador "escribiendo" ni impacientar.
 const humanDelay = (text: string) => sleep(Math.min(800 + (text?.length ?? 0) * 10, 3000));
 
-function saludoDe(cfg: CustomerBotConfig): string {
-  if (cfg.saludo) return cfg.saludo;
-  return (
-    `Hola, soy el asistente de ${cfg.marca}. Con gusto te ayudo.\n\n` +
-    `Te hago un par de preguntas para entender tu caso y coordino que un asesor te llame. ` +
-    `Por aquí no manejamos datos de pago ni documentos: eso lo ve el asesor por el canal seguro.\n\n` +
-    `Cuéntame, ¿qué te trae por aquí?`
-  );
-}
+const PERFIL_VACIO: PerfilExt = {
+  nombre: null, caso: null, producto: null, etapaNumero: null,
+  etapa: null, responsable: null, identificado: false,
+  contactoId: null, negocioId: null,
+};
 
 /**
- * Resuelve qué workspace tiene un bot con ese disparador.
+ * Resuelve quién escribe contra ONE.
  *
- * Se consulta en cada mensaje suelto, pero solo para textos cortos: un
- * disparador es una palabra, así que filtrar por longitud evita ir a la
- * base por cada mensaje largo que nunca sería un trigger.
+ * Nunca lanza: si la identificación falla, se atiende sin perfil. Un cliente
+ * mal atendido es peor que uno atendido en genérico, pero un bot caído es
+ * peor que los dos.
  */
+async function identificar(supabase: Supa, workspaceId: string, phone: string): Promise<PerfilExt> {
+  try {
+    const { data, error } = await supabase.rpc("cs_identificar_cliente", {
+      p_workspace_id: workspaceId,
+      p_phone: phone,
+    });
+    if (error) {
+      console.error("[cs-chat] identificar:", error.message);
+      return PERFIL_VACIO;
+    }
+    const r = data?.[0];
+    // `ambiguo` = el sufijo coincide con varios contactos. Se atiende SIN
+    // perfil a propósito: hablarle del caso de otra persona expone datos
+    // de un tercero.
+    if (!r || r.ambiguo) {
+      if (r?.ambiguo) console.warn(`[cs-chat] telefono ambiguo, se atiende sin perfil: ${phone}`);
+      return PERFIL_VACIO;
+    }
+    return {
+      nombre: r.contacto_nombre ?? null,
+      caso: r.caso_codigo ?? null,
+      producto: r.producto ?? null,
+      etapaNumero: r.etapa_numero ?? null,
+      etapa: r.etapa_nombre ?? null,
+      responsable: r.responsable ?? null,
+      identificado: true,
+      contactoId: r.contacto_id ?? null,
+      negocioId: r.negocio_id ?? null,
+    };
+  } catch (e) {
+    console.error("[cs-chat] identificar lanzó:", (e as Error).message ?? "");
+    return PERFIL_VACIO;
+  }
+}
+
+function saludoDe(cfg: CustomerBotConfig, perfil: PerfilExt): string {
+  if (!perfil.identificado) {
+    return (
+      cfg.saludo_desconocido ??
+      `Hola, soy el asistente de ${cfg.marca}. Cuéntame en qué te puedo ayudar y, si necesitas algo de tu cuenta, coordino que un asesor te llame.`
+    );
+  }
+  const nombre = (perfil.nombre ?? "").split(" ")[0] || "";
+  if (cfg.saludo) return cfg.saludo.replace(/\{nombre\}/g, nombre);
+  return `Hola ${nombre}, soy el asistente de ${cfg.marca}. ¿En qué te ayudo hoy?`;
+}
+
 export async function resolverCustomerTrigger(
   supabase: Supa,
   text: string,
@@ -70,10 +118,9 @@ export async function resolverCustomerTrigger(
   const t = (text || "").trim().toLowerCase().replace(/[!¡.,¿?]/g, "");
   if (!t || t.length > 40) return null;
 
-  // Este bloque corre en CADA mensaje de texto del webhook, incluidos los del
-  // equipo registrando gastos. Si la consulta fallara y la excepcion subiera,
-  // tumbaria el bot interno completo por una funcion opcional. Ante cualquier
-  // error se devuelve null: el mensaje sigue su curso normal.
+  // Corre en CADA mensaje de texto del webhook, incluidos los del equipo
+  // registrando gastos. Ante cualquier error se devuelve null y el mensaje
+  // sigue su curso: una función opcional no puede tumbar el bot interno.
   try {
     const { data, error } = await supabase
       .from("workspaces")
@@ -83,7 +130,6 @@ export async function resolverCustomerTrigger(
       console.error("[cs-chat] resolverCustomerTrigger:", error.message);
       return null;
     }
-
     for (const ws of data ?? []) {
       const cfg = ws.config_extra?.wa_customer_bot as CustomerBotConfig | undefined;
       if (!cfg?.trigger) continue;
@@ -93,15 +139,12 @@ export async function resolverCustomerTrigger(
     }
     return null;
   } catch (e) {
-    console.error("[cs-chat] resolverCustomerTrigger lanzo:", (e as Error).message ?? "");
+    console.error("[cs-chat] resolverCustomerTrigger lanzó:", (e as Error).message ?? "");
     return null;
   }
 }
 
 export async function hasOpenCustomerChat(supabase: Supa, phone: string): Promise<boolean> {
-  // Mismo criterio que arriba: ante un fallo se responde "no hay conversacion
-  // abierta" y el mensaje cae al flujo normal de ONE. Degradar es preferible a
-  // dejar sin servicio a quien si esta autorizado.
   try {
     const { data, error } = await supabase
       .from("cs_chat_sessions")
@@ -115,7 +158,7 @@ export async function hasOpenCustomerChat(supabase: Supa, phone: string): Promis
     }
     return !!data;
   } catch (e) {
-    console.error("[cs-chat] hasOpenCustomerChat lanzo:", (e as Error).message ?? "");
+    console.error("[cs-chat] hasOpenCustomerChat lanzó:", (e as Error).message ?? "");
     return false;
   }
 }
@@ -127,8 +170,9 @@ export async function startCustomerChat(
   config: CustomerBotConfig,
   waMessageId?: string,
 ): Promise<void> {
-  const saludo = saludoDe(config);
-  const state: CsState = { history: [{ role: "model", text: saludo }], turns: 0 };
+  const perfil = await identificar(supabase, workspaceId, phone);
+  const saludo = saludoDe(config, perfil);
+  const state: CsState = { history: [{ role: "model", text: saludo }], turns: 0, perfil };
 
   await supabase.from("cs_chat_sessions").upsert({
     phone,
@@ -136,14 +180,16 @@ export async function startCustomerChat(
     state,
     closed: false,
     desenlace: null,
-    contacto_id: null,
+    contacto_id: perfil.contactoId,
     updated_at: new Date().toISOString(),
   });
 
   if (waMessageId) await sendTypingIndicator(waMessageId);
   await humanDelay(saludo);
   await sendTextMessage(phone, saludo);
-  console.log(`[cs-chat] iniciada para ${phone} (ws ${workspaceId})`);
+  console.log(
+    `[cs-chat] iniciada ${phone} · ws ${workspaceId} · ${perfil.identificado ? `${perfil.nombre} (${perfil.caso ?? "sin caso"})` : "sin identificar"}`,
+  );
 }
 
 export async function continueCustomerChat(
@@ -158,7 +204,7 @@ export async function continueCustomerChat(
     .eq("phone", phone)
     .eq("closed", false)
     .maybeSingle();
-  if (!row) return; // carrera: la sesión se cerró entre el check y aquí
+  if (!row) return;
 
   const { data: ws } = await supabase
     .from("workspaces")
@@ -167,8 +213,6 @@ export async function continueCustomerChat(
     .single();
   const config = ws?.config_extra?.wa_customer_bot as CustomerBotConfig | undefined;
   if (!config) {
-    // Le quitaron la config al workspace con una conversación viva. Se cierra
-    // con gracia en vez de dejar a la persona hablando sola.
     await cerrar(supabase, phone, "abandonada");
     await sendTextMessage(phone, "Gracias por escribir. Un asesor te contacta pronto.");
     return;
@@ -176,55 +220,50 @@ export async function continueCustomerChat(
 
   if (waMessageId) await sendTypingIndicator(waMessageId);
 
-  // Ventana de servicio de WhatsApp: fuera de 24h el hilo no se puede retomar.
+  // Ventana de servicio de WhatsApp: fuera de 24h el hilo no se retoma.
   if (Date.now() - new Date(row.updated_at).getTime() > 24 * 60 * 60 * 1000) {
     await cerrar(supabase, phone, "expirada");
     await sendTextMessage(
       phone,
-      `Pasaron más de 24 horas, así que cerré la conversación anterior. Escribe *${config.trigger}* si quieres retomar.`,
+      `Pasaron más de 24 horas y cerré la conversación anterior. Escribe *${config.trigger}* para retomar.`,
     );
     return;
   }
 
   const state = row.state as CsState;
+  const perfil: PerfilExt = state.perfil ?? PERFIL_VACIO;
   const salida = (text || "").trim().toLowerCase().replace(/[!¡.,]/g, "");
 
   if (EXIT_WORDS.includes(salida)) {
     state.history.push({ role: "user", text: enmascarar(text) });
     await persistir(supabase, phone, state, true, "salida_explicita");
-    await sendTextMessage(phone, "Listo, no te escribo más. Si cambias de opinión, aquí estoy.");
+    await sendTextMessage(phone, "Listo. Cuando necesites algo, aquí estoy.");
     return;
   }
 
-  // ── Barreras deterministas, antes de llamar al modelo ──────────────────
   const sensible = detectarDatoSensible(text);
-  const correoNuevo = extraerCorreo(text);
-  if (correoNuevo) state.correo = correoNuevo;
-
-  // El historial se persiste SIEMPRE enmascarado. El modelo ve el texto
-  // original en este turno para poder reaccionar, pero lo que queda guardado
-  // no contiene el dato.
+  // El historial se persiste SIEMPRE enmascarado. El modelo ve el original
+  // en este turno para poder reaccionar; lo que queda guardado, no.
   state.history.push({ role: "user", text: enmascarar(text) });
 
-  const cap = TURN_CAP;
-  if (state.turns >= cap) {
-    await persistir(supabase, phone, state, true, "abandonada");
-    await sendTextMessage(phone, "Voy a pasarle tu caso a un asesor para que te contacte. Gracias por tu tiempo.");
-    await cerrarConLead(supabase, phone, row.workspace_id, state);
+  if (state.turns >= TURN_CAP) {
+    await persistir(supabase, phone, state, true, "escalada");
+    await sendTextMessage(phone, "Voy a pasarle tu caso a un asesor para que te llame y lo resuelvan bien.");
+    await escalar(supabase, phone, row.workspace_id, state, null);
     return;
   }
 
-  let system = buildSystem(config);
-  if (sensible) {
-    system += "\n\n" + BLOQUE_DATO_SENSIBLE;
-    state.aviso_dato_sensible = true;
-  }
+  let system = buildSystem({
+    marca: config.marca,
+    perfil,
+    frecuentes: config.frecuentes ?? [],
+    etapasExplicacion: config.etapas_explicacion,
+  });
+  if (sensible) system += "\n\n" + BLOQUE_DATO_SENSIBLE;
 
-  // Gemini exige que el historial arranque con turno de usuario; el nuestro
-  // empieza con el saludo del bot, así que se antepone un turno sintético.
   const messages: Msg[] = state.history.map((t) => ({ role: t.role, text: t.text }));
   if (messages[0]?.role === "model") {
-    messages.unshift({ role: "user", text: "(La persona escribe al WhatsApp del negocio.)" });
+    messages.unshift({ role: "user", text: "(El cliente escribe al WhatsApp de servicio.)" });
   }
 
   try {
@@ -232,30 +271,32 @@ export async function continueCustomerChat(
       model: MODEL,
       system,
       messages,
-      temperature: 0.6,
-      maxOutputTokens: 300,
+      temperature: 0.5,
+      maxOutputTokens: 320,
       thinkingBudget: 0,
     });
 
     const bruto = clean(r.text) || "Perdona, no te entendí bien. ¿Me lo repites?";
-    const cierra = bruto.includes(MARCADOR_CIERRE);
-    // El marcador es interno: se quita siempre, incluso si el modelo lo
-    // pone a mitad del texto. La persona nunca debe verlo.
-    const botText = bruto.split(MARCADOR_CIERRE).join("").trim();
+
+    // Los marcadores son internos y se quitan siempre, estén donde estén.
+    const mLlamar = bruto.match(RE_LLAMAR);
+    const pideLlamada = !!mLlamar;
+    const franja = mLlamar?.[1]?.trim() || null;
+    const resuelto = RE_RESUELTO.test(bruto);
+    const botText = bruto.replace(RE_LLAMAR, "").replace(RE_RESUELTO, "").trim();
 
     state.history.push({ role: "model", text: botText });
     state.turns += 1;
 
-    const cerrado = cierra || state.turns >= cap;
-    await persistir(supabase, phone, state, cerrado, cerrado ? "lead_capturado" : null);
+    const cerrado = pideLlamada || resuelto;
+    await persistir(supabase, phone, state, cerrado, pideLlamada ? "escalada" : resuelto ? "resuelta" : null);
 
     await humanDelay(botText);
     await sendTextMessage(phone, botText);
 
-    if (cerrado) await cerrarConLead(supabase, phone, row.workspace_id, state);
+    if (pideLlamada) await escalar(supabase, phone, row.workspace_id, state, franja);
   } catch (e) {
-    // El modelo no respondió tras los reintentos. La sesión NO se cierra: el
-    // hilo queda guardado y la persona puede retomar reenviando su mensaje.
+    // El modelo no respondió tras los reintentos. La sesión NO se cierra.
     console.error("[cs-chat] error en turno:", (e as Error).message ?? "");
     await sendTextMessage(phone, "Perdona, se me cruzaron los cables. ¿Me repites lo último?");
   }
@@ -280,25 +321,21 @@ async function cerrar(supabase: Supa, phone: string, desenlace: string): Promise
     .eq("phone", phone);
 }
 
-/** Extrae el lead y lo registra. Nunca rompe el cierre de la conversación. */
-async function cerrarConLead(
+async function escalar(
   supabase: Supa,
   phone: string,
   workspaceId: string,
   state: CsState,
+  franja: string | null,
 ): Promise<void> {
-  try {
-    const lead = await extraerLead(state.history);
-    const { contactoId } = await registrarLead(supabase, workspaceId, phone, lead, {
-      correoDetectado: state.correo ?? null,
-      turnos: state.turns,
-      historyEnmascarado: state.history,
-    });
-    if (contactoId) {
-      await supabase.from("cs_chat_sessions").update({ contacto_id: contactoId }).eq("phone", phone);
-      console.log(`[cs-chat] lead registrado para ${phone} → contacto ${contactoId}`);
-    }
-  } catch (e) {
-    console.error("[cs-chat] cierre con lead falló:", (e as Error).message ?? "");
+  const { id } = await escalarALlamada(supabase, {
+    workspaceId,
+    phone,
+    perfil: state.perfil ?? PERFIL_VACIO,
+    franja,
+    history: state.history,
+  });
+  if (id) {
+    await supabase.from("cs_chat_sessions").update({ escalamiento_id: id }).eq("phone", phone);
   }
 }

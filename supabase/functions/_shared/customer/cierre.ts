@@ -1,159 +1,112 @@
-// Cierre de la conversación: de historial de chat a lead en ONE.
+// Cierre de la conversación de servicio.
 //
-// El lead aterriza en `contactos` + `contacto_interacciones`, exactamente
-// donde ya caen los leads de Meta (meta-leads-webhook). Así el asesor no
-// tiene una bandeja nueva que aprender: el que entró por el bot y el que
-// entró por pauta se ven en el mismo sitio y se convierten igual.
+// Dos desenlaces:
+//   - RESUELTO  → el bot contestó y no queda nada pendiente. No se escala.
+//   - LLAMAR    → queda un caso en la bandeja para que un agente lo tome.
 //
-// Igual que en Meta: NO se crea un negocio. Se crea el contacto y se deja
-// una interacción en estado 'nueva'. El humano decide cuál convierte.
+// El escalamiento es el producto, no el fallback. Un bot de servicio que
+// nunca escala es un bot que está inventando respuestas.
 
 import { generate } from "../venezuela/gemini.ts";
+import type { PerfilCliente } from "./prompt.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
 
-const MODELO_SERIALIZE = "gemini-2.5-flash";
-
-export interface LeadExtraido {
-  nombre: string | null;
-  correo: string | null;
-  motivo: string | null;
-  momento_llamada: string | null;
-  resumen: string | null;
-}
+const MODELO_RESUMEN = "gemini-2.5-flash";
 
 const SCHEMA_HINT = `
-Devuelves SOLO un objeto JSON con esta forma exacta:
+Devuelves SOLO un objeto JSON con esta forma:
 
 {
-  "nombre": "nombre de pila y apellido si lo dio, o null",
-  "correo": "correo si lo dio, o null",
-  "motivo": "en una frase, qué problema de crédito trae, o null",
-  "momento_llamada": "cuándo pidió que la llamen, textual, o null",
-  "resumen": "dos frases sobre la conversación, para que el asesor entre en contexto"
+  "motivo": "en una frase, qué necesita la persona que no se pudo resolver",
+  "resumen": "dos o tres frases para que el agente entre en contexto sin leer el chat"
 }
 
 Reglas:
-- Si un dato no aparece en la conversación, va null. NO lo inventes ni lo deduzcas.
-- El nombre sale de lo que la persona dijo de sí misma, no del saludo del bot.
-- No incluyas datos de pago ni documentos aunque aparezcan en el texto.
+- Escribe para el agente que va a llamar, no para el cliente.
+- No inventes datos que no estén en la conversación.
+- No incluyas datos de pago ni documentos aunque aparezcan.
 `.trim();
 
-/** Extrae los campos del lead del historial. Devuelve null si el modelo falla. */
-export async function extraerLead(
+export interface ResumenEscalamiento {
+  motivo: string;
+  resumen: string;
+}
+
+/** Resume el caso para el agente. Si el modelo falla, se escala igual con lo que hay. */
+export async function resumirParaAgente(
   history: { role: "user" | "model"; text: string }[],
-): Promise<LeadExtraido | null> {
+): Promise<ResumenEscalamiento | null> {
   const transcripcion = history
-    .map((t) => `${t.role === "user" ? "PERSONA" : "BOT"}: ${t.text}`)
+    .map((t) => `${t.role === "user" ? "CLIENTE" : "BOT"}: ${t.text}`)
     .join("\n");
 
   try {
     const r = await generate({
-      model: MODELO_SERIALIZE,
+      model: MODELO_RESUMEN,
       system: SCHEMA_HINT,
       messages: [{ role: "user", text: transcripcion }],
       temperature: 0,
-      maxOutputTokens: 512,
+      maxOutputTokens: 400,
       thinkingBudget: 0,
       jsonMime: true,
     });
     const limpio = (r.text || "").replace(/```json|```/gi, "").trim();
     if (!limpio) return null;
-    const rec = JSON.parse(limpio) as LeadExtraido;
-    return {
-      nombre: rec.nombre ?? null,
-      correo: rec.correo ?? null,
-      motivo: rec.motivo ?? null,
-      momento_llamada: rec.momento_llamada ?? null,
-      resumen: rec.resumen ?? null,
-    };
+    const rec = JSON.parse(limpio) as ResumenEscalamiento;
+    return { motivo: rec.motivo ?? "Sin motivo registrado", resumen: rec.resumen ?? "" };
   } catch (e) {
-    console.error("[cs-chat] extraerLead falló:", (e as Error).message ?? "");
+    console.error("[cs-chat] resumirParaAgente falló:", (e as Error).message ?? "");
     return null;
   }
 }
 
 /**
- * Crea o reusa el contacto y deja la interacción.
+ * Deja el caso en la bandeja de llamadas.
  *
- * Dedup por teléfono dentro del workspace: si la persona ya había escrito
- * antes, se actualiza lo que falte en vez de duplicar la ficha. Nunca se
- * pisa un dato existente con null.
+ * Nunca lanza: si esto falla, la persona ya recibió la promesa de que la
+ * llaman, así que el error se registra pero no se le devuelve a ella. Lo que
+ * sí queda es rastro en el log para que no se pierda en silencio.
  */
-export async function registrarLead(
+export async function escalarALlamada(
   supabase: Supa,
-  workspaceId: string,
-  phone: string,
-  lead: LeadExtraido | null,
-  extras: { correoDetectado?: string | null; turnos: number; historyEnmascarado: unknown },
-): Promise<{ contactoId: string | null }> {
-  // El correo capturado por expresión regular manda sobre el del modelo:
-  // el primero se leyó del texto, el segundo se infirió.
-  const correo = extras.correoDetectado ?? lead?.correo ?? null;
-  const nombre = lead?.nombre?.trim() || `Contacto WhatsApp ${phone.slice(-4)}`;
-  const telefono = phone.startsWith("+") ? phone : `+${phone}`;
+  args: {
+    workspaceId: string;
+    phone: string;
+    perfil: PerfilCliente & { contactoId?: string | null; negocioId?: string | null };
+    franja: string | null;
+    history: { role: "user" | "model"; text: string }[];
+  },
+): Promise<{ id: string | null }> {
+  const resumen = await resumirParaAgente(args.history);
 
   try {
-    const { data: existente } = await supabase
-      .from("contactos")
-      .select("id, nombre, email")
-      .eq("workspace_id", workspaceId)
-      .eq("telefono", telefono)
-      .maybeSingle();
+    const { data, error } = await supabase
+      .from("cs_escalamientos")
+      .insert({
+        workspace_id: args.workspaceId,
+        contacto_id: args.perfil.contactoId ?? null,
+        negocio_id: args.perfil.negocioId ?? null,
+        phone: args.phone,
+        cliente_nombre: args.perfil.nombre ?? null,
+        motivo: resumen?.motivo ?? "Solicitud por WhatsApp sin clasificar",
+        franja: args.franja,
+        resumen: resumen?.resumen ?? null,
+        conversacion: args.history,
+        estado: "pendiente",
+      })
+      .select("id")
+      .single();
 
-    let contactoId: string;
-
-    if (existente) {
-      contactoId = existente.id;
-      // Solo se completa lo que falta. Un contacto que ya tenía nombre real
-      // no se degrada al placeholder de esta conversación.
-      const parche: Record<string, unknown> = {};
-      if (!existente.email && correo) parche.email = correo;
-      if (lead?.nombre && existente.nombre?.startsWith("Contacto WhatsApp")) parche.nombre = lead.nombre;
-      if (Object.keys(parche).length > 0) {
-        await supabase.from("contactos").update(parche).eq("id", contactoId);
-      }
-    } else {
-      const { data: creado, error } = await supabase
-        .from("contactos")
-        .insert({
-          workspace_id: workspaceId,
-          nombre,
-          telefono,
-          email: correo,
-          fuente_adquisicion: "web_organico",
-          fuente_detalle: "Bot de WhatsApp",
-          segmento: "contactado",
-        })
-        .select("id")
-        .single();
-      if (error || !creado) {
-        console.error("[cs-chat] no se pudo crear el contacto:", error?.message ?? "");
-        return { contactoId: null };
-      }
-      contactoId = creado.id;
+    if (error || !data) {
+      console.error("[cs-chat] no se pudo escalar:", error?.message ?? "");
+      return { id: null };
     }
-
-    await supabase.from("contacto_interacciones").insert({
-      workspace_id: workspaceId,
-      contacto_id: contactoId,
-      fuente: "whatsapp_bot",
-      fuente_ref: phone,
-      estado: "nueva",
-      ocurrida_at: new Date().toISOString(),
-      payload: {
-        motivo: lead?.motivo ?? null,
-        momento_llamada: lead?.momento_llamada ?? null,
-        resumen: lead?.resumen ?? null,
-        turnos: extras.turnos,
-        conversacion: extras.historyEnmascarado,
-      },
-    });
-
-    return { contactoId };
+    console.log(`[cs-chat] escalado ${data.id} · ${args.phone} · franja: ${args.franja ?? "sin definir"}`);
+    return { id: data.id };
   } catch (e) {
-    console.error("[cs-chat] registrarLead falló:", (e as Error).message ?? "");
-    return { contactoId: null };
+    console.error("[cs-chat] escalarALlamada lanzó:", (e as Error).message ?? "");
+    return { id: null };
   }
 }
