@@ -448,6 +448,33 @@ export async function getMiAgente(): Promise<string | null> {
  *
  * VENTANA DE 30 DIAS, la misma del perfil. Que las dos pantallas midan periodos
  * distintos seria la forma mas silenciosa de que se contradigan.
+ *
+ * ⚠️ DEUDA ABIERTA — HOY EL RANKING SE CALCULA EN DOS SITIOS.
+ *
+ * `get_calidad_equipo` delega en `calidad_ranking_periodo`. El MURO no: desde
+ * la v6 calcula su ranking en linea dentro de `calidad_bloque_periodo` (ahi
+ * estan los terciles, el orden por cierres y el corte del apellido), y
+ * `calidad_ranking_periodo` habia quedado como codigo muerto que esta funcion
+ * revivio. Son dos implementaciones de la misma cosa.
+ *
+ * Medido el 2026-07-29: dan salida IDENTICA byte a byte en las tres ventanas
+ * (dia e1ecd481, semana 801a51ad, mes c23c687e). Nadie ve un numero
+ * contradictorio hoy. Pero la primera vez que alguien toque una de las dos, se
+ * separan en silencio.
+ *
+ * COMO SE PAGA: que `calidad_bloque_periodo` delegue en
+ * `calidad_ranking_periodo` en vez de repetirla, que es lo que hacia antes de
+ * la v6. Con el control medido antes y comparado despues (debe salir identico,
+ * la logica es la misma).
+ *
+ * CUANDO — la condicion de cobro, decidida con el team-lead: **antes del
+ * siguiente cambio que toque el ranking, o despues de la reunion de Regat, lo
+ * que ocurra primero**. El ranking queda CONGELADO mientras tanto: si llega un
+ * encargo que roza el ranking (muro, pantalla del supervisor, umbrales, orden),
+ * primero se unifica y despues se cambia. No al reves.
+ *
+ * Por que no se pago de una: toca el SQL de la pantalla publica que se
+ * proyecta, y la ventana para detectar una rotura antes de la reunion es corta.
  */
 export async function getEquipoCalidad(dias = 30): Promise<EquipoCalidad | null> {
   const ctx = await ctxCalidad()
