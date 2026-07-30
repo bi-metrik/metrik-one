@@ -615,6 +615,11 @@ export default function MuroView({
 
           El monto de "cobrado" sale del dato, no escrito a mano: si el precio
           del programa cambia, la línea lo sigue.
+
+          Y por la misma razón, el origen de los datos se CUENTA. Esta línea
+          decía "una llamada real, el resto es muestra": cierto en Regat por
+          casualidad, falso en Advise, donde no hay ninguna real y la pantalla
+          se proyecta delante del cliente.
         */}
         <span>
           Banderas = errores críticos.
@@ -624,8 +629,12 @@ export default function MuroView({
           {c?.montoUnitarioUsd
             ? `Cobrado = pagó los ${usd(c.montoUnitarioUsd)} de una vez; el resto queda a seis cuotas.`
             : 'Cobrado = pagó de una vez; el resto queda a seis cuotas.'}
-          {'  ·  '}
-          Datos de demostración: una llamada real, el resto es muestra.
+          {notaMuestra(data.muestra) && (
+            <>
+              {'  ·  '}
+              {notaMuestra(data.muestra)}
+            </>
+          )}
         </span>
         <span style={{ whiteSpace: 'nowrap' }}>Powered by MéTRIK</span>
       </div>
@@ -856,6 +865,21 @@ function Puntos({ total, activo }: { total: number; activo: number }) {
  * mismo no hay a quién señalar, y pintar de todos modos sería inventar una
  * diferencia. Es el mismo defecto que tenía el semáforo agregado.
  */
+/**
+ * El descargo sobre el origen de los datos, redactado desde el conteo.
+ *
+ * Devuelve null (y la línea no se pinta) en los dos casos donde no hay nada
+ * honesto que decir: cuando el dato no llegó, y cuando todas las llamadas son
+ * reales — ahí no es una demostración y anunciarlo confunde.
+ */
+function notaMuestra(m: MuroData['muestra']): string | null {
+  if (!m || m.total === 0) return null
+  if (m.reales >= m.total) return null
+  if (m.reales === 0) return 'Datos de demostración: ninguna llamada real, todo es muestra.'
+  if (m.reales === 1) return 'Datos de demostración: una llamada real, el resto es muestra.'
+  return `Datos de demostración: ${m.reales} llamadas reales, el resto es muestra.`
+}
+
 function colorTecnica(v: number, u: UmbralesRanking): string | undefined {
   if (!u || u.tecnicaAlta <= u.tecnicaBaja) return undefined
   if (v >= u.tecnicaAlta) return M.ok

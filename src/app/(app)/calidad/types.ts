@@ -257,6 +257,20 @@ export interface MuroData {
   periodos: Record<Periodo, BloquePeriodo>
 
   /**
+   * De donde salen los datos que se estan viendo, CONTADO, no recordado. El pie
+   * del muro lo redacta.
+   *
+   * Es del workspace completo, no del periodo que rota: es un descargo sobre el
+   * origen de los datos, no una metrica. Si cambiara con el giro podria decir
+   * "ninguna real" en el dia y "una real" en el mes, sobre la misma pantalla.
+   *
+   * Opcional porque el codigo puede estar desplegado antes que la migracion que
+   * agrega la clave. En ese caso la pantalla calla, que es lo correcto: el
+   * error que esto repara fue justamente afirmar de memoria.
+   */
+  muestra?: { reales: number; total: number }
+
+  /**
    * El flujo: lo que esta pasando AHORA. NO rota — es el pulso en vivo, no un
    * agregado, y en vista de mes serian las mismas diez que en vista de dia.
    *
