@@ -18,7 +18,7 @@ import { randomUUID } from 'crypto'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { createServiceClient } from '@/lib/supabase/server'
-import { BUCKET_AUDIO } from '@/lib/calidad/audio-bucket'
+import { BUCKET_AUDIO, huerfanos } from '@/lib/calidad/audio-bucket'
 import {
   MAX_BYTES_AUDIO,
   MAX_SEGUNDOS_AUDIO,
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   // ya descargado, que es donde de verdad se atrapa la mentira. La DURACION,
   // en cambio, no se puede verificar barato en el servidor sin decodificar el
   // audio; su backstop real es el reloj de la funcion, que corta a los 300 s.
-  // Por eso el tope de duracion se fijo con margen 2x y no al filo.
+  // Por eso el tope de duracion se fijo midiendo, y por debajo del filo.
   if (bytes > MAX_BYTES_AUDIO) {
     return NextResponse.json({ error: mensajeAudioMuyPesado(bytes) }, { status: 413 })
   }
@@ -75,6 +75,34 @@ export async function POST(req: NextRequest) {
   const ruta = `${workspaceId}/${randomUUID()}.${extension(nombreArchivo)}`
 
   const supabase = createServiceClient()
+
+  /**
+   * Barrido oportunista, antes de dejar entrar uno nuevo.
+   *
+   * El cron que limpia huerfanos corre UNA VEZ AL DIA, y no por diseño: el plan
+   * hobby no admite crons mas frecuentes (el intento de desplegar uno cada 6 h
+   * hizo que Vercel rechazara el build entero con `cron_jobs_limits_reached`).
+   * Veinticuatro horas es mucho tiempo para una grabacion que prometimos borrar
+   * enseguida.
+   *
+   * Asi que se barre tambien aqui, que es el momento natural: quien sube un
+   * audio nuevo suele ser el mismo que dejo el anterior a medias, y su carpeta
+   * es la que hay que mirar. Cuesta un listado de un prefijo con pocos objetos.
+   *
+   * Es best-effort y va envuelto: que la limpieza falle no puede impedirle a
+   * nadie auditar una llamada. Para eso queda el cron como red de abajo.
+   */
+  try {
+    const { data: previos } = await supabase.storage
+      .from(BUCKET_AUDIO)
+      .list(workspaceId, { limit: 100 })
+    const sobran = huerfanos(previos ?? [], Date.now())
+    if (sobran.length > 0) {
+      await supabase.storage.from(BUCKET_AUDIO).remove(sobran.map((n) => `${workspaceId}/${n}`))
+    }
+  } catch {
+    /* lo recoge /api/crons/limpiar-audio */
+  }
   const { data, error: eStorage } = await supabase.storage
     .from(BUCKET_AUDIO)
     .createSignedUploadUrl(ruta)
