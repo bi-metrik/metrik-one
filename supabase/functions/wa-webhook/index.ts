@@ -10,6 +10,7 @@ import { sendTextMessage, sendButtons, sendCtaUrl } from '../_shared/wa-respond.
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { isCardumenChatTrigger, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
+import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
@@ -152,6 +153,39 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   if (message.type === 'text' && isTurismoTrigger(message.text)) {
     await sendTurismoLink(message.phone);
     return;
+  }
+
+  // 0d. Customer service — AISLAMIENTO TOTAL, mismo patron que Cardumen y Venezuela.
+  //     Quien escribe aqui NO es del equipo: es un cliente final de un cliente nuestro.
+  //     Por eso va ANTES de identificar staff — si cayera despues, el numero de una
+  //     persona desconocida entraria al flujo de gastos/intents de ONE.
+  //     OPT-IN: solo responde a workspaces con config_extra.wa_customer_bot.
+  if (await hasOpenCustomerChat(supabase, message.phone)) {
+    let texto = message.text || '';
+    if (message.type === 'audio' && message.audio_id) {
+      const result = await transcribeAudio(message.audio_id);
+      if (!result.text) {
+        await sendTextMessage(message.phone, 'No alcancé a entender el audio. ¿Me lo puedes escribir?');
+        return;
+      }
+      texto = result.text;
+    }
+    if (!texto.trim()) {
+      await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
+      return;
+    }
+    await continueCustomerChat(supabase, message.phone, texto, message.wa_message_id);
+    return;
+  }
+
+  // 0e. Customer service — disparador por palabra clave (solo si NO hay conversacion abierta).
+  //     El disparador lo define cada workspace en su config; se resuelve contra la base.
+  if (message.type === 'text' && message.text) {
+    const cs = await resolverCustomerTrigger(supabase, message.text);
+    if (cs) {
+      await startCustomerChat(supabase, message.phone, cs.workspaceId, cs.config, message.wa_message_id);
+      return;
+    }
   }
 
   // 1. Identify user by phone number
