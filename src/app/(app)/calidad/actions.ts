@@ -304,7 +304,19 @@ export async function getDatosDueno(): Promise<DuenoData | null> {
   if (!ctx) return null
   if (!ctx.perms.canViewCalidadDinero) return null
 
-  const { data, error } = await sinTipar(ctx.supabase).rpc('get_calidad_dinero', {
+  // ─── S2: la RPC del dinero sale del alcance del token del usuario ───
+  //
+  // `get_calidad_dinero` perdio el grant a `authenticated` (migracion
+  // 20260730000010_calidad_visibilidad_por_rol). Era la unica superficie del
+  // modulo con plata y un `operator` la alcanzaba por PostgREST directo, donde
+  // el guard de la linea de arriba no existe: medido el 2026-07-29, devolvia
+  // vendido, recaudado y precio del contrato a un agente del piso.
+  //
+  // Se consume con service_role, el mismo patron que el modulo ya usa para
+  // `calidad_dinero_cuotas` y para el muro publico. El guard de
+  // `canViewCalidadDinero` es ahora el UNICO camino de entrada, y por eso va
+  // ANTES de esta llamada: aqui ya no hay RLS que respalde nada.
+  const { data, error } = await sinTipar(createServiceClient()).rpc('get_calidad_dinero', {
     p_workspace_id: ctx.workspaceId,
     p_dias: 30,
   })
@@ -312,6 +324,9 @@ export async function getDatosDueno(): Promise<DuenoData | null> {
   const dinero = data as Omit<DuenoData, 'criticasAbiertas'>
 
   // Banderas criticas abiertas del workspace, agregadas por codigo.
+  // Sigue con el cliente del usuario a proposito: los hallazgos conservan su
+  // grant y su policy, y quien llega aqui ya paso el guard de dinero (owner),
+  // asi que la RLS actua como segunda capa en vez de desactivarse.
   const { data: criticasRaw } = await sinTipar(ctx.supabase)
     .from('calidad_llamadas_hallazgos')
     .select('codigo, titulo')
