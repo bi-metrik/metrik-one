@@ -474,10 +474,57 @@ export interface PerfilAgente {
     amarillo: number
     rojo: number
   }
+  /**
+   * La serie que dibuja el perfil: un punto por DIA, no por llamada.
+   *
+   * Una llamada suelta no dice nada de la persona (pudo tocarle un mal
+   * cliente); el dia si. Ordenados por fecha.
+   */
+  dias: DiaPerfil[]
+  /**
+   * Una fila por llamada. Ya NO se grafica: alimenta el detalle que se abre al
+   * hacer clic en un dia, que es lo que conserva el camino a la transcripcion.
+   */
   puntos: PuntoPerfil[]
   tendencia: TendenciaPerfil
   /** Ya vienen ordenados por puntos en juego, de mayor a menor. */
   bloques: BloquePerfil[]
+}
+
+/**
+ * El dia como unidad de desempeño.
+ *
+ *   score = tecnica - penalizacion
+ *   penalizacion = min(10, 10 * criticas / llamadas)
+ *
+ * Aqui SI se juntan los dos ejes, al reves de lo que se hace por llamada, y la
+ * diferencia no es un descuido: "una llamada de 84 con una bandera critica no
+ * es una de 70" sigue siendo cierto, porque una llamada es un hecho suelto.
+ * Pero "como opero hoy" si es una sola pregunta, y ejecutar bien exponiendo a
+ * la empresa en cada llamada no es un buen dia.
+ *
+ * La penalizacion va por TASA y no por conteo para no castigar producir, y esta
+ * capada en 10 puntos: se ve, no arrasa.
+ */
+export interface DiaPerfil {
+  dia: string
+  /** Cuantas llamadas sostienen el dato. La pantalla dibuja el punto segun esto. */
+  llamadas: number
+  tecnica: number
+  criticas: number
+  cierres: number
+  penalizacion: number
+  score: number
+  /**
+   * Media movil de 7 dias ponderada por llamadas: el promedio real de todas las
+   * llamadas de la ventana. Es la linea que se dibuja.
+   *
+   * Existe porque el volumen diario es muy desigual (de 1 a 12 llamadas). Unir
+   * los `score` crudos dibuja derrumbes que son azar de muestras chicas: un dia
+   * de 2 llamadas marco 77 y el siguiente, de 1 llamada, 53. La suavizada apenas
+   * se movio, que es lo que de verdad paso.
+   */
+  suave: number
 }
 
 export type LecturaTendencia = 'alza' | 'baja' | 'estable' | 'sin_datos'
