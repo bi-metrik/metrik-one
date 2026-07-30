@@ -2,9 +2,13 @@ import 'server-only'
 import { MODELO_AUDITORIA } from './motor-auditoria'
 
 /**
- * El tope del audio vive en `./tope-audio`, sin `server-only`: la validacion
- * que de verdad protege al usuario corre en el navegador, porque la plataforma
- * corta el cuerpo de la peticion antes de que este archivo se ejecute.
+ * El tope del audio vive en `./tope-audio`, sin `server-only`, porque el
+ * navegador tambien lo importa: es el que rechaza el archivo ANTES de subirlo
+ * y le da al usuario un mensaje escrito por nosotros en vez de un fallo seco.
+ *
+ * (La razon original era otra: la plataforma cortaba el cuerpo de la peticion
+ * antes de que este archivo llegara a ejecutarse. Eso dejo de aplicar cuando el
+ * audio salio del cuerpo y paso a subirse directo a Storage.)
  */
 
 /**

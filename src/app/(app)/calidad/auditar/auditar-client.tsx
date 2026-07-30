@@ -3,8 +3,16 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { C, MONO } from '../components/tokens'
-import { MAX_BYTES_AUDIO, MINUTOS_APROX_AUDIO, mb, mensajeAudioMuyPesado } from '@/lib/calidad/tope-audio'
+import {
+  MAX_BYTES_AUDIO,
+  MAX_SEGUNDOS_AUDIO,
+  MINUTOS_MAX_AUDIO,
+  mensajeAudioMuyLargo,
+  mensajeAudioMuyPesado,
+} from '@/lib/calidad/tope-audio'
 import { leerRespuesta } from '@/lib/calidad/respuesta'
+import { BUCKET_AUDIO } from '@/lib/calidad/audio-bucket'
+import { createClient } from '@/lib/supabase/client'
 
 /**
  * Auditar una llamada en vivo.
@@ -15,14 +23,17 @@ import { leerRespuesta } from '@/lib/calidad/respuesta'
  * LA BARRA REFLEJA ETAPAS VERDADERAS. Cada paso avanza cuando su petición
  * responde, no con un temporizador. Una barra que sube sola mientras el
  * servidor piensa es mentira, y si algo falla se queda clavada en un punto que
- * no significa nada — aquí el error cae en la etapa donde de verdad ocurrió.
+ * no significa nada: aquí el error cae en la etapa donde de verdad ocurrió.
  *
- * EL LÍMITE SE AVISA ANTES DE PROCESAR, Y AQUÍ NO ES UN LUJO: por encima de
- * 4.500.000 bytes la plataforma rechaza el cuerpo de la petición antes de que
- * corra una sola línea nuestra, así que ninguna validación del servidor puede
- * dar la cara. Si el archivo no cabe, la única forma de que el usuario lea un
- * mensaje escrito por nosotros es no mandarlo. El criterio es el peso; la
- * duración se sigue leyendo, pero para acompañar el mensaje y para el registro.
+ * Y ahora "Subiendo el audio" es de verdad una etapa. Antes las dos primeras se
+ * marcaban juntas al volver una sola petición, porque el archivo viajaba dentro
+ * de ella; hoy la subida es su propio viaje y su propio tiempo.
+ *
+ * EL LÍMITE SE AVISA ANTES DE SUBIR, Y EL CRITERIO ES LA DURACIÓN. Cambió: el
+ * archivo ya no viaja en el cuerpo de la petición, así que el techo dejó de ser
+ * el peso y pasó a ser el reloj de la función, que depende de los minutos y no
+ * de los megas. El peso sigue revisándose como red de abajo, sobre todo para el
+ * caso en que no se pueda leer la duración. Ver `tope-audio.ts`.
  */
 
 const ETAPAS = [
@@ -79,31 +90,58 @@ export default function AuditarClient() {
     setResultado(null)
     setHechas([])
 
-    // El aviso ocurre ANTES de subir, y por peso: si el archivo no cabe, este
-    // es el ÚNICO punto donde todavía podemos decirlo con nuestras palabras.
+    // La DURACIÓN se lee primero porque ahora es el criterio, no un adorno.
+    const duracionSeg = await duracionDe(archivo)
+    if (duracionSeg > MAX_SEGUNDOS_AUDIO) {
+      setError(mensajeAudioMuyLargo(duracionSeg))
+      return
+    }
+    // El peso es la red de abajo, y la única que queda cuando el navegador no
+    // logra leer los metadatos y `duracionDe` devuelve 0.
     if (archivo.size > MAX_BYTES_AUDIO) {
       setError(mensajeAudioMuyPesado(archivo.size))
       return
     }
-
-    const duracionSeg = await duracionDe(archivo)
     if (duracionSeg === 0) {
       setNota('No se pudo leer la duración del archivo; se intentará de todos modos.')
     }
 
     try {
-      // ── 1 y 2. Subir y transcribir ──────────────────────────────────────
+      // ── 1. Subir ────────────────────────────────────────────────────────
+      // El archivo va DIRECTO a Storage, no dentro de una petición nuestra, y
+      // ahí es donde muere el techo de 4,5 MB que dejaba esto en 17 minutos.
       setEtapa('subiendo')
-      const form = new FormData()
-      form.append('audio', archivo)
+      const rP = await fetch('/api/calidad/audio-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombreArchivo: archivo.name,
+          bytes: archivo.size,
+          segundos: Math.round(duracionSeg),
+        }),
+      })
+      const { datos: dP, error: eP } = await leerRespuesta(rP, 'No se pudo preparar la subida')
+      if (eP) throw new Error(eP)
 
+      const supabase = createClient()
+      const { error: eSubir } = await supabase.storage
+        .from(BUCKET_AUDIO)
+        .uploadToSignedUrl(String(dP.ruta), String(dP.token), archivo)
+      if (eSubir) throw new Error(`No se pudo subir el audio. ${eSubir.message}`)
+      setHechas((h) => [...h, 'subiendo'])
+
+      // ── 2. Transcribir ──────────────────────────────────────────────────
       setEtapa('transcribiendo')
-      const rT = await fetch('/api/calidad/transcribir', { method: 'POST', body: form })
+      const rT = await fetch('/api/calidad/transcribir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ruta: dP.ruta }),
+      })
       const { datos: dT, error: eT } = await leerRespuesta(rT, 'Falló la transcripción')
       if (eT) throw new Error(eT)
       const turnos = Number(dT.turnos ?? 0)
       const redacciones = Number(dT.redacciones ?? 0)
-      setHechas((h) => [...h, 'subiendo', 'transcribiendo'])
+      setHechas((h) => [...h, 'transcribiendo'])
       setNota(
         `${turnos} turnos transcritos · ${redacciones} dato${redacciones === 1 ? '' : 's'} sensible${redacciones === 1 ? '' : 's'} redactado${redacciones === 1 ? '' : 's'} antes de guardar nada`,
       )
@@ -210,7 +248,7 @@ export default function AuditarClient() {
         <div style={{ fontSize: 13, color: C.inkMuted, marginTop: 6 }}>
           {corriendo
             ? 'No cierres esta pestaña'
-            : `MP3, M4A o WAV · hasta ${mb(MAX_BYTES_AUDIO)} MB, unos ${MINUTOS_APROX_AUDIO} minutos`}
+            : `MP3, M4A o WAV · hasta ${MINUTOS_MAX_AUDIO} minutos de llamada`}
         </div>
         <input
           ref={inputRef}
@@ -331,6 +369,8 @@ export default function AuditarClient() {
         La transcripción se redacta automáticamente antes de guardarse: los números de tarjeta,
         códigos de seguridad y documentos de identidad no quedan registrados. Se conserva lo que el
         agente pidió, porque es la evidencia de la bandera; se borra el dato que el cliente dictó.
+        La grabación se guarda solo el tiempo que dura la transcripción y se borra enseguida: lo
+        que queda de la llamada es su transcripción ya redactada, no el audio.
       </p>
     </div>
   )
