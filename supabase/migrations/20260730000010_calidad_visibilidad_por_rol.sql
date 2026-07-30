@@ -211,20 +211,28 @@ create policy calidad_cobertura_dia_select on public.calidad_cobertura_dia
     and calidad_ve_todo_el_piso()
   );
 
--- ── 4. La vista de dinero sale del alcance del JWT del usuario ──────────────
+-- ── 4. El dinero, y por que el revoke NO va en esta migracion ───────────────
 --
--- `get_calidad_dinero` es la unica superficie del modulo que lleva plata y la
--- unica RPC que nadie mas encadena (verificado en pg_proc.prosrc: solo la
--- llama su server action). Deja de ser alcanzable con el token del usuario; el
--- unico camino es `getDatosDueno()`, que ya valida `canViewCalidadDinero`.
+-- Estas policies YA cierran el dinero. `get_calidad_dinero` es `invoker` y se
+-- alimenta de `calidad_reparto_cuotas` -> `calidad_llamadas` (recortada arriba)
+-- y de `calidad_recobro_dia` (cerrada arriba), asi que a un ejecutor le
+-- devuelve SUS numeros, no los del negocio. Medido el 2026-07-30 con estas
+-- policias puestas y sin ningun revoke:
 --
--- OJO al mantener: si alguna funcion futura la encadena como `invoker`, esto
--- la rompe. Esa es la razon de que las OTRAS no se revoquen.
-revoke execute on function public.get_calidad_dinero(uuid, integer) from authenticated;
-
--- `calidad_reparto_cuotas` NO se revoca: la encadena el muro. Igual queda
--- cerrada de hecho, porque es `invoker` y lee `calidad_llamadas`, asi que a un
--- ejecutor le agrega solo sus propias llamadas y su recobro sale en cero.
+--   operator (Carolina) -> vendido 7.990    · 10 ventas  · riesgo 0
+--   owner    (Oscar)    -> vendido 81.498   · 102 ventas · riesgo 2.476
+--
+-- Falta el cinturon adicional: quitarle a `authenticated` el execute de
+-- `get_calidad_dinero` para que la plata del negocio no dependa solo de que la
+-- RLS de dos tablas este bien puesta. Ese revoke vive en la migracion
+-- `20260730000011` y NO puede aplicarse antes de desplegar el codigo, porque
+-- **la base es compartida entre `main` y esta rama**: el `getDatosDueno()` que
+-- hoy corre en produccion todavia llama la RPC con el token del usuario y se
+-- rompería en vivo. Orden obligatorio (gotcha "una RPC con consumidores en
+-- produccion se AMPLIA, no cambia de forma"): esta migracion -> merge y deploy
+-- -> `20260730000011`.
+--
+-- `calidad_reparto_cuotas` no se revoca nunca: la encadena el muro.
 
 comment on function public.current_user_staff_id() is
   'staff.id del usuario autenticado (profile_id = auth.uid(), activo). Misma resolucion que getWorkspace().';
