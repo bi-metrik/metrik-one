@@ -25,6 +25,18 @@ const FILTROS: { clave: EstadoSolicitud | 'todas'; label: string }[] = [
   { clave: 'todas', label: 'Todas' },
 ]
 
+/** Deja el número legible: 573159509103 -> +57 315 950 9103. */
+function telLegible(raw: string): string {
+  const d = (raw || '').replace(/\D/g, '')
+  if (d.length === 12 && d.startsWith('57')) {
+    return `+57 ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}`
+  }
+  if (d.length === 11 && d.startsWith('1')) {
+    return `+1 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`
+  }
+  return raw
+}
+
 /** "hace 5 minutos" — para saber de un vistazo qué tan fría está la solicitud. */
 function haceCuanto(iso: string): string {
   const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
@@ -150,7 +162,7 @@ export default function SolicitudesClient({ solicitudes }: { solicitudes: Solici
                           style={{ color: C.verde }}
                         >
                           <Phone className="w-3.5 h-3.5" />
-                          {s.phone}
+                          {telLegible(s.phone)}
                         </a>
                         {s.franja && (
                           <span className="inline-flex items-center gap-1.5" style={{ color: C.suave }}>
