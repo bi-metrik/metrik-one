@@ -59,13 +59,22 @@ export async function transcribirAudio(
             ],
           },
         ],
-        // 64.000 y no 32.768, PORQUE EL MODELO PIENSA Y SU PENSAMIENTO SE
-        // COBRA DE AQUI. Medido sobre una llamada real de 40 minutos:
-        // `thoughtsTokenCount` fue 14.862, o sea que de los 32.768 quedaban
-        // ~18.000 para la transcripcion. Como el pensamiento varia entre
-        // corridas, la MISMA entrada daba unas veces STOP y otras MAX_TOKENS.
-        // Un tope que a veces alcanza no es un tope: es una moneda al aire.
-        maxOutputTokens: 64_000,
+        // OJO: los dos van DENTRO de `generationConfig`. Sueltos en la raiz del
+        // cuerpo, la API responde 400 `Unknown name "maxOutputTokens": Cannot
+        // find field` y la transcripcion no corre nunca. Paso: un cambio de
+        // este tope se comio el `generationConfig` entero y llego a produccion.
+        generationConfig: {
+          // `temperature: 0` porque una transcripcion no se improvisa: el mismo
+          // audio tiene que dar el mismo texto.
+          temperature: 0,
+          // 64.000 y no 32.768, PORQUE EL MODELO PIENSA Y SU PENSAMIENTO SE
+          // COBRA DE AQUI. Medido sobre una llamada real de 40 minutos:
+          // `thoughtsTokenCount` fue 14.862, o sea que de los 32.768 quedaban
+          // ~18.000 para la transcripcion. Como el pensamiento varia entre
+          // corridas, la MISMA entrada daba unas veces STOP y otras MAX_TOKENS.
+          // Un tope que a veces alcanza no es un tope: es una moneda al aire.
+          maxOutputTokens: 64_000,
+        },
       }),
     },
   )
