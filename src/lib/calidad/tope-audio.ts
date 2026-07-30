@@ -18,21 +18,33 @@
  * comprimido, pesan igual y tardan la mitad y el doble. Un tope por peso ya no
  * protege de nada. Por eso el criterio se invirtio.
  *
- * LOS NUMEROS DEL RELOJ, MEDIDOS EN PRODUCCION SOBRE EL DOMINIO PROPIO:
- * 12 min de audio -> 200 en 48,9 s. 17 min -> 200 en 78,1 s. Eso da entre 4,1 y
- * 4,6 segundos de reloj por minuto de audio, ligeramente superlineal. A 30
- * minutos son unos 140 s contra un presupuesto de 300 s: margen 2x, que es el
- * que se necesita para que un reintento no reviente la peticion.
+ * EL PRESUPUESTO DE 300 s NO SE PUEDE SUBIR. No es el default de la plataforma
+ * sino el maximo del plan (hobby, verificado el 2026-07-29 contra la API de
+ * Vercel). Los 800 s y los 1.800 s de duracion extendida son de Pro.
  *
- * Y EL PRESUPUESTO DE 300 s NO SE PUEDE SUBIR. No es el default de la
- * plataforma sino el maximo del plan (hobby, verificado el 2026-07-29 contra la
- * API de Vercel). Los 800 s y los 1.800 s de duracion extendida son de Pro. Si
- * algun dia se quiere pasar de 30 minutos, el primer paso no es tocar este
- * archivo: es decidir el plan.
+ * DE DONDE SALEN LOS 45 MINUTOS. No de extrapolar: de medir la transcripcion
+ * completa de una llamada real del sector recortada a cuatro duraciones, con
+ * `maxOutputTokens` en 64.000.
+ *
+ *   min | reloj | margen | pensamiento+salida / 64.000 | margen | cobertura
+ *    30 |  110s |  2,7x  |  25.898  (40%)              |  2,5x  |  100%
+ *    40 |   99s |  3,0x  |  23.400  (37%)              |  2,7x  |   99%
+ *    52 |  121s |  2,5x  |  30.670  (48%)              |  2,1x  |  100%
+ *    65 |  242s |  1,2x  |  62.636  (98%)              |  1,0x  |   98%
+ *
+ * El reloj NO crece de forma lineal con la duracion, que era lo que este
+ * archivo suponia antes: lo que manda es cuanto PIENSA el modelo, y eso pega un
+ * salto entre los 52 y los 65 minutos (de 18k a 46k tokens de pensamiento). A
+ * 65 minutos la cosa funciona, pero gastando el 98% del presupuesto de salida:
+ * eso no es un tope, es una moneda al aire. 52 es el ultimo punto medido con
+ * margen comodo en las dos dimensiones, y 45 deja un 15% por debajo de el.
+ *
+ * Para pasar de aqui hacen falta dos cosas, y solo una es codigo: plan Pro para
+ * el reloj, y trocear para que el pensamiento no se coma el presupuesto.
  */
 
-/** Tope real: media hora de llamada. Lo fija el reloj de la funcion. */
-export const MINUTOS_MAX_AUDIO = 30
+/** Tope real: 45 minutos. Lo fijan el reloj y el presupuesto de salida. */
+export const MINUTOS_MAX_AUDIO = 45
 export const MAX_SEGUNDOS_AUDIO = MINUTOS_MAX_AUDIO * 60
 
 /**

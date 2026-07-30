@@ -59,7 +59,13 @@ export async function transcribirAudio(
             ],
           },
         ],
-        generationConfig: { temperature: 0, maxOutputTokens: 32768 },
+        // 64.000 y no 32.768, PORQUE EL MODELO PIENSA Y SU PENSAMIENTO SE
+        // COBRA DE AQUI. Medido sobre una llamada real de 40 minutos:
+        // `thoughtsTokenCount` fue 14.862, o sea que de los 32.768 quedaban
+        // ~18.000 para la transcripcion. Como el pensamiento varia entre
+        // corridas, la MISMA entrada daba unas veces STOP y otras MAX_TOKENS.
+        // Un tope que a veces alcanza no es un tope: es una moneda al aire.
+        maxOutputTokens: 64_000,
       }),
     },
   )
@@ -73,6 +79,27 @@ export async function transcribirAudio(
   const texto = c?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
   if (!texto.trim()) {
     throw new Error(`La transcripción volvió vacía (${c?.finishReason ?? 'sin razón'}).`)
+  }
+
+  /**
+   * UNA TRANSCRIPCION A MEDIAS ES PEOR QUE NINGUNA, Y ANTES PASABA COMO BUENA.
+   *
+   * Aqui solo se miraba que el texto no viniera vacio. Cuando el modelo se
+   * quedaba sin presupuesto de salida devolvia media llamada y `MAX_TOKENS`, y
+   * esto lo daba por bueno: la auditoria corria sobre la mitad de la
+   * conversacion y salia con su puntaje y su semaforo, con toda la pinta de ser
+   * validos. El cierre de la llamada, que es donde viven las banderas de
+   * cobro, simplemente no existia para el motor. Un falso verde perfecto.
+   *
+   * Cualquier final que no sea STOP significa que falta audio por transcribir,
+   * asi que se cae ruidosamente. Es preferible que la pantalla diga que fallo.
+   */
+  if (c?.finishReason && c.finishReason !== 'STOP') {
+    throw new Error(
+      `La transcripción se cortó antes de terminar (${c.finishReason}). ` +
+        `Se transcribieron ${texto.length.toLocaleString('es-CO')} caracteres, pero la llamada no llegó al final: ` +
+        `auditar esto daría un resultado sobre media conversación. Sube un fragmento más corto.`,
+    )
   }
   return {
     texto,

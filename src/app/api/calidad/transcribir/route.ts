@@ -28,8 +28,8 @@ import { transcribirAudio } from '@/lib/calidad/transcribir'
 import { BUCKET_AUDIO } from '@/lib/calidad/audio-bucket'
 
 export const runtime = 'nodejs'
-// 300 s: el maximo del plan, no un default que se pueda subir. El tope de 30
-// minutos de audio se fijo contra este numero con margen 2x. Ver tope-audio.ts.
+// 300 s: el maximo del plan, no un default que se pueda subir. El tope de 45
+// minutos de audio se fijo midiendo contra este numero. Ver tope-audio.ts.
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
