@@ -88,7 +88,7 @@ const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
 /** Separador de miles: a tres metros "2817" se lee peor que "2.817". */
 const num = (n: number) => n.toLocaleString('es-CO')
 
-const COLS_AGENTES = '1fr 130px 120px 124px 130px 144px'
+const COLS_AGENTES = '1fr 130px 120px 124px 168px 130px 144px'
 const COLS_ULTIMAS = '98px 1fr 94px 178px'
 
 const PERIODOS: Periodo[] = ['dia', 'semana', 'mes']
@@ -424,6 +424,7 @@ export default function MuroView({
                   { texto: 'Llamadas', der: true },
                   { texto: 'Cierres', der: true },
                   { texto: '% cierre', der: true },
+                  { texto: 'Recaudado', der: true },
                   { texto: 'Técnica', der: true },
                   { texto: 'Banderas', der: true },
                 ]}
@@ -460,6 +461,10 @@ export default function MuroView({
                       agentes con distinto volumen. En gris se pierde al lado
                       del conteo de cierres. */}
                   <Num color={M.ink}>{a.pctCierre}%</Num>
+                  {/* Lo YA cobrado, no lo vendido: la venta a cuotas entra por
+                      la primera. Separa a quien cierra mucho y cobra poco de
+                      quien cierra menos y cobra de una. */}
+                  <Num color={M.ink}>{usd(a.recaudadoUsd)}</Num>
                   {/* Los dos ejes, separados y con color por umbral del propio
                       dato. Ejecutar bien la venta y exponer a la empresa son
                       cosas independientes: con una sola columna eso no se veía. */}
@@ -613,6 +618,8 @@ export default function MuroView({
         */}
         <span>
           Banderas = errores críticos.
+          {'  ·  '}
+          Recaudado = lo ya cobrado: de una vez entra completo, a cuotas entra la primera.
           {'  ·  '}
           {c?.montoUnitarioUsd
             ? `Cobrado = pagó los ${usd(c.montoUnitarioUsd)} de una vez; el resto queda a seis cuotas.`

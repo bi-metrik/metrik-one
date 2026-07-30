@@ -154,6 +154,15 @@ export interface FilaRanking {
   pctCierre: number
   tecnica: number
   banderas: number
+  /**
+   * Lo YA COBRADO por este agente en el periodo: la venta de tarjeta entra
+   * completa, la de cuenta entra solo por la primera de sus seis cuotas.
+   *
+   * No es lo vendido, y tampoco es el `recaudadoUsd` de `calidad_reparto_cuotas`
+   * (aquel proyecta las seis cuotas con la tasa de caida). Mismo nombre, dos
+   * preguntas distintas: no se suman ni se comparan entre si.
+   */
+  recaudadoUsd: number
 }
 
 /**
