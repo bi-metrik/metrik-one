@@ -20,7 +20,8 @@ Devuelves SOLO un objeto JSON con esta forma:
 
 {
   "motivo": "en una frase, qué necesita la persona que no se pudo resolver",
-  "resumen": "dos o tres frases para que el agente entre en contexto sin leer el chat"
+  "resumen": "dos o tres frases para que el agente entre en contexto sin leer el chat",
+  "nombre_declarado": "el nombre que la persona dio de sí misma, o null si no lo dijo"
 }
 
 Reglas:
@@ -32,6 +33,8 @@ Reglas:
 export interface ResumenEscalamiento {
   motivo: string;
   resumen: string;
+  /** Nombre que la persona dio, cuando el número no estaba registrado. */
+  nombreDeclarado: string | null;
 }
 
 /** Resume el caso para el agente. Si el modelo falla, se escala igual con lo que hay. */
@@ -54,8 +57,12 @@ export async function resumirParaAgente(
     });
     const limpio = (r.text || "").replace(/```json|```/gi, "").trim();
     if (!limpio) return null;
-    const rec = JSON.parse(limpio) as ResumenEscalamiento;
-    return { motivo: rec.motivo ?? "Sin motivo registrado", resumen: rec.resumen ?? "" };
+    const rec = JSON.parse(limpio) as ResumenEscalamiento & { nombre_declarado?: string | null };
+    return {
+      motivo: rec.motivo ?? "Sin motivo registrado",
+      resumen: rec.resumen ?? "",
+      nombreDeclarado: rec.nombre_declarado ?? null,
+    };
   } catch (e) {
     console.error("[cs-chat] resumirParaAgente falló:", (e as Error).message ?? "");
     return null;
@@ -89,7 +96,10 @@ export async function escalarALlamada(
         contacto_id: args.perfil.contactoId ?? null,
         negocio_id: args.perfil.negocioId ?? null,
         phone: args.phone,
-        cliente_nombre: args.perfil.nombre ?? null,
+        // Si el número no estaba registrado, el nombre es el que la persona
+        // dijo. Sin esto el agente recibe un teléfono suelto y no sabe ni por
+        // quién preguntar cuando llame.
+        cliente_nombre: args.perfil.nombre ?? resumen?.nombreDeclarado ?? null,
         motivo: resumen?.motivo ?? "Solicitud por WhatsApp sin clasificar",
         franja: args.franja,
         resumen: resumen?.resumen ?? null,

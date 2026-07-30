@@ -35,6 +35,8 @@ export interface CustomerBotConfig {
   etapas_explicacion?: Record<string, string>;
   /** Moneda en que factura este negocio. Default COP. */
   moneda?: string;
+  /** Con qué nombre se presenta el asistente. Ej: "Valentina". */
+  asesor_nombre?: string;
   /** Saludo para cliente reconocido. Admite {nombre}. */
   saludo?: string;
   /** Saludo cuando no se reconoce el número. */
@@ -131,7 +133,15 @@ async function traerPagos(
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const humanDelay = (text: string) => sleep(Math.min(800 + (text?.length ?? 0) * 10, 3000));
+/**
+ * Pausa antes de enviar, proporcional al largo del mensaje.
+ *
+ * Un asesor real no contesta en 800 ms. Con la latencia del modelo (1-3 s)
+ * mas esta pausa, la respuesta llega entre 3 y 7 segundos, que es el ritmo
+ * de una persona escribiendo. El tope de 4,5 s existe porque mas alla la
+ * espera deja de sentirse humana y empieza a sentirse rota.
+ */
+const humanDelay = (text: string) => sleep(Math.min(1200 + (text?.length ?? 0) * 20, 4500));
 
 const PERFIL_VACIO: PerfilExt = {
   nombre: null, caso: null, producto: null, etapaNumero: null,
@@ -182,15 +192,24 @@ async function identificar(supabase: Supa, workspaceId: string, phone: string): 
 }
 
 function saludoDe(cfg: CustomerBotConfig, perfil: PerfilExt): string {
+  const yo = cfg.asesor_nombre?.trim();
+  const mePresento = yo ? `soy ${yo}, de ${cfg.marca}` : `soy el asistente de ${cfg.marca}`;
+
   if (!perfil.identificado) {
-    return (
-      cfg.saludo_desconocido ??
-      `Hola, soy el asistente de ${cfg.marca}. Cuéntame en qué te puedo ayudar y, si necesitas algo de tu cuenta, coordino que un asesor te llame.`
-    );
+    // Número desconocido: lo PRIMERO es saber con quién se habla. Sin eso el
+    // escalamiento llega al agente como un teléfono suelto, y quien llama no
+    // sabe ni por quién preguntar.
+    if (cfg.saludo_desconocido) {
+      return cfg.saludo_desconocido.replace(/\{yo\}/g, yo ?? "").replace(/\{marca\}/g, cfg.marca);
+    }
+    return `Hola, ${mePresento}. No tengo este número registrado. ¿Con quién tengo el gusto?`;
   }
+
   const nombre = (perfil.nombre ?? "").split(" ")[0] || "";
-  if (cfg.saludo) return cfg.saludo.replace(/\{nombre\}/g, nombre);
-  return `Hola ${nombre}, soy el asistente de ${cfg.marca}. ¿En qué te ayudo hoy?`;
+  if (cfg.saludo) {
+    return cfg.saludo.replace(/\{nombre\}/g, nombre).replace(/\{yo\}/g, yo ?? "").replace(/\{marca\}/g, cfg.marca);
+  }
+  return `Hola ${nombre}, ${mePresento}. ¿En qué te ayudo hoy?`;
 }
 
 export async function resolverCustomerTrigger(
@@ -342,6 +361,7 @@ export async function continueCustomerChat(
     frecuentes: config.frecuentes ?? [],
     etapasExplicacion: config.etapas_explicacion,
     pagos: state.pagos ?? null,
+    asesorNombre: config.asesor_nombre,
   });
   if (sensible) system += "\n\n" + BLOQUE_DATO_SENSIBLE;
 

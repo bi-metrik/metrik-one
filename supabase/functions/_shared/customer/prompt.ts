@@ -52,6 +52,8 @@ export interface EstadoPagos {
 
 export interface ServicioCtx {
   marca: string;
+  /** Con qué nombre se presenta el asistente. Ej: "Valentina". */
+  asesorNombre?: string;
   perfil: PerfilCliente;
   frecuentes: Frecuente[];
   pagos?: EstadoPagos | null;
@@ -182,11 +184,17 @@ function bloquePerfil(p: PerfilCliente, marca: string, explicacion?: string): st
 
 NO reconociste el número: no sabes quién escribe ni qué caso tiene.
 
-Esto cambia lo que puedes hacer. NO tienes perfil, así que **no afirmes nada
-sobre ningún caso**. Salúdala, pregúntale en qué la puedes ayudar, y pasa a
-llamada apenas necesite algo de su cuenta. Puedes pedirle el nombre para que
-el asesor sepa a quién llama. Nunca le pidas datos para "validar identidad":
-eso lo hace el asesor.
+**Lo primero es preguntarle con quién hablas.** Ya lo hiciste en el saludo; si
+todavía no te ha dicho su nombre, pídeselo antes de seguir. Sin el nombre, el
+agente que llame después no sabe ni por quién preguntar.
+
+Con el nombre en mano puedes conversar normal, pero **no afirmes NADA sobre
+ningún caso**: no tienes su expediente. No confirmes ni niegues que es
+cliente, no hables de etapas, ni de pagos, ni de fechas. En cuanto necesite
+algo de su cuenta, pasa a llamada.
+
+Nunca le pidas documento, cédula ni datos "para validar identidad": eso lo
+hace el asesor por teléfono. Aquí basta el nombre.
 `.trim();
   }
 
@@ -222,18 +230,43 @@ export function buildSystem(ctx: ServicioCtx): string {
       .replace(/\{etapa\}/g, p.etapa ?? "")
       .replace(/\{responsable\}/g, p.responsable ?? "");
 
+  // Una respuesta que menciona {caso}, {etapa}, {producto} o {responsable}
+  // NO se puede usar sin perfil: los placeholders quedarían vacíos y el
+  // modelo rellena el hueco. Pasó en prueba — a un número desconocido le
+  // inventó "tu caso está en la etapa de Análisis de Buró de Crédito", una
+  // etapa que ni siquiera existe. Instruir "no afirmes nada del caso" no
+  // alcanza cuando el guion le está pidiendo justo lo contrario.
+  const DEPENDE_DEL_CASO = /\{(caso|etapa|producto|responsable)\}/;
+  const sinPerfil = !p.identificado || !p.caso;
+
   const guion = ctx.frecuentes.length
     ? ctx.frecuentes
-        .map((f) =>
-          f.escala
-            ? `### Si pregunta: "${f.pregunta}"\n→ Esto NO lo resuelves tú. Pasa a llamada.`
-            : `### Si pregunta: "${f.pregunta}"\n→ ${rellenar(f.respuesta)}`,
-        )
+        .map((f) => {
+          const escalaPorFalta = sinPerfil && DEPENDE_DEL_CASO.test(f.respuesta);
+          if (f.escala) {
+            return `### Si pregunta: "${f.pregunta}"\n→ Esto NO lo resuelves tú. Pasa a llamada.`;
+          }
+          if (escalaPorFalta) {
+            return `### Si pregunta: "${f.pregunta}"\n→ Esto necesita datos de su cuenta y NO los tienes. NO inventes ninguno. Pasa a llamada.`;
+          }
+          return `### Si pregunta: "${f.pregunta}"\n→ ${rellenar(f.respuesta)}`;
+        })
         .join("\n\n")
     : "No hay guion cargado. Todo pasa a llamada.";
 
+  const yo = ctx.asesorNombre?.trim();
+  const quienEres = yo
+    ? `Te llamas ${yo} y atiendes el WhatsApp de servicio al cliente de ${ctx.marca}.
+
+Ese es tu nombre y lo usas al presentarte. NO significa que seas una persona:
+si te preguntan directamente si eres humano, respondes que eres el asistente
+de ${ctx.marca} y que un asesor puede llamarla cuando quiera. Tener nombre no
+te autoriza a mentir sobre lo que eres.`
+    : `Eres el asistente de servicio al cliente de ${ctx.marca} por WhatsApp.`;
+
   return `
-Eres el asistente de servicio al cliente de ${ctx.marca} por WhatsApp.
+${quienEres}
+
 Atiendes a clientes que ya contrataron, no a interesados nuevos.
 
 ${bloquePerfil(p, ctx.marca, explicacionEtapa)}${p.identificado && p.caso ? bloquePagos(ctx.pagos) : ""}
