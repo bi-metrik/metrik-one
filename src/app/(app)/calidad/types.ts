@@ -154,6 +154,15 @@ export interface FilaRanking {
   pctCierre: number
   tecnica: number
   banderas: number
+  /**
+   * Lo YA COBRADO por este agente en el periodo: la venta de tarjeta entra
+   * completa, la de cuenta entra solo por la primera de sus seis cuotas.
+   *
+   * No es lo vendido, y tampoco es el `recaudadoUsd` de `calidad_reparto_cuotas`
+   * (aquel proyecta las seis cuotas con la tasa de caida). Mismo nombre, dos
+   * preguntas distintas: no se suman ni se comparan entre si.
+   */
+  recaudadoUsd: number
 }
 
 /**
@@ -246,6 +255,20 @@ export interface MuroData {
    * en blanco a mitad de ciclo.
    */
   periodos: Record<Periodo, BloquePeriodo>
+
+  /**
+   * De donde salen los datos que se estan viendo, CONTADO, no recordado. El pie
+   * del muro lo redacta.
+   *
+   * Es del workspace completo, no del periodo que rota: es un descargo sobre el
+   * origen de los datos, no una metrica. Si cambiara con el giro podria decir
+   * "ninguna real" en el dia y "una real" en el mes, sobre la misma pantalla.
+   *
+   * Opcional porque el codigo puede estar desplegado antes que la migracion que
+   * agrega la clave. En ese caso la pantalla calla, que es lo correcto: el
+   * error que esto repara fue justamente afirmar de memoria.
+   */
+  muestra?: { reales: number; total: number }
 
   /**
    * El flujo: lo que esta pasando AHORA. NO rota — es el pulso en vivo, no un
