@@ -14,7 +14,7 @@
 
 import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
 import { generate, type Msg } from "../venezuela/gemini.ts";
-import { buildSystem, BLOQUE_DATO_SENSIBLE, type Frecuente, type PerfilCliente } from "./prompt.ts";
+import { buildSystem, BLOQUE_DATO_SENSIBLE, type EstadoPagos, type Frecuente, type PerfilCliente } from "./prompt.ts";
 import { detectarDatoSensible, enmascarar } from "./deteccion.ts";
 import { escalarALlamada } from "./cierre.ts";
 
@@ -33,6 +33,8 @@ export interface CustomerBotConfig {
   frecuentes?: Frecuente[];
   /** Mapa nombre de etapa -> qué significa, en palabras del cliente. */
   etapas_explicacion?: Record<string, string>;
+  /** Moneda en que factura este negocio. Default COP. */
+  moneda?: string;
   /** Saludo para cliente reconocido. Admite {nombre}. */
   saludo?: string;
   /** Saludo cuando no se reconoce el número. */
@@ -45,6 +47,86 @@ interface CsState {
   history: { role: "user" | "model"; text: string }[];
   turns: number;
   perfil: PerfilExt;
+  pagos?: EstadoPagos | null;
+}
+
+const MESES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+
+/** "2026-08-05" -> "5 de agosto de 2026". Sin Date: el parseo de fechas sueltas cambia con la zona horaria. */
+function fechaLarga(iso: string | null): string | null {
+  if (!iso) return null;
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const mes = MESES[Number(m[2]) - 1];
+  if (!mes) return null;
+  return `${Number(m[3])} de ${mes} de ${m[1]}`;
+}
+
+function money(v: unknown, moneda: string): string | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  // El formato sigue a la MONEDA, no al idioma del bot. Un cliente de Advise
+  // está en Estados Unidos o Puerto Rico: "US$ 1.200,00" (notación colombiana)
+  // se lee raro y en plata la ambigüedad cuesta una llamada. USD va como
+  // $1,200.00; COP como $1.200.
+  const esUsd = moneda === "USD";
+  try {
+    return new Intl.NumberFormat(esUsd ? "en-US" : "es-CO", {
+      style: "currency",
+      currency: moneda,
+      minimumFractionDigits: esUsd ? 2 : 0,
+    }).format(n);
+  } catch {
+    return `${moneda} ${n}`;
+  }
+}
+
+/**
+ * Trae el estado de pagos y lo deja como TEXTO ya formateado.
+ *
+ * El formateo ocurre aquí y no en el modelo a propósito: el modelo solo
+ * repite. Nunca lanza — si falla, el prompt recibe null y el bot escala,
+ * que es el comportamiento correcto cuando no tenemos el dato.
+ */
+async function traerPagos(
+  supabase: Supa,
+  negocioId: string | null,
+  moneda: string,
+): Promise<EstadoPagos | null> {
+  if (!negocioId) return null;
+  try {
+    const { data, error } = await supabase.rpc("cs_estado_pagos", { p_negocio_id: negocioId });
+    if (error) {
+      console.error("[cs-chat] cs_estado_pagos:", error.message);
+      return null;
+    }
+    const r = data?.[0];
+    if (!r) return null;
+    // Sin precio no hay nada que contar de plata; mejor escalar.
+    if (r.precio_total === null && Number(r.pagado ?? 0) === 0) return null;
+
+    const ultFecha = fechaLarga(r.ultimo_pago_fecha);
+    const proxFecha = fechaLarga(r.proxima_fecha);
+    const ultMonto = money(r.ultimo_pago_monto, moneda);
+    const proxMonto = money(r.proxima_monto, moneda);
+
+    return {
+      precioTotal: money(r.precio_total, moneda),
+      pagado: money(r.pagado, moneda),
+      saldo: money(r.saldo, moneda),
+      cuotas: r.cuotas_totales ? `${r.cuotas_pagadas} de ${r.cuotas_totales}` : null,
+      ultimoPago: ultMonto && ultFecha ? `${ultMonto} el ${ultFecha}` : null,
+      proximaCuota: proxMonto && proxFecha ? `${proxMonto} el ${proxFecha}` : null,
+      vencido: r.hay_vencido ? money(r.monto_vencido, moneda) : null,
+    };
+  } catch (e) {
+    console.error("[cs-chat] traerPagos lanzó:", (e as Error).message ?? "");
+    return null;
+  }
 }
 
 const clean = (s: string) => (s || "").replace(/```[a-z]*|```/gi, "").trim();
@@ -171,8 +253,9 @@ export async function startCustomerChat(
   waMessageId?: string,
 ): Promise<void> {
   const perfil = await identificar(supabase, workspaceId, phone);
+  const pagos = await traerPagos(supabase, perfil.negocioId, config.moneda ?? "COP");
   const saludo = saludoDe(config, perfil);
-  const state: CsState = { history: [{ role: "model", text: saludo }], turns: 0, perfil };
+  const state: CsState = { history: [{ role: "model", text: saludo }], turns: 0, perfil, pagos };
 
   await supabase.from("cs_chat_sessions").upsert({
     phone,
@@ -258,6 +341,7 @@ export async function continueCustomerChat(
     perfil,
     frecuentes: config.frecuentes ?? [],
     etapasExplicacion: config.etapas_explicacion,
+    pagos: state.pagos ?? null,
   });
   if (sensible) system += "\n\n" + BLOQUE_DATO_SENSIBLE;
 

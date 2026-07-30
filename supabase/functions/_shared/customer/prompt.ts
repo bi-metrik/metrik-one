@@ -33,10 +33,28 @@ export interface Frecuente {
   escala?: boolean;
 }
 
+/**
+ * Estado de pagos, con las cifras YA FORMATEADAS como texto.
+ *
+ * Llegan formateadas a propósito: el modelo no debe sumar cuotas ni calcular
+ * saldos. Un modelo que hace aritmética se equivoca, y en plata una cifra mal
+ * dicha es un cliente llamando a reclamar. Aquí solo repite lo que se le da.
+ */
+export interface EstadoPagos {
+  precioTotal: string | null;
+  pagado: string | null;
+  saldo: string | null;
+  cuotas: string | null;          // "3 de 6"
+  ultimoPago: string | null;      // "US$200.00 el 5 de julio de 2026"
+  proximaCuota: string | null;    // "US$200.00 el 5 de agosto de 2026"
+  vencido: string | null;         // solo si hay algo vencido
+}
+
 export interface ServicioCtx {
   marca: string;
   perfil: PerfilCliente;
   frecuentes: Frecuente[];
+  pagos?: EstadoPagos | null;
   /**
    * Qué significa cada etapa, en palabras del cliente. Mapa nombre de etapa
    * → explicación.
@@ -132,6 +150,31 @@ Solo uno de los dos, y solo en el mensaje final. Si todavía estás
 conversando, no va ninguno.
 `.trim();
 
+
+function bloquePagos(pg?: EstadoPagos | null): string {
+  if (!pg) {
+    return `\n\n### Pagos\n\nNO tienes el estado de pagos de este cliente. No lo estimes ni lo deduzcas. Si pregunta por plata, pasa a llamada.`;
+  }
+  const filas = [
+    pg.precioTotal ? `- Valor total del programa: ${pg.precioTotal}` : null,
+    pg.pagado ? `- Lleva pagado: ${pg.pagado}` : null,
+    pg.saldo ? `- Le queda por pagar: ${pg.saldo}` : null,
+    pg.cuotas ? `- Cuotas: ${pg.cuotas}` : null,
+    pg.ultimoPago ? `- Último pago recibido: ${pg.ultimoPago}` : null,
+    pg.proximaCuota ? `- Próxima cuota: ${pg.proximaCuota}` : null,
+    pg.vencido ? `- ⚠️ Tiene vencido: ${pg.vencido}` : null,
+  ].filter(Boolean).join("\n");
+
+  return `\n\n### Pagos
+
+${filas}
+
+Estas cifras ya están calculadas: repítelas TAL CUAL. No sumes, no restes, no
+conviertas y no redondees. Si te preguntan algo de plata que NO esté en esta
+lista (por qué se cobró algo, cambiar la fecha de un débito, un reembolso),
+eso no lo resuelves tú: pasa a llamada.`;
+}
+
 function bloquePerfil(p: PerfilCliente, marca: string, explicacion?: string): string {
   if (!p.identificado) {
     return `
@@ -193,7 +236,7 @@ export function buildSystem(ctx: ServicioCtx): string {
 Eres el asistente de servicio al cliente de ${ctx.marca} por WhatsApp.
 Atiendes a clientes que ya contrataron, no a interesados nuevos.
 
-${bloquePerfil(p, ctx.marca, explicacionEtapa)}
+${bloquePerfil(p, ctx.marca, explicacionEtapa)}${p.identificado && p.caso ? bloquePagos(ctx.pagos) : ""}
 
 ## Lo que sabes responder
 
