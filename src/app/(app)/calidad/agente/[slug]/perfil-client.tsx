@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   CartesianGrid,
@@ -15,6 +16,7 @@ import { C, MONO } from '../../components/tokens'
 import {
   COMO_SUBIR,
   leerTendencia,
+  type DiaPerfil,
   type LecturaTendencia,
   type PerfilAgente,
   type Semaforo,
@@ -23,7 +25,7 @@ import {
 /**
  * Perfil de agente. Responde dos preguntas y nada mas:
  *
- *   ¿este agente esta mejorando o empeorando?  → dispersion + lectura
+ *   ¿este agente esta mejorando o empeorando?  → score por dia + lectura
  *   ¿que tiene que hacer para subir?           → recomendaciones
  *
  * ES UNA PANTALLA DE TRABAJO, no un muro. Se mira de cerca, en un escritorio,
@@ -35,10 +37,25 @@ import {
  * ("haz una pregunta cada dos minutos"), no de la persona ("no sabe escuchar"),
  * y el bloque fuerte se nombra igual que el debil.
  *
- * LOS DOS EJES NO SE PROMEDIAN. El eje Y es el puntaje tecnico; el cumplimiento
- * entra como COLOR del punto, nunca sumado. Una llamada de 84 con una bandera
- * critica no es "una de 70": es una buena llamada con un problema aparte, y la
- * pantalla tiene que dejar ver las dos cosas sin mezclarlas.
+ * LA UNIDAD ES EL DIA, NO LA LLAMADA. Antes se graficaba una dispersion de
+ * llamada por llamada y no se entendia: una llamada suelta no dice nada de la
+ * persona, pudo tocarle un mal cliente. La pregunta que la pantalla contesta es
+ * "como viene", y esa se responde con el dia.
+ *
+ * EN EL DIA SI SE JUNTAN LOS DOS EJES: `score = tecnica - penalizacion por
+ * criticas`. Es lo contrario de lo que hacia la version por llamada, y el
+ * cambio es deliberado. "Una llamada de 84 con una bandera critica no es una de
+ * 70" sigue siendo cierto, porque una llamada es un hecho suelto; pero "como
+ * opero hoy" SI es una sola pregunta, y ejecutar bien exponiendo a la empresa
+ * en cada llamada no es un buen dia.
+ *
+ * Y no repite el semaforo unico que se revirtio en la v4: aquel era de tres
+ * estados y al agregarlo por dia dejaba a todos en rojo. Este es continuo y la
+ * penalizacion esta capada en 10 sobre 100.
+ *
+ * EL VOLUMEN SE VE. El punto crece con las llamadas del dia y la linea es la
+ * media movil ponderada, no los puntos unidos: sin eso, un dia de una sola
+ * llamada dibuja un derrumbe que no ocurrio.
  */
 
 /**
@@ -46,29 +63,7 @@ import {
  * quiere unica), asi que todo es opcional salvo la posicion en el eje temporal:
  * una fila de la recta no tiene semaforo y una llamada no tiene `recta`.
  */
-type Fila = {
-  x: number
-  y?: number
-  /**
-   * Una clave por color en vez de `<Cell>` dentro de `<Scatter>`: en Recharts 3
-   * las Cell reciben un ref que revienta el render en runtime (no lo ve el
-   * compilador, solo la pantalla). Tres series, cada una con su `fill`, son
-   * ademas mas honestas con el modelo: el cumplimiento es una dimension propia,
-   * no una decoracion de los puntos del score.
-   */
-  yVerde?: number
-  yAmarillo?: number
-  yRojo?: number
-  recta?: number
-  id?: string
-  ref?: string
-  fecha?: string
-  dia?: string
-  tecnica?: number
-  semaforo?: Semaforo
-  cerroVenta?: boolean
-  detalle?: boolean
-}
+type Fila = DiaPerfil & { x: number }
 
 const COLOR_SEMAFORO: Record<Semaforo, string> = {
   verde: C.ok,
@@ -77,49 +72,44 @@ const COLOR_SEMAFORO: Record<Semaforo, string> = {
 }
 
 /**
- * Punto de una llamada auditada: mas grande, con anillo, y clicable.
+ * El punto de un dia. El radio codifica CUANTAS llamadas lo sostienen.
  *
- * Cada punto ES una llamada, pero solo las auditadas tienen detalle que abrir.
- * Hacer clicables todas llevaria a una pantalla vacia; hacer clicables solo
- * estas conecta las dos vistas sin prometer lo que no hay: se ve un punto bajo,
- * se hace clic y se cae en la auditoria de esa llamada, con sus banderas y su
- * minuto. Antes el grafico decia "tuviste dias malos" y no dejaba ir a ver
- * cuales.
+ * Radio por raiz del volumen, no lineal: lo que el ojo compara en un circulo es
+ * el area, y con radio lineal un dia de 12 llamadas se ve cuatro veces mas
+ * pesado que uno de 3, no cuatro veces mas grande en area. Con la raiz, area y
+ * volumen van a la par.
+ *
+ * Sin esto la pantalla miente por omision: dos puntos identicos donde uno vale
+ * 12 llamadas y el otro una sola.
  */
-function PuntoAuditado({
+function PuntoDia({
   cx,
   cy,
-  color,
+  llamadas,
+  maxLlamadas,
+  seleccionado,
   onClick,
 }: {
   cx?: number
   cy?: number
-  color: string
+  llamadas: number
+  maxLlamadas: number
+  seleccionado: boolean
   onClick: () => void
 }) {
   if (cx == null || cy == null) return null
+  const r = 3 + 6 * Math.sqrt(llamadas / Math.max(1, maxLlamadas))
   return (
     <g style={{ cursor: 'pointer' }} onClick={onClick}>
-      {/* Area de clic generosa: el punto visible es de 5 px y nadie acierta a eso. */}
-      <circle cx={cx} cy={cy} r={11} fill="transparent" />
-      <circle cx={cx} cy={cy} r={7} fill="none" stroke={color} strokeWidth={1.5} opacity={0.55} />
-      <circle cx={cx} cy={cy} r={4} fill={color} stroke={C.surface} strokeWidth={1.5} />
+      {/* Area de clic generosa: el punto chico es de 3 px y nadie acierta a eso. */}
+      <circle cx={cx} cy={cy} r={Math.max(11, r + 5)} fill="transparent" />
+      {seleccionado && (
+        <circle cx={cx} cy={cy} r={r + 4} fill="none" stroke={C.ink} strokeWidth={1.5} />
+      )}
+      <circle cx={cx} cy={cy} r={r} fill={C.brand} fillOpacity={0.75} stroke={C.surface} strokeWidth={1.5} />
     </g>
   )
 }
-
-/**
- * Los puntos se dibujan con `Line` sin trazo y con `dot`, no con `Scatter`.
- * Recharts 3.7 revienta en runtime al montar un `Scatter` bajo React 19
- * ("Expected ref to be a function...") y no hay ningun `Scatter` mas en el
- * proyecto que respalde el camino; `Line` si esta probado en los otros
- * tableros. Visualmente es la misma dispersion: sin linea que una los puntos.
- */
-const puntosPorColor: [keyof Fila, string][] = [
-  ['yVerde', C.ok],
-  ['yAmarillo', C.high],
-  ['yRojo', C.crit],
-]
 
 /** US$ sin decimales: la cifra importa, los centavos no. */
 const usd = (n: number) =>
@@ -134,42 +124,28 @@ const LECTURA: Record<LecturaTendencia, { titulo: string; tono: string }> = {
 
 export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente }) {
   const router = useRouter()
-  const { kpis, tendencia, bloques, puntos } = perfil
+  const { kpis, tendencia, bloques, puntos, dias } = perfil
   const lectura = leerTendencia(tendencia)
   const nombreCorto = perfil.agente.split(' ')[0]
 
-  // Serie para el grafico. `x` es el dia como numero para que el eje sea
-  // temporal de verdad y no una secuencia de llamadas: si el agente hizo 40
-  // llamadas un dia y 3 al siguiente, eso tiene que verse.
+  // El dia cuyo detalle esta abierto. Null = ninguno.
+  const [diaSel, setDiaSel] = useState<string | null>(null)
+
+  // Serie del grafico: un punto por dia. `x` es el dia como numero para que el
+  // eje sea temporal de verdad — si el agente no trabajo el martes, el hueco
+  // tiene que verse, no cerrarse como si el miercoles siguiera al lunes.
   const t0 = new Date(`${perfil.desde}T00:00:00`).getTime()
-  const datos: Fila[] = puntos.map((p) => ({
-    ...p,
-    // Sin redondear: `Math.round` sobre la fraccion del dia empuja una llamada
-    // de las 18:00 al dia siguiente y el eje termina mostrando una fecha que no
-    // existe en el periodo.
-    x: (new Date(`${p.fecha}:00`).getTime() - t0) / 86_400_000,
-    y: p.tecnica,
-    yVerde: p.semaforo === 'verde' ? p.tecnica : undefined,
-    yAmarillo: p.semaforo === 'amarillo' ? p.tecnica : undefined,
-    yRojo: p.semaforo === 'rojo' ? p.tecnica : undefined,
+  const serie: Fila[] = dias.map((d) => ({
+    ...d,
+    x: Math.round((new Date(`${d.dia}T00:00:00`).getTime() - t0) / 86_400_000),
   }))
 
-  // Linea de tendencia: la misma recta que sostiene la lectura de arriba, para
-  // que el ojo vea de donde sale la palabra. Se dibuja solo si hay pendiente.
-  const conRecta =
-    tendencia.porSemana !== null && datos.length >= 3
-      ? (() => {
-          const n = datos.length
-          const mx = datos.reduce((a, d) => a + d.x, 0) / n
-          const my = datos.reduce((a, d) => a + (d.y ?? 0), 0) / n
-          const m = tendencia.porSemana! / 7
-          const b = my - m * mx
-          const xs = [Math.min(...datos.map((d) => d.x)), Math.max(...datos.map((d) => d.x))]
-          return xs.map((x): Fila => ({ x, recta: m * x + b }))
-        })()
-      : ([] as Fila[])
+  const maxLlamadas = Math.max(1, ...dias.map((d) => d.llamadas))
 
-  const serie: Fila[] = [...datos, ...conRecta].sort((a, b) => a.x - b.x)
+  // Las llamadas del dia abierto, para no perder el camino a la transcripcion
+  // que si tenia la vista por llamada.
+  const llamadasDelDia = diaSel ? puntos.filter((p) => p.dia === diaSel) : []
+  const detalleDia = diaSel ? dias.find((d) => d.dia === diaSel) : undefined
 
   const fecha = (iso: string) =>
     new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
@@ -221,9 +197,9 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
         />
       </section>
 
-      {/* ── Dispersión + tendencia ─────────────────────────────────────── */}
+      {/* ── Score por día + trayectoria ────────────────────────────────── */}
       <section style={{ marginTop: 26 }}>
-        <h2 style={h2}>Llamada por llamada</h2>
+        <h2 style={h2}>Día por día</h2>
         <div style={{ ...card, padding: '18px 20px 10px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 17, fontWeight: 700, color: LECTURA[lectura].tono }}>
@@ -231,7 +207,7 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
             </span>
             <span style={{ fontSize: 13, color: C.inkMuted }}>
               {lectura === 'sin_datos' ? (
-                'Hacen falta al menos tres llamadas en el período para leer una tendencia.'
+                'Hacen falta al menos tres días con llamadas para leer una tendencia.'
               ) : (
                 <>
                   {tendencia.porSemana !== null && (
@@ -280,11 +256,14 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
                   tickLine={false}
                   axisLine={false}
                 />
+                {/* El tooltip DESGLOSA la cuenta. El score anterior no se
+                    entendia en parte porque era un numero sin origen visible:
+                    aqui se ve de que sale, y si no cuadra, se puede discutir. */}
                 <Tooltip
                   cursor={{ stroke: C.lineStrong }}
                   content={({ active, payload }) => {
-                    const p = payload?.[0]?.payload
-                    if (!active || !p || p.tecnica === undefined) return null
+                    const p = payload?.[0]?.payload as Fila | undefined
+                    if (!active || !p || p.score === undefined) return null
                     return (
                       <div
                         style={{
@@ -296,73 +275,67 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
                           boxShadow: '0 2px 8px rgba(0,0,0,.08)',
                         }}
                       >
-                        <div style={{ fontFamily: MONO, color: C.inkMuted }}>
-                          {p.fecha.replace('T', ' · ')}
+                        <div style={{ fontFamily: MONO, color: C.inkMuted }}>{fecha(p.dia)}</div>
+                        <div style={{ fontWeight: 700, marginTop: 2, fontSize: 15 }}>
+                          Score {p.score}
                         </div>
-                        <div style={{ fontWeight: 700, marginTop: 2 }}>Técnica {p.tecnica}</div>
-                        <div style={{ color: COLOR_SEMAFORO[p.semaforo as Semaforo] }}>
-                          {p.semaforo === 'verde'
-                            ? 'Sin banderas'
-                            : p.semaforo === 'amarillo'
-                              ? 'Con banderas'
-                              : 'Con banderas críticas'}
+                        <div style={{ color: C.inkMuted, marginTop: 4, lineHeight: 1.5 }}>
+                          Técnica {p.tecnica}
+                          {p.penalizacion > 0 && (
+                            <span style={{ color: C.crit }}>
+                              {' '}
+                              − {p.penalizacion} por {p.criticas}{' '}
+                              {p.criticas === 1 ? 'crítica' : 'críticas'}
+                            </span>
+                          )}
+                          <br />
+                          {p.llamadas} {p.llamadas === 1 ? 'llamada' : 'llamadas'}
+                          {p.cierres > 0 && ` · ${p.cierres} ${p.cierres === 1 ? 'cierre' : 'cierres'}`}
                         </div>
-                        {p.cerroVenta && <div style={{ color: C.brand }}>Cerró venta</div>}
-                        {p.detalle && (
-                          <div style={{ color: C.inkMuted, marginTop: 2 }}>Tiene transcripción</div>
+                        {p.llamadas <= 2 && (
+                          <div style={{ color: C.high, marginTop: 4 }}>
+                            Pocas llamadas: dato poco firme.
+                          </div>
                         )}
+                        <div style={{ color: C.inkMuted, marginTop: 4, fontSize: 11.5 }}>
+                          Promedio de la semana: {p.suave}
+                        </div>
                       </div>
                     )
                   }}
                 />
-                {/* El cumplimiento es el COLOR del punto, jamás parte de la altura. */}
-                {puntosPorColor.map(([clave, color]) => (
-                  <Line
-                    key={clave}
-                    dataKey={clave}
-                    stroke="none"
-                    dot={(props: { cx?: number; cy?: number; payload?: Fila; index?: number }) => {
-                      const f = props.payload
-                      // Cada Line recorre TODAS las filas, incluidas las de los
-                      // otros dos colores y las de la recta. Sin esta guarda se
-                      // dibuja un punto donde esa serie no tiene valor, y
-                      // Recharts los apila arriba: salia una fila de guiones
-                      // roja pegada al techo del grafico.
-                      if (f == null || f[clave] == null) return <g key={`v-${clave}-${props.index}`} />
-                      if (f.detalle && f.id) {
-                        return (
-                          <PuntoAuditado
-                            key={`aud-${f.id}`}
-                            cx={props.cx}
-                            cy={props.cy}
-                            color={color}
-                            onClick={() => router.push(`/calidad/llamada/${f.id}`)}
-                          />
-                        )
-                      }
-                      return (
-                        <circle
-                          key={`p-${clave}-${props.index}`}
-                          cx={props.cx}
-                          cy={props.cy}
-                          r={3}
-                          fill={color}
-                          fillOpacity={0.6}
-                        />
-                      )
-                    }}
-                    activeDot={{ r: 5, fill: color, stroke: C.surface, strokeWidth: 2 }}
-                    connectNulls={false}
-                    isAnimationActive={false}
-                  />
-                ))}
+                {/* La LINEA es la media movil ponderada, no los puntos unidos.
+                    Unir los crudos dibuja derrumbes que son ruido de muestra. */}
                 <Line
-                  dataKey="recta"
+                  dataKey="suave"
                   stroke={C.ink}
-                  strokeWidth={2}
+                  strokeWidth={2.5}
                   dot={false}
                   isAnimationActive={false}
                   connectNulls
+                />
+                {/* Los puntos van DESPUES para quedar sobre la linea. */}
+                <Line
+                  dataKey="score"
+                  stroke="none"
+                  dot={(props: { cx?: number; cy?: number; payload?: Fila; index?: number }) => {
+                    const f = props.payload
+                    if (f == null || f.score == null) return <g key={`v-${props.index}`} />
+                    return (
+                      <PuntoDia
+                        key={`d-${f.dia}`}
+                        cx={props.cx}
+                        cy={props.cy}
+                        llamadas={f.llamadas}
+                        maxLlamadas={maxLlamadas}
+                        seleccionado={diaSel === f.dia}
+                        onClick={() => setDiaSel(diaSel === f.dia ? null : f.dia)}
+                      />
+                    )
+                  }}
+                  activeDot={false}
+                  connectNulls={false}
+                  isAnimationActive={false}
                 />
               </ComposedChart>
             </ResponsiveContainer>
@@ -378,14 +351,100 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
               padding: '2px 4px 12px',
             }}
           >
-            <Leyenda color={C.ok} texto={`Sin banderas · ${kpis.verde}`} />
-            <Leyenda color={C.high} texto={`Con banderas · ${kpis.amarillo}`} />
-            <Leyenda color={C.crit} texto={`Con críticas · ${kpis.rojo}`} />
-            <span>· La línea es la tendencia del período.</span>
-            {puntos.some((p) => p.detalle) && (
-              <span>· Los puntos con anillo tienen transcripción: haz clic para abrirla.</span>
-            )}
+            <Leyenda color={C.brand} texto="Cada punto es un día" />
+            <span>· El punto crece con las llamadas que tuvo ese día.</span>
+            <span>· La línea es el promedio de los últimos siete días, no los puntos unidos.</span>
+            <span>· Haz clic en un día para ver sus llamadas.</span>
           </div>
+
+          {/* ── Las llamadas del día abierto ──────────────────────────────
+              El camino a la transcripción no se pierde al pasar a día: se
+              baja un nivel. Antes se hacía clic en la llamada directamente;
+              ahora se elige el día y de ahí la llamada. */}
+          {detalleDia && (
+            <div style={{ borderTop: `1px solid ${C.line}`, padding: '14px 4px 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 15, fontWeight: 700 }}>{fecha(detalleDia.dia)}</span>
+                <span style={{ fontSize: 13, color: C.inkMuted }}>
+                  Score {detalleDia.score} · técnica {detalleDia.tecnica}
+                  {detalleDia.penalizacion > 0 && (
+                    <span style={{ color: C.crit }}> − {detalleDia.penalizacion} por críticas</span>
+                  )}
+                  {' · '}
+                  {detalleDia.llamadas} {detalleDia.llamadas === 1 ? 'llamada' : 'llamadas'}
+                </span>
+                <button
+                  onClick={() => setDiaSel(null)}
+                  style={{
+                    marginLeft: 'auto',
+                    background: 'none',
+                    border: 'none',
+                    color: C.inkMuted,
+                    fontSize: 12.5,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {llamadasDelDia.map((l) => (
+                  <div
+                    key={l.id}
+                    onClick={l.detalle ? () => router.push(`/calidad/llamada/${l.id}`) : undefined}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '58px 1fr 62px 92px',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '7px 8px',
+                      borderRadius: 5,
+                      fontSize: 13,
+                      cursor: l.detalle ? 'pointer' : 'default',
+                      background: l.detalle ? 'rgba(0,0,0,.02)' : 'transparent',
+                    }}
+                  >
+                    <span style={{ fontFamily: MONO, color: C.inkMuted }}>
+                      {l.fecha.slice(11)}
+                    </span>
+                    <span
+                      style={{
+                        color: C.inkMuted,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {l.ref}
+                      {l.cerroVenta && <span style={{ color: C.brand }}> · cerró</span>}
+                    </span>
+                    <span style={{ fontFamily: MONO, textAlign: 'right' }}>{l.tecnica}</span>
+                    <span
+                      style={{
+                        color: COLOR_SEMAFORO[l.semaforo],
+                        fontSize: 12,
+                        textAlign: 'right',
+                      }}
+                    >
+                      {l.semaforo === 'verde'
+                        ? 'sin banderas'
+                        : l.semaforo === 'amarillo'
+                          ? 'con banderas'
+                          : 'críticas'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {llamadasDelDia.some((l) => l.detalle) && (
+                <p style={{ fontSize: 12, color: C.inkMuted, margin: '8px 4px 0' }}>
+                  Las llamadas con fondo tienen transcripción: haz clic para abrirla.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
