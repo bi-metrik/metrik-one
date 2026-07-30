@@ -28,6 +28,7 @@ import {
   Sliders,
   Receipt,
   Headphones,
+  PhoneCall,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -60,6 +61,8 @@ interface WorkspaceModules {
   aliados?: boolean
   /** Auditoria de calidad de llamadas (/calidad). Multi-cliente: call centers. */
   calidad_llamadas?: boolean
+  /** Bot de servicio al cliente por WhatsApp. Habilita /solicitudes. */
+  wa_customer_bot?: boolean
   [key: string]: boolean | undefined
 }
 
@@ -177,6 +180,14 @@ const CALIDAD_NAV_ITEMS = [
   // llame igual para todos es deliberado: el ejecutor no tiene por que saber
   // que su pantalla es un caso particular de la del supervisor.
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor', 'operator'] },
+]
+
+// Solicitudes de llamada que deja el bot de WhatsApp (activable por flag
+// wa_customer_bot). Es operacion diaria de quien atiende, por eso va con los
+// extras y no dentro de calidad: un workspace puede tener el bot sin tener
+// auditoria de llamadas.
+const SOLICITUDES_NAV_ITEMS = [
+  { href: '/solicitudes', label: 'Solicitudes', icon: PhoneCall, roles: ['owner', 'admin', 'supervisor', 'operator'] },
 ]
 
 // Valida (extra inferior, activable por flag)
@@ -394,7 +405,8 @@ export default function AppShell({
     : [])
   const validaItems = (modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : []
   const certItems = vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : [])
-  const extrasItems = [...validaItems, ...certItems]
+  const solicitudesItems = vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : [])
+  const extrasItems = [...solicitudesItems, ...validaItems, ...certItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
@@ -414,7 +426,7 @@ export default function AppShell({
         : (mod.calidad_llamadas ? '/calidad' : '/mi-negocio')))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...validaItems, ...certItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...certItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
     ? ['/valida', '/tableros', '/numeros']
     : (!mod.business && mod.compliance)
