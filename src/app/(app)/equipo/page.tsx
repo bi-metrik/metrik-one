@@ -8,6 +8,8 @@ import VendedoresClient from './vendedores-client'
 import EquipoComercialPersonasClient from './equipo-comercial-personas-client'
 import { getVendedoresResumen } from './vendedores-actions'
 import { getComercialResumen, getComercialMes, getMetasPorVendedorPeriodo } from './comercial-actions'
+import { getEquipoCalidad } from '../calidad/actions'
+import EquipoCalidadClient from './equipo-calidad-client'
 
 interface Props {
   searchParams: Promise<{ mes?: string; staff?: string; proyecto?: string; estado?: string }>
@@ -36,6 +38,34 @@ export default async function EquipoPage({ searchParams }: Props) {
     // gestiona equipo.
     // Equipo = hoja de indicadores POR PERSONA (con ranking). El tablero AGREGADO
     // vive en la pestaña "Comercial" de /tableros. Acceso: owner/admin/supervisor.
+    // Auditoria de calidad de llamadas (call centers): Equipo es el ranking de
+    // agentes con su tendencia, y el ejecutor ve SOLO su propia hoja. Es la
+    // tercera forma de esta misma ruta, con la misma logica que la de abajo:
+    // una ruta, contenido por rol. No se invento un patron, se escribio otra
+    // instancia del que ya existe.
+    //
+    // Va gateada por su flag y ANTES del fallthrough generico. Los modulos son
+    // disjuntos (ningun workspace tiene `business` y `calidad_llamadas` a la
+    // vez), asi que esta rama es inalcanzable para SOENA y para HJBC. Si alguna
+    // vez se crea un workspace con los dos, el orden de las ramas decide y hay
+    // que resolverlo aqui a proposito, no descubrirlo en pantalla.
+    if (modules.calidad_llamadas) {
+      // El permiso NO se escribe de nuevo: `canViewCalidadTodos` ya existe y ya
+      // gobierna la lista de llamadas y las rutas del motor. Quien puede ver a
+      // todos, ve el ranking; quien no, ve su propia hoja. Un solo booleano.
+      if (!getRolePermissions(role || '').canViewCalidadTodos) {
+        // `/calidad/mi-perfil` resuelve el agente por `agente_staff_id` (no por
+        // nombre) y redirige a su perfil. Sin ese puente habria que repetir la
+        // resolucion aqui.
+        redirect('/calidad/mi-perfil')
+      }
+      const datos = await getEquipoCalidad()
+      // Fallback a `/calidad`, no a `/negocios`: en un workspace de solo
+      // calidad, Negocios es un callejon sin salida.
+      if (!datos) redirect('/calidad')
+      return <EquipoCalidadClient datos={datos} />
+    }
+
     if (modules.comercial_negocios) {
       // El vendedor (operator) ve SOLO su propia hoja: se le redirige a su perfil.
       // Sin staff resuelto, no hay hoja que mostrar -> a Negocios.

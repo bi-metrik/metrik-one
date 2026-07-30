@@ -1,7 +1,9 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { FileAudio } from 'lucide-react'
 import { C, MONO } from './components/tokens'
 import { OrigenBadge, SemaforoBadge } from './components/semaforo-badge'
 import { duracion, slugAgente, type ListaLlamadas, type Semaforo } from './types'
@@ -36,10 +38,13 @@ function fmtFecha(iso: string) {
 export default function CalidadClient({
   datos,
   soloMias,
+  puedeAuditar,
 }: {
   datos: ListaLlamadas
   /** true cuando el usuario es ejecutor: la vista es su hoja, no la del piso. */
   soloMias: boolean
+  /** Subir una grabacion nueva es accion de supervision, no de operacion. */
+  puedeAuditar: boolean
 }) {
   const { filas: llamadas, kpis, total, mostradas } = datos
   const router = useRouter()
@@ -60,26 +65,63 @@ export default function CalidadClient({
 
   return (
     <div style={{ padding: '26px 30px 64px', maxWidth: 1120, color: C.ink }}>
-      <div style={{ marginBottom: 20 }}>
-        <div
-          style={{
-            fontFamily: MONO,
-            fontSize: 10.5,
-            letterSpacing: '.1em',
-            textTransform: 'uppercase',
-            color: C.inkMuted,
-            marginBottom: 5,
-          }}
-        >
-          {soloMias ? 'Mis llamadas' : 'Llamadas auditadas'}
+      <div
+        style={{
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 20,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontFamily: MONO,
+              fontSize: 10.5,
+              letterSpacing: '.1em',
+              textTransform: 'uppercase',
+              color: C.inkMuted,
+              marginBottom: 5,
+            }}
+          >
+            {soloMias ? 'Mis llamadas' : 'Llamadas auditadas'}
+          </div>
+          <h1 style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-.4px', margin: 0 }}>
+            {soloMias ? 'Tus llamadas, con la evidencia' : 'Todas, no una muestra'}
+          </h1>
+          <p style={{ color: C.inkMuted, marginTop: 5, maxWidth: '66ch', fontSize: 14 }}>
+            Cada llamada entra con sus dos ejes calificados. La técnica da puntaje; el cumplimiento
+            levanta banderas. No se promedian.
+          </p>
         </div>
-        <h1 style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-.4px', margin: 0 }}>
-          {soloMias ? 'Tus llamadas, con la evidencia' : 'Todas, no una muestra'}
-        </h1>
-        <p style={{ color: C.inkMuted, marginTop: 5, maxWidth: '66ch', fontSize: 14 }}>
-          Cada llamada entra con sus dos ejes calificados. La técnica da puntaje; el cumplimiento
-          levanta banderas. No se promedian.
-        </p>
+
+        {/* Auditar es una ACCION, no un modulo, y por eso dejo de ser entrada
+            del menu: el resultado aterriza en esta misma lista, asi que el
+            boton vive donde cae lo que produce. */}
+        {puedeAuditar && (
+          <Link
+            href="/calidad/auditar"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              background: C.brand,
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: 8,
+              padding: '10px 15px',
+              fontSize: 13.5,
+              fontWeight: 600,
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <FileAudio size={15} />
+            Auditar una llamada
+          </Link>
+        )}
       </div>
 
       {/* KPIs */}

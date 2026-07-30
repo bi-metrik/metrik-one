@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { Trophy, ArrowRight, Users } from 'lucide-react'
+import { ArrowRight, Users } from 'lucide-react'
+import { GREEN, iniciales, nombreCorto, Mini, RankBadge, RankRow } from './persona-ui'
 import type {
   ComercialResumenRow,
   ComercialMesResponse,
@@ -10,18 +11,8 @@ import type {
 import { MESES_ES } from './comercial-types'
 import { computeRanking, type RankingPersona } from './comercial-ranking'
 
-const GREEN = '#059669'
-const GOLD = '#D97706'
-
 function fmtCOP(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
-}
-function nombreCorto(s: string): string {
-  return s.split(' ').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')
-}
-function iniciales(s: string): string {
-  const p = s.split(' ').filter(Boolean)
-  return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase()
 }
 
 interface Props {
@@ -164,64 +155,5 @@ function PersonaCard({
         <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
       </div>
     </Link>
-  )
-}
-
-function RankBadge({ rank, total }: { rank: number; total: number }) {
-  if (!rank) return null
-  const esPrimero = rank === 1
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold"
-      style={{
-        backgroundColor: esPrimero ? '#FEF3C7' : '#F3F4F6',
-        color: esPrimero ? GOLD : '#6B7280',
-      }}
-      title={`Posicion ${rank} de ${total} en ventas`}
-    >
-      {esPrimero && <Trophy className="h-3 w-3" />}
-      #{rank} de {total}
-    </span>
-  )
-}
-
-function Mini({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="rounded-lg bg-gray-50 px-3 py-2">
-      <p className="text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-0.5 text-sm font-bold tabular-nums text-gray-900" style={color ? { color } : undefined}>
-        {value}
-      </p>
-    </div>
-  )
-}
-
-function RankRow({
-  label,
-  value,
-  rank,
-  total,
-  strong,
-}: {
-  label: string
-  value: string
-  rank: number
-  total: number
-  strong?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-xs text-gray-500">{label}</span>
-      <div className="flex items-center gap-2">
-        <span className={`tabular-nums whitespace-nowrap text-sm ${strong ? 'font-bold text-gray-900' : 'font-semibold text-gray-700'}`}>
-          {value}
-        </span>
-        {rank > 0 && (
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500 tabular-nums" title={`Posicion ${rank} de ${total}`}>
-            #{rank}
-          </span>
-        )}
-      </div>
-    </div>
   )
 }

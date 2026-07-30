@@ -8,8 +8,10 @@ import { TabFinanciero } from './components/tab-financiero'
 import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercial'
 import { TabComercialSoena } from './components/tab-comercial-soena'
 import { TabProceso } from './components/tab-proceso'
+import TabCalidad from './components/tab-calidad'
+import type { DuenoData } from '../calidad/types'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
-import { ShieldCheck } from 'lucide-react'
+import { ShieldCheck, LayoutDashboard } from 'lucide-react'
 import type {
   ComercialResumenRow,
   ComercialMesResponse,
@@ -17,7 +19,7 @@ import type {
   MetaComercial,
 } from '../equipo/comercial-types'
 
-type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'proceso' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento'
+type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'proceso' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento' | 'calidad'
 
 const RENTABILIDAD_TAB: { key: TabKey; label: string } = { key: 'rentabilidad_comercial', label: 'Rentabilidad Comercial' }
 const COMERCIAL_NEGOCIOS_TAB: { key: TabKey; label: string } = { key: 'comercial_negocios', label: 'Comercial' }
@@ -32,6 +34,10 @@ const BUSINESS_TABS: { key: TabKey; label: string }[] = [
 ]
 
 const COMPLIANCE_TAB: { key: TabKey; label: string } = { key: 'cumplimiento', label: 'Cumplimiento' }
+
+// Calidad de llamadas: dinero, embudo de cobro y riesgo. Se empuja FUERA de la
+// rama de business, igual que Cumplimiento — su modulo no depende de aquel.
+const CALIDAD_TAB: { key: TabKey; label: string } = { key: 'calidad', label: 'Recaudo y riesgo' }
 
 const PERIODOS: { key: Periodo; label: string }[] = [
   { key: 'mes', label: 'Este mes' },
@@ -57,6 +63,8 @@ interface TablerosClientProps {
   initialRentabilidad?: RentabilidadComercialData | null
   initialComercialNegocios?: ComercialNegociosBundle | null
   initialProcesoSeccional?: ProcesoSeccionalData | null
+  /** Null si el workspace no tiene el modulo o si el rol no ve dinero. */
+  initialCalidad?: DuenoData | null
   modules?: Record<string, boolean>
 }
 
@@ -67,6 +75,7 @@ export default function TablerosClient({
   initialRentabilidad,
   initialComercialNegocios,
   initialProcesoSeccional,
+  initialCalidad,
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
@@ -91,11 +100,16 @@ export default function TablerosClient({
       if (mod.proceso_semanal && initialProcesoSeccional) t.splice(1, 0, PROCESO_TAB)
     }
     if (mod.compliance) t.push(COMPLIANCE_TAB)
+    if (mod.calidad_llamadas && initialCalidad) t.push(CALIDAD_TAB)
     return t
-  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, initialComercialNegocios, initialProcesoSeccional])
+  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, mod.calidad_llamadas, initialComercialNegocios, initialProcesoSeccional, initialCalidad])
 
-  const defaultTab = tabs[0]?.key ?? 'cumplimiento'
-  const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
+  // Sin `?? 'cumplimiento'`: cuando no hay ninguna pestaña, caer en la de
+  // Cumplimiento hacia que la pantalla mostrara su vacio — un escudo verde y
+  // nada — como si el workspace tuviera compliance. Eso es lo que veia el dueño
+  // de un call center al entrar a Tableros. Ahora el vacio dice la verdad.
+  const defaultTab = tabs[0]?.key ?? null
+  const [activeTab, setActiveTab] = useState<TabKey | null>(defaultTab)
   const [periodo, setPeriodo] = useState<Periodo>('mes')
   const [isPending, startTransition] = useTransition()
 
@@ -148,7 +162,7 @@ export default function TablerosClient({
         </div>
 
         {/* Periodo selector — only for business tabs (no aplica a Rentabilidad Comercial ni Cumplimiento) */}
-        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && activeTab !== 'proceso' && (
+        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && activeTab !== 'proceso' && activeTab !== 'calidad' && (
           <div className="flex gap-1">
             {PERIODOS.map(p => (
               <button
@@ -169,6 +183,8 @@ export default function TablerosClient({
 
       {/* Content */}
       <div className={`transition-opacity duration-200 ${isPending ? 'opacity-50' : 'opacity-100'}`}>
+        {activeTab === null && <SinTableros />}
+        {activeTab === 'calidad' && initialCalidad && <TabCalidad datos={initialCalidad} />}
         {activeTab === 'rentabilidad_comercial' && rentabilidad && <TabRentabilidadComercial data={rentabilidad} />}
         {activeTab === 'comercial_negocios' && initialComercialNegocios && (
           <TabComercialSoena
@@ -204,6 +220,30 @@ function EmptyState() {
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <p className="text-lg font-medium text-gray-400">Sin datos suficientes</p>
       <p className="text-sm text-gray-400 mt-1">Registra movimientos para ver tus indicadores aqui.</p>
+    </div>
+  )
+}
+
+/**
+ * Ningun tablero para quien entra.
+ *
+ * No es un error: es que sus modulos no arman ninguna pestaña, o que las que
+ * hay no son para su rol. Decirlo es mejor que mostrar el vacio de otra cosa,
+ * que fue lo que paso: sin pestañas, la pantalla caia en el vacio de
+ * Cumplimiento y el dueño de un call center veia un escudo verde sin
+ * explicacion.
+ */
+function SinTableros() {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 mb-4">
+        <LayoutDashboard className="h-7 w-7 text-gray-400" aria-hidden="true" />
+      </div>
+      <p className="text-sm font-medium text-gray-900">Todavía no hay tableros para ti</p>
+      <p className="mt-1 max-w-sm text-sm text-gray-500">
+        Los indicadores de esta pantalla dependen de los módulos activos del negocio y del rol con
+        el que entras.
+      </p>
     </div>
   )
 }

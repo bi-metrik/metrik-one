@@ -27,11 +27,7 @@ import {
   Scale,
   Sliders,
   Receipt,
-  FileAudio,
   Headphones,
-  MonitorPlay,
-  Landmark,
-  TrendingUp,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -156,31 +152,31 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   { href: '/compliance/comparativa-informa', label: 'Comparativa Informa', icon: Scale, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_audit', value: true } },
 ]
 
-// Calidad de llamadas (activable por flag calidad_llamadas). Grupo propio.
+// Calidad de llamadas (activable por flag calidad_llamadas).
 //
-// Ruta propia y NO un tab de /tableros: ese archivo esta acoplado a
-// mod.business y tocarlo arriesga los workspaces que ya lo usan.
+// EL MODULO NO INVENTA MODULOS: reutiliza los que ONE ya tiene. `/equipo` es la
+// pantalla de personas y `/tableros` la de indicadores, y calidad entra por
+// ahi en vez de crear `/calidad/agente` y `/calidad/dueno` como conceptos
+// paralelos. Lo que queda propio del grupo es la operacion diaria: las
+// llamadas.
 //
-// Tres items con visibilidad distinta a proposito:
-//   - Llamadas: todos los roles con acceso. El ejecutor entra pero solo ve las
-//     suyas (filtro server-side por agente_staff_id).
-//   - Muro: sin operator. Es el televisor del piso, no una herramienta del agente.
-//   - Vista de dueño: solo owner. Lleva dinero.
+// La objecion original ("tocar /tableros arrastra mod.business") ya no aplica:
+// ese archivo carga por flag y `compliance` ya empuja su pestaña fuera de la
+// rama de business. Ademas /tableros YA estaba en el menu de este workspace,
+// porque vive en los compartidos, y renderizaba vacio.
+//
+// `/equipo` NO se toca en los items de business: se agrega aqui una entrada
+// propia. Asi el menu de SOENA, HJBC y AFI queda exactamente igual.
 //
 // Ocultar un item del menu NO impide teclear la URL: cada page.tsx guarda por
 // su cuenta. Esto es solo la capa visual.
 const CALIDAD_NAV_ITEMS = [
   { href: '/calidad', label: 'Llamadas', icon: Headphones, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
-  // Solo para el ejecutor: su perfil es la pantalla que le dice que mejorar, y
-  // sin esta entrada solo se alcanzaba haciendo clic en un nombre desde la
-  // lista — algo que el no puede hacer, porque solo ve sus propias llamadas.
-  // Los demas roles llegan al perfil de cualquiera desde la lista.
-  { href: '/calidad/mi-perfil', label: 'Mi desempeño', icon: TrendingUp, roles: ['operator'] },
-  // Auditar es accion de supervision: quien ve el piso entero puede subir una
-  // grabacion nueva. Un ejecutor no, por la misma razon que no ve llamadas ajenas.
-  { href: '/calidad/auditar', label: 'Auditar llamada', icon: FileAudio, roles: ['owner', 'admin', 'supervisor'] },
-  { href: '/calidad/muro', label: 'Muro', icon: MonitorPlay, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
-  { href: '/calidad/dueno', label: 'Vista de dueño', icon: Landmark, roles: ['owner'] },
+  // MISMA entrada para todos, contenido por rol. El ejecutor entra y ve SU
+  // propia hoja; quien gestiona ve a los cuatro y entra a cada uno. Que se
+  // llame igual para todos es deliberado: el ejecutor no tiene por que saber
+  // que su pantalla es un caso particular de la del supervisor.
+  { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor', 'operator'] },
 ]
 
 // Valida (extra inferior, activable por flag)
@@ -363,9 +359,17 @@ export default function AppShell({
     ? filterCompliance(VALIDACION_NAV_ITEMS, role, mod)
     : [])
   // En vitrina, "Compartidos" = solo Tableros, forzado para cualquier rol del ws.
+  //
+  // En un workspace de SOLO CALIDAD, Tableros tiene una sola pestaña y es la de
+  // dinero, que solo ve el dueño. Sin este recorte el supervisor tendria en el
+  // menu una entrada que abre una pantalla vacia — que es exactamente el
+  // defecto que este cambio vino a reparar, movido de sitio.
+  const soloCalidad = !mod.business && !mod.compliance && !mod.rentabilidad_comercial && !!mod.calidad_llamadas
   const sharedItems = modoVitrina
     ? [VITRINA_TABLEROS_ITEM]
-    : filterByRole(applyOverride(SHARED_NAV_ITEMS), role)
+    : filterByRole(applyOverride(SHARED_NAV_ITEMS), role).filter(
+        (i) => !(soloCalidad && i.href === '/tableros' && role !== 'owner'),
+      )
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
   // Href dinamico: owner del workspace admin global ve la biblioteca cross-workspace, el resto ve el Kanban del workspace actual
   const workflowsItems = vitrinaGate(hasLineas
@@ -377,8 +381,16 @@ export default function AppShell({
   // shell vitrina ES para clientes Valida-only). Fuera de vitrina, opt-in normal.
   // Calidad de llamadas — opt-in por flag. Sin el flag, ningun workspace
   // existente cambia su sidebar (el grupo queda vacio y no se renderiza).
+  //
+  // `/equipo` tambien vive en los items de business. Si un workspace tuviera
+  // los dos modulos, la entrada saldria DUPLICADA en el sidebar. Hoy no existe
+  // ninguno asi (regat es calidad-only; SOENA y HJBC son business), pero la
+  // condicion se deja escrita para que el primero que lo cree se estrelle con
+  // esta linea y no con una pantalla que muestra Equipo dos veces.
   const calidadItems = vitrinaGate(mod.calidad_llamadas
-    ? filterByRole(applyOverride(CALIDAD_NAV_ITEMS), role)
+    ? filterByRole(applyOverride(CALIDAD_NAV_ITEMS), role).filter(
+        (i) => !(i.href === '/equipo' && mod.business),
+      )
     : [])
   const validaItems = (modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : []
   const certItems = vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : [])
@@ -408,8 +420,9 @@ export default function AppShell({
     : (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     // Workspace de solo calidad (call center): sus tres rutas son las primarias.
+    // Son las mismas del sidebar — la operacion, las personas y los indicadores.
     : (!mod.business && mod.calidad_llamadas)
-    ? ['/calidad', '/calidad/muro', '/calidad/dueno', '/directorio']
+    ? ['/calidad', '/equipo', '/tableros', '/directorio']
     : (MOBILE_PRIMARY_HREFS[role] || MOBILE_PRIMARY_HREFS.operator)
   const mobilePrimary = allMobileItems.filter(item => primaryHrefs.includes(item.href))
   const mobileSecondary = allMobileItems.filter(item => !primaryHrefs.includes(item.href))
@@ -682,10 +695,21 @@ export default function AppShell({
                 </p>
               )}
               {calidadItems.map((item) => {
-                // '/calidad' hace prefix-match con '/calidad/muro' y '/calidad/dueno':
-                // sin el exacto, los tres items quedarian activos a la vez.
+                // Llamadas se marca activa en la lista, el detalle y la
+                // pantalla de auditar (que ya no es item propio: es un boton
+                // dentro de la lista, y su resultado aterriza ahi mismo).
                 const isActive = item.href === '/calidad'
-                  ? pathname === '/calidad' || pathname.startsWith('/calidad/llamada/')
+                  ? pathname === '/calidad'
+                    || pathname.startsWith('/calidad/llamada/')
+                    || pathname === '/calidad/auditar'
+                  // Equipo tambien queda activa en el perfil de una persona:
+                  // el perfil ES el contenido de Equipo para el ejecutor, y
+                  // para quien gestiona es a donde lleva cada fila. Sin esto,
+                  // el ejecutor aterriza en su perfil sin nada iluminado.
+                  : item.href === '/equipo'
+                  ? pathname === '/equipo'
+                    || pathname.startsWith('/calidad/agente/')
+                    || pathname === '/calidad/mi-perfil'
                   : pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (

@@ -6,6 +6,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { slugAgente } from './types'
 import type {
   DuenoData,
+  EquipoCalidad,
   PerfilAgente,
   EventoCinta,
   Hallazgo,
@@ -435,4 +436,34 @@ export async function getMiAgente(): Promise<string | null> {
     .maybeSingle()
 
   return (data as { agente_nombre: string } | null)?.agente_nombre ?? null
+}
+
+/**
+ * Equipo, para quien gestiona.
+ *
+ * Es accion de supervision: la ve quien puede ver las llamadas de todo el piso.
+ * El ejecutor NO llega aqui — su Equipo es su propio perfil, y esa bifurcacion
+ * la hace la page, no esta funcion. Aun asi el guard va tambien aqui: el nav es
+ * cosmetico y una URL tecleada no lo respeta.
+ *
+ * VENTANA DE 30 DIAS, la misma del perfil. Que las dos pantallas midan periodos
+ * distintos seria la forma mas silenciosa de que se contradigan.
+ */
+export async function getEquipoCalidad(dias = 30): Promise<EquipoCalidad | null> {
+  const ctx = await ctxCalidad()
+  if (!ctx) return null
+  if (!ctx.perms.canViewCalidadTodos) return null
+
+  const hasta = new Date()
+  const desde = new Date(hasta)
+  desde.setDate(desde.getDate() - (dias - 1))
+  const iso = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
+
+  const { data, error } = await sinTipar(ctx.supabase).rpc('get_calidad_equipo', {
+    p_workspace_id: ctx.workspaceId,
+    p_desde: iso(desde),
+    p_hasta: iso(hasta),
+  })
+  if (error || !data) return null
+  return data as EquipoCalidad
 }

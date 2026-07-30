@@ -504,3 +504,24 @@ export const COMO_SUBIR: Record<string, string> = {
   'Cierre y próximos pasos':
     'Cierra diciendo qué pasa después, quién lo hace y cuándo, y confirma que la persona lo repite.',
 }
+
+/**
+ * Equipo: el ranking del muro con nombre completo, mas hacia donde va cada uno.
+ *
+ * El ranking sale de la MISMA funcion que alimenta el muro. Lo unico que cambia
+ * es que aqui el nombre viene completo, porque el nombre es el enlace al perfil
+ * y "Felipe" no identifica a nadie en una operacion de doscientos agentes.
+ */
+export interface AgenteEquipo {
+  agente: string
+  /** Lo vendido en el periodo. Misma fuente y misma expresion que el perfil. */
+  vendidoUsd: number
+  tendencia: TendenciaPerfil
+}
+
+export interface EquipoCalidad {
+  desde: string
+  hasta: string
+  ranking: RankingPeriodo
+  agentes: AgenteEquipo[]
+}
