@@ -25,6 +25,12 @@
 //
 // Idempotencia: contacto_interacciones (workspace_id, 'meta', leadgen_id).
 // verify_jwt=false en config.toml (Meta no manda el JWT de Supabase).
+//
+// ⚠️ TODO EVENTO DEJA RASTRO ANTES DE PROCESARSE (meta_leads_eventos), y el
+// trabajo diferido va SIEMPRE dentro de EdgeRuntime.waitUntil. Las dos cosas
+// son la misma leccion: una vez respondimos 200, Meta no reintenta NUNCA, asi
+// que cualquier cosa que se pierda despues de ese 200 se pierde para siempre y
+// sin sintoma (el registro HTTP queda en 200). Ver el detalle en cada sitio.
 // ============================================================
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -63,8 +69,21 @@ Deno.serve(async (req) => {
         return new Response('Invalid signature', { status: 403 });
       }
       const payload = JSON.parse(body);
-      // Meta espera 200 en < 20s. Procesamos async y respondemos ya.
-      processPayload(payload).catch((e) => console.error('[meta-leads] process error:', e));
+      const supabase = getServiceClient();
+
+      // 1. Rastro ANTES de procesar. Este await es corto (un insert) y es el que
+      //    garantiza que, pase lo que pase despues, quede una fila que diga que
+      //    este lead llego. Registrar el evento DENTRO del trabajo diferido seria
+      //    inutil: si el worker muere, muere tambien el rastro de que murio.
+      const eventos = await registrarEventos(supabase, payload);
+
+      // 2. Meta espera 200 en < 20s. El trabajo pesado (Graph API + inserts) va
+      //    en segundo plano, pero sostenido por waitUntil para que sobreviva a
+      //    la respuesta.
+      await enSegundoPlano(
+        procesarEventos(supabase, eventos)
+          .catch((e) => console.error('[meta-leads] process error:', e)),
+      );
       return new Response('OK', { status: 200 });
     } catch (e) {
       // Nunca devolver 5xx por un bug de parseo: Meta entraría en retry-storm.
@@ -75,6 +94,109 @@ Deno.serve(async (req) => {
 
   return new Response('Method not allowed', { status: 405 });
 });
+
+// ── Trabajo que debe sobrevivir a la respuesta ────────────────────────────
+// `EdgeRuntime.waitUntil` le dice al runtime de Deno que no recicle el worker
+// hasta que la promesa termine. SIN ESTO, el patrón "responder 200 y seguir
+// trabajando" es una fuga: el fetch a la Graph API y los inserts quedan
+// huérfanos y el worker puede desaparecer a mitad de camino. Y como ya
+// respondimos 200, Meta NO reintenta — el lead se pierde en silencio, con el
+// registro HTTP marcando éxito. Es intermitente y empeora en ráfagas, que es
+// exactamente el patrón de la pérdida medida en SOENA (18 de 153 leads, 16 de
+// ellos concentrados entre el 15 y el 18 de julio).
+//
+// Fuera del runtime de Supabase (local, tests) `EdgeRuntime` no existe: ahí se
+// espera el trabajo en línea. Es más lento pero correcto, y es el único modo en
+// que un test puede observar el resultado.
+function enSegundoPlano(trabajo: Promise<unknown>): Promise<void> {
+  const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (rt && typeof rt.waitUntil === 'function') {
+    rt.waitUntil(trabajo);
+    return Promise.resolve();
+  }
+  return trabajo.then(() => undefined);
+}
+
+// ── Bitácora cruda (meta_leads_eventos) ───────────────────────────────────
+// Una fila por lead recibido, escrita apenas se valida la firma. Responde "¿llegó
+// este leadgen_id?" y "¿por qué no se convirtió en interacción?", que antes no
+// tenían respuesta: un page_id sin workspace se descartaba con un console.warn y
+// no dejaba ninguna fila.
+
+type EventoRegistrado = { eventoId: string | null; change: LeadgenChange | null };
+
+type ResultadoLead =
+  | { estado: 'procesado'; workspaceId: string; interaccionId: string; contactoId: string }
+  | { estado: 'descartado'; motivo: string; workspaceId?: string }
+  | { estado: 'error'; motivo: string; workspaceId?: string };
+
+async function registrarEventos(
+  supabase: SupabaseClient,
+  payload: Record<string, unknown>,
+): Promise<EventoRegistrado[]> {
+  const changes = extractChanges(payload);
+
+  // Un POST del que no se puede extraer ningún leadgen igual deja fila: una
+  // entrega malformada (o de otro tipo de suscripción) tampoco debe ser invisible.
+  const filas: Array<{
+    page_id: string | null;
+    leadgen_id: string | null;
+    form_id: string | null;
+    created_time: string | null;
+    estado: string;
+    motivo?: string;
+    payload: Record<string, unknown>;
+  }> = changes.length
+    ? changes.map((c) => ({
+      page_id: c.page_id || null,
+      leadgen_id: c.leadgen_id,
+      form_id: c.form_id ?? null,
+      created_time: c.created_time != null ? new Date(Number(c.created_time) * 1000).toISOString() : null,
+      estado: 'recibido',
+      payload,
+    }))
+    : [{
+      page_id: null,
+      leadgen_id: null,
+      form_id: null,
+      created_time: null,
+      estado: 'descartado',
+      motivo: 'sin_cambios_leadgen',
+      payload,
+    }];
+
+  const { data, error } = await supabase
+    .from('meta_leads_eventos').insert(filas).select('id');
+  if (error) {
+    // Que la bitácora falle NO puede tumbar la ingesta: el lead sigue valiendo
+    // más que su rastro. Se procesa igual, sin eventoId (y el error queda en log).
+    console.error('[meta-leads] error registrando evento crudo:', error.message);
+    return changes.map((c) => ({ eventoId: null, change: c }));
+  }
+
+  const ids = (data ?? []) as Array<{ id: string }>;
+  return changes.map((c, i) => ({ eventoId: ids[i]?.id ?? null, change: c }));
+}
+
+async function marcarEvento(
+  supabase: SupabaseClient,
+  eventoId: string | null,
+  r: ResultadoLead,
+): Promise<void> {
+  if (!eventoId) return;
+  const { error } = await supabase
+    .from('meta_leads_eventos')
+    .update({
+      estado: r.estado,
+      motivo: r.estado === 'procesado' ? null : r.motivo,
+      workspace_id: r.workspaceId ?? null,
+      interaccion_id: r.estado === 'procesado' ? r.interaccionId : null,
+      contacto_id: r.estado === 'procesado' ? r.contactoId : null,
+      procesado_en: new Date().toISOString(),
+    })
+    .eq('id', eventoId);
+  if (error) console.error('[meta-leads] error marcando evento %s: %s', eventoId, error.message);
+}
 
 // ── Firma HMAC-SHA256 (x-hub-signature-256), mismo patrón que wa-webhook ──
 async function verifySignature(body: string, signature: string | null): Promise<boolean> {
@@ -131,18 +253,22 @@ function extractChanges(payload: Record<string, unknown>): LeadgenChange[] {
   return out;
 }
 
-async function processPayload(payload: Record<string, unknown>): Promise<void> {
-  const changes = extractChanges(payload);
-  if (!changes.length) {
-    console.log('[meta-leads] payload sin cambios leadgen (object=%s)', payload.object);
+async function procesarEventos(supabase: SupabaseClient, eventos: EventoRegistrado[]): Promise<void> {
+  if (!eventos.length) {
+    console.log('[meta-leads] payload sin cambios leadgen');
     return;
   }
-  for (const c of changes) {
+  for (const { eventoId, change } of eventos) {
+    if (!change) continue;
+    let resultado: ResultadoLead;
     try {
-      await handleLead(c);
+      resultado = await handleLead(supabase, change);
     } catch (e) {
-      console.error('[meta-leads] lead %s error: %s', c.leadgen_id, e instanceof Error ? e.message : e);
+      const motivo = e instanceof Error ? e.message : String(e);
+      console.error('[meta-leads] lead %s error: %s', change.leadgen_id, motivo);
+      resultado = { estado: 'error', motivo: `excepcion: ${motivo}` };
     }
+    await marcarEvento(supabase, eventoId, resultado);
   }
 }
 
@@ -203,16 +329,16 @@ async function escribirOrigenSiFalta(
     .from('contactos').update({ custom_data: { ...cd, origen } }).eq('id', contactoId);
 }
 
-async function handleLead(c: LeadgenChange): Promise<void> {
-  const supabase = getServiceClient();
-
+// Devuelve SIEMPRE un resultado explícito (nunca void): cada salida temprana dice
+// por qué el lead no llegó a interacción, y eso es lo que se graba en la bitácora.
+async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<ResultadoLead> {
   // 1. Routing page_id → workspace (config-driven, opt-in).
   const { data: wss, error: wsErr } = await supabase
     .from('workspaces')
     .select('id, config_extra');
   if (wsErr) {
     console.error('[meta-leads] error consultando workspaces:', wsErr.message);
-    return;
+    return { estado: 'error', motivo: `consultando_workspaces: ${wsErr.message}` };
   }
   const ws = (wss ?? []).find((w) => {
     const cfg = (w as { config_extra?: { meta_leads?: MetaLeadsConfig } }).config_extra?.meta_leads;
@@ -223,8 +349,11 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   } | undefined;
 
   if (!ws) {
+    // Antes esto era SOLO este warn: el lead se evaporaba sin dejar fila. Ahora
+    // queda en meta_leads_eventos como descartado, reprocesable en cuanto alguien
+    // configure el page_id en el workspace que corresponda.
     console.warn('[meta-leads] ningún workspace mapeado para page_id=%s (lead ignorado)', c.page_id);
-    return;
+    return { estado: 'descartado', motivo: `sin_workspace_para_page_id: ${c.page_id}` };
   }
   const cfg = ws.config_extra.meta_leads;
   const workspaceId = ws.id;
@@ -239,14 +368,14 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     .maybeSingle();
   if (existing) {
     console.log('[meta-leads] lead %s ya ingerido (interacción %s)', c.leadgen_id, (existing as { id: string }).id);
-    return;
+    return { estado: 'descartado', motivo: 'ya_ingerido', workspaceId };
   }
 
   // 3. Traer el field_data del lead via Graph API.
   const token = Deno.env.get('META_LEADS_SYSTEM_TOKEN');
   if (!token) {
     console.error('[meta-leads] META_LEADS_SYSTEM_TOKEN no configurado');
-    return;
+    return { estado: 'error', motivo: 'META_LEADS_SYSTEM_TOKEN no configurado', workspaceId };
   }
   const fields = 'field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,created_time,platform';
   const res = await fetch(
@@ -255,7 +384,7 @@ async function handleLead(c: LeadgenChange): Promise<void> {
   const lead = await res.json();
   if (lead.error) {
     console.error('[meta-leads] Graph API error:', JSON.stringify(lead.error));
-    return;
+    return { estado: 'error', motivo: `graph_api: ${JSON.stringify(lead.error).slice(0, 500)}`, workspaceId };
   }
   const fieldData: Array<{ name: string; values: string[] }> = lead.field_data ?? [];
   const getField = (names: string[]): string | null => {
@@ -365,7 +494,7 @@ async function handleLead(c: LeadgenChange): Promise<void> {
       .select('id').single();
     if (error) {
       console.error('[meta-leads] error creando contacto:', error.message);
-      return;
+      return { estado: 'error', motivo: `creando_contacto: ${error.message}`, workspaceId };
     }
     contactoId = (data as { id: string }).id;
     contactoCreado = true;
@@ -410,10 +539,16 @@ async function handleLead(c: LeadgenChange): Promise<void> {
     // El índice único (workspace_id, 'meta', leadgen_id) protege de doble ingesta;
     // si dos entregas de Meta corren en paralelo, una gana y la otra choca aquí.
     console.error('[meta-leads] error registrando interacción:', interErr.message);
-    return;
+    return { estado: 'error', motivo: `registrando_interaccion: ${interErr.message}`, workspaceId };
   }
   console.log(
     '[meta-leads] interacción %s (estado=%s) registrada para contacto %s desde lead %s en ws %s',
     (inter as { id: string }).id, estadoInteraccion, contactoId, c.leadgen_id, workspaceId,
   );
+  return {
+    estado: 'procesado',
+    workspaceId,
+    interaccionId: (inter as { id: string }).id,
+    contactoId,
+  };
 }
