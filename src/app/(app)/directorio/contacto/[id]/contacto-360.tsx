@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, Mail, Save, Flame, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateContacto } from '../../actions'
-import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/catalogos/constants'
+import { FUENTES_ADQUISICION, ROLES_CONTACTO, STATUS_CONTACTO, resolverStatusContacto } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Contacto } from '@/types/database'
 import NotesSection from '@/components/notes-section'
@@ -158,13 +158,18 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Segmento</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Status</label>
             <select
               value={form.segmento}
               onChange={e => setForm(p => ({ ...p, segmento: e.target.value }))}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              {SEGMENTOS_CONTACTO.map(s => (
+              {/* Valor legacy aún no migrado: se ofrece como opción para no
+                  perderlo en silencio al guardar el resto del formulario. */}
+              {form.segmento && !STATUS_CONTACTO.some(s => s.value === form.segmento) && (
+                <option value={form.segmento}>{resolverStatusContacto(form.segmento).label}</option>
+              )}
+              {STATUS_CONTACTO.map(s => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>

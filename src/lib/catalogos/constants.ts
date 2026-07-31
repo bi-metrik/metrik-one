@@ -110,16 +110,50 @@ export const ROLES_CONTACTO = [
 
 export type RolContacto = typeof ROLES_CONTACTO[number]['value']
 
-// ── Segmentos de contacto ─────────────────────────────────
-
-export const SEGMENTOS_CONTACTO = [
-  { value: 'sin_contactar', label: 'Sin contactar', chipClass: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300' },
-  { value: 'contactado', label: 'Contactado', chipClass: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
-  { value: 'convertido', label: 'Convertido', chipClass: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' },
-  { value: 'inactivo', label: 'Inactivo', chipClass: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300' },
+// ── Status del contacto ───────────────────────────────────
+//
+// Estado de GESTIÓN comercial del contacto: lo marca la persona que lo trabaja,
+// NO el sistema. Antes este campo se llamaba "segmento" y lo escribía solo el
+// motor, derivándolo del ciclo de vida del negocio; esa sincronización se retiró
+// (ver `sincronizarSegmentoContacto`, eliminada) porque un contador de intentos
+// de contacto no se puede deducir del avance de un negocio.
+//
+// ⚠️ La COLUMNA de base de datos sigue llamándose `contactos.segmento`. Solo
+// cambió el nombre visible y el juego de valores. No renombrar la columna sin
+// tocar también el webhook de Meta (`config_extra.meta_leads.contacto.segmento_inicial`).
+//
+// Los tres primeros son una progresión de intentos: el color sube de intensidad
+// con cada intento fallido de conectar.
+export const STATUS_CONTACTO = [
+  { value: 'primer_contacto', label: 'Primer contacto', chipClass: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' },
+  { value: 'segundo_contacto', label: 'Segundo contacto', chipClass: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' },
+  { value: 'tercer_contacto', label: 'Tercer contacto', chipClass: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300' },
+  { value: 'conectado', label: 'Conectado', chipClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
+  { value: 'no_contesto', label: 'No contestó', chipClass: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300' },
+  { value: 'standby', label: 'Standby', chipClass: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
+  { value: 'descartado', label: 'Descartado', chipClass: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300' },
 ] as const
 
-export type SegmentoContacto = typeof SEGMENTOS_CONTACTO[number]['value']
+export type StatusContacto = typeof STATUS_CONTACTO[number]['value']
+
+const CHIP_STATUS_DESCONOCIDO = 'bg-[#F5F4F2] text-[#6B7280]'
+
+/**
+ * Resuelve label + chip de un status. Tolera valores que no están en la lista
+ * (los cuatro legacy: sin_contactar/contactado/convertido/inactivo) para que
+ * durante la ventana entre el despliegue del código y el backfill de datos la
+ * pantalla muestre el valor crudo en gris en vez de una celda vacía.
+ */
+export function resolverStatusContacto(value: string | null | undefined): {
+  label: string
+  chipClass: string
+} {
+  if (!value) return { label: 'Sin definir', chipClass: CHIP_STATUS_DESCONOCIDO }
+  const known = STATUS_CONTACTO.find(s => s.value === value)
+  return known
+    ? { label: known.label, chipClass: known.chipClass }
+    : { label: value.replace(/_/g, ' '), chipClass: CHIP_STATUS_DESCONOCIDO }
+}
 
 // ── Tipos de rubro (6 tipos, §4.6) ──────────────────────────
 

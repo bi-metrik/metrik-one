@@ -8,7 +8,7 @@ import {
   Plus, X, Loader2, CheckSquare, Square,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { FUENTES_ADQUISICION, ROLES_CONTACTO, SEGMENTOS_CONTACTO } from '@/lib/catalogos/constants'
+import { FUENTES_ADQUISICION, ROLES_CONTACTO, STATUS_CONTACTO, resolverStatusContacto } from '@/lib/catalogos/constants'
 import {
   deleteContacto,
   updateContactoSegmento,
@@ -223,7 +223,12 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'creacion', label: 'Fecha de creacion' },
 ]
 
-const SEGMENTO_ORDER = ['sin_contactar', 'contactado', 'convertido', 'inactivo'] as const
+// Orden del ciclo al tocar el chip: sigue la secuencia natural de gestión
+// (los tres intentos, luego los desenlaces).
+const SEGMENTO_ORDER = [
+  'primer_contacto', 'segundo_contacto', 'tercer_contacto',
+  'conectado', 'no_contesto', 'standby', 'descartado',
+] as const
 
 export default function ContactosList({ contactos, staff, miStaffId, miRol, canAsignar }: Props) {
   const [search, setSearch] = useState('')
@@ -257,10 +262,8 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
     }
     return colors[value] ?? 'bg-gray-100 text-gray-600'
   }
-  const getSegmentoLabel = (value: string | null) =>
-    SEGMENTOS_CONTACTO.find(s => s.value === value)?.label ?? ''
-  const getSegmentoChip = (value: string | null) =>
-    SEGMENTOS_CONTACTO.find(s => s.value === value)?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]'
+  const getSegmentoLabel = (value: string | null) => resolverStatusContacto(value).label
+  const getSegmentoChip = (value: string | null) => resolverStatusContacto(value).chipClass
 
   // Fecha corta absoluta (pura, calcada de negocio-card). Evita Date.now() en
   // render (regla react-hooks/purity).
@@ -274,16 +277,18 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
   }
 
   const cycleSegmento = (id: string, currentSegmento: string | null) => {
-    const current = currentSegmento ?? 'sin_contactar'
+    const current = currentSegmento ?? 'primer_contacto'
+    // Un valor legacy no está en el orden nuevo (indexOf → -1): el ciclo arranca
+    // desde el primero en vez de saltar a la mitad de la secuencia.
     const currentIdx = SEGMENTO_ORDER.indexOf(current as typeof SEGMENTO_ORDER[number])
-    const nextIdx = (currentIdx + 1) % SEGMENTO_ORDER.length
+    const nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % SEGMENTO_ORDER.length
     const next = SEGMENTO_ORDER[nextIdx]
-    const nextLabel = SEGMENTOS_CONTACTO.find(s => s.value === next)?.label ?? next
+    const nextLabel = resolverStatusContacto(next).label
 
     startTransition(async () => {
       const res = await updateContactoSegmento(id, next)
       if (res.success) {
-        toast.success(`Segmento: ${nextLabel}`)
+        toast.success(`Status: ${nextLabel}`)
         router.refresh()
       } else {
         toast.error(res.error ?? 'Error')
@@ -500,7 +505,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto">
-          {SEGMENTOS_CONTACTO.map(s => {
+          {STATUS_CONTACTO.map(s => {
             const count = contactos.filter(c => c.segmento === s.value).length
             if (count === 0) return null
             return (
