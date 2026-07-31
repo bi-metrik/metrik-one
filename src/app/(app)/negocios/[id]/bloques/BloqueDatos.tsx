@@ -10,6 +10,7 @@ import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/lib/afi/template-mapping'
 import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug } from '@/lib/dian/seccionales'
+import { campoRequeridoCumplido } from '@/lib/negocios/campo-completo'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 
 export interface DatosField {
@@ -289,15 +290,9 @@ export default function BloqueDatos({
   }
 
   function isComplete(vals: Record<string, unknown>) {
-    return fields.filter(f => f.required && visible(f, vals)).every(f => {
-      const v = vals[f.slug]
-      if (f.tipo === 'toggle') return true
-      if (f.tipo === 'checkbox') return true
-      if (f.tipo === 'documentos_preview') return true
-      if (f.tipo === 'doc_link') return true
-      if (f.tipo === 'plantilla') return true
-      return v !== '' && v !== null && v !== undefined
-    })
+    return fields
+      .filter(f => f.required && visible(f, vals))
+      .every(f => campoRequeridoCumplido(f.tipo, vals[f.slug]))
   }
 
   // Persistir los valores. `revalidate` solo cuando el cambio afecta a otros bloques

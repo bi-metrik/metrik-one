@@ -11,6 +11,7 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -2977,87 +2978,99 @@ export async function cambiarEtapaNegocioConGate(
     }
   }
 
-  // Skip etapa cobro cuando el pago ya está saldado — si el destino tiene stage='cobro',
-  // avanzar automáticamente a la siguiente etapa en orden. Si la etapa tiene
-  // config_extra.conciliar_sobrepago=true, solo salta con pago EXACTO (saldo===0); un
-  // sobrepago (saldo<0) NO salta y entra a Cobro para conciliar el extra.
+  // Salto automático de etapas ya saldadas: si al llegar no queda nada por cobrar ahí, el
+  // negocio pasa de largo. QUÉ etapas participan lo decide `aplicaSaltoPorSaldo` (el flag
+  // `saltar_si_saldo_cero` de la etapa, o su `stage` si no lo declara) y CUÁNDO el saldo lo
+  // justifica lo decide `debeSaltarPorSaldo`. Ambas viven en `lib/negocios/salto-etapa.ts`
+  // con sus tests; el porqué de separarlas del `stage` está documentado ahí.
+  //
+  // El salto ENCADENA: con el honorario ya pagado, un negocio puede atravesar Precobro y
+  // Cobro de un solo avance y aterrizar en Entrega. Antes se resolvía un único salto, así
+  // que quedaba detenido en la segunda etapa saldada sin razón visible para el equipo.
   {
-    const { data: destStageRaw } = await db(supabase)
-      .from('etapas_negocio')
-      .select('stage, orden, linea_id, config_extra')
-      .eq('id', resolvedEtapaId)
-      .single()
-    const destStage = destStageRaw as { stage: string | null; orden: number; linea_id: string; config_extra: Record<string, unknown> | null } | null
+    const [negPrecioRes, cobrosSkipRes] = await Promise.all([
+      db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
+      supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
+    ])
+    const negPrecio = negPrecioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+    const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
+    const totalCobrado = ((cobrosSkipRes.data ?? []) as Array<{ monto: number }>)
+      .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+    const saldo = precio - totalCobrado
 
-    if (destStage?.stage === 'cobro') {
-      const [negPrecioRes, cobrosSkipRes] = await Promise.all([
-        db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-        supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
-      ])
-      const negPrecio = negPrecioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
-      const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
-      const totalCobrado = ((cobrosSkipRes.data ?? []) as Array<{ monto: number }>)
-        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
-      const saldo = precio - totalCobrado
+    // Ni el precio ni los cobros cambian durante el encadenamiento: se leen una sola vez.
+    const visitadas = new Set<string>([resolvedEtapaId])
+
+    for (let i = 0; i < MAX_SALTOS_ENCADENADOS; i++) {
+      const { data: destStageRaw } = await db(supabase)
+        .from('etapas_negocio')
+        .select('stage, orden, linea_id, config_extra')
+        .eq('id', resolvedEtapaId)
+        .single()
+      const destStage = destStageRaw as { stage: string | null; orden: number; linea_id: string; config_extra: Record<string, unknown> | null } | null
+      if (!destStage) break
+
+      if (!aplicaSaltoPorSaldo(destStage)) break
       const conciliarSobrepago = destStage.config_extra?.conciliar_sobrepago === true
-      // Con conciliación activa el sobrepago NO salta (entra a conciliar). Sin ella, saldo<=0 salta.
-      const debeSaltar = conciliarSobrepago ? saldo === 0 : saldo <= 0
+      if (!debeSaltarPorSaldo(precio, saldo, conciliarSobrepago)) break
 
-      if (precio > 0 && debeSaltar) {
-        // Al saltar Cobro (ya saldado) NO ir a ciegas a orden+1: seguir el ROUTING de
-        // Cobro. Así la rama de devolución de IVA (Generación/Envío) solo se entra si
-        // requiere_devolucion_iva=true; si no, Cobro es terminal y el negocio se queda
-        // ahí. Bug previo: saltaba a orden+1 (Generación) ignorando el flag de IVA, así
-        // que un negocio sin devolución (ej. leasing/jurídica) entraba a devolución.
-        const cobroRouting = (destStage.config_extra?.routing ?? null) as {
-          default_etapa_orden: number
-          conditional?: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
-          source_etapa_orden?: number
-        } | null
-        let destinoOrden = destStage.orden + 1 // fallback legacy si Cobro no tiene routing
-        if (cobroRouting) {
-          let srcEtapaId = resolvedEtapaId
-          if (typeof cobroRouting.source_etapa_orden === 'number') {
-            const { data: se } = await db(supabase)
-              .from('etapas_negocio')
-              .select('id')
-              .eq('linea_id', destStage.linea_id)
-              .eq('orden', cobroRouting.source_etapa_orden)
-              .single()
-            if (se) srcEtapaId = (se as { id: string }).id
-          }
-          const { data: bDatos } = await db(supabase)
-            .from('negocio_bloques')
-            .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo))')
-            .eq('negocio_id', negocioId)
-            .eq('bloque_configs.etapa_id', srcEtapaId)
-          const campos: Record<string, unknown> = {}
-          for (const b of ((bDatos ?? []) as Record<string, unknown>[])) {
-            const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
-            if (tipo === 'datos' && b.data && typeof b.data === 'object') Object.assign(campos, b.data)
-          }
-          destinoOrden = cobroRouting.default_etapa_orden
-          for (const rule of (cobroRouting.conditional ?? [])) {
-            if (String(campos[rule.condition.field] ?? '') === String(rule.condition.value)) {
-              destinoOrden = rule.etapa_orden
-              break
-            }
-          }
-        }
-        // Solo saltar si el routing manda a una etapa POSTERIOR a Cobro. Si el destino es
-        // Cobro mismo (default, sin devolución de IVA), Cobro es terminal → no saltar.
-        if (destinoOrden > destStage.orden) {
-          const { data: nextEtapaRaw } = await db(supabase)
+      // Al saltar una etapa saldada NO ir a ciegas a orden+1: seguir su ROUTING. Así la
+      // rama de devolución de IVA solo se entra si el caso la lleva; si no, la etapa es
+      // terminal y el negocio se queda ahí. Bug previo: saltaba a orden+1 ignorando el
+      // flag, así que un negocio sin devolución (ej. leasing/jurídica) entraba a ella.
+      const cobroRouting = (destStage.config_extra?.routing ?? null) as {
+        default_etapa_orden: number
+        conditional?: Array<{ condition: { field: string; value: string }; etapa_orden: number }>
+        source_etapa_orden?: number
+      } | null
+      let destinoOrden = destStage.orden + 1 // fallback legacy si la etapa no tiene routing
+      if (cobroRouting) {
+        let srcEtapaId = resolvedEtapaId
+        if (typeof cobroRouting.source_etapa_orden === 'number') {
+          const { data: se } = await db(supabase)
             .from('etapas_negocio')
             .select('id')
             .eq('linea_id', destStage.linea_id)
-            .eq('orden', destinoOrden)
+            .eq('orden', cobroRouting.source_etapa_orden)
             .single()
-          if (nextEtapaRaw) {
-            resolvedEtapaId = (nextEtapaRaw as { id: string }).id
+          if (se) srcEtapaId = (se as { id: string }).id
+        }
+        const { data: bDatos } = await db(supabase)
+          .from('negocio_bloques')
+          .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo))')
+          .eq('negocio_id', negocioId)
+          .eq('bloque_configs.etapa_id', srcEtapaId)
+        const campos: Record<string, unknown> = {}
+        for (const b of ((bDatos ?? []) as Record<string, unknown>[])) {
+          const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
+          if (tipo === 'datos' && b.data && typeof b.data === 'object') Object.assign(campos, b.data)
+        }
+        destinoOrden = cobroRouting.default_etapa_orden
+        for (const rule of (cobroRouting.conditional ?? [])) {
+          if (String(campos[rule.condition.field] ?? '') === String(rule.condition.value)) {
+            destinoOrden = rule.etapa_orden
+            break
           }
         }
       }
+
+      // Solo saltar si el routing manda a una etapa POSTERIOR. Si el destino es la etapa
+      // misma (se apunta a sí misma = cierra), es terminal → no saltar.
+      if (!(destinoOrden > destStage.orden)) break
+
+      const { data: nextEtapaRaw } = await db(supabase)
+        .from('etapas_negocio')
+        .select('id')
+        .eq('linea_id', destStage.linea_id)
+        .eq('orden', destinoOrden)
+        .single()
+      if (!nextEtapaRaw) break
+
+      const nextId = (nextEtapaRaw as { id: string }).id
+      // Un routing mal configurado podría ciclar; el negocio se queda donde está.
+      if (visitadas.has(nextId)) break
+      visitadas.add(nextId)
+      resolvedEtapaId = nextId
     }
   }
 
