@@ -1070,7 +1070,22 @@ export async function getNegocioDetalle(id: string): Promise<{
           for (const gb of ((guardBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
             if (String((gb.data ?? {})[ccfg.solo_si.field] ?? '') === ccfg.solo_si.value) { cumple = true; break }
           }
-          if (!cumple) continue
+          if (!cumple) {
+            // El guard dejó de cumplirse (alguien corrigió la respuesta de arriba) y el
+            // bloque tiene un valor sembrado antes. NO basta con dejar de mostrarlo: el
+            // routing lee TODOS los bloques `datos` de la etapa sin mirar su `condition`,
+            // así que ese valor huérfano seguiría desviando el negocio a una rama que ya
+            // no le corresponde. Se limpia para restaurar la premisa del comentario de
+            // arriba: fuera de la rama, el campo va vacío.
+            const requiereFieldLimpiar = ccfg.requiere_field ?? 'requiere_cita_dian'
+            const dataActual = ((inst.data ?? {}) as Record<string, unknown>)
+            if (dataActual[requiereFieldLimpiar] != null) {
+              const { [requiereFieldLimpiar]: _descartado, ...dataSinCampo } = dataActual
+              await db(supabase).from('negocio_bloques').update({ data: dataSinCampo }).eq('id', inst.id)
+              instanciasMap[bc.id] = { ...inst, data: dataSinCampo } as NegocioBloque
+            }
+            continue
+          }
         }
         const requiereField = ccfg.requiere_field ?? 'requiere_cita_dian'
         const seccionalRefField = ccfg.seccional_ref_field ?? 'seccional_ref'
@@ -2480,6 +2495,9 @@ export async function cambiarEtapaNegocioConGate(
   // Validar que la nueva etapa es la siguiente en orden (o un salto permitido por routing)
   let etapaActualNombre: string | null = null
   let etapaActualConfigExtra: Record<string, unknown> = {}
+  // La línea sobrevive al bloque de validación de orden: los gates de más abajo la
+  // necesitan para resolver una etapa fuente por `orden` (que es único por línea).
+  let etapaActualLineaId: string | null = null
   if (negocio.etapa_actual_id) {
     const [etapaActualRes, nuevaEtapaRes] = await Promise.all([
       db(supabase)
@@ -2500,6 +2518,7 @@ export async function cambiarEtapaNegocioConGate(
     if (!etapaActualData || !nuevaEtapaData) return { error: 'Etapa no encontrada' }
     etapaActualNombre = etapaActualData.nombre ?? null
     etapaActualConfigExtra = etapaActualData.config_extra ?? {}
+    etapaActualLineaId = etapaActualData.linea_id
     if (etapaActualData.linea_id !== nuevaEtapaData.linea_id) return { error: 'Etapas de líneas distintas' }
 
     // Evaluar routing condicional (si existe) ANTES de validar orden
@@ -2764,6 +2783,72 @@ export async function cambiarEtapaNegocioConGate(
         const actualStr = typeof actual === 'boolean' ? String(actual) : String(actual ?? '')
         if (actualStr !== expected) {
           const nombre = gateMessages[gate] ?? `Campo "${slug}" debe ser "${expected}"`
+          return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+        }
+      }
+    }
+
+    // Gate custom: campos_alguno — AL MENOS UNO de varios campos debe tener el valor
+    // esperado. El gate `campo:<slug>=<valor>` de arriba solo expresa igualdad sobre UN
+    // campo, así que no puede pedir "una de estas dos respuestas". Config por etapa:
+    //   gates: ['campos_alguno']
+    //   campos_alguno_gate: { campos: [...], valor: 'true', source_etapa_orden?: N }
+    //   gate_messages: { campos_alguno: '...' }
+    // `source_etapa_orden` permite exigirlo desde una etapa POSTERIOR a la que captura
+    // las respuestas (mismo mecanismo que el routing). Hace falta porque un campo se
+    // puede corregir desde el historial después de que su propia etapa ya pasó: sin
+    // esto, el gate solo protege el primer avance. Un campo ausente cuenta como no
+    // cumplido, así que la exigencia sobrevive a que el bloque ni siquiera exista.
+    if (etapaGates.includes('campos_alguno')) {
+      const cfg = (etapaActualConfigExtra.campos_alguno_gate ?? null) as {
+        campos?: string[]
+        valor?: string
+        source_etapa_orden?: number
+      } | null
+      const camposExigidos = cfg?.campos ?? []
+      if (camposExigidos.length > 0) {
+        let sourceEtapaIdGate: string = negocio.etapa_actual_id
+        if (typeof cfg?.source_etapa_orden === 'number' && etapaActualLineaId) {
+          const { data: etapaFuente } = await db(supabase)
+            .from('etapas_negocio')
+            .select('id')
+            .eq('linea_id', etapaActualLineaId)
+            .eq('orden', cfg.source_etapa_orden)
+            .single()
+          if (etapaFuente) sourceEtapaIdGate = (etapaFuente as { id: string }).id
+        }
+
+        const { data: bloquesGate } = await db(supabase)
+          .from('negocio_bloques')
+          .select(`
+            data,
+            bloque_configs!inner(
+              etapa_id,
+              bloque_definitions!inner(tipo)
+            )
+          `)
+          .eq('negocio_id', negocioId)
+          .eq('bloque_configs.etapa_id', sourceEtapaIdGate)
+
+        const camposGate: Record<string, unknown> = {}
+        for (const b of ((bloquesGate ?? []) as Record<string, unknown>[])) {
+          const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
+          if (tipo === 'datos' && b.data && typeof b.data === 'object') {
+            Object.assign(camposGate, b.data)
+          }
+        }
+
+        const esperado = cfg?.valor ?? 'true'
+        const algunoCumple = camposExigidos.some((slug) => {
+          const actual = camposGate[slug]
+          const actualStr = typeof actual === 'boolean' ? String(actual) : String(actual ?? '')
+          return actualStr === esperado
+        })
+
+        if (!algunoCumple) {
+          const gateMessagesAlguno = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+          const nombre = gateMessagesAlguno['campos_alguno']
+            ?? `Al menos uno de estos campos debe ser "${esperado}": ${camposExigidos.join(', ')}`
           return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
         }
       }
