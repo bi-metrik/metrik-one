@@ -223,6 +223,11 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'creacion', label: 'Fecha de creacion' },
 ]
 
+// Centinela del chip de Meta. Vive en el mismo estado que el filtro de status
+// para que "Todos" y los filtros de rol lo limpien sin lógica extra; el matcher
+// lo resuelve contra `es_meta`, no contra el status.
+const META_FILTER = '__meta__'
+
 // Orden del ciclo al tocar el chip: sigue la secuencia natural de gestión
 // (los tres intentos, luego los desenlaces).
 const SEGMENTO_ORDER = [
@@ -309,10 +314,31 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
     })
   }
 
+  // Chips del filtro de Status: los del catálogo en su orden canónico, más los
+  // valores legacy que todavía existan en los datos. Solo los que tienen al menos
+  // un contacto (un chip en cero no filtra nada y roba espacio horizontal).
+  const statusConContactos = (() => {
+    const cuenta = new Map<string, number>()
+    for (const c of contactos) {
+      if (c.segmento) cuenta.set(c.segmento, (cuenta.get(c.segmento) ?? 0) + 1)
+    }
+    const canonicos = STATUS_CONTACTO.map(s => s.value) as readonly string[]
+    const legacy = [...cuenta.keys()].filter(v => !canonicos.includes(v)).sort()
+    return [...canonicos, ...legacy]
+      .map(value => ({ value, label: resolverStatusContacto(value).label, count: cuenta.get(value) ?? 0 }))
+      .filter(s => s.count > 0)
+  })()
+
   const filtered = contactos.filter(c => {
     const matchSearch = !search || c.nombre.toLowerCase().includes(search.toLowerCase())
     const matchRol = !rolFilter || c.rol === rolFilter
-    const matchSegmento = !segmentoFilter || c.segmento === segmentoFilter
+    // `segmentoFilter` guarda un status real O el centinela META_FILTER (el chip
+    // de Meta reusa este estado para que Todos/rol lo limpien igual). Sin la rama
+    // del centinela, filtrar por Meta comparaba '__meta__' contra el status del
+    // contacto y la lista salía vacía aunque el chip contara bien.
+    const matchSegmento =
+      !segmentoFilter ||
+      (segmentoFilter === META_FILTER ? c.es_meta : c.segmento === segmentoFilter)
     const matchResponsable =
       responsableFilter === RESP_TODOS ||
       (responsableFilter === RESP_SIN ? c.responsable_id === null : c.responsable_id === responsableFilter)
@@ -475,10 +501,10 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
           {(() => {
             const metaCount = contactos.filter(c => c.es_meta).length
             if (metaCount === 0) return null
-            const active = segmentoFilter === '__meta__'
+            const active = segmentoFilter === META_FILTER
             return (
               <button
-                onClick={() => { setSegmentoFilter(active ? null : '__meta__'); setRolFilter(null) }}
+                onClick={() => { setSegmentoFilter(active ? null : META_FILTER); setRolFilter(null) }}
                 className={`shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   active ? 'bg-[#1877F2] text-white' : 'bg-[#1877F2]/10 text-[#1877F2] hover:bg-[#1877F2]/20'
                 }`}
@@ -504,22 +530,22 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
           })}
         </div>
 
+        {/* Filtro por Status. Un chip por valor CON contactos: el orden canónico
+            primero y al final los valores legacy que aún no pasaron por el
+            backfill (si no se incluyeran, entre el deploy y el backfill esta fila
+            quedaría vacía y no habría cómo filtrar). */}
         <div className="flex gap-1.5 overflow-x-auto">
-          {STATUS_CONTACTO.map(s => {
-            const count = contactos.filter(c => c.segmento === s.value).length
-            if (count === 0) return null
-            return (
-              <button
-                key={s.value}
-                onClick={() => { setSegmentoFilter(segmentoFilter === s.value ? null : s.value); setRolFilter(null) }}
-                className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  segmentoFilter === s.value ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                {s.label} ({count})
-              </button>
-            )
-          })}
+          {statusConContactos.map(({ value, label, count }) => (
+            <button
+              key={value}
+              onClick={() => { setSegmentoFilter(segmentoFilter === value ? null : value); setRolFilter(null) }}
+              className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                segmentoFilter === value ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              {label} ({count})
+            </button>
+          ))}
         </div>
       </div>
 
