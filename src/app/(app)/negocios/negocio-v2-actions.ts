@@ -1080,9 +1080,22 @@ export async function getNegocioDetalle(id: string): Promise<{
             const requiereFieldLimpiar = ccfg.requiere_field ?? 'requiere_cita_dian'
             const dataActual = ((inst.data ?? {}) as Record<string, unknown>)
             if (dataActual[requiereFieldLimpiar] != null) {
-              const { [requiereFieldLimpiar]: _descartado, ...dataSinCampo } = dataActual
-              await db(supabase).from('negocio_bloques').update({ data: dataSinCampo }).eq('id', inst.id)
-              instanciasMap[bc.id] = { ...inst, data: dataSinCampo } as NegocioBloque
+              const { [requiereFieldLimpiar]: valorRetirado, ...dataSinCampo } = dataActual
+              // Deja rastro de lo retirado. Un borrado en silencio vuelve inauditable un
+              // barrido que puede alcanzar a muchos negocios de una vez (el cargue
+              // histórico de julio dejó 116 casos en este estado), y sin el valor previo
+              // no hay forma de revertir si la limpieza resulta equivocada.
+              const dataConRastro = {
+                ...dataSinCampo,
+                _campo_retirado: {
+                  campo: requiereFieldLimpiar,
+                  valor: valorRetirado,
+                  fecha: new Date().toISOString(),
+                  motivo: 'El bloque dejó de aplicar (guard solo_si). El valor huérfano seguiría decidiendo el routing, que lee los bloques de la etapa sin mirar su condition.',
+                },
+              }
+              await db(supabase).from('negocio_bloques').update({ data: dataConRastro }).eq('id', inst.id)
+              instanciasMap[bc.id] = { ...inst, data: dataConRastro } as NegocioBloque
             }
             continue
           }
