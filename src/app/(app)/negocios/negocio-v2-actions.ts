@@ -12,6 +12,7 @@ import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -924,18 +925,26 @@ export async function getNegocioDetalle(id: string): Promise<{
       const faltantes = configIds.filter(cid => !instanciasMap[cid])
       if (faltantes.length > 0) {
         // Bloques de solo lectura (config estado 'visible') no requieren acción
-        // del usuario → nacen completos. El resto, pendiente.
-        const configEstadoById = new Map(
-          ((bloqueConfigs ?? []) as Array<{ id: string; estado?: string }>).map(bc => [bc.id, bc.estado])
+        // del usuario → nacen completos, SALVO que tengan campos `required` sin
+        // valor (ver `visiblePuedeNacerCompleto`): ahí quedan pendientes para que
+        // su gate retenga en vez de dejar pasar la pregunta sin responder.
+        const configById = new Map(
+          ((bloqueConfigs ?? []) as Array<{ id: string; estado?: string; config_extra?: Record<string, unknown> | null }>)
+            .map(bc => [bc.id, bc])
         )
         const nuevas = faltantes.map(cid => {
-          const esVisible = configEstadoById.get(cid) === 'visible'
+          const cfg = configById.get(cid)
+          // `data: {}` — la instancia nace vacía, así que un bloque con campos
+          // `required` nunca los tiene: por eso este es el sitio donde el gate de
+          // la cita DIAN dejaba de retener.
+          const naceCompleto = cfg?.estado === 'visible'
+            && visiblePuedeNacerCompleto(cfg?.config_extra ?? null, {})
           return {
             negocio_id: id,
             bloque_config_id: cid,
-            estado: esVisible ? 'completo' : 'pendiente',
+            estado: naceCompleto ? 'completo' : 'pendiente',
             data: {},
-            ...(esVisible ? { completado_at: new Date().toISOString() } : {}),
+            ...(naceCompleto ? { completado_at: new Date().toISOString() } : {}),
           }
         })
         const { data: creadas } = await db(supabase)
@@ -1686,14 +1695,16 @@ export async function crearNegocio(input: {
           defaults.tipo_persona = tipoPersonaDerivado
         }
         // Bloques de solo lectura (config estado 'visible') no requieren acción
-        // del usuario → nacen completos. El resto, pendiente.
-        const esVisible = bc.estado === 'visible'
+        // del usuario → nacen completos, SALVO que tengan campos `required` que los
+        // defaults no alcancen a llenar (ver `visiblePuedeNacerCompleto`).
+        const naceCompleto = bc.estado === 'visible'
+          && visiblePuedeNacerCompleto(bc.config_extra as Record<string, unknown> | null, defaults)
         return {
           negocio_id: negocioData.id,
           bloque_config_id: bc.id as string,
-          estado: esVisible ? 'completo' : 'pendiente',
+          estado: naceCompleto ? 'completo' : 'pendiente',
           data: Object.keys(defaults).length > 0 ? defaults : {},
-          ...(esVisible ? { completado_at: new Date().toISOString() } : {}),
+          ...(naceCompleto ? { completado_at: new Date().toISOString() } : {}),
         }
       })
 
@@ -2242,11 +2253,33 @@ export async function cambiarEtapaNegocio(
 
         let prevCompleto
         if (isVisible) {
-          // Datos and documento share definition_id — use nombre/label for disambiguation
-          if (isDatos && bc.nombre) {
-            prevCompleto = completadosPorLabel.get(`${bc.bloque_definition_id}:${bc.nombre}`)
-          }
-          if (!prevCompleto) {
+          if (isDatos) {
+            // Los bloques `datos` COMPARTEN un mismo `bloque_definition_id` genérico, así
+            // que ese id NO identifica la casilla: solo dice "esto es un bloque de datos".
+            // La identidad real es el nombre. Antes, si el nombre no encontraba pareja se
+            // caía a `completadosPorDef`, que devuelve CUALQUIER bloque `datos` ya
+            // completado del negocio — sin ninguna relación semántica.
+            //
+            // Eso copiaba respuestas ajenas: medido el 2026-07-31 en SOENA, 321 instancias
+            // con data que no corresponde a sus propios campos ("Vehículo a reemplazar"
+            // con `requiere_devolucion_iva` adentro, "Radicado de inclusión" con el
+            // radicado de certificación). El motor de routing hace `Object.assign` de
+            // TODAS las data de los bloques `datos` de la etapa antes de evaluar sus
+            // condiciones, así que una clave prestada puede decidir una rama.
+            //
+            // Medido antes de cambiarlo: ningún valor prestado contradice al de su dueño
+            // (se copian dentro del mismo negocio), y las 10 herencias legítimas de la
+            // línea coinciden por nombre. El caso dañino es el otro: cuando el dueño NO
+            // tiene valor y el prestado ocupa su lugar — así nació completo y con basura
+            // el bloque de la cita DIAN.
+            //
+            // Sin pareja por nombre: nace pendiente y vacío. No se adivina.
+            prevCompleto = bc.nombre
+              ? completadosPorLabel.get(`${bc.bloque_definition_id}:${bc.nombre}`)
+              : undefined
+          } else {
+            // Tipos con definition_id propio (propuesta, cobros, historial…): el id SÍ
+            // identifica al bloque, así que heredar por definition_id es correcto.
             prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
           }
         } else if (isDocumento) {
@@ -2264,12 +2297,18 @@ export async function cambiarEtapaNegocio(
         const data = prevCompleto?.data
           ?? (isDatos ? computeFieldDefaults(bc.config_extra as Record<string, unknown> | null) : {})
 
+        // Heredar el estado `completo` exige además que los campos `required` del bloque
+        // DESTINO tengan valor: el origen puede declarar otros campos, y un gate no debe
+        // darse por cumplido con una respuesta que su propia casilla no tiene.
+        const heredaCompleto = !!prevCompleto
+          && (!isVisible || visiblePuedeNacerCompleto(bc.config_extra as Record<string, unknown> | null, data))
+
         return {
           negocio_id: negocioId,
           bloque_config_id: bc.id,
-          estado: prevCompleto ? 'completo' : 'pendiente',
+          estado: heredaCompleto ? 'completo' : 'pendiente',
           data,
-          completado_at: prevCompleto?.completado_at ?? null,
+          completado_at: heredaCompleto ? (prevCompleto?.completado_at ?? null) : null,
         }
       })
 
