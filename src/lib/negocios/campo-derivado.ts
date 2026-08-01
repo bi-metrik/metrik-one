@@ -19,6 +19,20 @@ export type LockWhen = {
   value?: unknown
   force_value?: unknown
   mapping?: Record<string, unknown>
+  /**
+   * Regla puntual que CONVIVE con un `mapping` y le gana. Para el caso en que un campo se
+   * deriva de una respuesta salvo cuando una condición dura de negocio lo determina por su
+   * cuenta (leasing → sin devolución de IVA, contrate lo que contrate el cliente).
+   * Su fuente puede ser otro bloque distinto al del `mapping`.
+   */
+  regla?: {
+    source_bloque_slug: string
+    source_etapa_orden?: number
+    field: string
+    value: unknown
+    force_value: unknown
+    hint?: string
+  }
   hint?: string
 }
 
@@ -41,8 +55,30 @@ export type EstadoDerivado = {
  * deliberada, y es exactamente así como un caso se va por la rama equivocada sin que nadie
  * lo note. El vacío no es una respuesta: exigirla es trabajo del gate de la pregunta.
  */
-export function resolverDerivado(lockWhen: LockWhen | undefined, valorFuente: unknown): EstadoDerivado {
+export function resolverDerivado(
+  lockWhen: LockWhen | undefined,
+  valorFuente: unknown,
+  /**
+   * Valor de la fuente de la REGLA PUNTUAL, cuando convive con un `mapping` y vive en otro
+   * bloque (`regla.source_bloque_slug`). Si se omite, la regla puntual se evalúa contra
+   * `valorFuente`, que es el caso de siempre.
+   */
+  valorFuenteRegla?: unknown,
+): EstadoDerivado {
   if (!lockWhen) return { bloqueado: false, valor: undefined }
+
+  // Precedencia: una regla puntual de negocio gana sobre la derivación general.
+  // El caso que lo obliga: `requiere_devolucion_iva` se deriva de qué contrató el cliente,
+  // PERO si la titularidad es leasing no hay devolución de IVA, se haya contratado lo que
+  // se haya contratado. Sin esta precedencia, configurar el mapping encima borraría esa
+  // regla en silencio, que es justo la clase de pérdida muda que estamos persiguiendo.
+  const regla = lockWhen.regla
+  if (regla) {
+    const observado = valorFuenteRegla !== undefined ? valorFuenteRegla : valorFuente
+    if (observado === regla.value) {
+      return { bloqueado: true, valor: regla.force_value }
+    }
+  }
 
   if (lockWhen.mapping) {
     const clave = valorFuente == null ? '' : String(valorFuente)
