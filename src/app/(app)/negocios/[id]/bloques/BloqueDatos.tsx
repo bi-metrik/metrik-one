@@ -289,10 +289,14 @@ export default function BloqueDatos({
     const lw = f.lock_when
     if (!lw) return { locked: false, forced: undefined }
     const sourceVal = datosPorSlug?.[lw.source_bloque_slug]?.[lw.field]
+    // La regla puntual que convive con un mapping puede leer OTRO bloque (leasing vive en
+    // titularidad, no en la pregunta del servicio contratado).
+    const reglaVal = lw.regla ? datosPorSlug?.[lw.regla.source_bloque_slug]?.[lw.regla.field] : undefined
     // La regla vive en `campo-derivado.ts`, compartida con el guardado del servidor: si
     // cada lado la implementara aparte, tarde o temprano dirían cosas distintas.
-    const r = resolverDerivado(lw, sourceVal)
-    return { locked: r.bloqueado, forced: r.valor, hint: lw.hint }
+    const r = resolverDerivado(lw, sourceVal, reglaVal)
+    const aplicaRegla = !!lw.regla && reglaVal === lw.regla.value
+    return { locked: r.bloqueado, forced: r.valor, hint: aplicaRegla ? lw.regla?.hint ?? lw.hint : lw.hint }
   }
 
   function isComplete(vals: Record<string, unknown>) {

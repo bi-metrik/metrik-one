@@ -3431,11 +3431,11 @@ async function propagarCamposDerivados(
   type Derivado = {
     configId: string
     slug: string
-    valor: unknown
+    lockWhen: LockWhen
     campoFuente: string
     respuesta: unknown
   }
-  const derivados: Derivado[] = []
+  const candidatos: Derivado[] = []
   for (const c of (configs ?? []) as Record<string, unknown>[]) {
     const fields = ((c.config_extra as Record<string, unknown> | null)?.fields ?? []) as Record<string, unknown>[]
     for (const f of fields) {
@@ -3445,18 +3445,44 @@ async function propagarCamposDerivados(
       // El campo fuente puede no venir en este guardado (se guardó otro campo del mismo
       // bloque): sin respuesta no hay nada que derivar, y NO es motivo para vaciar.
       if (!(campoFuente in data)) continue
-      const respuesta = data[campoFuente]
-      derivados.push({
+      candidatos.push({
         configId: c.id as string,
         slug: f.slug as string,
-        // Misma regla que aplica el render, de una sola fuente (`campo-derivado.ts`).
-        valor: resolverDerivado(lw as unknown as LockWhen, respuesta).valor,
+        lockWhen: lw as unknown as LockWhen,
         campoFuente,
-        respuesta,
+        respuesta: data[campoFuente],
       })
     }
   }
-  if (derivados.length === 0) return
+  if (candidatos.length === 0) return
+
+  // Una regla puntual que convive con el mapeo (leasing → sin devolución de IVA) puede
+  // leer OTRO bloque. Hay que traer su valor: sin él, el servidor escribiría el derivado
+  // ignorando una regla dura de negocio y el cliente lo corregiría recién al abrir el
+  // negocio, que es exactamente el retraso que este trabajo viene a eliminar.
+  const slugsRegla = [...new Set(candidatos.map(d => d.lockWhen.regla?.source_bloque_slug).filter(Boolean))] as string[]
+  const valorPorSlug = new Map<string, Record<string, unknown>>()
+  if (slugsRegla.length > 0) {
+    const { data: bloquesRegla } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocioId)
+      .in('bloque_configs.slug', slugsRegla)
+    for (const b of (bloquesRegla ?? []) as Record<string, unknown>[]) {
+      const s = (b.bloque_configs as Record<string, unknown> | null)?.slug as string | undefined
+      if (s) valorPorSlug.set(s, (b.data as Record<string, unknown>) ?? {})
+    }
+  }
+
+  const derivados = candidatos.map(d => {
+    const r = d.lockWhen.regla
+    const valorRegla = r ? valorPorSlug.get(r.source_bloque_slug)?.[r.field] : undefined
+    return {
+      ...d,
+      // Misma regla que aplica el render, de una sola fuente (`campo-derivado.ts`).
+      valor: resolverDerivado(d.lockWhen, d.respuesta, valorRegla).valor,
+    }
+  })
 
   const { data: instancias } = await db(supabase)
     .from('negocio_bloques')

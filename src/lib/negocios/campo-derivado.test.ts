@@ -56,6 +56,36 @@ describe('resolverDerivado — modo mapping', () => {
   })
 })
 
+describe('resolverDerivado — la regla dura de negocio gana sobre la derivación', () => {
+  // Caso real: `requiere_devolucion_iva` se deriva de qué contrató el cliente, PERO si la
+  // titularidad es leasing no hay devolución de IVA, contrate lo que contrate. Sin esta
+  // precedencia, poner el mapping encima habría borrado la regla de leasing en silencio.
+  const IVA_CON_LEASING: LockWhen = {
+    ...IVA,
+    regla: {
+      source_bloque_slug: 'titularidad',
+      field: 'modalidad_solicitante',
+      value: 'leasing',
+      force_value: false,
+      hint: 'Leasing cierra en Cobro, sin devolución de IVA',
+    },
+  }
+
+  it('con leasing fuerza "no", aunque la respuesta diga que contrató la devolución', () => {
+    expect(resolverDerivado(IVA_CON_LEASING, 'completo', 'leasing')).toEqual({ bloqueado: true, valor: false })
+    expect(resolverDerivado(IVA_CON_LEASING, 'solo_iva', 'leasing')).toEqual({ bloqueado: true, valor: false })
+  })
+
+  it('sin leasing manda la derivación', () => {
+    expect(resolverDerivado(IVA_CON_LEASING, 'solo_iva', 'propia').valor).toBe('true')
+    expect(resolverDerivado(IVA_CON_LEASING, 'solo_upme', 'propia').valor).toBe('false')
+  })
+
+  it('sin saber la titularidad NO se asume leasing: manda la derivación', () => {
+    expect(resolverDerivado(IVA_CON_LEASING, 'solo_iva', undefined).valor).toBe('true')
+  })
+})
+
 describe('resolverDerivado — sin mapping, comportamiento intacto', () => {
   // La regla puntual que ya existía en producción (leasing cierra sin devolución de IVA).
   const LEASING: LockWhen = {
