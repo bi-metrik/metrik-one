@@ -80,18 +80,25 @@ export default async function AppLayout({
     }
   }
 
-  const [workspaceResult, modulesResult, lineasResult] = await Promise.all([
-    activeClient
-      .from('workspaces')
-      .select('name, slug, color_primario, color_secundario, logo_url')
-      .eq('id', activeWorkspaceId)
-      .single(),
-    // modules column added in migration 20260409300001 — not in generated types yet
+  // Una sola lectura de `workspaces`: antes eran DOS consultas al MISMO registro en cada
+  // navegación (una por branding, otra por modules/config_extra). El costo de sesión por
+  // navegación es el cuello real del producto, no el tamaño de cada consulta.
+  // modules column added in migration 20260409300001 — not in generated types yet
+  type WorkspaceRow = {
+    name: string
+    slug: string
+    color_primario: string | null
+    color_secundario: string | null
+    logo_url: string | null
+    modules: Record<string, boolean> | null
+    config_extra: Record<string, unknown> | null
+  }
+  const [workspaceResult, lineasResult] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (activeClient.from('workspaces') as any)
-      .select('modules, config_extra')
+      .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra')
       .eq('id', activeWorkspaceId)
-      .single() as Promise<{ data: { modules: Record<string, boolean> | null; config_extra: Record<string, unknown> | null } | null; error: unknown }>,
+      .single() as Promise<{ data: WorkspaceRow | null; error: unknown }>,
     // hasLineas: workspace tiene al menos una linea activa → habilita item /flujo
     activeClient
       .from('lineas_negocio')
@@ -105,16 +112,16 @@ export default async function AppLayout({
     redirect('/sin-espacio')
   }
 
-  const workspaceModules = (modulesResult.data?.modules as Record<string, boolean> | null) ?? { business: true }
+  const workspaceModules = (workspace.modules as Record<string, boolean> | null) ?? { business: true }
   // Override de visibilidad del nav por workspace (config-driven). Mapa { href: roles[] }
   // que reemplaza los roles por defecto de cada item del sidebar para ESTE workspace.
   // Sin override = comportamiento global intacto (resto de workspaces sin cambio).
-  const navRolesOverride = (modulesResult.data?.config_extra as { nav_roles_override?: Record<string, string[]> } | null)
+  const navRolesOverride = (workspace.config_extra as { nav_roles_override?: Record<string, string[]> } | null)
     ?.nav_roles_override ?? undefined
   // Modo vitrina comercial (opt-in por workspace, config-driven). Cliente Valida-only
   // ve un shell curado: solo Valida (funcional) + Tableros + Números (vitrinas de upsell
   // a ONE). Ausente/false → comportamiento idéntico a hoy (cero impacto a otros workspaces).
-  const modoVitrina = (modulesResult.data?.config_extra as { modo_vitrina?: boolean } | null)
+  const modoVitrina = (workspace.config_extra as { modo_vitrina?: boolean } | null)
     ?.modo_vitrina === true
   const hasLineas = (lineasResult.count ?? 0) > 0
 
