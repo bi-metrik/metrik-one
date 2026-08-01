@@ -5183,13 +5183,21 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         link_url: string | null; imagen_data: string | null; orden: number
       }>>()
       if (instIds.length > 0) {
-        const { data: prevItems } = await db(supabase)
+        // La columna es `negocio_bloque_id`. Decia `bloque_instancia_id`, que existe pero en
+        // OTRA tabla (`bloque_locks`), asi que PostgREST devolvia 400 y, como el error no se
+        // captura, `prevItems` quedaba vacio: el historial de etapas anteriores mostraba los
+        // cronogramas y checklists SIN items, sin avisar. Medido: ~100 errores en 3 horas.
+        const { data: prevItems, error: prevItemsError } = await db(supabase)
           .from('bloque_items')
-          .select('id, bloque_instancia_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden')
-          .in('bloque_instancia_id', instIds)
+          .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden')
+          .in('negocio_bloque_id', instIds)
           .order('orden', { ascending: true })
+        // Sin esto un fallo de esta consulta vuelve a ser mudo.
+        if (prevItemsError) {
+          console.error('[getNegocioDetalleCompleto] bloque_items de etapas previas:', prevItemsError)
+        }
         for (const it of ((prevItems ?? []) as Record<string, unknown>[])) {
-          const bid = it.bloque_instancia_id as string
+          const bid = it.negocio_bloque_id as string
           if (!itemsByInst.has(bid)) itemsByInst.set(bid, [])
           itemsByInst.get(bid)!.push({
             id: it.id as string,

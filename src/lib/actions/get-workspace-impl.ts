@@ -102,7 +102,7 @@ async function getWorkspaceImpl() {
       read_only: 'operativo',
       contador: 'operativo',
     }
-    const { data: created } = await supabase
+    const { data: created, error: createError } = await supabase
       .from('staff')
       .insert({
         workspace_id: profile.workspace_id,
@@ -113,7 +113,25 @@ async function getWorkspaceImpl() {
       })
       .select('id')
       .single()
-    staffRecord = created
+    // La lectura de arriba filtra `is_active`, asi que un registro INACTIVO no se encuentra
+    // y este insert choca contra `staff_profile_id_key` (unique por profile_id). Tambien
+    // chocan dos requests concurrentes del mismo usuario. En ambos casos el registro EXISTE:
+    // releerlo sin filtro es correcto y evita devolver `staffId = null`, que degrada permisos
+    // y responsables en silencio. Medido: 113 conflictos en 3 horas en produccion.
+    if (created) {
+      staffRecord = created
+    } else {
+      const { data: existente } = await supabase
+        .from('staff')
+        .select('id')
+        .eq('profile_id', user.id)
+        .maybeSingle()
+      if (existente) {
+        staffRecord = existente
+      } else {
+        console.error('[getWorkspace] no se pudo crear ni encontrar el staff:', createError)
+      }
+    }
   }
 
   // ── Impersonación QA ("Ver como"): solo platform_admin ────────────────
