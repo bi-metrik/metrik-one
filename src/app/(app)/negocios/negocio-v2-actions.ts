@@ -12,7 +12,16 @@ import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import {
+  exigeDatoDeDecision,
+  camposDeDecision,
+  decisionesSinResponder,
+  mensajeDatoFaltante,
+  type RoutingEtapa,
+  type CampoDecision,
+} from '@/lib/negocios/dato-de-decision'
 import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-completo'
+import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -2514,6 +2523,111 @@ async function autocompletarGatesAnticipoPorSaldo(
   }
 }
 
+// ── El motor exige el dato antes de decidir ───────────────────────────────────
+//
+// Resuelve los campos que gobiernan la bifurcación de una etapa: dónde se responde cada uno
+// y si la pregunta le corresponde a ESTE caso. La regla de qué cuenta como respuesta y qué
+// se le dice al equipo vive en `lib/negocios/dato-de-decision.ts`, porque la aplican los DOS
+// sitios que resuelven routing (el avance de etapa y el salto encadenado por saldo).
+//
+// `aplica` sale de la `condition` del bloque dueño, evaluada con `condicion_cumplida` — la
+// MISMA función SQL que usan los gates y que replica el render. Un bloque que no aplica no
+// se muestra y no se puede responder: exigirle el dato dejaría el caso sin salida.
+async function camposDecisionDelNegocio(
+  supabase: unknown,
+  negocioId: string,
+  lineaId: string,
+  sourceEtapaId: string,
+  routing: RoutingEtapa,
+): Promise<CampoDecision[]> {
+  const campos = camposDeDecision(routing)
+  if (campos.length === 0) return []
+
+  const [bloquesRes, etapaRes] = await Promise.all([
+    db(supabase)
+      .from('bloque_configs')
+      .select('nombre, config_extra, bloque_definitions!inner(tipo)')
+      .eq('etapa_id', sourceEtapaId),
+    db(supabase).from('etapas_negocio').select('nombre').eq('id', sourceEtapaId).single(),
+  ])
+  const etapaNombre = (etapaRes.data as { nombre: string } | null)?.nombre ?? null
+
+  type BloqueCfg = {
+    nombre: string | null
+    config_extra: Record<string, unknown> | null
+    bloque_definitions: { tipo: string } | null
+  }
+  const bloques = ((bloquesRes.data ?? []) as BloqueCfg[]).filter(
+    b => b.bloque_definitions?.tipo === 'datos' && b.config_extra?.desactivado !== true,
+  )
+
+  const resultado: CampoDecision[] = []
+  for (const campo of campos) {
+    let dueno: BloqueCfg | null = null
+    let field: Record<string, unknown> | null = null
+    for (const b of bloques) {
+      const fields = (b.config_extra?.fields ?? []) as Array<Record<string, unknown>>
+      const encontrado = fields.find(f => f.slug === campo)
+      if (encontrado) { dueno = b; field = encontrado; break }
+    }
+
+    if (!dueno) {
+      // Nadie declara el campo. El guardián lo reporta como `decision_sin_dueno`; aquí se
+      // frena porque es la forma más pura del defecto: el motor decidiría con un dato que
+      // NO existe en ninguna parte.
+      resultado.push({ campo, bloque: null, etapa: etapaNombre })
+      continue
+    }
+
+    let aplica = true
+    const condition = dueno.config_extra?.condition as Record<string, unknown> | null | undefined
+    if (condition) {
+      const { data: cumple } = await db(supabase).rpc('condicion_cumplida', {
+        p_negocio_id: negocioId,
+        p_linea_id: lineaId,
+        p_etapa_actual_id: sourceEtapaId,
+        p_cond: condition,
+      })
+      aplica = cumple === true
+    }
+
+    let bloqueNombre = dueno.nombre ?? null
+    let label = (field?.label as string | null) ?? null
+    let etapaLabel = etapaNombre
+
+    // Campo DERIVADO (`lock_when.mapping`, objetivo O3): no es una pregunta sino la
+    // consecuencia de otra. Mandar al equipo a este bloque sería mandarlo a un control que
+    // no puede tocar; la respuesta que falta es la de su fuente. El guardián hace la misma
+    // indirección, así que motor y guardián cuentan la misma historia.
+    const lockWhen = field?.lock_when as LockWhen | undefined
+    if (lockWhen?.mapping && lockWhen.source_bloque_slug) {
+      const { data: fuenteRaw } = await db(supabase)
+        .from('bloque_configs')
+        .select('nombre, config_extra, etapas_negocio!inner(nombre, linea_id)')
+        .eq('slug', lockWhen.source_bloque_slug)
+        .eq('etapas_negocio.linea_id', lineaId)
+        .limit(1)
+        .maybeSingle()
+      const fuente = fuenteRaw as {
+        nombre: string | null
+        config_extra: Record<string, unknown> | null
+        etapas_negocio: { nombre: string } | null
+      } | null
+      if (fuente) {
+        bloqueNombre = fuente.nombre ?? bloqueNombre
+        etapaLabel = fuente.etapas_negocio?.nombre ?? etapaLabel
+        const fFuente = ((fuente.config_extra?.fields ?? []) as Array<Record<string, unknown>>)
+          .find(f => f.slug === lockWhen.field)
+        label = (fFuente?.label as string | null) ?? lockWhen.field ?? label
+      }
+    }
+
+    resultado.push({ campo, label, bloque: bloqueNombre, etapa: etapaLabel, aplica })
+  }
+
+  return resultado
+}
+
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 
 export async function cambiarEtapaNegocioConGate(
@@ -2624,6 +2738,33 @@ export async function cambiarEtapaNegocioConGate(
         const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
         if (tipo === 'datos' && b.data && typeof b.data === 'object') {
           Object.assign(camposNegocio, b.data)
+        }
+      }
+
+      // ── El motor exige el dato ANTES de decidir ─────────────────────────────
+      //
+      // Sin esto, un campo decisorio vacío no hace match con ninguna condición y el avance
+      // cae al `default_etapa_orden`: el motor elige una ruta con un dato que no tiene, sin
+      // error y sin aviso. En SOENA eso mandó 17 casos de Entrega a Facturación, la etapa de
+      // cierre. Opt-in por etapa (`exigir_dato_de_decision`); sin el flag, nada cambia.
+      //
+      // Respeta el override de owner/admin como cualquier otro gate: si alguien decide
+      // avanzar sabiendo que el dato falta, queda el motivo en el log. Un freno que no se
+      // pueda levantar dejaría casos varados sin salida.
+      if (!motivoOverride && exigeDatoDeDecision(etapaActualData.config_extra)) {
+        const campos = await camposDecisionDelNegocio(
+          supabase, negocioId, etapaActualData.linea_id, sourceEtapaId, routing as RoutingEtapa,
+        )
+        const faltantes = decisionesSinResponder(campos, camposNegocio)
+        if (faltantes.length > 0) {
+          const msgs = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+          return {
+            error: 'gate_bloqueado',
+            bloquesPendientes: faltantes.map(f => ({
+              nombre: mensajeDatoFaltante(f, msgs['dato_de_decision']),
+              es_gate: true,
+            })),
+          }
         }
       }
 
@@ -3093,6 +3234,17 @@ export async function cambiarEtapaNegocioConGate(
           const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
           if (tipo === 'datos' && b.data && typeof b.data === 'object') Object.assign(campos, b.data)
         }
+        // El salto también RESUELVE ROUTING, así que también puede decidir a ciegas. Si la
+        // etapa exige el dato y falta, el negocio se queda AQUÍ en vez de pasar de largo:
+        // aterriza donde está la pregunta, que es justo lo que se quiere. No se devuelve
+        // error porque el avance ya ocurrió; lo que se frena es el salto, no el avance.
+        if (exigeDatoDeDecision(destStage.config_extra)) {
+          const camposDec = await camposDecisionDelNegocio(
+            supabase, negocioId, destStage.linea_id, srcEtapaId, cobroRouting as RoutingEtapa,
+          )
+          if (decisionesSinResponder(camposDec, campos).length > 0) break
+        }
+
         destinoOrden = cobroRouting.default_etapa_orden
         for (const rule of (cobroRouting.conditional ?? [])) {
           if (String(campos[rule.condition.field] ?? '') === String(rule.condition.value)) {
@@ -3214,6 +3366,11 @@ export async function marcarBloqueCompleto(
     .eq('id', negocioBloqueId)
 
   if (updateError) return { error: (updateError as { message: string }).message }
+
+  // Igual que en `actualizarBloqueData`: la respuesta y sus campos derivados se escriben
+  // juntos. Hace falta en AMBOS caminos — el cliente manda por aquí cuando el bloque queda
+  // completo, que es justamente el caso de una pregunta obligatoria que decide una ruta.
+  await propagarCamposDerivados(supabase, negocioBloqueId, mergedData)
 
   // Siempre revalidar la página del negocio después de marcar completo
   if (negocioId) {
@@ -3366,6 +3523,163 @@ async function resolverDestinoCompartido(
 }
 
 /**
+ * Propaga los campos DERIVADOS de un bloque que acaba de guardarse.
+ *
+ * Un campo con `lock_when.mapping` no es una pregunta: es la consecuencia de la respuesta
+ * de otro campo (ver el tipo en `BloqueDatos.tsx`). Sirve para reemplazar varios
+ * interruptores sueltos por una sola pregunta SIN tocar los routings, que siguen leyendo
+ * los campos de siempre.
+ *
+ * ⚠️ Por qué la derivación se persiste AQUÍ y no basta el effect del cliente.
+ * El enforcement de `lock_when` corre al RENDERIZAR, así que el valor derivado se escribe
+ * cuando alguien ABRE el negocio. Para un campo que decide una ruta eso llega tarde: el
+ * routing puede evaluarse antes de que el valor exista, y el motor leería un campo vacío y
+ * caería al default — el mismo defecto que este trabajo viene a cerrar. Escribiéndolo al
+ * guardar, la respuesta y sus consecuencias quedan en la misma operación. El effect del
+ * cliente se conserva solo como respaldo para instancias viejas.
+ *
+ * Una respuesta que no está en el mapa deja el campo derivado VACÍO a propósito: el vacío
+ * no es una respuesta, y exigirla es trabajo del gate de la pregunta, no de este campo.
+ *
+ * Deja rastro en `_derivado` (qué campo, desde qué respuesta y cuándo), por la misma razón
+ * que lo dejó la limpieza de campos retirados: cuando el sistema escribe datos solo, el
+ * rastro es parte del arreglo.
+ */
+async function propagarCamposDerivados(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioBloqueId: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  // El bloque fuente se identifica por su slug estable. Un heredado (slug null) nunca lo es.
+  const { data: fuente } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, bloque_configs!inner(slug, etapa_id)')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!fuente) return
+
+  const cfgFuente = (fuente as Record<string, unknown>).bloque_configs as Record<string, unknown> | null
+  const slugFuente = cfgFuente?.slug as string | undefined
+  const negocioId = (fuente as { negocio_id: string }).negocio_id
+  if (!slugFuente) return
+
+  // Línea del negocio → sus bloques configurados. Es una lectura de CONFIGURACIÓN (sin
+  // `data`), acotada a la línea, y en un workspace sin campos derivados corta aquí mismo.
+  const { data: etapaFuente } = await db(supabase)
+    .from('etapas_negocio')
+    .select('linea_id')
+    .eq('id', cfgFuente?.etapa_id as string)
+    .single()
+  const lineaId = (etapaFuente as { linea_id?: string } | null)?.linea_id
+  if (!lineaId) return
+
+  const { data: configs } = await db(supabase)
+    .from('bloque_configs')
+    .select('id, config_extra, etapas_negocio!inner(linea_id)')
+    .eq('etapas_negocio.linea_id', lineaId)
+
+  type Derivado = {
+    configId: string
+    slug: string
+    lockWhen: LockWhen
+    campoFuente: string
+    respuesta: unknown
+  }
+  const candidatos: Derivado[] = []
+  for (const c of (configs ?? []) as Record<string, unknown>[]) {
+    const fields = ((c.config_extra as Record<string, unknown> | null)?.fields ?? []) as Record<string, unknown>[]
+    for (const f of fields) {
+      const lw = f.lock_when as Record<string, unknown> | undefined
+      if (!lw?.mapping || lw.source_bloque_slug !== slugFuente) continue
+      const campoFuente = lw.field as string
+      // El campo fuente puede no venir en este guardado (se guardó otro campo del mismo
+      // bloque): sin respuesta no hay nada que derivar, y NO es motivo para vaciar.
+      if (!(campoFuente in data)) continue
+      candidatos.push({
+        configId: c.id as string,
+        slug: f.slug as string,
+        lockWhen: lw as unknown as LockWhen,
+        campoFuente,
+        respuesta: data[campoFuente],
+      })
+    }
+  }
+  if (candidatos.length === 0) return
+
+  // Una regla puntual que convive con el mapeo (leasing → sin devolución de IVA) puede
+  // leer OTRO bloque. Hay que traer su valor: sin él, el servidor escribiría el derivado
+  // ignorando una regla dura de negocio y el cliente lo corregiría recién al abrir el
+  // negocio, que es exactamente el retraso que este trabajo viene a eliminar.
+  const slugsRegla = [...new Set(candidatos.map(d => d.lockWhen.regla?.source_bloque_slug).filter(Boolean))] as string[]
+  const valorPorSlug = new Map<string, Record<string, unknown>>()
+  if (slugsRegla.length > 0) {
+    const { data: bloquesRegla } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocioId)
+      .in('bloque_configs.slug', slugsRegla)
+    for (const b of (bloquesRegla ?? []) as Record<string, unknown>[]) {
+      const s = (b.bloque_configs as Record<string, unknown> | null)?.slug as string | undefined
+      if (s) valorPorSlug.set(s, (b.data as Record<string, unknown>) ?? {})
+    }
+  }
+
+  const derivados = candidatos.map(d => {
+    const r = d.lockWhen.regla
+    const valorRegla = r ? valorPorSlug.get(r.source_bloque_slug)?.[r.field] : undefined
+    return {
+      ...d,
+      // Misma regla que aplica el render, de una sola fuente (`campo-derivado.ts`).
+      valor: resolverDerivado(d.lockWhen, d.respuesta, valorRegla).valor,
+    }
+  })
+
+  const { data: instancias } = await db(supabase)
+    .from('negocio_bloques')
+    .select('id, data, bloque_config_id')
+    .eq('negocio_id', negocioId)
+    .in('bloque_config_id', [...new Set(derivados.map(d => d.configId))])
+
+  const ahora = new Date().toISOString()
+  for (const inst of (instancias ?? []) as Record<string, unknown>[]) {
+    const propios = derivados.filter(d => d.configId === inst.bloque_config_id)
+    if (propios.length === 0) continue
+
+    // Escribir donde vive el dato de verdad (un derivado puede estar en un bloque compartido).
+    const destinoId = await resolverDestinoCompartido(supabase, inst.id as string)
+    const base =
+      destinoId === inst.id
+        ? ((inst.data as Record<string, unknown>) ?? {})
+        : (((await db(supabase).from('negocio_bloques').select('data').eq('id', destinoId).single())
+            .data as Record<string, unknown> | null)?.data as Record<string, unknown>) ?? {}
+
+    const siguiente = { ...base }
+    const rastro = { ...((base._derivado as Record<string, unknown>) ?? {}) }
+    let cambio = false
+    for (const d of propios) {
+      if (base[d.slug] === d.valor) continue
+      cambio = true
+      if (d.valor === undefined) delete siguiente[d.slug]
+      else siguiente[d.slug] = d.valor
+      rastro[d.slug] = {
+        de_bloque: slugFuente,
+        de_campo: d.campoFuente,
+        respuesta: d.respuesta ?? null,
+        en: ahora,
+      }
+    }
+    if (!cambio) continue
+    siguiente._derivado = rastro
+
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ data: siguiente, updated_at: ahora })
+      .eq('id', destinoId)
+  }
+}
+
+/**
  * ¿Se está escribiendo sobre un bloque de una etapa que el negocio YA superó?
  * Es la diferencia entre "trabajar la etapa" y "corregir hacia atrás", y define
  * si aplica el opt-in de corrección y la marca de autoría.
@@ -3484,6 +3798,14 @@ export async function actualizarBloqueData(
     .single()
 
   if (updateError) return { error: (updateError as { message: string }).message }
+
+  // Los campos derivados de este bloque (`lock_when.mapping`) se escriben en la MISMA
+  // operación que la respuesta que los origina. Ver `propagarCamposDerivados`.
+  // Se omite en el autosave de borrador (revalidate:false, escritura libre cada pocos
+  // segundos): las respuestas que derivan algo siempre revalidan.
+  if (opts?.revalidate !== false) {
+    await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
+  }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
   if (nid && opts?.revalidate !== false) revalidatePath(`/negocios/${nid}`)

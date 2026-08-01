@@ -11,6 +11,7 @@ import type { EpaycoDesglose } from '@/lib/epayco'
 import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/lib/afi/template-mapping'
 import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug } from '@/lib/dian/seccionales'
 import { campoRequeridoCumplido } from '@/lib/negocios/campo-completo'
+import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 
 export interface DatosField {
@@ -45,15 +46,17 @@ export interface DatosField {
   // = 'leasing' → forzar requiere_devolucion_iva = false y deshabilitar el toggle
   // (leasing cierra en Cobro, sin devolución de IVA). El valor forzado se PERSISTE
   // (gate y routing leen el dato real), no es solo cosmético.
-  lock_when?: {
-    source_bloque_slug: string
-    // Etapa del bloque fuente — el server lo usa para cargar ese bloque en datosPorSlug.
-    source_etapa_orden?: number
-    field: string
-    value: unknown
-    force_value: unknown
-    hint?: string
-  }
+  //
+  // Dos modos, excluyentes:
+  //  · `value` + `force_value` — la regla puntual de siempre: si la fuente vale X, forzar Y.
+  //  · `mapping` — el campo deja de ser una pregunta y pasa a ser una CONSECUENCIA de la
+  //    respuesta de la fuente: cada respuesta suya se traduce a un valor de este campo.
+  //    Es el modo que permite reemplazar N interruptores sueltos por una sola pregunta sin
+  //    tocar los routings, que siguen leyendo los campos de siempre. Una respuesta de la
+  //    fuente que no esté en el mapa deja este campo VACÍO a propósito: el vacío no es una
+  //    respuesta, y quien tiene que exigirla es el gate de la pregunta, no este campo.
+  // `source_etapa_orden` lo usa el server para cargar el bloque fuente en `datosPorSlug`.
+  lock_when?: LockWhen
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
   doc_link?: {
     source_bloque_slug?: string // referencia estable (preferida sobre nombre/orden)
@@ -286,7 +289,14 @@ export default function BloqueDatos({
     const lw = f.lock_when
     if (!lw) return { locked: false, forced: undefined }
     const sourceVal = datosPorSlug?.[lw.source_bloque_slug]?.[lw.field]
-    return { locked: sourceVal === lw.value, forced: lw.force_value, hint: lw.hint }
+    // La regla puntual que convive con un mapping puede leer OTRO bloque (leasing vive en
+    // titularidad, no en la pregunta del servicio contratado).
+    const reglaVal = lw.regla ? datosPorSlug?.[lw.regla.source_bloque_slug]?.[lw.regla.field] : undefined
+    // La regla vive en `campo-derivado.ts`, compartida con el guardado del servidor: si
+    // cada lado la implementara aparte, tarde o temprano dirían cosas distintas.
+    const r = resolverDerivado(lw, sourceVal, reglaVal)
+    const aplicaRegla = !!lw.regla && reglaVal === lw.regla.value
+    return { locked: r.bloqueado, forced: r.valor, hint: aplicaRegla ? lw.regla?.hint ?? lw.hint : lw.hint }
   }
 
   function isComplete(vals: Record<string, unknown>) {
@@ -736,6 +746,10 @@ export default function BloqueDatos({
             const lk = lockState(f)
             const shown = lk.locked ? lk.forced : values[f.slug]
             const blocked = isPending || lk.locked
+            // Derivado sin respuesta de la fuente: NO decir "No". Un toggle apagado se lee
+            // como una negativa deliberada, y aquí lo que pasa es que nadie ha respondido
+            // todavía la pregunta de la que este campo depende.
+            const sinDefinir = lk.locked && lk.forced === undefined
             return (
               <div className="flex flex-col gap-0.5">
                 <label className="inline-flex items-center gap-2">
@@ -747,7 +761,9 @@ export default function BloqueDatos({
                       className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${shown ? 'translate-x-4' : 'translate-x-0'}`}
                     />
                   </div>
-                  <span className="text-xs text-[#1A1A1A]">{shown ? 'Sí' : 'No'}</span>
+                  <span className={`text-xs ${sinDefinir ? 'text-[#6B7280] italic' : 'text-[#1A1A1A]'}`}>
+                    {sinDefinir ? 'Sin definir' : shown ? 'Sí' : 'No'}
+                  </span>
                 </label>
                 {lk.locked && lk.hint && (
                   <span className="text-[10px] text-[#6B7280] italic">{lk.hint}</span>
