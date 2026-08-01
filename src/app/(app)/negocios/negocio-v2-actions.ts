@@ -925,11 +925,11 @@ export async function getNegocioDetalle(id: string): Promise<{
       const faltantes = configIds.filter(cid => !instanciasMap[cid])
       if (faltantes.length > 0) {
         // Bloques de solo lectura (config estado 'visible') no requieren acción
-        // del usuario → nacen completos, SALVO que tengan campos `required` sin
-        // valor (ver `visiblePuedeNacerCompleto`): ahí quedan pendientes para que
-        // su gate retenga en vez de dejar pasar la pregunta sin responder.
+        // del usuario → nacen completos, SALVO que sean GATE con campos `required`
+        // sin valor (ver `visiblePuedeNacerCompleto`): ahí quedan pendientes para
+        // que el gate retenga en vez de dejar pasar la pregunta sin responder.
         const configById = new Map(
-          ((bloqueConfigs ?? []) as Array<{ id: string; estado?: string; config_extra?: Record<string, unknown> | null }>)
+          ((bloqueConfigs ?? []) as Array<{ id: string; estado?: string; es_gate?: boolean; config_extra?: Record<string, unknown> | null }>)
             .map(bc => [bc.id, bc])
         )
         const nuevas = faltantes.map(cid => {
@@ -938,7 +938,7 @@ export async function getNegocioDetalle(id: string): Promise<{
           // `required` nunca los tiene: por eso este es el sitio donde el gate de
           // la cita DIAN dejaba de retener.
           const naceCompleto = cfg?.estado === 'visible'
-            && visiblePuedeNacerCompleto(cfg?.config_extra ?? null, {})
+            && visiblePuedeNacerCompleto(cfg?.config_extra ?? null, {}, cfg?.es_gate === true)
           return {
             negocio_id: id,
             bloque_config_id: cid,
@@ -1681,7 +1681,7 @@ export async function crearNegocio(input: {
   if (primeraEtapa?.id) {
     const { data: bloqueConfigs } = await db(supabase)
       .from('bloque_configs')
-      .select('id, estado, config_extra, bloque_definitions(tipo)')
+      .select('id, estado, es_gate, config_extra, bloque_definitions(tipo)')
       .eq('etapa_id', primeraEtapa.id)
       .eq('workspace_id', workspaceId)
 
@@ -1695,10 +1695,14 @@ export async function crearNegocio(input: {
           defaults.tipo_persona = tipoPersonaDerivado
         }
         // Bloques de solo lectura (config estado 'visible') no requieren acción
-        // del usuario → nacen completos, SALVO que tengan campos `required` que los
-        // defaults no alcancen a llenar (ver `visiblePuedeNacerCompleto`).
+        // del usuario → nacen completos, SALVO que sean GATE con campos `required`
+        // que los defaults no alcancen a llenar (ver `visiblePuedeNacerCompleto`).
         const naceCompleto = bc.estado === 'visible'
-          && visiblePuedeNacerCompleto(bc.config_extra as Record<string, unknown> | null, defaults)
+          && visiblePuedeNacerCompleto(
+            bc.config_extra as Record<string, unknown> | null,
+            defaults,
+            bc.es_gate === true,
+          )
         return {
           negocio_id: negocioData.id,
           bloque_config_id: bc.id as string,
@@ -2174,7 +2178,7 @@ export async function cambiarEtapaNegocio(
   // Solo heredar estado/data para bloques VISIBLE (editable siempre empieza pendiente)
   const { data: bloqueConfigs } = await db(supabase)
     .from('bloque_configs')
-    .select('id, bloque_definition_id, estado, nombre, config_extra, bloque_definitions(tipo)')
+    .select('id, bloque_definition_id, estado, es_gate, nombre, config_extra, bloque_definitions(tipo)')
     .eq('etapa_id', nuevaEtapaId)
     .eq('workspace_id', workspaceId)
 
@@ -2183,6 +2187,7 @@ export async function cambiarEtapaNegocio(
       id: string
       bloque_definition_id: string
       estado: string
+      es_gate: boolean | null
       nombre: string | null
       config_extra: Record<string, unknown> | null
       bloque_definitions: { tipo: string } | null
@@ -2301,7 +2306,11 @@ export async function cambiarEtapaNegocio(
         // DESTINO tengan valor: el origen puede declarar otros campos, y un gate no debe
         // darse por cumplido con una respuesta que su propia casilla no tiene.
         const heredaCompleto = !!prevCompleto
-          && (!isVisible || visiblePuedeNacerCompleto(bc.config_extra as Record<string, unknown> | null, data))
+          && (!isVisible || visiblePuedeNacerCompleto(
+                bc.config_extra as Record<string, unknown> | null,
+                data,
+                bc.es_gate === true,
+              ))
 
         return {
           negocio_id: negocioId,
