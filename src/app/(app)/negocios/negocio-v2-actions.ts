@@ -12,6 +12,14 @@ import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import {
+  exigeDatoDeDecision,
+  camposDeDecision,
+  decisionesSinResponder,
+  mensajeDatoFaltante,
+  type RoutingEtapa,
+  type CampoDecision,
+} from '@/lib/negocios/dato-de-decision'
 import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
@@ -2515,6 +2523,111 @@ async function autocompletarGatesAnticipoPorSaldo(
   }
 }
 
+// ── El motor exige el dato antes de decidir ───────────────────────────────────
+//
+// Resuelve los campos que gobiernan la bifurcación de una etapa: dónde se responde cada uno
+// y si la pregunta le corresponde a ESTE caso. La regla de qué cuenta como respuesta y qué
+// se le dice al equipo vive en `lib/negocios/dato-de-decision.ts`, porque la aplican los DOS
+// sitios que resuelven routing (el avance de etapa y el salto encadenado por saldo).
+//
+// `aplica` sale de la `condition` del bloque dueño, evaluada con `condicion_cumplida` — la
+// MISMA función SQL que usan los gates y que replica el render. Un bloque que no aplica no
+// se muestra y no se puede responder: exigirle el dato dejaría el caso sin salida.
+async function camposDecisionDelNegocio(
+  supabase: unknown,
+  negocioId: string,
+  lineaId: string,
+  sourceEtapaId: string,
+  routing: RoutingEtapa,
+): Promise<CampoDecision[]> {
+  const campos = camposDeDecision(routing)
+  if (campos.length === 0) return []
+
+  const [bloquesRes, etapaRes] = await Promise.all([
+    db(supabase)
+      .from('bloque_configs')
+      .select('nombre, config_extra, bloque_definitions!inner(tipo)')
+      .eq('etapa_id', sourceEtapaId),
+    db(supabase).from('etapas_negocio').select('nombre').eq('id', sourceEtapaId).single(),
+  ])
+  const etapaNombre = (etapaRes.data as { nombre: string } | null)?.nombre ?? null
+
+  type BloqueCfg = {
+    nombre: string | null
+    config_extra: Record<string, unknown> | null
+    bloque_definitions: { tipo: string } | null
+  }
+  const bloques = ((bloquesRes.data ?? []) as BloqueCfg[]).filter(
+    b => b.bloque_definitions?.tipo === 'datos' && b.config_extra?.desactivado !== true,
+  )
+
+  const resultado: CampoDecision[] = []
+  for (const campo of campos) {
+    let dueno: BloqueCfg | null = null
+    let field: Record<string, unknown> | null = null
+    for (const b of bloques) {
+      const fields = (b.config_extra?.fields ?? []) as Array<Record<string, unknown>>
+      const encontrado = fields.find(f => f.slug === campo)
+      if (encontrado) { dueno = b; field = encontrado; break }
+    }
+
+    if (!dueno) {
+      // Nadie declara el campo. El guardián lo reporta como `decision_sin_dueno`; aquí se
+      // frena porque es la forma más pura del defecto: el motor decidiría con un dato que
+      // NO existe en ninguna parte.
+      resultado.push({ campo, bloque: null, etapa: etapaNombre })
+      continue
+    }
+
+    let aplica = true
+    const condition = dueno.config_extra?.condition as Record<string, unknown> | null | undefined
+    if (condition) {
+      const { data: cumple } = await db(supabase).rpc('condicion_cumplida', {
+        p_negocio_id: negocioId,
+        p_linea_id: lineaId,
+        p_etapa_actual_id: sourceEtapaId,
+        p_cond: condition,
+      })
+      aplica = cumple === true
+    }
+
+    let bloqueNombre = dueno.nombre ?? null
+    let label = (field?.label as string | null) ?? null
+    let etapaLabel = etapaNombre
+
+    // Campo DERIVADO (`lock_when.mapping`, objetivo O3): no es una pregunta sino la
+    // consecuencia de otra. Mandar al equipo a este bloque sería mandarlo a un control que
+    // no puede tocar; la respuesta que falta es la de su fuente. El guardián hace la misma
+    // indirección, así que motor y guardián cuentan la misma historia.
+    const lockWhen = field?.lock_when as LockWhen | undefined
+    if (lockWhen?.mapping && lockWhen.source_bloque_slug) {
+      const { data: fuenteRaw } = await db(supabase)
+        .from('bloque_configs')
+        .select('nombre, config_extra, etapas_negocio!inner(nombre, linea_id)')
+        .eq('slug', lockWhen.source_bloque_slug)
+        .eq('etapas_negocio.linea_id', lineaId)
+        .limit(1)
+        .maybeSingle()
+      const fuente = fuenteRaw as {
+        nombre: string | null
+        config_extra: Record<string, unknown> | null
+        etapas_negocio: { nombre: string } | null
+      } | null
+      if (fuente) {
+        bloqueNombre = fuente.nombre ?? bloqueNombre
+        etapaLabel = fuente.etapas_negocio?.nombre ?? etapaLabel
+        const fFuente = ((fuente.config_extra?.fields ?? []) as Array<Record<string, unknown>>)
+          .find(f => f.slug === lockWhen.field)
+        label = (fFuente?.label as string | null) ?? lockWhen.field ?? label
+      }
+    }
+
+    resultado.push({ campo, label, bloque: bloqueNombre, etapa: etapaLabel, aplica })
+  }
+
+  return resultado
+}
+
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 
 export async function cambiarEtapaNegocioConGate(
@@ -2625,6 +2738,33 @@ export async function cambiarEtapaNegocioConGate(
         const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
         if (tipo === 'datos' && b.data && typeof b.data === 'object') {
           Object.assign(camposNegocio, b.data)
+        }
+      }
+
+      // ── El motor exige el dato ANTES de decidir ─────────────────────────────
+      //
+      // Sin esto, un campo decisorio vacío no hace match con ninguna condición y el avance
+      // cae al `default_etapa_orden`: el motor elige una ruta con un dato que no tiene, sin
+      // error y sin aviso. En SOENA eso mandó 17 casos de Entrega a Facturación, la etapa de
+      // cierre. Opt-in por etapa (`exigir_dato_de_decision`); sin el flag, nada cambia.
+      //
+      // Respeta el override de owner/admin como cualquier otro gate: si alguien decide
+      // avanzar sabiendo que el dato falta, queda el motivo en el log. Un freno que no se
+      // pueda levantar dejaría casos varados sin salida.
+      if (!motivoOverride && exigeDatoDeDecision(etapaActualData.config_extra)) {
+        const campos = await camposDecisionDelNegocio(
+          supabase, negocioId, etapaActualData.linea_id, sourceEtapaId, routing as RoutingEtapa,
+        )
+        const faltantes = decisionesSinResponder(campos, camposNegocio)
+        if (faltantes.length > 0) {
+          const msgs = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+          return {
+            error: 'gate_bloqueado',
+            bloquesPendientes: faltantes.map(f => ({
+              nombre: mensajeDatoFaltante(f, msgs['dato_de_decision']),
+              es_gate: true,
+            })),
+          }
         }
       }
 
@@ -3094,6 +3234,17 @@ export async function cambiarEtapaNegocioConGate(
           const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
           if (tipo === 'datos' && b.data && typeof b.data === 'object') Object.assign(campos, b.data)
         }
+        // El salto también RESUELVE ROUTING, así que también puede decidir a ciegas. Si la
+        // etapa exige el dato y falta, el negocio se queda AQUÍ en vez de pasar de largo:
+        // aterriza donde está la pregunta, que es justo lo que se quiere. No se devuelve
+        // error porque el avance ya ocurrió; lo que se frena es el salto, no el avance.
+        if (exigeDatoDeDecision(destStage.config_extra)) {
+          const camposDec = await camposDecisionDelNegocio(
+            supabase, negocioId, destStage.linea_id, srcEtapaId, cobroRouting as RoutingEtapa,
+          )
+          if (decisionesSinResponder(camposDec, campos).length > 0) break
+        }
+
         destinoOrden = cobroRouting.default_etapa_orden
         for (const rule of (cobroRouting.conditional ?? [])) {
           if (String(campos[rule.condition.field] ?? '') === String(rule.condition.value)) {
