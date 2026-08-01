@@ -13,6 +13,7 @@ import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
 import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-completo'
+import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
@@ -3215,6 +3216,11 @@ export async function marcarBloqueCompleto(
 
   if (updateError) return { error: (updateError as { message: string }).message }
 
+  // Igual que en `actualizarBloqueData`: la respuesta y sus campos derivados se escriben
+  // juntos. Hace falta en AMBOS caminos — el cliente manda por aquí cuando el bloque queda
+  // completo, que es justamente el caso de una pregunta obligatoria que decide una ruta.
+  await propagarCamposDerivados(supabase, negocioBloqueId, mergedData)
+
   // Siempre revalidar la página del negocio después de marcar completo
   if (negocioId) {
     revalidatePath(`/negocios/${negocioId}`)
@@ -3366,6 +3372,137 @@ async function resolverDestinoCompartido(
 }
 
 /**
+ * Propaga los campos DERIVADOS de un bloque que acaba de guardarse.
+ *
+ * Un campo con `lock_when.mapping` no es una pregunta: es la consecuencia de la respuesta
+ * de otro campo (ver el tipo en `BloqueDatos.tsx`). Sirve para reemplazar varios
+ * interruptores sueltos por una sola pregunta SIN tocar los routings, que siguen leyendo
+ * los campos de siempre.
+ *
+ * ⚠️ Por qué la derivación se persiste AQUÍ y no basta el effect del cliente.
+ * El enforcement de `lock_when` corre al RENDERIZAR, así que el valor derivado se escribe
+ * cuando alguien ABRE el negocio. Para un campo que decide una ruta eso llega tarde: el
+ * routing puede evaluarse antes de que el valor exista, y el motor leería un campo vacío y
+ * caería al default — el mismo defecto que este trabajo viene a cerrar. Escribiéndolo al
+ * guardar, la respuesta y sus consecuencias quedan en la misma operación. El effect del
+ * cliente se conserva solo como respaldo para instancias viejas.
+ *
+ * Una respuesta que no está en el mapa deja el campo derivado VACÍO a propósito: el vacío
+ * no es una respuesta, y exigirla es trabajo del gate de la pregunta, no de este campo.
+ *
+ * Deja rastro en `_derivado` (qué campo, desde qué respuesta y cuándo), por la misma razón
+ * que lo dejó la limpieza de campos retirados: cuando el sistema escribe datos solo, el
+ * rastro es parte del arreglo.
+ */
+async function propagarCamposDerivados(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioBloqueId: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  // El bloque fuente se identifica por su slug estable. Un heredado (slug null) nunca lo es.
+  const { data: fuente } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, bloque_configs!inner(slug, etapa_id)')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!fuente) return
+
+  const cfgFuente = (fuente as Record<string, unknown>).bloque_configs as Record<string, unknown> | null
+  const slugFuente = cfgFuente?.slug as string | undefined
+  const negocioId = (fuente as { negocio_id: string }).negocio_id
+  if (!slugFuente) return
+
+  // Línea del negocio → sus bloques configurados. Es una lectura de CONFIGURACIÓN (sin
+  // `data`), acotada a la línea, y en un workspace sin campos derivados corta aquí mismo.
+  const { data: etapaFuente } = await db(supabase)
+    .from('etapas_negocio')
+    .select('linea_id')
+    .eq('id', cfgFuente?.etapa_id as string)
+    .single()
+  const lineaId = (etapaFuente as { linea_id?: string } | null)?.linea_id
+  if (!lineaId) return
+
+  const { data: configs } = await db(supabase)
+    .from('bloque_configs')
+    .select('id, config_extra, etapas_negocio!inner(linea_id)')
+    .eq('etapas_negocio.linea_id', lineaId)
+
+  type Derivado = {
+    configId: string
+    slug: string
+    valor: unknown
+    campoFuente: string
+    respuesta: unknown
+  }
+  const derivados: Derivado[] = []
+  for (const c of (configs ?? []) as Record<string, unknown>[]) {
+    const fields = ((c.config_extra as Record<string, unknown> | null)?.fields ?? []) as Record<string, unknown>[]
+    for (const f of fields) {
+      const lw = f.lock_when as Record<string, unknown> | undefined
+      if (!lw?.mapping || lw.source_bloque_slug !== slugFuente) continue
+      const campoFuente = lw.field as string
+      // El campo fuente puede no venir en este guardado (se guardó otro campo del mismo
+      // bloque): sin respuesta no hay nada que derivar, y NO es motivo para vaciar.
+      if (!(campoFuente in data)) continue
+      const respuesta = data[campoFuente]
+      derivados.push({
+        configId: c.id as string,
+        slug: f.slug as string,
+        // Misma regla que aplica el render, de una sola fuente (`campo-derivado.ts`).
+        valor: resolverDerivado(lw as unknown as LockWhen, respuesta).valor,
+        campoFuente,
+        respuesta,
+      })
+    }
+  }
+  if (derivados.length === 0) return
+
+  const { data: instancias } = await db(supabase)
+    .from('negocio_bloques')
+    .select('id, data, bloque_config_id')
+    .eq('negocio_id', negocioId)
+    .in('bloque_config_id', [...new Set(derivados.map(d => d.configId))])
+
+  const ahora = new Date().toISOString()
+  for (const inst of (instancias ?? []) as Record<string, unknown>[]) {
+    const propios = derivados.filter(d => d.configId === inst.bloque_config_id)
+    if (propios.length === 0) continue
+
+    // Escribir donde vive el dato de verdad (un derivado puede estar en un bloque compartido).
+    const destinoId = await resolverDestinoCompartido(supabase, inst.id as string)
+    const base =
+      destinoId === inst.id
+        ? ((inst.data as Record<string, unknown>) ?? {})
+        : (((await db(supabase).from('negocio_bloques').select('data').eq('id', destinoId).single())
+            .data as Record<string, unknown> | null)?.data as Record<string, unknown>) ?? {}
+
+    const siguiente = { ...base }
+    const rastro = { ...((base._derivado as Record<string, unknown>) ?? {}) }
+    let cambio = false
+    for (const d of propios) {
+      if (base[d.slug] === d.valor) continue
+      cambio = true
+      if (d.valor === undefined) delete siguiente[d.slug]
+      else siguiente[d.slug] = d.valor
+      rastro[d.slug] = {
+        de_bloque: slugFuente,
+        de_campo: d.campoFuente,
+        respuesta: d.respuesta ?? null,
+        en: ahora,
+      }
+    }
+    if (!cambio) continue
+    siguiente._derivado = rastro
+
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ data: siguiente, updated_at: ahora })
+      .eq('id', destinoId)
+  }
+}
+
+/**
  * ¿Se está escribiendo sobre un bloque de una etapa que el negocio YA superó?
  * Es la diferencia entre "trabajar la etapa" y "corregir hacia atrás", y define
  * si aplica el opt-in de corrección y la marca de autoría.
@@ -3484,6 +3621,14 @@ export async function actualizarBloqueData(
     .single()
 
   if (updateError) return { error: (updateError as { message: string }).message }
+
+  // Los campos derivados de este bloque (`lock_when.mapping`) se escriben en la MISMA
+  // operación que la respuesta que los origina. Ver `propagarCamposDerivados`.
+  // Se omite en el autosave de borrador (revalidate:false, escritura libre cada pocos
+  // segundos): las respuestas que derivan algo siempre revalidan.
+  if (opts?.revalidate !== false) {
+    await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
+  }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
   if (nid && opts?.revalidate !== false) revalidatePath(`/negocios/${nid}`)
