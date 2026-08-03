@@ -146,14 +146,23 @@ export async function registrarCorrecciones(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any
   workspaceId: string
+  /** profile.id — queda en `corregido_por` de esta tabla. */
   userId: string | undefined
+  /**
+   * staff.id — es lo ÚNICO que acepta `activity_log.autor_id` (FK → staff).
+   * Pasarle el profile.id viola la FK y el evento del timeline se pierde sin ruido:
+   * pasó con la primera corrección real (V0254, 2026-08-03), que quedó registrada en
+   * la tabla y ausente del timeline. `profiles` y `staff` son tablas distintas y este
+   * campo es el que más se confunde de las dos.
+   */
+  staffId: string | null | undefined
   userNombre?: string | null
   negocioBloqueId: string
   campos: CampoCorregido[]
   causa: CausaCorreccion
   sesionId: string
 }): Promise<{ registradas: number }> {
-  const { supabase, workspaceId, userId, negocioBloqueId, campos, causa, sesionId } = params
+  const { supabase, workspaceId, userId, staffId, negocioBloqueId, campos, causa, sesionId } = params
   if (campos.length === 0) return { registradas: 0 }
 
   try {
@@ -210,14 +219,15 @@ export async function registrarCorrecciones(params: {
 
       // `tipo` debe existir en el CHECK de activity_log: se usa 'cambio', que ya está
       // permitido. Un tipo fuera del CHECK hace fallar el insert EN SILENCIO.
-      const { data: evento } = await db(supabase)
+      const { data: evento, error: errEvento } = await db(supabase)
         .from('activity_log')
         .insert({
           workspace_id: workspaceId,
           entidad_tipo: 'negocio',
           entidad_id: ctx.negocioId,
           tipo: 'cambio',
-          autor_id: userId ?? null,
+          // staff.id, NO profile.id (ver el comentario del parámetro).
+          autor_id: staffId ?? null,
           campo_modificado: campo.slug,
           valor_anterior: antes,
           valor_nuevo: despues,
@@ -225,6 +235,9 @@ export async function registrarCorrecciones(params: {
         })
         .select('id')
         .maybeSingle()
+      // Sin esto el fallo es mudo: la corrección queda registrada en la tabla y
+      // ausente del timeline, que es donde la gente la busca.
+      if (errEvento) console.error('[correcciones] no se pudo escribir el evento:', errEvento)
 
       const { error: errIns } = await db(supabase)
         .from('bloque_correcciones')

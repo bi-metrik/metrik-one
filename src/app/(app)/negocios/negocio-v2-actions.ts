@@ -3454,6 +3454,7 @@ export async function marcarBloqueCompleto(
       supabase,
       workspaceId,
       userId,
+      staffId,
       userNombre: nombreCorrector,
       negocioBloqueId: destinoId,
       campos: cambiosCorreccion,
@@ -3834,7 +3835,7 @@ export async function actualizarBloqueData(
   // tocados en ese mismo acto. En el trabajo normal de la etapa no viaja.
   opts?: { revalidate?: boolean; correccion?: { causa?: string; sesion_id?: string } }
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, userId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   // Guard server-side de permisos (rol+área+responsable). El autosave de borrador
@@ -3907,6 +3908,7 @@ export async function actualizarBloqueData(
       supabase,
       workspaceId,
       userId,
+      staffId,
       userNombre: nombreCorrector,
       negocioBloqueId: destinoId,
       campos: cambiosCorreccion,

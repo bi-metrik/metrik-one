@@ -761,7 +761,7 @@ export async function actualizarCampoDocumento(
   // entonces la causa es obligatoria (ver `actualizarBloqueData`, mismo criterio).
   correccion?: { causa?: string; sesion_id?: string },
 ): Promise<{ success: boolean; isComplete?: boolean; error?: string }> {
-  const { supabase, workspaceId, userId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Validar que slug existe en camposExtraccion
@@ -867,6 +867,7 @@ export async function actualizarCampoDocumento(
       supabase,
       workspaceId,
       userId,
+      staffId,
       userNombre: editorNombre,
       negocioBloqueId,
       campos: [{ slug, antes: valorPrevio, despues: value || null }],
