@@ -86,7 +86,13 @@ create policy "bloque_correcciones_update" on public.bloque_correcciones
   using (workspace_id = current_user_workspace_id())
   with check (workspace_id = current_user_workspace_id());
 
--- Toda tabla nueva de este proyecto nace con privilegios para `anon`; el REVOKE es
--- explícito porque la anon key viaja en el bundle del browser.
+-- Toda tabla nueva de este proyecto nace con TODOS los privilegios para `anon` y para
+-- `authenticated`, y un `grant` explícito NO quita lo heredado: hay que revocar antes.
+--
+-- Verificado al aplicar (2026-08-02): sin el revoke, `authenticated` conservaba DELETE
+-- y TRUNCATE. En una tabla de auditoría eso importa más de lo normal, porque **TRUNCATE
+-- no pasa por RLS**: cualquiera con su propio token podía vaciar el registro completo
+-- aunque las policies solo le dejen ver su workspace.
 revoke all on public.bloque_correcciones from anon;
+revoke all on public.bloque_correcciones from authenticated;
 grant select, insert, update on public.bloque_correcciones to authenticated;
