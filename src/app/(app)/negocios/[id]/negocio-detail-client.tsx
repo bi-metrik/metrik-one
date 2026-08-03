@@ -65,6 +65,7 @@ import BloquePagoExterno from './bloques/BloquePagoExterno'
 import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
 import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
+import { GuiaEtapaCard } from './GuiaEtapaCard'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -2058,6 +2059,15 @@ export default function NegocioDetailClient({
 
       {/* ── BODY: Bloques ── */}
       <div className="space-y-4">
+        {/* La ayuda de la etapa va ARRIBA de los bloques, no en un documento aparte:
+            un documento aparte no se abre mientras se trabaja. Opt-in por configuración
+            de la etapa (`config_extra.guia`); sin ella no se renderiza nada. */}
+        {(() => {
+          const e = etapasLinea.find(x => x.id === negocio.etapa_actual_id)
+          return e?.guia ? (
+            <GuiaEtapaCard guia={e.guia} etapaNumero={e.numero} etapaNombre={e.nombre} />
+          ) : null
+        })()}
         <div>
           <div className="mb-3 flex items-center justify-end gap-2">
             <ResponsableSelector

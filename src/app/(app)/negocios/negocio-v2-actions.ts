@@ -58,6 +58,23 @@ export type EtapaNegocio = {
   // config_extra.buzon_leads = true → buzón de entrada (Recepción). Al descartar
   // desde aquí se piden razones de triage de lead, no de pérdida de venta.
   es_buzon?: boolean
+  // config_extra.guia → la ayuda de la etapa, en la etapa. Se muestra sobre los
+  // bloques para responder, sin salir de la pantalla, las tres preguntas que se
+  // hace quien abre un caso: dónde está, qué le toca y qué falta para avanzar.
+  // Opt-in: una línea sin `guia` se ve exactamente igual que hoy.
+  guia?: GuiaEtapa | null
+}
+
+/** Ayuda contextual de una etapa. Texto plano: lo escribe quien configura la línea. */
+export type GuiaEtapa = {
+  /** Qué significa que un caso esté aquí. Una frase. */
+  definicion?: string
+  /** Lo que hay que hacer, en pasos cortos. */
+  hacer?: string[]
+  /** Qué retiene el caso, en las palabras del equipo. */
+  avanzar?: string
+  /** Quién responde esta etapa. */
+  responsable?: string
 }
 
 export type BloqueDefinition = {
@@ -771,6 +788,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       nombre: e.nombre as string,
       orden: e.orden as number,
       numero: e.numero as number,
+      guia: ((e.config_extra as { guia?: GuiaEtapa } | null)?.guia ?? null),
       es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
     }))
