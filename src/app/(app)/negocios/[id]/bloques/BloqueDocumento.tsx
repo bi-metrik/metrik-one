@@ -21,6 +21,8 @@ import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { puedeCorregirDocumentos } from '@/lib/roles'
+import SelectorCausa from '@/components/negocios/selector-causa'
+import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado, CampoEdicion } from '@/lib/ai/extract-fields'
 
@@ -322,6 +324,7 @@ function EditableCampoVisible({
   campo,
   camposConfig,
   onUpdate,
+  correccion,
 }: {
   negocioBloqueId: string
   negocioId: string
@@ -329,6 +332,8 @@ function EditableCampoVisible({
   campo: CampoResultado | undefined
   camposConfig: CampoExtraccion[]
   onUpdate: (slug: string, value: string) => void
+  /** Causa + sesión cuando el bloque es de una etapa ya superada. */
+  correccion?: { causa: string; sesion_id: string }
 }) {
   const [saving, setSaving] = useState(false)
   const isCurrency = config.tipo === 'currency'
@@ -342,6 +347,7 @@ function EditableCampoVisible({
       config.slug,
       value,
       camposConfig,
+      correccion,
     )
     setSaving(false)
     if (!res.success) toast.error(res.error ?? 'Error guardando campo')
@@ -408,6 +414,11 @@ export default function BloqueDocumento({
   // factura, veía el dato mal extraído y no tenía cómo corregirlo.
   const corregirGerencial = configExtra.corregir_campos_gerencial === true
   const puedeCorregirVisible = puedeCorregirDocumentos(userRole) || esResponsable === true
+  // Causa de la corrección, elegida en un clic y compartida por todos los campos del
+  // bloque: corregir tres campos del mismo documento por el mismo motivo es UNA
+  // corrección, no tres. `sesionDoc` es lo que las agrupa en el registro.
+  const [causaDoc, setCausaDoc] = useState<CausaCorreccion | null>(null)
+  const sesionDoc = useRef<string | null>(null)
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
     if (saved.drive_url) return 'uploaded'
@@ -634,6 +645,28 @@ export default function BloqueDocumento({
             <span className="ml-auto text-[11px] text-muted-foreground italic">Sin archivo</span>
           )}
         </div>
+        {/* La causa se elige antes de habilitar la edición, igual que en los bloques de
+            datos: el servidor la exige cuando el bloque es de una etapa ya superada. */}
+        {corregirGerencial && puedeCorregirVisible && !causaDoc && (
+          <SelectorCausa
+            onElegir={c => { sesionDoc.current = nuevaSesionId(); setCausaDoc(c) }}
+            onCancelar={() => setCausaDoc(null)}
+          />
+        )}
+        {corregirGerencial && puedeCorregirVisible && causaDoc && (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
+            <span className="text-[11px] text-[#92400E]">
+              Corrigiendo ({LABEL_CAUSA[causaDoc]}). Queda registrado con tu nombre y con lo que decía antes.
+            </span>
+            <button
+              type="button"
+              onClick={() => { setCausaDoc(null); sesionDoc.current = null }}
+              className="shrink-0 rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[#92400E] border border-[#FDE68A] hover:bg-[#FEF3C7] transition-colors"
+            >
+              Listo
+            </button>
+          </div>
+        )}
         {camposConfig.length > 0 && Object.keys(campos).length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {camposConfig
@@ -645,9 +678,12 @@ export default function BloqueDocumento({
                 //      (corrección de datos que difieren de UPME, cualquier autorizado);
                 //  (b) gerencial: owner/admin/supervisor corrigen TODOS los campos
                 //      (opt-in corregir_campos_gerencial). El resto es solo lectura.
+                // Sin causa elegida, la corrección gerencial no habilita el input: el
+                // servidor la rechazaría de todos modos, y es mejor no ofrecer un campo
+                // que va a fallar al guardar.
                 const editable =
                   (editarExtraidos && config.alerta_revision === true) ||
-                  (corregirGerencial && puedeCorregirVisible)
+                  (corregirGerencial && puedeCorregirVisible && !!causaDoc)
                 if (!editable && !campo?.value) return null
                 const displayValue = config.tipo === 'currency'
                   ? formatCurrencyDisplay(campo?.value ?? null)
@@ -672,6 +708,9 @@ export default function BloqueDocumento({
                     </div>
                     {editable ? (
                       <EditableCampoVisible
+                        correccion={causaDoc && sesionDoc.current
+                          ? { causa: causaDoc, sesion_id: sesionDoc.current }
+                          : undefined}
                         negocioBloqueId={negocioBloqueId}
                         negocioId={negocioId}
                         config={config}
