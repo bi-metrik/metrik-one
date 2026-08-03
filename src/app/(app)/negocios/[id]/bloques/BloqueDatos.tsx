@@ -3,7 +3,7 @@
 import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
-import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
+import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion } from '../../negocio-v2-actions'
 import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import { extraerCampoDesdeImagen, subirImagenClipboard } from '@/lib/actions/documento-actions'
@@ -196,6 +196,12 @@ export default function BloqueDatos({
   const [corrigiendo, setCorrigiendo] = useState(false)
   const [causa, setCausa] = useState<CausaCorreccion | null>(null)
   const [pidiendoCausa, setPidiendoCausa] = useState(false)
+  // Aviso de retorno: cuando este bloque responde un dato que DECIDE la ruta y el caso ya
+  // pasó el punto donde se evalúa, cambiarlo devuelve el caso a esa etapa. Se pregunta al
+  // servidor al abrir la corrección — antes de que se pueda editar nada — porque el
+  // guardado es un autosave: avisar al guardar llegaría tarde.
+  const [avisoRetorno, setAvisoRetorno] = useState<string | null>(null)
+  const [consultandoRetorno, setConsultandoRetorno] = useState(false)
   const sesionCorreccion = useRef<string | null>(null)
   // Ref para que el guardado de respaldo al desmontar también lleve la causa: si se
   // leyera del estado, ese flush final se rechazaría por falta de causa.
@@ -614,15 +620,46 @@ export default function BloqueDatos({
             </div>
           )
         })}
-        {puedeCorregir && !pidiendoCausa && (
+        {puedeCorregir && !pidiendoCausa && !avisoRetorno && (
           <button
             type="button"
-            onClick={() => setPidiendoCausa(true)}
-            className="mt-1 inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] px-2 py-1 text-[11px] font-medium text-[#6B7280] hover:bg-[#F5F4F2] hover:text-[#1A1A1A] transition-colors"
+            disabled={consultandoRetorno}
+            onClick={async () => {
+              setConsultandoRetorno(true)
+              try {
+                const r = await consultarRetornoDeCorreccion(negocioBloqueId)
+                if (r.aviso) setAvisoRetorno(r.aviso)
+                else setPidiendoCausa(true)
+              } finally {
+                setConsultandoRetorno(false)
+              }
+            }}
+            className="mt-1 inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] px-2 py-1 text-[11px] font-medium text-[#6B7280] hover:bg-[#F5F4F2] hover:text-[#1A1A1A] transition-colors disabled:opacity-60"
           >
             <Pencil className="h-3 w-3" />
-            Corregir
+            {consultandoRetorno ? 'Revisando…' : 'Corregir'}
           </button>
+        )}
+        {puedeCorregir && avisoRetorno && !pidiendoCausa && (
+          <div className="mt-1 space-y-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] p-2.5">
+            <p className="text-[11px] text-[#92400E]">{avisoRetorno}</p>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => { setAvisoRetorno(null); setPidiendoCausa(true) }}
+                className="rounded-md border border-[#FDE68A] bg-white px-2 py-1 text-[11px] font-medium text-[#92400E] hover:bg-[#FEF3C7] transition-colors"
+              >
+                Entiendo, corregir y devolver
+              </button>
+              <button
+                type="button"
+                onClick={() => setAvisoRetorno(null)}
+                className="rounded-md px-2 py-1 text-[11px] text-[#92400E]/70 hover:text-[#92400E] transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         )}
         {puedeCorregir && pidiendoCausa && (
           <SelectorCausa
@@ -657,7 +694,7 @@ export default function BloqueDatos({
           </span>
           <button
             type="button"
-            onClick={() => { setCorrigiendo(false); setCausa(null); sesionCorreccion.current = null }}
+            onClick={() => { setCorrigiendo(false); setCausa(null); setAvisoRetorno(null); sesionCorreccion.current = null }}
             className="shrink-0 rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[#92400E] border border-[#FDE68A] hover:bg-[#FEF3C7] transition-colors"
           >
             Listo
