@@ -1188,8 +1188,28 @@ export async function getNegocioDetalle(id: string): Promise<{
           [seccionalRefField]: seccional?.nombre_oficial ?? nombreOficialSeccional(seccionalRut),
         }
         try {
-          await db(supabase).from('negocio_bloques').update({ data: nuevoData }).eq('id', inst.id)
-          instanciasMap[bc.id] = { ...inst, data: nuevoData } as NegocioBloque
+          // Al sembrar la respuesta hay que RE-EVALUAR la completitud del bloque, no
+          // solo escribir el dato. La instancia nace `pendiente` cuando es un gate
+          // `visible` con campos `required` vacíos (ver `visiblePuedeNacerCompleto`),
+          // y ese veredicto se calcula UNA sola vez, con `data: {}`. Si el auto-init
+          // llena después el campo que faltaba y nadie revisa el estado, el bloque
+          // queda pendiente para siempre: es de solo lectura, así que la UI no ofrece
+          // forma de cerrarlo y el gate retiene un negocio cuya respuesta YA está.
+          // Pasó con V0107 y V0122 (SOENA), corregidos a mano el 2026-08-03.
+          const cierraAhora = (bc as { estado?: string }).estado === 'visible'
+            && (bc as { es_gate?: boolean }).es_gate === true
+            && visiblePuedeNacerCompleto(bc.config_extra ?? null, nuevoData, true)
+          const patch: Record<string, unknown> = { data: nuevoData }
+          if (cierraAhora && inst.estado !== 'completo') {
+            patch.estado = 'completo'
+            patch.completado_at = new Date().toISOString()
+          }
+          await db(supabase).from('negocio_bloques').update(patch).eq('id', inst.id)
+          instanciasMap[bc.id] = {
+            ...inst,
+            data: nuevoData,
+            ...(cierraAhora ? { estado: 'completo' } : {}),
+          } as NegocioBloque
           // Sembrar la seccional del negocio si aún no la tiene. Es la fuente única
           // que leen los formularios DIAN (casilla 12 del 010) vía
           // aplicarSeccionalPreset. No pisa un override manual ya existente.
@@ -2872,7 +2892,17 @@ export async function cambiarEtapaNegocioConGate(
       }
     }
 
-    // Gate custom: saldo_cero — saldo del negocio debe ser cero para avanzar
+    // Gate custom: saldo_cero — el HONORARIO pendiente debe estar cubierto.
+    //
+    // Mide contra `precio_aprobado` (honorario) A PROPÓSITO, no contra el valor a
+    // recaudar. El recaudo de la tarifa UPME (pasante) tiene su propio control aguas
+    // arriba: el gate `saldo:handoff`, que exige el valor a recaudar completo menos el
+    // saldo diferido por la modalidad. Sumar aquí la tarifa duplicaría ese control y
+    // retendría casos donde el cliente pagó su honorario y la tarifa no entró por
+    // SOENA. Medido el 2026-08-03: hacerlo habría frenado 32 negocios abiertos, la
+    // mayoría ya en Entrega.
+    //
+    // Un sobrepago (saldo negativo) NO bloquea aquí: solo se compara el faltante.
     if (etapaGates.includes('saldo_cero')) {
       const [negPrecioRes, cobrosRes] = await Promise.all([
         db(supabase)
@@ -3081,12 +3111,18 @@ export async function cambiarEtapaNegocioConGate(
     // negocio, exige que el sobrepago esté conciliado (campo `accion_extra` con valor).
     // Si no hay sobrepago, no exige nada (no estorba a negocios con pago normal).
     if (etapaGates.includes('sobrepago_conciliado')) {
-      const [negPrecioConcRes, cobrosConcRes] = await Promise.all([
+      const [negPrecioConcRes, cobrosConcRes, modeloConc] = await Promise.all([
         db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
         supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
+        leerModeloDineroCompleto(supabase, negocioId),
       ])
       const negPrecioConc = negPrecioConcRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
-      const precioConc = negPrecioConc?.precio_aprobado ?? negPrecioConc?.precio_estimado ?? 0
+      // Mismo criterio que `saldo_cero`: el sobrepago se mide contra el valor a
+      // recaudar (honorario + tarifa pasante). Sin esto, la tarifa que el cliente
+      // paga para la UPME se leía como plata de más y exigía conciliar algo que no
+      // existe: era el caso NORMAL del flujo, no la excepción.
+      const honorarioConc = negPrecioConc?.precio_aprobado ?? negPrecioConc?.precio_estimado ?? 0
+      const precioConc = valorARecaudar(honorarioConc, modeloConc)
       const totalCobradoConc = ((cobrosConcRes.data ?? []) as Array<{ monto: number }>)
         .reduce((sum, c) => sum + (c.monto ?? 0), 0)
       const extra = totalCobradoConc - precioConc
@@ -3197,12 +3233,19 @@ export async function cambiarEtapaNegocioConGate(
   // Cobro de un solo avance y aterrizar en Entrega. Antes se resolvía un único salto, así
   // que quedaba detenido en la segunda etapa saldada sin razón visible para el equipo.
   {
-    const [negPrecioRes, cobrosSkipRes] = await Promise.all([
+    const [negPrecioRes, cobrosSkipRes, modeloSkip] = await Promise.all([
       db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
       supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
+      leerModeloDineroCompleto(supabase, negocioId),
     ])
     const negPrecio = negPrecioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
-    const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
+    // Igual que los gates de saldo: se compara contra el valor a recaudar (honorario
+    // + tarifa pasante). Con `precio_aprobado` a secas, un negocio con la tarifa
+    // pagada daba saldo NEGATIVO y `debeSaltarPorSaldo` —que con `conciliar_sobrepago`
+    // exige CERO exacto— no saltaba: el caso entraba a las etapas de cobro que ya no
+    // le aplicaban.
+    const honorarioSkip = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
+    const precio = valorARecaudar(honorarioSkip, modeloSkip)
     const totalCobrado = ((cobrosSkipRes.data ?? []) as Array<{ monto: number }>)
       .reduce((sum, c) => sum + (c.monto ?? 0), 0)
     const saldo = precio - totalCobrado
