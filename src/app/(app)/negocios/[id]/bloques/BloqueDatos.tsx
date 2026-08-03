@@ -12,6 +12,7 @@ import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/
 import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug } from '@/lib/dian/seccionales'
 import { campoRequeridoCumplido } from '@/lib/negocios/campo-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
+import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 
 export interface DatosField {
@@ -20,7 +21,8 @@ export interface DatosField {
   tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'checkbox' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview' | 'doc_link' | 'plantilla'
   required?: boolean
   options?: string[]
-  opciones?: Array<{ value: string; label: string }>
+  // `solo_si` (opt-in) restringe una opción a los casos donde aplica. Ver `opcion-condicional.ts`.
+  opciones?: Array<{ value: string; label: string; solo_si?: OpcionSoloSi }>
   default?: unknown
   // Texto de ayuda opcional (ícono "i" con tooltip junto al label). Opt-in por
   // config — solo aparece donde el equipo lo necesite. Mantener breve (1-2 frases).
@@ -881,27 +883,51 @@ export default function BloqueDatos({
             </div>
           )}
 
-          {f.tipo === 'radio' && (f.opciones || f.options) && (
-            <div className="space-y-1.5">
-              {(f.opciones ?? f.options?.map(o => ({ value: o, label: o })) ?? []).map(opt => (
-                <label
-                  key={opt.value}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs hover:border-[#10B981]/50 transition-colors"
-                >
-                  <input
-                    type="radio"
-                    name={f.slug}
-                    value={opt.value}
-                    checked={values[f.slug] === opt.value}
-                    onChange={() => handleToggleChange(f.slug, opt.value)}
-                    disabled={isPending}
-                    className="h-3.5 w-3.5 accent-[#10B981]"
-                  />
-                  <span className="text-[#1A1A1A]">{opt.label}</span>
-                </label>
-              ))}
-            </div>
-          )}
+          {f.tipo === 'radio' && (f.opciones || f.options) && (() => {
+            // Hay opciones que no aplican a todos los casos (un vehículo en leasing no
+            // tiene proceso de devolución de IVA). No se ofrecen, en vez de ofrecerlas y
+            // corregir la respuesta después: el formulario tiene que decir la verdad.
+            const todas = f.opciones ?? f.options?.map(o => ({ value: o, label: o })) ?? []
+            const { visibles, seleccionadaYaNoAplica, motivo } = resolverOpciones(
+              todas,
+              values[f.slug],
+              s => datosPorSlug?.[s.source_bloque_slug]?.[s.field],
+            )
+            return (
+              <div className="space-y-1.5">
+                {visibles.map(opt => {
+                  const yaNoAplica =
+                    seleccionadaYaNoAplica && opt.value === values[f.slug]
+                  return (
+                    <label
+                      key={String(opt.value)}
+                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                        yaNoAplica
+                          ? 'border-[#FDE68A] bg-[#FFFBEB]'
+                          : 'border-[#E5E7EB] hover:border-[#10B981]/50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name={f.slug}
+                        value={String(opt.value)}
+                        checked={values[f.slug] === opt.value}
+                        onChange={() => handleToggleChange(f.slug, opt.value)}
+                        disabled={isPending}
+                        className="h-3.5 w-3.5 accent-[#10B981]"
+                      />
+                      <span className="text-[#1A1A1A]">{opt.label}</span>
+                    </label>
+                  )
+                })}
+                {seleccionadaYaNoAplica && (
+                  <p className="text-[10px] text-[#92400E]">
+                    {motivo ?? 'Esta respuesta ya no aplica para este caso. Elige otra.'}
+                  </p>
+                )}
+              </div>
+            )
+          })()}
 
           {f.tipo === 'documentos_preview' && (
             <DocumentosPreview productos={values as ProductosContratados} />
