@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { usuarioDesdeToken } from './claims-user'
 
 // Cookies host-only — la lib auth-js rechaza domain cross-subdomain.
 export async function updateSession(request: NextRequest) {
@@ -24,11 +25,11 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // IMPORTANT: Do NOT use getSession() — it reads from cookies and can be
-  // tampered with. getUser() sends a request to the Supabase Auth server.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // IMPORTANTE: sigue prohibido `getSession()` — lee la cookie y confía en ella.
+  // `usuarioDesdeToken` usa `getClaims()`, que VERIFICA LA FIRMA del JWT contra el
+  // JWKS del proyecto: misma garantía que `getUser()`, sin round-trip al servidor
+  // de Auth en cada request (medido: 165 ms → 0 ms). Ver `claims-user.ts`.
+  const { user } = await usuarioDesdeToken(supabase)
 
   return { user, supabaseResponse, supabase }
 }

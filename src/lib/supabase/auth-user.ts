@@ -1,6 +1,7 @@
 import 'server-only'
 import { cache } from 'react'
 import { createClient } from './server'
+import { usuarioDesdeToken } from './claims-user'
 
 /**
  * Resuelve el usuario autenticado UNA sola vez por request (React cache).
@@ -13,9 +14,14 @@ import { createClient } from './server'
  *
  * Semánticamente idéntico a llamar `supabase.auth.getUser()` directo — solo
  * deduplica. El cliente que cada consumidor use para SUS queries no cambia.
+ *
+ * Desde 2026-08-02 resuelve el usuario VERIFICANDO LA FIRMA DEL TOKEN en vez de
+ * preguntándole al servidor de Auth (ver `claims-user.ts`). El `cache()` sigue
+ * teniendo sentido: evita repetir la verificación y mantiene una sola respuesta
+ * por render. Devuelve `{ id, email }`, que es todo lo que consumen el layout,
+ * `getWorkspace` y la propuesta económica.
  */
 export const getCachedUser = cache(async () => {
   const supabase = await createClient()
-  const { data: { user }, error } = await supabase.auth.getUser()
-  return { user, error }
+  return usuarioDesdeToken(supabase)
 })
