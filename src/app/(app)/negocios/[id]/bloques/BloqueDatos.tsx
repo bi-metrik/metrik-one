@@ -10,7 +10,7 @@ import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/lib/afi/template-mapping'
 import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug } from '@/lib/dian/seccionales'
-import { campoRequeridoCumplido } from '@/lib/negocios/campo-completo'
+import { campoVisible, camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
@@ -282,8 +282,7 @@ export default function BloqueDatos({
 
   // Solo renderizar fields cuyo showIf se cumple (o que no tienen showIf)
   function visible(f: DatosField, vals: Record<string, unknown>) {
-    if (!f.showIf) return true
-    return vals[f.showIf.field] === f.showIf.equals
+    return campoVisible(f as CampoConfig, vals)
   }
 
   // Resolver lock_when cross-bloque: lee el campo fuente desde datosPorSlug.
@@ -302,9 +301,9 @@ export default function BloqueDatos({
   }
 
   function isComplete(vals: Record<string, unknown>) {
-    return fields
-      .filter(f => f.required && visible(f, vals))
-      .every(f => campoRequeridoCumplido(f.tipo, vals[f.slug]))
+    // Misma regla que aplica el servidor en `marcarBloqueCompleto`. Si divergieran,
+    // el cliente ofrecería completar algo que el servidor va a rechazar.
+    return camposRequeridosFaltantes(fields as CampoConfig[], vals).length === 0
   }
 
   // Persistir los valores. `revalidate` solo cuando el cambio afecta a otros bloques
