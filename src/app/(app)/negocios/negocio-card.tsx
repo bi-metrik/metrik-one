@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
-import Link from 'next/link'
+import { CardLink } from '@/components/card-link'
 import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
@@ -455,7 +455,7 @@ export default function NegocioCard({
         : 'bg-[#10B981]'
 
   return (
-    <Link
+    <CardLink
       href={`/negocios/${negocio.id}`}
       className="block rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
     >
@@ -667,6 +667,6 @@ export default function NegocioCard({
           </div>
         </div>
       )}
-    </Link>
+    </CardLink>
   )
 }
