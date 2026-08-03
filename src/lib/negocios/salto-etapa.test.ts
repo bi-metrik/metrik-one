@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo } from './salto-etapa'
+import { valorARecaudar, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 
 describe('qué etapas participan del salto', () => {
   it('sin flag, se comporta como hasta ahora: solo las de cobro', () => {
@@ -59,5 +60,55 @@ describe('cuándo el saldo justifica el salto', () => {
 
   it('con conciliación, solo el pago exacto salta', () => {
     expect(debeSaltarPorSaldo(637500, 0, true)).toBe(true)
+  })
+})
+
+// El helper de arriba nunca estuvo mal: recibía un saldo mal calculado. Estos casos
+// fijan la COMPOSICIÓN, que es donde estaba el defecto (2026-08-03): el saldo se mide
+// contra `valorARecaudar(honorario, modelo)` — honorario + tarifa pasante — y NO contra
+// `precio_aprobado` a secas, que es solo el honorario.
+//
+// ⚠️ Aplica al SALTO y a `sobrepago_conciliado`, NO al gate `saldo_cero`, que sigue
+// midiendo el honorario. La diferencia no es un descuido: el recaudo de la tarifa lo
+// controla `saldo:handoff` aguas arriba, y exigirlo otra vez en `saldo_cero` retendría
+// negocios cuyo cliente pagó su honorario y cuya tarifa no entró por SOENA (medido:
+// 32 casos abiertos). Aquí la fórmula nueva solo puede DESTRABAR, nunca retener de más.
+describe('el saldo se compone contra el valor a recaudar, no contra el honorario', () => {
+  const modeloCon = (tarifa: number): ModeloDinero => ({
+    tarifa_upme: tarifa,
+    aprobado_plan: 1,
+    aprobado_honorario: 0,
+  })
+
+  // V0099: honorario $850.000 + tarifa $701.812 = $1.551.812, y el cliente pagó
+  // exactamente eso. Estaba entrando a Cobro como si hubiera pagado de más.
+  it('negocio pagado completo (honorario + tarifa) salta: saldo 0, no sobrepago', () => {
+    const honorario = 850_000
+    const tarifa = 701_812
+    const cobrado = 1_551_812
+
+    const precio = valorARecaudar(honorario, modeloCon(tarifa))
+    expect(precio).toBe(cobrado)
+    expect(debeSaltarPorSaldo(precio, precio - cobrado, true)).toBe(true)
+
+    // Con la fórmula vieja el mismo caso daba sobrepago y quedaba retenido.
+    expect(debeSaltarPorSaldo(honorario, honorario - cobrado, true)).toBe(false)
+  })
+
+  // V0025 / V0103: mismo esquema, pero falta el 50% del honorario del Plan 1.
+  // Un faltante real tiene que seguir reteniendo con la fórmula nueva.
+  it('faltante real sigue sin saltar aunque se cuente la tarifa', () => {
+    const precio = valorARecaudar(850_000, modeloCon(701_812))
+    const cobrado = 1_126_812
+    expect(precio - cobrado).toBe(425_000)
+    expect(debeSaltarPorSaldo(precio, precio - cobrado, true)).toBe(false)
+  })
+
+  // Sin tarifa confirmada el valor a recaudar es el honorario: el comportamiento de
+  // los negocios que no cobran tarifa (y de cualquier otro workspace) no cambia.
+  it('sin tarifa, la fórmula nueva es idéntica a la anterior', () => {
+    const honorario = 637_500
+    expect(valorARecaudar(honorario, null)).toBe(honorario)
+    expect(valorARecaudar(honorario, modeloCon(0))).toBe(honorario)
   })
 })

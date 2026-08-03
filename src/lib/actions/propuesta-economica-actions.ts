@@ -65,7 +65,19 @@ export type PropuestaData = {
   aprobado_version: number | null
   aprobado_plan: 1 | 2 | null       // plan elegido al aprobar (1 = 50/50, 2 = único)
   // Desglose congelado al aprobar: honorario del plan elegido + tarifa (pasante).
-  // precio_aprobado del negocio = aprobado_honorario + aprobado_tarifa_upme.
+  //
+  // ⚠️ `precio_aprobado` del negocio = SOLO `aprobado_honorario`. La tarifa NO se le
+  // suma: es plata de terceros y `precio_aprobado` es la señal de ingreso de todo el
+  // sistema (ver la regla cardinal en `lib/upme/modelo-dinero.ts`). Lo que el cliente
+  // paga es `valorARecaudar()` = honorario + tarifa confirmada, derivado y no
+  // almacenado.
+  //
+  // `aprobado_tarifa_upme` quedó como registro histórico del diseño "Ola 2"
+  // (reemplazado el 2026-07-16): la tarifa vigente se CONFIRMA en Validación y vive
+  // en el bloque de confirmación, no aquí. Que valga 0 es lo esperado, NO un dato
+  // faltante — el comentario anterior decía lo contrario e indujo un diagnóstico
+  // errado el 2026-08-03 que estuvo a punto de sumarle la tarifa al precio (habría
+  // inflado ingresos, margen y EBITDA).
   aprobado_honorario?: number | null
   aprobado_tarifa_upme?: number | null
 }
