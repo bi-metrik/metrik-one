@@ -9,6 +9,8 @@ import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } 
 import { nitSinDv, calcularDvNit } from '@/lib/dian/nit'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { documentoVigenteEn } from '@/lib/documentos/vigencia'
+import { montosCoinciden } from '@/lib/negocios/monto-cop'
+import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 
 const BUCKET = 've-documentos'
 
@@ -61,7 +63,7 @@ async function extractWithRetry(
 // en bloques de etapas anteriores (RUT, Factura, etc). Devolvemos un detalle de
 // cada match. El gate del bloque solo se cumple si todas las comparaciones pasan.
 
-export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 'overlap' | 'vigencia'
+export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 'overlap' | 'vigencia' | 'monto'
 
 // Fuente de datos para un check: una etapa + bloque + cómo resolver el valor
 // esperado (un campo, varios concatenados, o varias alternativas de campo).
@@ -91,6 +93,12 @@ export type CrossCheckSpec = CrossCheckSource & {
   // Solo para match_mode 'vigencia': días que el documento sigue siendo válido
   // desde su fecha de expedición. Default 30.
   vigencia_dias?: number
+  // Solo para match_mode 'monto': margen en pesos dentro del cual dos importes se
+  // consideran el mismo. Default `TOLERANCIA_SALDO_COP` ($1.000, el piso de
+  // materialidad ya vigente en los gates de saldo). Comparar dinero al peso exacto
+  // convierte cada redondeo legítimo en una alerta, y una alerta que salta siempre
+  // deja de leerse.
+  tolerancia_cop?: number
   // Si el valor EXTRAÍDO del documento viene vacío, el check pasa (no aplica).
   // Ej.: el 2º beneficiario del Concepto UPME — solo se valida si el certificado
   // lista un segundo solicitante.
@@ -128,8 +136,13 @@ function compareValues(
   expected: string,
   extracted: string,
   mode: CrossCheckMatchMode = 'exact',
-  opts?: { vigencia_dias?: number },
+  opts?: { vigencia_dias?: number; tolerancia_cop?: number },
 ): boolean {
+  // El dinero se compara como NÚMERO y con margen, nunca como texto: "$ 701.812"
+  // y "701812" son el mismo monto, y "350906.00" no son 35 millones. Ver `monto-cop.ts`.
+  if (mode === 'monto') {
+    return montosCoinciden(expected, extracted, opts?.tolerancia_cop ?? TOLERANCIA_SALDO_COP)
+  }
   // La vigencia se evalúa ANTES del guard de vacíos: en una seccional que no exige
   // cita no hay fecha objetivo, y ahí el check no aplica en vez de fallar. Solo un
   // vencimiento comprobado marca el check como no cumplido.
@@ -227,7 +240,7 @@ async function runCrossCheck(
     srcData: Record<string, unknown>,
     extractedRaw: string,
     mode: CrossCheckMatchMode,
-    opts?: { vigencia_dias?: number },
+    opts?: { vigencia_dias?: number; tolerancia_cop?: number },
   ): { expected: string; ok: boolean } => {
     if (src.source_fields && src.source_fields.length > 0) {
       const join = src.join ?? ' '
@@ -271,7 +284,7 @@ async function runCrossCheck(
         (src.source_bloque_slug ? dataPorSlug.get(src.source_bloque_slug) : undefined) ??
         dataPorBloque.get(`${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`) ??
         {}
-      const r = resolveFromSource(src, srcData, extractedRaw, mode, { vigencia_dias: check.vigencia_dias })
+      const r = resolveFromSource(src, srcData, extractedRaw, mode, { vigencia_dias: check.vigencia_dias, tolerancia_cop: check.tolerancia_cop })
       if (r.ok) { expectedRaw = r.expected; ok = true; break }
       // Recordar el primer valor esperado no vacío para el reporte si nada matchea
       if (!expectedRaw && r.expected) expectedRaw = r.expected
