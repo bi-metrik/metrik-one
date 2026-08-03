@@ -65,3 +65,48 @@ export function campoRequeridoCumplido(tipo: CampoTipo, valor: unknown): boolean
 
   return valor !== '' && valor !== null && valor !== undefined
 }
+
+/** Forma mínima de un `config_extra.fields[i]` para evaluar completitud. */
+export interface CampoConfig {
+  slug: string
+  tipo: CampoTipo
+  required?: boolean
+  label?: string
+  showIf?: { field: string; equals: unknown }
+}
+
+/**
+ * ¿El campo aplica a este caso? Un campo con `showIf` que no se cumple está oculto
+ * en pantalla, así que exigirlo dejaría el bloque bloqueado para siempre.
+ */
+export function campoVisible(f: CampoConfig, valores: Record<string, unknown>): boolean {
+  if (!f.showIf) return true
+  return valores[f.showIf.field] === f.showIf.equals
+}
+
+/**
+ * ¿El bloque `datos` está completo? Misma regla que usa `BloqueDatos.isComplete`,
+ * extraída acá para que el SERVIDOR pueda aplicarla también.
+ *
+ * ⚠️ POR QUÉ EN EL SERVIDOR
+ *
+ * `marcarBloqueCompleto` validaba permisos (`guardEditarBloque`) pero NO completitud:
+ * escribía `estado='completo'` con lo que el cliente le mandara. La única barrera vivía
+ * en un componente, así que todo llamador que no fuera el camino feliz de `persist()`
+ * podía marcar completo un bloque incompleto. `handleConfirm` (bloques `require_confirm`)
+ * es uno de esos llamadores: llama directo, sin evaluar `isComplete`.
+ *
+ * Es el mismo criterio que el código ya declara para permisos ("la UI es solo UX; esta es
+ * la barrera real") y que no se estaba cumpliendo para completitud.
+ *
+ * Devuelve los campos que faltan (vacío = completo) para poder decir CUÁL falta, en vez
+ * de un "no se pudo" sin explicación.
+ */
+export function camposRequeridosFaltantes(
+  fields: CampoConfig[],
+  valores: Record<string, unknown>,
+): CampoConfig[] {
+  return fields
+    .filter((f) => f.required && campoVisible(f, valores))
+    .filter((f) => !campoRequeridoCumplido(f.tipo, valores[f.slug]))
+}

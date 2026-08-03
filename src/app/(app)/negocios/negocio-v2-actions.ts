@@ -11,6 +11,7 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
 import {
   exigeDatoDeDecision,
@@ -3341,6 +3342,35 @@ export async function marcarBloqueCompleto(
   const negocioId = (currentBloque as Record<string, unknown> | null)?.negocio_id as string | null
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
   const mergedData = { ...currentData, ...data }
+
+  // ── Barrera de completitud (bloques `datos` que son GATE) ─────────────────
+  //
+  // Hasta acá esta función solo validaba PERMISOS. La completitud la decidía el
+  // cliente (`BloqueDatos.isComplete`) y el servidor escribía `estado='completo'`
+  // con lo que le llegara. Cualquier llamador que no fuera ese camino podía marcar
+  // completo un bloque incompleto — `handleConfirm` (bloques `require_confirm`)
+  // llama directo, sin evaluar completitud.
+  //
+  // Acotado a `es_gate`: es donde un bloque mal completado tiene consecuencia
+  // (deja avanzar de etapa). Un bloque no-gate mal marcado no rompe nada, y
+  // exigirlo aquí cambiaría el comportamiento de workspaces que hoy funcionan.
+  {
+    const { data: cfgRaw } = await db(supabase)
+      .from('negocio_bloques')
+      .select('bloque_configs!inner(es_gate, config_extra, bloque_definitions!inner(tipo))')
+      .eq('id', negocioBloqueId)
+      .single()
+    const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
+    const esDatosGate = cfg?.es_gate === true && cfg?.bloque_definitions?.tipo === 'datos'
+    if (esDatosGate) {
+      const fields = (cfg?.config_extra?.fields ?? []) as CampoConfig[]
+      const faltantes = camposRequeridosFaltantes(fields, mergedData)
+      if (faltantes.length > 0) {
+        const nombres = faltantes.map((f) => f.label ?? f.slug).join(', ')
+        return { error: `Faltan campos obligatorios: ${nombres}` }
+      }
+    }
+  }
 
   if (destinoId !== negocioBloqueId) {
     const { error: dataError } = await db(supabase)
