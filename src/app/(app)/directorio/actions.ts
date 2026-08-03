@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { STATUS_CONTACTO } from '@/lib/catalogos/constants'
 import { revalidatePath } from 'next/cache'
 
 // ── Contactos ─────────────────────────────────────────────
@@ -255,8 +256,12 @@ export async function updateContactoSegmento(id: string, segmento: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
-  const valid = ['sin_contactar', 'contactado', 'convertido', 'inactivo']
-  if (!valid.includes(segmento)) return { success: false, error: 'Segmento invalido' }
+  // La validación sale del catálogo, no de una lista escrita aquí: cuando el
+  // juego de valores cambió (2026-07-31) esta copia se quedó con los cuatro
+  // viejos y rechazó TODOS los status nuevos, así que el chip de la lista dejó
+  // de funcionar en silencio (el detalle seguía guardando por otra vía).
+  const valid = STATUS_CONTACTO.map(s => s.value) as readonly string[]
+  if (!valid.includes(segmento)) return { success: false, error: 'Status invalido' }
 
   const { error: dbError } = await supabase
     .from('contactos')
