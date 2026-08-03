@@ -25,6 +25,7 @@ import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-complet
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
+import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
@@ -3334,10 +3335,15 @@ export async function cambiarEtapaNegocioConGate(
 
 export async function marcarBloqueCompleto(
   negocioBloqueId: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  // Ver `actualizarBloqueData`. Un bloque de una etapa superada casi siempre está
+  // COMPLETO, así que la corrección entra por acá y no por el guardado de borrador:
+  // sin este tratamiento, el camino más común de corrección era justo el que no
+  // dejaba ni marca de autoría ni traza (hueco detectado el 2026-08-02).
+  opts?: { correccion?: { causa?: string; sesion_id?: string } }
 ): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
-  if (error) return { error: 'No autenticado' }
+  if (error || !workspaceId) return { error: 'No autenticado' }
 
   // Guard server-side de permisos (rol+área+responsable). La UI es solo UX.
   const guard = await guardEditarBloque(negocioBloqueId)
@@ -3359,7 +3365,29 @@ export async function marcarBloqueCompleto(
 
   const negocioId = (currentBloque as Record<string, unknown> | null)?.negocio_id as string | null
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
-  const mergedData = { ...currentData, ...data }
+  let mergedData = { ...currentData, ...data }
+
+  // ── Corrección post-avance ────────────────────────────────────────────────
+  // Mismo criterio que `actualizarBloqueData`: sobre una etapa ya superada esto no
+  // es trabajo de la etapa sino una corrección, y exige opt-in del bloque, causa y
+  // marca de autoría con el valor previo.
+  const corr = await contextoCorreccion(supabase, negocioBloqueId)
+  let cambiosCorreccion: CampoCorregido[] = []
+  let nombreCorrector: string | null = null
+  if (corr?.esPostAvance) {
+    if (!corr.permiteCorregir) {
+      return { error: 'Este bloque no admite correcciones después de avanzar de etapa' }
+    }
+    const causa = opts?.correccion?.causa
+    const sesionId = opts?.correccion?.sesion_id
+    if (!esCausaValida(causa) || !sesionId) {
+      return { error: 'Indica por qué se corrige antes de guardar' }
+    }
+    const estampado = await estamparEdiciones(supabase, userId, currentData, mergedData)
+    mergedData = estampado.data
+    cambiosCorreccion = estampado.cambios
+    nombreCorrector = estampado.nombre
+  }
 
   // ── Barrera de completitud (bloques `datos` que son GATE) ─────────────────
   //
@@ -3419,6 +3447,20 @@ export async function marcarBloqueCompleto(
   // juntos. Hace falta en AMBOS caminos — el cliente manda por aquí cuando el bloque queda
   // completo, que es justamente el caso de una pregunta obligatoria que decide una ruta.
   await propagarCamposDerivados(supabase, negocioBloqueId, mergedData)
+
+  // Traza de la corrección contra el bloque donde vive el dato (ver `actualizarBloqueData`).
+  if (cambiosCorreccion.length > 0) {
+    await registrarCorrecciones({
+      supabase,
+      workspaceId,
+      userId,
+      userNombre: nombreCorrector,
+      negocioBloqueId: destinoId,
+      campos: cambiosCorreccion,
+      causa: opts!.correccion!.causa as CausaCorreccion,
+      sesionId: opts!.correccion!.sesion_id as string,
+    })
+  }
 
   // Siempre revalidar la página del negocio después de marcar completo
   if (negocioId) {
@@ -3728,42 +3770,6 @@ async function propagarCamposDerivados(
 }
 
 /**
- * ¿Se está escribiendo sobre un bloque de una etapa que el negocio YA superó?
- * Es la diferencia entre "trabajar la etapa" y "corregir hacia atrás", y define
- * si aplica el opt-in de corrección y la marca de autoría.
- */
-async function contextoCorreccion(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  negocioBloqueId: string,
-): Promise<{ esPostAvance: boolean; permiteCorregir: boolean; dataPrevia: Record<string, unknown> } | null> {
-  const { data: nb } = await db(supabase)
-    .from('negocio_bloques')
-    .select('negocio_id, data, bloque_configs!inner(config_extra, etapas_negocio!inner(orden))')
-    .eq('id', negocioBloqueId)
-    .single()
-  if (!nb) return null
-
-  const ordenBloque = nb.bloque_configs?.etapas_negocio?.orden as number | undefined
-  const { data: neg } = await db(supabase)
-    .from('negocios')
-    .select('etapa_actual_id')
-    .eq('id', nb.negocio_id)
-    .single()
-  const { data: etapaActual } = neg?.etapa_actual_id
-    ? await db(supabase).from('etapas_negocio').select('orden').eq('id', neg.etapa_actual_id).single()
-    : { data: null }
-
-  const ordenActual = (etapaActual as { orden?: number } | null)?.orden
-  const cfg = (nb.bloque_configs?.config_extra ?? {}) as { corregir_campos_gerencial?: boolean }
-  return {
-    esPostAvance: ordenBloque !== undefined && ordenActual !== undefined && ordenBloque < ordenActual,
-    permiteCorregir: cfg.corregir_campos_gerencial === true,
-    dataPrevia: (nb.data ?? {}) as Record<string, unknown>,
-  }
-}
-
-/**
  * Estampa `_ediciones[slug] = { por_id, por_nombre, en }` en los campos que
  * cambiaron. La marca la construye el SERVIDOR comparando contra lo persistido:
  * lo que mande el cliente en `_ediciones` se descarta, o cualquiera podría
@@ -3775,14 +3781,14 @@ async function estamparEdiciones(
   userId: string | undefined,
   previa: Record<string, unknown>,
   entrante: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+): Promise<{ data: Record<string, unknown>; cambios: CampoCorregido[]; nombre: string | null }> {
   const { _ediciones: _descartado, ...limpio } = entrante as Record<string, unknown> & { _ediciones?: unknown }
   const ediciones = { ...((previa._ediciones ?? {}) as Record<string, unknown>) }
 
   const cambiados = Object.keys(limpio).filter(
     k => !k.startsWith('_') && JSON.stringify(limpio[k]) !== JSON.stringify(previa[k]),
   )
-  if (cambiados.length === 0) return { ...limpio, _ediciones: ediciones }
+  if (cambiados.length === 0) return { data: { ...limpio, _ediciones: ediciones }, cambios: [], nombre: null }
 
   let nombre = 'Usuario'
   if (userId) {
@@ -3790,9 +3796,29 @@ async function estamparEdiciones(
     nombre = (prof?.full_name as string | null) ?? 'Usuario'
   }
   const en = new Date().toISOString()
-  for (const slug of cambiados) ediciones[slug] = { por_id: userId ?? '', por_nombre: nombre, en }
+  // La marca conserva el valor PREVIO además de quién y cuándo. Sin el valor previo,
+  // la huella dice que alguien tocó el campo pero no permite reconstruir qué decía,
+  // que es justo lo que se necesita para revisar una decisión aguas abajo.
+  // `antes` se fija la primera vez y no se pisa: si el mismo campo se toca varias
+  // veces, el original sigue siendo el que había antes de empezar a corregir.
+  for (const slug of cambiados) {
+    const marcaPrevia = (ediciones[slug] ?? null) as { antes?: unknown } | null
+    ediciones[slug] = {
+      por_id: userId ?? '',
+      por_nombre: nombre,
+      en,
+      antes: marcaPrevia && 'antes' in marcaPrevia ? marcaPrevia.antes : (previa[slug] ?? null),
+      despues: limpio[slug] ?? null,
+    }
+  }
 
-  return { ...limpio, _ediciones: ediciones }
+  const cambios: CampoCorregido[] = cambiados.map(slug => ({
+    slug,
+    antes: (ediciones[slug] as { antes?: unknown }).antes,
+    despues: limpio[slug] ?? null,
+  }))
+
+  return { data: { ...limpio, _ediciones: ediciones }, cambios, nombre }
 }
 
 export async function actualizarBloqueData(
@@ -3802,10 +3828,14 @@ export async function actualizarBloqueData(
   // Guardado de BORRADOR: con { revalidate: false } persiste sin revalidar la ruta
   // (no re-renderiza el server component → no roba el foco mientras se escribe).
   // Default true para compatibilidad.
-  opts?: { revalidate?: boolean }
+  //
+  // `correccion` solo aplica cuando el bloque es de una etapa YA SUPERADA: la causa
+  // se elige en un clic al abrir la corrección y el `sesion_id` agrupa los campos
+  // tocados en ese mismo acto. En el trabajo normal de la etapa no viaja.
+  opts?: { revalidate?: boolean; correccion?: { causa?: string; sesion_id?: string } }
 ): Promise<{ error: string | null }> {
-  const { supabase, userId, error } = await getWorkspace()
-  if (error) return { error: 'No autenticado' }
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
 
   // Guard server-side de permisos (rol+área+responsable). El autosave de borrador
   // también escribe negocio_bloques.data → debe validar igual que marcarBloqueCompleto.
@@ -3824,11 +3854,24 @@ export async function actualizarBloqueData(
   // marca de quién y cuándo. El área ya la validó el guard de arriba.
   const corr = await contextoCorreccion(supabase, negocioBloqueId)
   let dataFinal = data
+  let cambiosCorreccion: CampoCorregido[] = []
+  let nombreCorrector: string | null = null
   if (corr?.esPostAvance) {
     if (!corr.permiteCorregir) {
       return { error: 'Este bloque no admite correcciones después de avanzar de etapa' }
     }
-    dataFinal = await estamparEdiciones(supabase, userId, corr.dataPrevia, data)
+    // La causa es obligatoria: sin ella el registro no distingue un error real de un
+    // cambio legítimo del cliente, y el agregado por área queda inservible. Se valida
+    // en el servidor porque el cliente es solo UX.
+    const causa = opts?.correccion?.causa
+    const sesionId = opts?.correccion?.sesion_id
+    if (!esCausaValida(causa) || !sesionId) {
+      return { error: 'Indica por qué se corrige antes de guardar' }
+    }
+    const estampado = await estamparEdiciones(supabase, userId, corr.dataPrevia, data)
+    dataFinal = estampado.data
+    cambiosCorreccion = estampado.cambios
+    nombreCorrector = estampado.nombre
   }
 
   // Bloque compartido entre etapas: la escritura va a la fila del origen, no a la copia
@@ -3855,11 +3898,29 @@ export async function actualizarBloqueData(
     await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
   }
 
+  // Traza de la corrección: valor previo, valor nuevo, causa y área DUEÑA del bloque.
+  // Se registra contra `destinoId` (donde vive el dato), no contra la copia abierta:
+  // en un bloque compartido el dato pertenece a la etapa de origen, y esa es el área
+  // a la que corresponde el error. Nunca bloquea el guardado del dato.
+  if (cambiosCorreccion.length > 0) {
+    await registrarCorrecciones({
+      supabase,
+      workspaceId,
+      userId,
+      userNombre: nombreCorrector,
+      negocioBloqueId: destinoId,
+      campos: cambiosCorreccion,
+      causa: opts!.correccion!.causa as CausaCorreccion,
+      sesionId: opts!.correccion!.sesion_id as string,
+    })
+  }
+
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
   if (nid && opts?.revalidate !== false) revalidatePath(`/negocios/${nid}`)
 
   // No registrar en activity_log aquí — auto-save cada 800ms genera ruido.
-  // Los cambios se registran al completar bloque (marcarBloqueCompleto).
+  // Los cambios se registran al completar bloque (marcarBloqueCompleto), salvo la
+  // corrección post-avance, que sí deja su propio evento (arriba).
 
   return { error: null }
 }

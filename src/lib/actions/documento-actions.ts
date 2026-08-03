@@ -11,6 +11,7 @@ import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriv
 import { documentoVigenteEn } from '@/lib/documentos/vigencia'
 import { montosCoinciden } from '@/lib/negocios/monto-cop'
 import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
+import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
 
 const BUCKET = 've-documentos'
 
@@ -756,9 +757,12 @@ export async function actualizarCampoDocumento(
   slug: string,
   value: string,
   camposExtraccion: CampoExtraccion[],
+  // Solo viaja cuando el bloque es de una etapa ya superada: es una corrección, y
+  // entonces la causa es obligatoria (ver `actualizarBloqueData`, mismo criterio).
+  correccion?: { causa?: string; sesion_id?: string },
 ): Promise<{ success: boolean; isComplete?: boolean; error?: string }> {
-  const { supabase, userId, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Validar que slug existe en camposExtraccion
   const slugValido = camposExtraccion.some(c => c.slug === slug)
@@ -807,6 +811,17 @@ export async function actualizarCampoDocumento(
   const currentData = (bloque?.data as Record<string, unknown>) ?? {}
   const campos = (currentData.campos as Record<string, CampoResultado>) ?? {}
 
+  // ── Corrección hacia atrás: causa obligatoria ─────────────────────────────
+  // Editar el campo de un documento mientras se trabaja su etapa es trabajo normal.
+  // Hacerlo cuando el negocio ya avanzó es una corrección, y sin causa el registro
+  // no distingue un error real de un cambio legítimo del cliente.
+  const ctxCorr = await contextoCorreccion(supabase, negocioBloqueId)
+  const esCorreccion = ctxCorr?.esPostAvance === true
+  if (esCorreccion && (!esCausaValida(correccion?.causa) || !correccion?.sesion_id)) {
+    return { success: false, error: 'Indica por qué se corrige antes de guardar' }
+  }
+  const valorPrevio = campos[slug]?.value ?? null
+
   // Update the specific field — marca de edición manual (quién + cuándo).
   campos[slug] = {
     value: value || null,
@@ -843,6 +858,21 @@ export async function actualizarCampoDocumento(
         updated_at: new Date().toISOString(),
       })
       .eq('id', negocioBloqueId)
+  }
+
+  // Traza de la corrección (valor previo, valor nuevo, causa, área dueña del bloque).
+  // Nunca bloquea: el dato corregido es el trabajo, el registro es la traza.
+  if (esCorreccion) {
+    await registrarCorrecciones({
+      supabase,
+      workspaceId,
+      userId,
+      userNombre: editorNombre,
+      negocioBloqueId,
+      campos: [{ slug, antes: valorPrevio, despues: value || null }],
+      causa: correccion!.causa as CausaCorreccion,
+      sesionId: correccion!.sesion_id as string,
+    })
   }
 
   revalidatePath(`/negocios/${negocioId}`)

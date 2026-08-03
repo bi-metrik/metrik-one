@@ -4,6 +4,8 @@ import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
+import SelectorCausa from '@/components/negocios/selector-causa'
+import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import { extraerCampoDesdeImagen, subirImagenClipboard } from '@/lib/actions/documento-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
@@ -187,7 +189,20 @@ export default function BloqueDatos({
   // Corrección post-avance: el bloque entra en modo visible y el usuario habilitado
   // lo pasa a editable. Se reusa el formulario editable completo en vez de duplicar
   // inputs de solo-corrección: un solo render que mantener, mismo autosave.
+  //
+  // La causa se elige ANTES de poder editar: preguntarla después (al guardar) llega
+  // tarde, porque el autosave ya habría intentado escribir sin ella. `sesion` agrupa
+  // todos los campos tocados en este mismo acto de corrección.
   const [corrigiendo, setCorrigiendo] = useState(false)
+  const [causa, setCausa] = useState<CausaCorreccion | null>(null)
+  const [pidiendoCausa, setPidiendoCausa] = useState(false)
+  const sesionCorreccion = useRef<string | null>(null)
+  // Ref para que el guardado de respaldo al desmontar también lleve la causa: si se
+  // leyera del estado, ese flush final se rechazaría por falta de causa.
+  const correccionRef = useRef<{ causa: string; sesion_id: string } | undefined>(undefined)
+  correccionRef.current = corrigiendo && causa && sesionCorreccion.current
+    ? { causa, sesion_id: sesionCorreccion.current }
+    : undefined
   const modoEfectivo: 'editable' | 'visible' = corrigiendo ? 'editable' : modo
   const ediciones = (saved._ediciones ?? {}) as Record<string, EdicionCampo>
   const [values, setValues] = useState<Record<string, unknown>>(() => {
@@ -231,7 +246,10 @@ export default function BloqueDatos({
       if (saveTimer.current) clearTimeout(saveTimer.current)
       // Si quedó un borrador sin guardar (el usuario navegó sin blur), persistir ya.
       if (dirtyRef.current) {
-        void actualizarBloqueData(negocioBloqueId, valuesRef.current, undefined, { revalidate: false })
+        void actualizarBloqueData(negocioBloqueId, valuesRef.current, undefined, {
+          revalidate: false,
+          correccion: correccionRef.current,
+        })
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -315,13 +333,16 @@ export default function BloqueDatos({
     dirtyRef.current = false
     setSaveStatus('saving')
     const complete = isComplete(vals)
+    const correccion = correccionRef.current
     let result: { error: string | null }
     if (complete && !requireConfirm) {
-      const r = await marcarBloqueCompleto(negocioBloqueId, vals)
+      // Un bloque de una etapa superada casi siempre está completo: este es el camino
+      // real de la corrección, y por eso también lleva la causa.
+      const r = await marcarBloqueCompleto(negocioBloqueId, vals, { correccion })
       if (!r.error && onComplete) onComplete()
       result = { error: r.error }
     } else {
-      result = await actualizarBloqueData(negocioBloqueId, vals, undefined, { revalidate })
+      result = await actualizarBloqueData(negocioBloqueId, vals, undefined, { revalidate, correccion })
     }
     if (result.error) { toast.error(result.error); setSaveStatus('idle') }
     else { setSaveStatus('saved'); window.setTimeout(() => setSaveStatus('idle'), 1800) }
@@ -593,15 +614,26 @@ export default function BloqueDatos({
             </div>
           )
         })}
-        {puedeCorregir && (
+        {puedeCorregir && !pidiendoCausa && (
           <button
             type="button"
-            onClick={() => setCorrigiendo(true)}
+            onClick={() => setPidiendoCausa(true)}
             className="mt-1 inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] px-2 py-1 text-[11px] font-medium text-[#6B7280] hover:bg-[#F5F4F2] hover:text-[#1A1A1A] transition-colors"
           >
             <Pencil className="h-3 w-3" />
             Corregir
           </button>
+        )}
+        {puedeCorregir && pidiendoCausa && (
+          <SelectorCausa
+            onElegir={c => {
+              setCausa(c)
+              sesionCorreccion.current = nuevaSesionId()
+              setPidiendoCausa(false)
+              setCorrigiendo(true)
+            }}
+            onCancelar={() => setPidiendoCausa(false)}
+          />
         )}
       </div>
     )
@@ -620,11 +652,12 @@ export default function BloqueDatos({
       {corrigiendo && (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
           <span className="text-[11px] text-[#92400E]">
-            Corrigiendo un dato de una etapa anterior. Queda registrado con tu nombre.
+            Corrigiendo un dato de una etapa anterior ({causa ? LABEL_CAUSA[causa] : 'sin causa'}).
+            Queda registrado con tu nombre y con lo que decía antes.
           </span>
           <button
             type="button"
-            onClick={() => setCorrigiendo(false)}
+            onClick={() => { setCorrigiendo(false); setCausa(null); sesionCorreccion.current = null }}
             className="shrink-0 rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[#92400E] border border-[#FDE68A] hover:bg-[#FEF3C7] transition-colors"
           >
             Listo
