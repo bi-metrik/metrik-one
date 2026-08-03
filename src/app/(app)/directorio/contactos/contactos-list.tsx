@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { CardLink } from '@/components/card-link'
 import {
   Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown, UserCircle,
   Plus, X, Loader2, CheckSquare, Square,
@@ -622,7 +622,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
           const marcado = seleccion.has(c.id)
 
           return (
-            <Link
+            <CardLink
               key={c.id}
               href={`/directorio/contacto/${c.id}`}
               className={`block rounded-xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${
@@ -746,7 +746,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                   </div>
                 </div>
               </div>
-            </Link>
+            </CardLink>
           )
         })}
         {sorted.length === 0 && (

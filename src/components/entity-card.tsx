@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
+import { CardLink } from '@/components/card-link'
 import { ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -288,9 +288,9 @@ export default function EntityCard({
 
   if (href) {
     return (
-      <Link href={href} className="block">
+      <CardLink href={href} className="block">
         {cardContent}
-      </Link>
+      </CardLink>
     )
   }
 
