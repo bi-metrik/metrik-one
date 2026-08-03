@@ -5,6 +5,7 @@ import NegocioCard, { type StaffAsignable } from './negocio-card'
 import EmptyState from '@/components/empty-state'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
+import { segmentarNegocios } from '@/lib/negocios/segmentador'
 import type { NegocioResumen } from './negocio-v2-actions'
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
@@ -196,14 +197,6 @@ export default function NegociosClient({
     setEtapaNum(null)
   }
 
-  // Filtrado por fase / etapa.
-  const current = useMemo(() => {
-    if (fase === 'cerrados') return cerradosFiltrados
-    if (fase === 'todos') return negocios
-    if (etapaNum !== null) return negocios.filter((n) => n.etapa_numero === etapaNum)
-    return negocios.filter((n) => n.stage_actual === fase)
-  }, [fase, etapaNum, negocios, cerradosFiltrados])
-
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
   const filtros = useMemo<FiltrosLista>(
@@ -211,10 +204,18 @@ export default function NegociosClient({
     [seccional, responsable, origen, term, soloAtrasados],
   )
 
-  const currentFiltradoSinOrden = useMemo(
-    () => aplicarFiltros(current, filtros),
-    [current, filtros],
+  // Lista + contadores de etapa salen de la misma segmentación: el contador de una etapa
+  // NO se filtra a sí mismo (si no, al elegir una etapa las demás caen a cero y se pierde
+  // la foto de la fase). Regla y pruebas en src/lib/negocios/segmentador.ts.
+  const segmentacion = useMemo(
+    () =>
+      segmentarNegocios(negocios, cerradosFiltrados, fase, etapaNum, (xs) =>
+        aplicarFiltros(xs, filtros),
+      ),
+    [negocios, cerradosFiltrados, fase, etapaNum, filtros],
   )
+  const currentFiltradoSinOrden = segmentacion.lista
+  const etapaCount = segmentacion.contarEtapa
 
   // Orden. 'reciente' respeta el orden del servidor (created_at desc).
   // 'atraso' pone primero al más atrasado; los que no tienen SLA (o van a
@@ -249,8 +250,11 @@ export default function NegociosClient({
   // Atrasados dentro de la fase/etapa seleccionada, ignorando el propio toggle
   // (si no, al activarlo el contador se congelaría en su propio resultado).
   const atrasadosCount = useMemo(
-    () => aplicarFiltros(current, { ...filtros, soloAtrasados: false }).filter(estaAtrasado).length,
-    [current, filtros],
+    () =>
+      segmentarNegocios(negocios, cerradosFiltrados, fase, etapaNum, (xs) =>
+        aplicarFiltros(xs, { ...filtros, soloAtrasados: false }),
+      ).lista.filter(estaAtrasado).length,
+    [negocios, cerradosFiltrados, fase, etapaNum, filtros],
   )
 
   // Orígenes presentes en la lista (abiertos + cerrados), con su conteo. Solo se
@@ -274,10 +278,6 @@ export default function NegociosClient({
     })
   }, [negocios, cerrados])
 
-  // etapaCount cuenta sobre currentFiltrado (fase + responsable + seccional + búsqueda).
-  const etapaCount = (numero: number) =>
-    currentFiltrado.filter((n) => n.etapa_numero === numero).length
-
   // Fases visibles (según stages activos del workspace + si hay cerrados).
   const fases = ALL_FASES.filter((f) =>
     f.key === 'todos'
@@ -289,7 +289,11 @@ export default function NegociosClient({
 
   const showEmpty = currentFiltrado.length === 0
   const isFilteringMotivo = fase === 'cerrados' && motivoCierre !== 'todos'
-  const sinResultadosBusqueda = term.length > 0 && currentFiltrado.length === 0 && current.length > 0
+  // "La búsqueda no encontró nada" solo si la fase/etapa SÍ tiene negocios sin filtrar
+  // (si no, el vacío es de la etapa, no de la búsqueda).
+  const hayEnFaseEtapa =
+    segmentarNegocios(negocios, cerradosFiltrados, fase, etapaNum, (xs) => xs).lista.length > 0
+  const sinResultadosBusqueda = term.length > 0 && currentFiltrado.length === 0 && hayEnFaseEtapa
 
   return (
     <div className="space-y-4">
