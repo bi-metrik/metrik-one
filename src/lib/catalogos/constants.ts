@@ -122,9 +122,18 @@ export type RolContacto = typeof ROLES_CONTACTO[number]['value']
 // cambió el nombre visible y el juego de valores. No renombrar la columna sin
 // tocar también el webhook de Meta (`config_extra.meta_leads.contacto.segmento_inicial`).
 //
-// Los tres primeros son una progresión de intentos: el color sube de intensidad
+// `sin_contactar` es el estado de NACIMIENTO: nadie lo ha llamado todavía. Un
+// lead de Meta llenó un formulario, que es un movimiento del cliente hacia
+// nosotros, no un intento de contacto nuestro. Estuvo fuera de esta lista entre
+// el rediseño del 2026-07-31 y el 2026-08-03: durante esa ventana el sistema
+// seguía creando contactos ahí (webhook de Meta y alta manual) en un valor que
+// su propio catálogo no reconocía, así que salían en gris y no aparecían en el
+// selector ni en los filtros.
+//
+// Los tres "contacto" son una progresión de intentos: el color sube de intensidad
 // con cada intento fallido de conectar.
 export const STATUS_CONTACTO = [
+  { value: 'sin_contactar', label: 'Sin contactar', chipClass: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
   { value: 'primer_contacto', label: 'Primer contacto', chipClass: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' },
   { value: 'segundo_contacto', label: 'Segundo contacto', chipClass: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' },
   { value: 'tercer_contacto', label: 'Tercer contacto', chipClass: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300' },
@@ -140,9 +149,9 @@ const CHIP_STATUS_DESCONOCIDO = 'bg-[#F5F4F2] text-[#6B7280]'
 
 /**
  * Resuelve label + chip de un status. Tolera valores que no están en la lista
- * (los cuatro legacy: sin_contactar/contactado/convertido/inactivo) para que
- * durante la ventana entre el despliegue del código y el backfill de datos la
- * pantalla muestre el valor crudo en gris en vez de una celda vacía.
+ * (los legacy que quedan: contactado/convertido/inactivo) para que durante la
+ * ventana entre el despliegue del código y el backfill de datos la pantalla
+ * muestre el valor crudo en gris en vez de una celda vacía.
  */
 export function resolverStatusContacto(value: string | null | undefined): {
   label: string

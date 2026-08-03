@@ -230,6 +230,12 @@ const META_FILTER = '__meta__'
 
 // Orden del ciclo al tocar el chip: sigue la secuencia natural de gestión
 // (los tres intentos, luego los desenlaces).
+//
+// `sin_contactar` queda FUERA a propósito, aunque sí es un status del catálogo:
+// es el estado de nacimiento, y el ciclo es la progresión de gestión. Al tocar
+// el chip de un contacto sin contactar, el `indexOf` da -1 y el ciclo arranca en
+// "primer contacto", que es justo el primer intento. Así nadie lo devuelve a
+// "sin contactar" de un click; para eso está el selector del detalle.
 const SEGMENTO_ORDER = [
   'primer_contacto', 'segundo_contacto', 'tercer_contacto',
   'conectado', 'no_contesto', 'standby', 'descartado',
