@@ -123,11 +123,42 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [cargar])
 
-  // Supabase Realtime: escuchar cambios en notificaciones del usuario
+  // Supabase Realtime: escuchar cambios en notificaciones del usuario.
+  //
+  // ⚠️ El canal SE RINDE tras unos intentos, a propósito. Si el WebSocket no
+  // conecta, la librería reintenta con backoff PARA SIEMPRE: es trabajo constante
+  // en el navegador de un usuario que dejó la pestaña abierta toda la jornada, y
+  // es el mejor candidato a los reportes de "la aplicación se pega y toca
+  // actualizar". Medido el 2026-08-01 en producción: 17.007 rechazos 401 en 24 h,
+  // cero conexiones exitosas, con la aplicación en uso normal.
+  //
+  // Rendirse NO deja la campana desactualizada: el efecto de `visibilitychange`
+  // de arriba recarga el conteo cada vez que el usuario vuelve a la pestaña, y el
+  // contador inicial llega resuelto desde el servidor. Se pierde el aviso
+  // instantáneo mientras la pestaña está al frente, nada más.
   useEffect(() => {
     const supabase = createClient()
+    const MAX_FALLOS = 3
+    let fallos = 0
+    let rendido = false
+    let suscrito = false
 
-    const channel = supabase
+    // La referencia se declara antes del `subscribe` porque su callback puede
+    // dispararse de forma síncrona: leer `channel` desde `rendirse` antes de que
+    // exista rompería con "used before its declaration".
+    let canal: ReturnType<typeof supabase.channel> | null = null
+
+    const rendirse = (motivo: string) => {
+      if (rendido) return
+      rendido = true
+      console.warn(`[notificaciones] realtime deja de reintentar: ${motivo}`)
+      // Al quitar el último canal, la librería cierra el socket (RealtimeClient
+      // .removeChannel llama a disconnect cuando no quedan canales) → se acaba el
+      // bucle de reconexión, no solo la suscripción.
+      if (canal) supabase.removeChannel(canal)
+    }
+
+    canal = supabase
       .channel('notificaciones-realtime')
       .on(
         'postgres_changes',
@@ -144,10 +175,28 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
           setItems(prev => (prev.some(n => n.id === nueva.id) ? prev : [nueva, ...prev]))
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          suscrito = true
+          fallos = 0
+          return
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          fallos += 1
+          if (fallos >= MAX_FALLOS) rendirse(`${fallos} intentos fallidos (${status})`)
+        }
+      })
+
+    // Red de seguridad: si el socket ni siquiera llega a abrirse, el callback de
+    // arriba puede no dispararse nunca y el bucle quedaría vivo igual.
+    const plazo = setTimeout(() => {
+      if (!suscrito) rendirse('no conectó dentro del plazo')
+    }, 30_000)
 
     return () => {
-      supabase.removeChannel(channel)
+      clearTimeout(plazo)
+      rendido = true
+      if (canal) supabase.removeChannel(canal)
     }
   }, [userId])
 
