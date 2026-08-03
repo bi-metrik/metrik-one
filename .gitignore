@@ -43,3 +43,8 @@ next-env.d.ts
 
 # Supabase
 supabase/.temp/
+
+# Worktrees de agentes
+# Solo la carpeta de worktrees: el resto de .claude/ SI se versiona
+# (settings.json, launch.json, agent-memory/).
+.claude/worktrees/
