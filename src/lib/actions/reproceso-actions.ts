@@ -248,13 +248,22 @@ export async function reprocesarNegocio(
   if (updErr) return { ok: false, error: (updErr as { message: string }).message }
 
   // ── Traza: es el insumo del indicador de calidad ──────────────────────
+  //
+  // ⚠️ `tipo` tiene que existir en el CHECK de `activity_log`, y **`reproceso` NO está
+  // ahí** (la lista es: comentario, cambio, sistema, cambio_etapa, cambio_estado,
+  // solicitud_conciliacion, conciliacion_atendida). Esta línea decía `'reproceso'`, así
+  // que el insert fallaba y la traza del reproceso nunca se escribía. No se había notado
+  // porque no se ha corrido ningún reproceso todavía (0 en producción al 2026-08-03) y
+  // porque el error del insert no se miraba. Un tipo fuera del CHECK falla EN SILENCIO:
+  // es la cuarta vez que muerde. Se usa `cambio_etapa`, que es lo que de verdad ocurre.
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    const { error: errLog } = await supabase.from('activity_log').insert({
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
-      tipo: 'reproceso',
+      tipo: 'cambio_etapa',
       autor_id: staffId,
+      campo_modificado: 'etapa',
       contenido:
         `Reproceso ${ciclo} — ${LABEL_TIPO[input.tipo]}. ` +
         `Causa: ${input.causa === 'error_propio' ? 'error propio' : 'criterio del tercero'}. ` +
@@ -262,6 +271,7 @@ export async function reprocesarNegocio(
       valor_anterior: etapaActual.nombre,
       valor_nuevo: destino.nombre,
     })
+    if (errLog) console.error('[reproceso] no se pudo escribir el evento del timeline:', errLog)
   }
 
   // ── Notificar a supervisores y owner, sin excepción ───────────────────
@@ -330,14 +340,16 @@ export async function cerrarReproceso(
     .eq('id', negocioId)
 
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    // `sistema`: cerrar el reproceso no mueve la etapa. Ver la nota del CHECK arriba.
+    const { error: errLog } = await supabase.from('activity_log').insert({
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
-      tipo: 'reproceso',
+      tipo: 'sistema',
       autor_id: staffId,
       contenido: `Reproceso ${marca.ciclo} cerrado — ${LABEL_TIPO[marca.tipo]}.`,
     })
+    if (errLog) console.error('[reproceso] no se pudo escribir el cierre en el timeline:', errLog)
   }
 
   revalidatePath(`/negocios/${negocioId}`)

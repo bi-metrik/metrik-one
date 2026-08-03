@@ -26,6 +26,7 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
+import { retornosPosibles, retornosDisparados, ejecutarRetorno } from '@/lib/correcciones/retorno'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
@@ -3504,6 +3505,11 @@ export async function marcarBloqueCompleto(
       causa: opts!.correccion!.causa as CausaCorreccion,
       sesionId: opts!.correccion!.sesion_id as string,
     })
+    // Si lo corregido decide la ruta, el caso vuelve al punto donde se decide.
+    await aplicarRetornoPorDecision(
+      supabase, workspaceId, negocioBloqueId, userId, staffId,
+      cambiosCorreccion, opts!.correccion!.causa as CausaCorreccion,
+    )
   }
 
   // Siempre revalidar la página del negocio después de marcar completo
@@ -3865,6 +3871,83 @@ async function estamparEdiciones(
   return { data: { ...limpio, _ediciones: ediciones }, cambios, nombre }
 }
 
+/**
+ * Si la corrección tocó un dato que DECIDE la ruta y el caso ya pasó por el punto donde
+ * ese dato se evalúa, devuelve el caso a ese punto para que el motor vuelva a decidir.
+ *
+ * Se llama DESPUÉS de persistir el dato y de propagar sus campos derivados: el motor tiene
+ * que encontrar el valor nuevo cuando el caso vuelva a salir de la etapa. Y después de
+ * registrar la corrección, porque la traza del dato es independiente de que el caso se
+ * mueva o no.
+ *
+ * Opt-in por configuración de la etapa (`punto_de_decision`). Sin esa declaración
+ * `retornosPosibles` corta en la primera consulta y no hay cambio de comportamiento.
+ */
+async function aplicarRetornoPorDecision(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  negocioBloqueId: string,
+  userId: string | undefined,
+  staffId: string | null | undefined,
+  cambios: CampoCorregido[],
+  causa: CausaCorreccion,
+): Promise<void> {
+  if (cambios.length === 0) return
+  const posibles = await retornosPosibles(supabase, negocioBloqueId)
+  if (posibles.length === 0) return
+
+  const { data: nb } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id')
+    .eq('id', negocioBloqueId)
+    .maybeSingle()
+  const negocioId = (nb as { negocio_id?: string } | null)?.negocio_id
+  if (!negocioId) return
+
+  const disparados = await retornosDisparados(supabase, negocioId, posibles, cambios)
+  if (disparados.length === 0) return
+
+  const r = await ejecutarRetorno({
+    supabase,
+    workspaceId,
+    negocioId,
+    userId,
+    staffId,
+    retorno: disparados[0],
+    causa,
+  })
+  if (r) {
+    revalidatePath(`/negocios/${negocioId}`)
+    revalidatePath('/negocios')
+  }
+}
+
+/**
+ * El aviso que la pantalla muestra ANTES de dejar corregir: "este dato define la ruta del
+ * caso; cambiarlo lo devuelve a <etapa> para volver a decidir".
+ *
+ * Se consulta al abrir la corrección y no al guardar porque el guardado de un bloque de
+ * datos es un autosave: para cuando hubiera algo que preguntar, el dato ya viajó. Es el
+ * mismo motivo por el que la causa se elige antes de editar.
+ *
+ * Devuelve `null` cuando no hay nada que avisar: sin declaración en la etapa, sin permiso,
+ * o porque el caso todavía no pasó por el punto de decisión.
+ */
+export async function consultarRetornoDeCorreccion(
+  negocioBloqueId: string,
+): Promise<{ aviso: string | null; etapa: string | null }> {
+  const vacio = { aviso: null, etapa: null }
+  const { supabase, error } = await getWorkspace()
+  if (error) return vacio
+  // Mismo guard que la escritura: quien no puede corregir tampoco necesita el aviso.
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return vacio
+  const posibles = await retornosPosibles(supabase, negocioBloqueId)
+  if (posibles.length === 0) return vacio
+  return { aviso: posibles[0].aviso, etapa: posibles[0].etapaNombre }
+}
+
 export async function actualizarBloqueData(
   negocioBloqueId: string,
   data: Record<string, unknown>,
@@ -3938,7 +4021,11 @@ export async function actualizarBloqueData(
   // operación que la respuesta que los origina. Ver `propagarCamposDerivados`.
   // Se omite en el autosave de borrador (revalidate:false, escritura libre cada pocos
   // segundos): las respuestas que derivan algo siempre revalidan.
-  if (opts?.revalidate !== false) {
+  //
+  // Excepción: una CORRECCIÓN siempre propaga, aunque llegue por el camino del borrador.
+  // Si no, un decisor derivado quedaría con el valor viejo mientras el caso ya se movió
+  // por el nuevo — el motor volvería a decidir con el dato equivocado.
+  if (opts?.revalidate !== false || cambiosCorreccion.length > 0) {
     await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
   }
 
@@ -3958,6 +4045,10 @@ export async function actualizarBloqueData(
       causa: opts!.correccion!.causa as CausaCorreccion,
       sesionId: opts!.correccion!.sesion_id as string,
     })
+    await aplicarRetornoPorDecision(
+      supabase, workspaceId, negocioBloqueId, userId, staffId,
+      cambiosCorreccion, opts!.correccion!.causa as CausaCorreccion,
+    )
   }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
