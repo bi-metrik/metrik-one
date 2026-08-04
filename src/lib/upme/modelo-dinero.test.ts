@@ -9,6 +9,7 @@ import {
   esCeroDeliberado,
   TOLERANCIA_SALDO_COP,
   type ModeloDinero,
+  descuadreConciliacion,
   type PropuestaBloqueData,
 } from './modelo-dinero'
 
@@ -251,5 +252,49 @@ describe('esCeroDeliberado — cero deliberado vs sin cotizar', () => {
   it('con varias propuestas, basta una aprobada en 0 (heredadas readonly no rompen)', () => {
     const heredadaVacia: PropuestaBloqueData = { data: {} }
     expect(esCeroDeliberado([heredadaVacia, aprobadaEn(0)], 0)).toBe(true)
+  })
+})
+
+describe('descuadreConciliacion', () => {
+  // El caso que originó el fix: V0076 pagó honorario + tarifa en un solo recaudo.
+  // La fórmula vieja (honorario − cobrado) lo leía como sobrepago de la tarifa.
+  it('no ve descuadre cuando el pago cubre honorario + tarifa exacto', () => {
+    const d = descuadreConciliacion(637_500, modelo({ tarifa_upme: 350_906 }), 988_406)
+    expect(d.faltante).toBe(0)
+    expect(d.exceso).toBe(0)
+    expect(d.hayDescuadre).toBe(false)
+  })
+
+  // Los 62 casos que la fórmula simétrica habría retenido: el cliente pagó su
+  // honorario a SOENA y la tarifa la pagó él directo a la UPME. No es un faltante
+  // de SOENA — mismo criterio que el gate `saldo_cero`.
+  it('no exige la tarifa que no entró por SOENA', () => {
+    const d = descuadreConciliacion(637_500, modelo({ tarifa_upme: 701_812 }), 637_500)
+    expect(d.faltante).toBe(0)
+    expect(d.hayDescuadre).toBe(false)
+  })
+
+  it('sí ve el faltante cuando el honorario quedó corto', () => {
+    const d = descuadreConciliacion(637_500, modelo({ tarifa_upme: 350_906 }), 400_000)
+    expect(d.faltante).toBe(237_500)
+    expect(d.exceso).toBe(0)
+    expect(d.hayDescuadre).toBe(true)
+  })
+
+  it('sí ve el exceso cuando el pago supera honorario + tarifa', () => {
+    const d = descuadreConciliacion(637_500, modelo({ tarifa_upme: 350_906 }), 1_100_000)
+    expect(d.exceso).toBe(111_594)
+    expect(d.faltante).toBe(0)
+    expect(d.hayDescuadre).toBe(true)
+  })
+
+  it('ignora un residuo de un peso en cualquiera de los dos lados', () => {
+    expect(descuadreConciliacion(637_500, modelo({ tarifa_upme: 0 }), 637_499).hayDescuadre).toBe(false)
+    expect(descuadreConciliacion(637_500, modelo({ tarifa_upme: 0 }), 637_501).hayDescuadre).toBe(false)
+  })
+
+  it('sin modelo de dinero se comporta como si no hubiera tarifa', () => {
+    const d = descuadreConciliacion(637_500, null, 637_500)
+    expect(d.hayDescuadre).toBe(false)
   })
 })
