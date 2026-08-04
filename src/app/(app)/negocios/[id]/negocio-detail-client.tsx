@@ -1240,12 +1240,32 @@ function BloqueRenderer({
   // posterior (historial). Para el 010/1668: la DIAN devuelve requerimientos casi
   // siempre y hay que poder re-generar el formulario aun después de avanzar de etapa.
   const editableSiempre = (configExtra as { editable_siempre?: boolean }).editable_siempre === true
-  const modo: 'editable' | 'visible' =
+  const modoBase: 'editable' | 'visible' =
     (((bloque as { _forceReadOnly?: boolean })._forceReadOnly
       || (configExtra as { _areaReadonly?: boolean })._areaReadonly)
       && !editableSiempre)
       ? 'visible'
       : getBloqueMode()
+
+  // Propuesta económica: una copia readonly heredada (Negociación, Documentación…) se
+  // vuelve editable cuando la aprobación se revirtió y el negocio sigue dentro de la
+  // ventana de renegociación (`_puedeRevertirAprobacion`, resuelto en el servidor desde
+  // `revertir_hasta_etapa_orden`). Sin esto, revertir deja el bloque incompleto sin
+  // ningún lugar desde donde rehacerlo: la copia NATIVA vive en una etapa anterior y ahí
+  // siempre aparece forzada a solo lectura por el historial (`_forceReadOnly`).
+  // `bloque.instancia.data` ya trae el dato del ORIGEN (swap de herencia readonly más
+  // arriba), así que leer `aprobado_at` de ahí es leer el estado vigente, no el de esta
+  // copia. NO aplica si el área del usuario no cubre esta etapa (`_areaReadonly`) ni si
+  // esta card es la del historial (`_forceReadOnly`): ninguna de las dos debe ceder.
+  const puedeRenegociarPropuesta =
+    tipo === 'propuesta_economica'
+    && (configExtra as { readonly?: boolean }).readonly === true
+    && !(bloque as { _forceReadOnly?: boolean })._forceReadOnly
+    && !(configExtra as { _areaReadonly?: boolean })._areaReadonly
+    && (configExtra as { _puedeRevertirAprobacion?: boolean })._puedeRevertirAprobacion === true
+    && !(bloque.instancia?.data as { aprobado_at?: string | null } | null | undefined)?.aprobado_at
+
+  const modo: 'editable' | 'visible' = puedeRenegociarPropuesta ? 'editable' : modoBase
 
   switch (tipo) {
     case 'equipo':
