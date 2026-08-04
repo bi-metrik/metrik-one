@@ -21,7 +21,7 @@ import {
   type RoutingEtapa,
   type CampoDecision,
 } from '@/lib/negocios/dato-de-decision'
-import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-completo'
+import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto } from '@/lib/negocios/bloque-visible-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
@@ -1079,7 +1079,9 @@ export async function getNegocioDetalle(id: string): Promise<{
       // ⚠️ La fuente de la seccional ya cambió tres veces (factura → RUT → factura →
       // RUT). Vigente desde 2026-07-24: RUT casilla 12, confirmado por Deisy tras
       // capacitación DIAN y ratificado por Juan David para todos los casos.
-      for (const bc of ((bloqueConfigs ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }>)) {
+      // `estado` y `es_gate` se declaran en el tipo porque el cierre del gate depende de
+      // ellos: son parte del contrato de este loop, no un detalle que se castea al vuelo.
+      for (const bc of ((bloqueConfigs ?? []) as Array<{ id: string; estado?: string | null; es_gate?: boolean | null; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null }>)) {
         const ccfg = (bc.config_extra?.cita_dian_confirmacion ?? null) as
           | {
               enabled?: boolean
@@ -1143,7 +1145,30 @@ export async function getNegocioDetalle(id: string): Promise<{
         const requiereField = ccfg.requiere_field ?? 'requiere_cita_dian'
         const seccionalRefField = ccfg.seccional_ref_field ?? 'seccional_ref'
         const data = ((inst.data ?? {}) as Record<string, unknown>)
-        if (data[requiereField] != null) continue // ya inicializado — no pisar confirmación manual
+        if (data[requiereField] != null) {
+          // El DATO ya está y no se re-computa: pisarlo borraría una confirmación manual.
+          // Pero el ESTADO sí se vuelve a mirar, y esa distinción es el defecto que se
+          // cierra aquí. La instancia nace `pendiente` cuando es un gate `visible` con su
+          // campo required vacío, y ese veredicto se calcula una sola vez, al crearla. Si el
+          // campo se llenó después por una vía que no cerró el bloque en la misma pasada
+          // (una versión anterior de este auto-init, un backfill de datos), este `continue`
+          // salía antes de revisar el estado y el bloque quedaba pendiente PARA SIEMPRE: es
+          // de solo lectura, la UI no ofrece forma de cerrarlo, y el gate retiene un negocio
+          // cuya respuesta ya está escrita en él. Medido en SOENA el 2026-08-04: 5 casos
+          // vivos, más V0107 y V0122 destrabados a mano el día anterior.
+          if (inst.estado !== 'completo' && gateVisibleQuedaResuelto(bc, data)) {
+            try {
+              await db(supabase)
+                .from('negocio_bloques')
+                .update({ estado: 'completo', completado_at: new Date().toISOString() })
+                .eq('id', inst.id)
+              instanciasMap[bc.id] = { ...inst, estado: 'completo' } as NegocioBloque
+            } catch (e) {
+              console.error('[getNegocioDetalle] cierre tardío de gate cita DIAN falló:', e)
+            }
+          }
+          continue
+        }
         const rutSlug = ccfg.rut_slug ?? 'rut'
         const seccionalField = ccfg.seccional_field ?? 'direccion_seccional'
         const { data: rutBloques } = await db(supabase)
@@ -1190,16 +1215,11 @@ export async function getNegocioDetalle(id: string): Promise<{
         }
         try {
           // Al sembrar la respuesta hay que RE-EVALUAR la completitud del bloque, no
-          // solo escribir el dato. La instancia nace `pendiente` cuando es un gate
-          // `visible` con campos `required` vacíos (ver `visiblePuedeNacerCompleto`),
-          // y ese veredicto se calcula UNA sola vez, con `data: {}`. Si el auto-init
-          // llena después el campo que faltaba y nadie revisa el estado, el bloque
-          // queda pendiente para siempre: es de solo lectura, así que la UI no ofrece
-          // forma de cerrarlo y el gate retiene un negocio cuya respuesta YA está.
-          // Pasó con V0107 y V0122 (SOENA), corregidos a mano el 2026-08-03.
-          const cierraAhora = (bc as { estado?: string }).estado === 'visible'
-            && (bc as { es_gate?: boolean }).es_gate === true
-            && visiblePuedeNacerCompleto(bc.config_extra ?? null, nuevoData, true)
+          // solo escribir el dato: si no, el gate de solo lectura queda pendiente con
+          // su respuesta puesta y sin forma de cerrarlo en pantalla. La regla es la
+          // misma que aplica el camino de arriba (`gateVisibleQuedaResuelto`), para que
+          // sembrar-y-cerrar y cerrar-lo-ya-sembrado no puedan divergir.
+          const cierraAhora = gateVisibleQuedaResuelto(bc, nuevoData)
           const patch: Record<string, unknown> = { data: nuevoData }
           if (cierraAhora && inst.estado !== 'completo') {
             patch.estado = 'completo'

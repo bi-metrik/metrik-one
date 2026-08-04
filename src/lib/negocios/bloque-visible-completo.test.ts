@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { visiblePuedeNacerCompleto } from './bloque-visible-completo'
+import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto } from './bloque-visible-completo'
 
 /**
  * El caso real que originó esta regla: el bloque "Cita DIAN" de la etapa Entrega en SOENA.
@@ -85,5 +85,39 @@ describe('visiblePuedeNacerCompleto', () => {
     }
     expect(visiblePuedeNacerCompleto(dos, { a: 'x' }, true)).toBe(false)
     expect(visiblePuedeNacerCompleto(dos, { a: 'x', b: 'y' }, true)).toBe(true)
+  })
+})
+
+describe('gateVisibleQuedaResuelto', () => {
+  const VISIBLE_GATE = { estado: 'visible', es_gate: true, config_extra: CITA_DIAN_ENTREGA }
+
+  it('cierra el gate de solo lectura cuyo campo ya quedó respondido', () => {
+    // El estado exacto de los 5 casos vivos de SOENA el 2026-08-04: instancia `pendiente`
+    // con la respuesta ya escrita en su propia data.
+    expect(gateVisibleQuedaResuelto(VISIBLE_GATE, {
+      requiere_cita_dian_iva: 'true',
+      seccional_ref: 'Dirección Seccional de Impuestos de Bogotá',
+    })).toBe(true)
+  })
+
+  it('NO lo cierra mientras la respuesta siga vacía', () => {
+    expect(gateVisibleQuedaResuelto(VISIBLE_GATE, {})).toBe(false)
+    expect(gateVisibleQuedaResuelto(VISIBLE_GATE, { seccional_ref: 'Bogotá' })).toBe(false)
+  })
+
+  it('no toca bloques editables: esos los cierra quien los diligencia', () => {
+    const editable = { estado: 'editable', es_gate: true, config_extra: CITA_DIAN_ENTREGA }
+    expect(gateVisibleQuedaResuelto(editable, { requiere_cita_dian_iva: 'true' })).toBe(false)
+  })
+
+  it('no toca bloques visibles que no son gate: no retienen nada', () => {
+    const visibleSinGate = { estado: 'visible', es_gate: false, config_extra: CITA_DIAN_ENTREGA }
+    expect(gateVisibleQuedaResuelto(visibleSinGate, { requiere_cita_dian_iva: 'true' })).toBe(false)
+  })
+
+  it('aguanta config incompleta sin cerrar nada por accidente', () => {
+    expect(gateVisibleQuedaResuelto(null, { requiere_cita_dian_iva: 'true' })).toBe(false)
+    expect(gateVisibleQuedaResuelto(undefined, {})).toBe(false)
+    expect(gateVisibleQuedaResuelto({ config_extra: CITA_DIAN_ENTREGA }, { requiere_cita_dian_iva: 'true' })).toBe(false)
   })
 })
