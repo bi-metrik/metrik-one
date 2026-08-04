@@ -223,3 +223,62 @@ export function esCeroDeliberado(
   }
   return false
 }
+
+/** Descuadre de la conciliación final del recaudo, desglosado por lado. */
+export interface DescuadreConciliacion {
+  /** Honorario que el cliente todavía le debe a SOENA. 0 si está cubierto. */
+  faltante: number
+  /** Plata recibida por encima del valor a recaudar (honorario + tarifa). 0 si no hay. */
+  exceso: number
+  /** true si cualquiera de los dos lados supera el residuo tolerado de $1. */
+  hayDescuadre: boolean
+}
+
+/**
+ * Residuo tolerado por la conciliación final: un peso. Es el redondeo, no la
+ * materialidad. Deliberadamente MÁS ESTRICTO que `TOLERANCIA_SALDO_COP` ($1.000, el
+ * piso de Carmen para los gates de avance): aquí se está cerrando la plata del caso,
+ * no dejándolo pasar. Cambiarlo es decisión de CFO, no de este fix.
+ */
+export const RESIDUO_CONCILIACION_COP = 1
+
+/**
+ * ¿Está cuadrada la plata del cliente para cerrar el caso? Cada lado se mide con el
+ * criterio que el sistema YA declaró para él, y son distintos a propósito:
+ *
+ *   - FALTANTE contra el HONORARIO (`precio_aprobado`), igual que el gate `saldo_cero`.
+ *     La tarifa UPME no se exige aquí: su recaudo tiene su propio control aguas arriba
+ *     (`saldo:handoff`), y en muchos casos el cliente le paga la tarifa DIRECTO a la
+ *     UPME, así que nunca entra como cobro de SOENA. Exigirla convertiría ese flujo
+ *     normal en una deuda inventada.
+ *
+ *   - EXCESO contra el VALOR A RECAUDAR (honorario + tarifa), igual que el gate
+ *     `sobrepago_conciliado`. Cuando el cliente paga los dos componentes en un solo
+ *     recaudo, la tarifa NO es plata de más: es el caso normal, no la excepción.
+ *
+ * Medirlo simétrico contra uno solo de los dos rompe por el otro lado. Medido contra
+ * producción SOENA el 2026-08-04 sobre 223 negocios abiertos: la versión simétrica
+ * (honorario + tarifa en ambos lados) destrababa 17 y RETENÍA 62 casos que hoy pasan,
+ * la mayoría ya en Cita, Envío o Generación. Esta versión destraba 18 y retiene 0.
+ *
+ * Puro: no toca DB ni red.
+ *
+ * @param precioAprobado precio_aprobado del negocio = HONORARIO, en COP.
+ * @param modelo         modelo de dinero (aporta la tarifa confirmada). null → sin tarifa.
+ * @param recaudado      suma de cobros reales del negocio, en COP.
+ */
+export function descuadreConciliacion(
+  precioAprobado: number,
+  modelo: ModeloDinero | null,
+  recaudado: number,
+): DescuadreConciliacion {
+  const honorario = Number.isFinite(precioAprobado) && precioAprobado > 0 ? precioAprobado : 0
+  const rec = Number.isFinite(recaudado) && recaudado > 0 ? recaudado : 0
+  const faltante = Math.max(0, Math.round(honorario - rec))
+  const exceso = Math.max(0, Math.round(rec - valorARecaudar(honorario, modelo)))
+  return {
+    faltante,
+    exceso,
+    hayDescuadre: faltante > RESIDUO_CONCILIACION_COP || exceso > RESIDUO_CONCILIACION_COP,
+  }
+}

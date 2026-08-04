@@ -10,7 +10,7 @@ import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
-import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
 import {
@@ -3159,13 +3159,21 @@ export async function cambiarEtapaNegocioConGate(
       }
     }
 
-    // Gate custom: conciliacion_diana — el negocio NO avanza hasta que su diferencia
-    // (precio - cobrado) sea 0 Y el área financiera (Diana) dé el check en el panel
-    // de conciliación (fila conciliada en negocio_conciliacion). Opt-in por etapa
-    // (config_extra.gates) → workspaces sin el gate no cambian. Mensaje configurable
-    // en config_extra.gate_messages['conciliacion_diana'].
+    // Gate custom: conciliacion_diana — el negocio NO avanza hasta que su plata esté
+    // cuadrada Y el área financiera (Diana) dé el check en el panel de conciliación
+    // (fila conciliada en negocio_conciliacion). Opt-in por etapa (config_extra.gates)
+    // → workspaces sin el gate no cambian. Mensaje configurable en
+    // config_extra.gate_messages['conciliacion_diana'].
+    //
+    // El cuadre lo decide `descuadreConciliacion`, que mide cada lado con su propio
+    // criterio: el FALTANTE contra el honorario (como `saldo_cero`) y el EXCESO contra
+    // el valor a recaudar (como `sobrepago_conciliado`). Antes usaba `precio_aprobado`
+    // crudo en ambos lados: a un cliente que pagaba honorario + tarifa en un solo
+    // recaudo le exigía conciliar un sobrepago del tamaño exacto de la tarifa (caso
+    // V0076). Es la misma expresión que el PR #197 corrigió en los otros tres sitios;
+    // este cuarto no entró en aquel barrido.
     if (etapaGates.includes('conciliacion_diana')) {
-      const [negConcRes, cobrosConcRes, checkRes] = await Promise.all([
+      const [negConcRes, cobrosConcRes, checkRes, modeloConcDiana] = await Promise.all([
         db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
         supabase.from('cobros').select('monto').eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
         db(supabase)
@@ -3174,20 +3182,25 @@ export async function cambiarEtapaNegocioConGate(
           .eq('negocio_id', negocioId)
           .eq('workspace_id', workspaceId)
           .maybeSingle(),
+        leerModeloDineroCompleto(supabase, negocioId),
       ])
       const negConc = negConcRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
-      const precioConc = negConc?.precio_aprobado ?? negConc?.precio_estimado ?? 0
+      const honorarioConcDiana = negConc?.precio_aprobado ?? negConc?.precio_estimado ?? 0
       const totalCobradoConc = ((cobrosConcRes.data ?? []) as Array<{ monto: number }>)
         .reduce((sum, c) => sum + (c.monto ?? 0), 0)
-      const diferenciaConc = precioConc - totalCobradoConc
+      const descuadre = descuadreConciliacion(honorarioConcDiana, modeloConcDiana, totalCobradoConc)
       const conciliado = (checkRes.data as { conciliado: boolean } | null)?.conciliado === true
 
       const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
-      if (Math.abs(diferenciaConc) > 1 || !conciliado) {
+      if (descuadre.hayDescuadre || !conciliado) {
         const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-        const defaultMsg = !conciliado && Math.abs(diferenciaConc) <= 1
+        // El mensaje nombra el lado real del descuadre: pedirle "conciliar un sobrepago"
+        // a quien le falta plata mandaba a la financiera a buscar lo que no existe.
+        const defaultMsg = !descuadre.hayDescuadre
           ? 'Falta el check de conciliación del área financiera'
-          : `Conciliación pendiente (diferencia: ${fmt.format(diferenciaConc)})`
+          : descuadre.faltante > 0
+            ? `Conciliación pendiente: faltan ${fmt.format(descuadre.faltante)} del honorario`
+            : `Conciliación pendiente: sobran ${fmt.format(descuadre.exceso)} sobre el valor a recaudar`
         const nombre = gateMessages['conciliacion_diana'] ?? defaultMsg
         return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
       }
