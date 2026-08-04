@@ -20,7 +20,6 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
-import { contextoCorreccion } from '@/lib/correcciones/registrar'
 import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
