@@ -687,12 +687,49 @@ export async function revertirAprobacionPropuesta(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabase as any
 
-  // Límite 1: el negocio no puede haber salido de la etapa del bloque.
-  const corr = await contextoCorreccion(supabase, bloqueId)
-  if (corr?.esPostAvance) {
+  // Límite 1: la ventana la declara la configuración del bloque, NO la etapa donde el
+  // bloque vive. La propuesta se aprueba en una etapa y se renegocia en la siguiente,
+  // donde el bloque ya es copia de solo lectura; medir contra la etapa propia dejaba
+  // esto inalcanzable justo donde se pidió (detectado en V0267, 2026-08-04).
+  const bloqueConfigId = (ctx.bloque as { bloque_config_id?: string }).bloque_config_id
+  const { data: ventanaRow } = await sb
+    .from('bloque_configs')
+    .select('config_extra, etapas_negocio!inner(orden)')
+    .eq('id', bloqueConfigId)
+    .maybeSingle()
+  const cfgVentana = ventanaRow as {
+    config_extra?: { revertir_hasta_etapa_orden?: number } | null
+    etapas_negocio?: { orden?: number } | null
+  } | null
+  const hastaOrden = cfgVentana?.config_extra?.revertir_hasta_etapa_orden
+    ?? cfgVentana?.etapas_negocio?.orden
+    ?? null
+
+  // Se resuelve en dos pasos en vez de por join: el nombre de la FK a la etapa actual
+  // no es estable y un join mal nombrado devolvería vacío en silencio, que aquí
+  // significaría dejar pasar una reversión fuera de ventana.
+  const { data: negRow } = await sb
+    .from('negocios')
+    .select('etapa_actual_id')
+    .eq('id', ctx.negocioId)
+    .maybeSingle()
+  const etapaActualId = (negRow as { etapa_actual_id?: string | null } | null)?.etapa_actual_id ?? null
+  let ordenActual: number | null = null
+  let nombreActual: string | null = null
+  if (etapaActualId) {
+    const { data: etRow } = await sb
+      .from('etapas_negocio')
+      .select('orden, nombre')
+      .eq('id', etapaActualId)
+      .maybeSingle()
+    ordenActual = (etRow as { orden?: number } | null)?.orden ?? null
+    nombreActual = (etRow as { nombre?: string } | null)?.nombre ?? null
+  }
+
+  if (hastaOrden != null && ordenActual != null && ordenActual > hastaOrden) {
     return {
       ok: false,
-      error: 'El negocio ya avanzó de etapa. Devuélvelo a Negociación antes de revertir la aprobación.',
+      error: `El negocio ya está en ${nombreActual ?? 'una etapa posterior'} y la aprobación solo se revierte antes de eso. Devuélvelo primero, o corrige el valor aprobado.`,
     }
   }
 

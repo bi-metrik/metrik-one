@@ -5555,6 +5555,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     !!areas && areas.length > 0 && areaDuenaActual !== null
     && !getAreasEfectivas({ id: '', role: (role ?? 'read_only') as Role, areas: areas as Area[] }).has(areaDuenaActual)
 
+  // Orden de la etapa en la que está el negocio AHORA. Define la ventana de reversión
+  // de la propuesta, que no coincide con la etapa donde el bloque vive.
+  const ordenEtapaActualNeg = base.etapasLinea.find(
+    e => e.id === base.negocio.etapa_actual_id,
+  )?.orden ?? null
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -5684,6 +5690,18 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // workspace, NO derivada del rol (ver `corregirValorAprobado`). Se resuelve
     // en el servidor y viaja como flag para que el bloque sepa si mostrar el
     // botón; la action revalida la lista antes de escribir.
+    // Revertir la aprobación: la ventana NO es la etapa donde vive el bloque, es hasta
+    // la etapa que se declare en `revertir_hasta_etapa_orden`. En SOENA la propuesta se
+    // aprueba en Propuesta (orden 4) pero se renegocia en Negociación (orden 5), donde
+    // el bloque ya es una copia de solo lectura: atar la ventana a la etapa propia
+    // dejaba la reversión inalcanzable justo en el escenario que la pidió. Sin la
+    // config declarada no se muestra nada (opt-in, conservador).
+    if (defTipo === 'propuesta_economica') {
+      const hasta = (configExtra as { revertir_hasta_etapa_orden?: number }).revertir_hasta_etapa_orden
+      if (typeof hasta === 'number' && ordenEtapaActualNeg != null && ordenEtapaActualNeg <= hasta) {
+        enrichedConfigExtra._puedeRevertirAprobacion = true
+      }
+    }
     if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
       enrichedConfigExtra._puedeCorregirPrecio = true
     }
