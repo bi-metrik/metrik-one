@@ -153,12 +153,64 @@ function pctMostrado(n: number): number {
 
 // ── Lectura del bloque + servicio asociado ──────────────────────────────────
 
+/**
+ * Resuelve un `negocioBloqueId` a la fila ORIGEN cuando lo que se abrió es una copia
+ * readonly heredada (`config_extra.readonly=true` + `source_bloque_slug`).
+ *
+ * La propuesta económica vive nativamente en una etapa (Propuesta) y aparece heredada
+ * de solo lectura en las siguientes (Negociación, Documentación…) — cada una con su
+ * propia fila en `negocio_bloques`, poblada una única vez por copia al crearse (ver
+ * `cambiarEtapaNegocio`), nunca vuelta a sincronizar. Todo el resto del producto (las
+ * demás copias readonly, los gates de saldo, `anticipoCubiertoPorSaldo`) lee el estado
+ * vigente de la propuesta por el SLUG del bloque origen (`propuestaDataPorSlug` en
+ * `getNegocioDetalle`), no por la fila que el usuario tenga abierta.
+ *
+ * Sin esto, generar/aprobar/revertir desde la copia (que es justo donde el equipo
+ * renegocia — ver `revertirAprobacionPropuesta`) escribe en una fila que nadie más lee:
+ * el resto del sistema sigue viendo el estado viejo del origen, y la fila corregida en
+ * la copia se pierde en el próximo re-render (que la vuelve a pisar con el dato del
+ * origen). Resolver siempre al origen mantiene una sola fuente de verdad.
+ */
+async function resolverOrigenPropuesta(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  bloqueId: string,
+): Promise<string> {
+  const { data: actual } = await supabase
+    .from('negocio_bloques')
+    .select('negocio_id, bloque_configs!inner(config_extra)')
+    .eq('id', bloqueId)
+    .maybeSingle()
+  if (!actual) return bloqueId
+
+  const cfg = (actual as Record<string, unknown>).bloque_configs as Record<string, unknown> | null
+  const ce = (cfg?.config_extra ?? {}) as Record<string, unknown>
+  if (ce.readonly !== true) return bloqueId
+
+  const srcSlug = ce.source_bloque_slug as string | undefined
+  if (!srcSlug) return bloqueId
+
+  const { data: origen } = await supabase
+    .from('negocio_bloques')
+    .select('id, bloque_configs!inner(slug)')
+    .eq('negocio_id', (actual as { negocio_id: string }).negocio_id)
+    .eq('bloque_configs.slug', srcSlug)
+    .maybeSingle()
+
+  return (origen as { id?: string } | null)?.id ?? bloqueId
+}
+
 async function loadBloqueContext(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
   workspaceId: string,
-  bloqueId: string,
+  bloqueIdAbierto: string,
 ) {
+  // El permiso ya se validó (guardEditarBloque) contra el bloque que el usuario tiene
+  // ABIERTO — la etapa donde está trabajando. A partir de aquí, toda lectura/escritura
+  // va contra el origen: es la misma fila que ven las demás copias y el resto del motor.
+  const bloqueId = await resolverOrigenPropuesta(supabase, bloqueIdAbierto)
+
   const { data: bloque, error: errB } = await supabase
     .from('negocio_bloques')
     .select(`
@@ -518,11 +570,14 @@ export async function generarVersionPropuesta(
     aprobado_tarifa_upme: ctx.data.aprobado_tarifa_upme ?? null,
   }
 
+  // Escribe siempre en la fila ORIGEN (`ctx.bloque.id`), nunca en `bloqueId` tal cual
+  // llegó: si se abrió desde una copia readonly heredada (Negociación...), `bloqueId`
+  // es esa copia, y `loadBloqueContext` ya la resolvió al origen en `ctx`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (supabase as any)
     .from('negocio_bloques')
     .update({ data: nuevoData })
-    .eq('id', bloqueId)
+    .eq('id', ctx.bloque.id)
 
   if (errUpd) return { ok: false, error: errUpd.message }
 
@@ -609,7 +664,7 @@ export async function aprobarVersionPropuesta(
   const { error: errBlq } = await sb
     .from('negocio_bloques')
     .update({ data: nuevoData, estado: 'completo', completado_at: ahora })
-    .eq('id', bloqueId)
+    .eq('id', ctx.bloque.id)
   if (errBlq) return { ok: false, error: errBlq.message }
 
   await sb
@@ -779,7 +834,7 @@ export async function revertirAprobacionPropuesta(
   const { error: errBlq } = await sb
     .from('negocio_bloques')
     .update({ data: nuevoData, estado: 'pendiente', completado_at: null, updated_at: ahora })
-    .eq('id', bloqueId)
+    .eq('id', ctx.bloque.id)
   if (errBlq) return { ok: false, error: (errBlq as { message: string }).message }
 
   // El precio del negocio se suelta con la aprobación: dejarlo puesto sin aprobación
@@ -916,8 +971,8 @@ export async function actualizarTarifaUpmePropuesta(
     await (supabase as any)
       .from('negocio_bloques')
       .update({ data: { ...ctx.data, tarifa_upme_editada: false } })
-      .eq('id', bloqueId)
-    const recomputado = await loadBloqueContext(supabase, workspaceId, bloqueId)
+      .eq('id', ctx.bloque.id)
+    const recomputado = await loadBloqueContext(supabase, workspaceId, ctx.bloque.id)
     editada = false
     nuevaTarifa = recomputado.error ? 0 : recomputado.tarifaUpme
     detalle = recomputado.error ? null : recomputado.tarifaDetalle
@@ -954,7 +1009,7 @@ export async function actualizarTarifaUpmePropuesta(
   const { error: errUpd } = await (supabase as any)
     .from('negocio_bloques')
     .update({ data: nuevoData })
-    .eq('id', bloqueId)
+    .eq('id', ctx.bloque.id)
   if (errUpd) return { ok: false, error: errUpd.message }
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
