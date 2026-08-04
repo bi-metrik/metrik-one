@@ -81,6 +81,44 @@ async function getStaffAreas(supabase: any, staffId: string): Promise<Area[]> {
 }
 
 /**
+ * A quien se le carga el reproceso: quien completo el bloque del tramo que hay
+ * que rehacer. Devuelve un `staff.id`, o NULL si el trabajo no tiene autor
+ * (cargue masivo por SQL) o si quien lo hizo no esta en `staff`.
+ *
+ * ⚠️ `negocio_bloques.completado_por` apunta a `profiles.id`, mientras que el
+ * indicador se agrupa por `staff.id`. El puente es `staff.profile_id`. Usar uno
+ * por el otro da cero silencioso: `negocios.responsable_id` SI es `staff.id`, y
+ * confundirlos es facil.
+ */
+const BLOQUE_DEL_TRAMO: Record<TipoReproceso, string> = {
+  certificacion_upme: 'radicado_de_certificacion',
+  devolucion_dian: 'confirmacion_envio_a_dian',
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function resolverAtribucion(supabase: any, negocioId: string, tipo: TipoReproceso): Promise<string | null> {
+  const slug = BLOQUE_DEL_TRAMO[tipo]
+  const { data } = await db(supabase)
+    .from('negocio_bloques')
+    .select('completado_por, completado_at, bloque_configs!inner(slug)')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.slug', slug)
+    .not('completado_por', 'is', null)
+    .order('completado_at', { ascending: false })
+    .limit(1)
+
+  const profileId = ((data ?? []) as Array<{ completado_por: string | null }>)[0]?.completado_por
+  if (!profileId) return null
+
+  const { data: st } = await db(supabase)
+    .from('staff')
+    .select('id')
+    .eq('profile_id', profileId)
+    .maybeSingle()
+  return (st as { id: string } | null)?.id ?? null
+}
+
+/**
  * Devuelve el negocio a la etapa que corresponda al tipo de reproceso, archivando
  * el ciclo anterior y dejando marca visible.
  */
@@ -247,6 +285,34 @@ export async function reprocesarNegocio(
 
   if (updErr) return { ok: false, error: (updErr as { message: string }).message }
 
+  // ── Historial del reproceso: el insumo REAL del indicador de calidad ──
+  //
+  // La marca de arriba vive en `negocios.metadata.reproceso` y solo conserva el
+  // ciclo VIGENTE: al abrir el ciclo 2 se pisa el 1. Sirve para pintar el estado
+  // del caso, no para contar "cuantos certificados malos hubo en julio", que es
+  // lo que pesa el 40% del bono. Por eso cada ciclo se asienta como un hecho
+  // propio en `reproceso_eventos`.
+  //
+  // `atribuido_a` es quien HIZO el trabajo que hay que rehacer, no quien reporta
+  // el reproceso (eso siempre es la supervisora, y cargarselo a ella invertiria
+  // el indicador). Se resuelve contra el `completado_por` del bloque del tramo.
+  // Si no se puede resolver —trabajo que entro por cargue masivo, sin autor— se
+  // deja en NULL y el tablero lo cuenta como "sin atribuir" en vez de colgarselo
+  // a alguien por descarte.
+  const atribuidoA = await resolverAtribucion(supabase, negocioId, input.tipo)
+  const { error: errEvento } = await db(supabase).from('reproceso_eventos').insert({
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    ciclo,
+    tipo: input.tipo,
+    causa: input.causa,
+    detalle,
+    atribuido_a: atribuidoA,
+    abierto_por: staffId ?? null,
+    abierto_at: archivadoAt,
+  })
+  if (errEvento) console.error('[reproceso] no se pudo asentar el evento de calidad:', errEvento)
+
   // ── Traza: es el insumo del indicador de calidad ──────────────────────
   //
   // ⚠️ `tipo` tiene que existir en el CHECK de `activity_log`, y **`reproceso` NO está
@@ -334,10 +400,22 @@ export async function cerrarReproceso(
   const marca = (metadata.reproceso ?? null) as ReprocesoMarca | null
   if (!marca?.activo) return { ok: false, error: 'Este negocio no tiene un reproceso abierto' }
 
+  const cerradoAt = new Date().toISOString()
+
   await db(supabase)
     .from('negocios')
-    .update({ metadata: { ...metadata, reproceso: { ...marca, activo: false, cerrado_at: new Date().toISOString() } } })
+    .update({ metadata: { ...metadata, reproceso: { ...marca, activo: false, cerrado_at: cerradoAt } } })
     .eq('id', negocioId)
+
+  // El hecho ya quedo asentado al abrirlo; aqui solo se le pone fecha de cierre.
+  // El indicador de calidad cuenta por `abierto_at`, asi que cerrar un reproceso
+  // NO lo borra del mes en que ocurrio: el certificado malo ya paso.
+  await db(supabase)
+    .from('reproceso_eventos')
+    .update({ cerrado_at: cerradoAt })
+    .eq('negocio_id', negocioId)
+    .eq('ciclo', marca.ciclo)
+    .is('cerrado_at', null)
 
   if (staffId) {
     // `sistema`: cerrar el reproceso no mueve la etapa. Ver la nota del CHECK arriba.

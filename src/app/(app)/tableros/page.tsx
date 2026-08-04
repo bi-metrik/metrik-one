@@ -3,6 +3,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales } from '../equipo/comercial-actions'
+import { getOperacionesBono } from './operaciones-actions'
 import { getDatosDueno } from '../calidad/actions'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import TablerosClient from './tableros-client'
@@ -94,8 +95,17 @@ export default async function TablerosPage() {
   // `proyectos`, vacio en los workspaces Clarity; esta mide `negocios`.
   const procesoSeccional = modules.proceso_semanal ? await getProcesoPorSeccional() : null
 
+  // Bono de operaciones (gate propio). Mide a las PERSONAS del area de
+  // operaciones, no el estado de los casos: son preguntas distintas y por eso no
+  // cuelga de `proceso_semanal`. El recorte del dinero lo hace la accion.
+  const [anioOps, mesOps] = bogotaYearMonth().split('-')
+  const operaciones = modules.operaciones_bonos
+    ? await getOperacionesBono(Number(anioOps), Number(mesOps))
+    : null
+
   return (
     <TablerosClient
+      initialOperaciones={operaciones}
       initialProcesoSeccional={procesoSeccional}
       initialComercial={comercial}
       initialOperativo={operativo}
