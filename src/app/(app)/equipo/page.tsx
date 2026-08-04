@@ -66,6 +66,20 @@ export default async function EquipoPage({ searchParams }: Props) {
       return <EquipoCalidadClient datos={datos} />
     }
 
+    // Operativo del area de operaciones: su hoja del bono es su vista de Equipo.
+    // Va ANTES de la rama comercial porque un workspace puede tener los dos
+    // modulos, y quien trabaja en operaciones no tiene nada que hacer en el
+    // tablero de vendedores. Se resuelve por AREA (`staff_areas`), no por el
+    // texto de `position`, que es campo libre.
+    if (modules.operaciones_bonos && role === 'operator' && staffId) {
+      const { data: areas } = await supabase
+        .from('staff_areas')
+        .select('area')
+        .eq('staff_id', staffId)
+      const esOperaciones = ((areas ?? []) as Array<{ area: string }>).some(a => a.area === 'operaciones')
+      if (esOperaciones) redirect(`/equipo/operaciones/${staffId}`)
+    }
+
     if (modules.comercial_negocios) {
       // El vendedor (operator) ve SOLO su propia hoja: se le redirige a su perfil.
       // Sin staff resuelto, no hay hoja que mostrar -> a Negocios.
