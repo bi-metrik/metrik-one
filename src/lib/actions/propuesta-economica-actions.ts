@@ -20,6 +20,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
+import { contextoCorreccion } from '@/lib/correcciones/registrar'
 import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
@@ -628,6 +629,143 @@ export async function aprobarVersionPropuesta(
     tipo: 'propuesta_aprobada',
     autor_id: staffId,
     contenido: contenidoLog,
+  })
+
+  revalidatePath(`/negocios/${ctx.negocioId}`)
+  return { ok: true }
+}
+
+// ── Action: revertir la aprobacion ──────────────────────────────────────────
+
+/**
+ * Deshace la aprobación de la propuesta para que se pueda generar una versión nueva
+ * y volver a elegir plan. Pedido por el equipo comercial (2026-08-04): un plan mal
+ * elegido al avanzar de etapa no tenía cómo deshacerse, y la única vía era pedirle a
+ * Mauricio que lo corrigiera por SQL.
+ *
+ * Tres límites, y cada uno responde a un riesgo distinto:
+ *
+ * 1. **Solo mientras el negocio siga en la etapa del bloque.** Aprobar fija el precio
+ *    del negocio, y ese precio alimenta el valor a recaudar, el saldo y el gate de
+ *    handoff a operaciones. Deshacerlo cuando el caso ya avanzó es cambiarle el piso
+ *    a decisiones que ya se tomaron aguas abajo.
+ *
+ * 2. **Solo mientras no haya un pago CONFIRMADO** (`cobros.fecha IS NOT NULL`). Un
+ *    cobro registrado sin fecha no es plata recibida — es la misma definición que ya
+ *    usa el resto del producto para contar ingresos. Con plata recibida, revertir
+ *    dejaría el cobro apuntando a un precio que dejó de existir, y eso reaparece como
+ *    descuadre en conciliación.
+ *
+ * 3. **Las versiones NO se borran.** El PDF que el cliente ya recibió queda en el
+ *    historial: se revierte la decisión, no la evidencia de lo que se le envió.
+ *
+ * El cap de descuento no necesita nada especial: `aprobarVersionPropuesta` lo evalúa
+ * en CADA aprobación, así que al volver a aprobar se vuelve a exigir rol gerencial si
+ * el descuento nuevo supera el umbral. Sin esto, revertir sería la puerta para
+ * saltarse el tope (aprobar bajo, revertir, aprobar alto).
+ */
+export async function revertirAprobacionPropuesta(
+  bloqueId: string,
+  motivo: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { supabase, workspaceId, staffId, error: errWs } = await getWorkspace()
+  if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const razon = (motivo ?? '').trim()
+  if (!razon) return { ok: false, error: 'Escribe por qué se revierte la aprobación' }
+
+  const guard = await guardEditarBloque(bloqueId)
+  if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
+
+  const ctx = await loadBloqueContext(supabase, workspaceId, bloqueId)
+  if (ctx.error) return { ok: false, error: ctx.error }
+
+  if (!ctx.data.aprobado_at) {
+    return { ok: false, error: 'Esta propuesta no está aprobada' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+
+  // Límite 1: el negocio no puede haber salido de la etapa del bloque.
+  const corr = await contextoCorreccion(supabase, bloqueId)
+  if (corr?.esPostAvance) {
+    return {
+      ok: false,
+      error: 'El negocio ya avanzó de etapa. Devuélvelo a Negociación antes de revertir la aprobación.',
+    }
+  }
+
+  // Límite 2: sin pagos confirmados. Se cuenta la plata recibida, no el registro.
+  const { data: pagos } = await sb
+    .from('cobros')
+    .select('id, monto, fecha')
+    .eq('negocio_id', ctx.negocioId)
+    .not('fecha', 'is', null)
+    .limit(5)
+  const confirmados = (pagos ?? []) as Array<{ monto: number | null }>
+  if (confirmados.length > 0) {
+    const total = confirmados.reduce((s, c) => s + Number(c.monto ?? 0), 0)
+    return {
+      ok: false,
+      error: `El negocio ya tiene pagos registrados por ${formatCOP(total)}. Con plata recibida, el precio se corrige, no se revierte.`,
+    }
+  }
+
+  const precioAnterior = ctx.data.aprobado_honorario ?? null
+  const planAnterior = ctx.data.aprobado_plan ?? null
+  const versionAnterior = ctx.data.aprobado_version ?? null
+  const ahora = new Date().toISOString()
+
+  // Se limpian SOLO las marcas de aprobación. `versiones` queda intacto: es el
+  // registro de lo que se le mandó al cliente.
+  const nuevoData: PropuestaData = {
+    ...ctx.data,
+    // Los campos base se reafirman desde el contexto: `ctx.data` es lo persistido y
+    // puede venir incompleto en instancias viejas, y este objeto reemplaza la fila
+    // entera. Sin esto, revertir podría dejar el bloque sin su precio base.
+    precio_base_con_iva: ctx.data.precio_base_con_iva ?? ctx.precioBase,
+    iva_pct: ctx.data.iva_pct ?? ctx.ivaPct,
+    descuento_pct_plan1: ctx.data.descuento_pct_plan1 ?? 0,
+    descuento_pct_plan2: ctx.data.descuento_pct_plan2 ?? 0,
+    valor_final_plan1: ctx.data.valor_final_plan1 ?? 0,
+    valor_final_plan2: ctx.data.valor_final_plan2 ?? 0,
+    versiones: ctx.data.versiones ?? [],
+    version_activa: ctx.data.version_activa ?? null,
+    aprobado_at: null,
+    aprobado_por: null,
+    aprobado_version: null,
+    aprobado_plan: null,
+    aprobado_honorario: null,
+    aprobado_tarifa_upme: null,
+  }
+
+  const { error: errBlq } = await sb
+    .from('negocio_bloques')
+    .update({ data: nuevoData, estado: 'pendiente', completado_at: null, updated_at: ahora })
+    .eq('id', bloqueId)
+  if (errBlq) return { ok: false, error: (errBlq as { message: string }).message }
+
+  // El precio del negocio se suelta con la aprobación: dejarlo puesto sin aprobación
+  // vigente haría que el valor a recaudar siguiera calculándose sobre un acuerdo que
+  // ya no existe.
+  await sb
+    .from('negocios')
+    .update({ precio_aprobado: null, updated_at: ahora })
+    .eq('id', ctx.negocioId)
+
+  // `autor_id` es FK → staff(id), NO profiles. Un id equivocado hace fallar el insert
+  // en silencio y la reversión quedaría sin rastro.
+  await sb.from('activity_log').insert({
+    workspace_id: workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: ctx.negocioId,
+    tipo: 'cambio',
+    autor_id: staffId ?? null,
+    campo_modificado: 'precio_aprobado',
+    valor_anterior: precioAnterior != null ? String(precioAnterior) : null,
+    valor_nuevo: null,
+    contenido: `Aprobación revertida (v${versionAnterior ?? '?'}, Plan ${planAnterior ?? '?'}, ${precioAnterior != null ? formatCOP(Number(precioAnterior)) : 'sin valor'}). ${razon}`.slice(0, 280),
   })
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
