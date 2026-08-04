@@ -54,3 +54,34 @@ export function visiblePuedeNacerCompleto(
   }
   return true
 }
+
+/**
+ * ¿Este gate de solo lectura ya está resuelto, aunque su instancia siga `pendiente`?
+ *
+ * La misma regla de arriba, pero preguntada en otro momento. `visiblePuedeNacerCompleto` se
+ * evalúa UNA vez, al crear la instancia, con la data que tenga en ese instante. Cuando el
+ * campo que faltaba se llena después —el auto-init en una pasada posterior, un backfill— el
+ * veredicto queda viejo y nadie lo revisa.
+ *
+ * Eso en un bloque `visible` + `es_gate` no es cosmético: es de solo lectura, así que la UI
+ * no ofrece forma de cerrarlo, y el gate retiene un negocio **cuya respuesta ya está escrita
+ * en el propio bloque**. El caso queda esperando un dato que tiene.
+ *
+ * Medido en SOENA (2026-08-04): 5 negocios vivos así en la etapa Entrega (V0049, V0066,
+ * V0070, V0071, V0080), más V0107 y V0122 destrabados a mano el día anterior. Todos con el
+ * campo `requiere_cita_dian_iva` resuelto desde la seccional del RUT.
+ *
+ * Devuelve false para todo lo que no sea un gate de solo lectura: un bloque editable lo
+ * cierra la persona que lo diligencia, y no le corresponde a esto adelantarse.
+ */
+export function gateVisibleQuedaResuelto(
+  bloqueConfig: {
+    estado?: string | null
+    es_gate?: boolean | null
+    config_extra?: Record<string, unknown> | null
+  } | null | undefined,
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (bloqueConfig?.estado !== 'visible' || bloqueConfig?.es_gate !== true) return false
+  return visiblePuedeNacerCompleto(bloqueConfig.config_extra ?? null, data, true)
+}
