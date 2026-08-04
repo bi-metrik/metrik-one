@@ -8,6 +8,7 @@ import {
   generarVersionPropuesta,
   aprobarVersionPropuesta,
   corregirValorAprobado,
+  revertirAprobacionPropuesta,
 } from '@/lib/actions/propuesta-economica-actions'
 
 interface PropuestaVersion {
@@ -100,6 +101,9 @@ export default function BloquePropuestaEconomica({
   const [corrigiendoValor, setCorrigiendoValor] = useState(false)
   const [valorCorregido, setValorCorregido] = useState('')
   const [motivoCorreccion, setMotivoCorreccion] = useState('')
+  // Reversión de la aprobación (sí reabre el bloque: ver la action).
+  const [revirtiendo, setRevirtiendo] = useState(false)
+  const [motivoReversion, setMotivoReversion] = useState('')
   const [isPending, startTransition] = useTransition()
   const data = (instancia?.data ?? {}) as PropuestaData
   const precioBase = data.precio_base_con_iva ?? 0
@@ -277,6 +281,61 @@ export default function BloquePropuestaEconomica({
           />
         ) : (
           <p className="text-sm text-muted-foreground">Sin versiones generadas.</p>
+        )}
+
+        {/* Revertir la aprobación: solo mientras el negocio siga en esta etapa (por eso
+            `modo !== 'visible'`) y el servidor además exige que no haya pagos. Deja el
+            bloque en pendiente para poder generar una versión nueva y elegir plan otra
+            vez. Es distinto de "Corregir valor aprobado": aquello cambia el número
+            registrado sin tocar lo que recibió el cliente; esto reabre la negociación. */}
+        {aprobada && modo !== 'visible' && !revirtiendo && (
+          <button
+            type="button"
+            onClick={() => setRevirtiendo(true)}
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Revertir aprobación
+          </button>
+        )}
+        {revirtiendo && (
+          <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs text-amber-900">
+              Deshace la aprobación para generar una propuesta nueva y volver a elegir plan.
+              El PDF que ya recibió el cliente se conserva en el historial. Solo se puede
+              mientras el negocio siga en esta etapa y no tenga pagos registrados.
+            </p>
+            <input
+              type="text"
+              value={motivoReversion}
+              onChange={e => setMotivoReversion(e.target.value)}
+              placeholder="¿Por qué se revierte?"
+              className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={isPending || !motivoReversion.trim()}
+                onClick={() => startTransition(async () => {
+                  const r = await revertirAprobacionPropuesta(negocioBloqueId, motivoReversion)
+                  if (!r.ok) { toast.error(r.error ?? 'No se pudo revertir'); return }
+                  toast.success('Aprobación revertida — ya puedes generar una versión nueva')
+                  setRevirtiendo(false)
+                  setMotivoReversion('')
+                })}
+                className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                Revertir aprobación
+              </button>
+              <button
+                type="button"
+                onClick={() => { setRevirtiendo(false); setMotivoReversion('') }}
+                className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Corrección del valor aprobado. Solo para quien está declarado en la
