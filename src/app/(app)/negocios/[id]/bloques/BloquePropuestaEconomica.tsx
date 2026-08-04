@@ -54,6 +54,13 @@ interface ConfigExtra {
    * tanto puede corregir el valor aprobado. NO se deriva del rol.
    */
   _puedeCorregirPrecio?: boolean
+  /**
+   * Ventana de reversión resuelta en el servidor: el negocio sigue dentro del rango
+   * declarado en `revertir_hasta_etapa_orden`. No se deriva del modo del bloque porque
+   * la propuesta se aprueba en una etapa y se renegocia en la siguiente, donde este
+   * bloque ya es copia de solo lectura.
+   */
+  _puedeRevertirAprobacion?: boolean
 }
 
 interface BloqueInstancia {
@@ -288,7 +295,7 @@ export default function BloquePropuestaEconomica({
             bloque en pendiente para poder generar una versión nueva y elegir plan otra
             vez. Es distinto de "Corregir valor aprobado": aquello cambia el número
             registrado sin tocar lo que recibió el cliente; esto reabre la negociación. */}
-        {aprobada && modo !== 'visible' && !revirtiendo && (
+        {aprobada && configExtra._puedeRevertirAprobacion && !revirtiendo && (
           <button
             type="button"
             onClick={() => setRevirtiendo(true)}
