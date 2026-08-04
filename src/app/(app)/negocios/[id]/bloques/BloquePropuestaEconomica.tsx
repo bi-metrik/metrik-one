@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, Lock } from 'lucide-react'
+import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, Lock, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import {
@@ -290,20 +290,43 @@ export default function BloquePropuestaEconomica({
           <p className="text-sm text-muted-foreground">Sin versiones generadas.</p>
         )}
 
-        {/* Revertir la aprobación: solo mientras el negocio siga en esta etapa (por eso
-            `modo !== 'visible'`) y el servidor además exige que no haya pagos. Deja el
-            bloque en pendiente para poder generar una versión nueva y elegir plan otra
-            vez. Es distinto de "Corregir valor aprobado": aquello cambia el número
-            registrado sin tocar lo que recibió el cliente; esto reabre la negociación. */}
-        {aprobada && configExtra._puedeRevertirAprobacion && !revirtiendo && (
-          <button
-            type="button"
-            onClick={() => setRevirtiendo(true)}
-            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-          >
-            Revertir aprobación
-          </button>
-        )}
+        {/* Dos acciones de riesgo e intención distintas sobre el mismo bloque: revertir
+            reabre la negociación completa, corregir solo ajusta un número mal cargado.
+            Van en botones propios, cada uno en su renglón — texto subrayado suelto las
+            hacía ilegibles como dos opciones separadas (quedaban pegadas). */}
+        <div className="flex flex-col items-start gap-2 pt-1">
+          {/* Revertir la aprobación: solo mientras el negocio siga en esta etapa (por eso
+              `modo !== 'visible'`) y el servidor además exige que no haya pagos. Deja el
+              bloque en pendiente para poder generar una versión nueva y elegir plan otra
+              vez. Es distinto de "Corregir valor aprobado": aquello cambia el número
+              registrado sin tocar lo que recibió el cliente; esto reabre la negociación. */}
+          {aprobada && configExtra._puedeRevertirAprobacion && !revirtiendo && (
+            <button
+              type="button"
+              onClick={() => setRevirtiendo(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-muted-foreground/30 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Revertir aprobación
+            </button>
+          )}
+
+          {/* Corrección del valor aprobado. Solo para quien está declarado en la
+              config del workspace. No toca las versiones ni el PDF enviado. */}
+          {aprobada && configExtra._puedeCorregirPrecio && !corrigiendoValor && (
+            <button
+              type="button"
+              onClick={() => {
+                setValorCorregido(String(data.aprobado_honorario ?? valorAprobado ?? ''))
+                setCorrigiendoValor(true)
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-muted-foreground/30 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Corregir valor aprobado
+            </button>
+          )}
+        </div>
         {revirtiendo && (
           <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs text-amber-900">
@@ -345,20 +368,6 @@ export default function BloquePropuestaEconomica({
           </div>
         )}
 
-        {/* Corrección del valor aprobado. Solo para quien está declarado en la
-            config del workspace. No toca las versiones ni el PDF enviado. */}
-        {aprobada && configExtra._puedeCorregirPrecio && !corrigiendoValor && (
-          <button
-            type="button"
-            onClick={() => {
-              setValorCorregido(String(data.aprobado_honorario ?? valorAprobado ?? ''))
-              setCorrigiendoValor(true)
-            }}
-            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-          >
-            Corregir valor aprobado
-          </button>
-        )}
         {corrigiendoValor && (
           <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs text-amber-900">
