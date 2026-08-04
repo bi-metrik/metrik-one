@@ -9,6 +9,8 @@ import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercia
 import { TabComercialSoena } from './components/tab-comercial-soena'
 import { TabProceso } from './components/tab-proceso'
 import TabCalidad from './components/tab-calidad'
+import { TabOperaciones } from './components/tab-operaciones'
+import type { OperacionesBonoData } from './operaciones-types'
 import type { DuenoData } from '../calidad/types'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { ShieldCheck, LayoutDashboard } from 'lucide-react'
@@ -19,13 +21,15 @@ import type {
   MetaComercial,
 } from '../equipo/comercial-types'
 
-type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'proceso' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento' | 'calidad'
+type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'proceso' | 'operaciones' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento' | 'calidad'
 
 const RENTABILIDAD_TAB: { key: TabKey; label: string } = { key: 'rentabilidad_comercial', label: 'Rentabilidad Comercial' }
 const COMERCIAL_NEGOCIOS_TAB: { key: TabKey; label: string } = { key: 'comercial_negocios', label: 'Comercial' }
 // Foto del proceso por etapa. Gateada por su propio modulo: la pestana Operativo
 // generica mide `proyectos`, que en los workspaces Clarity esta vacio (SOENA: 0).
 const PROCESO_TAB: { key: TabKey; label: string } = { key: 'proceso', label: 'Proceso' }
+// Bono de operaciones: mide a las PERSONAS del area, no el estado de los casos.
+const OPERACIONES_TAB: { key: TabKey; label: string } = { key: 'operaciones', label: 'Operaciones' }
 
 const BUSINESS_TABS: { key: TabKey; label: string }[] = [
   { key: 'financiero', label: 'Financiero' },
@@ -63,6 +67,7 @@ interface TablerosClientProps {
   initialRentabilidad?: RentabilidadComercialData | null
   initialComercialNegocios?: ComercialNegociosBundle | null
   initialProcesoSeccional?: ProcesoSeccionalData | null
+  initialOperaciones?: OperacionesBonoData | null
   /** Null si el workspace no tiene el modulo o si el rol no ve dinero. */
   initialCalidad?: DuenoData | null
   modules?: Record<string, boolean>
@@ -75,6 +80,7 @@ export default function TablerosClient({
   initialRentabilidad,
   initialComercialNegocios,
   initialProcesoSeccional,
+  initialOperaciones,
   initialCalidad,
   modules,
 }: TablerosClientProps) {
@@ -98,11 +104,14 @@ export default function TablerosClient({
       }
       // Va despues de Comercial: primero cuanto se vendio, luego donde esta atascado.
       if (mod.proceso_semanal && initialProcesoSeccional) t.splice(1, 0, PROCESO_TAB)
+      // Va detras de Proceso: primero donde estan atascados los casos, luego como
+      // le fue a cada persona.
+      if (mod.operaciones_bonos && initialOperaciones) t.push(OPERACIONES_TAB)
     }
     if (mod.compliance) t.push(COMPLIANCE_TAB)
     if (mod.calidad_llamadas && initialCalidad) t.push(CALIDAD_TAB)
     return t
-  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, mod.calidad_llamadas, initialComercialNegocios, initialProcesoSeccional, initialCalidad])
+  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, mod.operaciones_bonos, mod.calidad_llamadas, initialComercialNegocios, initialProcesoSeccional, initialOperaciones, initialCalidad])
 
   // Sin `?? 'cumplimiento'`: cuando no hay ninguna pestaña, caer en la de
   // Cumplimiento hacia que la pantalla mostrara su vacio — un escudo verde y
@@ -162,7 +171,7 @@ export default function TablerosClient({
         </div>
 
         {/* Periodo selector — only for business tabs (no aplica a Rentabilidad Comercial ni Cumplimiento) */}
-        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && activeTab !== 'proceso' && activeTab !== 'calidad' && (
+        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && activeTab !== 'proceso' && activeTab !== 'operaciones' && activeTab !== 'calidad' && (
           <div className="flex gap-1">
             {PERIODOS.map(p => (
               <button
@@ -199,6 +208,9 @@ export default function TablerosClient({
         )}
         {activeTab === 'proceso' && initialProcesoSeccional && (
           <TabProceso data={initialProcesoSeccional} />
+        )}
+        {activeTab === 'operaciones' && initialOperaciones && (
+          <TabOperaciones data={initialOperaciones} />
         )}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
