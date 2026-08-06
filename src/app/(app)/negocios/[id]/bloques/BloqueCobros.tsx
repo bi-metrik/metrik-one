@@ -8,6 +8,7 @@ import { confirmarCobroProgramado } from './plan-recurrente-actions'
 import { eliminarPorcionPago } from '@/lib/actions/conciliacion-actions'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
+import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 
@@ -270,6 +271,17 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
 
   const totalCobrado = confirmados.reduce((s, c) => s + c.monto, 0)
   const saldoPendiente = precioTotal - totalCobrado
+  // Un saldo NEGATIVO es plata a favor del cliente y hay que decirlo. Antes se pintaba
+  // como `saldoPendiente > 0 ? saldoPendiente : 0`, así que un sobrepago se veía igual
+  // que un negocio al día: "Saldo $0". La cifra existía en los datos y la pantalla la
+  // tapaba, que es la peor forma de un dato faltante — nadie va a buscar lo que el
+  // sistema afirma que no existe.
+  //
+  // El residuo de redondeo NO cuenta como saldo a favor: se compara contra el piso de
+  // materialidad, la misma vara que usan los gates y el motor de avance. Sin eso, un
+  // negocio que pagó $120 de más quedaría marcado en la tarjeta como si hubiera que
+  // devolverle algo.
+  const haySaldoAFavor = saldoPendiente < 0 && !saldoCuadrado(saldoPendiente)
   const programadosVencidos = programados.filter(c => c.vencido).length
   const bloqueaHandoff = pendienteHandoff != null && pendienteHandoff.pendienteTotal > 0
   const plan = modeloDinero?.aprobado_plan
@@ -332,10 +344,18 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
             <p className="text-[10px] font-medium text-[#059669]">Cobrado</p>
             <p className="text-sm font-bold text-[#059669] tabular-nums">{fmt(totalCobrado)}</p>
           </div>
-          <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5 text-center">
-            <p className="text-[10px] font-medium text-[#6B7280]">Saldo</p>
-            <p className="text-sm font-bold text-[#1A1A1A] tabular-nums">
-              {fmt(saldoPendiente > 0 ? saldoPendiente : 0)}
+          <div
+            className={
+              haySaldoAFavor
+                ? 'rounded-lg border border-[#F59E0B]/40 bg-[#F59E0B]/5 p-2.5 text-center'
+                : 'rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5 text-center'
+            }
+          >
+            <p className={haySaldoAFavor ? 'text-[10px] font-medium text-[#B45309]' : 'text-[10px] font-medium text-[#6B7280]'}>
+              {haySaldoAFavor ? 'A favor del cliente' : 'Saldo'}
+            </p>
+            <p className={haySaldoAFavor ? 'text-sm font-bold text-[#B45309] tabular-nums' : 'text-sm font-bold text-[#1A1A1A] tabular-nums'}>
+              {fmt(haySaldoAFavor ? -saldoPendiente : Math.max(0, saldoPendiente))}
             </p>
           </div>
         </div>
