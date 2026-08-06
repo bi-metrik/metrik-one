@@ -6414,8 +6414,12 @@ async function validarGateFacturaEmitida(
 export async function completarNegocio(
   negocioId: string,
   lecciones?: string,
+  cierreNoFacturable?: {
+    motivo: 'cortesia_compensacion' | 'incluido_otro_acuerdo' | 'otro'
+    nota?: string
+  },
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   // Validar que existe y esta en stage cobro
@@ -6434,12 +6438,51 @@ export async function completarNegocio(
     return { error: 'El negocio ya esta cerrado' }
   }
 
-  // Gate de cierre "factura:emitida": si la etapa de cierre lo exige, no cerrar
-  // hasta que el bloque de factura tenga consecutivo y el NIT del emisor coincida
-  // con el del workspace. Source-agnostic: lo satisface igual la extracción
-  // manual (IA) que el volcado futuro de Siigo (misma estructura data.campos).
+  const motivosNoFacturable = new Set(['cortesia_compensacion', 'incluido_otro_acuerdo', 'otro'])
+  const esCierreNoFacturable = cierreNoFacturable !== undefined
+  const motivoNoFacturable = cierreNoFacturable?.motivo
+  const notaNoFacturable = cierreNoFacturable?.nota?.trim() || null
+
+  // Gate de cierre "factura:emitida": en el cierre normal conserva exactamente
+  // la validación vigente. La excepción explícita solo existe en cobro, para un
+  // gate realmente incumplido y con autorización de administración/financiera.
   const gateErr = await validarGateFacturaEmitida(supabase, negocioId, negocio.etapa_actual_id as string | null)
-  if (gateErr) return { error: gateErr }
+  if (!esCierreNoFacturable) {
+    if (gateErr) return { error: gateErr }
+  } else {
+    if (negocio.stage_actual !== 'cobro') {
+      return { error: 'El cierre no facturable solo está disponible en la etapa de cierre.' }
+    }
+    if (!motivoNoFacturable || !motivosNoFacturable.has(motivoNoFacturable)) {
+      return { error: 'Selecciona un motivo válido para el cierre no facturable.' }
+    }
+    if (motivoNoFacturable === 'otro' && !notaNoFacturable) {
+      return { error: 'Describe el motivo cuando seleccionas Otro.' }
+    }
+    if (!gateErr) {
+      return { error: 'La factura ya cumple el gate; usa el cierre normal.' }
+    }
+    if (!staffId) {
+      return { error: 'No se pudo identificar al responsable del cierre.' }
+    }
+
+    const esAdministracion = role === 'owner' || role === 'admin'
+    const esFinanciera = getAreasEfectivas({
+      id: staffId,
+      role: (role ?? 'read_only') as Role,
+      areas: (areas ?? []) as Area[],
+    }).has('financiera')
+    if (!esAdministracion && !esFinanciera) {
+      return { error: 'Solo administración o financiera puede autorizar un cierre no facturable.' }
+    }
+
+    // Conserva la segmentación de áreas y responsabilidad que aplica a la etapa
+    // de cobro. El chequeo anterior es la autorización adicional del override.
+    const permisoCierre = await guardAvanzarStage(negocioId, 'cobro')
+    if (!permisoCierre.ok) {
+      return { error: permisoCierre.error ?? 'Sin permisos para cerrar en esta fase.' }
+    }
+  }
 
   // Calcular snapshot financiero: buscar cobros del negocio
   const { data: cobrosData } = await db(supabase)
@@ -6454,8 +6497,9 @@ export async function completarNegocio(
   const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
   const pendiente = Math.max(0, precioAprobado - totalCobrado)
 
+  const now = new Date().toISOString()
   const snapshot = {
-    fecha_cierre: new Date().toISOString(),
+    fecha_cierre: now,
     precio_aprobado: precioAprobado,
     total_cobrado: totalCobrado,
     pendiente_cobro: pendiente,
@@ -6468,7 +6512,14 @@ export async function completarNegocio(
       estado: 'completado',
       lecciones_aprendidas: lecciones?.trim() || null,
       cierre_snapshot: snapshot,
-      closed_at: new Date().toISOString(),
+      closed_at: now,
+      ...(esCierreNoFacturable ? {
+        cierre_no_facturable: true,
+        cierre_no_facturable_motivo: motivoNoFacturable,
+        cierre_no_facturable_nota: notaNoFacturable,
+        cierre_no_facturable_at: now,
+        cierre_no_facturable_por: staffId,
+      } : {}),
     })
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
@@ -6476,13 +6527,22 @@ export async function completarNegocio(
   if (updErr) return { error: (updErr as { message: string }).message }
 
   if (staffId) {
+    const motivosLabel: Record<string, string> = {
+      cortesia_compensacion: 'Cortesía o compensación',
+      incluido_otro_acuerdo: 'Incluido en otro acuerdo',
+      otro: 'Otro',
+    }
+    const motivoLabel = motivosLabel[motivoNoFacturable ?? '']
     await supabase.from('activity_log').insert({
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'cambio_estado',
       autor_id: staffId,
-      contenido: 'Proyecto completado',
+      ...(esCierreNoFacturable ? { campo_modificado: 'cierre_no_facturable' } : {}),
+      contenido: esCierreNoFacturable
+        ? `Proyecto completado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
+        : 'Proyecto completado',
       valor_nuevo: 'completado',
     })
   }
