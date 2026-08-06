@@ -10,6 +10,13 @@ expediente.
 Primer adopter: SOENA (línea GIT EV/HEV). El diseño es **genérico y opt-in por
 workspace**, igual que el resto de módulos de ONE.
 
+⚠️ **Esta integración es el paso 1 de un rediseño mayor:** facturar deja de ser una
+etapa del flujo y pasa a vivir en un panel de financiera, con el cierre del negocio
+disparado por la facturación. Ver `2026-08-06_facturacion-fuera-del-flujo.md`. Ese
+rediseño depende de que esta integración exista, porque el cruce contra las facturas
+ya emitidas en Siigo es lo que permite que la cola del panel nazca depurada en vez de
+con 173 pendientes falsos.
+
 ## Decisiones tomadas (no reabrir sin decisión de Mauricio)
 
 1. **El cierre del negocio solo se habilita con factura ACEPTADA por la DIAN**
