@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { getNegocioDetalleCompleto } from '../negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { puedeAutorizarCierreNoFacturable, type Area, type Role } from '@/lib/permissions/can-edit'
 import { createServiceClient } from '@/lib/supabase/server'
 import { listarConsultasPorNegocio } from '@/lib/actions/valida-consultas'
 import { getDatosSarlaft, getScoreNegocio } from '@/lib/actions/valida-score'
@@ -26,8 +27,10 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // Cargar consultas Valida solo si el workspace tiene el flag activo
   const { workspaceId, staffId, role } = await getWorkspace()
 
-  // Areas efectivas del staff actual (para gatear boton "Reabrir" como supervisor)
+  // Areas efectivas del staff actual (para gatear boton "Reabrir" como supervisor
+  // y la casilla de cierre no facturable)
   let hasAreaComercial = false
+  let puedeCierreNoFacturable = false
   if (staffId) {
     const svc2 = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,6 +39,13 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       .eq('staff_id', staffId)
     const areaList = ((areas ?? []) as Array<{ area: string }>).map((r) => r.area)
     hasAreaComercial = areaList.includes('comercial') || areaList.includes('direccion')
+    // Mismo helper que usa el guard del servidor: la pantalla no puede ofrecer
+    // una excepcion que la accion vaya a rechazar al final del formulario.
+    puedeCierreNoFacturable = puedeAutorizarCierreNoFacturable({
+      id: staffId,
+      role: (role ?? 'read_only') as Role,
+      areas: areaList as Area[],
+    })
   }
   const negocioCerrado = data.negocio.cierre_motivo !== null
   let validaConsultas: Awaited<ReturnType<typeof listarConsultasPorNegocio>> | null = null
@@ -100,6 +110,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         bloquesEtapasPrevias={data.bloquesEtapasPrevias as any}
         pausaEnabled={data.pausaEnabled}
         registrarPagoEnabled={conciliacionActiva}
+        puedeCierreNoFacturable={puedeCierreNoFacturable}
         errorMsg={err}
       />
       {validaActivo && (

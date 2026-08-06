@@ -28,7 +28,7 @@ import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { retornosPosibles, retornosDisparados, ejecutarRetorno } from '@/lib/correcciones/retorno'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
-import { STAGE_TO_AREA, getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
+import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
@@ -6466,13 +6466,14 @@ export async function completarNegocio(
       return { error: 'No se pudo identificar al responsable del cierre.' }
     }
 
-    const esAdministracion = role === 'owner' || role === 'admin'
-    const esFinanciera = getAreasEfectivas({
+    // Mismo criterio que decide si la pantalla muestra la casilla. Ver
+    // `puedeAutorizarCierreNoFacturable`: la regla vive en un solo lugar.
+    const autorizado = puedeAutorizarCierreNoFacturable({
       id: staffId,
       role: (role ?? 'read_only') as Role,
       areas: (areas ?? []) as Area[],
-    }).has('financiera')
-    if (!esAdministracion && !esFinanciera) {
+    })
+    if (!autorizado) {
       return { error: 'Solo administración o financiera puede autorizar un cierre no facturable.' }
     }
 
@@ -6502,7 +6503,12 @@ export async function completarNegocio(
     fecha_cierre: now,
     precio_aprobado: precioAprobado,
     total_cobrado: totalCobrado,
+    // Se conserva el numero tal cual (es lo que quedo sin cobrar de verdad), pero
+    // en un cierre no facturable ese saldo NO es cartera: nadie lo va a cobrar.
+    // Sin la marca, cualquier lector futuro del snapshot lo suma como plata por
+    // entrar, que es justo lo que la excepcion existe para evitar.
     pendiente_cobro: pendiente,
+    ...(esCierreNoFacturable ? { no_facturable: true, motivo_no_facturable: motivoNoFacturable } : {}),
     margen: totalCobrado - 0, // sin costos ejecutados por ahora
   }
 

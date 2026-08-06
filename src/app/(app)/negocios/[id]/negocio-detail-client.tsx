@@ -616,6 +616,7 @@ function SelectorEtapa({
   vecesPausado,
   userRole,
   reprocesoMarca,
+  puedeCierreNoFacturable,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -630,6 +631,7 @@ function SelectorEtapa({
   vecesPausado: number
   userRole: string
   reprocesoMarca: ReprocesoVista | null
+  puedeCierreNoFacturable: boolean
 }) {
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
@@ -745,6 +747,7 @@ function SelectorEtapa({
             esBuzonLeads={etapaActual?.es_buzon === true}
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
+            puedeCierreNoFacturable={puedeCierreNoFacturable}
             onClose={() => setShowCierreDialog(false)}
           />
         )}
@@ -827,6 +830,7 @@ function SelectorEtapa({
           esBuzonLeads={etapaActual?.es_buzon === true}
           resumenFinanciero={resumenFinanciero}
           precioAprobado={precioAprobado}
+          puedeCierreNoFacturable={puedeCierreNoFacturable}
           onClose={() => setShowCierreDialog(false)}
         />
       )}
@@ -1839,6 +1843,8 @@ interface Props {
   pausaEnabled: boolean
   /** Habilita "Registrar pago" dentro del bloque de pagos (opt-in modules.conciliacion). */
   registrarPagoEnabled?: boolean
+  /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
+  puedeCierreNoFacturable?: boolean
   errorMsg?: string
 }
 
@@ -1863,6 +1869,7 @@ export default function NegocioDetailClient({
   bloquesEtapasPrevias = [],
   pausaEnabled,
   registrarPagoEnabled = false,
+  puedeCierreNoFacturable = false,
   errorMsg,
 }: Props) {
   useEffect(() => {
@@ -1987,6 +1994,7 @@ export default function NegocioDetailClient({
             vecesPausado={negocio.veces_pausado}
             userRole={userRole}
             reprocesoMarca={reprocesoMarca}
+            puedeCierreNoFacturable={puedeCierreNoFacturable}
           />
         </div>
         </div>

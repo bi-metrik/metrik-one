@@ -123,7 +123,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('negocios')
-      .select('nombre, precio_aprobado, estado, closed_at')
+      .select('nombre, precio_aprobado, estado, closed_at, cierre_no_facturable')
       .eq('workspace_id', workspaceId)
       .eq('estado', 'completado'),
 
@@ -241,8 +241,13 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
   const runwayMeses = gastoTotalMensual > 0 ? saldoActual / gastoTotalMensual : 99
 
   // Cartera pendiente — simplified using negocios completados
+  // Un cierre no facturable NO es cartera: se cerro a proposito sin factura, asi
+  // que su precio aprobado (que se conserva como historia comercial) no es plata
+  // por cobrar. Sin este filtro, la excepcion inflaria la cartera del tablero.
   const now = new Date()
   const carteraPendiente: ProyectoCartera[] = negociosCerrados
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((n: any) => n.cierre_no_facturable !== true)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map((n: any) => {
       const precioAprobado = Number(n.precio_aprobado || 0)

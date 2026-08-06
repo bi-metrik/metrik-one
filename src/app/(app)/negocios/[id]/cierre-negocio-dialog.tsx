@@ -28,6 +28,14 @@ interface CierreNegocioDialogProps {
   esBuzonLeads?: boolean // descarte desde el buzón de entrada (Recepción)
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   precioAprobado: number | null
+  /**
+   * El usuario puede autorizar un cierre sin factura. Se resuelve en el servidor
+   * con `puedeAutorizarCierreNoFacturable` (rol + areas): el cliente no conoce
+   * las areas del staff, y ofrecer la casilla a quien la accion va a rechazar
+   * obliga a llenar motivo y nota para chocar contra un error al final.
+   * Esto es UX, no seguridad: el guard real vive en `completarNegocio`.
+   */
+  puedeCierreNoFacturable?: boolean
   onClose: () => void
 }
 
@@ -376,6 +384,7 @@ export default function CierreNegocioDialog({
   esBuzonLeads,
   resumenFinanciero,
   precioAprobado,
+  puedeCierreNoFacturable = false,
   onClose,
 }: CierreNegocioDialogProps) {
   const showCompletar = stage === 'cobro' || (stage === 'ejecucion' && isTerminalStage)
@@ -395,7 +404,7 @@ export default function CierreNegocioDialog({
             negocioId={negocioId}
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
-            permiteCierreNoFacturable={stage === 'cobro'}
+            permiteCierreNoFacturable={stage === 'cobro' && puedeCierreNoFacturable}
             onClose={onClose}
           />
         )}
