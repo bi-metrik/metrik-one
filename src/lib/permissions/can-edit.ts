@@ -152,6 +152,29 @@ export function canEditHeader(user: UserContext): boolean {
   return getAreasEfectivas(user).has('comercial')
 }
 
+// ── puedeAutorizarCierreNoFacturable ─────────────────────────────────
+
+/**
+ * Cerrar un negocio SIN factura es una excepcion financiera, no un paso mas del
+ * flujo: deja un caso entregado que nunca va a generar ingreso. La autoriza
+ * administracion (owner/admin) o quien lleva el area financiera (directa o via
+ * 'direccion', que expande a las 3 areas operativas).
+ *
+ * Fuente unica del criterio: lo consume el guard del servidor en
+ * `completarNegocio` Y la pantalla que decide si mostrar la casilla. Copiar la
+ * regla en cualquiera de los dos lados los desincroniza en silencio: la pantalla
+ * ofreceria algo que el servidor rechaza (o al reves, lo escondería a quien sí
+ * puede).
+ *
+ * Esto NO reemplaza la segmentacion por area del stage de cobro: es una
+ * autorizacion ADICIONAL sobre ella.
+ */
+export function puedeAutorizarCierreNoFacturable(user: UserContext): boolean {
+  if (user.role === 'owner' || user.role === 'admin') return true
+  if (user.role === 'read_only' || user.role === 'contador') return false
+  return getAreasEfectivas(user).has('financiera')
+}
+
 // ── canGestionarAliados ──────────────────────────────────────────────
 
 /**
