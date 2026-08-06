@@ -12,6 +12,7 @@ import {
   tipoCobroHonorario,
   tarifaConfirmadaPorNegocio,
   valorARecaudarCartera,
+  saldoConciliacion,
   esCeroDeliberado,
   type FilaBloqueTarifa,
   type ModeloDinero,
@@ -546,10 +547,15 @@ export interface NegocioSaldo {
   precio: number
   /** Tarifa UPME confirmada (plata de terceros que SOENA recauda). 0 si no aplica. */
   tarifa_upme: number
-  /** Lo que el cliente le paga a SOENA = honorario + tarifa. La vara del saldo. */
+  /** Lo que el cliente le paga a SOENA = honorario + tarifa. La vara del SOBRANTE. */
   valor_a_recaudar: number
   cobrado: number
-  saldo: number // valor_a_recaudar - cobrado. > 0 = falta por cobrar
+  /**
+   * `> 0` le falta plata a SOENA, `< 0` le sobra. Asimétrico a propósito: lo que falta
+   * se mide contra el honorario y lo que sobra contra el valor a recaudar. Ver
+   * `saldoConciliacion`.
+   */
+  saldo: number
   referencias: { external_ref: string; fuente: string | null; monto: number; fecha: string | null }[]
   conciliado: boolean
 }
@@ -563,7 +569,7 @@ export interface AsignacionRef {
   monto: number
   /** true si es el negocio donde cayó el pago originalmente. */
   es_origen: boolean
-  /** Saldo del negocio (valor a recaudar - cobrado). >0 = aún le falta por cobrar. */
+  /** Saldo del negocio (ver `saldoConciliacion`). >0 = aún le falta por cobrar. */
   saldo: number
 }
 
@@ -641,6 +647,11 @@ interface NegocioRow {
   precio: number
   /** Tarifa UPME confirmada (pasante). 0 si no está confirmada o no se contrató. */
   tarifa: number
+  /**
+   * Tarifa que efectivamente entra al valor a recaudar (0 cuando todavía no es
+   * cartera). Es la que se le pasa al modelo de dinero al medir el saldo.
+   */
+  tarifa_cartera: number
   /**
    * Lo que el cliente le paga a SOENA = honorario + tarifa. Es la vara contra la que
    * se mide TODO en este panel: el saldo, el sobrepago y el "conciliado".
@@ -770,24 +781,26 @@ async function cargarNegociosYCobros(
   for (const n of filas) {
     const honorario = n.precio_aprobado ?? n.precio_estimado ?? 0
     const tarifa = tarifas.get(n.id) ?? 0
+    // Mismo modelo de dinero que el gate de handoff y el saldo del bloque de Cobros,
+    // pero preguntando por CARTERA: la tarifa de un negocio sin monto aprobado y sin
+    // un peso recaudado todavía no es plata que alguien deba cobrar.
+    const valorARecaudarDelNegocio = valorARecaudarCartera(
+      honorario,
+      { tarifa_upme: tarifa, aprobado_plan: null, aprobado_honorario: null },
+      {
+        recaudado: cobrado.get(n.id) ?? 0,
+        ceroDeliberado: esCeroDeliberado(propuestas.get(n.id) ?? [], n.precio_aprobado),
+        honorarioAprobado: n.precio_aprobado,
+      },
+    )
     negocios.set(n.id, {
       id: n.id,
       codigo: n.codigo,
       nombre: n.nombre,
       precio: honorario,
       tarifa,
-      // Mismo modelo de dinero que el gate de handoff y el saldo del bloque de Cobros,
-      // pero preguntando por CARTERA: la tarifa de un negocio sin monto aprobado y sin
-      // un peso recaudado todavía no es plata que alguien deba cobrar.
-      valor_a_recaudar: valorARecaudarCartera(
-        honorario,
-        { tarifa_upme: tarifa, aprobado_plan: null, aprobado_honorario: null },
-        {
-          recaudado: cobrado.get(n.id) ?? 0,
-          ceroDeliberado: esCeroDeliberado(propuestas.get(n.id) ?? [], n.precio_aprobado),
-          honorarioAprobado: n.precio_aprobado,
-        },
-      ),
+      tarifa_cartera: Math.max(0, valorARecaudarDelNegocio - honorario),
+      valor_a_recaudar: valorARecaudarDelNegocio,
       estado: n.estado,
       stage_actual: n.stage_actual,
       etapa_nombre: n.etapas_negocio?.nombre ?? null,
@@ -797,6 +810,21 @@ async function cargarNegociosYCobros(
   }
 
   return { negocios, cobros, cobrado }
+}
+
+/**
+ * Saldo del negocio tal como lo muestra el panel: `> 0` le falta plata a SOENA, `< 0`
+ * le sobra. Delega en `saldoConciliacion`, que es la asimetría del producto (falta
+ * contra el honorario, sobra contra el valor a recaudar). Existe para que las tres
+ * listas del panel no vuelvan a tener cada una su propia resta.
+ */
+function saldoDelNegocio(neg: NegocioRow | null | undefined, cobrado: number): number {
+  if (!neg) return 0
+  return saldoConciliacion(
+    neg.precio,
+    { tarifa_upme: neg.tarifa_cartera, aprobado_plan: null, aprobado_honorario: null },
+    cobrado,
+  )
 }
 
 /** cobrado financiero por negocio (excluye devoluciones pendientes). */
@@ -954,7 +982,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
           nombre: p.negocio_nombre,
           monto: p.monto,
           es_origen: p.negocio_id === origin.negocio_id,
-          saldo: neg ? neg.valor_a_recaudar - cob : 0,
+          saldo: saldoDelNegocio(neg, cob),
         })
       }
     } else {
@@ -966,7 +994,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
         nombre: origin.negocio_nombre,
         monto: Math.min(precioOrigen, refTotal),
         es_origen: true,
-        saldo: negOrigin.valor_a_recaudar - cobOrig,
+        saldo: saldoDelNegocio(negOrigin, cobOrig),
       })
     }
 
@@ -995,18 +1023,15 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
   for (const [negId, neg] of negocios) {
     if (neg.estado !== 'abierto') continue
     const cob = cobrado.get(negId) ?? 0
-    // Falta / sobra contra lo que el cliente le paga a SOENA (honorario + tarifa),
-    // no contra el honorario: con el honorario a secas, quien paga completo aparecía
-    // con un sobrante del tamaño de la tarifa y quien debía plata aparecía al revés
-    // (medido: V0103 mostraba "sobran $276.812" cuando le FALTAN $425.000).
+    // El panel usa la MISMA asimetría que el resto del producto (ver
+    // `saldoConciliacion`): FALTA contra el honorario, SOBRA contra el valor a recaudar.
     //
-    // ⚠️ Este panel INFORMA; el gate `conciliacion_diana` RETIENE. Por eso
-    // `descuadreConciliacion` mide su faltante contra el honorario solo y este contra
-    // el valor a recaudar, y esa diferencia es a propósito: un cliente que le pagó la
-    // tarifa DIRECTO a la UPME no debe quedar frenado por una deuda que no tiene, pero
-    // sí vale la pena que aparezca en la lista de quien cobra. No unificarlas sin medir
-    // los 62 casos que la versión simétrica retenía (ver #206).
-    const saldo = neg.valor_a_recaudar - cob
+    // Medirlo simétrico contra honorario + tarifa, como quedó en #214, llenaba la lista
+    // de deudores falsos: el cliente que le paga la tarifa DIRECTO a la UPME aparecía
+    // debiendo justo el valor de la tarifa. Medido el 2026-08-06 sobre los 33 faltantes
+    // de producción: 25 tenían un faltante idéntico a la tarifa y NINGUNO debía
+    // honorario. El sobrepago sí se mide contra el valor a recaudar, y eso no cambia.
+    const saldo = saldoDelNegocio(neg, cob)
     const refsDelNegocio = referencias
       .filter((r) => r.porciones.some((p) => p.negocio_id === negId))
       .map((r) => {

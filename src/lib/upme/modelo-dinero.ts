@@ -441,3 +441,40 @@ export function descuadreConciliacion(
     hayDescuadre: !saldoCuadrado(faltante) || !saldoCuadrado(exceso),
   }
 }
+
+/**
+ * Saldo del cliente CON SIGNO, para pintarlo en una lista: `> 0` le falta plata a
+ * SOENA, `< 0` le sobra, `0` está cuadrado.
+ *
+ * Es `descuadreConciliacion` puesto en un solo número — no una resta propia. Hereda,
+ * por lo tanto, su asimetría deliberada:
+ *
+ *   - FALTA contra el HONORARIO. Un cliente que le pagó la tarifa DIRECTO a la UPME no
+ *     le debe nada a SOENA, y ese es un flujo normal, no una excepción. Medir el
+ *     faltante contra honorario + tarifa lo convertía en deudor: medido el 2026-08-06,
+ *     de 33 faltantes en producción 25 tenían un faltante idéntico a la tarifa y
+ *     NINGUNO debía honorario.
+ *   - SOBRA contra el VALOR A RECAUDAR. Cuando el cliente paga los dos componentes
+ *     juntos, la tarifa no es plata de más: es el caso normal (arreglado en #214).
+ *
+ * Entre las dos varas hay una franja donde el saldo es 0 a propósito: ahí no se sabe
+ * (ni importa para cobrar) cuánto de la tarifa entró por SOENA. Como `faltante` y
+ * `exceso` nunca son positivos a la vez, la resta no tiene signo ambiguo.
+ *
+ * ⚠️ NO "simplificar" midiendo ambos lados contra la misma vara. Ya se midió: la
+ * versión simétrica retenía 62 casos que hoy pasan (ver el gotcha de CLAUDE.md y #206).
+ *
+ * Puro: no toca DB ni red.
+ *
+ * @param precioAprobado precio_aprobado del negocio = HONORARIO, en COP.
+ * @param modelo         modelo de dinero (aporta la tarifa confirmada).
+ * @param recaudado      suma de cobros reales del negocio, en COP.
+ */
+export function saldoConciliacion(
+  precioAprobado: number,
+  modelo: ModeloDinero | null,
+  recaudado: number,
+): number {
+  const { faltante, exceso } = descuadreConciliacion(precioAprobado, modelo, recaudado)
+  return faltante - exceso
+}
