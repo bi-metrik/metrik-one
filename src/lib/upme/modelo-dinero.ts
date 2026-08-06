@@ -28,13 +28,19 @@
  * REGLA DURA: nada aquí bloquea, descarta ni "gatea" — solo compone y reparte.
  */
 
+import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+
 /**
  * Tolerancia de materialidad de saldo (piso de Carmen, CFO). Un residuo ≤ $1.000 COP
  * no bloquea los gates de avance: no es cobrable en la práctica. La tolerancia SOLO
  * destraba la comparación del gate — NUNCA genera cobro ni reconoce ingreso, no toca
  * `precio_aprobado` ni el P&L/EBITDA. Faltantes > $1.000 siguen bloqueando.
+ *
+ * La constante se mudó a `lib/negocios/tolerancia-saldo.ts` (el motor de avance también la
+ * necesita y no tiene por qué depender del modelo de dinero de SOENA). Se re-exporta desde
+ * aquí para no partir a los consumidores que ya la importaban de este módulo.
  */
-export const TOLERANCIA_SALDO_COP = 1000
+export { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 
 /** Modelo de dinero de un negocio, leído de su propuesta aprobada + tarifa confirmada. */
 export interface ModeloDinero {
@@ -230,17 +236,23 @@ export interface DescuadreConciliacion {
   faltante: number
   /** Plata recibida por encima del valor a recaudar (honorario + tarifa). 0 si no hay. */
   exceso: number
-  /** true si cualquiera de los dos lados supera el residuo tolerado de $1. */
+  /** true si cualquiera de los dos lados supera el piso de materialidad. */
   hayDescuadre: boolean
 }
 
 /**
- * Residuo tolerado por la conciliación final: un peso. Es el redondeo, no la
- * materialidad. Deliberadamente MÁS ESTRICTO que `TOLERANCIA_SALDO_COP` ($1.000, el
- * piso de Carmen para los gates de avance): aquí se está cerrando la plata del caso,
- * no dejándolo pasar. Cambiarlo es decisión de CFO, no de este fix.
+ * Residuo tolerado por la conciliación final.
+ *
+ * Nació en $1 (el redondeo, no la materialidad) con el argumento de que aquí se cierra la
+ * plata del caso en vez de dejarlo pasar. En la práctica esa distinción no se sostuvo: el
+ * gate `conciliacion_diana` que consume esta función es un gate de AVANCE como los demás, así
+ * que un residuo de $120 frenaba el caso igual, solo que con otro número. Decisión de Mauricio
+ * (2026-08-06): el piso de materialidad es uno solo para todo el sistema.
+ *
+ * Se conserva el nombre porque lo importan otros módulos, pero ya no es una constante propia:
+ * es el mismo piso de Carmen. Cambiarlo se hace en `lib/negocios/tolerancia-saldo.ts`.
  */
-export const RESIDUO_CONCILIACION_COP = 1
+export const RESIDUO_CONCILIACION_COP = TOLERANCIA_SALDO_COP
 
 /**
  * ¿Está cuadrada la plata del cliente para cerrar el caso? Cada lado se mide con el
@@ -279,6 +291,8 @@ export function descuadreConciliacion(
   return {
     faltante,
     exceso,
-    hayDescuadre: faltante > RESIDUO_CONCILIACION_COP || exceso > RESIDUO_CONCILIACION_COP,
+    // Cada lado se compara contra el MISMO piso de materialidad que usan los demás gates.
+    // `saldoCuadrado` mide valor absoluto y aquí los dos lados ya llegan positivos.
+    hayDescuadre: !saldoCuadrado(faltante) || !saldoCuadrado(exceso),
   }
 }

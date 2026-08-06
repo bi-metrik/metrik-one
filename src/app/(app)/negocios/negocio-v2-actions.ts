@@ -11,6 +11,7 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
 import {
@@ -3148,7 +3149,10 @@ export async function cambiarEtapaNegocioConGate(
         .reduce((sum, c) => sum + (c.monto ?? 0), 0)
       const extra = totalCobradoConc - precioConc
 
-      if (precioConc > 0 && extra > 0) {
+      // El exceso se juzga contra el MISMO piso de materialidad que el resto del sistema
+      // (decisión de Mauricio, 2026-08-06). Con `extra > 0` a secas, un cliente que redondeó
+      // al pagar quedaba obligado a "conciliar" $120 que nadie va a devolver ni cobrar.
+      if (precioConc > 0 && !saldoCuadrado(extra)) {
         const { data: bloquesConc } = await db(supabase)
           .from('negocio_bloques')
           .select(`
