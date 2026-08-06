@@ -10,8 +10,12 @@ import { ctxFabPago } from '@/lib/actions/fab-pago-actions'
 import {
   repartirPagoTarifaHonorario,
   tipoCobroHonorario,
+  tarifaConfirmadaPorNegocio,
+  valorARecaudar,
+  type FilaBloqueTarifa,
   type ModeloDinero,
 } from '@/lib/upme/modelo-dinero'
+import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import {
   construirRefExterna,
@@ -79,6 +83,7 @@ export interface NegocioParaSplit {
   codigo: string | null
   nombre: string | null
   empresa: string | null
+  /** Valor a recaudar (honorario + tarifa UPME): la base de `diferencia`. */
   precio: number
   cobrado: number
   diferencia: number
@@ -535,9 +540,14 @@ export interface NegocioSaldo {
   empresa: string | null
   etapa_nombre: string | null
   responsable: string | null
+  /** Honorario de SOENA (`precio_aprobado`). Es el ingreso, NO lo que paga el cliente. */
   precio: number
+  /** Tarifa UPME confirmada (plata de terceros que SOENA recauda). 0 si no aplica. */
+  tarifa_upme: number
+  /** Lo que el cliente le paga a SOENA = honorario + tarifa. La vara del saldo. */
+  valor_a_recaudar: number
   cobrado: number
-  saldo: number // precio - cobrado. > 0 = falta por cobrar
+  saldo: number // valor_a_recaudar - cobrado. > 0 = falta por cobrar
   referencias: { external_ref: string; fuente: string | null; monto: number; fecha: string | null }[]
   conciliado: boolean
 }
@@ -551,7 +561,7 @@ export interface AsignacionRef {
   monto: number
   /** true si es el negocio donde cayó el pago originalmente. */
   es_origen: boolean
-  /** Saldo del negocio (precio - cobrado). >0 = aún le falta por cobrar. */
+  /** Saldo del negocio (valor a recaudar - cobrado). >0 = aún le falta por cobrar. */
   saldo: number
 }
 
@@ -563,7 +573,7 @@ export interface SobrepagoRef {
   negocio_id: string
   negocio_codigo: string | null
   negocio_nombre: string | null
-  /** Precio del negocio de origen (informativo). */
+  /** Valor a recaudar del negocio de origen: honorario + tarifa UPME (informativo). */
   precio_negocio: number
   /** Valor total del pago de la referencia (constante). */
   valor_pagado: number
@@ -625,7 +635,15 @@ interface NegocioRow {
   id: string
   codigo: string | null
   nombre: string | null
+  /** Honorario de SOENA (`precio_aprobado`) — el INGRESO. NO es lo que paga el cliente. */
   precio: number
+  /** Tarifa UPME confirmada (pasante). 0 si no está confirmada o no se contrató. */
+  tarifa: number
+  /**
+   * Lo que el cliente le paga a SOENA = honorario + tarifa. Es la vara contra la que
+   * se mide TODO en este panel: el saldo, el sobrepago y el "conciliado".
+   */
+  valor_a_recaudar: number
   estado: string | null
   stage_actual: string | null
   etapa_nombre: string | null
@@ -644,6 +662,44 @@ interface CobroRow {
   split_json: { split_id?: string; por_reparto?: boolean; ref_total?: number; por_devolver?: boolean; origen?: string; split_total?: number } | null
 }
 
+/**
+ * Tarifa UPME confirmada de MUCHOS negocios, en dos consultas por lote.
+ *
+ * El resolvedor por negocio (`leerModeloDineroCompleto`) hace 3-4 consultas cada vez:
+ * llamarlo dentro del bucle del panel serían ~900 consultas por carga con los 235
+ * negocios abiertos de SOENA. Aquí se traen las filas de una y la decisión la aplica
+ * `tarifaConfirmadaPorNegocio`, que es la MISMA regla extraída pura (probada en
+ * `tarifa-lote.test.ts`).
+ *
+ * Se filtra por `config_extra.tarifa_confirmacion.enabled`, no por el slug del bloque:
+ * ese es el contrato genérico del producto — un workspace puede nombrar su bloque como
+ * quiera. Un workspace sin ese bloque devuelve el mapa vacío y todo queda como antes.
+ */
+async function cargarTarifasConfirmadas(
+  supabase: unknown,
+  negocioIds: string[],
+): Promise<Map<string, number>> {
+  if (negocioIds.length === 0) return new Map()
+
+  const [confRes, certRes] = await Promise.all([
+    db(supabase)
+      .from('negocio_bloques')
+      .select('negocio_id, data, bloque_configs!inner(config_extra)')
+      .in('negocio_id', negocioIds)
+      .eq('bloque_configs.config_extra->tarifa_confirmacion->>enabled', 'true'),
+    db(supabase)
+      .from('negocio_bloques')
+      .select('negocio_id, data, bloque_configs!inner(slug)')
+      .in('negocio_id', negocioIds)
+      .eq('bloque_configs.slug', 'certificacion_upme'),
+  ])
+
+  return tarifaConfirmadaPorNegocio(
+    (confRes.data ?? []) as FilaBloqueTarifa[],
+    (certRes.data ?? []) as FilaBloqueTarifa[],
+  )
+}
+
 async function cargarNegociosYCobros(
   supabase: unknown,
   workspaceId: string,
@@ -657,19 +713,28 @@ async function cargarNegociosYCobros(
     `)
     .eq('workspace_id', workspaceId)
 
-  const negocios = new Map<string, NegocioRow>()
-  for (const n of ((negociosRaw ?? []) as Array<{
+  const filas = (negociosRaw ?? []) as Array<{
     id: string; codigo: string | null; nombre: string | null
     precio_aprobado: number | null; precio_estimado: number | null
     estado: string | null; stage_actual: string | null
     etapas_negocio: { nombre: string | null; orden: number | null } | null
     empresas: { nombre: string | null } | null
-  }>)) {
+  }>
+
+  const tarifas = await cargarTarifasConfirmadas(supabase, filas.map((n) => n.id))
+
+  const negocios = new Map<string, NegocioRow>()
+  for (const n of filas) {
+    const honorario = n.precio_aprobado ?? n.precio_estimado ?? 0
+    const tarifa = tarifas.get(n.id) ?? 0
     negocios.set(n.id, {
       id: n.id,
       codigo: n.codigo,
       nombre: n.nombre,
-      precio: n.precio_aprobado ?? n.precio_estimado ?? 0,
+      precio: honorario,
+      tarifa,
+      // Misma función que usa el saldo del bloque de Cobros y el gate de handoff.
+      valor_a_recaudar: valorARecaudar(honorario, { tarifa_upme: tarifa, aprobado_plan: null, aprobado_honorario: null }),
       estado: n.estado,
       stage_actual: n.stage_actual,
       etapa_nombre: n.etapas_negocio?.nombre ?? null,
@@ -794,9 +859,9 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
 
   // Pestaña 1: SOBREPAGOS (por referencia) + por devolver (global)
   //
-  // Una referencia es un sobrepago cuando su pago total supera el precio del
-  // negocio donde cayó (el "origen"). El pago se reparte como porciones editables
-  // entre varios negocios (anticipos parciales): el remanente = valor pagado -
+  // Una referencia es un sobrepago cuando su pago total supera el VALOR A RECAUDAR
+  // del negocio donde cayó (el "origen") = honorario + tarifa UPME. El pago se reparte
+  // como porciones editables entre negocios (anticipos parciales): el remanente = pagado -
   // asignado - por devolver, y baja a medida que se asigna. Se concilia en $0.
   const sobrepagos: SobrepagoRef[] = []
   const porDevolver: RefPorcion[] = []
@@ -811,13 +876,18 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
     const origin = nonReparto[0]
     const negOrigin = origin.negocio_id ? negocios.get(origin.negocio_id) : null
     if (!negOrigin || negOrigin.estado !== 'abierto') continue
-    const precioOrigen = negOrigin.precio
+    // Lo que el cliente le debe a SOENA es honorario + tarifa UPME, y las paga en UN
+    // recaudo. Comparar contra el honorario a secas convertía a TODO cliente que paga
+    // completo en un sobrepago del tamaño exacto de la tarifa.
+    const precioOrigen = negOrigin.valor_a_recaudar
 
     // ref_total: persistido en el cobro de origen una vez se materializa el reparto.
     // Mientras está "fresco", el cobro de origen aún contiene todo el pago.
     const materializado = origin.ref_total != null
     const refTotal = materializado ? (origin.ref_total as number) : origin.monto
-    if (refTotal <= precioOrigen + 1) continue // no hay sobrepago
+    // Mismo piso de materialidad que el resto del sistema (ver `tolerancia-saldo.ts`):
+    // un residuo de redondeo no es plata de más que haya que repartir.
+    if (refTotal - precioOrigen <= TOLERANCIA_SALDO_COP) continue // no hay sobrepago
 
     const conc = origin.negocio_id ? (conciliadoNegocio.get(origin.negocio_id) ?? false) : false
     if (conc) continue // ya conciliado → sale de la pestaña
@@ -837,11 +907,11 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
           nombre: p.negocio_nombre,
           monto: p.monto,
           es_origen: p.negocio_id === origin.negocio_id,
-          saldo: neg ? neg.precio - cob : 0,
+          saldo: neg ? neg.valor_a_recaudar - cob : 0,
         })
       }
     } else {
-      // Fresco: por defecto el origen retiene su precio; el resto es remanente.
+      // Fresco: por defecto el origen retiene su valor a recaudar; el resto es remanente.
       const cobOrig = cobrado.get(origin.negocio_id ?? '') ?? 0
       asignaciones.push({
         negocio_id: origin.negocio_id,
@@ -849,7 +919,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
         nombre: origin.negocio_nombre,
         monto: Math.min(precioOrigen, refTotal),
         es_origen: true,
-        saldo: negOrigin.precio - cobOrig,
+        saldo: negOrigin.valor_a_recaudar - cobOrig,
       })
     }
 
@@ -878,7 +948,18 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
   for (const [negId, neg] of negocios) {
     if (neg.estado !== 'abierto') continue
     const cob = cobrado.get(negId) ?? 0
-    const saldo = neg.precio - cob
+    // Falta / sobra contra lo que el cliente le paga a SOENA (honorario + tarifa),
+    // no contra el honorario: con el honorario a secas, quien paga completo aparecía
+    // con un sobrante del tamaño de la tarifa y quien debía plata aparecía al revés
+    // (medido: V0103 mostraba "sobran $276.812" cuando le FALTAN $425.000).
+    //
+    // ⚠️ Este panel INFORMA; el gate `conciliacion_diana` RETIENE. Por eso
+    // `descuadreConciliacion` mide su faltante contra el honorario solo y este contra
+    // el valor a recaudar, y esa diferencia es a propósito: un cliente que le pagó la
+    // tarifa DIRECTO a la UPME no debe quedar frenado por una deuda que no tiene, pero
+    // sí vale la pena que aparezca en la lista de quien cobra. No unificarlas sin medir
+    // los 62 casos que la versión simétrica retenía (ver #206).
+    const saldo = neg.valor_a_recaudar - cob
     const refsDelNegocio = referencias
       .filter((r) => r.porciones.some((p) => p.negocio_id === negId))
       .map((r) => {
@@ -899,12 +980,14 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
       etapa_nombre: neg.etapa_nombre,
       responsable: responsablePorNegocio.get(negId) ?? null,
       precio: neg.precio,
+      tarifa_upme: neg.tarifa,
+      valor_a_recaudar: neg.valor_a_recaudar,
       cobrado: cob,
       saldo,
       referencias: refsDelNegocio,
       conciliado: conciliadoNegocio.get(negId) ?? false,
     }
-    if (Math.abs(saldo) <= 1) conciliadosList.push(fila)
+    if (saldoCuadrado(saldo)) conciliadosList.push(fila)
     else saldos.push(fila)
   }
   saldos.sort((a, b) => b.saldo - a.saldo)
@@ -941,7 +1024,8 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
       codigo: s.codigo,
       nombre: s.nombre,
       empresa: s.empresa,
-      precio: s.precio,
+      // Valor a recaudar, para que `precio - cobrado` cuadre con `diferencia`.
+      precio: s.valor_a_recaudar,
       cobrado: s.cobrado,
       diferencia: s.saldo,
     }))

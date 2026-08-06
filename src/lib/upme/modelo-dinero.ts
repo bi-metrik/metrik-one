@@ -77,6 +77,79 @@ export function valorARecaudar(precioAprobado: number, modelo: ModeloDinero | nu
   return Math.round(honorario + tarifa)
 }
 
+// ── Tarifa confirmada: resolución EN LOTE ────────────────────────────────────
+//
+// `leerModeloDineroCompleto` resuelve el modelo de UN negocio con varias consultas.
+// El panel de conciliación necesita la tarifa de TODOS los negocios del workspace
+// (235 abiertos en SOENA), así que no puede llamarlo en un bucle. Estas funciones
+// son la MISMA decisión, extraída pura: el caller trae las filas en una consulta
+// por lote y aquí se aplican las tres reglas. Si la regla cambia, cambia acá y en
+// `leerModeloDineroCompleto` — el contrato entre las dos lo fija `tarifa-lote.test.ts`.
+
+/** Fila mínima de un `negocio_bloques` para resolver la tarifa en lote. */
+export interface FilaBloqueTarifa {
+  negocio_id: string
+  data: Record<string, unknown> | null
+}
+
+/**
+ * Tarifa UPME CONFIRMADA que declara el `data` de un bloque de confirmación. 0 si no
+ * está confirmada.
+ *
+ * El toggle `tarifa_confirmada` es obligatorio: el bloque también guarda la tarifa de
+ * REFERENCIA calculada (Art. 13), y esa no es una obligación del cliente hasta que
+ * alguien la confirma. Tomarla sin el toggle inflaría el valor a recaudar de negocios
+ * que todavía no cerraron la cifra.
+ */
+export function tarifaConfirmadaDeData(data: Record<string, unknown> | null | undefined): number {
+  if (!data || typeof data !== 'object') return 0
+  if (data.tarifa_confirmada !== true) return 0
+  const valor = Number(data.tarifa_upme_confirmada ?? 0)
+  return Number.isFinite(valor) && valor > 0 ? valor : 0
+}
+
+/**
+ * ¿Este bloque declara que el negocio NO contrató la certificación UPME? Solo cuenta
+ * si el campo EXISTE y está en `false`: un bloque sin tocar no debe anular la tarifa
+ * de un negocio normal.
+ */
+export function niegaCertificacionUpme(data: Record<string, unknown> | null | undefined): boolean {
+  if (!data || typeof data !== 'object') return false
+  return 'requiere_certificacion_upme' in data && data.requiere_certificacion_upme === false
+}
+
+/**
+ * Mapa negocio → tarifa UPME confirmada, resuelto en lote.
+ *
+ * Un negocio puede traer varias filas del bloque (las copias readonly heredadas viajan
+ * con él entre etapas): gana la confirmada, sin importar el orden de llegada. Si el
+ * negocio declaró que no contrató la certificación, la tarifa se anula: no hay nada
+ * que pasarle al cliente y sumársela escondería un sobrepago real.
+ *
+ * Puro: no toca DB ni red.
+ *
+ * @param confirmaciones filas de los bloques con `config_extra.tarifa_confirmacion.enabled`.
+ * @param certificaciones filas del bloque `certificacion_upme` (decisión comercial).
+ */
+export function tarifaConfirmadaPorNegocio(
+  confirmaciones: FilaBloqueTarifa[],
+  certificaciones: FilaBloqueTarifa[],
+): Map<string, number> {
+  const tarifas = new Map<string, number>()
+  for (const fila of confirmaciones) {
+    if (!fila?.negocio_id) continue
+    const tarifa = tarifaConfirmadaDeData(fila.data)
+    if (tarifa <= 0) continue
+    // Máximo entre filas: determinista, no depende del orden en que lleguen.
+    tarifas.set(fila.negocio_id, Math.max(tarifas.get(fila.negocio_id) ?? 0, tarifa))
+  }
+  for (const fila of certificaciones) {
+    if (!fila?.negocio_id) continue
+    if (niegaCertificacionUpme(fila.data)) tarifas.set(fila.negocio_id, 0)
+  }
+  return tarifas
+}
+
 export interface RepartoPago {
   /** Porción que cubre la tarifa (pasante): min(pago, tarifa). */
   monto_pasante: number
