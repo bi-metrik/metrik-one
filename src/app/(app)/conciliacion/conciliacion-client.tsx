@@ -7,7 +7,7 @@ import Link from 'next/link'
 import {
   Scale, CheckCircle2, Loader2, X, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
-  Landmark,
+  Landmark, Clock,
 } from 'lucide-react'
 import {
   aceptarRepartoComercial,
@@ -21,6 +21,7 @@ import {
 } from '@/lib/actions/conciliacion-actions'
 import { MAX_LARGO_REF_EXTERNA, referenciaVisible } from '@/lib/cobros/referencia-externa'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -560,8 +561,20 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
                     <span className="text-[12px]" style={{ color: '#6B7280' }}>{n.empresa ?? n.nombre ?? ''}</span>
                     <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
                   </Link>
-                  <div className="mt-0.5 text-[11px]" style={{ color: '#9CA3AF' }}>
-                    {n.etapa_nombre ?? ''}{n.responsable ? ` · ${n.responsable}` : ''}
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[11px]" style={{ color: '#9CA3AF' }}>
+                    <span>{n.etapa_nombre ?? ''}{n.responsable ? ` · ${n.responsable}` : ''}</span>
+                    {n.dias_desde_creacion != null && (
+                      <span
+                        className="inline-flex items-center gap-1"
+                        // Se nombra la referencia del contador en el tooltip: "24 días" a
+                        // secas invita a leerlo como días de mora, y no lo son.
+                        title={`El negocio se creó hace ${etiquetaAntiguedad(n.dias_desde_creacion)}. No es la antigüedad de la deuda: cuenta desde que nació el caso, no desde que se aprobó la propuesta.`}
+                      >
+                        <span aria-hidden>·</span>
+                        <Clock className="h-3 w-3" />
+                        {etiquetaAntiguedad(n.dias_desde_creacion)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
