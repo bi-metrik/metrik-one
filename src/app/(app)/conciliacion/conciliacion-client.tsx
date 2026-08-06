@@ -20,6 +20,7 @@ import {
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
 import { MAX_LARGO_REF_EXTERNA, referenciaVisible } from '@/lib/cobros/referencia-externa'
+import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -458,16 +459,19 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
     let sobrante = 0
     let faltante = 0
     for (const n of data.saldos) {
-      if (n.saldo < -1) sobrante += Math.abs(n.saldo)
-      else if (n.saldo > 1) faltante += n.saldo
+      // Misma vara que el servidor: un residuo de redondeo no es ni sobrante ni
+      // faltante. Con el umbral de $1 propio, la pestaña contradecía al panel.
+      if (saldoCuadrado(n.saldo)) continue
+      if (n.saldo < 0) sobrante += Math.abs(n.saldo)
+      else faltante += n.saldo
     }
     return { sobrante, faltante, diferencia: faltante - sobrante }
   }, [data])
 
   const universo = useMemo<NegocioSaldo[]>(() => {
     const out: NegocioSaldo[] = []
-    if (filtros.sobrante) out.push(...data.saldos.filter((n) => n.saldo < -1))
-    if (filtros.faltante) out.push(...data.saldos.filter((n) => n.saldo > 1))
+    if (filtros.sobrante) out.push(...data.saldos.filter((n) => n.saldo < 0 && !saldoCuadrado(n.saldo)))
+    if (filtros.faltante) out.push(...data.saldos.filter((n) => n.saldo > 0 && !saldoCuadrado(n.saldo)))
     if (filtros.cero) out.push(...data.conciliados)
     return out
   }, [data, filtros])
@@ -561,7 +565,7 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  {Math.abs(n.saldo) <= 1 ? (
+                  {saldoCuadrado(n.saldo) ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                       <CheckCircle2 className="h-3 w-3" /> Pagado
                     </span>
@@ -576,8 +580,16 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
                       <div className="text-[14px] font-bold tabular-nums" style={{ color: '#DC2626' }}>{fmtCOP(Math.abs(n.saldo))}</div>
                     </>
                   )}
-                  <div className="mt-0.5 text-[10px]" style={{ color: '#9CA3AF' }}>
-                    {fmtCOP(n.cobrado)} / {fmtCOP(n.precio)}
+                  <div
+                    className="mt-0.5 text-[10px]"
+                    style={{ color: '#9CA3AF' }}
+                    title={
+                      n.tarifa_upme > 0
+                        ? `Honorario ${fmtCOP(n.precio)} + tarifa UPME ${fmtCOP(n.tarifa_upme)}`
+                        : undefined
+                    }
+                  >
+                    {fmtCOP(n.cobrado)} / {fmtCOP(n.valor_a_recaudar)}
                   </div>
                 </div>
               </div>
