@@ -33,6 +33,8 @@
  * Sin el flag ninguna línea de ningún workspace cambia de comportamiento.
  */
 
+import { saldoCuadrado } from './tolerancia-saldo'
+
 /** Máximo de saltos encadenados en un solo avance. Backstop, no un límite esperado. */
 export const MAX_SALTOS_ENCADENADOS = 5
 
@@ -56,9 +58,16 @@ export function aplicaSaltoPorSaldo(etapa: EtapaSalto | null | undefined): boole
 /**
  * Con el saldo ya calculado, ¿corresponde saltar esta etapa?
  *
- * Con `conciliar_sobrepago` activo solo salta el pago EXACTO: un sobrepago tiene que entrar
+ * Con `conciliar_sobrepago` activo salta el pago CUADRADO: un sobrepago real tiene que entrar
  * a la etapa para conciliarse en vez de pasar de largo. Sin él, cualquier saldo cubierto
  * (cero o negativo) salta, que es el comportamiento histórico.
+ *
+ * ⚠️ "Cuadrado" NO es cero absoluto, es dentro del piso de materialidad (`saldoCuadrado`).
+ * Exigir el cero exacto abría una franja donde el motor retenía un caso que, ya adentro, sus
+ * propios gates daban por cuadrado: el gate `saldo_cero` de esa misma etapa tolera $1.000.
+ * Dos varas para la misma plata, y en medio quedaban varados los que pagaron redondeando
+ * (SOENA 2026-08-06: V0276 con $120 de más, V0274 con $688). El piso lo decide el CFO y vive
+ * en `tolerancia-saldo.ts`.
  *
  * Un negocio sin precio nunca salta: sin monto de referencia el saldo no significa nada.
  */
@@ -68,5 +77,5 @@ export function debeSaltarPorSaldo(
   conciliarSobrepago: boolean,
 ): boolean {
   if (!(precio > 0)) return false
-  return conciliarSobrepago ? saldo === 0 : saldo <= 0
+  return conciliarSobrepago ? saldoCuadrado(saldo) : saldo <= 0
 }

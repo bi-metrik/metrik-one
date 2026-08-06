@@ -293,6 +293,27 @@ describe('descuadreConciliacion', () => {
     expect(descuadreConciliacion(637_500, modelo({ tarifa_upme: 0 }), 637_501).hayDescuadre).toBe(false)
   })
 
+  // Decisión de Mauricio (2026-08-06): el piso de materialidad es UNO para todo el sistema.
+  // Antes esta función toleraba $1 mientras el gate `saldo_cero` toleraba $1.000, así que el
+  // mismo peso de diferencia se juzgaba con dos varas. Medido sobre los 232 negocios abiertos
+  // de SOENA: destraba 2 (V0274 con $688, V0276 con $120) y no retiene ninguno nuevo.
+  it('un residuo dentro de la tolerancia de materialidad no es descuadre', () => {
+    const d = descuadreConciliacion(318_750, modelo({ tarifa_upme: 733_130 }), 1_052_000) // V0276
+    expect(d.exceso).toBe(120)
+    expect(d.hayDescuadre).toBe(false)
+
+    const f = descuadreConciliacion(637_500, modelo({ tarifa_upme: 0 }), 636_501)
+    expect(f.faltante).toBe(999)
+    expect(f.hayDescuadre).toBe(false)
+  })
+
+  // La franja tolerada no puede tragarse plata real: el borde se fija en la prueba para que
+  // ampliarla exija tocar esta línea a conciencia.
+  it('pasado el piso vuelve a ser descuadre, por los dos lados', () => {
+    expect(descuadreConciliacion(637_500, modelo({ tarifa_upme: 0 }), 638_501).hayDescuadre).toBe(true)
+    expect(descuadreConciliacion(637_500, modelo({ tarifa_upme: 0 }), 636_499).hayDescuadre).toBe(true)
+  })
+
   it('sin modelo de dinero se comporta como si no hubiera tarifa', () => {
     const d = descuadreConciliacion(637_500, null, 637_500)
     expect(d.hayDescuadre).toBe(false)
