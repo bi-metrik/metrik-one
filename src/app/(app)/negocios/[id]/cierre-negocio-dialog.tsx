@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -390,9 +391,34 @@ export default function CierreNegocioDialog({
   const showCompletar = stage === 'cobro' || (stage === 'ejecucion' && isTerminalStage)
   const showCancelar = stage === 'ejecucion' && !isTerminalStage
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-xl p-6 space-y-1">
+  // Bloquear scroll del fondo + cerrar con Escape. No se cierra al hacer click
+  // fuera a proposito: aqui hay un formulario y un click accidental en el fondo
+  // borraria lo escrito.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  // El dialogo solo se monta tras un click, nunca en SSR.
+  if (typeof document === 'undefined') return null
+
+  // Portal a document.body. Este dialogo se renderiza DENTRO del selector de
+  // etapa, que vive en el header sticky; ese header usa `backdrop-blur`, que
+  // crea un containing block y atrapa el `fixed inset-0` adentro: el panel
+  // quedaba detras de la barra de saludo y fecha en vez de cubrir la pantalla.
+  // Es el mismo fallo que ya se corrigio en `ModalGateBloqueado`: cualquier
+  // overlay nuevo que se monte dentro del header necesita este portal.
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain bg-black/50 p-4">
+      {/* max-h + scroll interno: el formulario de cierre crecio con la excepcion
+          no facturable y en pantallas bajas se salia del viewport. */}
+      <div className="my-auto flex max-h-[90vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-white shadow-xl p-6 space-y-1">
         {stage === 'venta' && (
           <PerderForm negocioId={negocioId} esBuzonLeads={esBuzonLeads} onClose={onClose} />
         )}
@@ -409,6 +435,7 @@ export default function CierreNegocioDialog({
           />
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

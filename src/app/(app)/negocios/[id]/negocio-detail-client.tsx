@@ -895,9 +895,15 @@ function PausaNegocioDialog({
     })
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-background border border-border shadow-xl">
+  // Mismo portal que el modal de gate y el dialogo de cierre: este dialogo se
+  // monta dentro del header sticky, y su `backdrop-blur` crea un containing
+  // block que atrapa el `fixed inset-0` adentro (el panel queda detras de la
+  // barra de saludo). Todo overlay que nazca aqui necesita salir al body.
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain bg-black/40 p-4">
+      <div className="my-auto flex max-h-[90vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-background border border-border shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">Pausar negocio</h2>
@@ -972,7 +978,8 @@ function PausaNegocioDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
