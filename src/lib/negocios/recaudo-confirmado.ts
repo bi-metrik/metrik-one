@@ -42,6 +42,15 @@
  * Puro: no toca DB ni red.
  */
 
+/**
+ * ⚠️ DEUDA DETECTADA (2026-08-06): `src/types/database.ts` NO declara `split_json` en
+ * `cobros` — solo en `gastos`. La columna existe en la base desde que se construyó el
+ * reparto de pagos, así que los tipos están stale. Por eso los llamadores consultan esa
+ * columna vía el helper `db()` (que devuelve `any`) en lugar del cliente tipado. Al
+ * regenerar los tipos (`npx supabase gen types`, recordando re-agregar los ~26 alias del
+ * final del archivo) esos `db()` pueden volver a ser `supabase` tipado.
+ */
+
 /** Fila mínima de un cobro para decidir si su plata está confirmada. */
 export interface CobroParaRecaudo {
   monto: number | null

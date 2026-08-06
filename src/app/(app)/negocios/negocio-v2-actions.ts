@@ -2950,7 +2950,7 @@ export async function cambiarEtapaNegocioConGate(
           .select('precio_aprobado, precio_estimado')
           .eq('id', negocioId)
           .single(),
-        supabase
+        db(supabase)
           .from('cobros')
           .select('monto, split_json')
           .eq('negocio_id', negocioId)
@@ -3033,7 +3033,7 @@ export async function cambiarEtapaNegocioConGate(
       // confirmó: soltar el negocio a operaciones es justo la decisión que no conviene
       // tomar con plata en veremos.
       const [{ data: cobrosHandoff }, conciliadoHandoffRes] = await Promise.all([
-        supabase
+        db(supabase)
           .from('cobros')
           .select('monto, tipo_cobro, split_json')
           .eq('negocio_id', negocioId)
@@ -3182,7 +3182,10 @@ export async function cambiarEtapaNegocioConGate(
     if (etapaGates.includes('sobrepago_conciliado')) {
       const [negPrecioConcRes, cobrosConcRes, modeloConc, conciliadoSobreRes] = await Promise.all([
         db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-        supabase.from('cobros').select('monto, split_json').eq('negocio_id', negocioId),
+        // db(): los tipos generados de `cobros` NO declaran `split_json` (la columna
+        // existe en la base desde el reparto de pagos; `src/types/database.ts` solo la
+        // tiene en `gastos`). Ver nota en `lib/negocios/recaudo-confirmado.ts`.
+        db(supabase).from('cobros').select('monto, split_json').eq('negocio_id', negocioId),
         leerModeloDineroCompleto(supabase, negocioId),
         db(supabase)
           .from('negocio_conciliacion')
@@ -3258,7 +3261,7 @@ export async function cambiarEtapaNegocioConGate(
     if (etapaGates.includes('conciliacion_diana')) {
       const [negConcRes, cobrosConcRes, checkRes, modeloConcDiana] = await Promise.all([
         db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-        supabase.from('cobros').select('monto, split_json').eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
+        db(supabase).from('cobros').select('monto, split_json').eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
         db(supabase)
           .from('negocio_conciliacion')
           .select('conciliado')
@@ -3337,7 +3340,8 @@ export async function cambiarEtapaNegocioConGate(
   {
     const [negPrecioRes, cobrosSkipRes, modeloSkip, conciliadoSkipRes] = await Promise.all([
       db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-      supabase.from('cobros').select('monto, split_json').eq('negocio_id', negocioId),
+      // db(): ver nota de tipos stale en `lib/negocios/recaudo-confirmado.ts`.
+      db(supabase).from('cobros').select('monto, split_json').eq('negocio_id', negocioId),
       leerModeloDineroCompleto(supabase, negocioId),
       db(supabase)
         .from('negocio_conciliacion')
