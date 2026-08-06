@@ -303,6 +303,78 @@ export function esCeroDeliberado(
   return false
 }
 
+// ── Cartera: cuándo la tarifa es plata por cobrar y cuándo es ruido ──────────
+//
+// La tarifa UPME se confirma en Validación, mucho ANTES de que exista una propuesta
+// aprobada. `valorARecaudar` la suma siempre, que es lo correcto para el gate de
+// handoff y para el sobrepago: son preguntas sobre plata que ya se movió o que está a
+// punto de moverse. Pero para la pregunta "¿este negocio le debe plata a SOENA?" ese
+// mismo número convierte al pipeline temprano en cartera inventada: un negocio recién
+// entrado aparece debiendo una tarifa que nadie le ha cotizado.
+//
+// El criterio vive acá, en el resolvedor, y NO dentro del panel: escribirlo al lado
+// del consumidor es exactamente el patrón que dejó seis copias de `precio_aprobado −
+// cobrado` regadas por el sistema.
+
+/** Lo que hay que saber del negocio para decidir si su tarifa es cartera. */
+export interface ContextoCartera {
+  /** Recaudo real del cliente (suma de cobros reales), en COP. */
+  recaudado: number
+  /** ¿Su propuesta fue APROBADA con honorario 0? Sale de `esCeroDeliberado`. */
+  ceroDeliberado: boolean
+  /**
+   * `negocios.precio_aprobado` CRUDO: la señal de que hay un monto aprobado.
+   * OJO: no es el honorario que se muestra en pantalla, que cae a `precio_estimado`
+   * cuando no hay aprobado. Un estimado es una hipótesis comercial, no un monto
+   * aprobado, y no debe volver cobrable la tarifa.
+   */
+  honorarioAprobado: number | null
+}
+
+/**
+ * ¿La tarifa confirmada de este negocio es CARTERA (plata que alguien debe cobrar)?
+ *
+ * Sí en cuanto se cumpla cualquiera de las tres:
+ *   1. Ya hay plata recaudada → hay dinero real en juego; esconderlo es peor que el
+ *      ruido que este criterio quita.
+ *   2. Hay honorario aprobado → el negocio se cerró y la tarifa va con él.
+ *   3. Es un cero deliberado → una propuesta aprobada en 0 SIGUE siendo aprobada, y su
+ *      tarifa pendiente es cartera legítima.
+ *
+ * No, solo cuando no se cumple ninguna: sin monto aprobado y sin un peso recaudado, no
+ * hay nada que cobrar todavía.
+ *
+ * Puro: no toca DB ni red.
+ */
+export function tarifaEsCartera(ctx: ContextoCartera): boolean {
+  const recaudado = Number.isFinite(ctx.recaudado) ? ctx.recaudado : 0
+  if (recaudado > 0) return true
+  const aprobado = ctx.honorarioAprobado
+  if (typeof aprobado === 'number' && Number.isFinite(aprobado) && aprobado > 0) return true
+  return ctx.ceroDeliberado === true
+}
+
+/**
+ * Valor a recaudar para efectos de CARTERA: igual a `valorARecaudar`, salvo que deja la
+ * tarifa por fuera cuando todavía no es cobrable (ver `tarifaEsCartera`).
+ *
+ * ⚠️ INVARIANTE que lo hace seguro: **con recaudo > 0 nunca difiere de
+ * `valorARecaudar`**. Por eso este criterio no puede mover un sobrepago ni el badge —
+ * un sobrepago exige un cobro, y con cobro las dos funciones dan lo mismo. Está fijado
+ * en `cartera.test.ts`; si alguien cambia `tarifaEsCartera`, esa prueba es la que avisa.
+ *
+ * @param precioAprobado honorario que se muestra (con su fallback a `precio_estimado`).
+ * @param modelo         modelo de dinero (aporta la tarifa confirmada).
+ * @param ctx            señales del negocio para decidir si la tarifa es cobrable.
+ */
+export function valorARecaudarCartera(
+  precioAprobado: number,
+  modelo: ModeloDinero | null,
+  ctx: ContextoCartera,
+): number {
+  return valorARecaudar(precioAprobado, tarifaEsCartera(ctx) ? modelo : null)
+}
+
 /** Descuadre de la conciliación final del recaudo, desglosado por lado. */
 export interface DescuadreConciliacion {
   /** Honorario que el cliente todavía le debe a SOENA. 0 si está cubierto. */

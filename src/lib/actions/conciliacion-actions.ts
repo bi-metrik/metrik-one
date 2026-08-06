@@ -11,9 +11,11 @@ import {
   repartirPagoTarifaHonorario,
   tipoCobroHonorario,
   tarifaConfirmadaPorNegocio,
-  valorARecaudar,
+  valorARecaudarCartera,
+  esCeroDeliberado,
   type FilaBloqueTarifa,
   type ModeloDinero,
+  type PropuestaBloqueData,
 } from '@/lib/upme/modelo-dinero'
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
@@ -700,10 +702,38 @@ async function cargarTarifasConfirmadas(
   )
 }
 
+/**
+ * Bloques de propuesta económica de MUCHOS negocios, en una consulta por lote. Los
+ * consume `esCeroDeliberado`: una propuesta APROBADA cuyo honorario final es 0 sigue
+ * siendo una propuesta aprobada, y distinguir ese caso del "aún sin cotizar" es lo que
+ * evita esconderle la cartera a un negocio que sí cerró.
+ */
+async function cargarPropuestasEconomicas(
+  supabase: unknown,
+  negocioIds: string[],
+): Promise<Map<string, PropuestaBloqueData[]>> {
+  const out = new Map<string, PropuestaBloqueData[]>()
+  if (negocioIds.length === 0) return out
+
+  const { data } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .in('negocio_id', negocioIds)
+    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+
+  for (const fila of ((data ?? []) as Array<{ negocio_id: string; data: Record<string, unknown> | null }>)) {
+    if (!fila?.negocio_id) continue
+    const lista = out.get(fila.negocio_id)
+    if (lista) lista.push({ data: fila.data })
+    else out.set(fila.negocio_id, [{ data: fila.data }])
+  }
+  return out
+}
+
 async function cargarNegociosYCobros(
   supabase: unknown,
   workspaceId: string,
-): Promise<{ negocios: Map<string, NegocioRow>; cobros: CobroRow[] }> {
+): Promise<{ negocios: Map<string, NegocioRow>; cobros: CobroRow[]; cobrado: Map<string, number> }> {
   const { data: negociosRaw } = await db(supabase)
     .from('negocios')
     .select(`
@@ -720,8 +750,21 @@ async function cargarNegociosYCobros(
     etapas_negocio: { nombre: string | null; orden: number | null } | null
     empresas: { nombre: string | null } | null
   }>
+  const ids = filas.map((n) => n.id)
 
-  const tarifas = await cargarTarifasConfirmadas(supabase, filas.map((n) => n.id))
+  // Los cobros se cargan ANTES de armar el mapa: el recaudo es una de las señales que
+  // deciden si la tarifa de un negocio es cartera (ver `tarifaEsCartera`).
+  const { data: cobrosRaw } = await db(supabase)
+    .from('cobros')
+    .select('id, negocio_id, monto, tipo_cobro, external_ref, fuente, fecha, split_json')
+    .eq('workspace_id', workspaceId)
+  const cobros = (cobrosRaw ?? []) as CobroRow[]
+  const cobrado = cobradoFinanciero(cobros)
+
+  const [tarifas, propuestas] = await Promise.all([
+    cargarTarifasConfirmadas(supabase, ids),
+    cargarPropuestasEconomicas(supabase, ids),
+  ])
 
   const negocios = new Map<string, NegocioRow>()
   for (const n of filas) {
@@ -733,8 +776,18 @@ async function cargarNegociosYCobros(
       nombre: n.nombre,
       precio: honorario,
       tarifa,
-      // Misma función que usa el saldo del bloque de Cobros y el gate de handoff.
-      valor_a_recaudar: valorARecaudar(honorario, { tarifa_upme: tarifa, aprobado_plan: null, aprobado_honorario: null }),
+      // Mismo modelo de dinero que el gate de handoff y el saldo del bloque de Cobros,
+      // pero preguntando por CARTERA: la tarifa de un negocio sin monto aprobado y sin
+      // un peso recaudado todavía no es plata que alguien deba cobrar.
+      valor_a_recaudar: valorARecaudarCartera(
+        honorario,
+        { tarifa_upme: tarifa, aprobado_plan: null, aprobado_honorario: null },
+        {
+          recaudado: cobrado.get(n.id) ?? 0,
+          ceroDeliberado: esCeroDeliberado(propuestas.get(n.id) ?? [], n.precio_aprobado),
+          honorarioAprobado: n.precio_aprobado,
+        },
+      ),
       estado: n.estado,
       stage_actual: n.stage_actual,
       etapa_nombre: n.etapas_negocio?.nombre ?? null,
@@ -743,12 +796,7 @@ async function cargarNegociosYCobros(
     })
   }
 
-  const { data: cobrosRaw } = await db(supabase)
-    .from('cobros')
-    .select('id, negocio_id, monto, tipo_cobro, external_ref, fuente, fecha, split_json')
-    .eq('workspace_id', workspaceId)
-
-  return { negocios, cobros: (cobrosRaw ?? []) as CobroRow[] }
+  return { negocios, cobros, cobrado }
 }
 
 /** cobrado financiero por negocio (excluye devoluciones pendientes). */
@@ -777,8 +825,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
   if (!ctx.ok) return { data: null, error: ctx.error }
   const { supabase, workspaceId } = ctx
 
-  const { negocios, cobros } = await cargarNegociosYCobros(supabase, workspaceId)
-  const cobrado = cobradoFinanciero(cobros)
+  const { negocios, cobros, cobrado } = await cargarNegociosYCobros(supabase, workspaceId)
 
   const negocioIds = Array.from(negocios.keys())
   const responsablePorNegocio = new Map<string, string>()
