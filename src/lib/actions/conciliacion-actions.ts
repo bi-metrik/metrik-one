@@ -19,6 +19,7 @@ import {
   type PropuestaBloqueData,
 } from '@/lib/upme/modelo-dinero'
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import { diasDesde } from '@/lib/negocios/antiguedad'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import {
   construirRefExterna,
@@ -558,6 +559,21 @@ export interface NegocioSaldo {
   saldo: number
   referencias: { external_ref: string; fuente: string | null; monto: number; fecha: string | null }[]
   conciliado: boolean
+  /**
+   * Días cumplidos desde que se CREÓ el negocio, para que la financiera vea de un
+   * vistazo cuánto lleva esperando un faltante.
+   *
+   * ⚠️ Es la antigüedad del NEGOCIO, no la de la deuda. Un negocio puede pasar días en
+   * Validación antes de que se apruebe la propuesta, y hasta ese momento no hay nada
+   * que cobrar: en esos casos este número exagera la mora. Medido en SOENA el
+   * 2026-08-06, la brecha máxima entre ambas era de 4 días (V0124: 9 días de negocio,
+   * 5 de obligación), así que hoy sirve como aproximación. Si algún día se necesita la
+   * mora real, la fuente es la fecha de aprobación de la propuesta, no `created_at`.
+   *
+   * Se calcula en el SERVIDOR: hacerlo al pintar mete un `Date.now()` en el render y
+   * eso ya rompió antes en este repo (`contactos-list`).
+   */
+  dias_desde_creacion: number | null
 }
 
 /** Un negocio al que se le asignó una porción del pago de una referencia. */
@@ -662,6 +678,8 @@ interface NegocioRow {
   etapa_nombre: string | null
   etapa_orden: number | null
   empresa: string | null
+  /** Antigüedad del negocio en días cumplidos. Ver `NegocioSaldo.dias_desde_creacion`. */
+  dias_desde_creacion: number | null
 }
 
 interface CobroRow {
@@ -748,7 +766,7 @@ async function cargarNegociosYCobros(
   const { data: negociosRaw } = await db(supabase)
     .from('negocios')
     .select(`
-      id, codigo, nombre, precio_aprobado, precio_estimado, estado, stage_actual,
+      id, codigo, nombre, precio_aprobado, precio_estimado, estado, stage_actual, created_at,
       etapas_negocio:etapa_actual_id ( nombre, orden ),
       empresas:empresa_id ( nombre )
     `)
@@ -757,11 +775,17 @@ async function cargarNegociosYCobros(
   const filas = (negociosRaw ?? []) as Array<{
     id: string; codigo: string | null; nombre: string | null
     precio_aprobado: number | null; precio_estimado: number | null
-    estado: string | null; stage_actual: string | null
+    estado: string | null; stage_actual: string | null; created_at: string | null
     etapas_negocio: { nombre: string | null; orden: number | null } | null
     empresas: { nombre: string | null } | null
   }>
   const ids = filas.map((n) => n.id)
+
+  // Una sola marca de tiempo para TODAS las filas de la respuesta: si cada negocio
+  // llamara a `Date.now()` por su cuenta, dos casos creados en el mismo instante
+  // podrían salir con antigüedades distintas al cruzar la medianoche a mitad del
+  // recorrido. Es barato hacerlo bien y caro explicarlo después.
+  const ahora = Date.now()
 
   // Los cobros se cargan ANTES de armar el mapa: el recaudo es una de las señales que
   // deciden si la tarifa de un negocio es cartera (ver `tarifaEsCartera`).
@@ -806,6 +830,7 @@ async function cargarNegociosYCobros(
       etapa_nombre: n.etapas_negocio?.nombre ?? null,
       etapa_orden: n.etapas_negocio?.orden ?? null,
       empresa: n.empresas?.nombre ?? null,
+      dias_desde_creacion: diasDesde(n.created_at, ahora),
     })
   }
 
@@ -1058,6 +1083,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
       saldo,
       referencias: refsDelNegocio,
       conciliado: conciliadoNegocio.get(negId) ?? false,
+      dias_desde_creacion: neg.dias_desde_creacion,
     }
     if (saldoCuadrado(saldo)) conciliadosList.push(fila)
     else saldos.push(fila)
