@@ -67,10 +67,11 @@ export default function ConciliacionClient({ data, cola }: { data: ConciliacionV
       <div className="mb-5">
         <div className="flex items-center gap-2">
           <Scale className="h-5 w-5" style={{ color: VERDE }} />
-          <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>Conciliación de pagos</h1>
+          <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>Tesorería</h1>
         </div>
         <p className="mt-1 text-[13px]" style={{ color: '#6B7280' }}>
-          Confirma o rechaza los pagos que el comercial registró. Los pagos se registran desde el bloque de pagos de cada negocio.
+          Facturación, confirmación de pagos y saldos. Los pagos los registra el comercial desde el
+          bloque de pagos de cada negocio; aquí se confirman.
         </p>
       </div>
 

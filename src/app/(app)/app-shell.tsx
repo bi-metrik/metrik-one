@@ -114,8 +114,13 @@ const BUSINESS_NAV_ITEMS = [
 // Cuentas de cobro condicional a modules.cobros_recurrentes.
 const CAJA_MOVIMIENTOS_ITEM = { href: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, roles: ['owner', 'admin', 'supervisor', 'read_only'] }
 const CAJA_COBROS_ITEM = { href: '/cobros-recurrentes', label: 'Cuentas de cobro', icon: Receipt, roles: ['owner', 'admin'] }
-// Conciliación condicional a modules.conciliacion (área financiera concilia).
-const CAJA_CONCILIACION_ITEM = { href: '/conciliacion', label: 'Conciliación', icon: Scale, roles: ['owner', 'admin', 'supervisor'] }
+// Tesorería: condicional a modules.conciliacion (el flag conserva su nombre
+// historico; lo que cambio es el rotulo visible). El modulo dejo de ser solo
+// conciliar: hoy tambien factura y registra recaudos de terceros, que NO son
+// plata propia, asi que "Cartera" se quedaba corto (criterio de Carmen, CFO).
+// La RUTA sigue siendo /conciliacion a proposito: renombrarla romperia enlaces
+// guardados sin darle nada al usuario, que no ve la URL.
+const CAJA_CONCILIACION_ITEM = { href: '/conciliacion', label: 'Tesorería', icon: Scale, roles: ['owner', 'admin', 'supervisor'] }
 
 // 2026-04-27: Causacion → Revision (flag binario, sin formularios fiscales)
 const CONTABILIDAD_NAV_ITEMS = [
