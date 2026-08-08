@@ -1738,12 +1738,23 @@ export async function getNegociosParaPagoFueraEpayco(): Promise<{
   if (!ctx.ok) return { negocios: [], error: ctx.error }
   const { supabase, workspaceId } = ctx
 
-  const { data: raw } = await db(supabase)
+  // El error se LEE. Descartarlo dejaba un fallo mudo: si la consulta fallaba,
+  // la funcion devolvia lista vacia sin error y la pantalla mostraba un buscador
+  // que "no encuentra nada", indistinguible de un workspace sin negocios.
+  const { data: raw, error: qErr } = await db(supabase)
     .from('negocios')
     .select('id, codigo, nombre, empresas:empresa_id ( nombre )')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
     .order('created_at', { ascending: false })
+    // Sin limite explicito manda el tope del servidor (1000). Se sube para que la
+    // lista no se corte en silencio cuando el workspace crezca: el buscador filtra
+    // en el cliente, asi que un truncamiento se ve como "ese negocio no existe".
+    .limit(5000)
+
+  if (qErr) {
+    return { negocios: [], error: `No se pudieron cargar los negocios: ${(qErr as { message: string }).message}` }
+  }
 
   const negocios: NegocioParaPagoFueraEpayco[] = ((raw ?? []) as Array<{
     id: string

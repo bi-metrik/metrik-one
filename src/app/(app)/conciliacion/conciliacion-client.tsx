@@ -726,8 +726,12 @@ function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
       </div>
 
       <div className="space-y-4 rounded-lg border bg-white p-4" style={{ borderColor: '#E5E7EB' }}>
-        {/* Negocio */}
-        <label className="block">
+        {/* Negocio.
+            NO es un <label>: adentro hay un input y ademas la lista de resultados,
+            que son <button>. Un <label> se asocia al primer control labelable que
+            contiene y reenvia hacia el los clics de todo lo que envuelve, incluidos
+            esos botones. Por eso es un <div> con el rotulo suelto. */}
+        <div className="block">
           <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Negocio</span>
           {cargando ? (
             <div className="flex items-center gap-2 text-[13px]" style={{ color: '#6B7280' }}>
@@ -782,7 +786,7 @@ function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
               )}
             </>
           )}
-        </label>
+        </div>
 
         {/* Valor + fecha */}
         <div className="grid grid-cols-2 gap-3">
