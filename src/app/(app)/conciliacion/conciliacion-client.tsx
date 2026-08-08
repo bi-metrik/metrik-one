@@ -7,7 +7,7 @@ import Link from 'next/link'
 import {
   Scale, CheckCircle2, Loader2, X, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
-  Landmark, Clock,
+  Landmark, Clock, FileText, AlertTriangle,
 } from 'lucide-react'
 import {
   aceptarRepartoComercial,
@@ -20,6 +20,8 @@ import {
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
 import { MAX_LARGO_REF_EXTERNA, referenciaVisible } from '@/lib/cobros/referencia-externa'
+import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
+import { descartarDeFacturacion, restaurarEnFacturacion } from '@/lib/actions/facturacion-actions'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
 
@@ -29,7 +31,7 @@ const fmtCOP = (n: number) =>
 const VERDE = '#10B981'
 const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
 
-type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco'
+type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion'
 
 /**
  * Panel de conciliación de la FINANCIERA — SOLO aceptar o rechazar lo que el
@@ -43,7 +45,7 @@ type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco'
  *     bancaria. NO es conciliación — por eso vive en su propia pestaña, aislada de
  *     la bandeja de aceptar/rechazar.
  */
-export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
+export default function ConciliacionClient({ data, cola }: { data: ConciliacionV2; cola: ColaFacturacion | null }) {
   const router = useRouter()
 
   // Repartos propuestos por el comercial, pendientes de confirmar.
@@ -59,6 +61,7 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
     { key: 'saldos', label: 'Saldos', count: data.metricas.en_saldo },
     { key: 'general', label: 'Vista general' },
     { key: 'fuera_epayco', label: 'Pago fuera de ePayco' },
+    ...(cola ? [{ key: 'facturacion' as TabKey, label: 'Por facturar', count: cola.totales.listos + cola.totales.incompletos }] : []),
   ]
 
   return (
@@ -67,10 +70,11 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
       <div className="mb-5">
         <div className="flex items-center gap-2">
           <Scale className="h-5 w-5" style={{ color: VERDE }} />
-          <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>Conciliación de pagos</h1>
+          <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>Tesorería</h1>
         </div>
         <p className="mt-1 text-[13px]" style={{ color: '#6B7280' }}>
-          Confirma o rechaza los pagos que el comercial registró. Los pagos se registran desde el bloque de pagos de cada negocio.
+          Facturación, confirmación de pagos y saldos. Los pagos los registra el comercial desde el
+          bloque de pagos de cada negocio; aquí se confirman.
         </p>
       </div>
 
@@ -106,6 +110,7 @@ export default function ConciliacionClient({ data }: { data: ConciliacionV2 }) {
       {tab === 'saldos' && <TabSaldos data={data} />}
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'fuera_epayco' && <TabPagoFueraEpayco onDone={() => router.refresh()} />}
+      {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
     </div>
   )
 }
@@ -880,5 +885,269 @@ function FuenteBadge({ fuente, small }: { fuente: string; small?: boolean }) {
     >
       {label}
     </span>
+  )
+}
+
+// ── Pestaña: Por facturar ─────────────────────────────────────────────────────
+
+/**
+ * Cola de facturación del área financiera. Es la ÚNICA superficie desde la que
+ * se factura: el negocio tendrá un botón, pero lleva aquí (decisión de Mauricio,
+ * 2026-08-06, para que no existan dos vías de escritura del mismo documento).
+ *
+ * Esta versión LEE: muestra qué se puede facturar y qué le falta a cada caso.
+ * La emisión contra Siigo se conecta después, sobre esta misma lista.
+ */
+type VistaFact = 'pendientes' | 'descartados' | 'facturados'
+
+function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
+  const router = useRouter()
+  const [vista, setVista] = useState<VistaFact>('pendientes')
+
+  if (cola.desde_etapa_numero == null) {
+    return (
+      <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
+        <FileText className="mx-auto h-8 w-8" style={{ color: '#D1D5DB' }} />
+        <p className="mt-2 text-[13px] font-semibold" style={{ color: '#1A1A1A' }}>Facturación sin configurar</p>
+        <p className="mt-1 text-[12px]" style={{ color: '#6B7280' }}>
+          Falta definir desde qué etapa se habilita facturar. Mientras no esté, esta bandeja no
+          asume ningún criterio: prefiere estar vacía a llenarse de casos que nadie mandó facturar.
+        </p>
+      </div>
+    )
+  }
+
+  const facturados = cola.casos.filter(c => c.ya_facturado)
+  const descartados = cola.casos.filter(c => !c.ya_facturado && c.descartado != null)
+  const pendientes = cola.casos.filter(c => !c.ya_facturado && c.descartado == null)
+  const visibles = vista === 'facturados' ? facturados : vista === 'descartados' ? descartados : pendientes
+
+  return (
+    <div>
+      {/* Resumen */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { label: 'Listos para facturar', value: String(cola.totales.listos), destaque: true },
+          { label: 'Les falta un dato', value: String(cola.totales.incompletos) },
+          { label: 'Descartados', value: String(cola.totales.descartados) },
+          { label: 'Valor listo', value: fmtCOP(cola.totales.valor_listo) },
+        ].map(t => (
+          <div key={t.label} className="rounded-lg border px-3 py-2" style={{ borderColor: '#E5E7EB' }}>
+            <div className="text-[11px]" style={{ color: '#6B7280' }}>{t.label}</div>
+            <div className="text-[15px] font-bold" style={{ color: t.destaque ? VERDE : '#1A1A1A' }}>{t.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {!cola.siigo_configurado && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border px-3 py-2"
+             style={{ borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }}>
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#B45309' }} />
+          <p className="text-[12px]" style={{ color: '#92400E' }}>
+            Este espacio todavía no tiene la conexión contable configurada. La lista se puede
+            revisar, pero no se puede emitir nada.
+          </p>
+        </div>
+      )}
+
+      {cola.descarte_abierto && (
+        <div className="mb-3 rounded-lg border px-3 py-2 text-[12px]"
+             style={{ borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', color: '#6B7280' }}>
+          <strong style={{ color: '#1A1A1A' }}>Puesta al día:</strong> puedes descartar los casos que ya
+          se facturaron por fuera o que no van a facturarse. Se pueden devolver a la cola en cualquier
+          momento. Esta opción está disponible hasta el {cola.descarte_hasta}.
+        </div>
+      )}
+
+      {/* Selector de vista */}
+      <div className="mb-3 flex flex-wrap gap-1">
+        {([
+          { k: 'pendientes' as VistaFact, label: `Pendientes (${pendientes.length})` },
+          { k: 'descartados' as VistaFact, label: `Descartados (${descartados.length})` },
+          { k: 'facturados' as VistaFact, label: `Ya facturados (${facturados.length})` },
+        ]).map(o => (
+          <button
+            key={o.k}
+            onClick={() => setVista(o.k)}
+            className="rounded-full border px-3 py-1 text-[12px] font-medium transition"
+            style={{
+              borderColor: vista === o.k ? VERDE : '#E5E7EB',
+              backgroundColor: vista === o.k ? '#D1FAE5' : 'transparent',
+              color: vista === o.k ? '#047857' : '#6B7280',
+            }}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {visibles.length === 0 ? (
+        <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
+          <p className="text-[13px]" style={{ color: '#6B7280' }}>
+            {vista === 'facturados' ? 'Ningún caso registra factura todavía.'
+              : vista === 'descartados' ? 'No has descartado ningún caso.'
+              : 'No hay casos por facturar.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visibles.map(c => (
+            <FilaPorFacturar
+              key={c.negocio_id}
+              caso={c}
+              descarteAbierto={cola.descarte_abierto}
+              onCambio={() => router.refresh()}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FilaPorFacturar({
+  caso, descarteAbierto, onCambio,
+}: { caso: CasoPorFacturar; descarteAbierto: boolean; onCambio: () => void }) {
+  const [isPending, startTransition] = useTransition()
+  const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
+  const [motivo, setMotivo] = useState('')
+
+  const confirmarDescarte = () => {
+    startTransition(async () => {
+      const r = await descartarDeFacturacion(caso.negocio_id, motivo)
+      if (r.error) { toast.error(r.error); return }
+      toast.success(`${caso.codigo ?? 'Caso'} descartado de la cola`)
+      setPidiendoMotivo(false); setMotivo(''); onCambio()
+    })
+  }
+
+  const restaurar = () => {
+    startTransition(async () => {
+      const r = await restaurarEnFacturacion(caso.negocio_id)
+      if (r.error) { toast.error(r.error); return }
+      toast.success(`${caso.codigo ?? 'Caso'} devuelto a la cola`)
+      onCambio()
+    })
+  }
+
+  // Un caso está listo cuando puede emitirse la factura del honorario. El recibo
+  // del recaudo UPME se reporta aparte: es otro documento y otra plata (de un
+  // tercero), así que su falta NO debe frenar la factura.
+  const listo = caso.faltan_factura.length === 0 && caso.faltan_cliente.length === 0
+  const faltas = [...new Set([...caso.faltan_cliente, ...caso.faltan_factura])]
+
+  return (
+    <div className="rounded-lg border p-3" style={{ borderColor: listo ? '#A7F3D0' : '#E5E7EB' }}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Link href={`/negocios/${caso.negocio_id}`} className="text-[13px] font-semibold hover:underline"
+                  style={{ color: '#1A1A1A' }}>
+              {caso.codigo ?? 'sin código'}
+            </Link>
+            <span className="truncate text-[13px]" style={{ color: '#1A1A1A' }}>{caso.nombre ?? ''}</span>
+            {caso.ya_facturado && (
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                    style={{ backgroundColor: '#D1FAE5', color: '#047857' }}>Facturado</span>
+            )}
+          </div>
+          <div className="mt-0.5 text-[11px]" style={{ color: '#6B7280' }}>
+            {[caso.cliente, caso.identificacion, caso.etapa].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[14px] font-bold" style={{ color: '#1A1A1A' }}>
+            {caso.honorario == null ? 'sin precio' : fmtCOP(caso.honorario)}
+          </div>
+          {caso.valor_upme != null && (
+            <div className="text-[11px]" style={{ color: '#6B7280' }}>
+              recaudo UPME {fmtCOP(caso.valor_upme)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {!caso.ya_facturado && faltas.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-medium" style={{ color: '#B45309' }}>Falta:</span>
+          {faltas.map(f => (
+            <span key={f} className="rounded-full px-2 py-0.5 text-[10px]"
+                  style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>{f}</span>
+          ))}
+        </div>
+      )}
+
+      {!caso.ya_facturado && listo && caso.faltan_recibo.length > 0 && (
+        <div className="mt-2 text-[11px]" style={{ color: '#6B7280' }}>
+          La factura del honorario puede salir. El recibo del recaudo UPME no: falta{' '}
+          {caso.faltan_recibo.join(', ')}.
+        </div>
+      )}
+
+      {/* Descartado: se dice quién y por qué, y se puede deshacer */}
+      {caso.descartado && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md px-2 py-1.5"
+             style={{ backgroundColor: '#F9FAFB' }}>
+          <span className="text-[11px]" style={{ color: '#6B7280' }}>
+            Descartado{caso.descartado.por ? ` por ${caso.descartado.por}` : ''}
+            {caso.descartado.motivo ? ` · ${caso.descartado.motivo}` : ''}
+          </span>
+          <button
+            onClick={restaurar}
+            disabled={isPending}
+            className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition disabled:opacity-50"
+            style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+          >
+            {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+            Devolver a la cola
+          </button>
+        </div>
+      )}
+
+      {/* Descartar: solo mientras la ventana de puesta al día siga abierta */}
+      {!caso.ya_facturado && !caso.descartado && descarteAbierto && (
+        pidiendoMotivo ? (
+          <div className="mt-2 rounded-md border p-2" style={{ borderColor: '#E5E7EB' }}>
+            <input
+              value={motivo}
+              onChange={e => setMotivo(e.target.value)}
+              placeholder="Motivo (opcional): ya facturado por fuera, no aplica…"
+              className="w-full rounded-md border px-2 py-1 text-[12px] focus:outline-none"
+              style={{ borderColor: '#E5E7EB' }}
+              autoFocus
+            />
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={confirmarDescarte}
+                disabled={isPending}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-white transition disabled:opacity-50"
+                style={{ backgroundColor: '#B45309' }}
+              >
+                {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                Confirmar descarte
+              </button>
+              <button
+                onClick={() => { setPidiendoMotivo(false); setMotivo('') }}
+                className="rounded-md border px-2 py-1 text-[11px] font-medium"
+                style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 flex justify-end">
+            <button
+              onClick={() => setPidiendoMotivo(true)}
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition"
+              style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+            >
+              <X className="h-3 w-3" />
+              Descartar factura
+            </button>
+          </div>
+        )
+      )}
+    </div>
   )
 }

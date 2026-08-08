@@ -243,7 +243,7 @@ export default function EpaycoClient({
           style={{ color: '#6B7280' }}
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Volver a Conciliación
+          Volver a Tesorería
         </Link>
 
         <div className="flex flex-wrap items-center justify-between gap-4">

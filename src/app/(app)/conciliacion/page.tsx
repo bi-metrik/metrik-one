@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { getConciliacionV2 } from '@/lib/actions/conciliacion-actions'
+import { getColaFacturacion } from '@/lib/actions/facturacion-actions'
 import ConciliacionClient from './conciliacion-client'
 
 export const runtime = 'nodejs'
@@ -40,5 +41,9 @@ export default async function ConciliacionPage() {
     redirect('/negocios')
   }
 
-  return <ConciliacionClient data={data} />
+  // La cola de facturación es opcional: si el workspace no la tiene configurada
+  // (o el usuario no pasa el guard financiero), la pestaña simplemente no aparece.
+  const { data: cola } = await getColaFacturacion()
+
+  return <ConciliacionClient data={data} cola={cola} />
 }
