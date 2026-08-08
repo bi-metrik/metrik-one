@@ -28,13 +28,19 @@
  * REGLA DURA: nada aquí bloquea, descarta ni "gatea" — solo compone y reparte.
  */
 
+import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+
 /**
  * Tolerancia de materialidad de saldo (piso de Carmen, CFO). Un residuo ≤ $1.000 COP
  * no bloquea los gates de avance: no es cobrable en la práctica. La tolerancia SOLO
  * destraba la comparación del gate — NUNCA genera cobro ni reconoce ingreso, no toca
  * `precio_aprobado` ni el P&L/EBITDA. Faltantes > $1.000 siguen bloqueando.
+ *
+ * La constante se mudó a `lib/negocios/tolerancia-saldo.ts` (el motor de avance también la
+ * necesita y no tiene por qué depender del modelo de dinero de SOENA). Se re-exporta desde
+ * aquí para no partir a los consumidores que ya la importaban de este módulo.
  */
-export const TOLERANCIA_SALDO_COP = 1000
+export { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 
 /** Modelo de dinero de un negocio, leído de su propuesta aprobada + tarifa confirmada. */
 export interface ModeloDinero {
@@ -69,6 +75,79 @@ export function valorARecaudar(precioAprobado: number, modelo: ModeloDinero | nu
   const honorario = Number.isFinite(precioAprobado) && precioAprobado > 0 ? precioAprobado : 0
   const tarifa = modelo && Number.isFinite(modelo.tarifa_upme) && modelo.tarifa_upme > 0 ? modelo.tarifa_upme : 0
   return Math.round(honorario + tarifa)
+}
+
+// ── Tarifa confirmada: resolución EN LOTE ────────────────────────────────────
+//
+// `leerModeloDineroCompleto` resuelve el modelo de UN negocio con varias consultas.
+// El panel de conciliación necesita la tarifa de TODOS los negocios del workspace
+// (235 abiertos en SOENA), así que no puede llamarlo en un bucle. Estas funciones
+// son la MISMA decisión, extraída pura: el caller trae las filas en una consulta
+// por lote y aquí se aplican las tres reglas. Si la regla cambia, cambia acá y en
+// `leerModeloDineroCompleto` — el contrato entre las dos lo fija `tarifa-lote.test.ts`.
+
+/** Fila mínima de un `negocio_bloques` para resolver la tarifa en lote. */
+export interface FilaBloqueTarifa {
+  negocio_id: string
+  data: Record<string, unknown> | null
+}
+
+/**
+ * Tarifa UPME CONFIRMADA que declara el `data` de un bloque de confirmación. 0 si no
+ * está confirmada.
+ *
+ * El toggle `tarifa_confirmada` es obligatorio: el bloque también guarda la tarifa de
+ * REFERENCIA calculada (Art. 13), y esa no es una obligación del cliente hasta que
+ * alguien la confirma. Tomarla sin el toggle inflaría el valor a recaudar de negocios
+ * que todavía no cerraron la cifra.
+ */
+export function tarifaConfirmadaDeData(data: Record<string, unknown> | null | undefined): number {
+  if (!data || typeof data !== 'object') return 0
+  if (data.tarifa_confirmada !== true) return 0
+  const valor = Number(data.tarifa_upme_confirmada ?? 0)
+  return Number.isFinite(valor) && valor > 0 ? valor : 0
+}
+
+/**
+ * ¿Este bloque declara que el negocio NO contrató la certificación UPME? Solo cuenta
+ * si el campo EXISTE y está en `false`: un bloque sin tocar no debe anular la tarifa
+ * de un negocio normal.
+ */
+export function niegaCertificacionUpme(data: Record<string, unknown> | null | undefined): boolean {
+  if (!data || typeof data !== 'object') return false
+  return 'requiere_certificacion_upme' in data && data.requiere_certificacion_upme === false
+}
+
+/**
+ * Mapa negocio → tarifa UPME confirmada, resuelto en lote.
+ *
+ * Un negocio puede traer varias filas del bloque (las copias readonly heredadas viajan
+ * con él entre etapas): gana la confirmada, sin importar el orden de llegada. Si el
+ * negocio declaró que no contrató la certificación, la tarifa se anula: no hay nada
+ * que pasarle al cliente y sumársela escondería un sobrepago real.
+ *
+ * Puro: no toca DB ni red.
+ *
+ * @param confirmaciones filas de los bloques con `config_extra.tarifa_confirmacion.enabled`.
+ * @param certificaciones filas del bloque `certificacion_upme` (decisión comercial).
+ */
+export function tarifaConfirmadaPorNegocio(
+  confirmaciones: FilaBloqueTarifa[],
+  certificaciones: FilaBloqueTarifa[],
+): Map<string, number> {
+  const tarifas = new Map<string, number>()
+  for (const fila of confirmaciones) {
+    if (!fila?.negocio_id) continue
+    const tarifa = tarifaConfirmadaDeData(fila.data)
+    if (tarifa <= 0) continue
+    // Máximo entre filas: determinista, no depende del orden en que lleguen.
+    tarifas.set(fila.negocio_id, Math.max(tarifas.get(fila.negocio_id) ?? 0, tarifa))
+  }
+  for (const fila of certificaciones) {
+    if (!fila?.negocio_id) continue
+    if (niegaCertificacionUpme(fila.data)) tarifas.set(fila.negocio_id, 0)
+  }
+  return tarifas
 }
 
 export interface RepartoPago {
@@ -224,23 +303,101 @@ export function esCeroDeliberado(
   return false
 }
 
+// ── Cartera: cuándo la tarifa es plata por cobrar y cuándo es ruido ──────────
+//
+// La tarifa UPME se confirma en Validación, mucho ANTES de que exista una propuesta
+// aprobada. `valorARecaudar` la suma siempre, que es lo correcto para el gate de
+// handoff y para el sobrepago: son preguntas sobre plata que ya se movió o que está a
+// punto de moverse. Pero para la pregunta "¿este negocio le debe plata a SOENA?" ese
+// mismo número convierte al pipeline temprano en cartera inventada: un negocio recién
+// entrado aparece debiendo una tarifa que nadie le ha cotizado.
+//
+// El criterio vive acá, en el resolvedor, y NO dentro del panel: escribirlo al lado
+// del consumidor es exactamente el patrón que dejó seis copias de `precio_aprobado −
+// cobrado` regadas por el sistema.
+
+/** Lo que hay que saber del negocio para decidir si su tarifa es cartera. */
+export interface ContextoCartera {
+  /** Recaudo real del cliente (suma de cobros reales), en COP. */
+  recaudado: number
+  /** ¿Su propuesta fue APROBADA con honorario 0? Sale de `esCeroDeliberado`. */
+  ceroDeliberado: boolean
+  /**
+   * `negocios.precio_aprobado` CRUDO: la señal de que hay un monto aprobado.
+   * OJO: no es el honorario que se muestra en pantalla, que cae a `precio_estimado`
+   * cuando no hay aprobado. Un estimado es una hipótesis comercial, no un monto
+   * aprobado, y no debe volver cobrable la tarifa.
+   */
+  honorarioAprobado: number | null
+}
+
+/**
+ * ¿La tarifa confirmada de este negocio es CARTERA (plata que alguien debe cobrar)?
+ *
+ * Sí en cuanto se cumpla cualquiera de las tres:
+ *   1. Ya hay plata recaudada → hay dinero real en juego; esconderlo es peor que el
+ *      ruido que este criterio quita.
+ *   2. Hay honorario aprobado → el negocio se cerró y la tarifa va con él.
+ *   3. Es un cero deliberado → una propuesta aprobada en 0 SIGUE siendo aprobada, y su
+ *      tarifa pendiente es cartera legítima.
+ *
+ * No, solo cuando no se cumple ninguna: sin monto aprobado y sin un peso recaudado, no
+ * hay nada que cobrar todavía.
+ *
+ * Puro: no toca DB ni red.
+ */
+export function tarifaEsCartera(ctx: ContextoCartera): boolean {
+  const recaudado = Number.isFinite(ctx.recaudado) ? ctx.recaudado : 0
+  if (recaudado > 0) return true
+  const aprobado = ctx.honorarioAprobado
+  if (typeof aprobado === 'number' && Number.isFinite(aprobado) && aprobado > 0) return true
+  return ctx.ceroDeliberado === true
+}
+
+/**
+ * Valor a recaudar para efectos de CARTERA: igual a `valorARecaudar`, salvo que deja la
+ * tarifa por fuera cuando todavía no es cobrable (ver `tarifaEsCartera`).
+ *
+ * ⚠️ INVARIANTE que lo hace seguro: **con recaudo > 0 nunca difiere de
+ * `valorARecaudar`**. Por eso este criterio no puede mover un sobrepago ni el badge —
+ * un sobrepago exige un cobro, y con cobro las dos funciones dan lo mismo. Está fijado
+ * en `cartera.test.ts`; si alguien cambia `tarifaEsCartera`, esa prueba es la que avisa.
+ *
+ * @param precioAprobado honorario que se muestra (con su fallback a `precio_estimado`).
+ * @param modelo         modelo de dinero (aporta la tarifa confirmada).
+ * @param ctx            señales del negocio para decidir si la tarifa es cobrable.
+ */
+export function valorARecaudarCartera(
+  precioAprobado: number,
+  modelo: ModeloDinero | null,
+  ctx: ContextoCartera,
+): number {
+  return valorARecaudar(precioAprobado, tarifaEsCartera(ctx) ? modelo : null)
+}
+
 /** Descuadre de la conciliación final del recaudo, desglosado por lado. */
 export interface DescuadreConciliacion {
   /** Honorario que el cliente todavía le debe a SOENA. 0 si está cubierto. */
   faltante: number
   /** Plata recibida por encima del valor a recaudar (honorario + tarifa). 0 si no hay. */
   exceso: number
-  /** true si cualquiera de los dos lados supera el residuo tolerado de $1. */
+  /** true si cualquiera de los dos lados supera el piso de materialidad. */
   hayDescuadre: boolean
 }
 
 /**
- * Residuo tolerado por la conciliación final: un peso. Es el redondeo, no la
- * materialidad. Deliberadamente MÁS ESTRICTO que `TOLERANCIA_SALDO_COP` ($1.000, el
- * piso de Carmen para los gates de avance): aquí se está cerrando la plata del caso,
- * no dejándolo pasar. Cambiarlo es decisión de CFO, no de este fix.
+ * Residuo tolerado por la conciliación final.
+ *
+ * Nació en $1 (el redondeo, no la materialidad) con el argumento de que aquí se cierra la
+ * plata del caso en vez de dejarlo pasar. En la práctica esa distinción no se sostuvo: el
+ * gate `conciliacion_diana` que consume esta función es un gate de AVANCE como los demás, así
+ * que un residuo de $120 frenaba el caso igual, solo que con otro número. Decisión de Mauricio
+ * (2026-08-06): el piso de materialidad es uno solo para todo el sistema.
+ *
+ * Se conserva el nombre porque lo importan otros módulos, pero ya no es una constante propia:
+ * es el mismo piso de Carmen. Cambiarlo se hace en `lib/negocios/tolerancia-saldo.ts`.
  */
-export const RESIDUO_CONCILIACION_COP = 1
+export const RESIDUO_CONCILIACION_COP = TOLERANCIA_SALDO_COP
 
 /**
  * ¿Está cuadrada la plata del cliente para cerrar el caso? Cada lado se mide con el
@@ -279,6 +436,45 @@ export function descuadreConciliacion(
   return {
     faltante,
     exceso,
-    hayDescuadre: faltante > RESIDUO_CONCILIACION_COP || exceso > RESIDUO_CONCILIACION_COP,
+    // Cada lado se compara contra el MISMO piso de materialidad que usan los demás gates.
+    // `saldoCuadrado` mide valor absoluto y aquí los dos lados ya llegan positivos.
+    hayDescuadre: !saldoCuadrado(faltante) || !saldoCuadrado(exceso),
   }
+}
+
+/**
+ * Saldo del cliente CON SIGNO, para pintarlo en una lista: `> 0` le falta plata a
+ * SOENA, `< 0` le sobra, `0` está cuadrado.
+ *
+ * Es `descuadreConciliacion` puesto en un solo número — no una resta propia. Hereda,
+ * por lo tanto, su asimetría deliberada:
+ *
+ *   - FALTA contra el HONORARIO. Un cliente que le pagó la tarifa DIRECTO a la UPME no
+ *     le debe nada a SOENA, y ese es un flujo normal, no una excepción. Medir el
+ *     faltante contra honorario + tarifa lo convertía en deudor: medido el 2026-08-06,
+ *     de 33 faltantes en producción 25 tenían un faltante idéntico a la tarifa y
+ *     NINGUNO debía honorario.
+ *   - SOBRA contra el VALOR A RECAUDAR. Cuando el cliente paga los dos componentes
+ *     juntos, la tarifa no es plata de más: es el caso normal (arreglado en #214).
+ *
+ * Entre las dos varas hay una franja donde el saldo es 0 a propósito: ahí no se sabe
+ * (ni importa para cobrar) cuánto de la tarifa entró por SOENA. Como `faltante` y
+ * `exceso` nunca son positivos a la vez, la resta no tiene signo ambiguo.
+ *
+ * ⚠️ NO "simplificar" midiendo ambos lados contra la misma vara. Ya se midió: la
+ * versión simétrica retenía 62 casos que hoy pasan (ver el gotcha de CLAUDE.md y #206).
+ *
+ * Puro: no toca DB ni red.
+ *
+ * @param precioAprobado precio_aprobado del negocio = HONORARIO, en COP.
+ * @param modelo         modelo de dinero (aporta la tarifa confirmada).
+ * @param recaudado      suma de cobros reales del negocio, en COP.
+ */
+export function saldoConciliacion(
+  precioAprobado: number,
+  modelo: ModeloDinero | null,
+  recaudado: number,
+): number {
+  const { faltante, exceso } = descuadreConciliacion(precioAprobado, modelo, recaudado)
+  return faltante - exceso
 }

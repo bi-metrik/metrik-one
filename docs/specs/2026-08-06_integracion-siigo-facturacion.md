@@ -12,10 +12,14 @@ workspace**, igual que el resto de módulos de ONE.
 
 ⚠️ **Esta integración es el paso 1 de un rediseño mayor:** facturar deja de ser una
 etapa del flujo y pasa a vivir en un panel de financiera, con el cierre del negocio
-disparado por la facturación. Ver `2026-08-06_facturacion-fuera-del-flujo.md`. Ese
-rediseño depende de que esta integración exista, porque el cruce contra las facturas
-ya emitidas en Siigo es lo que permite que la cola del panel nazca depurada en vez de
-con 173 pendientes falsos.
+disparado por la facturación. Ver `2026-08-06_facturacion-fuera-del-flujo.md`.
+
+⚠️ **Corrección medida el 2026-08-06:** ese rediseño se planeó asumiendo que cruzar
+las facturas ya emitidas en Siigo depuraría la cola del panel. **No lo hace.** De los
+123 clientes facturados en Siigo con el producto de VE, solo **9** existen en ONE:
+SOENA facturó esos casos entre marzo y junio y el cargue a ONE (julio) trajo los casos
+vivos, así que las dos poblaciones son casi disjuntas. Los pendientes de la cola son
+REALES, no ruido, y el panel no depende de esta integración para nacer honesto.
 
 ## Decisiones tomadas (no reabrir sin decisión de Mauricio)
 

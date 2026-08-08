@@ -63,6 +63,40 @@ describe('cuándo el saldo justifica el salto', () => {
   })
 })
 
+// El residuo de redondeo NO es un sobrepago que conciliar. Exigir el cero absoluto aquí
+// mientras el gate `saldo_cero` de la misma etapa tolera $1.000 dejaba una franja donde el
+// motor retiene un caso que, una vez adentro, sus propios gates dan por cuadrado.
+//
+// Medido en SOENA el 2026-08-06: V0276 pagó $120 de más sobre $1.051.880 y quedó varado en
+// Cobro; V0274 traía $688 y venía detrás. Ninguno tenía plata que resolver.
+describe('el residuo inmaterial no retiene: una sola vara para todo el sistema', () => {
+  // Piso de materialidad de Carmen (CFO). Se escribe literal a propósito: si alguien cambia
+  // la constante, estas pruebas tienen que hablar del número que el negocio decidió.
+  it('un sobrepago dentro de la tolerancia salta igual que el pago exacto', () => {
+    expect(debeSaltarPorSaldo(1_051_880, -120, true)).toBe(true)   // V0276
+    expect(debeSaltarPorSaldo(1_339_312, -688, true)).toBe(true)   // V0274
+    expect(debeSaltarPorSaldo(637_500, -1_000, true)).toBe(true)   // el borde entra
+  })
+
+  it('un faltante dentro de la tolerancia también salta, igual que el gate saldo_cero', () => {
+    expect(debeSaltarPorSaldo(637_500, 999, true)).toBe(true)
+  })
+
+  // La franja tolerada es angosta a propósito: un sobrepago real sigue entrando a conciliarse.
+  it('pasada la tolerancia sigue reteniendo, por los dos lados', () => {
+    expect(debeSaltarPorSaldo(637_500, -1_001, true)).toBe(false)
+    expect(debeSaltarPorSaldo(637_500, 1_001, true)).toBe(false)
+    expect(debeSaltarPorSaldo(637_500, -701_812, true)).toBe(false) // V0121, el caso original
+  })
+
+  // Sin `conciliar_sobrepago` la etapa nunca miró el sobrepago: cualquier saldo cubierto
+  // saltaba y sigue saltando. La tolerancia no le agrega ni le quita nada.
+  it('sin conciliación el comportamiento no cambia', () => {
+    expect(debeSaltarPorSaldo(637_500, -701_812, false)).toBe(true)
+    expect(debeSaltarPorSaldo(637_500, 999, false)).toBe(false)
+  })
+})
+
 // El helper de arriba nunca estuvo mal: recibía un saldo mal calculado. Estos casos
 // fijan la COMPOSICIÓN, que es donde estaba el defecto (2026-08-03): el saldo se mide
 // contra `valorARecaudar(honorario, modelo)` — honorario + tarifa pasante — y NO contra

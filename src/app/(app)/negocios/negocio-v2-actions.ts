@@ -11,8 +11,14 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import {
+  sumarRecaudoConfirmado,
+  recaudoPendienteDeConfirmar,
+  type CobroParaRecaudo,
+} from '@/lib/negocios/recaudo-confirmado'
 import {
   exigeDatoDeDecision,
   camposDeDecision,
@@ -2469,7 +2475,7 @@ async function anticipoCubiertoPorSaldo(
   workspaceId: string,
   negocioId: string,
 ): Promise<boolean> {
-  const [negRes, cobrosRes, propRes] = await Promise.all([
+  const [negRes, cobrosRes, propRes, conciliadoRes] = await Promise.all([
     db(supabase)
       .from('negocios')
       .select('precio_aprobado, precio_estimado')
@@ -2478,7 +2484,7 @@ async function anticipoCubiertoPorSaldo(
       .maybeSingle(),
     db(supabase)
       .from('cobros')
-      .select('monto')
+      .select('monto, split_json')
       .eq('negocio_id', negocioId)
       .eq('workspace_id', workspaceId),
     db(supabase)
@@ -2486,6 +2492,12 @@ async function anticipoCubiertoPorSaldo(
       .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
       .eq('negocio_id', negocioId)
       .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica'),
+    db(supabase)
+      .from('negocio_conciliacion')
+      .select('conciliado')
+      .eq('negocio_id', negocioId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle(),
   ])
 
   const neg = negRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
@@ -2502,8 +2514,15 @@ async function anticipoCubiertoPorSaldo(
     return false
   }
 
-  const cobrado = ((cobrosRes.data ?? []) as Array<{ monto: number }>)
-    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  // Recaudo CONFIRMADO: una porción de reparto que el comercial propuso y la financiera
+  // todavía no validó NO cierra este gate. Es exactamente lo que pasó con V0287 el
+  // 2026-08-05: media referencia ajena cerró su anticipo y el negocio avanzó con plata
+  // que no era suya. Ver `lib/negocios/recaudo-confirmado.ts`.
+  const conciliado = (conciliadoRes.data as { conciliado: boolean } | null)?.conciliado === true
+  const cobrado = sumarRecaudoConfirmado(
+    (cobrosRes.data ?? []) as CobroParaRecaudo[],
+    conciliado,
+  )
 
   // Plan aprobado, leído DIRECTO de la propuesta (el bloque con plan aprobado gana).
   let plan: 1 | 2 | null = null
@@ -2925,31 +2944,46 @@ export async function cambiarEtapaNegocioConGate(
     //
     // Un sobrepago (saldo negativo) NO bloquea aquí: solo se compara el faltante.
     if (etapaGates.includes('saldo_cero')) {
-      const [negPrecioRes, cobrosRes] = await Promise.all([
+      const [negPrecioRes, cobrosRes, conciliadoRes] = await Promise.all([
         db(supabase)
           .from('negocios')
           .select('precio_aprobado, precio_estimado')
           .eq('id', negocioId)
           .single(),
-        supabase
+        db(supabase)
           .from('cobros')
-          .select('monto')
+          .select('monto, split_json')
           .eq('negocio_id', negocioId)
           .eq('workspace_id', workspaceId)
           ,
+        db(supabase)
+          .from('negocio_conciliacion')
+          .select('conciliado')
+          .eq('negocio_id', negocioId)
+          .eq('workspace_id', workspaceId)
+          .maybeSingle(),
       ])
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const negPrecio = negPrecioRes.data as any
       const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
-      const totalCobrado = ((cobrosRes.data ?? []) as Array<{ monto: number }>)
-        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+      // Solo el recaudo CONFIRMADO cubre el saldo (ver `lib/negocios/recaudo-confirmado.ts`).
+      const cobrosSaldo = (cobrosRes.data ?? []) as CobroParaRecaudo[]
+      const conciliadoSaldo = (conciliadoRes.data as { conciliado: boolean } | null)?.conciliado === true
+      const totalCobrado = sumarRecaudoConfirmado(cobrosSaldo, conciliadoSaldo)
       const saldo = precio - totalCobrado
 
       if (saldo > TOLERANCIA_SALDO_COP) {
         const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+        // Nombrar la plata que está registrada pero sin confirmar. Decir solo "faltan $X"
+        // manda a la financiera a buscar un pago que YA está en el sistema esperando su
+        // visto bueno.
+        const sinConfirmar = recaudoPendienteDeConfirmar(cobrosSaldo, conciliadoSaldo)
+        const detalle = sinConfirmar > 0
+          ? ` (hay ${fmt.format(sinConfirmar)} de un reparto sin confirmar por el área financiera)`
+          : ''
         return {
           error: 'gate_bloqueado',
-          bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}`, es_gate: true }],
+          bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}${detalle}`, es_gate: true }],
         }
       }
     }
@@ -2994,15 +3028,27 @@ export async function cambiarEtapaNegocioConGate(
       } else {
 
       // Recaudo real del cliente: suma de cobros, excluyendo remanentes por devolver
-      // (devolucion_pendiente, montos negativos) que no son recaudo entrante.
-      const { data: cobrosHandoff } = await supabase
-        .from('cobros')
-        .select('monto, tipo_cobro')
-        .eq('negocio_id', negocioId)
-        .eq('workspace_id', workspaceId)
-      const recaudadoHandoff = ((cobrosHandoff ?? []) as Array<{ monto: number; tipo_cobro: string | null }>)
-        .filter((c) => c.tipo_cobro !== 'devolucion_pendiente')
-        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+      // (devolucion_pendiente, montos negativos) que no son recaudo entrante. Y desde el
+      // 2026-08-06, tampoco cuentan las porciones de un reparto que la financiera aún no
+      // confirmó: soltar el negocio a operaciones es justo la decisión que no conviene
+      // tomar con plata en veremos.
+      const [{ data: cobrosHandoff }, conciliadoHandoffRes] = await Promise.all([
+        db(supabase)
+          .from('cobros')
+          .select('monto, tipo_cobro, split_json')
+          .eq('negocio_id', negocioId)
+          .eq('workspace_id', workspaceId),
+        db(supabase)
+          .from('negocio_conciliacion')
+          .select('conciliado')
+          .eq('negocio_id', negocioId)
+          .eq('workspace_id', workspaceId)
+          .maybeSingle(),
+      ])
+      const cobrosHandoffLista = (cobrosHandoff ?? []) as CobroParaRecaudo[]
+      const conciliadoHandoff = (conciliadoHandoffRes.data as { conciliado: boolean } | null)?.conciliado === true
+      const opcionesHandoff = { excluirTipos: ['devolucion_pendiente'] }
+      const recaudadoHandoff = sumarRecaudoConfirmado(cobrosHandoffLista, conciliadoHandoff, opcionesHandoff)
 
       const modeloHandoff = await leerModeloDineroCompleto(supabase, negocioId)
       const pend = calcularPendienteHandoff(precioHandoff, modeloHandoff, recaudadoHandoff)
@@ -3011,6 +3057,8 @@ export async function cambiarEtapaNegocioConGate(
         const partes: string[] = []
         if (pend.pendienteUpme > 0) partes.push(`UPME ${fmt.format(pend.pendienteUpme)}`)
         if (pend.pendienteHonorario > 0) partes.push(`honorario ${fmt.format(pend.pendienteHonorario)}`)
+        const sinConfirmarHandoff = recaudoPendienteDeConfirmar(cobrosHandoffLista, conciliadoHandoff, opcionesHandoff)
+        if (sinConfirmarHandoff > 0) partes.push(`${fmt.format(sinConfirmarHandoff)} sin confirmar por el área financiera`)
         const desglose = partes.length ? ` (${partes.join(' + ')})` : ''
         const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
         const nombre = gateMessages['saldo:handoff']
@@ -3132,10 +3180,19 @@ export async function cambiarEtapaNegocioConGate(
     // negocio, exige que el sobrepago esté conciliado (campo `accion_extra` con valor).
     // Si no hay sobrepago, no exige nada (no estorba a negocios con pago normal).
     if (etapaGates.includes('sobrepago_conciliado')) {
-      const [negPrecioConcRes, cobrosConcRes, modeloConc] = await Promise.all([
+      const [negPrecioConcRes, cobrosConcRes, modeloConc, conciliadoSobreRes] = await Promise.all([
         db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-        supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
+        // db(): los tipos generados de `cobros` NO declaran `split_json` (la columna
+        // existe en la base desde el reparto de pagos; `src/types/database.ts` solo la
+        // tiene en `gastos`). Ver nota en `lib/negocios/recaudo-confirmado.ts`.
+        db(supabase).from('cobros').select('monto, split_json').eq('negocio_id', negocioId),
         leerModeloDineroCompleto(supabase, negocioId),
+        db(supabase)
+          .from('negocio_conciliacion')
+          .select('conciliado')
+          .eq('negocio_id', negocioId)
+          .eq('workspace_id', workspaceId)
+          .maybeSingle(),
       ])
       const negPrecioConc = negPrecioConcRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
       // Mismo criterio que `saldo_cero`: el sobrepago se mide contra el valor a
@@ -3144,11 +3201,20 @@ export async function cambiarEtapaNegocioConGate(
       // existe: era el caso NORMAL del flujo, no la excepción.
       const honorarioConc = negPrecioConc?.precio_aprobado ?? negPrecioConc?.precio_estimado ?? 0
       const precioConc = valorARecaudar(honorarioConc, modeloConc)
-      const totalCobradoConc = ((cobrosConcRes.data ?? []) as Array<{ monto: number }>)
-        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+      // Un reparto sin confirmar tampoco AFIRMA un sobrepago: exigir conciliar plata de
+      // más a partir de una porción que la financiera todavía no validó es pedir que se
+      // resuelva dos veces lo mismo. Cuando ella dé el check, esa plata entra al cálculo
+      // y, si sobra de verdad, el gate lo pide entonces.
+      const totalCobradoConc = sumarRecaudoConfirmado(
+        (cobrosConcRes.data ?? []) as CobroParaRecaudo[],
+        (conciliadoSobreRes.data as { conciliado: boolean } | null)?.conciliado === true,
+      )
       const extra = totalCobradoConc - precioConc
 
-      if (precioConc > 0 && extra > 0) {
+      // El exceso se juzga contra el MISMO piso de materialidad que el resto del sistema
+      // (decisión de Mauricio, 2026-08-06). Con `extra > 0` a secas, un cliente que redondeó
+      // al pagar quedaba obligado a "conciliar" $120 que nadie va a devolver ni cobrar.
+      if (precioConc > 0 && !saldoCuadrado(extra)) {
         const { data: bloquesConc } = await db(supabase)
           .from('negocio_bloques')
           .select(`
@@ -3195,7 +3261,7 @@ export async function cambiarEtapaNegocioConGate(
     if (etapaGates.includes('conciliacion_diana')) {
       const [negConcRes, cobrosConcRes, checkRes, modeloConcDiana] = await Promise.all([
         db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-        supabase.from('cobros').select('monto').eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
+        db(supabase).from('cobros').select('monto, split_json').eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
         db(supabase)
           .from('negocio_conciliacion')
           .select('conciliado')
@@ -3206,10 +3272,15 @@ export async function cambiarEtapaNegocioConGate(
       ])
       const negConc = negConcRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
       const honorarioConcDiana = negConc?.precio_aprobado ?? negConc?.precio_estimado ?? 0
-      const totalCobradoConc = ((cobrosConcRes.data ?? []) as Array<{ monto: number }>)
-        .reduce((sum, c) => sum + (c.monto ?? 0), 0)
-      const descuadre = descuadreConciliacion(honorarioConcDiana, modeloConcDiana, totalCobradoConc)
       const conciliado = (checkRes.data as { conciliado: boolean } | null)?.conciliado === true
+      // El descuadre se mide con el recaudo CONFIRMADO, la misma base que los demás gates.
+      // Sin el check de la financiera, una porción propuesta por el comercial no puede
+      // aparecer cuadrando la plata del caso.
+      const totalCobradoConc = sumarRecaudoConfirmado(
+        (cobrosConcRes.data ?? []) as CobroParaRecaudo[],
+        conciliado,
+      )
+      const descuadre = descuadreConciliacion(honorarioConcDiana, modeloConcDiana, totalCobradoConc)
 
       const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
       if (descuadre.hayDescuadre || !conciliado) {
@@ -3267,10 +3338,17 @@ export async function cambiarEtapaNegocioConGate(
   // Cobro de un solo avance y aterrizar en Entrega. Antes se resolvía un único salto, así
   // que quedaba detenido en la segunda etapa saldada sin razón visible para el equipo.
   {
-    const [negPrecioRes, cobrosSkipRes, modeloSkip] = await Promise.all([
+    const [negPrecioRes, cobrosSkipRes, modeloSkip, conciliadoSkipRes] = await Promise.all([
       db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
-      supabase.from('cobros').select('monto').eq('negocio_id', negocioId),
+      // db(): ver nota de tipos stale en `lib/negocios/recaudo-confirmado.ts`.
+      db(supabase).from('cobros').select('monto, split_json').eq('negocio_id', negocioId),
       leerModeloDineroCompleto(supabase, negocioId),
+      db(supabase)
+        .from('negocio_conciliacion')
+        .select('conciliado')
+        .eq('negocio_id', negocioId)
+        .eq('workspace_id', workspaceId)
+        .maybeSingle(),
     ])
     const negPrecio = negPrecioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
     // Igual que los gates de saldo: se compara contra el valor a recaudar (honorario
@@ -3280,8 +3358,13 @@ export async function cambiarEtapaNegocioConGate(
     // le aplicaban.
     const honorarioSkip = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
     const precio = valorARecaudar(honorarioSkip, modeloSkip)
-    const totalCobrado = ((cobrosSkipRes.data ?? []) as Array<{ monto: number }>)
-      .reduce((sum, c) => sum + (c.monto ?? 0), 0)
+    // El salto encadena: con el saldo en cero un negocio puede atravesar VARIAS etapas de
+    // un solo avance. Es la decisión más cara de tomar con plata sin confirmar, así que
+    // aquí también cuenta solo el recaudo confirmado.
+    const totalCobrado = sumarRecaudoConfirmado(
+      (cobrosSkipRes.data ?? []) as CobroParaRecaudo[],
+      (conciliadoSkipRes.data as { conciliado: boolean } | null)?.conciliado === true,
+    )
     const saldo = precio - totalCobrado
 
     // Ni el precio ni los cobros cambian durante el encadenamiento: se leen una sola vez.
