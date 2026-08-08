@@ -17,6 +17,13 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { borradorCliente, borradorFactura, borradorRecibo, type RutExtraido } from '@/lib/siigo/mapeo'
 import type { SiigoConfig } from '@/lib/siigo/client'
+import { revalidatePath } from 'next/cache'
+// La ventana vive en su propio módulo: este archivo es `'use server'` y exportar
+// una constante desde aquí anula TODOS los exports en el build.
+// La fecha se valida en el SERVIDOR, no solo escondiendo el botón: una pestaña
+// abierta desde antes seguiría mostrando la acción, y un barrido masivo sobre
+// plata no puede depender de que el cliente esté actualizado.
+import { DESCARTE_FACTURACION_HASTA, ventanaDescarteAbierta } from '@/lib/facturacion/ventana-descarte'
 
 export interface CasoPorFacturar {
   negocio_id: string
@@ -38,6 +45,8 @@ export interface CasoPorFacturar {
   faltan_recibo: string[]
   /** Ya tiene número de factura registrado en el negocio. */
   ya_facturado: boolean
+  /** Sacado de la cola a mano durante la puesta al día. Reversible. */
+  descartado: { at: string; por: string | null; motivo: string | null } | null
 }
 
 export interface ColaFacturacion {
@@ -46,7 +55,11 @@ export interface ColaFacturacion {
   desde_etapa_numero: number | null
   /** El workspace no tiene Siigo configurado: la cola se ve, pero no se emite. */
   siigo_configurado: boolean
-  totales: { listos: number; incompletos: number; ya_facturados: number; valor_listo: number }
+  /** La herramienta provisional de descarte sigue disponible. */
+  descarte_abierto: boolean
+  /** Hasta cuándo (para decirlo en pantalla, no para decidir: eso lo hace el servidor). */
+  descarte_hasta: string
+  totales: { listos: number; incompletos: number; ya_facturados: number; descartados: number; valor_listo: number }
 }
 
 /**
@@ -102,25 +115,26 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     if (typeof f.desde_etapa_numero === 'number') { desde = f.desde_etapa_numero; break }
   }
   if (desde == null) {
-    return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, totales: { listos: 0, incompletos: 0, ya_facturados: 0, valor_listo: 0 } } }
+    return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
   }
 
   // ── Negocios candidatos ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: negocios } = await (svc as any)
     .from('negocios')
-    .select('id, codigo, nombre, precio_aprobado, contacto_id, etapas_negocio!inner(nombre, numero)')
+    .select('id, codigo, nombre, precio_aprobado, contacto_id, metadata, etapas_negocio!inner(nombre, numero)')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
   type Neg = {
     id: string; codigo: string | null; nombre: string | null
     precio_aprobado: number | null; contacto_id: string | null
+    metadata: Record<string, unknown> | null
     etapas_negocio: { nombre: string | null; numero: number | null } | null
   }
   const candidatos = ((negocios ?? []) as Neg[])
     .filter(n => (n.etapas_negocio?.numero ?? 0) > desde!)
   if (candidatos.length === 0) {
-    return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, totales: { listos: 0, incompletos: 0, ya_facturados: 0, valor_listo: 0 } } }
+    return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
   }
   const ids = candidatos.map(n => n.id)
 
@@ -199,30 +213,144 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       faltan_cliente: cli.faltantes,
       faltan_recibo: rec.faltantes,
       ya_facturado: facturadoPorNegocio.has(n.id),
+      descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,
     }
   })
 
   // Pendientes primero, y dentro de esos los que ya están listos para emitir:
   // la cola debe abrir por lo que se puede resolver hoy.
   const listo = (c: CasoPorFacturar) => c.faltan_factura.length === 0 && c.faltan_cliente.length === 0
+  const fuera = (c: CasoPorFacturar) => c.ya_facturado || c.descartado != null
   casos.sort((a, b) => {
-    if (a.ya_facturado !== b.ya_facturado) return a.ya_facturado ? 1 : -1
+    if (fuera(a) !== fuera(b)) return fuera(a) ? 1 : -1
     if (listo(a) !== listo(b)) return listo(a) ? -1 : 1
     return (b.honorario ?? 0) - (a.honorario ?? 0)
   })
 
-  const pendientes = casos.filter(c => !c.ya_facturado)
+  const pendientes = casos.filter(c => !fuera(c))
   return {
     data: {
       casos,
       desde_etapa_numero: desde,
       siigo_configurado,
+      descarte_abierto: ventanaDescarteAbierta(),
+      descarte_hasta: DESCARTE_FACTURACION_HASTA,
       totales: {
         listos: pendientes.filter(listo).length,
         incompletos: pendientes.filter(c => !listo(c)).length,
         ya_facturados: casos.filter(c => c.ya_facturado).length,
+        descartados: casos.filter(c => c.descartado != null && !c.ya_facturado).length,
         valor_listo: pendientes.filter(listo).reduce((s, c) => s + (c.honorario ?? 0), 0),
       },
     },
   }
+}
+
+// ── Descarte provisional ─────────────────────────────────────────────────────
+
+/**
+ * Saca un negocio de la cola de facturación SIN cerrarlo ni tocar su precio.
+ *
+ * Es la herramienta de puesta al día: los 176 casos que quedaron en la bandeja
+ * incluyen muchos ya facturados por fuera de ONE, y revisarlos uno a uno dentro
+ * del flujo no es viable. Se marca en `metadata` y NO en una columna porque es
+ * deliberadamente temporal: no vale la pena dejar esquema para algo que vence.
+ *
+ * Reversible a propósito (`restaurarEnFacturacion`): un barrido masivo sobre
+ * plata sin vuelta atrás convierte un clic de más en un caso perdido.
+ */
+export async function descartarDeFacturacion(
+  negocioId: string,
+  motivo?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+
+  // La ventana se valida aquí, no solo escondiendo el botón: una pestaña abierta
+  // desde antes seguiría ofreciendo la acción después del vencimiento.
+  if (!ventanaDescarteAbierta()) {
+    return { ok: false, error: `El descarte de facturación estuvo disponible hasta el ${DESCARTE_FACTURACION_HASTA}.` }
+  }
+
+  const { workspaceId } = ctx
+  const { staffId } = await getWorkspace()
+  const svc = createServiceClient()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: neg } = await (svc as any)
+    .from('negocios').select('id, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+  if (!neg) return { ok: false, error: 'Negocio no encontrado' }
+
+  let nombre: string | null = null
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: st } = await (svc as any).from('staff').select('full_name').eq('id', staffId).maybeSingle()
+    nombre = (st?.full_name as string | null) ?? null
+  }
+
+  const marca = {
+    at: new Date().toISOString(),
+    por: nombre,
+    motivo: motivo?.trim() || null,
+  }
+  const metadata = { ...((neg.metadata ?? {}) as Record<string, unknown>), facturacion_descartada: marca }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: upErr } = await (svc as any)
+    .from('negocios').update({ metadata }).eq('id', negocioId).eq('workspace_id', workspaceId)
+  if (upErr) return { ok: false, error: (upErr as { message: string }).message }
+
+  if (staffId) {
+    // `tipo` DEBE estar en el CHECK de activity_log o el insert falla en silencio
+    // (ya pasó cuatro veces en este repo). 'sistema' está en el catálogo.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (svc as any).from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId, // FK a staff(id), NO a profiles
+      contenido: `Descartado de la cola de facturación${marca.motivo ? `. Motivo: ${marca.motivo}` : ''}`,
+    })
+  }
+
+  revalidatePath('/conciliacion')
+  return { ok: true }
+}
+
+/** Devuelve el negocio a la cola. Sin límite de fecha: deshacer siempre se puede. */
+export async function restaurarEnFacturacion(negocioId: string): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { workspaceId } = ctx
+  const { staffId } = await getWorkspace()
+  const svc = createServiceClient()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: neg } = await (svc as any)
+    .from('negocios').select('id, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+  if (!neg) return { ok: false, error: 'Negocio no encontrado' }
+
+  const metadata = { ...((neg.metadata ?? {}) as Record<string, unknown>) }
+  delete metadata.facturacion_descartada
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: upErr } = await (svc as any)
+    .from('negocios').update({ metadata }).eq('id', negocioId).eq('workspace_id', workspaceId)
+  if (upErr) return { ok: false, error: (upErr as { message: string }).message }
+
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (svc as any).from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId,
+      contenido: 'Devuelto a la cola de facturación',
+    })
+  }
+
+  revalidatePath('/conciliacion')
+  return { ok: true }
 }
