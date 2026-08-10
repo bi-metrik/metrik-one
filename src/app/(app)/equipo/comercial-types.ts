@@ -6,6 +6,13 @@ export interface ComercialResumenRow {
   responsable_id: string | null
   nombre: string
   position: string | null
+  /**
+   * Lidera el equipo (owner / admin / supervisor). Toma casos especiales, pero NO
+   * compite en el ranking ni se mide con estos indicadores: comparar a quien reparte
+   * el trabajo contra quien lo ejecuta no dice nada de ninguno de los dos. Sus casos
+   * se muestran aparte para que la suma del equipo siga cuadrando.
+   */
+  es_lider: boolean
   sin_responsable: boolean
   negocios_total: number
   negocios_abiertos: number
@@ -114,6 +121,8 @@ export interface ComercialVendedorMes {
   responsable_id: string | null
   nombre: string
   sin_responsable: boolean
+  /** Lidera el equipo: se lista aparte, fuera de la comparacion. Ver ComercialResumenRow. */
+  es_lider: boolean
   num_ventas: number
   /** Honorario sin IVA (ingreso limpio). Headline. */
   valor_sin_iva: number

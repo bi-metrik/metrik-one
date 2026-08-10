@@ -46,15 +46,16 @@ export async function getOperacionesBono(
       ...p,
       bono: verTodo || p.staff_id === staffId ? p.bono : undefined,
     })),
-    supervisor: bruto.supervisor
-      ? {
-          ...bruto.supervisor,
-          bono:
-            verTodo || bruto.supervisor.staff_id === staffId
-              ? bruto.supervisor.bono
-              : undefined,
-        }
-      : null,
+    // El bloque de quien lidera NO viaja a quien no debe verlo. Antes se recortaba
+    // solo el bono, y su nombre, cargo, puntaje y promedios seguian llegando al
+    // navegador de cada operativo: la pantalla no los pintaba, pero estaban en el
+    // payload de la pagina para cualquiera que abriera las herramientas del navegador.
+    // Es la misma regla que ya aplicaba al dinero, extendida a la fila completa:
+    // ocultar en React no es ocultar.
+    supervisor:
+      bruto.supervisor && (verTodo || bruto.supervisor.staff_id === staffId)
+        ? bruto.supervisor
+        : null,
   }
 }
 
