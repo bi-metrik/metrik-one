@@ -81,11 +81,16 @@ export async function guardVerNegocio(
 export async function guardAvanzarStage(
   negocioId: string,
   stageTo: Stage,
+  /**
+   * Áreas que la etapa ACTUAL invita a avanzarla (`config_extra.areas_que_avanzan`).
+   * Lo resuelve quien llama, que ya tiene la config de la etapa a mano.
+   */
+  areasQueAvanzan?: Area[],
 ): Promise<{ ok: boolean; error?: string }> {
   const c = await resolverCtx()
   if (!c) return { ok: false, error: 'No autenticado' }
   const resp = await responsablesDe(c.supabase, negocioId)
-  if (!canAdvanceStage(c.user, stageTo, resp)) {
+  if (!canAdvanceStage(c.user, stageTo, resp, areasQueAvanzan)) {
     return { ok: false, error: 'Tu rol o área no permite avanzar a esta fase' }
   }
   return { ok: true }
