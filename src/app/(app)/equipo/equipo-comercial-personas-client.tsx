@@ -58,6 +58,33 @@ export default function EquipoComercialPersonasClient({ resumen, mesData, anio, 
         ))}
       </div>
 
+      {/* Quien lidera no compite, pero sus casos se ven: si se ocultaran, la suma del
+          equipo quedaria corta sin explicar por que. */}
+      {ranking.lideres.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
+          <p className="mb-3 text-xs font-bold uppercase tracking-wide text-gray-400">
+            Casos que llevan los lideres
+          </p>
+          <div className="space-y-3">
+            {ranking.lideres.map((l) => (
+              <div key={l.responsable_id} className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                  {iniciales(l.nombre)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold text-gray-700">{nombreCorto(l.nombre)}</p>
+                  <p className="text-xs text-gray-400">{l.position ?? 'Lidera el equipo'} · fuera del ranking</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-gray-700 tabular-nums">{l.negocios_abiertos} activos</p>
+                  <p className="text-xs text-gray-400 tabular-nums">{fmtCOP(l.valor_aprobado)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Bucket sin responsable: informativo, fuera del ranking */}
       {ranking.sinResponsable && ranking.sinResponsable.negocios_total > 0 && (
         <div className="mt-6 rounded-2xl border border-dashed border-gray-200 bg-white p-5">

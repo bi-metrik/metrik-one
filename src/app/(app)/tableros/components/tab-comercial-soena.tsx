@@ -8,6 +8,7 @@ import {
 } from 'recharts'
 import type {
   ComercialResumenRow,
+  ComercialVendedorMes,
   ComercialMesResponse,
   ComercialSerieResponse,
   MetaComercial,
@@ -74,8 +75,16 @@ export function TabComercialSoena({
   }
 
   const kpis = mesData?.kpis
-  const vendedoresMes = mesData?.porVendedor ?? []
   const ventasPorDia = mesData?.porDia ?? []
+
+  // Quien lidera el equipo toma casos especiales pero no compite: va listado aparte,
+  // debajo, para no mezclarlo con la comparacion entre quienes ejecutan. Sus cifras
+  // SI cuentan en los totales del equipo, que son del equipo entero.
+  const porVendedor = mesData?.porVendedor ?? []
+  const vendedoresMes = porVendedor.filter((v) => !v.es_lider)
+  const lideresMes = porVendedor.filter((v) => v.es_lider)
+  const equipoEjecuta = equipo.filter((v) => !v.es_lider)
+  const equipoLidera = equipo.filter((v) => v.es_lider)
 
   const totalHonorario = equipo.reduce((s, v) => s + v.honorario_recaudado, 0)
   const totalTarifa = equipo.reduce((s, v) => s + v.tarifa_recaudada, 0)
@@ -161,38 +170,19 @@ export function TabComercialSoena({
               </thead>
               <tbody>
                 {vendedoresMes.map((v) => (
-                  <tr key={v.responsable_id ?? 'sin'} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-3">
-                      <span className="font-medium text-gray-900">
-                        {v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums">
-                      {v.num_ventas}
-                      {v.meta_num_ventas ? <span className="ml-1 text-[10px] text-gray-400">/{v.meta_num_ventas}</span> : null}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums" style={{ color: GREEN }}>
-                      {fmtCOP(v.valor_sin_iva)}
-                    </td>
-                    <td className="hidden px-4 py-3 text-right text-gray-500 tabular-nums md:table-cell">
-                      {fmtCOP(v.valor_con_iva)}
-                    </td>
-                    <td className="hidden px-4 py-3 text-right text-gray-600 tabular-nums sm:table-cell">
-                      {fmtCOP(v.primer_pago)}
-                    </td>
-                    <td className="hidden px-4 py-3 text-right text-gray-600 tabular-nums lg:table-cell">
-                      {fmtCOP(v.segundo_pago)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-gray-700">
-                      {v.casos_completos}
-                      <span className="ml-1 text-[10px] text-gray-400">{pct(v.tasa_casos_completos)}</span>
-                    </td>
-                    <td className="hidden px-4 py-3 text-right tabular-nums text-gray-600 sm:table-cell">
-                      {pct(v.participacion_pct)}
+                  <FilaVendedor key={v.responsable_id ?? 'sin'} v={v} />
+                ))}
+                {lideresMes.length > 0 && (
+                  <tr className="border-b border-gray-50 bg-gray-50/40">
+                    <td colSpan={8} className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                      Lideres · fuera de la comparacion
                     </td>
                   </tr>
+                )}
+                {lideresMes.map((v) => (
+                  <FilaVendedor key={v.responsable_id ?? 'sin-lider'} v={v} />
                 ))}
-                {vendedoresMes.length === 0 && (
+                {porVendedor.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">
                       Sin ventas registradas este mes.
@@ -200,8 +190,8 @@ export function TabComercialSoena({
                   </tr>
                 )}
               </tbody>
-              {kpis && vendedoresMes.length > 0 && (
-                <tfoot>
+              {kpis && porVendedor.length > 0 && (
+                                <tfoot>
                   <tr className="border-t border-gray-100 bg-gray-50/40 font-bold text-gray-900">
                     <td className="px-4 py-3">TOTAL</td>
                     <td className="px-4 py-3 text-right tabular-nums">{kpis.num_ventas}</td>
@@ -315,7 +305,7 @@ export function TabComercialSoena({
         </div>
         <h2 className="mb-3 text-sm font-bold text-gray-900">Embudo por vendedor (todo el historico)</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {equipo.map((v) => (
+          {equipoEjecuta.map((v) => (
             <div
               key={v.responsable_id ?? 'sin-responsable'}
               className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
@@ -342,6 +332,25 @@ export function TabComercialSoena({
             </div>
           ))}
         </div>
+
+        {/* Los casos de quienes lideran no se esconden: sin esta linea, la suma de las
+            tarjetas no coincide con los totales de arriba y nadie sabe por que. */}
+        {equipoLidera.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
+              Casos que llevan los lideres · fuera de la comparacion
+            </p>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+              {equipoLidera.map((v) => (
+                <span key={v.responsable_id ?? 'lider'} className="text-gray-600">
+                  {nombreCorto(v.nombre)}{' '}
+                  <span className="font-semibold text-gray-900 tabular-nums">{v.negocios_abiertos}</span>
+                  <span className="text-gray-400"> activos · {fmtCOP(v.honorario_recaudado)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {metasModalOpen && (
@@ -354,6 +363,43 @@ export function TabComercialSoena({
         />
       )}
     </div>
+  )
+}
+
+/** Fila de la tabla por vendedor. Compartida por la lista de ejecutores y la de lideres. */
+function FilaVendedor({ v }: { v: ComercialVendedorMes }) {
+  return (
+    <tr className="border-b border-gray-50 hover:bg-gray-50/50">
+
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-gray-900">
+                        {v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums">
+                      {v.num_ventas}
+                      {v.meta_num_ventas ? <span className="ml-1 text-[10px] text-gray-400">/{v.meta_num_ventas}</span> : null}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums" style={{ color: GREEN }}>
+                      {fmtCOP(v.valor_sin_iva)}
+                    </td>
+                    <td className="hidden px-4 py-3 text-right text-gray-500 tabular-nums md:table-cell">
+                      {fmtCOP(v.valor_con_iva)}
+                    </td>
+                    <td className="hidden px-4 py-3 text-right text-gray-600 tabular-nums sm:table-cell">
+                      {fmtCOP(v.primer_pago)}
+                    </td>
+                    <td className="hidden px-4 py-3 text-right text-gray-600 tabular-nums lg:table-cell">
+                      {fmtCOP(v.segundo_pago)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                      {v.casos_completos}
+                      <span className="ml-1 text-[10px] text-gray-400">{pct(v.tasa_casos_completos)}</span>
+                    </td>
+                    <td className="hidden px-4 py-3 text-right tabular-nums text-gray-600 sm:table-cell">
+                      {pct(v.participacion_pct)}
+                    </td>
+                  </tr>
   )
 }
 

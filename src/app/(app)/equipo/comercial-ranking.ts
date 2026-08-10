@@ -44,6 +44,11 @@ export interface RankingEquipo {
   total: number
   /** Bucket sin responsable, aparte del ranking (informativo). null si no hay. */
   sinResponsable: ComercialResumenRow | null
+  /**
+   * Quienes lideran el equipo, fuera del ranking pero CON sus casos a la vista.
+   * Esconderlos del todo dejaria la suma del equipo corta sin decir por que.
+   */
+  lideres: ComercialResumenRow[]
 }
 
 function posiciones(rows: ComercialResumenRow[], metrica: RankingMetrica): Map<string, number> {
@@ -77,7 +82,10 @@ export function computeRanking(
   resumen: ComercialResumenRow[],
   metasPorVendedor: Map<string, number | null> = new Map(),
 ): RankingEquipo {
-  const personas = resumen.filter((r) => !r.sin_responsable && r.responsable_id)
+  // El ranking es entre quienes ejecutan. Quien lidera queda fuera de la competencia
+  // (decision de Mauricio, 2026-08-10) pero conserva sus casos a la vista.
+  const personas = resumen.filter((r) => !r.sin_responsable && r.responsable_id && !r.es_lider)
+  const lideres = resumen.filter((r) => !r.sin_responsable && r.responsable_id && r.es_lider)
   const sinResponsable = resumen.find((r) => r.sin_responsable) ?? null
 
   const rVentas = posiciones(personas, 'num_ventas')
@@ -135,7 +143,7 @@ export function computeRanking(
   // Orden de presentacion por defecto: numero de ventas desc (metrica primaria).
   filas.sort((a, b) => a.rank_ventas - b.rank_ventas)
 
-  return { personas: filas, total: personas.length, sinResponsable }
+  return { personas: filas, total: personas.length, sinResponsable, lideres }
 }
 
 /** Busca la posicion de una persona por su staff_id. null si no esta (o es el bucket). */

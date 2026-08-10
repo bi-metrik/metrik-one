@@ -6,6 +6,8 @@ import { bogotaYearMonth } from '@/lib/dates/bogota'
 import EquipoClient from './equipo-client'
 import VendedoresClient from './vendedores-client'
 import EquipoComercialPersonasClient from './equipo-comercial-personas-client'
+import EquiposClient from './equipos-client'
+import { getOperacionesBono } from '../tableros/operaciones-actions'
 import { getVendedoresResumen } from './vendedores-actions'
 import { getComercialResumen, getComercialMes, getMetasPorVendedorPeriodo } from './comercial-actions'
 import { getEquipoCalidad } from '../calidad/actions'
@@ -96,13 +98,31 @@ export default async function EquipoPage({ searchParams }: Props) {
         getComercialMes(anioSel, mesSel),
         getMetasPorVendedorPeriodo(anioSel, mesSel),
       ])
+      const comercial = {
+        resumen,
+        mesData,
+        anio: anioSel,
+        mes: mesSel,
+        metasPorVendedor: Array.from(metasMap),
+      }
+
+      // Con los dos equipos activos, Equipo los muestra SEPARADOS: cada uno con sus
+      // indicadores. Comercial mide la venta; operaciones, el trabajo sobre el caso ya
+      // vendido. Antes esta pantalla mostraba solo la lista comercial, y como esa lista
+      // agrupaba por el responsable principal del negocio (que puede ser un operativo),
+      // el equipo de operaciones aparecia dentro de los indicadores comerciales.
+      if (modules.operaciones_bonos) {
+        const operaciones = await getOperacionesBono(anioSel, mesSel)
+        return <EquiposClient comercial={comercial} operaciones={operaciones} />
+      }
+
       return (
         <EquipoComercialPersonasClient
-          resumen={resumen}
-          mesData={mesData}
-          anio={anioSel}
-          mes={mesSel}
-          metasPorVendedor={Array.from(metasMap)}
+          resumen={comercial.resumen}
+          mesData={comercial.mesData}
+          anio={comercial.anio}
+          mes={comercial.mes}
+          metasPorVendedor={comercial.metasPorVendedor}
         />
       )
     }
