@@ -21,7 +21,9 @@ import {
 } from '@/lib/actions/conciliacion-actions'
 import { MAX_LARGO_REF_EXTERNA, referenciaVisible } from '@/lib/cobros/referencia-externa'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
-import { descartarDeFacturacion, restaurarEnFacturacion } from '@/lib/actions/facturacion-actions'
+import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio } from '@/lib/actions/facturacion-actions'
+import type { FacturaEnSiigo } from '@/lib/siigo/facturas'
+import { casoListoParaFacturar, faltantesDelCaso } from '@/lib/facturacion/caso-listo'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
 
@@ -1008,6 +1010,7 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
               key={c.negocio_id}
               caso={c}
               descarteAbierto={cola.descarte_abierto}
+              siigoConfigurado={cola.siigo_configurado}
               onCambio={() => router.refresh()}
             />
           ))}
@@ -1018,11 +1021,29 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
 }
 
 function FilaPorFacturar({
-  caso, descarteAbierto, onCambio,
-}: { caso: CasoPorFacturar; descarteAbierto: boolean; onCambio: () => void }) {
+  caso, descarteAbierto, siigoConfigurado, onCambio,
+}: { caso: CasoPorFacturar; descarteAbierto: boolean; siigoConfigurado: boolean; onCambio: () => void }) {
   const [isPending, startTransition] = useTransition()
   const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
+  // Tres pasos a propósito: revisar la prefactura, confirmar, emitir. Una factura
+  // electrónica aceptada por la DIAN no se deshace, así que el clic no puede
+  // quedar a un solo movimiento de distancia.
+  const [revisando, setRevisando] = useState(false)
+  const [confirmando, setConfirmando] = useState(false)
+  const [duplicados, setDuplicados] = useState<FacturaEnSiigo[] | null>(null)
+  const [justificacion, setJustificacion] = useState('')
+
+  const emitir = (justificacionDuplicado?: string) => {
+    startTransition(async () => {
+      const r = await emitirFacturaDeNegocio(caso.negocio_id, { justificacionDuplicado })
+      if (r.duplicados) { setDuplicados(r.duplicados); setConfirmando(false); return }
+      if (!r.ok) { toast.error(r.error ?? 'No se pudo emitir'); return }
+      toast.success(`Factura ${r.numero} emitida`)
+      setRevisando(false); setConfirmando(false); setDuplicados(null); setJustificacion('')
+      onCambio()
+    })
+  }
 
   const confirmarDescarte = () => {
     startTransition(async () => {
@@ -1042,11 +1063,10 @@ function FilaPorFacturar({
     })
   }
 
-  // Un caso está listo cuando puede emitirse la factura del honorario. El recibo
-  // del recaudo UPME se reporta aparte: es otro documento y otra plata (de un
-  // tercero), así que su falta NO debe frenar la factura.
-  const listo = caso.faltan_factura.length === 0 && caso.faltan_cliente.length === 0
-  const faltas = [...new Set([...caso.faltan_cliente, ...caso.faltan_factura])]
+  // El criterio y la lista de faltantes salen del mismo módulo que usa el
+  // servidor para contar la bandeja: dos copias se desincronizan en silencio.
+  const listo = casoListoParaFacturar(caso)
+  const faltas = faltantesDelCaso(caso)
 
   return (
     <div className="rounded-lg border p-3" style={{ borderColor: listo ? '#A7F3D0' : '#E5E7EB' }}>
@@ -1060,7 +1080,9 @@ function FilaPorFacturar({
             <span className="truncate text-[13px]" style={{ color: '#1A1A1A' }}>{caso.nombre ?? ''}</span>
             {caso.ya_facturado && (
               <span className="rounded-full px-2 py-0.5 text-[10px] font-bold"
-                    style={{ backgroundColor: '#D1FAE5', color: '#047857' }}>Facturado</span>
+                    style={{ backgroundColor: '#D1FAE5', color: '#047857' }}>
+                {caso.factura_numero ?? 'Facturado'}
+              </span>
             )}
           </div>
           <div className="mt-0.5 text-[11px]" style={{ color: '#6B7280' }}>
@@ -1093,6 +1115,133 @@ function FilaPorFacturar({
         <div className="mt-2 text-[11px]" style={{ color: '#6B7280' }}>
           La factura del honorario puede salir. El recibo del recaudo UPME no: falta{' '}
           {caso.faltan_recibo.join(', ')}.
+        </div>
+      )}
+
+      {/* ── Prefactura y emisión ─────────────────────────────────────────── */}
+      {!caso.ya_facturado && !caso.descartado && listo && siigoConfigurado && (
+        <div className="mt-2">
+          {!revisando ? (
+            <div className="flex justify-end">
+              <button
+                onClick={() => setRevisando(true)}
+                className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition"
+                style={{ backgroundColor: VERDE }}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Revisar y facturar
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-md border p-3" style={{ borderColor: '#A7F3D0', backgroundColor: '#F0FDF4' }}>
+              <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#047857' }}>
+                Así saldría la factura
+              </div>
+
+              <dl className="mt-2 space-y-1 text-[12px]">
+                {[
+                  ['Cliente', caso.cliente ?? '—'],
+                  ['Identificación', caso.identificacion ?? '—'],
+                  ['Concepto', 'Incentivos tributarios UPME'],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-3">
+                    <dt style={{ color: '#6B7280' }}>{k}</dt>
+                    <dd className="text-right" style={{ color: '#1A1A1A' }}>{v}</dd>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-3 border-t pt-1" style={{ borderColor: '#A7F3D0' }}>
+                  <dt style={{ color: '#6B7280' }}>Base</dt>
+                  <dd style={{ color: '#1A1A1A' }}>{caso.base_gravable == null ? '—' : fmtCOP(caso.base_gravable)}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt style={{ color: '#6B7280' }}>IVA</dt>
+                  <dd style={{ color: '#1A1A1A' }}>
+                    {caso.honorario == null || caso.base_gravable == null
+                      ? '—' : fmtCOP(caso.honorario - caso.base_gravable)}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3 text-[13px] font-bold">
+                  <dt style={{ color: '#1A1A1A' }}>Total</dt>
+                  <dd style={{ color: '#1A1A1A' }}>{caso.honorario == null ? '—' : fmtCOP(caso.honorario)}</dd>
+                </div>
+              </dl>
+
+              {/* Siigo ya tiene una factura de este servicio para el cliente */}
+              {duplicados && (
+                <div className="mt-3 rounded-md border p-2" style={{ borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }}>
+                  <div className="flex items-start gap-1.5">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: '#B91C1C' }} />
+                    <div className="text-[12px]" style={{ color: '#991B1B' }}>
+                      <strong>Este cliente ya tiene factura de este servicio.</strong>{' '}
+                      {duplicados.map(d => d.name).join(', ')}
+                      {duplicados[0]?.date ? ` (${duplicados[0].date})` : ''}. Si aun así hay que
+                      facturar, escribe por qué: queda registrado.
+                    </div>
+                  </div>
+                  <input
+                    value={justificacion}
+                    onChange={e => setJustificacion(e.target.value)}
+                    placeholder="Por qué se factura de nuevo"
+                    className="mt-2 w-full rounded-md border px-2 py-1 text-[12px] focus:outline-none"
+                    style={{ borderColor: '#FCA5A5' }}
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {!confirmando && !duplicados && (
+                  <button
+                    onClick={() => setConfirmando(true)}
+                    className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition"
+                    style={{ backgroundColor: VERDE }}
+                  >
+                    Facturar electrónicamente
+                  </button>
+                )}
+
+                {confirmando && (
+                  <>
+                    <span className="text-[12px]" style={{ color: '#991B1B' }}>
+                      Se radica ante la DIAN y no se puede deshacer.
+                    </span>
+                    <button
+                      onClick={() => emitir()}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
+                      style={{ backgroundColor: '#B91C1C' }}
+                    >
+                      {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Sí, facturar
+                    </button>
+                  </>
+                )}
+
+                {duplicados && (
+                  <button
+                    onClick={() => emitir(justificacion)}
+                    disabled={isPending || justificacion.trim().length === 0}
+                    className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
+                    style={{ backgroundColor: '#B91C1C' }}
+                  >
+                    {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Facturar de todos modos
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    setRevisando(false); setConfirmando(false); setDuplicados(null); setJustificacion('')
+                  }}
+                  disabled={isPending}
+                  className="rounded-md border px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
+                  style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
