@@ -5776,14 +5776,20 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
 
   // ── Build enriched bloques with auto_fill values ──────────────────────────
   // Segmentación por área: si el usuario tiene área(s) asignada(s) y NO cubren el
-  // stage de la etapa actual, todos sus bloques quedan readonly. Sin área → sin
-  // restricción (solo se activa donde staff_areas está poblado). owner/admin con
-  // área también se restringen (decisión 2026-06-04).
+  // stage de la etapa actual, sus bloques quedan readonly — SALVO los que inviten
+  // a su área con `areas_editoras` (se resuelve bloque por bloque más abajo).
+  // Sin área → sin restricción (solo se activa donde staff_areas está poblado).
+  // owner/admin con área también se restringen (decisión 2026-06-04).
   const stageActualNeg = (base.negocio.stage_actual ?? null) as Stage | null
   const areaDuenaActual = stageActualNeg ? STAGE_TO_AREA[stageActualNeg] : null
+  const areasEfectivasUsuario = getAreasEfectivas({
+    id: '',
+    role: (role ?? 'read_only') as Role,
+    areas: (areas ?? []) as Area[],
+  })
   const areaReadonly =
     !!areas && areas.length > 0 && areaDuenaActual !== null
-    && !getAreasEfectivas({ id: '', role: (role ?? 'read_only') as Role, areas: areas as Area[] }).has(areaDuenaActual)
+    && !areasEfectivasUsuario.has(areaDuenaActual)
 
   // Orden de la etapa en la que está el negocio AHORA. Define la ventana de reversión
   // de la propuesta, que no coincide con la etapa donde el bloque vive.
@@ -5936,7 +5942,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const enrichedConfigExtra: Record<string, unknown> = { ...configExtra }
     if (Object.keys(autoFill).length > 0) enrichedConfigExtra._auto_fill = autoFill
     if (resolvedFields) enrichedConfigExtra.fields = resolvedFields
-    if (areaReadonly) enrichedConfigExtra._areaReadonly = true
+    // Solo lectura por área: se decide POR BLOQUE, no por etapa. Un bloque puede
+    // invitar a otra área (`areas_editoras`) porque su trabajo real es de ella,
+    // aunque la etapa pertenezca a otra. Sin la marca, el resultado es el de antes.
+    const invitadoAEsteBloque = ((configExtra.areas_editoras ?? []) as Area[])
+      .some(a => areasEfectivasUsuario.has(a))
+    if (areaReadonly && !invitadoAEsteBloque) enrichedConfigExtra._areaReadonly = true
     // Corrección del valor aprobado: capacidad declarada por persona en el
     // workspace, NO derivada del rol (ver `corregirValorAprobado`). Se resuelve
     // en el servidor y viaja como flag para que el bloque sepa si mostrar el

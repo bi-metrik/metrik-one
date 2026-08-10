@@ -50,14 +50,17 @@ export async function guardEditarBloque(
   if (!c) return { ok: false, error: 'No autenticado' }
   const { data: nb } = await db(c.supabase)
     .from('negocio_bloques')
-    .select('negocio_id, bloque_configs!inner(etapas_negocio!inner(stage))')
+    .select('negocio_id, bloque_configs!inner(config_extra, etapas_negocio!inner(stage))')
     .eq('id', negocioBloqueId)
     .single()
   if (!nb) return { ok: false, error: 'Bloque no encontrado' }
   const stage = (nb.bloque_configs?.etapas_negocio?.stage ?? null) as Stage | null
   if (!stage) return { ok: false, error: 'Etapa sin stage' }
+  // Áreas invitadas a editar ESTE bloque, aunque el stage sea de otra área.
+  const areasExtra = ((nb.bloque_configs as { config_extra?: { areas_editoras?: unknown } | null } | null)
+    ?.config_extra?.areas_editoras ?? []) as Area[]
   const resp = await responsablesDe(c.supabase, nb.negocio_id as string)
-  if (!canEditBloque(c.user, { stage }, resp)) {
+  if (!canEditBloque(c.user, { stage, areasExtra }, resp)) {
     return { ok: false, error: 'Tu rol o área no permite editar en esta fase del negocio' }
   }
   return { ok: true }
