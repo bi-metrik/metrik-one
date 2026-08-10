@@ -42,6 +42,21 @@ export type UserContext = {
 export type BloqueContext = {
   /** Stage al que pertenece la etapa donde vive el bloque. */
   stage: Stage
+  /**
+   * Áreas que ADEMÁS de la dueña del stage pueden editar este bloque
+   * (`config_extra.areas_editoras`, opt-in por bloque).
+   *
+   * Existe porque el área dueña se deriva del stage de la etapa, y hay bloques
+   * cuyo trabajo real es de otra área. Caso que lo motivó (SOENA, Notificación):
+   * la etapa es de venta, pero cuando la DIAN abre agenda para un caso radicado
+   * por PQRS, quien consigue la cita es OPERACIONES — y tenía que pedirle al
+   * comercial que la registrara.
+   *
+   * Amplía, nunca restringe: sin el campo, el criterio es idéntico al anterior.
+   * Y NO toca `canAdvanceStage`: poder registrar un dato en un bloque no es
+   * poder mover el negocio de etapa.
+   */
+  areasExtra?: Area[]
 }
 
 /** Stage -> area duena del stage. cerrado no tiene area (read-only). */
@@ -97,13 +112,17 @@ export function canEditBloque(
   const areaDuena = STAGE_TO_AREA[bloque.stage]
   const tieneAreas = user.areas.length > 0
   const areasEfectivas = getAreasEfectivas(user)
-  // Cubre el stage si no tiene areas (sin segmentacion) o su area lo incluye.
-  const cubreStage = areaDuena !== null && (!tieneAreas || areasEfectivas.has(areaDuena))
+  // El bloque puede declarar áreas adicionales autorizadas a editarlo.
+  const invitada = (bloque.areasExtra ?? []).some(a => areasEfectivas.has(a))
+  // Cubre el stage si no tiene areas (sin segmentacion), su area lo incluye, o
+  // el bloque invita explicitamente a su area.
+  const cubreStage = (areaDuena !== null && (!tieneAreas || areasEfectivas.has(areaDuena))) || invitada
 
   // owner/admin: passthrough si no tienen area; con area, se restringen al stage.
   if (user.role === 'owner' || user.role === 'admin') {
     if (!tieneAreas) return true
-    return areaDuena === null ? true : areasEfectivas.has(areaDuena)
+    // Stage sin área dueña (cerrado): owner/admin conservan el paso, como antes.
+    return areaDuena === null ? true : areasEfectivas.has(areaDuena) || invitada
   }
 
   // Stage cerrado: solo owner/admin (ya retornaron arriba)

@@ -10,6 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  canAdvanceStage,
   canEditBloque,
   canEditHeader,
   canGestionarAliados,
@@ -276,4 +277,57 @@ test('canWriteActivityLog == canViewNegocio', () => {
     canWriteActivityLog(user('contador', []), ['u1']),
     false
   )
+})
+
+// ── areasExtra: un bloque invita a otra área ───────────────────────
+// Caso real (SOENA, etapa Notificación = stage venta): si la DIAN abre agenda
+// para un caso radicado por PQRS, quien consigue la cita es OPERACIONES y debe
+// poder registrarla sin pedírselo al comercial.
+const ventaConOperaciones = { stage: 'venta', areasEditoras: ['operaciones'] }
+const ventaInvitaOps = { stage: 'venta', areasExtra: ['operaciones'] }
+
+test('areasExtra: operaciones edita un bloque de venta que la invita', () => {
+  // supervisor de operaciones (no requiere ser responsable)
+  assert.equal(canEditBloque(user('supervisor', ['operaciones']), ventaInvitaOps, []), true)
+  // operator de operaciones, responsable del negocio
+  assert.equal(canEditBloque(user('operator', ['operaciones']), ventaInvitaOps, ['u1']), true)
+})
+
+test('areasExtra NO exime al operator de ser responsable', () => {
+  assert.equal(canEditBloque(user('operator', ['operaciones']), ventaInvitaOps, ['otro']), false)
+})
+
+test('areasExtra no cambia nada para el área dueña del stage', () => {
+  assert.equal(canEditBloque(user('supervisor', ['comercial']), ventaInvitaOps, []), true)
+  assert.equal(canEditBloque(user('supervisor', ['comercial']), venta, []), true)
+})
+
+test('areasExtra NO abre el bloque a un área que no fue invitada', () => {
+  assert.equal(canEditBloque(user('supervisor', ['financiera']), ventaInvitaOps, []), false)
+})
+
+test('sin areasExtra, operaciones sigue sin poder editar un bloque de venta', () => {
+  assert.equal(canEditBloque(user('supervisor', ['operaciones']), venta, []), false)
+  assert.equal(canEditBloque(user('operator', ['operaciones']), venta, ['u1']), false)
+})
+
+test('areasExtra mal escrito (clave equivocada) NO abre nada', () => {
+  // Protege contra un typo en la config: si la clave no es la esperada, el
+  // bloque se comporta como si no invitara a nadie.
+  assert.equal(canEditBloque(user('supervisor', ['operaciones']), ventaConOperaciones, []), false)
+})
+
+test('areasExtra: read_only y contador siguen fuera del modelo', () => {
+  assert.equal(canEditBloque(user('read_only', ['operaciones']), ventaInvitaOps, ['u1']), false)
+  assert.equal(canEditBloque(user('contador', ['operaciones']), ventaInvitaOps, ['u1']), false)
+})
+
+test('areasExtra: direccion ya cubría todo, sigue igual', () => {
+  assert.equal(canEditBloque(user('supervisor', ['direccion']), ventaInvitaOps, []), true)
+})
+
+test('areasExtra NO habilita avanzar de etapa: es permiso de bloque, no de stage', () => {
+  // canAdvanceStage delega en canEditBloque SIN areasExtra — mover el negocio
+  // sigue siendo del área dueña del stage destino.
+  assert.equal(canAdvanceStage(user('supervisor', ['operaciones']), 'venta', []), false)
 })
