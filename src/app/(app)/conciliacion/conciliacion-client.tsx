@@ -598,6 +598,18 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
                       <div className="text-[14px] font-bold tabular-nums" style={{ color: '#DC2626' }}>{fmtCOP(Math.abs(n.saldo))}</div>
                     </>
                   )}
+                  {/* La plata que espera TU visto bueno. Sin nombrarla, la fila diría
+                      "faltan $X" sobre un pago que ya está registrado, y mandaría a
+                      buscar algo que no se ha perdido: lo que falta es confirmarlo. */}
+                  {n.pendiente_de_confirmar > 0 && (
+                    <div
+                      className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800"
+                      title="El comercial repartió este pago y todavía no lo has confirmado. Hasta entonces no cuenta como recaudo y el caso no avanza de etapa."
+                    >
+                      <Clock className="h-3 w-3" />
+                      {fmtCOP(n.pendiente_de_confirmar)} sin confirmar
+                    </div>
+                  )}
                   <div
                     className="mt-0.5 text-[10px]"
                     style={{ color: '#9CA3AF' }}
