@@ -2,7 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
-import { SECCIONALES_DIAN } from '@/lib/dian/seccionales'
+import { SECCIONALES_DIAN, canonizarSeccional } from '@/lib/dian/seccionales'
 import type {
   ComercialData, OperativoData, FinancieroData,
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
@@ -812,6 +812,14 @@ export async function getProcesoSemanal(semanas = 8): Promise<ProcesoSemanalData
 //
 // El corte con/sin cita NO se hardcodea: sale del flag `cita` del catálogo
 // SECCIONALES_DIAN. Si la DIAN cambia la exigencia, se actualiza ahí y esta vista sigue.
+
+/** Clave de agrupación de una seccional: el canónico, o el texto crudo si no se reconoce. */
+function claveSeccional(valor: string | null | undefined): string {
+  const t = valor?.trim()
+  if (!t) return ''
+  return canonizarSeccional(t) ?? t
+}
+
 export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | null> {
   const { supabase, workspaceId } = await getWorkspace()
   if (!supabase || !workspaceId) return null
@@ -856,9 +864,15 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
   if (fechaFotoPrevia) {
     for (const r of snaps) {
       if (r.tomado_en !== fechaFotoPrevia) continue
-      antes.set(`${r.etapa_id}::${(r.seccional as string | null) ?? ''}`, {
-        abiertos: Number(r.abiertos ?? 0),
-        vencidos: Number(r.vencidos ?? 0),
+      // Las fotos viejas guardan el texto tal como estaba ese día, con sus variantes.
+      // Se canonizan igual que el dato de hoy y se SUMAN cuando dos variantes colapsan
+      // en la misma ciudad: si no, la comparación "hoy / semana pasada" restaría contra
+      // una sola de las dos y mostraría una caída que nunca ocurrió.
+      const k = `${r.etapa_id}::${claveSeccional(r.seccional as string | null)}`
+      const acc = antes.get(k) ?? { abiertos: 0, vencidos: 0 }
+      antes.set(k, {
+        abiertos: acc.abiertos + Number(r.abiertos ?? 0),
+        vencidos: acc.vencidos + Number(r.vencidos ?? 0),
       })
     }
   }
@@ -888,7 +902,12 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
 
   for (const n of filas) {
     if (!n.etapa_actual_id) continue
-    const sec = (n.metadata?.seccional as string | undefined)?.trim() || null
+    // Se agrupa por el nombre CANÓNICO, no por el texto guardado. El dato quedó
+    // canonizado en origen (ver `seccional-negocio.ts`), pero la vista lo vuelve a
+    // canonizar al leer: es lo que impide que un cargue nuevo, un script viejo o un
+    // registro histórico partan otra vez una ciudad en dos columnas.
+    const crudo = (n.metadata?.seccional as string | undefined)?.trim() || null
+    const sec = crudo ? (canonizarSeccional(crudo) ?? crudo) : null
     if (sec === null) sinRegistrar++
     else seccionalesVistas.add(sec)
     const m = porEtapa.get(n.etapa_actual_id) ?? new Map<string | null, { abiertos: number }>()
@@ -907,7 +926,8 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
 
   const vencidosHoy = new Map<string, number>()
   for (const r of ((hoyRows ?? []) as Array<Record<string, unknown>>)) {
-    vencidosHoy.set(`${r.etapa_id}::${(r.seccional as string | null) ?? ''}`, Number(r.vencidos ?? 0))
+    const k = `${r.etapa_id}::${claveSeccional(r.seccional as string | null)}`
+    vencidosHoy.set(k, (vencidosHoy.get(k) ?? 0) + Number(r.vencidos ?? 0))
   }
 
   const etapas: ProcesoSeccionalEtapa[] = Array.from(porEtapa.entries())
@@ -995,8 +1015,13 @@ export interface CasoEnEtapa {
 
 export async function getCasosDeEtapa(input: {
   etapaId: string
-  /** `undefined` = todas las seccionales. `null` = solo los que no la tienen registrada. */
-  seccional?: string | null
+  /**
+   * `undefined` = todas las seccionales. `null` = solo los que no la tienen registrada.
+   * Un ARREGLO abre las columnas que agrupan varias: "Sin cita" son las catorce
+   * seccionales que no exigen cita previa, y sin esto era la única celda del tablero
+   * que mostraba un número sin dejar ver de quiénes se trataba.
+   */
+  seccional?: string | string[] | null
   soloVencidos: boolean
   /** Solo los que tienen un reproceso abierto. */
   soloReproceso?: boolean
@@ -1087,7 +1112,12 @@ export async function getCasosDeEtapa(input: {
       id: f.id,
       codigo: f.codigo,
       nombre: f.nombre ?? '—',
-      seccional: ((f.metadata?.seccional as string | undefined)?.trim() || null),
+      // Canonizada, igual que en la tabla: el filtro de abajo compara contra el nombre
+      // de la columna en la que se hizo clic, y ese nombre es el canónico.
+      seccional: (() => {
+        const c = claveSeccional(f.metadata?.seccional as string | undefined)
+        return c === '' ? null : c
+      })(),
       responsable: f.responsable_id ? (nombrePorStaff.get(f.responsable_id) ?? null) : null,
       horasEnEtapa: h,
       vencido: Boolean(slaHoras && slaHoras > 0 && h !== null && h > slaHoras),
@@ -1096,8 +1126,14 @@ export async function getCasosDeEtapa(input: {
     }
   })
 
+  const enSeccional = (c: CasoEnEtapa): boolean => {
+    if (input.seccional === undefined) return true
+    if (Array.isArray(input.seccional)) return c.seccional !== null && input.seccional.includes(c.seccional)
+    return c.seccional === input.seccional
+  }
+
   return casos
-    .filter(c => (input.seccional === undefined ? true : c.seccional === input.seccional))
+    .filter(enSeccional)
     .filter(c => (input.soloVencidos ? c.vencido : true))
     .filter(c => (input.soloReproceso ? c.reproceso !== null : true))
     // Lo mas atascado primero: primero por tiempo en la etapa, y a igualdad, por

@@ -185,6 +185,63 @@ export function getSeccionalBySlug(slug: string): SeccionalDIAN | null {
 }
 
 /**
+ * NOMBRE CANÓNICO de una seccional: el único texto con el que se la nombra al
+ * guardarla en datos (`negocios.metadata.seccional`) y al agruparla en tableros.
+ *
+ * Bogotá colapsa sus dos buzones en "Bogotá". El buzón (naturales / jurídicas) NO
+ * se pierde: se vuelve a derivar de `tipo_persona` cada vez que se necesita, que es
+ * lo correcto — el buzón depende de quién es el solicitante, no de cómo se tecleó la
+ * ciudad. Guardarlo dentro del nombre creaba una tercera variante ("Bogotá — Personas
+ * naturales") que ninguna otra capa reconocía.
+ */
+export function labelCanonicoSeccional(s: SeccionalDIAN): string {
+  return s.tipo_persona ? 'Bogotá' : s.label
+}
+
+/**
+ * Lleva CUALQUIER forma de escribir una seccional a su nombre canónico: la ciudad
+ * suelta ("Bogota"), el nombre oficial del RUT ("Impuestos y Aduanas de Tuluá"), el
+ * label con buzón ("Bogotá — Personas naturales") o el propio canónico.
+ *
+ * Devuelve null si no se reconoce. Quien llama decide: nunca se inventa una seccional
+ * ni se degrada a un genérico, porque de este texto cuelgan la casilla 12 del 010, el
+ * buzón de la Guía y el corte con/sin cita del tablero.
+ */
+export function canonizarSeccional(input: string | null | undefined): string | null {
+  const s = seccionalDesdeRut(input)
+  return s ? labelCanonicoSeccional(s) : null
+}
+
+/**
+ * Traduce una seccional a la clave del preset del Formato 010
+ * (`bloque_configs.config_extra.seccionales`), que es un vocabulario MÁS CORTO que el
+ * catálogo: solo las seccionales con particularidades propias tienen entrada, y el
+ * resto comparte "Otras seccionales".
+ *
+ * Existe porque son dos vocabularios distintos sobre la misma realidad y confundirlos
+ * fue el defecto de origen: el 010 buscaba su preset con `seccionales[valor]`, match
+ * EXACTO, así que "Bogota" sin tilde no encontraba el preset de "Bogotá" y el caso se
+ * quedaba sin la casilla 12 resuelta, en silencio.
+ */
+export function presetKeySeccional(
+  input: string | null | undefined,
+  keys: string[],
+): string | null {
+  if (keys.length === 0) return null
+  const otras = keys.find(k => normalize(k) === 'otras seccionales') ?? null
+  const canonico = canonizarSeccional(input)
+  // Se busca por el canónico y también por el texto crudo: una clave del preset puede
+  // no existir en el catálogo (configuración libre del workspace) y aun así ser válida.
+  for (const candidato of [canonico, input]) {
+    if (!candidato) continue
+    const n = normalize(candidato)
+    const hit = keys.find(k => normalize(k) === n)
+    if (hit) return hit
+  }
+  return otras
+}
+
+/**
  * Resuelve una entrada de seccional (nombre de ciudad, nombre oficial parcial, o
  * el key de un preset como "Cali"/"Tuluá") al par CANÓNICO { nombre_oficial, codigo }
  * que exige la DIAN en la casilla 12 del Formato 010.
