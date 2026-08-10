@@ -1039,7 +1039,13 @@ function FilaPorFacturar({
       const r = await emitirFacturaDeNegocio(caso.negocio_id, { justificacionDuplicado })
       if (r.duplicados) { setDuplicados(r.duplicados); setConfirmando(false); return }
       if (!r.ok) { toast.error(r.error ?? 'No se pudo emitir'); return }
-      toast.success(`Factura ${r.numero} emitida`)
+      // Si el PDF no quedó en el negocio hay que decirlo: la factura salió igual,
+      // pero el expediente queda incompleto y en silencio nadie lo notaría.
+      if (r.archivada === false) {
+        toast.warning(`Factura ${r.numero} emitida, pero el PDF no quedó cargado en el negocio`)
+      } else {
+        toast.success(`Factura ${r.numero} emitida y archivada en el negocio`)
+      }
       setRevisando(false); setConfirmando(false); setDuplicados(null); setJustificacion('')
       onCambio()
     })

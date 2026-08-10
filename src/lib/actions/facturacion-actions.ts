@@ -433,6 +433,12 @@ export interface ResultadoEmitir {
   numero?: string
   /** Se creó sin radicar ante la DIAN. */
   borrador?: boolean
+  /**
+   * `false` si la factura salió pero su PDF no quedó cargado en el negocio. No es
+   * un fallo de la emisión: es un pendiente que hay que decir, porque el
+   * expediente queda incompleto y en silencio nadie lo notaría.
+   */
+  archivada?: boolean
   error?: string
   /**
    * Siigo ya tiene factura de este producto para el cliente. La pantalla debe
@@ -481,11 +487,28 @@ export async function emitirFacturaDeNegocio(
     (conc as { conciliado: boolean } | null)?.conciliado === true,
   )
 
+  // Dónde archivar el PDF: se declara por línea, junto al resto de la config de
+  // Siigo. Sin el dato la factura sale igual, pero el archivo no queda en el
+  // expediente y la pantalla lo dice, en vez de callarlo.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negLinea } = await (svc as any)
+    .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+  let bloqueFacturaSlug: string | undefined
+  if (negLinea?.linea_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: linea } = await (svc as any)
+      .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
+    const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
+      { bloque_factura_slug?: string } | undefined
+    bloqueFacturaSlug = cfgSiigo?.bloque_factura_slug
+  }
+
   const r = await emitirFacturaNegocio(
     workspaceId,
     negocioId,
     nombre,
     {
+      bloqueFacturaSlug,
       // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
       // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
       // sin radicar existe para la primera prueba controlada con Diana.
@@ -531,5 +554,5 @@ export async function emitirFacturaDeNegocio(
   }
 
   revalidatePath('/conciliacion')
-  return { ok: true, numero: r.numero, borrador: !r.emitida }
+  return { ok: true, numero: r.numero, borrador: !r.emitida, archivada: r.archivada }
 }

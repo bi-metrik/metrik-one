@@ -17,6 +17,7 @@ import { claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './c
 import { borradorFactura, type BorradorFactura } from './mapeo'
 import { asegurarClienteSiigo } from './clientes'
 import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { archivarPdfEnBloque } from './archivar-documento'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 
 /**
@@ -71,6 +72,12 @@ export async function facturasDelClienteEnSiigo(
 
 export interface OpcionesEmision {
   /**
+   * Slug del bloque del negocio donde se archiva el PDF emitido. Sin él la
+   * factura se emite igual, pero el archivo no queda en el expediente: se avisa
+   * en vez de dejarlo pasar callado.
+   */
+  bloqueFacturaSlug?: string
+  /**
    * Emitir electrónicamente (radicar ante la DIAN). En `false` el documento se
    * crea en Siigo sin radicar, para una primera prueba controlada.
    */
@@ -85,18 +92,48 @@ export interface OpcionesEmision {
 }
 
 export type ResultadoEmision =
-  | { ok: true; numero: string; siigo_id: string; total: number; emitida: boolean }
+  | {
+      ok: true; numero: string; siigo_id: string; total: number; emitida: boolean
+      /** `false` si la factura salió pero su PDF no se pudo dejar en el negocio. */
+      archivada: boolean
+    }
   | { ok: false; motivo: 'faltan_datos'; faltantes: string[] }
   | { ok: false; motivo: 'saldo_pendiente'; faltante: number }
   | { ok: false; motivo: 'ya_facturado_en_one'; numero: string }
   | { ok: false; motivo: 'duplicado_en_siigo'; existentes: FacturaEnSiigo[] }
   | { ok: false; motivo: 'error'; mensaje: string }
 
+/**
+ * PDF de un documento ya emitido, tal como lo entrega Siigo.
+ *
+ * Solo existe para FACTURAS. Los recibos de caja no exponen PDF por API
+ * (comprobado el 2026-08-10: 404 en `/pdf` y en `/print`).
+ */
+export async function pdfDeFactura(
+  workspaceId: string,
+  siigoId: string,
+): Promise<{ pdf: Buffer; cufe: string | null } | null> {
+  try {
+    const r = await siigoRequest<{ base64?: string; cufe?: string }>(
+      workspaceId, `/v1/invoices/${siigoId}/pdf`, { maxEspera429Ms: ESPERA_429_EMISION_MS },
+    )
+    if (!r.base64) return null
+    return { pdf: Buffer.from(r.base64, 'base64'), cufe: r.cufe ?? null }
+  } catch (e) {
+    console.error('[siigo] no se pudo traer el PDF de la factura:', (e as Error).message)
+    return null
+  }
+}
+
 /** Marca que queda en `negocios.metadata.siigo_factura`. */
 export interface MarcaFactura {
   numero: string
   siigo_id: string
   total: number
+  /** Identificador fiscal de la factura electrónica, cuando Siigo lo devuelve. */
+  cufe?: string | null
+  /** Dónde quedó archivado el PDF dentro del negocio. */
+  archivo_url?: string | null
   /** `false` si se creó sin radicar ante la DIAN. */
   emitida: boolean
   at: string
@@ -195,10 +232,31 @@ export async function emitirFacturaNegocio(
       },
     )
 
+    // ── 6. Archivar el PDF dentro del negocio ────────────────────────────────
+    // La factura YA existe y es irreversible: de aquí en adelante nada puede
+    // convertir la emisión en un fallo. Lo que salga mal se reporta como
+    // pendiente de archivar, no como factura no emitida.
+    let cufe: string | null = null
+    let archivoUrl: string | null = null
+    if (creada.id) {
+      const doc = await pdfDeFactura(workspaceId, creada.id)
+      cufe = doc?.cufe ?? null
+      if (doc && opciones.bloqueFacturaSlug) {
+        const nombre = `${(creada.name ?? 'factura').replace(/[^\w.-]+/g, '-')}.pdf`
+        const arch = await archivarPdfEnBloque(
+          workspaceId, negocioId, opciones.bloqueFacturaSlug, doc.pdf, nombre,
+        )
+        if (arch.ok) archivoUrl = arch.url ?? null
+        else console.error('[siigo] factura emitida pero SIN archivar en el negocio:', arch.error)
+      }
+    }
+
     const marca: MarcaFactura = {
       numero: creada.name ?? '(sin número)',
       siigo_id: creada.id ?? '',
       total: honorario,
+      cufe,
+      archivo_url: archivoUrl,
       emitida: opciones.emitir,
       at: new Date().toISOString(),
       por: staffNombre,
@@ -216,7 +274,11 @@ export async function emitirFacturaNegocio(
       console.error('[siigo] factura emitida pero NO marcada en el negocio:', errUp.message)
     }
 
-    return { ok: true, numero: marca.numero, siigo_id: marca.siigo_id, total: honorario, emitida: opciones.emitir }
+    return {
+      ok: true, numero: marca.numero, siigo_id: marca.siigo_id,
+      total: honorario, emitida: opciones.emitir,
+      archivada: !opciones.bloqueFacturaSlug || archivoUrl != null,
+    }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
     return { ok: false, motivo: 'error', mensaje }
