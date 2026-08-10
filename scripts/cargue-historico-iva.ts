@@ -25,6 +25,7 @@ import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } 
 import { createDriveFolder, uploadFileToDrive, setFilePublicByLink } from '../src/lib/google-drive'
 import { generarFormularioCore } from '../src/lib/actions/formulario-actions'
 import { nitSinDv, calcularDvNit } from '../src/lib/dian/nit'
+import { asignarResponsable } from '../src/lib/negocios/responsable-rol'
 
 for (const line of readFileSync(join(process.cwd(), '.env.local'), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
@@ -293,7 +294,13 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
   if (nerr) throw new Error(`negocio: ${nerr.message}`)
   const negocioId = (neg as { id: string }).id
   if (f.responsable_staff_id) {
-    await supabase.from('negocio_responsables').insert({ negocio_id: negocioId, staff_id: f.responsable_staff_id, assigned_by: ASSIGNED_BY })
+    // Vía el helper para que la fila nazca CON `rol`: el cargue de julio insertó sin él y
+    // dejó 247 responsables invisibles para el routing de avisos (ver responsable-rol.ts).
+    await asignarResponsable(supabase, {
+      negocioId,
+      staffId: f.responsable_staff_id,
+      assignedBy: ASSIGNED_BY,
+    })
   }
 
   // 4. carpeta Drive
