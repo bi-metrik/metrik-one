@@ -245,6 +245,9 @@ export async function emitirFacturaNegocio(
         const nombre = `${(creada.name ?? 'factura').replace(/[^\w.-]+/g, '-')}.pdf`
         const arch = await archivarPdfEnBloque(
           workspaceId, negocioId, opciones.bloqueFacturaSlug, doc.pdf, nombre,
+          // El consecutivo lo devolvió Siigo: se guarda para que se vea en el
+          // bloque sin que nadie lo copie del PDF.
+          { numero_factura: creada.name ?? '' },
         )
         if (arch.ok) archivoUrl = arch.url ?? null
         else console.error('[siigo] factura emitida pero SIN archivar en el negocio:', arch.error)
