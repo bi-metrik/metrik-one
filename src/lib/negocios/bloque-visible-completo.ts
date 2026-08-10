@@ -85,3 +85,30 @@ export function gateVisibleQuedaResuelto(
   if (bloqueConfig?.estado !== 'visible' || bloqueConfig?.es_gate !== true) return false
   return visiblePuedeNacerCompleto(bloqueConfig.config_extra ?? null, data, true)
 }
+
+/**
+ * ¿Una copia de solo lectura de un DOCUMENTO puede nacer completa?
+ *
+ * Un bloque `visible` nace completo porque no requiere acción del usuario. Para un
+ * bloque de datos eso es cierto: lo llena el sistema. Para un DOCUMENTO heredado no:
+ * la copia no tiene archivo propio, muestra el del origen, y si el origen tampoco
+ * tiene archivo la pantalla afirma que el documento está cuando no está. Eso no es
+ * ruido, es información falsa, y sobre un expediente es peor que un pendiente de más.
+ *
+ * Medido en SOENA el 2026-08-10, al mover el bloque de factura: **754 instancias**
+ * de "Factura emitida" y 28 de "RUT solicitante 2" se veían completas con el origen
+ * vacío. En cambio las de Certificado UPME, Factura Venta Vehículo y RUT (69 en
+ * total) SÍ tienen archivo en su origen y se ven bien: por eso la regla mira el
+ * origen y no el tipo a secas, que las habría marcado pendientes sin motivo.
+ *
+ * @param esDocumento tipo del bloque === 'documento'.
+ * @param origenTieneArchivo si el negocio ya tiene el documento en el bloque origen.
+ */
+export function documentoHeredadoNaceCompleto(
+  esDocumento: boolean,
+  heredado: boolean,
+  origenTieneArchivo: boolean,
+): boolean {
+  if (!esDocumento || !heredado) return true
+  return origenTieneArchivo
+}
