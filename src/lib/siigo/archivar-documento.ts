@@ -43,6 +43,11 @@ export async function archivarPdfEnBloque(
   slugBloque: string,
   pdf: Buffer,
   nombreArchivo: string,
+  /**
+   * Campos que ONE ya conoce del documento y que, si no se escribieran, alguien
+   * tendría que transcribir del PDF que el propio sistema acaba de recibir.
+   */
+  campos?: Record<string, string>,
 ): Promise<ResultadoArchivado> {
   try {
     const svc = createServiceClient()
@@ -105,6 +110,21 @@ export async function archivarPdfEnBloque(
       uploaded_at: new Date().toISOString(),
       // Deja dicho que el archivo lo trajo ONE desde Siigo, no una persona.
       origen: 'emitido_en_siigo',
+      // Los campos se escriben con la MISMA forma que deja la extracción con IA
+      // (`{value, confidence, manual}`), porque los leen las mismas pantallas y
+      // los mismos gates. `manual: true` porque no salieron de una extracción:
+      // los devolvió Siigo, y marcarlos como extraídos les pondría un porcentaje
+      // de confianza inventado.
+      ...(campos && Object.keys(campos).length > 0
+        ? {
+            campos: {
+              ...((existente?.data as { campos?: Record<string, unknown> } | undefined)?.campos ?? {}),
+              ...Object.fromEntries(
+                Object.entries(campos).map(([k, v]) => [k, { value: v, manual: true }]),
+              ),
+            },
+          }
+        : {}),
     }
 
     if (existente?.id) {

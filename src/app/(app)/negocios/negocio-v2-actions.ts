@@ -6496,6 +6496,21 @@ async function validarGateFacturaEmitida(
   const { bloque_slug, nit_campo = 'emisor_nit', numero_campo = 'numero_factura', emisor_nit_esperado } = cfg.factura_gate
   if (!bloque_slug) return null
 
+  // Si la factura la emitió ONE contra Siigo, el gate ya está satisfecho: el
+  // número lo devolvió Siigo y el emisor es, por construcción, el del workspace
+  // desde cuya cuenta se emitió. Exigirle a alguien que transcriba del PDF un
+  // dato que el sistema acaba de recibir es pedirle que copie a mano lo que ya
+  // sabe, y la comprobación de emisor existe para otra cosa: detectar que se
+  // cargue a mano una factura ajena.
+  const { data: negFactura } = await db(supabase)
+    .from('negocios')
+    .select('metadata')
+    .eq('id', negocioId)
+    .single()
+  const marca = ((negFactura as { metadata?: Record<string, unknown> } | null)?.metadata?.siigo_factura ?? null) as
+    { numero?: string } | null
+  if (marca?.numero) return null
+
   const { data: bloques } = await db(supabase)
     .from('negocio_bloques')
     .select('data, bloque_configs!inner(slug)')
