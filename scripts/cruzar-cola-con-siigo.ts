@@ -58,6 +58,10 @@ async function traerTodo<T>(wsId: string, ruta: string, siigoRequest: <R>(w: str
 async function main() {
   const { createClient } = await import('@supabase/supabase-js')
   const { siigoRequest, getSiigoConfig } = await import('../src/lib/siigo/client')
+  // El MISMO helper que usa el mapeo al crear el tercero. Comparar el número
+  // crudo del RUT contra lo que Siigo guardó da falsos faltantes cuando el RUT
+  // trae el DV pegado: el tercero existe, con la identificación canónica.
+  const { nitSinDv } = await import('../src/lib/dian/nit')
 
   const one = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -116,7 +120,7 @@ async function main() {
       }
       rutPorNegocio.set(b.negocio_id, plano)
       const raw = String(campos.numero_identificacion?.value ?? campos.nit?.value ?? '').trim()
-      const limpio = raw.replace(/[^\d]/g, '')
+      const limpio = nitSinDv(raw) ?? raw.replace(/[^\d]/g, '')
       if (limpio) idPorNegocio.set(b.negocio_id, limpio)
     } else if (b.bloque_configs?.slug === 'factura_emitida') {
       const n = String(campos.numero_factura?.value ?? '').trim()
@@ -160,6 +164,12 @@ async function main() {
   const conRecibo: string[] = []
 
   for (const n of cola) {
+    // La marca del negocio cuenta igual que el bloque: es la que deja la emisión
+    // desde la cola, y medir solo el bloque haría ver como "ONE no lo sabe" a un
+    // caso que ONE acaba de marcar.
+    if ((n.metadata?.siigo_factura ?? null) !== null && !oneDiceFacturado.has(n.id)) {
+      oneDiceFacturado.set(n.id, String((n.metadata!.siigo_factura as { numero?: string }).numero ?? 'sí'))
+    }
     const id = idPorNegocio.get(n.id)
     if (!id) { sinId++; continue }
     if (tercerosPorId.has(id)) conTercero++; else sinTercero++
