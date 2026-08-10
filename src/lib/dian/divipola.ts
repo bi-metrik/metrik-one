@@ -1,101 +1,78 @@
 /**
  * DIVIPOLA (DANE) — códigos de país / departamento / municipio para las casillas
- * 26 / 27 / 28 del Formato 010.
+ * 26 / 27 / 28 del Formato 010 y para el cliente de Siigo.
  *
  * Motivación: la extracción del RUT trae los códigos de ubicación de forma poco
- * fiable (se vio `codigo_municipio="76"` copiando el código del departamento). Los
- * códigos son DETERMINISTAS dado el NOMBRE (que sí se extrae bien), así que los
- * resolvemos por nombre y solo caemos a lo extraído cuando el municipio no está
- * en la tabla. Formato de los códigos = el mismo que usa el RUT: departamento a
- * 2 dígitos ("76"), municipio a 3 dígitos dentro del departamento ("001").
+ * fiable (se midió `codigo_departamento` con el código de PAÍS y `codigo_municipio`
+ * con un sufijo suelto). Los códigos SÍ son deterministas dado el NOMBRE, que se
+ * extrae bien, así que se resuelven por nombre.
  *
- * País: Colombia = "169" (código de país DIAN, tal como aparece en el RUT).
+ * El catálogo ya NO se escribe a mano: son los 1.122 municipios oficiales, en
+ * `divipola-catalogo.generated.ts`, producidos por `scripts/generar-divipola.ts`
+ * desde el DANE. La tabla anterior cubría ~50 municipios elegidos a dedo y dejaba
+ * sin resolver 11 de los que aparecen en los RUT reales de SOENA (medido el
+ * 2026-08-09), dos de ellos homónimos entre departamentos.
+ *
+ * Tres reglas que gobiernan la resolución:
+ *
+ * 1. **El departamento manda.** Con nombre de departamento, el municipio se busca
+ *    dentro de él. Así "Barbosa" no elige entre Antioquia y Santander a la suerte.
+ * 2. **Un homónimo sin departamento NO se resuelve.** 67 nombres se repiten entre
+ *    departamentos; elegir uno es inventar el dato, y este dato viaja a la DIAN.
+ * 3. **El nombre común se acepta si es inequívoco.** El DANE nombra "Santiago de
+ *    Cali" y "Cartagena de Indias"; los RUT dicen "Cali" y "Cartagena". Se acepta
+ *    un nombre contenido como palabra completa SOLO si dentro del departamento
+ *    hay exactamente un municipio que lo cumple.
  */
+
+import {
+  DEPARTAMENTOS_DANE,
+  MUNICIPIOS_POR_DEPTO,
+  MUNICIPIOS_UNICOS,
+} from './divipola-catalogo.generated'
+import { normalizeNombreUbicacion } from './normalizar-ubicacion'
 
 export const CODIGO_PAIS_COLOMBIA = '169'
 
-function normalize(s: string | null | undefined): string {
-  return (s ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/\bd\.?\s*c\.?\b/g, '') // "Bogotá D.C." -> "bogota"
-    .replace(/[^a-z\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+export { normalizeNombreUbicacion }
+
+/**
+ * Formas coloquiales de un DEPARTAMENTO que no coinciden con el nombre oficial.
+ * Los municipios NO necesitan esta lista: los resuelve la regla 3.
+ */
+const ALIAS_DEPARTAMENTO: Record<string, string> = {
+  'valle': '76',
+  'guajira': '44',
+  'san andres': '88',
+  'san andres y providencia': '88',
+  'archipielago de san andres': '88',
+  'bogota dc': '11',
+  'distrito capital': '11',
+  'norte santander': '54',
 }
 
-// Departamentos DANE (33). Nombre normalizado -> código 2 dígitos.
-const DEPARTAMENTOS: Record<string, string> = {
-  'antioquia': '05', 'atlantico': '08', 'bogota': '11', 'bolivar': '13',
-  'boyaca': '15', 'caldas': '17', 'caqueta': '18', 'cauca': '19',
-  'cesar': '20', 'cordoba': '23', 'cundinamarca': '25', 'choco': '27',
-  'huila': '41', 'la guajira': '44', 'guajira': '44', 'magdalena': '47',
-  'meta': '50', 'narino': '52', 'norte de santander': '54', 'quindio': '63',
-  'risaralda': '66', 'santander': '68', 'sucre': '70', 'tolima': '73',
-  'valle del cauca': '76', 'valle': '76', 'arauca': '81', 'casanare': '85',
-  'putumayo': '86', 'archipielago de san andres providencia y santa catalina': '88',
-  'san andres y providencia': '88', 'san andres': '88', 'amazonas': '91',
-  'guainia': '94', 'guaviare': '95', 'vaupes': '97', 'vichada': '99',
+function codigoDepartamento(nombre: string): string | null {
+  if (!nombre) return null
+  return DEPARTAMENTOS_DANE[nombre] ?? ALIAS_DEPARTAMENTO[nombre] ?? null
 }
 
-// Municipios principales (centros urbanos y de venta de vehículos + seccionales).
-// Nombre normalizado -> { dep: código depto 2 díg, mun: código municipio 3 díg }.
-// El DANE completo es de ~1.100 municipios; esta tabla cubre las ciudades donde
-// SOENA opera. Un municipio fuera de tabla cae al valor extraído (editable).
-const MUNICIPIOS: Record<string, { dep: string; mun: string }> = {
-  'bogota': { dep: '11', mun: '001' },
-  'santafe de bogota': { dep: '11', mun: '001' },
-  'medellin': { dep: '05', mun: '001' },
-  'envigado': { dep: '05', mun: '266' },
-  'itagui': { dep: '05', mun: '360' },
-  'bello': { dep: '05', mun: '088' },
-  'sabaneta': { dep: '05', mun: '631' },
-  'rionegro': { dep: '05', mun: '615' },
-  'cali': { dep: '76', mun: '001' },
-  'santiago de cali': { dep: '76', mun: '001' },
-  'yumbo': { dep: '76', mun: '892' },
-  'palmira': { dep: '76', mun: '520' },
-  'tulua': { dep: '76', mun: '834' },
-  'buenaventura': { dep: '76', mun: '109' },
-  'jamundi': { dep: '76', mun: '364' },
-  'barranquilla': { dep: '08', mun: '001' },
-  'soledad': { dep: '08', mun: '758' },
-  'cartagena': { dep: '13', mun: '001' },
-  'bucaramanga': { dep: '68', mun: '001' },
-  'floridablanca': { dep: '68', mun: '276' },
-  'giron': { dep: '68', mun: '307' },
-  'cucuta': { dep: '54', mun: '001' },
-  'san jose de cucuta': { dep: '54', mun: '001' },
-  'pereira': { dep: '66', mun: '001' },
-  'dosquebradas': { dep: '66', mun: '170' },
-  'manizales': { dep: '17', mun: '001' },
-  'armenia': { dep: '63', mun: '001' },
-  'ibague': { dep: '73', mun: '001' },
-  'neiva': { dep: '41', mun: '001' },
-  'villavicencio': { dep: '50', mun: '001' },
-  'pasto': { dep: '52', mun: '001' },
-  'popayan': { dep: '19', mun: '001' },
-  'santa marta': { dep: '47', mun: '001' },
-  'monteria': { dep: '23', mun: '001' },
-  'sincelejo': { dep: '70', mun: '001' },
-  'valledupar': { dep: '20', mun: '001' },
-  'riohacha': { dep: '44', mun: '001' },
-  'quibdo': { dep: '27', mun: '001' },
-  'florencia': { dep: '18', mun: '001' },
-  'tunja': { dep: '15', mun: '001' },
-  'sogamoso': { dep: '15', mun: '759' },
-  'yopal': { dep: '85', mun: '001' },
-  'arauca': { dep: '81', mun: '001' },
-  'leticia': { dep: '91', mun: '001' },
-  'girardot': { dep: '25', mun: '307' },
-  'soacha': { dep: '25', mun: '754' },
-  'chia': { dep: '25', mun: '175' },
-  'zipaquira': { dep: '25', mun: '899' },
-  'mosquera': { dep: '25', mun: '473' },
-  'funza': { dep: '25', mun: '286' },
-  'madrid': { dep: '25', mun: '430' },
-  'facatativa': { dep: '25', mun: '269' },
+/** ¿`corto` aparece dentro de `oficial` como secuencia de palabras completas? */
+function esNombreCortoDe(corto: string, oficial: string): boolean {
+  if (!corto) return false
+  return ` ${oficial} `.includes(` ${corto} `)
+}
+
+/**
+ * Municipio dentro de un departamento conocido. Exacto primero; si no, el nombre
+ * común (regla 3) y solo cuando el candidato es único.
+ */
+function municipioEnDepto(dep: string, nombre: string): string | null {
+  const tabla = MUNICIPIOS_POR_DEPTO[dep]
+  if (!tabla || !nombre) return null
+  if (tabla[nombre]) return tabla[nombre]
+
+  const candidatos = Object.keys(tabla).filter(oficial => esNombreCortoDe(nombre, oficial))
+  return candidatos.length === 1 ? tabla[candidatos[0]] : null
 }
 
 export interface CodigosUbicacion {
@@ -105,10 +82,11 @@ export interface CodigosUbicacion {
 }
 
 /**
- * Resuelve los códigos DANE a partir de los NOMBRES (país/departamento/municipio),
- * que se extraen con mayor fiabilidad que los códigos. Precedencia por campo:
- *   nombre-resuelto  >  código extraído (fallback)  >  null
- * Nunca inventa un municipio: si el municipio no está en tabla, deja el extraído.
+ * Resuelve los códigos DANE a partir de los NOMBRES (país/departamento/municipio).
+ * Precedencia por campo: nombre resuelto > código extraído (fallback) > null.
+ *
+ * Nunca inventa: si el municipio no se puede determinar sin ambigüedad, devuelve
+ * lo extraído (que el operador puede corregir) o null, jamás un código a la suerte.
  */
 export function resolverCodigosUbicacion(
   pais: string | null | undefined,
@@ -116,22 +94,32 @@ export function resolverCodigosUbicacion(
   municipio: string | null | undefined,
   extraidos?: Partial<CodigosUbicacion>,
 ): CodigosUbicacion {
-  const nPais = normalize(pais)
-  const nDep = normalize(departamento)
-  const nMun = normalize(municipio)
+  const nPais = normalizeNombreUbicacion(pais)
+  const nDep = normalizeNombreUbicacion(departamento)
+  const nMun = normalizeNombreUbicacion(municipio)
 
   const codigo_pais = nPais.includes('colombia') ? CODIGO_PAIS_COLOMBIA : (extraidos?.codigo_pais ?? null)
 
-  const depByName = DEPARTAMENTOS[nDep] ?? null
-  // La clave de municipio es global (mismo nombre en varios departamentos, ej.
-  // Rionegro en Antioquia y Santander). Solo confiamos en el match de municipio si
-  // su departamento coincide con el nombre de departamento extraído (o si no hay
-  // nombre de departamento). Así un homónimo no sobrescribe el departamento correcto.
-  const muni = MUNICIPIOS[nMun]
-  const muniOk = muni && (!depByName || muni.dep === depByName)
+  const depPorNombre = codigoDepartamento(nDep)
 
-  const codigo_departamento = depByName ?? (muniOk ? muni!.dep : null) ?? extraidos?.codigo_departamento ?? null
-  const codigo_municipio = muniOk ? muni!.mun : (extraidos?.codigo_municipio ?? null)
+  // Con departamento: se busca dentro de él y no se mira nada más. Sin él: solo
+  // valen los nombres únicos en todo el país (los 67 homónimos quedan sin resolver).
+  let dep: string | null = depPorNombre
+  let mun: string | null = null
 
-  return { codigo_pais, codigo_departamento, codigo_municipio }
+  if (depPorNombre) {
+    mun = municipioEnDepto(depPorNombre, nMun)
+  } else {
+    const unico = MUNICIPIOS_UNICOS[nMun]
+    if (unico) {
+      dep = unico.dep
+      mun = unico.mun
+    }
+  }
+
+  return {
+    codigo_pais,
+    codigo_departamento: dep ?? extraidos?.codigo_departamento ?? null,
+    codigo_municipio: mun ?? extraidos?.codigo_municipio ?? null,
+  }
 }
