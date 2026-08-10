@@ -20,6 +20,7 @@ import {
 } from '@/lib/upme/modelo-dinero'
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { diasDesde } from '@/lib/negocios/antiguedad'
+import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import {
   construirRefExterna,
@@ -560,6 +561,15 @@ export interface NegocioSaldo {
   referencias: { external_ref: string; fuente: string | null; monto: number; fecha: string | null }[]
   conciliado: boolean
   /**
+   * Recaudo que ya está registrado pero espera el visto bueno del área financiera.
+   * `0` cuando no hay nada pendiente.
+   *
+   * No suma al saldo (el motor tampoco lo cuenta), pero se muestra para que el bloqueo
+   * tenga nombre: "faltan $X" sobre plata que ya entró manda a buscar lo que no se ha
+   * perdido. Lo que falta es la confirmación, y eso sí es accionable.
+   */
+  pendiente_de_confirmar: number
+  /**
    * Días cumplidos desde que se CREÓ el negocio, para que la financiera vea de un
    * vistazo cuánto lleva esperando un faltante.
    *
@@ -762,7 +772,13 @@ async function cargarPropuestasEconomicas(
 async function cargarNegociosYCobros(
   supabase: unknown,
   workspaceId: string,
-): Promise<{ negocios: Map<string, NegocioRow>; cobros: CobroRow[]; cobrado: Map<string, number> }> {
+): Promise<{
+  negocios: Map<string, NegocioRow>
+  cobros: CobroRow[]
+  cobrado: Map<string, number>
+  /** Recaudo registrado que espera el visto bueno de la financiera, por negocio. */
+  pendienteConfirmar: Map<string, number>
+}> {
   const { data: negociosRaw } = await db(supabase)
     .from('negocios')
     .select(`
@@ -794,7 +810,22 @@ async function cargarNegociosYCobros(
     .select('id, negocio_id, monto, tipo_cobro, external_ref, fuente, fecha, split_json')
     .eq('workspace_id', workspaceId)
   const cobros = (cobrosRaw ?? []) as CobroRow[]
-  const cobrado = cobradoFinanciero(cobros)
+
+  // El check de la financiera se necesita ANTES de sumar: es lo que decide si una porción
+  // propuesta por el comercial cuenta como recaudo. Se lee aquí, y no más abajo donde ya
+  // se leía para otra cosa, porque el orden importa — sumar primero y corregir después
+  // dejaría el saldo mal en todo lo que se calcula en medio.
+  const { data: concRaw } = await db(supabase)
+    .from('negocio_conciliacion')
+    .select('negocio_id, conciliado')
+    .eq('workspace_id', workspaceId)
+  const conciliadoPorNegocio = new Map<string, boolean>()
+  for (const r of ((concRaw ?? []) as Array<{ negocio_id: string; conciliado: boolean }>)) {
+    conciliadoPorNegocio.set(r.negocio_id, r.conciliado)
+  }
+
+  const cobrado = cobradoFinanciero(cobros, conciliadoPorNegocio)
+  const pendienteConfirmar = pendienteDeConfirmarPorNegocio(cobros, conciliadoPorNegocio)
 
   const [tarifas, propuestas] = await Promise.all([
     cargarTarifasConfirmadas(supabase, ids),
@@ -834,7 +865,7 @@ async function cargarNegociosYCobros(
     })
   }
 
-  return { negocios, cobros, cobrado }
+  return { negocios, cobros, cobrado, pendienteConfirmar }
 }
 
 /**
@@ -853,12 +884,63 @@ function saldoDelNegocio(neg: NegocioRow | null | undefined, cobrado: number): n
 }
 
 /** cobrado financiero por negocio (excluye devoluciones pendientes). */
-function cobradoFinanciero(cobros: CobroRow[]): Map<string, number> {
-  const m = new Map<string, number>()
+function cobradoFinanciero(
+  cobros: CobroRow[],
+  conciliadoPorNegocio: Map<string, boolean>,
+): Map<string, number> {
+  const porNegocio = new Map<string, CobroRow[]>()
   for (const c of cobros) {
     if (!c.negocio_id) continue
-    if (c.tipo_cobro === 'devolucion_pendiente') continue
-    m.set(c.negocio_id, (m.get(c.negocio_id) ?? 0) + (c.monto ?? 0))
+    const lista = porNegocio.get(c.negocio_id)
+    if (lista) lista.push(c)
+    else porNegocio.set(c.negocio_id, [c])
+  }
+
+  const m = new Map<string, number>()
+  for (const [negocioId, lista] of porNegocio) {
+    // MISMA regla que el motor de avance (`sumarRecaudoConfirmado`): una porción que el
+    // comercial propuso y la financiera no ha confirmado NO cuenta como recaudo. Antes el
+    // panel sumaba todo y el motor no, así que las dos superficies se contradecían sobre
+    // el mismo negocio: la pantalla decía "Pagado" y el gate lo retenía por esa misma
+    // plata. Medido en V0256 el 2026-08-08: panel $0 contra motor $510.000.
+    m.set(
+      negocioId,
+      sumarRecaudoConfirmado(lista, conciliadoPorNegocio.get(negocioId) ?? false, {
+        excluirTipos: ['devolucion_pendiente'],
+      }),
+    )
+  }
+  return m
+}
+
+/**
+ * Plata registrada que espera el visto bueno del área financiera, por negocio.
+ *
+ * Es exactamente lo que `cobradoFinanciero` dejó por fuera, y existe para NOMBRARLO en
+ * pantalla. Sin este dato el panel diría "faltan $X" sobre un negocio cuya plata ya está
+ * registrada, y mandaría a la financiera a buscar algo que no se ha perdido: lo que falta
+ * es su propia confirmación.
+ */
+function pendienteDeConfirmarPorNegocio(
+  cobros: CobroRow[],
+  conciliadoPorNegocio: Map<string, boolean>,
+): Map<string, number> {
+  const porNegocio = new Map<string, CobroRow[]>()
+  for (const c of cobros) {
+    if (!c.negocio_id) continue
+    const lista = porNegocio.get(c.negocio_id)
+    if (lista) lista.push(c)
+    else porNegocio.set(c.negocio_id, [c])
+  }
+
+  const m = new Map<string, number>()
+  for (const [negocioId, lista] of porNegocio) {
+    const pendiente = recaudoPendienteDeConfirmar(
+      lista,
+      conciliadoPorNegocio.get(negocioId) ?? false,
+      { excluirTipos: ['devolucion_pendiente'] },
+    )
+    if (pendiente > 0) m.set(negocioId, pendiente)
   }
   return m
 }
@@ -878,7 +960,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
   if (!ctx.ok) return { data: null, error: ctx.error }
   const { supabase, workspaceId } = ctx
 
-  const { negocios, cobros, cobrado } = await cargarNegociosYCobros(supabase, workspaceId)
+  const { negocios, cobros, cobrado, pendienteConfirmar } = await cargarNegociosYCobros(supabase, workspaceId)
 
   const negocioIds = Array.from(negocios.keys())
   const responsablePorNegocio = new Map<string, string>()
@@ -1083,6 +1165,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
       saldo,
       referencias: refsDelNegocio,
       conciliado: conciliadoNegocio.get(negId) ?? false,
+      pendiente_de_confirmar: pendienteConfirmar.get(negId) ?? 0,
       dias_desde_creacion: neg.dias_desde_creacion,
     }
     if (saldoCuadrado(saldo)) conciliadosList.push(fila)
