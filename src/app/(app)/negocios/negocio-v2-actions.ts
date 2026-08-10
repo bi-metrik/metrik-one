@@ -30,6 +30,7 @@ import {
 } from '@/lib/negocios/dato-de-decision'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
+import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { recolectarReferenciasFuente, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
@@ -2772,7 +2773,7 @@ export async function cambiarEtapaNegocioConGate(
   /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
   etapaDestinoNombre?: string
 }> {
-  const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   // El override de gate (omitir gates con motivo) es exclusivo de owner/admin.
@@ -2794,7 +2795,19 @@ export async function cambiarEtapaNegocioConGate(
   // Guard server-side: solo quien puede editar la fase actual del negocio puede
   // avanzarla (rol+área+responsable). Permite el handoff (comercial cierra venta);
   // bloquea a operators ajenos / supervisores de otra área.
-  const gAvance = await guardAvanzarStage(negocioId, (negocio.stage_actual ?? 'venta') as Stage)
+  //
+  // La etapa puede invitar a otra área a avanzarla (`areas_que_avanzan`) cuando el
+  // trabajo que desbloquea el paso es de esa área. Se lee ANTES del guard porque
+  // `etapaActualConfigExtra` se resuelve más abajo, junto con la validación de orden.
+  const { data: cfgEtapaActual } = await db(supabase)
+    .from('etapas_negocio')
+    .select('config_extra')
+    .eq('id', negocio.etapa_actual_id ?? '')
+    .maybeSingle()
+  const areasQueAvanzan = (((cfgEtapaActual as { config_extra?: { areas_que_avanzan?: unknown } | null } | null)
+    ?.config_extra?.areas_que_avanzan ?? []) as Area[])
+
+  const gAvance = await guardAvanzarStage(negocioId, (negocio.stage_actual ?? 'venta') as Stage, areasQueAvanzan)
   if (!gAvance.ok) return { error: gAvance.error ?? 'Sin permiso' }
 
   // resolvedEtapaId puede cambiar si routing auto-corrige el destino
@@ -2962,11 +2975,73 @@ export async function cambiarEtapaNegocioConGate(
           p_etapa_id: negocio.etapa_actual_id,
         })
 
-      const bloquesPendientes = ((pendientesRaw ?? []) as Array<{ nombre: string | null }>).map(
-        (b) => ({ nombre: b.nombre ?? 'Bloque', es_gate: true })
-      )
+      // Un gate cuyo paso VENCIÓ puede quedar en "no aplica" en vez de retener.
+      // Solo lo declara el bloque (`omitible_por.areas`) y solo lo hace quien
+      // trabaja el hecho que lo vence. Ver `gate-omitible.ts` para el porqué.
+      const pendientesIds = ((pendientesRaw ?? []) as Array<{ bloque_config_id: string; nombre: string | null }>)
+      const { data: cfgsPendientes, error: errCfgs } = await db(supabase)
+        .from('bloque_configs')
+        .select('id, config_extra')
+        .in('id', pendientesIds.map(p => p.bloque_config_id))
+      // Si no se puede leer la config, se trata como NO omitible: el lado seguro
+      // de un control es retener, nunca dejar pasar por falta de información.
+      if (errCfgs) console.error('[cambiarEtapa] no se pudo leer la config de los gates pendientes:', errCfgs)
+      const cfgPorId = new Map(((cfgsPendientes ?? []) as Array<{ id: string; config_extra: Record<string, unknown> | null }>)
+        .map(c => [c.id, c.config_extra]))
 
-      return { error: 'gate_bloqueado', bloquesPendientes }
+      const omitibles = errCfgs ? [] : pendientesIds.filter(p =>
+        puedeOmitirGate(cfgPorId.get(p.bloque_config_id), {
+          role: (role ?? 'read_only') as Role,
+          areas: (areas ?? []) as Area[],
+        }))
+      const retienen = pendientesIds.filter(p => !omitibles.some(o => o.bloque_config_id === p.bloque_config_id))
+
+      if (retienen.length > 0) {
+        return {
+          error: 'gate_bloqueado',
+          bloquesPendientes: retienen.map(b => ({ nombre: b.nombre ?? 'Bloque', es_gate: true })),
+        }
+      }
+
+      // Todos los que faltaban vencieron: se marcan como "no aplica" —con motivo,
+      // autor y fecha— y el negocio sigue. NO se marcan como completos a secas:
+      // eso afirmaría que el trabajo se hizo.
+      const ahora = new Date().toISOString()
+      for (const p of omitibles) {
+        const cfg = cfgPorId.get(p.bloque_config_id)
+        const marca = marcaOmitido(cfg, { id: staffId ?? null, nombre: null }, ahora)
+        const { data: inst } = await db(supabase)
+          .from('negocio_bloques')
+          .select('id, data')
+          .eq('negocio_id', negocioId)
+          .eq('bloque_config_id', p.bloque_config_id)
+          .maybeSingle()
+        if (!inst) continue
+        const dataPrevia = ((inst as { data: Record<string, unknown> | null }).data ?? {})
+        const { error: errOmitir } = await db(supabase)
+          .from('negocio_bloques')
+          .update({
+            estado: 'completo',
+            completado_at: ahora,
+            data: { ...dataPrevia, [CLAVE_OMITIDO]: marca },
+          })
+          .eq('id', (inst as { id: string }).id)
+        if (errOmitir) return { error: `No se pudo marcar "${p.nombre ?? 'el bloque'}" como no aplica: ${errOmitir.message}` }
+
+        // El rastro va al timeline. `autor_id` es staff.id (campo minado ya
+        // documentado: no confundir con profile.id).
+        try {
+          await db(supabase).from('activity_log').insert({
+            workspace_id: workspaceId,
+            entidad_tipo: 'negocio',
+            entidad_id: negocioId,
+            tipo: 'cambio',
+            autor_id: staffId,
+            campo_modificado: 'bloque_datos',
+            contenido: `Bloque "${p.nombre ?? 'sin nombre'}" quedó en "${marca.label}" al avanzar de etapa`,
+          })
+        } catch (e) { console.error('[cambiarEtapa] no se pudo registrar la omisión en el timeline:', e) }
+      }
     }
 
     // Gate custom: comentario_requerido — debe haber al menos un comentario en actividad

@@ -152,8 +152,17 @@ export function canAdvanceStage(
   user: UserContext,
   stageTo: Stage,
   negocioResponsables: string[],
+  /**
+   * Áreas que la ETAPA invita a avanzarla (`config_extra.areas_que_avanzan`),
+   * aunque el stage sea de otra. Existe porque hay etapas cuyo trabajo que
+   * DESBLOQUEA el avance lo hace otra área: en SOENA, Notificación es del
+   * comercial (es quien habla con el cliente) pero es operaciones quien
+   * consigue la fecha de la cita y necesita poder seguir.
+   * Sin el campo, el criterio es el de siempre.
+   */
+  areasExtra?: Area[],
 ): boolean {
-  return canEditBloque(user, { stage: stageTo }, negocioResponsables)
+  return canEditBloque(user, { stage: stageTo, areasExtra }, negocioResponsables)
 }
 
 // ── canEditHeader ────────────────────────────────────────────────────
