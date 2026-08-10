@@ -27,6 +27,7 @@ import type {
   NegocioBloque,
 } from '../negocio-v2-actions'
 import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
@@ -328,7 +329,7 @@ function ResponsableSelector({
         toast.error(result.error)
       } else {
         const nombre = staffList.find(s => s.id === staffId)?.full_name ?? ''
-        toast.success(`Responsable agregado: ${nombre}`)
+        toast.success(`Responsable agregado: ${nombre}`, { description: detalleAsignacion(result) })
       }
     })
   }

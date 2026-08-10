@@ -15,6 +15,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '../src/lib/ai/extract-fields'
 import { createDriveFolder, uploadFileToDrive, setFilePublicByLink } from '../src/lib/google-drive'
 import { generarFormularioCore } from '../src/lib/actions/formulario-actions'
+import { asignarResponsable } from '../src/lib/negocios/responsable-rol'
 
 for (const line of readFileSync(join(process.cwd(), '.env.local'), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
@@ -168,7 +169,8 @@ async function procesar(c:Caso) {
     const { data: neg, error: nerr } = await supabase.from('negocios').insert({ workspace_id:WS, linea_id:LINEA, contacto_id:contactoId, empresa_id:null, nombre:`${c.nombre} - ${marca}`, codigo:c.codigo, responsable_id:JESSICA_STAFF, etapa_actual_id:ENVIO, stage_actual:'ejecucion', estado:'abierto', origen:'otro', metadata:{ id_hubspot:c.id, fuente_cargue:'iva_devolucion' } }).select('id').single()
     if (nerr) throw new Error(`negocio: ${nerr.message}`)
     negocioId = (neg as {id:string}).id
-    await supabase.from('negocio_responsables').insert({ negocio_id:negocioId, staff_id:JESSICA_STAFF, assigned_by:JESSICA_PROFILE })
+    // Con rol derivado del área: una fila sin rol no recibe avisos (ver responsable-rol.ts)
+    await asignarResponsable(supabase, { negocioId, staffId:JESSICA_STAFF, assignedBy:JESSICA_PROFILE })
   }
 
   // carpeta Drive

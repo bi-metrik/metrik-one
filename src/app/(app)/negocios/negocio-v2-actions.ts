@@ -38,6 +38,7 @@ import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, typ
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
+import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -1717,9 +1718,13 @@ export async function crearNegocio(input: {
   // no necesitan auto-asignación. assigned_by = userId (FK a profiles).
   if (role === 'operator' && staffId) {
     try {
-      await db(supabase)
-        .from('negocio_responsables')
-        .insert({ negocio_id: negocioData.id, staff_id: staffId, assigned_by: userId ?? null })
+      // Vía `asignarResponsable` para que la fila nazca CON rol: sin él, el negocio que
+      // el operator acaba de crear le avisa a su supervisor y no a él.
+      await asignarResponsable(supabase, {
+        negocioId: negocioData.id,
+        staffId,
+        assignedBy: userId ?? null,
+      })
       await sincronizarResponsablePrincipal(supabase, negocioData.id, workspaceId)
     } catch (respErr) {
       // No bloquear la creación del negocio si la auto-asignación falla.
@@ -2046,12 +2051,13 @@ export async function crearNegocioDesdeInteraccion(input: {
   // N:M) divergen. ON CONFLICT DO NOTHING vía upsert con ignoreDuplicates.
   if (responsableId) {
     try {
-      await db(supabase)
-        .from('negocio_responsables')
-        .upsert(
-          { negocio_id: res.negocio_id, staff_id: responsableId, assigned_by: userId ?? null },
-          { onConflict: 'negocio_id,staff_id', ignoreDuplicates: true },
-        )
+      // Con rol derivado del área (ver `asignarResponsable`): una fila sin rol deja al
+      // responsable invisible para el routing de avisos.
+      await asignarResponsable(supabase, {
+        negocioId: res.negocio_id,
+        staffId: responsableId,
+        assignedBy: userId ?? null,
+      })
       await sincronizarResponsablePrincipal(supabase, res.negocio_id, workspaceId)
     } catch (respErr) {
       // No bloquear la conversión si la asignación de responsable falla.
@@ -6695,7 +6701,13 @@ export async function getStaffParaAsignarNegocio(): Promise<Array<{ id: string; 
 export async function agregarResponsable(
   negocioId: string,
   staffMiembroId: string,
-): Promise<{ error: string | null }> {
+): Promise<{
+  error: string | null
+  /** Rol con el que quedó. `null` = no recibe avisos de etapa (ver `asignarResponsable`). */
+  rol?: 'comercial' | 'operaciones' | null
+  /** Nombre de quien ocupaba ese puesto y quedó desplazado, para poder decirlo en pantalla. */
+  desplazado?: string | null
+}> {
   // userId = profile.id (para assigned_by, FK a profiles). staffId = staff.id (para activity_log.autor_id).
   const { supabase, workspaceId, role, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
@@ -6723,57 +6735,48 @@ export async function agregarResponsable(
     .single()
   if (!staff) return { error: 'Staff no encontrado' }
 
-  // El rol (comercial | operaciones) se deriva del área del staff: es lo que
-  // decide a quién se le notifica según el stage de la etapa. Sin rol, el
-  // responsable queda invisible para el routing de notificaciones.
-  // Un negocio admite UN comercial y UN operativo (índice único parcial):
-  // asignar otro del mismo área REEMPLAZA al anterior, no lo suma.
-  const { data: areasStaff } = await db(supabase)
-    .from('staff_areas')
-    .select('area')
-    .eq('staff_id', staffMiembroId)
-
-  const areas = ((areasStaff ?? []) as Array<{ area: string }>).map(a => a.area)
-  const rol = areas.includes('comercial')
-    ? 'comercial'
-    : areas.includes('operaciones')
-      ? 'operaciones'
-      : null
-
-  if (rol) {
-    // Libera el puesto antes de ocuparlo (el índice único no deja dos del mismo rol)
-    await db(supabase)
-      .from('negocio_responsables')
-      .delete()
-      .eq('negocio_id', negocioId)
-      .eq('rol', rol)
-  }
-
-  // assigned_by es FK → profiles(id): debe ser userId (profile.id), NO staffId.
-  const { error: insErr } = await db(supabase)
-    .from('negocio_responsables')
-    .upsert(
-      { negocio_id: negocioId, staff_id: staffMiembroId, assigned_by: userId ?? null, rol },
-      { onConflict: 'negocio_id,staff_id', ignoreDuplicates: false },
-    )
-  if (insErr) return { error: (insErr as { message: string }).message }
+  // El rol (comercial | operaciones) sale del área del staff y decide a quién se le
+  // notifica según el stage de la etapa. Vive en `asignarResponsable` porque los otros
+  // caminos de asignación tienen que escribirlo igual: una fila sin rol es invisible
+  // para el routing y el aviso se va al supervisor con el responsable puesto.
+  const asignacion = await asignarResponsable(supabase, {
+    negocioId,
+    staffId: staffMiembroId,
+    assignedBy: userId ?? null,
+  })
+  if (asignacion.error) return { error: asignacion.error }
 
   await sincronizarResponsablePrincipal(supabase, negocioId, workspaceId)
 
+  // Nombre del desplazado: se resuelve DESPUÉS de asignar, pero el id se capturó antes
+  // de liberar el puesto (después de liberarlo ya no hay a quién preguntarle).
+  let desplazadoNombre: string | null = null
+  if (asignacion.desplazado) {
+    const { data: previo } = await db(supabase)
+      .from('staff')
+      .select('full_name')
+      .eq('id', asignacion.desplazado)
+      .maybeSingle()
+    desplazadoNombre = (previo as { full_name: string | null } | null)?.full_name ?? null
+  }
+
   if (staffId) {
+    const nombre = (staff as { full_name: string | null }).full_name ?? 'Sin nombre'
+    const comoRol = asignacion.rol ? ` como ${asignacion.rol}` : ' (sin área: no recibe avisos de etapa)'
+    const relevo = desplazadoNombre ? `, en reemplazo de ${desplazadoNombre}` : ''
     await db(supabase).from('activity_log').insert({
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'cambio_sistema',
       autor_id: staffId,
-      contenido: `Responsable agregado: ${(staff as { full_name: string | null }).full_name ?? 'Sin nombre'}`,
+      contenido: `Responsable agregado: ${nombre}${comoRol}${relevo}`,
     })
   }
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
-  return { error: null }
+  return { error: null, rol: asignacion.rol, desplazado: desplazadoNombre }
 }
 
 export async function quitarResponsable(
