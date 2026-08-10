@@ -117,10 +117,15 @@ async function borradorDelNegocio(
 }
 
 /** ¿Existe ya el tercero en Siigo? Se pregunta por identificación, que es su llave. */
-async function buscarEnSiigo(workspaceId: string, identificacion: string): Promise<string | null> {
+async function buscarEnSiigo(
+  workspaceId: string,
+  identificacion: string,
+  maxEspera429Ms: number,
+): Promise<string | null> {
   const res = await siigoRequest<{ results?: Array<{ id?: string }> }>(
     workspaceId,
     `/v1/customers?identification=${encodeURIComponent(identificacion)}`,
+    { maxEspera429Ms },
   )
   const primero = res.results?.[0]
   return primero ? (primero.id ?? null) : null
@@ -135,6 +140,12 @@ export async function asegurarClienteSiigo(
   workspaceId: string,
   negocioId: string,
   origen: MarcaCliente['origen'] = 'automatico',
+  /**
+   * Cuánto aguantar si Siigo responde que se pasó el límite de peticiones. Por
+   * defecto no se espera (falla limpio); un barrido de cientos de casos sí pasa
+   * un valor, porque ahí la pausa es parte del trabajo.
+   */
+  maxEspera429Ms = 0,
 ): Promise<ResultadoCliente> {
   const svc = createServiceClient()
 
@@ -170,7 +181,7 @@ export async function asegurarClienteSiigo(
   if (faltantes.length > 0) return { estado: 'incompleto', faltantes }
 
   try {
-    const existente = await buscarEnSiigo(workspaceId, payload.identification)
+    const existente = await buscarEnSiigo(workspaceId, payload.identification, maxEspera429Ms)
     if (existente !== null) {
       await marcar(workspaceId, negocioId, negocio.metadata, {
         identificacion: payload.identification,
@@ -184,6 +195,7 @@ export async function asegurarClienteSiigo(
     const creado = await siigoRequest<{ id?: string }>(workspaceId, '/v1/customers', {
       method: 'POST',
       body: payload satisfies BorradorCliente,
+      maxEspera429Ms,
     })
 
     await marcar(workspaceId, negocioId, negocio.metadata, {

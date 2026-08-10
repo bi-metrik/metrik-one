@@ -191,7 +191,31 @@ interface RequestOpts {
    * ⚠️ Un UUID sin guiones son 32 y NO cabe: usar `claveIdempotencia()`.
    */
   idempotencyKey?: string
+  /**
+   * Cuánto esperar, como máximo, cuando Siigo responde 429 (límite de peticiones).
+   *
+   * Por defecto **0**: falla limpio. Es deliberado, porque la mayoría de estas
+   * llamadas cuelgan de una acción del usuario y dejarlo mirando la pantalla
+   * veinte segundos es peor que decirle que lo intente de nuevo. Los recorridos
+   * largos (barridos, backfills) sí pasan un valor y esperan.
+   *
+   * Medido el 2026-08-09 con el backfill de SOENA: el límite salta alrededor de
+   * las 100 peticiones seguidas y Siigo pide ~19 s de pausa.
+   */
+  maxEspera429Ms?: number
 }
+
+/** Segundos que Siigo pide esperar, del header o del texto del error. */
+function esperaSugerida(res: Response, cuerpo: string): number {
+  const header = Number(res.headers.get('retry-after'))
+  if (Number.isFinite(header) && header > 0) return header * 1000
+  // El cuerpo trae "Rate limit is exceeded. Try again in 19 seconds."
+  const m = cuerpo.match(/in\s+(\d+)\s+second/i)
+  if (m) return Number(m[1]) * 1000
+  return 5000
+}
+
+const dormir = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
 /**
  * Mensaje legible a partir del cuerpo de error de Siigo, que llega como
@@ -230,7 +254,7 @@ export async function siigoRequest<T>(
   opts: RequestOpts = {},
 ): Promise<T> {
   const creds = await resolveCredentials(workspaceId)
-  const { method = 'GET', body, idempotencyKey } = opts
+  const { method = 'GET', body, idempotencyKey, maxEspera429Ms = 0 } = opts
 
   const ejecutar = async (token: string): Promise<Response> => {
     const headers: Record<string, string> = {
@@ -255,6 +279,20 @@ export async function siigoRequest<T>(
     invalidarTokenSiigo(workspaceId)
     token = await getAccessToken(workspaceId, creds)
     res = await ejecutar(token)
+  }
+
+  // Límite de peticiones. Se reintenta solo si quien llama declaró cuánto está
+  // dispuesto a esperar: un 429 en medio de una acción del usuario es preferible
+  // reportarlo, y en un barrido es preferible aguantar la pausa.
+  if (res.status === 429 && maxEspera429Ms > 0) {
+    const cuerpo = await res.text()
+    const espera = esperaSugerida(res, cuerpo)
+    if (espera <= maxEspera429Ms) {
+      await dormir(espera)
+      res = await ejecutar(token)
+    } else {
+      throw describirError(429, cuerpo)
+    }
   }
 
   if (!res.ok) throw describirError(res.status, await res.text())
