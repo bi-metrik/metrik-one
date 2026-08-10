@@ -15,7 +15,8 @@ import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
-import { resolverSeccionalOficial } from '@/lib/dian/seccionales'
+import { resolverSeccionalOficial, presetKeySeccional } from '@/lib/dian/seccionales'
+import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { createElement } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,7 +108,14 @@ async function aplicarSeccionalPreset(
     (typeof overrides.seccional === 'string' && overrides.seccional) ||
     (typeof negocioSeccional === 'string' && negocioSeccional) ||
     (data?.seccional as string | undefined)
-  const seleccion = explicit || sugerirSeccional(await leerCiudadVentaFactura(supabase, negocioId), keys)
+  const elegida = explicit || sugerirSeccional(await leerCiudadVentaFactura(supabase, negocioId), keys)
+  // El preset se busca TRADUCIENDO la seccional a la clave, no comparándola literal.
+  // Son dos vocabularios: el catálogo tiene 35 seccionales reales y el preset solo las
+  // que traen particularidades, más "Otras seccionales". Con el match exacto anterior,
+  // "Bogota" sin tilde o "Bogotá — Personas naturales" no encontraban el preset de
+  // "Bogotá" y el 010 se quedaba sin casilla 12 resuelta, sin avisar. Medido el
+  // 2026-08-10 en SOENA: 107 de los negocios abiertos con seccional registrada.
+  const seleccion = presetKeySeccional(elegida, keys) ?? elegida
   const preset = seccionales[seleccion]
   if (preset) {
     // El preset SOLO sobreescribe una constante cuando trae esa clave explícita.
@@ -772,10 +780,13 @@ export async function guardarSeccional(
   // Persistir la seccional a nivel de NEGOCIO (fuente única): así una sola
   // selección aplica a las 2 copias del 010 (generación y envío) y no vuelve a
   // desincronizarse. El data.seccional del bloque queda como eco inmediato para la UI.
+  //
+  // Se persiste CANONIZADA, y "Otras seccionales" no se persiste: es una clave de
+  // preset, no una seccional. Guardarla borraba de qué ciudad era el caso y dejaba al
+  // tablero sin saber si necesita cita. En ese caso la elección vive solo en el bloque,
+  // que es lo que el operador realmente eligió: qué preset aplicarle a ESTE formulario.
   if (nid) {
-    const { data: neg } = await db(supabase).from('negocios').select('metadata').eq('id', nid).maybeSingle()
-    const meta = (neg?.metadata as Record<string, unknown>) ?? {}
-    await db(supabase).from('negocios').update({ metadata: { ...meta, seccional } }).eq('id', nid)
+    await fijarSeccionalNegocio(supabase, { negocioId: nid, entrada: seccional, pisar: true })
     revalidatePath(`/negocios/${nid}`)
   }
   return { error: null }

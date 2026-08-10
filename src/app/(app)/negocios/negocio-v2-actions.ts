@@ -8,7 +8,8 @@ import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
-import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional } from '@/lib/dian/seccionales'
+import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
+import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
@@ -1279,10 +1280,17 @@ export async function getNegocioDetalle(id: string): Promise<{
           // Sembrar la seccional del negocio si aún no la tiene. Es la fuente única
           // que leen los formularios DIAN (casilla 12 del 010) vía
           // aplicarSeccionalPreset. No pisa un override manual ya existente.
-          if (seccional && !negocioMetadata.seccional) {
-            const metadataActualizada = { ...negocioMetadata, seccional: seccional.label }
-            await db(supabase).from('negocios').update({ metadata: metadataActualizada }).eq('id', id)
-            negocioMetadata.seccional = seccional.label
+          //
+          // Se siembra el nombre CANÓNICO, no `seccional.label`: el label de Bogotá
+          // trae el buzón ("Bogotá — Personas naturales") y esa variante no la
+          // reconocía ninguna otra capa. El buzón se sigue derivando de tipo_persona
+          // donde hace falta.
+          if (seccional) {
+            const esc = await fijarSeccionalNegocio(supabase, {
+              negocioId: id,
+              entrada: labelCanonicoSeccional(seccional),
+            })
+            if (esc.guardado) negocioMetadata.seccional = esc.guardado
           }
         } catch (e) {
           console.error('[getNegocioDetalle] auto-init cita DIAN falló:', e)

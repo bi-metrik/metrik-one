@@ -46,12 +46,18 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
   // Celda en la que se hizo clic: abre el panel con los casos concretos detrás del numero.
   const [seleccion, setSeleccion] = useState<CeldaSeleccionada | null>(null)
 
-  const abrir = (e: ProcesoSeccionalEtapa, seccional?: string | null, soloReproceso = false) =>
+  const abrir = (
+    e: ProcesoSeccionalEtapa,
+    seccional?: string | string[] | null,
+    soloReproceso = false,
+    seccionalLabel?: string,
+  ) =>
     setSeleccion({
       etapaId: e.etapaId,
       etapaNombre: e.nombre,
       etapaNumero: e.numero,
       seccional,
+      seccionalLabel,
       // Al abrir los reprocesos se muestran todos, no solo los atrasados: son dos
       // preguntas distintas y cruzarlas escondería casos.
       soloVencidos: soloReproceso ? false : metrica === 'vencidos',
@@ -211,7 +217,10 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
                           />
                         )
                       })}
-                      <Celda {...sumaGrupo(e, sinCita)} />
+                      <Celda
+                        {...sumaGrupo(e, sinCita)}
+                        onClick={() => abrir(e, sinCita, false, 'sin cita previa')}
+                      />
                       <Celda
                         hoy={valorDe(celda(e, null))}
                         antes={antesDe(celda(e, null))}
@@ -298,7 +307,14 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
 
       {seleccion && (
         <CasosDrawer
-          key={[seleccion.etapaId, seleccion.seccional ?? 'todas', seleccion.soloVencidos, seleccion.soloReproceso].join('|')}
+          key={[
+            seleccion.etapaId,
+            Array.isArray(seleccion.seccional)
+              ? seleccion.seccional.join('+')
+              : seleccion.seccional ?? 'todas',
+            seleccion.soloVencidos,
+            seleccion.soloReproceso,
+          ].join('|')}
           celda={seleccion}
           onClose={() => setSeleccion(null)}
         />
