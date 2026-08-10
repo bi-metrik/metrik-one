@@ -27,7 +27,7 @@ import {
   type RoutingEtapa,
   type CampoDecision,
 } from '@/lib/negocios/dato-de-decision'
-import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto } from '@/lib/negocios/bloque-visible-completo'
+import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
@@ -967,16 +967,51 @@ export async function getNegocioDetalle(id: string): Promise<{
         // sin valor (ver `visiblePuedeNacerCompleto`): ahí quedan pendientes para
         // que el gate retenga en vez de dejar pasar la pregunta sin responder.
         const configById = new Map(
-          ((bloqueConfigs ?? []) as Array<{ id: string; estado?: string; es_gate?: boolean; config_extra?: Record<string, unknown> | null }>)
-            .map(bc => [bc.id, bc])
+          ((bloqueConfigs ?? []) as Array<{
+            id: string; estado?: string; es_gate?: boolean
+            config_extra?: Record<string, unknown> | null
+            bloque_definitions?: { tipo?: string } | null
+          }>).map(bc => [bc.id, bc])
         )
+
+        // ¿El origen de cada documento heredado ya tiene archivo en ESTE negocio?
+        // Una copia de solo lectura muestra el archivo del origen, así que darla por
+        // completa cuando el origen está vacío hace que la pantalla afirme que el
+        // documento está. Ver `documentoHeredadoNaceCompleto`.
+        const slugsOrigen = [...new Set(
+          faltantes
+            .map(cid => configById.get(cid))
+            .filter(cfg => cfg?.bloque_definitions?.tipo === 'documento')
+            .map(cfg => (cfg?.config_extra as { source_bloque_slug?: string } | null)?.source_bloque_slug)
+            .filter((x): x is string => !!x),
+        )]
+        const origenConArchivo = new Set<string>()
+        if (slugsOrigen.length > 0) {
+          const { data: origenes } = await db(supabase)
+            .from('negocio_bloques')
+            .select('data, bloque_configs!inner(slug)')
+            .eq('negocio_id', id)
+            .in('bloque_configs.slug', slugsOrigen)
+          for (const o of ((origenes ?? []) as unknown as Array<{
+            data: Record<string, unknown> | null; bloque_configs: { slug: string }
+          }>)) {
+            if (String(o.data?.drive_url ?? '')) origenConArchivo.add(o.bloque_configs.slug)
+          }
+        }
+
         const nuevas = faltantes.map(cid => {
           const cfg = configById.get(cid)
+          const origenSlug = (cfg?.config_extra as { source_bloque_slug?: string } | null)?.source_bloque_slug
           // `data: {}` — la instancia nace vacía, así que un bloque con campos
           // `required` nunca los tiene: por eso este es el sitio donde el gate de
           // la cita DIAN dejaba de retener.
           const naceCompleto = cfg?.estado === 'visible'
             && visiblePuedeNacerCompleto(cfg?.config_extra ?? null, {}, cfg?.es_gate === true)
+            && documentoHeredadoNaceCompleto(
+              cfg?.bloque_definitions?.tipo === 'documento',
+              !!origenSlug,
+              !!origenSlug && origenConArchivo.has(origenSlug),
+            )
           return {
             negocio_id: id,
             bloque_config_id: cid,
