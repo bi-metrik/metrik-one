@@ -29,6 +29,7 @@ import {
 } from '@/lib/negocios/dato-de-decision'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
+import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { recolectarReferenciasFuente, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
@@ -4181,6 +4182,36 @@ export async function actualizarBloqueData(
   // local. Es lo que hace que el dato sea UNO solo y no dos que pueden divergir.
   const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
 
+  // Heredado `editable_solo_si_vacio`: si el dato YA vino lleno de la etapa anterior, el
+  // bloque se muestra de solo lectura y aquí no se escribe. El render lo refleja, pero el
+  // render es UX: esta es la barrera. Corregir un dato ya puesto se hace en su etapa
+  // origen, que es donde vive la responsabilidad de ese campo.
+  {
+    const { data: abierto, error: errAbierto } = await db(supabase)
+      .from('negocio_bloques')
+      .select('bloque_configs!inner(config_extra)')
+      .eq('id', negocioBloqueId)
+      .single()
+    if (errAbierto) return { error: `No se pudo leer el bloque: ${errAbierto.message}` }
+    const ce = ((abierto as Record<string, unknown> | null)?.bloque_configs as
+      { config_extra?: Record<string, unknown> | null } | null)?.config_extra ?? null
+
+    if ((ce as { editable_solo_si_vacio?: boolean } | null)?.editable_solo_si_vacio === true) {
+      // Se evalúa contra el DESTINO (el origen en un bloque compartido), que es donde
+      // vive el dato de verdad; la copia local está vacía por diseño.
+      const { data: filaDestino, error: errDestino } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data')
+        .eq('id', destinoId)
+        .single()
+      if (errDestino) return { error: `No se pudo leer el bloque origen: ${errDestino.message}` }
+      const dataDestino = (filaDestino as { data: Record<string, unknown> | null } | null)?.data ?? null
+      if (soloLecturaPorDatoLleno(ce, dataDestino)) {
+        return { error: 'Este dato ya viene registrado de la etapa anterior. Para cambiarlo, corrígelo en la etapa donde se capturó.' }
+      }
+    }
+  }
+
   const { data: row, error: updateError } = await db(supabase)
     .from('negocio_bloques')
     .update({
@@ -5752,6 +5783,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     e => e.id === base.negocio.etapa_actual_id,
   )?.orden ?? null
 
+  // Gates heredados que ya vienen llenos y quedaron de solo lectura: se recogen durante
+  // el recorrido y se cierran de una sola vez al terminar (el `map` no admite `await`).
+  const gatesHeredadosACerrar: string[] = []
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -5799,6 +5834,23 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       if (srcData) {
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
       }
+    }
+
+    // Heredado `editable_solo_si_vacio` que ya viene lleno: se pinta de solo lectura, así
+    // que NADIE puede cerrarlo desde la pantalla. Si además es gate, dejarlo `pendiente`
+    // retendría el negocio esperando un dato que ya tiene — el defecto que este repo ya
+    // documentó dos veces (ver `gateVisibleQuedaResuelto`). Se cierra aquí, con la misma
+    // data que el render acaba de resolver.
+    if (
+      b.instancia
+      && b.instancia.estado !== 'completo'
+      && b.es_gate === true
+      && soloLecturaPorDatoLleno(configExtra, b.instancia.data as Record<string, unknown> | null)
+    ) {
+      // El `map` es síncrono: aquí solo se marca en memoria y el id se acumula para
+      // persistirlo en una sola escritura al salir del recorrido.
+      gatesHeredadosACerrar.push(b.instancia.id)
+      b = { ...b, instancia: { ...b.instancia, estado: 'completo' } }
     }
 
     // Si el tipo no se infirio, usamos detector indirecto: si hay srcData
@@ -5946,6 +5998,19 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       }>,
     }
   })
+
+  // Persistencia del cierre marcado arriba. El gate lo evalúa SQL contra
+  // `negocio_bloques.estado`, así que sin esta escritura la pantalla mostraría el bloque
+  // resuelto y el motor seguiría reteniendo el negocio.
+  if (gatesHeredadosACerrar.length > 0) {
+    const { error: errCierre } = await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'completo', completado_at: new Date().toISOString() })
+      .in('id', gatesHeredadosACerrar)
+    // No se traga: si falla, el negocio queda retenido por un gate que la pantalla no
+    // ofrece forma de cerrar, y sin este registro nadie sabría por qué.
+    if (errCierre) console.error('[getNegocioDetalle] no se pudieron cerrar los gates heredados ya llenos:', errCierre)
+  }
 
   return {
     negocio: base.negocio,

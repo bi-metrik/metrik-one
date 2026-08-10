@@ -31,6 +31,7 @@ import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
+import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -1195,6 +1196,12 @@ function BloqueRenderer({
     ) return 'editable'
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
+    // Heredado que se comporta según lo que traiga: con el dato ya puesto en la
+    // etapa anterior se muestra de solo lectura; vacío se habilita aquí. El
+    // `data` que llega ya es el del origen en los bloques compartidos.
+    if (soloLecturaPorDatoLleno(configExtra, bloque.instancia?.data as Record<string, unknown> | null)) {
+      return 'visible'
+    }
     // Instance-level: bloque already completed.
     // Excepciones `datos` y `documento`: siguen editables mientras el negocio esté
     // EN esta etapa (si fuera de una etapa anterior ya habría salido arriba, por
