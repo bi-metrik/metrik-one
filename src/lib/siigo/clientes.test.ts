@@ -76,4 +76,50 @@ describe('borradorCliente — la ciudad ya resuelve para los municipios reales',
     )
     expect(r.payload.phones).toEqual([{ number: '3001234567' }])
   })
+
+  it('sin teléfono, la clave `phones` NO viaja', () => {
+    const r = borradorCliente({ ...base, departamento: 'Bogotá D.C.', municipio: 'Bogotá' }, { email: 'a@b.co' })
+    expect('phones' in r.payload).toBe(false)
+  })
+})
+
+/**
+ * Estas dos cosas rompieron el backfill del 2026-08-10: los 167 terceros se
+ * rechazaron y ninguno se creó. El mapeo se había validado comparándolo contra
+ * documentos ya emitidos, que es una prueba de LECTURA: nunca había hecho un POST.
+ */
+describe('lo que Siigo exige al CREAR, que no es lo que devuelve al leer', () => {
+  const base: RutExtraido = {
+    numero_identificacion: '37747612',
+    primer_nombre: 'CAROL', primer_apellido: 'CARRILLO',
+    tipo_persona: 'Natural', direccion: 'CLL 10A 9 37',
+    pais: 'Colombia', departamento: 'Bogotá D.C.', municipio: 'Bogotá',
+  }
+
+  it('id_type viaja como CADENA, no como objeto', () => {
+    // Siigo LEE `{code, name}` pero al crear exige "13": con el objeto responde
+    // "The field id_type is required" y con un número, "Invalid data type".
+    const r = borradorCliente(base, { email: 'a@b.co' })
+    expect(r.payload.id_type).toBe('13')
+  })
+
+  it('una persona jurídica va con NIT', () => {
+    const r = borradorCliente({ ...base, tipo_persona: 'Jurídica', razon_social: 'ACME SAS' }, { email: 'a@b.co' })
+    expect(r.payload.id_type).toBe('31')
+    expect(r.payload.person_type).toBe('Company')
+  })
+
+  it('un teléfono que no cabe en 10 dígitos se OMITE, no tumba el tercero', () => {
+    // El teléfono es opcional; perderlo es mejor que no crear el cliente. Y no se
+    // recorta a la fuerza: eso sería inventar un número que nadie contesta.
+    const r = borradorCliente(base, { email: 'a@b.co', telefono: '601 314 3195520 ext 22' })
+    // La clave se OMITE: `phones: []` lo rechaza Siigo con un error genérico.
+    expect('phones' in r.payload).toBe(false)
+    expect(r.faltantes).toEqual([])
+  })
+
+  it('un teléfono nacional normal sí viaja', () => {
+    expect(borradorCliente(base, { email: 'a@b.co', telefono: '+57 314 3195520' }).payload.phones)
+      .toEqual([{ number: '3143195520' }])
+  })
 })
