@@ -37,6 +37,7 @@ import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
+import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
@@ -3454,13 +3455,17 @@ export async function cambiarEtapaNegocioConGate(
     }
   }
 
-  // Obtener nombre de la nueva etapa para el log
+  // Obtener nombre de la nueva etapa para el log. `numero` y `linea_id` los usa
+  // el disparador de Siigo de más abajo (el `numero` es el orden VISIBLE, que es
+  // con el que se declara la configuración; `orden` es interno y no coincide).
   const { data: nuevaEtapaInfoRaw } = await db(supabase)
     .from('etapas_negocio')
-    .select('nombre')
+    .select('nombre, numero, linea_id')
     .eq('id', resolvedEtapaId)
     .single()
-  const nuevaEtapaNombre = (nuevaEtapaInfoRaw as { nombre: string } | null)?.nombre ?? resolvedEtapaId
+  const nuevaEtapaInfo = nuevaEtapaInfoRaw as
+    { nombre: string; numero: number | null; linea_id: string | null } | null
+  const nuevaEtapaNombre = nuevaEtapaInfo?.nombre ?? resolvedEtapaId
 
   // Cambiar etapa
   const resultCambio = await cambiarEtapaNegocio(negocioId, resolvedEtapaId)
@@ -3487,6 +3492,19 @@ export async function cambiarEtapaNegocioConGate(
         contenido: motivoOverride ? `Override: ${motivoOverride}` : null,
       })
   }
+
+  // El tercero de Siigo se crea al superar la etapa donde se captura el RUT.
+  // Va DESPUÉS del avance y del log, y no puede romper ninguno de los dos: el
+  // negocio ya se movió. Un tercero no es un documento contable (crearlo dos
+  // veces no asienta nada), por eso este es el único de los tres documentos que
+  // se dispara solo. Sin `config_extra.siigo` en la línea, no hace nada.
+  await crearClienteSiigoAlAvanzar(
+    workspaceId,
+    negocioId,
+    nuevaEtapaInfo?.linea_id ?? null,
+    nuevaEtapaInfo?.numero ?? null,
+    staffId ?? null,
+  )
 
   return { ...resultCambio, etapaDestinoNombre: nuevaEtapaNombre }
 }
