@@ -29,6 +29,7 @@ import {
 } from '@/lib/negocios/dato-de-decision'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
+import { recolectarReferenciasFuente, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
@@ -5281,19 +5282,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   const totalCobrado = cobrosList.reduce((sum, c) => sum + (c.monto ?? 0), 0)
 
   // ── Cross-etapa data for conditions + auto_fill ────────────────────────────
-  const sourceEtapaOrdens = new Set<number>()
-  for (const bcId of Object.keys(bloqueConfigsExtra)) {
-    const ce = bloqueConfigsExtra[bcId]
-    const cond = ce?.condition as { source_etapa_orden?: number } | undefined
-    if (cond?.source_etapa_orden) sourceEtapaOrdens.add(cond.source_etapa_orden)
-    const fields = (ce?.fields ?? []) as Array<{ auto_fill?: { source_etapa_orden?: number }; lock_when?: { source_etapa_orden?: number } }>
-    for (const f of fields) {
-      if (f.auto_fill?.source_etapa_orden) sourceEtapaOrdens.add(f.auto_fill.source_etapa_orden)
-      // lock_when: el bloque fuente (ej. titularidad) debe cargarse en datosPorSlug
-      // para resolver el bloqueo cross-bloque en el render.
-      if (f.lock_when?.source_etapa_orden) sourceEtapaOrdens.add(f.lock_when.source_etapa_orden)
-    }
-  }
+  // Se recolectan LAS DOS formas de declarar el bloque fuente (orden de etapa y
+  // slug estable). Recolectar solo la primera dejaba sin resolver a quien
+  // declaraba únicamente el slug: ver `referencias-fuente.ts`.
+  const { etapaOrdens: sourceEtapaOrdens, bloqueSlugs: sourceBloqueSlugs } =
+    recolectarReferenciasFuente(Object.keys(bloqueConfigsExtra).map(bcId => bloqueConfigsExtra[bcId]))
 
   // Si hay un bloque tipo guia_devolucion en la etapa actual, su preview depende
   // de RUT, Factura y Fecha cita DIAN. Se resuelven por IDENTIDAD DE BLOQUE
@@ -5410,6 +5403,29 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         }
         if (bloqueSlug) datosPorSlug[bloqueSlug] = perBloque
       }
+    }
+  }
+
+  // Slugs referenciados que la pasada anterior no alcanzo: su etapa origen no
+  // esta declarada por `source_etapa_orden` en ninguna referencia de esta etapa.
+  // Se resuelven por slug DENTRO DE LA LINEA, que es lo que hace el gate en SQL
+  // (`condicion_cumplida`). Sin esto, render y gate discrepan: el bloque no se
+  // pinta y el gate lo sigue exigiendo, dejando el negocio sin nada que hacer.
+  const slugsFaltantes = [...sourceBloqueSlugs].filter(s => !datosPorSlug[s])
+  if (slugsFaltantes.length > 0 && base.negocio.linea_id) {
+    const { data: bloquesPorSlug, error: errorPorSlug } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug, etapas_negocio!inner(linea_id))')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.etapas_negocio.linea_id', base.negocio.linea_id)
+      .in('bloque_configs.slug', slugsFaltantes)
+    // El error se sube: tragarselo devuelve lista vacia, indistinguible de "el
+    // bloque fuente no existe", y el sintoma seria otra vez una etapa en blanco.
+    if (errorPorSlug) throw new Error(`No se pudieron resolver los bloques fuente: ${errorPorSlug.message}`)
+    for (const b of ((bloquesPorSlug ?? []) as Record<string, unknown>[])) {
+      const slug = (b.bloque_configs as { slug?: string | null } | null)?.slug
+      if (!slug) continue
+      datosPorSlug[slug] = aplanarDataBloque(b.data as Record<string, unknown> | null)
     }
   }
 
