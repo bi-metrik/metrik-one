@@ -83,7 +83,7 @@ interface MarcaCliente {
 async function borradorDelNegocio(
   negocioId: string,
   contactoId: string | null,
-): Promise<{ borrador: ReturnType<typeof borradorCliente> } | null> {
+): Promise<{ borrador: ReturnType<typeof borradorCliente> }> {
   const svc = createServiceClient()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -153,9 +153,17 @@ export async function asegurarClienteSiigo(
     return { estado: 'ya_existia', identificacion: yaMarcado.identificacion, siigo_id: yaMarcado.siigo_id }
   }
 
-  const armado = await borradorDelNegocio(negocioId, negocio.contacto_id)
-  if (!armado) return { estado: 'error', mensaje: 'No se pudo leer el expediente' }
-  const { payload, faltantes } = armado.borrador
+  // `borradorDelNegocio` LANZA si la consulta del RUT falla (para no confundir un
+  // error de base con "no hay RUT"). Se atrapa aquí y no más arriba: esta función
+  // promete devolver un `ResultadoCliente`, y quien la llame desde un botón manual
+  // no tiene por qué envolverla en su propio try.
+  let borrador: Awaited<ReturnType<typeof borradorDelNegocio>>
+  try {
+    borrador = await borradorDelNegocio(negocioId, negocio.contacto_id)
+  } catch (e) {
+    return { estado: 'error', mensaje: (e as Error).message }
+  }
+  const { payload, faltantes } = borrador.borrador
 
   // Lo que ONE no pudo resolver se declara, no se rellena. El caso aparece en la
   // cola de facturación con esta misma lista y alguien la completa.
@@ -201,8 +209,12 @@ async function marcar(
   const svc = createServiceClient()
   const metadata = { ...(metadataActual ?? {}), siigo_cliente: marca }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (svc as any)
+  const { error } = await (svc as any)
     .from('negocios').update({ metadata }).eq('id', negocioId).eq('workspace_id', workspaceId)
+  // No se traga el error: sin la marca, el siguiente avance vuelve a preguntarle a
+  // Siigo (que responderá "ya existe", así que no duplica), pero eso es una llamada
+  // de más repetida en cada avance y nadie la vería.
+  if (error) console.error('[siigo] no se pudo marcar el negocio con su tercero:', error.message)
 }
 
 /**
