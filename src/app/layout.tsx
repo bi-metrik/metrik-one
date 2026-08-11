@@ -1,24 +1,33 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono, Montserrat } from 'next/font/google'
+import localFont from 'next/font/local'
 import { ThemeProvider } from 'next-themes'
 import { Toaster } from 'sonner'
 import Splash from '@/components/splash'
 import './globals.css'
 
-const geistSans = Geist({
+// Fuentes autoalojadas (subset latin, variable). No se descargan de fonts.gstatic.com
+// en tiempo de build: un 404 del CDN de Google tumbaba el build entero (2026-08-10).
+// Para actualizarlas: bajar el .woff2 del bloque `/* latin */` que sirve
+// fonts.googleapis.com/css2?family=<Familia>:wght@100..900 y reemplazar el archivo.
+const geistSans = localFont({
+  src: './fonts/Geist-latin-variable.woff2',
   variable: '--font-geist-sans',
-  subsets: ['latin'],
+  weight: '100 900',
+  display: 'swap',
 })
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: './fonts/GeistMono-latin-variable.woff2',
   variable: '--font-geist-mono',
-  subsets: ['latin'],
+  weight: '100 900',
+  display: 'swap',
 })
 
-const montserrat = Montserrat({
+const montserrat = localFont({
+  src: './fonts/Montserrat-latin-variable.woff2',
   variable: '--font-montserrat',
-  subsets: ['latin'],
-  weight: ['300', '400', '700', '800'],
+  weight: '100 900',
+  display: 'swap',
 })
 
 export const metadata: Metadata = {
