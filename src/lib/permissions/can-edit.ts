@@ -203,6 +203,30 @@ export function puedeAutorizarCierreNoFacturable(user: UserContext): boolean {
   return getAreasEfectivas(user).has('financiera')
 }
 
+// ── puedeGestionarPagosExternos ──────────────────────────────────────
+
+/**
+ * Registrar, corregir o ANULAR un pago que no entro por la pasarela.
+ *
+ * Es plata que entra sin que ninguna pasarela la respalde: el unico respaldo es el
+ * soporte que adjunta quien la registra. Y anular es tocar el saldo de un negocio
+ * hacia abajo. Las dos cosas son del area financiera, o de administracion.
+ *
+ * Hermana de `puedeAutorizarCierreNoFacturable` y con el mismo criterio: owner/admin
+ * siempre; read_only/contador nunca; el resto solo con 'financiera' en sus areas
+ * efectivas ('direccion' la expande).
+ *
+ * Fuente UNICA: la consumen el guard del servidor (`ctxPagosExternos`) Y la pantalla,
+ * que decide con ella si dibuja los botones de editar y anular. Copiar la regla en los
+ * dos lados los desincroniza en silencio: la pantalla ofreceria algo que el servidor
+ * rechaza, o se lo escondaria a quien si puede.
+ */
+export function puedeGestionarPagosExternos(user: UserContext): boolean {
+  if (user.role === 'owner' || user.role === 'admin') return true
+  if (user.role === 'read_only' || user.role === 'contador') return false
+  return getAreasEfectivas(user).has('financiera')
+}
+
 // ── canGestionarAliados ──────────────────────────────────────────────
 
 /**

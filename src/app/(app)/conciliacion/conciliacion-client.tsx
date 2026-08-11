@@ -1,25 +1,23 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
   Scale, CheckCircle2, Loader2, X, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
-  Landmark, Clock, FileText, AlertTriangle,
+  Clock, FileText, AlertTriangle,
 } from 'lucide-react'
 import {
   aceptarRepartoComercial,
   rechazarRepartoComercial,
-  getNegociosParaPagoFueraEpayco,
-  registrarPagoFueraEpayco,
   type ConciliacionV2,
-  type NegocioParaPagoFueraEpayco,
   type NegocioSaldo,
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
-import { MAX_LARGO_REF_EXTERNA, referenciaVisible } from '@/lib/cobros/referencia-externa'
+import PagosExternosTab from './pagos-externos-tab'
+import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
 import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio } from '@/lib/actions/facturacion-actions'
 import type { FacturaEnSiigo } from '@/lib/siigo/facturas'
@@ -111,7 +109,7 @@ export default function ConciliacionClient({ data, cola }: { data: ConciliacionV
       {tab === 'bandeja' && <TabBandeja pendientes={pendientes} onDone={() => router.refresh()} />}
       {tab === 'saldos' && <TabSaldos data={data} />}
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
-      {tab === 'fuera_epayco' && <TabPagoFueraEpayco onDone={() => router.refresh()} />}
+      {tab === 'fuera_epayco' && <PagosExternosTab onDone={() => router.refresh()} />}
       {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
     </div>
   )
@@ -645,244 +643,9 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// PAGO FUERA DE ePAYCO — captura excepcional del área financiera
-// ════════════════════════════════════════════════════════════════════════════
-
-/**
- * Registro de un pago que NO entró por la pasarela: cayó a Davivienda u otra cuenta.
- * Formulario mínimo — negocio, valor, fecha, cuenta y referencia OPCIONAL (número de
- * consignación o comprobante, para trazabilidad). Sin referencia el registro NO se
- * bloquea: el sistema genera una interna. NO reparte y NO concilia: es solo la captura
- * del ingreso contra el negocio. Deliberadamente separado de la bandeja de
- * aceptar/rechazar repartos.
- */
-function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
-  const hoyBogota = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
-
-  const [negocios, setNegocios] = useState<NegocioParaPagoFueraEpayco[]>([])
-  const [cargando, setCargando] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  const [q, setQ] = useState('')
-  const [negocioId, setNegocioId] = useState('')
-  const [monto, setMonto] = useState('')
-  const [fecha, setFecha] = useState(hoyBogota)
-  const [fuente, setFuente] = useState<'davivienda' | 'otra'>('davivienda')
-  const [referencia, setReferencia] = useState('')
-  const [pending, startTransition] = useTransition()
-
-  useEffect(() => {
-    let cancel = false
-    getNegociosParaPagoFueraEpayco().then((res) => {
-      if (cancel) return
-      if (res.error) setLoadError(res.error)
-      else setNegocios(res.negocios)
-      setCargando(false)
-    })
-    return () => { cancel = true }
-  }, [])
-
-  const seleccionado = useMemo(
-    () => negocios.find((n) => n.negocio_id === negocioId) ?? null,
-    [negocios, negocioId],
-  )
-
-  const query = q.trim().toLowerCase()
-  const resultados = useMemo(() => {
-    if (!query) return []
-    return negocios
-      .filter((n) => [n.codigo, n.nombre, n.empresa].filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(query)))
-      .slice(0, 8)
-  }, [negocios, query])
-
-  function registrar() {
-    if (!negocioId) return toast.error('Elige el negocio al que cae el pago')
-    const valor = Number(monto)
-    if (!Number.isFinite(valor) || valor <= 0) return toast.error('Ingresa el valor del pago')
-
-    startTransition(async () => {
-      const res = await registrarPagoFueraEpayco({
-        negocio_id: negocioId,
-        monto: valor,
-        fecha: fecha || undefined,
-        fuente,
-        referencia: referencia.trim() || undefined,
-      })
-      if (res.success) {
-        toast.success('Pago registrado')
-        setNegocioId(''); setQ(''); setMonto(''); setFecha(hoyBogota); setFuente('davivienda'); setReferencia('')
-        onDone()
-      } else {
-        toast.error(res.error)
-      }
-    })
-  }
-
-  const cuentas: { key: 'davivienda' | 'otra'; label: string }[] = [
-    { key: 'davivienda', label: 'Davivienda' },
-    { key: 'otra', label: 'Otra cuenta' },
-  ]
-
-  return (
-    <div className="max-w-xl">
-      <div className="mb-4 rounded-lg border px-4 py-3" style={{ borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }}>
-        <div className="flex items-center gap-1.5">
-          <Landmark className="h-4 w-4" style={{ color: '#B45309' }} />
-          <h2 className="text-[13px] font-bold" style={{ color: '#92400E' }}>Registro excepcional</h2>
-        </div>
-        <p className="mt-1 text-[12px]" style={{ color: '#92400E' }}>
-          Solo para el dinero que entró a una cuenta bancaria y no por ePayco. Se registra
-          el valor contra el negocio y queda marcado como pago fuera de ePayco. No reparte
-          ni concilia: eso se hace en la pestaña &quot;Por confirmar&quot;.
-        </p>
-      </div>
-
-      <div className="space-y-4 rounded-lg border bg-white p-4" style={{ borderColor: '#E5E7EB' }}>
-        {/* Negocio.
-            NO es un <label>: adentro hay un input y ademas la lista de resultados,
-            que son <button>. Un <label> se asocia al primer control labelable que
-            contiene y reenvia hacia el los clics de todo lo que envuelve, incluidos
-            esos botones. Por eso es un <div> con el rotulo suelto. */}
-        <div className="block">
-          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Negocio</span>
-          {cargando ? (
-            <div className="flex items-center gap-2 text-[13px]" style={{ color: '#6B7280' }}>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando negocios…
-            </div>
-          ) : loadError ? (
-            <p className="text-[12px]" style={{ color: '#DC2626' }}>{loadError}</p>
-          ) : seleccionado ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border px-2.5 py-1.5" style={{ borderColor: VERDE, backgroundColor: '#ECFDF5' }}>
-              <span className="min-w-0 truncate text-[13px]">
-                <span className="font-semibold" style={{ color: '#1A1A1A' }}>{seleccionado.codigo ?? '—'}</span>
-                <span style={{ color: '#6B7280' }}> · {seleccionado.empresa ?? seleccionado.nombre ?? ''}</span>
-              </span>
-              <button
-                onClick={() => { setNegocioId(''); setQ('') }}
-                className="shrink-0 rounded p-0.5 hover:bg-white"
-                aria-label="Cambiar negocio"
-              >
-                <X className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 rounded-md border px-2.5 py-1.5" style={{ borderColor: '#E5E7EB' }}>
-                <Search className="h-4 w-4" style={{ color: '#9CA3AF' }} />
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Busca por código, empresa o nombre…"
-                  className="w-full text-[13px] outline-none"
-                  style={{ color: '#1A1A1A' }}
-                />
-              </div>
-              {query && (
-                resultados.length === 0 ? (
-                  <p className="mt-1.5 text-[12px]" style={{ color: '#9CA3AF' }}>Sin resultados.</p>
-                ) : (
-                  <div className="mt-1.5 space-y-1">
-                    {resultados.map((n) => (
-                      <button
-                        key={n.negocio_id}
-                        onClick={() => setNegocioId(n.negocio_id)}
-                        className="block w-full rounded-md border px-2.5 py-1.5 text-left text-[13px] transition hover:bg-gray-50"
-                        style={{ borderColor: '#E5E7EB' }}
-                      >
-                        <span className="font-semibold" style={{ color: '#1A1A1A' }}>{n.codigo ?? '—'}</span>
-                        <span style={{ color: '#6B7280' }}> · {n.empresa ?? n.nombre ?? ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                )
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Valor + fecha */}
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Valor</span>
-            <input
-              value={monto}
-              onChange={(e) => setMonto(e.target.value.replace(/[^\d]/g, ''))}
-              inputMode="numeric"
-              placeholder="ej. 1500000"
-              className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none"
-              style={{ borderColor: '#E5E7EB' }}
-            />
-            {Number(monto) > 0 && (
-              <p className="mt-1 text-right text-[11px] font-semibold" style={{ color: VERDE }}>{fmtCOP(Number(monto))}</p>
-            )}
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Fecha del pago</span>
-            <input
-              type="date"
-              value={fecha}
-              onChange={(e) => setFecha(e.target.value)}
-              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-              style={{ borderColor: '#E5E7EB' }}
-            />
-          </label>
-        </div>
-
-        {/* Cuenta */}
-        <div>
-          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>¿A qué cuenta entró?</span>
-          <div className="grid grid-cols-2 gap-2">
-            {cuentas.map((c) => (
-              <button
-                key={c.key}
-                onClick={() => setFuente(c.key)}
-                className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
-                style={fuente === c.key
-                  ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
-                  : { borderColor: '#E5E7EB', color: '#6B7280' }}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Referencia — opcional. Si no la tienes a mano, el sistema genera una interna. */}
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>
-            Referencia <span className="font-normal" style={{ color: '#9CA3AF' }}>(opcional)</span>
-          </span>
-          <input
-            value={referencia}
-            onChange={(e) => setReferencia(e.target.value.slice(0, MAX_LARGO_REF_EXTERNA))}
-            placeholder="N.º de consignación o comprobante"
-            maxLength={MAX_LARGO_REF_EXTERNA}
-            className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-            style={{ borderColor: '#E5E7EB' }}
-          />
-          <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>
-            Si no la tienes a mano, déjala vacía: el sistema genera una referencia interna.
-            Un mismo comprobante no se puede registrar dos veces.
-          </p>
-        </label>
-
-        <div className="flex justify-end">
-          <button
-            onClick={registrar}
-            disabled={pending || cargando}
-            className="inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
-            style={{ backgroundColor: VERDE }}
-          >
-            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-            Registrar pago
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+// El registro de pagos fuera de la pasarela vive en `./pagos-externos-tab.tsx`. Salio de
+// este archivo el 2026-08-11 al dejar de ser un formulario suelto: ahora lleva listado de
+// lo ya registrado, alerta de referencia sobre-asignada, soporte obligatorio y anulacion.
 
 // ── Primitivos ───────────────────────────────────────────────────────────────
 

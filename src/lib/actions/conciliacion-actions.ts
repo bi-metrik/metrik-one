@@ -22,11 +22,6 @@ import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-s
 import { diasDesde } from '@/lib/negocios/antiguedad'
 import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
-import {
-  construirRefExterna,
-  normalizarRefExterna,
-  MAX_LARGO_REF_EXTERNA,
-} from '@/lib/cobros/referencia-externa'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -1249,6 +1244,27 @@ export interface AgregarPagoInput {
   fecha?: string
   justificacion?: string
   tipo_cobro?: string
+  /**
+   * Soporte del pago, ya archivado por el caller (Storage + carpeta del negocio en
+   * Drive). Viaja en el mismo INSERT que el cobro: un cobro sin su respaldo, aunque sea
+   * por un instante, es exactamente el estado que el soporte obligatorio quiere evitar.
+   */
+  soporte?: Record<string, unknown> | null
+  /** Marca de reparto deliberado (`split_id` + `split_total`) cuando el caller la declara. */
+  split_json?: Record<string, unknown>
+  /**
+   * Salta el bloqueo duro por referencia ya usada en otro negocio.
+   *
+   * NO es un permiso para duplicar: es para el caller que aplica el control CORRECTO
+   * sobre esa referencia, que es el de MONTO (la suma registrada no puede superar el
+   * pago original — `lib/cobros/sobreasignacion.ts`). Repetir una referencia entre
+   * negocios es legitimo cuando un pago se reparte, y hay casos reales asi en
+   * produccion; el bloqueo por unicidad los rompe.
+   *
+   * Quien la pase debe haber evaluado la sobre-asignacion ANTES y declarar el reparto
+   * con `split_json`.
+   */
+  permitirRefCompartida?: boolean
 }
 
 /**
@@ -1339,9 +1355,12 @@ export async function registrarPagoEnNegocio(
       }
     }
 
+    // Un cobro ANULADO no bloquea el re-registro (ver `lib/cobros/anulacion.ts`).
     const { data: existing } = await db(supabase)
       .from('cobros').select('id')
-      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', String(refNum)).limit(1)
+      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', String(refNum))
+      .is('anulado_at', null)
+      .limit(1)
     if (existing && (existing as unknown[]).length > 0) return { success: true }
 
     const { error: insErr } = await db(supabase).from('cobros').insert({
@@ -1359,24 +1378,35 @@ export async function registrarPagoEnNegocio(
     if (input.fuente === 'otra' && !fuenteValor) return { success: false, error: 'Indica el nombre de la fuente del pago' }
     const externalRef = referencia
 
-    // Bloqueo DURO de duplicado también para pagos manuales (Davivienda/otra).
-    const dupManual = await refDuplicadaNoSplit(supabase, workspaceId, externalRef)
-    if (dupManual && dupManual.negocio_id !== negocioId) {
-      return {
-        success: false,
-        error: `Esta referencia ya está registrada en ${dupManual.codigo ?? dupManual.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+    // Bloqueo DURO de duplicado también para pagos manuales (Davivienda/otra), SALVO
+    // que el caller ya haya aplicado el control de monto (ver `permitirRefCompartida`).
+    if (!input.permitirRefCompartida) {
+      const dupManual = await refDuplicadaNoSplit(supabase, workspaceId, externalRef)
+      if (dupManual && dupManual.negocio_id !== negocioId) {
+        return {
+          success: false,
+          error: `Esta referencia ya está registrada en ${dupManual.codigo ?? dupManual.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+        }
       }
     }
 
+    // Idempotencia: un cobro ANULADO no cuenta como "ya existe". Si contara, anular un
+    // pago mal cargado dejaría el negocio sin poder volver a registrarlo con la misma
+    // referencia — que es justo el camino que la anulación abre (el monto no se edita:
+    // se anula y se vuelve a registrar). Ver `lib/cobros/anulacion.ts`.
     const { data: existing } = await db(supabase)
       .from('cobros').select('id')
-      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', externalRef).limit(1)
+      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', externalRef)
+      .is('anulado_at', null)
+      .limit(1)
     if (existing && (existing as unknown[]).length > 0) return { success: true }
 
     const { error: insErr } = await db(supabase).from('cobros').insert({
       workspace_id: workspaceId, negocio_id: negocioId, monto,
       tipo_cobro: input.tipo_cobro ?? 'externo', fecha, external_ref: externalRef,
       fuente: fuenteValor, notas: `Pago ${fuenteValor} — Ref ${referencia}`,
+      ...(input.soporte ? { soporte: input.soporte } : {}),
+      ...(input.split_json ? { split_json: input.split_json } : {}),
     })
     if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar el pago' }
     await logFabOrigen(referencia)
@@ -1397,12 +1427,15 @@ async function refDuplicadaNoSplit(
   workspaceId: string,
   externalRef: string,
 ): Promise<{ negocio_id: string; codigo: string | null } | null> {
+  // `anulado_at is null`: el duplicado se detecta por PRESENCIA de la referencia, no por
+  // su monto, así que el cero de la anulación no basta acá. Ver `lib/cobros/anulacion.ts`.
   const { data } = await db(supabase)
     .from('cobros')
     .select('negocio_id, split_json, negocios:negocio_id ( codigo )')
     .eq('workspace_id', workspaceId)
     .eq('external_ref', externalRef)
     .not('negocio_id', 'is', null)
+    .is('anulado_at', null)
     .is('split_json->>split_id', null)
     .limit(1)
     .maybeSingle()
@@ -1799,143 +1832,8 @@ export async function rechazarRepartoComercial(
   return { success: true, eliminados: comercial.length }
 }
 
-// ── Pago fuera de ePayco (registro excepcional del área financiera) ───────────
-
-/** Negocio elegible para recibir un pago que no entró por ePayco. */
-export interface NegocioParaPagoFueraEpayco {
-  negocio_id: string
-  codigo: string | null
-  nombre: string | null
-  empresa: string | null
-}
-
-/**
- * Lista los negocios abiertos del workspace para el buscador del registro de pago
- * fuera de ePayco. Solo área financiera (ctxFinanciero).
- */
-export async function getNegociosParaPagoFueraEpayco(): Promise<{
-  negocios: NegocioParaPagoFueraEpayco[]
-  error?: string
-}> {
-  const ctx = await ctxFinanciero()
-  if (!ctx.ok) return { negocios: [], error: ctx.error }
-  const { supabase, workspaceId } = ctx
-
-  // El error se LEE. Descartarlo dejaba un fallo mudo: si la consulta fallaba,
-  // la funcion devolvia lista vacia sin error y la pantalla mostraba un buscador
-  // que "no encuentra nada", indistinguible de un workspace sin negocios.
-  const { data: raw, error: qErr } = await db(supabase)
-    .from('negocios')
-    .select('id, codigo, nombre, empresas:empresa_id ( nombre )')
-    .eq('workspace_id', workspaceId)
-    .eq('estado', 'abierto')
-    .order('created_at', { ascending: false })
-    // Sin limite explicito manda el tope del servidor (1000). Se sube para que la
-    // lista no se corte en silencio cuando el workspace crezca: el buscador filtra
-    // en el cliente, asi que un truncamiento se ve como "ese negocio no existe".
-    .limit(5000)
-
-  if (qErr) {
-    return { negocios: [], error: `No se pudieron cargar los negocios: ${(qErr as { message: string }).message}` }
-  }
-
-  const negocios: NegocioParaPagoFueraEpayco[] = ((raw ?? []) as Array<{
-    id: string
-    codigo: string | null
-    nombre: string | null
-    empresas: { nombre: string | null } | null
-  }>).map((n) => ({
-    negocio_id: n.id,
-    codigo: n.codigo,
-    nombre: n.nombre,
-    empresa: n.empresas?.nombre ?? null,
-  }))
-
-  return { negocios }
-}
-
-export interface PagoFueraEpaycoInput {
-  negocio_id: string
-  /** Valor recibido, en pesos. */
-  monto: number
-  /** 'YYYY-MM-DD'. Default: hoy (Bogotá). */
-  fecha?: string
-  /** Cuenta por la que entró el dinero. Se guarda en `cobros.fuente`. */
-  fuente: 'davivienda' | 'otra'
-  /**
-   * OPCIONAL. Número de consignación o comprobante real, escrito por la financiera.
-   * Se persiste prefijada (`EXT-…`) en `cobros.external_ref`. Vacío → referencia
-   * interna autogenerada.
-   */
-  referencia?: string
-}
-
-/**
- * Registra un pago que NO entró por ePayco: negocio + valor + fecha + fuente, con
- * referencia opcional (número de consignación o comprobante).
- *
- * NO es conciliación ni reparto — es la captura de un ingreso excepcional que llegó
- * a una cuenta bancaria (Davivienda u otra). Exclusivo del área financiera
- * (ctxFinanciero aquí + el blindaje de `registrarPagoEnNegocio`, que revalida la
- * sesión en su rama no-ePayco).
- *
- * `cobros.external_ref` es la llave del registro de pagos y del control de duplicados
- * (`refDuplicadaNoSplit`), no puede quedar vacía. Dos casos:
- *   - Con referencia escrita: se guarda prefijada `EXT-{referencia}` (ver
- *     `referencia-externa.ts`). Vive en su propio espacio de nombres → un comprobante
- *     NO puede hacerse pasar por una referencia real de ePayco (siempre numérica
- *     pura), y a la vez SÍ cuenta para el control de duplicados: teclear dos veces el
- *     mismo comprobante queda frenado (en el mismo negocio es idempotente, en otro se
- *     rechaza).
- *   - Sin referencia (la financiera no la tiene a mano): no se bloquea el registro; se
- *     genera una interna trazable (`FUERA-EPAYCO-...`), única por construcción.
- *
- * La `fuente` se persiste aunque hoy no alimente ningún cálculo: habilita un control
- * de saldo por cuenta a futuro.
- */
-export async function registrarPagoFueraEpayco(
-  input: PagoFueraEpaycoInput,
-): Promise<{ success: true } | { success: false; error: string }> {
-  const ctx = await ctxFinanciero()
-  if (!ctx.ok) return { success: false, error: ctx.error }
-  const { supabase, workspaceId, staffId } = ctx
-
-  const monto = Number(input.monto)
-  if (!Number.isFinite(monto) || monto <= 0) {
-    return { success: false, error: 'El valor del pago debe ser mayor a cero' }
-  }
-  if (input.fuente !== 'davivienda' && input.fuente !== 'otra') {
-    return { success: false, error: 'Elige la cuenta por la que entró el pago' }
-  }
-
-  const refEscrita = normalizarRefExterna(input.referencia)
-  if (refEscrita && refEscrita.length > MAX_LARGO_REF_EXTERNA) {
-    return { success: false, error: `La referencia no puede superar ${MAX_LARGO_REF_EXTERNA} caracteres` }
-  }
-
-  const fecha = (input.fecha ?? '').trim() || todayBogotaISO()
-  const referencia =
-    construirRefExterna(refEscrita) ??
-    `FUERA-EPAYCO-${fecha.replace(/-/g, '')}-${randomUUID().slice(0, 6).toUpperCase()}`
-
-  const res = await registrarPagoEnNegocio(
-    supabase,
-    workspaceId,
-    staffId,
-    {
-      negocio_id: input.negocio_id,
-      fuente: input.fuente,
-      // `registrarPagoEnNegocio` exige nombre cuando la fuente es 'otra'; el
-      // formulario es mínimo y no lo pide → queda etiquetado como 'otra'.
-      fuente_nombre: input.fuente === 'otra' ? 'otra' : undefined,
-      referencia,
-      monto,
-      fecha,
-      tipo_cobro: 'externo',
-    },
-    'conciliacion',
-  )
-
-  if (!res.success) return { success: false, error: res.error }
-  return { success: true }
-}
+// El registro, listado, correccion y anulacion de pagos fuera de la pasarela vive en
+// `src/lib/actions/pagos-externos.ts`. Se movio ahi el 2026-08-11 al dejar de ser solo
+// un formulario de captura: ahora tiene listado, control de sobre-asignacion por monto,
+// soporte obligatorio y anulacion. La via unica de escritura del cobro sigue siendo
+// `registrarPagoEnNegocio`, en este archivo.
