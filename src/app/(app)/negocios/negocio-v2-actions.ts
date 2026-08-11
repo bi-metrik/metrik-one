@@ -3682,9 +3682,15 @@ export async function cambiarEtapaNegocioConGate(
   // retroceso financiero viene a evitar. Por eso vuelve a frenar aquí, hasta que alguien
   // lo resuelva de forma explícita y con motivo escrito.
   //
-  // El override de owner/admin lo respeta igual que los demás gates: es un aviso, no una
-  // cerradura.
-  if (!motivoOverride) {
+  // ⚠️ Este gate NO cede al override de owner/admin, a diferencia de los demás.
+  // Decisión de Mauricio (2026-08-11): "es un gate, no avanza hasta que no se resuelva,
+  // no importa quién". Un override aquí deja al caso avanzando con plata que ya no
+  // tiene, que es exactamente el estado que esto viene a evitar — y quien más
+  // probablemente use el override es quien menos contexto tiene de por qué se frenó.
+  //
+  // No es un callejón sin salida: la salida es RESOLVER el aviso, con motivo escrito
+  // (`resolverAviso`), que deja el rastro de por qué se dio por atendido.
+  {
     const aviso = await leerAviso(supabase, workspaceId, negocioId)
     if (aviso) {
       return {
