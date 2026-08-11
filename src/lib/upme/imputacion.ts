@@ -42,6 +42,25 @@
  * forma de notar que se desincronizaron.
  */
 
+/**
+ * ⚠️ ESTE MODELO ES OPT-IN, Y EL DEFAULT ES NO APLICARLO.
+ *
+ * Topar el recaudo contra el valor del negocio (y tratar el sobrante como plata que no
+ * se queda) es el modelo de dinero de SOENA: honorario + una tarifa que se recauda y se
+ * gira a la UPME. **No es universal.** En un workspace sin ese modelo, un cobro mayor al
+ * precio suele ser el precio desactualizado, no plata ajena — y dejarlo fuera del P&L le
+ * borra ingreso propio.
+ *
+ * Medido el 2026-08-11: aplicado a ciegas, ana-demo perdia $900.000 de ingreso por un
+ * excedente que en su modelo no significa nada.
+ *
+ * Se declara en la configuracion, igual que la tarifa de IVA:
+ *   `lineas_negocio.config_extra.recaudo.topar_por_valor`  (gana)
+ *   `workspaces.config_extra.recaudo.topar_por_valor`
+ * Sin declaracion -> `false` -> sin techo -> todo el recaudo es ingreso propio, que es
+ * exactamente el comportamiento que tenia el producto antes de este frente.
+ */
+
 /** Techos del negocio, en pesos CON IVA (que es como entra la plata). */
 export interface TechosNegocio {
   /** Honorario del tramo 1. Plan 1 → 50%; Plan 2 → 100%. */
@@ -146,8 +165,10 @@ export function techosDelNegocio(
   honorario: number | null,
   plan: 1 | 2 | null,
   tarifaConfirmada: number | null,
+  /** El workspace o la linea declaran el modelo topado. Sin declaracion: NO se topa. */
+  toparPorValor: boolean = false,
 ): TechosNegocio {
-  if (honorario == null || !Number.isFinite(honorario)) {
+  if (!toparPorValor || honorario == null || !Number.isFinite(honorario)) {
     return { tramo1: 0, tramo2: 0, tarifa: Math.max(0, tarifaConfirmada ?? 0), sinTecho: true }
   }
   const total = Math.max(0, honorario)
