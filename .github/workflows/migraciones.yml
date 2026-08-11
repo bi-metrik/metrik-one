@@ -1,0 +1,31 @@
+# Revisa las migraciones que el PR agrega. No corre nada contra la base: solo lee el SQL.
+#
+# Es el unico workflow del repo. Se crea con este frente porque la guarda de grants necesita
+# algo que la ejecute: sin CI, un chequeo es un archivo que nadie corre.
+name: Migraciones
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/check-migracion-grants.mjs'
+      - '.github/workflows/migraciones.yml'
+
+jobs:
+  grants:
+    name: Toda tabla nueva declara RLS y su grant
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # El chequeo compara contra la base del PR: necesita mas de un commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Guarda de grants
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: node scripts/check-migracion-grants.mjs
