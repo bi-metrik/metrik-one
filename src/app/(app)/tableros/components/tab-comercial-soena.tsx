@@ -299,7 +299,7 @@ export function TabComercialSoena({
       {/* Totales historicos + embudo por vendedor */}
       <section>
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <ResumenTotal label="Valor aprobado (historico)" value={fmtCOP(totalAprobado)} />
+          <ResumenTotal label="Valor aprobado historico (sin IVA)" value={fmtCOP(totalAprobado)} />
           <ResumenTotal label="Honorario recaudado" value={fmtCOP(totalHonorario)} color={GREEN} />
           <ResumenTotal label="Tarifa UPME (terceros)" value={fmtCOP(totalTarifa)} muted />
         </div>
@@ -325,7 +325,7 @@ export function TabComercialSoena({
               </div>
               <div className="space-y-2 border-t border-gray-50 pt-3">
                 <Row label="Negocios activos" value={String(v.negocios_abiertos)} />
-                <Row label="Valor aprobado" value={fmtCOP(v.valor_aprobado)} />
+                <Row label="Valor aprobado (sin IVA)" value={fmtCOP(v.valor_aprobado)} />
                 <Row label="Honorario recaudado" value={fmtCOP(v.honorario_recaudado)} strong color={GREEN} />
                 <Row label="Tarifa UPME (terceros)" value={fmtCOP(v.tarifa_recaudada)} muted />
               </div>

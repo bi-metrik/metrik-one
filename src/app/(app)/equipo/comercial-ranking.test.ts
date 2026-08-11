@@ -21,6 +21,7 @@ function fila(p: Partial<ComercialResumenRow> & { nombre: string }): ComercialRe
     cerrados: 0,
     num_ventas: p.num_ventas ?? 0,
     valor_aprobado: p.valor_aprobado ?? 0,
+    valor_aprobado_con_iva: p.valor_aprobado_con_iva ?? 0,
     honorario_recaudado: p.honorario_recaudado ?? 0,
     tarifa_recaudada: 0,
   }
