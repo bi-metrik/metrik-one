@@ -45,19 +45,31 @@ Una fila por negocio. Expone el valor total, la base y el IVA, mas el origen de 
 de SOENA el bloque y el precio difieren (V0259 637.500 vs 510.000; V0097 637.585 vs 637.500)
 y el del bloque es el viejo. Las dos RPC que preferian el bloque cambian su cifra por esto.
 
-**La tarifa de IVA sale de la configuracion, nunca de un literal.** Cadena por negocio:
+**La tarifa de IVA sale de la configuracion, nunca de un literal.** No todos los workspaces
+traen precios con IVA (SOENA si; otros no) y dentro de un workspace puede diferir por linea de
+negocio, asi que la declaracion vive en la **configuracion del workspace y de la linea**.
+Cadena por negocio:
 
 1. `propuesta` — la propuesta economica **aprobada** del negocio (`data.iva_pct`).
-2. `servicio` — `servicios.tarifa_iva` del servicio que declara el bloque de propuesta de la
+2. `linea` — `lineas_negocio.config_extra->'honorario'->>'iva_pct'`.
+3. `servicio` — `servicios.tarifa_iva` del servicio que declara el bloque de propuesta de la
    **linea** del negocio (`config_extra.auto_propuesta.servicio_id`). Se resuelve por linea y
    no por instancia del bloque porque 44 de los 265 negocios de SOENA nunca instanciaron ese
    bloque. Si una linea alcanza dos tarifas distintas, es ambigua y se pasa al escalon
    siguiente: un parametro ambiguo no se resuelve por comodidad.
-3. `workspace` — `workspaces.config_extra->'honorario'->>'iva_pct'`. Es la via para declarar
-   un workspace sin propuesta economica, sin tocar codigo.
-4. `sin_declarar` — `iva_frac = 0`, o sea base = total.
+4. `workspace` — `workspaces.config_extra->'honorario'->>'iva_pct'`.
+5. `sin_declarar` — `iva_frac = 0`, o sea base = total.
+
+**La declaracion explicita (linea, workspace) gana sobre la inferida del servicio**, porque una
+declaracion que no puede sobrescribir lo inferido no es una decision: es decoracion. El dato del
+caso concreto (la propuesta aprobada de ESE negocio) gana sobre todo.
 
 La normalizacion (0.19 vs 19) vive en un solo sitio; antes estaba copiada en dos funciones.
+
+**SOENA queda declarado en su workspace** (`config_extra.honorario.iva_pct = 0.19`) en la misma
+migracion. Hoy resuelve igual por el servicio, asi que no mueve ninguna cifra; lo que cambia es
+que deja de depender de una inferencia: si mañana alguien cambia el servicio o crea una linea
+nueva, la respuesta sigue estando dicha. Ninguno de los otros seis se declara.
 
 ### Por que el default es 0 y no 19%
 
@@ -119,21 +131,72 @@ cobros de negocios vendidos en meses anteriores, y ademas hay pagos de tarifa UP
 estan marcados `tipo_cobro = 'pasante'` y entran como honorario. Es un hallazgo aparte, con
 un dato duro: agosto muestra $24,2M recaudados contra $12,4M vendidos con IVA.
 
-## Efecto medido del cambio (ensayo con rollback, 2026-08-10)
+## El otro lado: lo que entra a la cuenta no es todo ingreso
 
-| Cifra | Antes | Despues |
+El inventario del brief eran 6 consumidores. Buscando la **forma** de la formula en la base
+aparecieron **8**, y dos vistas mas con el defecto entrando por los cobros:
+
+- `cs_estado_pagos` y `cs_identificar_cliente` (bot de servicio al cliente) usan
+  `precio_aprobado` para hablar de saldo y pagos. Es cartera: **con IVA es lo correcto** y no
+  cambian. Quedan declaradas aqui.
+- **`v_pyl_mes` y `v_mc_linea_mes` calculaban `ingresos = sum(cobros.monto)`**, y ahi habia
+  DOS errores, no uno.
+
+El segundo es mas grande que el que abrio este frente. En SOENA el cliente paga en una sola
+referencia el honorario **mas la tarifa que se le gira a la UPME**, y esa tarifa casi nunca
+queda marcada `tipo_cobro = 'pasante'`. Medido el 2026-08-10: de **$63.138.351** cobrados,
+**$21.041.601 (33%) exceden el honorario aprobado** del negocio, en 32 casos. Plata de terceros
+contada como ingreso propio.
+
+Corregir solo el IVA habria dejado el P&L igual de falso pero con aspecto de corregido, que es
+peor: una pantalla rota se ve, una pantalla sana que miente no.
+
+**Criterio, el mismo que ya usa la conciliacion** (`valor a recaudar = honorario + tarifa`): de
+lo que entra por un negocio, es ingreso propio lo que cabe dentro de su valor (CON IVA),
+consumido en orden cronologico; **el excedente no es ingreso**. Da igual si es tarifa de
+terceros o un sobrepago por devolver: en los dos casos es plata que no se queda. `v_cobro_valor`
+es la fuente unica de ese desglose, hermana de `v_negocio_valor`.
+
+Casos limite, decididos a proposito y no por omision:
+
+| Caso | Decision | Medido hoy |
 |---|---|---|
-| MC acumulado SOENA | $116.599.143 | $97.749.284 |
-| MC de los otros seis workspaces | — | **identico, peso a peso** |
-| Valor vendido ago-2026 (sin IVA) | $10.485.714 | $10.378.571 |
-| Valor vendido ago-2026 (con IVA) | $12.478.000 | $12.350.500 |
-| Valor vendido jul-2026 (con IVA) | $21.926.335 | $21.926.250 |
-| Negocios por conciliar | 5 | **5** |
-| Pendiente de recaudo del perfil | $22.770.520 | **$22.770.520** |
+| Negocio sin ningun valor declarado | Sin techo: cuenta todo. Ausencia de dato no es cero | 0 casos |
+| Cobro sin negocio | Sin techo; IVA de la declaracion del workspace | 0 cobros |
+| Monto negativo (`devolucion_pendiente`) | Va entero a terceros; no descuenta ingreso, porque devuelve plata que nunca fue ingreso | 0 cobros |
+| `tipo_cobro = 'pasante'` | Excluido, ya era plata de terceros declarada | 0 cobros |
 
-Los $18,8M que pierde el MC de SOENA son exactamente el IVA que estaba contando como ingreso.
-Las diferencias de agosto ($107.143) y julio ($85) son los dos negocios donde el bloque de
-propuesta tenia un valor distinto al aprobado vigente.
+`v_pyl_mes` gana `ingresos_con_iva`, `iva_recaudado` y `recaudo_terceros` para que la plata que
+entro siga a la vista y se pueda conciliar contra el banco. Verificacion aritmetica: en SOENA
+35.375.420 + 6.721.330 + 21.041.601 = **63.138.351**, el total cobrado, exacto.
+
+De paso `v_mc_linea_mes` deja de contar los cobros `pasante` como ingreso: `v_pyl_mes` ya los
+excluia y esta no, asi que las dos pantallas podian discrepar. Hoy no hay ninguno, asi que la
+alineacion no mueve cifras todavia.
+
+## Efecto medido del cambio
+
+Ensayo en transaccion con rollback contra produccion, midiendo **antes y despues dentro de la
+misma transaccion** (con `discard plans` entre medio) para no comparar contra una linea base que
+ya se movio — la base es una sola y SOENA opera sobre ella todo el dia.
+
+| Workspace | MC por negocio antes | despues | Ingresos P&L antes | despues |
+|---|---|---|---|---|
+| soena | $118.474.905 | $99.319.689 | $63.138.351 | $35.375.420 |
+| ana-demo | $52.050.000 | **igual** | $36.700.000 | $35.800.000 |
+| afi | $46.245.000 | **igual** | $0 | **igual** |
+| metrik | $199.563.642 | **igual** | $17.366.667 | **igual** |
+| wmc-sm | $140.801.644 | **igual** | $0 | **igual** |
+| dimpro | $10.900.000 | **igual** | $0 | **igual** |
+| advise | $2.700 | **igual** | $1.600 | **igual** |
+
+Los **$19.155.216** que pierde el MC de SOENA son el IVA que estaba contando como ingreso. Los
+**$27.762.931** que pierden sus ingresos del P&L son ese IVA ($6,7M) mas la tarifa de terceros
+($21,0M). El movimiento de ana-demo ($900.000) es un excedente sobre el valor del negocio, y cae
+por el mismo criterio.
+
+Sin cambio, verificado: negocios por conciliar (5 → 5) y el pendiente de recaudo del perfil
+comercial, que son las dos cifras de cartera.
 
 ## Lo que NO se hizo, y por que
 
@@ -143,19 +206,12 @@ calculado en ONE seria una segunda verdad sobre una cifra que se declara ante la
 dia que difiera (notas credito, anulaciones, ajustes) nadie sabria cual manda. Si se quiere
 ver el IVA facturado dentro de ONE, se trae de Siigo. Decision de Felipe, 2026-08-10.
 
-## Hallazgo abierto: el mismo defecto en el P&L, por otra puerta
+**No se reclasificaron los cobros de tarifa UPME a `tipo_cobro = 'pasante'`.** El P&L ya no los
+cuenta como ingreso, que era el daño; marcarlos uno por uno es una migracion de datos con su
+propio criterio y su propia medicion. Queda como pendiente separado.
 
-El inventario del brief eran 6 consumidores. Buscando la **forma** de la formula en la base
-aparecieron **8**, y dos vistas mas con el defecto entrando por los cobros:
+## Regla que este frente confirma
 
-- `cs_estado_pagos` y `cs_identificar_cliente` (bot de servicio al cliente) usan
-  `precio_aprobado` para hablar de saldo y pagos. Es cartera: **con IVA es lo correcto** y no
-  cambian. Quedan declaradas aqui.
-- **`v_pyl_mes` y `v_mc_linea_mes` calculan `ingresos = sum(cobros.monto)`**, y esos cobros
-  llegan CON IVA. El MC y el **EBITDA** de `/numeros` estan inflados por la misma razon que lo
-  estaba `v_mc_negocio`. No entra en este frente porque el desglose hay que aplicarlo al cobro
-  (no al precio) y hay que decidir que pasa con los cobros sin `negocio_id`. **Pendiente de
-  decision de Mauricio.**
-
-Regla que este hallazgo confirma: un conteo heredado de sitios es piso, nunca techo. Se busca
-la formula por su forma en el codigo, no por la lista que dejo escrita el fix anterior.
+Un conteo heredado de sitios es piso, nunca techo. Se busca la formula por su **forma** en el
+codigo, no por la lista que dejo escrita el fix anterior. Aqui el brief decia 6 y eran 8, y el
+error mas grande no estaba en ninguno de los dos: estaba en los cobros.

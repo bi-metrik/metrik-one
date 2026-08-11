@@ -30,14 +30,21 @@
 -- Una cifra de recaudo NUNCA se compara contra una base sin IVA: eso daba por
 -- cobrado un caso al 84%.
 --
--- El porcentaje de IVA sale de la configuracion, NO del literal 1.19. Cadena de
--- resolucion, por negocio, con el origen expuesto en la vista:
+-- El porcentaje de IVA sale de la CONFIGURACION, NO del literal 1.19. Cada workspace
+-- lo maneja distinto (SOENA trae precios con IVA; otros no), y dentro de un workspace
+-- puede diferir por linea de negocio. Cadena de resolucion, por negocio, con el origen
+-- expuesto en la vista:
 --   1. `propuesta`    la propuesta economica aprobada del negocio (data.iva_pct)
---   2. `servicio`     servicios.tarifa_iva del servicio que declara su bloque
---   3. `workspace`    workspaces.config_extra->'honorario'->>'iva_pct'
---   4. `sin_declarar` no hay dato -> iva_frac 0 (base = total)
+--   2. `linea`        lineas_negocio.config_extra->'honorario'->>'iva_pct'
+--   3. `servicio`     servicios.tarifa_iva del servicio que declara su bloque
+--   4. `workspace`    workspaces.config_extra->'honorario'->>'iva_pct'
+--   5. `sin_declarar` no hay dato -> iva_frac 0 (base = total)
 --
--- Sobre el paso 4: NO se asume 19% para quien no lo declaro. Medido el
+-- La declaracion explicita (linea, workspace) gana sobre la inferida del servicio,
+-- porque una declaracion que no puede sobrescribir lo inferido no es una decision:
+-- es decoracion. El dato del caso concreto (la propuesta aprobada) gana sobre todo.
+--
+-- Sobre el paso 5: NO se asume 19% para quien no lo declaro. Medido el
 -- 2026-08-10 en produccion (ensayo en transaccion con rollback): resuelven los
 -- 265 negocios de SOENA, 66 por su propuesta aprobada y 199 por el servicio de
 -- su linea, todos 0.19. Quedan sin declarar afi (53), metrik (26), ana-demo (5),
@@ -99,41 +106,47 @@ servicio as (
   group by linea_id
   having count(*) = 1
 ),
-resuelto as (
+candidatos as (
   select
-    n.id                as negocio_id,
+    n.id           as negocio_id,
     n.workspace_id,
+    n.linea_id,
     n.precio_aprobado,
     n.precio_estimado,
+    p.iva_pct                                                as iva_propuesta,
+    nullif(l.config_extra->'honorario'->>'iva_pct','')::numeric as iva_linea,
+    sv.tarifa_iva                                            as iva_servicio,
+    nullif(w.config_extra->'honorario'->>'iva_pct','')::numeric as iva_workspace
+  from negocios n
+  left join propuesta      p  on p.negocio_id = n.id
+  left join lineas_negocio l  on l.id = n.linea_id
+  left join servicio       sv on sv.linea_id  = n.linea_id
+  left join workspaces     w  on w.id = n.workspace_id
+),
+resuelto as (
+  select
+    c.*,
     case
-      when p.iva_pct    is not null then 'propuesta'
-      when sv.tarifa_iva is not null then 'servicio'
-      when nullif(w.config_extra->'honorario'->>'iva_pct','') is not null then 'workspace'
+      when c.iva_propuesta is not null then 'propuesta'
+      when c.iva_linea     is not null then 'linea'
+      when c.iva_servicio  is not null then 'servicio'
+      when c.iva_workspace is not null then 'workspace'
       else 'sin_declarar'
     end as iva_origen,
     -- Normalizacion en UN solo sitio: la tarifa se ha guardado como fraccion
     -- (0.19) y como porcentaje (19) segun quien la escribiera.
     case
-      when p.iva_pct is not null
-        then case when p.iva_pct > 1 then p.iva_pct / 100 else p.iva_pct end
-      when sv.tarifa_iva is not null
-        then case when sv.tarifa_iva > 1 then sv.tarifa_iva / 100 else sv.tarifa_iva end
-      when nullif(w.config_extra->'honorario'->>'iva_pct','') is not null
-        then case
-               when (w.config_extra->'honorario'->>'iva_pct')::numeric > 1
-                 then (w.config_extra->'honorario'->>'iva_pct')::numeric / 100
-               else (w.config_extra->'honorario'->>'iva_pct')::numeric
-             end
-      else 0
+      when coalesce(c.iva_propuesta, c.iva_linea, c.iva_servicio, c.iva_workspace) is null then 0
+      when coalesce(c.iva_propuesta, c.iva_linea, c.iva_servicio, c.iva_workspace) > 1
+        then coalesce(c.iva_propuesta, c.iva_linea, c.iva_servicio, c.iva_workspace) / 100
+      else coalesce(c.iva_propuesta, c.iva_linea, c.iva_servicio, c.iva_workspace)
     end as iva_frac
-  from negocios n
-  left join propuesta  p  on p.negocio_id = n.id
-  left join servicio   sv on sv.linea_id  = n.linea_id
-  left join workspaces w  on w.id = n.workspace_id
+  from candidatos c
 )
 select
   r.negocio_id,
   r.workspace_id,
+  r.linea_id,
   r.iva_frac,
   r.iva_origen,
   (r.iva_origen <> 'sin_declarar') as iva_declarado,
@@ -150,7 +163,15 @@ select
   round(coalesce(r.precio_aprobado, r.precio_estimado, 0) / (1 + r.iva_frac), 2)          as valor_base,
   coalesce(r.precio_aprobado, r.precio_estimado, 0)
     - round(coalesce(r.precio_aprobado, r.precio_estimado, 0) / (1 + r.iva_frac), 2)      as valor_iva,
-  (r.precio_aprobado is null and r.precio_estimado is not null)                           as es_estimado
+  (r.precio_aprobado is null and r.precio_estimado is not null)                           as es_estimado,
+
+  -- Techo de lo que este negocio puede aportar como ingreso propio (CON IVA). NULL =
+  -- el negocio no declara ningun valor, asi que no hay techo: ausencia de dato no es
+  -- cero, y poner cero aqui haria desaparecer del P&L plata realmente cobrada.
+  case
+    when r.precio_aprobado is null and r.precio_estimado is null then null
+    else coalesce(r.precio_aprobado, r.precio_estimado)
+  end                                                                                     as valor_techo
 from resuelto r;
 
 comment on view v_negocio_valor is
@@ -165,6 +186,22 @@ comment on view v_negocio_valor is
 alter view v_negocio_valor set (security_invoker = on);
 revoke all on v_negocio_valor from anon;
 grant select on v_negocio_valor to authenticated;
+
+-- ── 1b. SOENA declara que sus precios traen IVA ─────────────────────────────
+-- Deja de estar solo INFERIDO del servicio: queda dicho en la configuracion del
+-- workspace, que es donde vive esta decision. Cualquier linea nueva de SOENA lo
+-- hereda; una linea que cobre distinto lo declara en su propio config_extra y gana.
+-- Resuelve al mismo 0.19 que ya venia del servicio, asi que no mueve ninguna cifra.
+update workspaces
+set config_extra = jsonb_set(
+      coalesce(config_extra, '{}'::jsonb),
+      '{honorario}',
+      coalesce(config_extra->'honorario', '{}'::jsonb) || jsonb_build_object('iva_pct', 0.19),
+      true)
+where slug = 'soena';
+
+-- Ningun otro workspace se declara: nadie ha dicho todavia si sus precios incluyen
+-- IVA, y suponerlo moveria sus cifras sobre una respuesta que no existe.
 
 -- ── 2. Margen de contribucion: base contra costos ───────────────────────────
 -- Se recrea con DROP+CREATE porque agrega columnas (convencion del repo).
@@ -835,3 +872,224 @@ $function$;
 
 revoke execute on function public.count_negocios_por_conciliar(uuid) from public, anon;
 grant  execute on function public.count_negocios_por_conciliar(uuid) to authenticated;
+
+-- ── 5. El P&L: lo que entra a la cuenta NO es todo ingreso ──────────────────
+--
+-- `v_pyl_mes` y `v_mc_linea_mes` calculan los ingresos del mes como la suma cruda
+-- de `cobros.monto`. Eso arrastra DOS errores del mismo tipo, y el segundo es mas
+-- grande que el que abrio este frente:
+--
+--   (a) el cobro llega CON IVA, y el IVA no es ingreso;
+--   (b) el cobro puede traer plata de TERCEROS. En SOENA el cliente paga en una
+--       sola referencia el honorario mas la tarifa que se le gira a la UPME, y esa
+--       tarifa casi nunca queda marcada `tipo_cobro='pasante'`. Medido el
+--       2026-08-10: de $63.138.351 cobrados, **$21.041.601 (33%) exceden el
+--       honorario aprobado** del negocio, repartidos en 32 casos.
+--
+-- Corregir solo (a) habria dejado el P&L igual de falso pero con aspecto de
+-- corregido, que es peor: una pantalla sana que miente no se ve.
+--
+-- Criterio, el mismo que ya usa la conciliacion (`valor a recaudar = honorario +
+-- tarifa`): de lo que entra por un negocio, es ingreso propio lo que cabe dentro de
+-- su valor (CON IVA), consumido en orden cronologico; **el excedente NO es ingreso**.
+-- Da igual si el excedente es tarifa de terceros o un sobrepago por devolver: en los
+-- dos casos es plata que no se queda. Es el lado conservador y es reversible.
+--
+-- Casos limite, decididos a proposito:
+--   * Negocio sin ningun valor declarado -> SIN techo: cuenta todo. Ausencia de dato
+--     no es cero, y un techo de cero borraria del P&L plata realmente cobrada.
+--   * Cobro sin negocio -> sin techo, y el IVA sale de la declaracion del workspace.
+--     Medido: hoy hay CERO cobros sin negocio en toda la base.
+--   * Monto negativo (`devolucion_pendiente`) -> va entero a terceros, no descuenta
+--     ingreso: devuelve plata que nunca fue ingreso, era excedente. Medido: hoy hay
+--     CERO cobros de ese tipo.
+--   * `tipo_cobro = 'pasante'` -> excluido, ya era plata de terceros declarada.
+
+create or replace view v_cobro_valor as
+with elegibles as (
+  select
+    c.id, c.workspace_id, c.negocio_id, c.fecha, c.monto, c.tipo_cobro,
+    -- Suma de lo POSITIVO cobrado antes que este, dentro del mismo negocio. Es lo
+    -- que ya consumio el techo. Orden por fecha y luego por id, para que la
+    -- asignacion sea determinista cuando dos cobros comparten fecha.
+    coalesce(sum(greatest(c.monto, 0)) over (
+      partition by c.negocio_id order by c.fecha, c.id
+      rows between unbounded preceding and 1 preceding), 0) as consumido_antes
+  from cobros c
+  where c.fecha is not null
+    and coalesce(c.tipo_cobro, '') <> 'pasante'
+),
+asignado as (
+  select
+    e.*,
+    v.linea_id,
+    coalesce(v.iva_frac, 0)                as iva_frac,
+    coalesce(v.iva_origen, 'sin_declarar') as iva_origen,
+    case
+      -- Sin negocio o sin valor declarado: no hay techo que aplicar.
+      when e.negocio_id is null or v.valor_techo is null then e.monto
+      when e.monto < 0                                   then 0
+      else greatest(0, least(e.monto, v.valor_techo - e.consumido_antes))
+    end as parte_propia
+  from elegibles e
+  left join v_negocio_valor v on v.negocio_id = e.negocio_id
+)
+select
+  a.id as cobro_id,
+  a.workspace_id,
+  a.negocio_id,
+  a.linea_id,
+  a.fecha,
+  a.tipo_cobro,
+  a.monto,
+  a.iva_frac,
+  a.iva_origen,
+  -- Ingreso propio del negocio, CON IVA (lo que entro y se queda).
+  a.parte_propia                                                    as propio_con_iva,
+  -- Ingreso propio SIN IVA: esto es lo que se reconoce en el P&L.
+  round(a.parte_propia / (1 + a.iva_frac), 2)                       as propio_base,
+  a.parte_propia - round(a.parte_propia / (1 + a.iva_frac), 2)      as propio_iva,
+  -- Plata que entro a la cuenta y no es ingreso (tarifa de terceros o sobrepago).
+  a.monto - a.parte_propia                                          as terceros
+from asignado a;
+
+comment on view v_cobro_valor is
+  'Desglose de cada cobro: cuanto es ingreso propio (con IVA, sin IVA, IVA) y cuanto es '
+  'plata de terceros. El ingreso propio se topa contra el valor del negocio en orden '
+  'cronologico; el excedente no es ingreso. Fuente unica del lado del recaudo, hermana de '
+  'v_negocio_valor (que es la del lado del precio).';
+
+alter view v_cobro_valor set (security_invoker = on);
+revoke all on v_cobro_valor from anon;
+grant select on v_cobro_valor to authenticated;
+
+-- ── 6. P&L mensual sobre ingreso real ───────────────────────────────────────
+
+drop view if exists v_pyl_mes;
+
+create view v_pyl_mes as
+with meses as (
+  select distinct workspace_id, date_trunc('month', fecha::timestamptz)::date as mes from cobros
+  union
+  select distinct workspace_id, date_trunc('month', fecha::timestamptz)::date as mes from gastos
+),
+ingresos as (
+  select
+    cv.workspace_id,
+    date_trunc('month', cv.fecha::timestamptz)::date as mes,
+    sum(cv.propio_base)    as ingresos,
+    sum(cv.propio_con_iva) as ingresos_con_iva,
+    sum(cv.propio_iva)     as iva_recaudado,
+    sum(cv.terceros)       as recaudo_terceros
+  from v_cobro_valor cv
+  group by 1, 2
+),
+variables as (
+  select workspace_id, date_trunc('month', fecha::timestamptz)::date as mes, sum(monto) as costos_variables
+  from gastos where clasificacion_costo = 'variable' group by 1, 2
+),
+fijos_gastos as (
+  select workspace_id, date_trunc('month', fecha::timestamptz)::date as mes, sum(monto) as fijos_gastos
+  from gastos where clasificacion_costo = 'fijo' group by 1, 2
+),
+fijos_config as (
+  select workspace_id, sum(monthly_amount) as fijos_recurrentes
+  from fixed_expenses where is_active = true group by 1
+),
+fijos_legacy as (
+  select workspace_id, sum(monto_referencia) as fijos_recurrentes_legacy
+  from gastos_fijos_config where activo = true group by 1
+)
+select
+  m.workspace_id,
+  m.mes,
+  -- `ingresos` sigue siendo la columna que consume /numeros, pero ahora es el
+  -- ingreso REAL: sin IVA y sin la plata que solo pasa por la cuenta.
+  coalesce(i.ingresos, 0)          as ingresos,
+  coalesce(i.ingresos_con_iva, 0)  as ingresos_con_iva,
+  coalesce(i.iva_recaudado, 0)     as iva_recaudado,
+  coalesce(i.recaudo_terceros, 0)  as recaudo_terceros,
+  coalesce(v.costos_variables, 0)  as costos_variables,
+  coalesce(i.ingresos, 0) - coalesce(v.costos_variables, 0) as mc,
+  case
+    when coalesce(i.ingresos, 0) > 0
+      then (coalesce(i.ingresos, 0) - coalesce(v.costos_variables, 0)) / i.ingresos
+    else null
+  end as mc_pct,
+  coalesce(fg.fijos_gastos, 0) as fijos_gastos_mes,
+  coalesce(fc.fijos_recurrentes, 0) + coalesce(fl.fijos_recurrentes_legacy, 0) as fijos_recurrentes,
+  coalesce(fg.fijos_gastos, 0) + coalesce(fc.fijos_recurrentes, 0) + coalesce(fl.fijos_recurrentes_legacy, 0) as fijos_total,
+  coalesce(i.ingresos, 0) - coalesce(v.costos_variables, 0)
+    - (coalesce(fg.fijos_gastos, 0) + coalesce(fc.fijos_recurrentes, 0) + coalesce(fl.fijos_recurrentes_legacy, 0)) as ebitda
+from meses m
+left join ingresos    i  on i.workspace_id  = m.workspace_id and i.mes  = m.mes
+left join variables   v  on v.workspace_id  = m.workspace_id and v.mes  = m.mes
+left join fijos_gastos fg on fg.workspace_id = m.workspace_id and fg.mes = m.mes
+left join fijos_config fc on fc.workspace_id = m.workspace_id
+left join fijos_legacy fl on fl.workspace_id = m.workspace_id;
+
+comment on view v_pyl_mes is
+  'P&L mensual en caja. `ingresos` es ingreso propio SIN IVA: excluye el IVA (que se recauda '
+  'para la DIAN) y la plata de terceros que solo pasa por la cuenta. `recaudo_terceros` la '
+  'deja a la vista para conciliar contra el banco.';
+
+alter view v_pyl_mes set (security_invoker = on);
+revoke all on v_pyl_mes from anon;
+grant select on v_pyl_mes to authenticated;
+
+-- ── 7. MC por linea, mismo criterio ─────────────────────────────────────────
+-- De paso deja de contar los cobros `pasante` como ingreso: v_pyl_mes ya los
+-- excluia y esta no, asi que las dos pantallas podian discrepar. Medido: hoy no hay
+-- ningun cobro con ese tipo, asi que la alineacion no mueve ninguna cifra todavia.
+
+drop view if exists v_mc_linea_mes;
+
+create view v_mc_linea_mes as
+with ingresos_linea as (
+  select
+    cv.workspace_id,
+    date_trunc('month', cv.fecha::timestamptz)::date as mes,
+    cv.linea_id,
+    sum(cv.propio_base)  as ingresos,
+    sum(cv.terceros)     as recaudo_terceros
+  from v_cobro_valor cv
+  group by 1, 2, 3
+),
+variables_linea as (
+  select
+    g.workspace_id,
+    date_trunc('month', g.fecha::timestamptz)::date as mes,
+    n.linea_id,
+    sum(g.monto) as costos_variables
+  from gastos g
+  left join negocios n on n.id = g.negocio_id
+  where g.clasificacion_costo = 'variable'
+  group by 1, 2, 3
+)
+select
+  coalesce(i.workspace_id, v.workspace_id) as workspace_id,
+  coalesce(i.mes, v.mes)                   as mes,
+  coalesce(i.linea_id, v.linea_id)         as linea_id,
+  l.nombre as linea_nombre,
+  l.tipo   as linea_tipo,
+  coalesce(i.ingresos, 0)         as ingresos,
+  coalesce(i.recaudo_terceros, 0) as recaudo_terceros,
+  coalesce(v.costos_variables, 0) as costos_variables,
+  coalesce(i.ingresos, 0) - coalesce(v.costos_variables, 0) as mc,
+  case
+    when coalesce(i.ingresos, 0) > 0
+      then (coalesce(i.ingresos, 0) - coalesce(v.costos_variables, 0)) / i.ingresos
+    else null
+  end as mc_pct
+from ingresos_linea i
+full join variables_linea v
+  on v.workspace_id = i.workspace_id and v.mes = i.mes and not v.linea_id is distinct from i.linea_id
+left join lineas_negocio l on l.id = coalesce(i.linea_id, v.linea_id);
+
+comment on view v_mc_linea_mes is
+  'MC por linea de negocio, sobre ingreso propio sin IVA (v_cobro_valor). El bucket con '
+  'linea_id NULL son costos o cobros sin linea asignada.';
+
+alter view v_mc_linea_mes set (security_invoker = on);
+revoke all on v_mc_linea_mes from anon;
+grant select on v_mc_linea_mes to authenticated;
