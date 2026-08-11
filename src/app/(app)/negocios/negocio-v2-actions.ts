@@ -51,6 +51,7 @@ import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
+import { leerAviso } from '@/lib/correcciones/retroceso'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -3669,6 +3670,38 @@ export async function cambiarEtapaNegocioConGate(
             es_gate: true,
           }],
         }
+      }
+    }
+  }
+
+  // ── El aviso de recaudo cambiado REAPARECE al intentar avanzar ──
+  //
+  // Quien cambia la plata (la financiera) casi nunca es quien mueve el caso (el
+  // comercial). Un aviso que solo se muestra una vez lo cierra quien pasaba por ahí, y
+  // el caso sigue adelante con plata que ya no tiene — que es justo el estado que el
+  // retroceso financiero viene a evitar. Por eso vuelve a frenar aquí, hasta que alguien
+  // lo resuelva de forma explícita y con motivo escrito.
+  //
+  // ⚠️ Este gate NO cede al override de owner/admin, a diferencia de los demás.
+  // Decisión de Mauricio (2026-08-11): "es un gate, no avanza hasta que no se resuelva,
+  // no importa quién". Un override aquí deja al caso avanzando con plata que ya no
+  // tiene, que es exactamente el estado que esto viene a evitar — y quien más
+  // probablemente use el override es quien menos contexto tiene de por qué se frenó.
+  //
+  // No es un callejón sin salida: la salida es RESOLVER el aviso, con motivo escrito
+  // (`resolverAviso`), que deja el rastro de por qué se dio por atendido.
+  {
+    const aviso = await leerAviso(supabase, workspaceId, negocioId)
+    if (aviso) {
+      return {
+        error: 'gate_bloqueado',
+        bloquesPendientes: [{
+          nombre:
+            `El recaudo de este negocio cambió (referencia ${aviso.referencia}) y todavía nadie lo resolvió. ` +
+            `Motivo: ${aviso.motivo}` +
+            (aviso.destinoSugerido ? ` · Se sugirió devolverlo a ${aviso.destinoSugerido}.` : ''),
+          es_gate: true,
+        }],
       }
     }
   }

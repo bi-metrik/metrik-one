@@ -22,6 +22,19 @@ import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-s
 import { diasDesde } from '@/lib/negocios/antiguedad'
 import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
+import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
+import {
+  guardarAviso,
+  resolverAviso,
+  etapasRecorridas,
+  ejecutarRetroceso,
+  proponerRetrocesoFinanciero,
+} from '@/lib/correcciones/retroceso'
+import type {
+  CausaRetrocesoFinanciero,
+  PropuestaRetroceso,
+} from '@/lib/negocios/retroceso-financiero'
+import { recalcularNegocioPorCambioDeRecaudo, cambiarEtapaNegocio } from '@/app/(app)/negocios/negocio-v2-actions'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -1837,3 +1850,296 @@ export async function rechazarRepartoComercial(
 // un formulario de captura: ahora tiene listado, control de sobre-asignacion por monto,
 // soporte obligatorio y anulacion. La via unica de escritura del cobro sigue siendo
 // `registrarPagoEnNegocio`, en este archivo.
+
+// ── Redistribuir una referencia desde el panel de la financiera ────────────────
+
+/**
+ * El área financiera reescribe cómo se reparte una referencia entre negocios.
+ *
+ * Es UNA operación para los cuatro gestos que antes no existían: repartir, deshacer un
+ * reparto, dejar todo en el negocio original y mover la referencia completa a otro
+ * negocio. Todos son editar una lista de líneas.
+ *
+ * ⚠️ Lo que esto reemplaza: hasta hoy solo se podía corregir ANTES de que la financiera
+ * aceptara el reparto (`eliminarPorcionPago` exige negocio en `venta` Y conciliación sin
+ * confirmar). Los errores de plata se descubren tarde, así que en la práctica la
+ * corrección era un SQL a mano. Medido el 2026-08-11: las 2 referencias repartidas del
+ * workspace estaban las dos fuera del alcance de esa acción.
+ *
+ * Las reglas viven en `src/lib/cobros/redistribucion.ts` (puro, 15 pruebas). Aquí solo
+ * se resuelven contra la base y se ejecutan.
+ */
+export async function redistribuirReferencia(input: {
+  externalRef: string
+  /** Valor real del pago que llegó. Se usa como techo. */
+  pagoOriginal: number
+  lineas: Array<{ negocioId: string; monto: number; porDevolver?: boolean }>
+  motivo: string
+}): Promise<
+  | { ok: true; negociosAfectados: number; gatesReabiertos: number }
+  | { ok: false; error: string; errores?: string[] }
+> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const ref = (input.externalRef ?? '').trim()
+  if (!ref) return { ok: false, error: 'Referencia inválida' }
+
+  // ── Estado actual: solo porciones VIGENTES ──
+  // `anulado_at is null` no es opcional: una porción anulada tiene `monto = 0` y
+  // volvería a entrar al reparto como una línea fantasma.
+  const { data: actualesRaw, error: leerErr } = await db(supabase)
+    .from('cobros')
+    .select('id, negocio_id, monto, negocios:negocio_id ( codigo, metadata )')
+    .eq('workspace_id', workspaceId)
+    .eq('external_ref', ref)
+    .is('anulado_at', null)
+    .not('negocio_id', 'is', null)
+
+  if (leerErr) return { ok: false, error: (leerErr as { message: string }).message }
+
+  const actuales = ((actualesRaw ?? []) as Array<{
+    id: string
+    negocio_id: string
+    monto: number
+    negocios: { codigo: string | null; metadata: Record<string, unknown> | null } | null
+  }>).map(c => ({
+    cobroId: c.id,
+    negocioId: c.negocio_id,
+    negocioCodigo: c.negocios?.codigo ?? null,
+    monto: Number(c.monto ?? 0),
+    negocioFacturado: Boolean(c.negocios?.metadata && 'siigo_factura' in c.negocios.metadata),
+  }))
+
+  // Códigos de los negocios destino, para que los errores hablen en el idioma del
+  // operador (V0043) y no en uuid.
+  const idsDestino = [...new Set(input.lineas.map(l => l.negocioId))]
+  const { data: negsRaw } = await db(supabase)
+    .from('negocios')
+    .select('id, codigo')
+    .eq('workspace_id', workspaceId)
+    .in('id', idsDestino.length > 0 ? idsDestino : ['00000000-0000-0000-0000-000000000000'])
+  const codigoPorId = new Map(
+    ((negsRaw ?? []) as Array<{ id: string; codigo: string | null }>).map(n => [n.id, n.codigo]),
+  )
+
+  if (idsDestino.some(id => !codigoPorId.has(id))) {
+    return { ok: false, error: 'Uno de los negocios no existe en este espacio de trabajo' }
+  }
+
+  const plan = planearRedistribucion({
+    pagoOriginal: input.pagoOriginal,
+    actuales,
+    destino: input.lineas.map(l => ({ ...l, negocioCodigo: codigoPorId.get(l.negocioId) ?? null })),
+    motivo: input.motivo,
+  })
+
+  if (!plan.ok) {
+    return { ok: false, error: plan.errores[0] ?? 'No se puede aplicar', errores: plan.errores }
+  }
+
+  const motivo = input.motivo.trim()
+  const ahora = new Date().toISOString()
+  // Con dos o más porciones vivas TODAS llevan la misma marca. Una sola sin ella la
+  // leen `refDuplicadaNoSplit` y `negocioCongeladoPorDuplicado` como duplicado
+  // accidental y congelan los dos negocios.
+  const splitId = requiereSplitId(plan.porcionesResultantes) ? randomUUID() : null
+
+  for (const c of plan.cambios) {
+    if (c.accion === 'anular') {
+      const { error: anErr } = await db(supabase)
+        .from('cobros')
+        .update({
+          monto: 0,
+          monto_anulado: c.montoAnterior,
+          anulado_at: ahora,
+          anulado_por: staffId,
+          anulacion_motivo: `Redistribución de la referencia ${ref}: ${motivo}`.slice(0, 300),
+        })
+        .eq('id', c.cobroId)
+        .eq('workspace_id', workspaceId)
+        .is('anulado_at', null)
+      if (anErr) return { ok: false, error: (anErr as { message: string }).message }
+      continue
+    }
+
+    if (c.accion === 'crear') {
+      const { error: crErr } = await db(supabase).from('cobros').insert({
+        workspace_id: workspaceId,
+        negocio_id: c.negocioId,
+        monto: c.montoNuevo,
+        fecha: todayBogotaISO(),
+        external_ref: ref,
+        tipo_cobro: 'pago',
+        split_json: { split_id: splitId, split_total: input.pagoOriginal, origen: 'redistribucion_financiera' },
+        notas: `Redistribución de la referencia ${ref}: ${motivo}`.slice(0, 1000),
+      })
+      if (crErr) return { ok: false, error: (crErr as { message: string }).message }
+      continue
+    }
+
+    // 'ajustar' y 'sin_cambio' comparten el UPDATE: el segundo solo re-estampa la
+    // marca de reparto, que puede haber cambiado aunque su monto no.
+    const { error: upErr } = await db(supabase)
+      .from('cobros')
+      .update({
+        monto: c.montoNuevo,
+        split_json: { split_id: splitId, split_total: input.pagoOriginal, origen: 'redistribucion_financiera' },
+      })
+      .eq('id', c.cobroId)
+      .eq('workspace_id', workspaceId)
+      .is('anulado_at', null)
+    if (upErr) return { ok: false, error: (upErr as { message: string }).message }
+  }
+
+  // ── Lo que el cambio de plata desarma ──
+  // Des-concilia, reevalúa los bloques de cobros y reabre SOLO los gates que se habían
+  // cerrado con esta plata. No devuelve de etapa: eso lo decide una persona.
+  let gatesReabiertos = 0
+  for (const negocioId of plan.negociosAfectados) {
+    const r = await recalcularNegocioPorCambioDeRecaudo(
+      negocioId,
+      `redistribución de la referencia ${ref}`,
+    )
+    gatesReabiertos += r.gates_reabiertos
+
+    if (staffId) {
+      const cambio = plan.cambios.find(c => c.negocioId === negocioId)
+      const detalle = cambio
+        ? `${fmtCop(cambio.montoAnterior)} → ${fmtCop(cambio.montoNuevo)}`
+        : 'ajustado'
+      await db(supabase).from('activity_log').insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio_sistema',
+        autor_id: staffId,
+        contenido: `Recaudo redistribuido por el área financiera (ref ${ref}): ${detalle}. Motivo: ${motivo}`.slice(0, 280),
+      })
+    }
+  }
+
+  // ── El aviso que NO se puede cerrar por accidente ──
+  // Reabrir los gates no basta: el caso puede haber avanzado tres etapas con esta plata,
+  // y la pantalla se ve igual que la de un caso sano. El aviso queda pegado al negocio,
+  // lo ven la financiera y el comercial, y vuelve a frenar cuando alguien intenta
+  // avanzar (ver el guard en `cambiarEtapaNegocioConGate`).
+  for (const negocioId of plan.negociosAfectados) {
+    const { data: etapaRaw } = await db(supabase)
+      .from('negocios')
+      .select('etapas_negocio!negocios_etapa_actual_id_fkey(nombre)')
+      .eq('id', negocioId)
+      .single()
+
+    await guardarAviso({
+      supabase,
+      workspaceId,
+      negocioId,
+      referencia: ref,
+      motivo,
+      etapaAlCambiar: (etapaRaw?.etapas_negocio as { nombre: string } | null)?.nombre ?? 'sin etapa',
+      gatesReabiertos,
+      destinoSugerido: null,
+      ahora,
+      staffId,
+    })
+  }
+
+  revalidatePath('/conciliacion')
+  for (const negocioId of plan.negociosAfectados) revalidatePath(`/negocios/${negocioId}`)
+
+  return { ok: true, negociosAfectados: plan.negociosAfectados.length, gatesReabiertos }
+}
+
+// ── Retroceso financiero ──────────────────────────────────────────────────────
+
+/**
+ * A dónde puede volver el caso, según por qué cambió la plata.
+ *
+ * Devuelve una PROPUESTA con sus alternativas: la financiera decide, y puede elegir
+ * cualquier etapa que el caso haya recorrido. Las reglas viven en
+ * `src/lib/negocios/retroceso-financiero.ts` (puro, 15 pruebas).
+ */
+export async function proponerRetroceso(input: {
+  negocioId: string
+  causa: CausaRetrocesoFinanciero
+}): Promise<
+  | { ok: true; propuesta: PropuestaRetroceso; etapaActual: string }
+  | { ok: false; error: string }
+> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId } = ctx
+
+  const { data: negRaw } = await db(supabase)
+    .from('negocios')
+    .select('linea_id, etapas_negocio!negocios_etapa_actual_id_fkey(id, nombre, orden, numero, stage)')
+    .eq('id', input.negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  const actual = negRaw?.etapas_negocio as
+    | { id: string; nombre: string; orden: number; numero: number; stage: string }
+    | null
+  if (!negRaw?.linea_id || !actual) return { ok: false, error: 'Negocio sin etapa actual' }
+
+  const recorridas = await etapasRecorridas(supabase, input.negocioId, negRaw.linea_id)
+  const propuesta = proponerRetrocesoFinanciero({
+    causa: input.causa,
+    etapaActual: actual,
+    etapasRecorridas: recorridas,
+  })
+
+  return { ok: true, propuesta, etapaActual: actual.nombre }
+}
+
+/**
+ * Aplica el retroceso decidido por la financiera y retira el aviso.
+ *
+ * El movimiento reusa `cambiarEtapaNegocio` (el movedor interno que crea las instancias
+ * de la etapa destino con su herencia), inyectado como parámetro para no cerrar un ciclo
+ * de imports.
+ */
+export async function aplicarRetrocesoFinanciero(input: {
+  negocioId: string
+  causa: CausaRetrocesoFinanciero
+  destinoEtapaId: string | null
+  motivo: string
+}): Promise<{ ok: true; movido: boolean } | { ok: false; error: string; errores?: string[] }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const res = await ejecutarRetroceso({
+    supabase,
+    workspaceId,
+    negocioId: input.negocioId,
+    causa: input.causa,
+    destinoEtapaId: input.destinoEtapaId,
+    motivo: input.motivo,
+    staffId,
+    moverEtapa: (negocioId, etapaId) => cambiarEtapaNegocio(negocioId, etapaId),
+  })
+
+  if (!res.ok) return { ok: false, error: res.error ?? 'No se pudo aplicar', errores: res.errores }
+
+  // Resolver el retroceso ES resolver el aviso: el caso ya está donde su plata lo
+  // sostiene. Dejarlo puesto frenaría al comercial por algo ya atendido.
+  await resolverAviso({
+    supabase,
+    workspaceId,
+    negocioId: input.negocioId,
+    motivo: `Retroceso financiero aplicado: ${input.motivo}`,
+    staffId,
+  })
+
+  revalidatePath('/conciliacion')
+  revalidatePath(`/negocios/${input.negocioId}`)
+
+  return { ok: true, movido: res.movido }
+}
+
+function fmtCop(n: number): string {
+  return `$${Math.round(n).toLocaleString('es-CO')}`
+}
