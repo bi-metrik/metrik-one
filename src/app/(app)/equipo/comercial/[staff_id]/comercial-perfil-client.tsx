@@ -153,9 +153,11 @@ export default function ComercialPerfilClient({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <Kpi label="Ventas" value={String(perfil.kpis.num_ventas)} color={GREEN} />
         <Kpi label="Negocios activos" value={String(perfil.kpis.negocios_abiertos)} />
-        <Kpi label="Valor aprobado" value={fmtCOP(perfil.kpis.valor_aprobado)} />
+        <Kpi label="Valor aprobado (sin IVA)" value={fmtCOP(perfil.kpis.valor_aprobado)} />
         <Kpi label="Honorario recaudado" value={fmtCOP(perfil.kpis.honorario_recaudado)} color={GREEN} />
-        <Kpi label="Pendiente de recaudo" value={fmtCOP(perfil.kpis.pendiente_honorario)} />
+        {/* Cartera: con IVA, porque es lo que falta que entre a la cuenta. NO es
+            "valor aprobado - recaudado": esas dos cifras estan en bases distintas. */}
+        <Kpi label="Pendiente de recaudo (con IVA)" value={fmtCOP(perfil.kpis.pendiente_honorario)} />
         <Kpi label="Vencidos (SLA)" value={String(perfil.kpis.vencidos)} color={perfil.kpis.vencidos > 0 ? RED : undefined} />
         <Kpi label="Tarifa UPME (terceros)" value={fmtCOP(perfil.kpis.tarifa_recaudada)} muted />
       </div>
@@ -197,7 +199,7 @@ export default function ComercialPerfilClient({
                 <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wide text-gray-400">
                   <th className="py-3 px-4 text-left">Etapa</th>
                   <th className="py-3 px-4 text-right">Negocios</th>
-                  <th className="py-3 px-4 text-right">Valor aprobado</th>
+                  <th className="py-3 px-4 text-right">Valor aprobado (sin IVA)</th>
                   <th className="py-3 px-4 text-right">Pendiente de recaudo</th>
                 </tr>
               </thead>
@@ -475,7 +477,7 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
                 <th className="py-3 px-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wide hidden sm:table-cell">Etapa</th>
                 <th className="py-3 px-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wide hidden md:table-cell">Ultimo avance</th>
                 <th className="py-3 px-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wide">SLA</th>
-                <th className="py-3 px-4 text-right text-[11px] font-bold text-gray-400 uppercase tracking-wide">Valor aprobado</th>
+                <th className="py-3 px-4 text-right text-[11px] font-bold text-gray-400 uppercase tracking-wide">Valor aprobado (sin IVA)</th>
                 <th className="py-3 px-4 text-right text-[11px] font-bold text-gray-400 uppercase tracking-wide">Honorario</th>
               </tr>
             </thead>
