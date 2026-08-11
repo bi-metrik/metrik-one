@@ -9,7 +9,9 @@ import {
   crearNegocioDesdeInteraccion,
   marcarInteraccionContactada,
   descartarInteraccion,
+  type NegocioDelMismoContacto,
 } from '../../../negocios/negocio-v2-actions'
+import { DialogoNegocioDuplicado } from '@/components/negocios/dialogo-negocio-duplicado'
 import { formatCOP } from '@/lib/contacts/constants'
 import { origenDesdeFuenteInteraccion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
@@ -253,19 +255,27 @@ function CrearNegocioForm({
   const [empresaNombre, setEmpresaNombre] = useState('')
   const [empresaNit, setEmpresaNit] = useState('')
   const [isPending, startTransition] = useTransition()
+  /** Negocios que este contacto ya tiene. null = no hay que preguntar. */
+  const [duplicados, setDuplicados] = useState<NegocioDelMismoContacto[] | null>(null)
 
-  const submit = () => {
-    if (tipo === 'juridica' && !empresaNombre.trim()) {
-      toast.error('Ingresa el nombre de la empresa')
-      return
-    }
+  const enviar = (confirmarDuplicado: boolean) => {
     startTransition(async () => {
       const res = await crearNegocioDesdeInteraccion({
         interaccion_id: interaccionId,
         tipo_persona: tipo,
         empresa_nombre: tipo === 'juridica' ? empresaNombre.trim() : undefined,
         empresa_nit: tipo === 'juridica' ? empresaNit.trim() || undefined : undefined,
+        confirmar_duplicado: confirmarDuplicado,
       })
+
+      // Sin error y sin id = el contacto ya tiene negocios y falta la decisión.
+      if (!res.error && !res.negocio_id && res.duplicados?.length) {
+        setDuplicados(res.duplicados)
+        return
+      }
+
+      setDuplicados(null)
+
       if (res.error) {
         toast.error(res.error)
       } else {
@@ -273,6 +283,14 @@ function CrearNegocioForm({
         onDone()
       }
     })
+  }
+
+  const submit = () => {
+    if (tipo === 'juridica' && !empresaNombre.trim()) {
+      toast.error('Ingresa el nombre de la empresa')
+      return
+    }
+    enviar(false)
   }
 
   // El origen NO se pregunta: lo determina el canal de la interacción. Se
@@ -351,6 +369,15 @@ function CrearNegocioForm({
           Cancelar
         </button>
       </div>
+
+      {duplicados && (
+        <DialogoNegocioDuplicado
+          duplicados={duplicados}
+          creando={isPending}
+          onCancelar={() => setDuplicados(null)}
+          onCrearIgual={() => enviar(true)}
+        />
+      )}
     </div>
   )
 }
