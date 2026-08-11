@@ -292,12 +292,18 @@ async function negocioCongeladoPorDuplicado(
   workspaceId: string,
   negocioId: string,
 ): Promise<string | null> {
-  // Referencias NO-split de este negocio
+  // Referencias NO-split de este negocio.
+  //
+  // `anulado_at is null`: este control cuenta por PRESENCIA de la referencia, no por
+  // monto, así que el cero de un cobro anulado no lo saca solo. Sin este filtro, anular
+  // un pago mal cargado dejaría los dos negocios congelados para siempre — justo el
+  // atasco que la anulación existe para deshacer. Ver `lib/cobros/anulacion.ts`.
   const { data: misCobros } = await db(supabase)
     .from('cobros')
     .select('external_ref, split_json')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
+    .is('anulado_at', null)
     .not('external_ref', 'is', null)
 
   const misRefs = ((misCobros ?? []) as Array<{ external_ref: string | null; split_json: { split_id?: string } | null }>)
@@ -311,6 +317,7 @@ async function negocioCongeladoPorDuplicado(
     .select('external_ref, negocio_id, split_json, negocios:negocio_id ( estado )')
     .eq('workspace_id', workspaceId)
     .in('external_ref', misRefs)
+    .is('anulado_at', null)
     .neq('negocio_id', negocioId)
 
   for (const c of ((otrosCobros ?? []) as Array<{
@@ -2656,6 +2663,95 @@ async function autocompletarGatesAnticipoPorSaldo(
   }
 }
 
+/**
+ * Rehace lo que dependía del recaudo de un negocio cuando ese recaudo CAMBIÓ hacia
+ * abajo — hoy, al anular un cobro (`lib/actions/pagos-externos.ts`).
+ *
+ * Dejar de sumar la plata no basta. Con esa plata ya se tomaron decisiones que quedaron
+ * escritas: el negocio pudo marcarse conciliado, su bloque de cobros pudo pasar a
+ * completo, y el gate de anticipo pudo cerrarse SOLO porque el saldo lo cubría
+ * (`autocompletarGatesAnticipoPorSaldo`). Un cobro anulado que deja un gate cerrado
+ * detrás es peor que no poder anularlo: el caso avanza con plata que ya no existe.
+ *
+ * Las tres cosas se deshacen aquí:
+ *   1. El negocio deja de estar conciliado (cambió su cobrado).
+ *   2. Sus bloques de cobros se reevalúan (`reevaluarBloquesCobros` los devuelve a
+ *      pendiente si el saldo dejó de estar cubierto).
+ *   3. Los gates cerrados con la marca `_completado_via: 'saldo'` se REABREN si el
+ *      saldo ya no alcanza. Solo esos: un gate que alguien cerró a mano no se toca,
+ *      porque no fue esta plata la que lo cerró.
+ *
+ * NO revierte un avance de etapa ya ocurrido. Reabrir el gate es lo que impide el
+ * siguiente avance; devolver un caso de etapa es una decisión con consecuencias
+ * propias (documentos, avisos, responsables) y la toma una persona, no una anulación.
+ */
+export async function recalcularNegocioPorCambioDeRecaudo(
+  negocioId: string,
+  motivo: string,
+): Promise<{ gates_reabiertos: number }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { gates_reabiertos: 0 }
+
+  // 1. El check de conciliación se cae: el cobrado ya no es el que se validó.
+  await db(supabase)
+    .from('negocio_conciliacion')
+    .update({ conciliado: false, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+
+  // 2. Bloques de cobros: completo ⇄ pendiente según el saldo real.
+  await reevaluarBloquesCobros(negocioId)
+
+  // 3. Gates de anticipo cerrados por saldo.
+  const cubierto = await anticipoCubiertoPorSaldo(supabase, workspaceId, negocioId)
+  if (cubierto) return { gates_reabiertos: 0 }
+
+  const { data: bloquesRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('id, estado, data, bloque_configs!inner(config_extra, es_gate)')
+    .eq('negocio_id', negocioId)
+
+  const aReabrir = ((bloquesRaw ?? []) as Array<{
+    id: string
+    estado: string | null
+    data: Record<string, unknown> | null
+    bloque_configs: { config_extra: Record<string, unknown> | null; es_gate: boolean | null } | null
+  }>).filter(
+    (b) =>
+      b.estado === 'completo' &&
+      b.bloque_configs?.es_gate === true &&
+      b.bloque_configs?.config_extra?.es_pagos_epayco === true &&
+      b.data?._completado_via === 'saldo',
+  )
+
+  const nowIso = new Date().toISOString()
+  for (const b of aReabrir) {
+    const data = { ...(b.data ?? {}) }
+    delete data._completado_via
+    data._nota = `Gate reabierto: el saldo que lo cerró dejó de existir (${motivo}).`
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'pendiente', completado_at: null, data, updated_at: nowIso })
+      .eq('id', b.id)
+
+    if (staffId) {
+      try {
+        await db(supabase).from('activity_log').insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'comentario',
+          autor_id: staffId,
+          contenido: `Gate de anticipo REABIERTO: se había cerrado solo porque el saldo lo cubría, y ese saldo cambió (${motivo}).`,
+        })
+      } catch { /* no bloquear por el log */ }
+    }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { gates_reabiertos: aReabrir.length }
+}
+
 // ── El motor exige el dato antes de decidir ───────────────────────────────────
 //
 // Resuelve los campos que gobiernan la bifurcación de una etapa: dónde se responde cada uno
@@ -4523,13 +4619,17 @@ export async function autoCrearCobros(
     return { error: null }
   }
 
-  // Idempotencia: verificar si ya existe un cobro anticipo para este negocio
+  // Idempotencia: verificar si ya existe un cobro anticipo para este negocio.
+  // Un anticipo ANULADO no cuenta: si contara, este camino lo UPDATEARÍA y resucitaría
+  // una fila que alguien anuló a propósito, con su motivo y su autor intactos pero con
+  // plata de vuelta. Ver `lib/cobros/anulacion.ts`.
   const { data: existente } = await db(supabase)
     .from('cobros')
     .select('id')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
     .eq('tipo_cobro', 'anticipo')
+    .is('anulado_at', null)
     .limit(1)
 
   if (existente && (existente as unknown[]).length > 0) {
