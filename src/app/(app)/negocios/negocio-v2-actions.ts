@@ -1582,6 +1582,61 @@ export async function getDatosNuevoNegocio(): Promise<{
 
 // ── Crear negocio ─────────────────────────────────────────────────────────────
 
+/**
+ * Negocio que ya existe a nombre del mismo contacto.
+ *
+ * Se devuelve al intentar crear otro para que el comercial vea CUÁL es antes de
+ * decidir. No es un error: un cliente puede comprar dos vehículos. Lo que no
+ * puede es crearlo tres veces por equivocación sin que nada se lo advierta.
+ */
+export interface NegocioDelMismoContacto {
+  id: string
+  codigo: string | null
+  nombre: string
+  /** 'abierto' | 'completado' | 'perdido' | … */
+  estado: string
+  etapa_nombre: string | null
+  created_at: string
+}
+
+/**
+ * Negocios que ya existen para un contacto, del más reciente al más viejo.
+ *
+ * Vive aparte porque los dos caminos de creación (formulario y conversión de un
+ * lead de Meta) tienen que preguntar lo mismo, y el de Meta tiene que hacerlo
+ * ANTES de crear la empresa jurídica: si preguntara después, cancelar dejaría
+ * una empresa huérfana.
+ */
+async function negociosDelContacto(
+  supabase: unknown,
+  workspaceId: string,
+  contactoId: string,
+): Promise<NegocioDelMismoContacto[]> {
+  const { data } = await db(supabase)
+    .from('negocios')
+    .select('id, codigo, nombre, estado, created_at, etapas_negocio(nombre)')
+    .eq('workspace_id', workspaceId)
+    .eq('contacto_id', contactoId)
+    .order('created_at', { ascending: false })
+    .limit(10)
+
+  return ((data ?? []) as Array<{
+    id: string
+    codigo: string | null
+    nombre: string | null
+    estado: string | null
+    created_at: string
+    etapas_negocio: { nombre: string | null } | null
+  }>).map(n => ({
+    id: n.id,
+    codigo: n.codigo,
+    nombre: n.nombre ?? 'Sin nombre',
+    estado: n.estado ?? 'abierto',
+    etapa_nombre: n.etapas_negocio?.nombre ?? null,
+    created_at: n.created_at,
+  }))
+}
+
 export async function crearNegocio(input: {
   nombre: string
   linea_id?: string
@@ -1598,7 +1653,17 @@ export async function crearNegocio(input: {
   origen?: string
   /** Aliado que lo originó. Obligatorio si origen = 'alianza'; ignorado si no. */
   aliado_id?: string
-}): Promise<{ negocio_id: string | null; error: string | null }> {
+  /**
+   * El comercial ya vio los negocios que existen para este contacto y aun así
+   * quiere crear otro. Sin esto, la creación se detiene y devuelve `duplicados`.
+   */
+  confirmar_duplicado?: boolean
+}): Promise<{
+  negocio_id: string | null
+  error: string | null
+  /** Presente solo cuando la creación se detuvo esperando confirmación. */
+  duplicados?: NegocioDelMismoContacto[]
+}> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
 
@@ -1653,6 +1718,22 @@ export async function crearNegocio(input: {
       .select('id')
       .single()
     contactoId = (newContact as { id: string } | null)?.id
+  }
+
+  // ── Ya existe un negocio a nombre de este contacto ──
+  //
+  // Frena y devuelve cuáles son, para que el comercial lo vea ANTES de crear
+  // otro. No bloquea: un cliente puede comprar un segundo vehículo, y ese caso
+  // es real (hay negocios en producción nombrados "… NEGOCIO 2"). Lo que se
+  // corrige es el otro: el mismo lead creado tres veces por equivocación.
+  //
+  // Solo aplica cuando el contacto YA existía: uno recién creado aquí arriba no
+  // puede tener negocios previos, así que ni se consulta.
+  if (input.contacto_id && contactoId && !input.confirmar_duplicado) {
+    const previos = await negociosDelContacto(supabase, workspaceId, contactoId)
+    if (previos.length > 0) {
+      return { negocio_id: null, error: null, duplicados: previos }
+    }
   }
 
   // Persona natural: auto-crear empresa vinculada al contacto
@@ -1764,6 +1845,20 @@ export async function crearNegocio(input: {
   }
 
   const negocioData = negocio as { id: string }
+
+  // Crear a sabiendas de que el contacto ya tenía negocio es una decisión, y por
+  // eso queda escrita: es lo único que después distingue un segundo vehículo
+  // legítimo de un duplicado que nadie quiso crear.
+  if (input.confirmar_duplicado && input.contacto_id && staffId) {
+    await db(supabase).from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioData.id,
+      tipo: 'cambio_sistema',
+      autor_id: staffId,
+      contenido: 'Negocio creado con otro(s) ya existente(s) para el mismo contacto, confirmado por quien lo creó',
+    })
+  }
 
   // ── Auto-asignar al creador como responsable si es operator ──
   // Un operator solo ve los negocios donde es responsable (negocio_responsables N:M,
@@ -1954,7 +2049,13 @@ export async function crearNegocioDesdeInteraccion(input: {
   tipo_persona: 'natural' | 'juridica'
   empresa_nombre?: string
   empresa_nit?: string
-}): Promise<{ negocio_id: string | null; error: string | null }> {
+  /** Ver `crearNegocio`: el comercial ya vio los negocios previos del contacto. */
+  confirmar_duplicado?: boolean
+}): Promise<{
+  negocio_id: string | null
+  error: string | null
+  duplicados?: NegocioDelMismoContacto[]
+}> {
   // userId = profile.id (para assigned_by, FK a profiles). staffId = staff.id
   // (para negocio_responsables.staff_id y como fallback de responsable del negocio).
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
@@ -2031,6 +2132,16 @@ export async function crearNegocioDesdeInteraccion(input: {
   } } } | null)?.config_extra?.meta_leads?.nombre_negocio)
   const nombreNegocio = construirNombreNegocioDesdePayload(contactoNombre, cfgNombre, fieldData)
 
+  // 3.b. ¿Este contacto ya tiene negocio? Se pregunta ANTES de crear la empresa
+  //      jurídica del paso 4: si se preguntara después, cancelar dejaría una
+  //      empresa huérfana en el directorio.
+  if (!input.confirmar_duplicado) {
+    const previos = await negociosDelContacto(supabase, workspaceId, inter.contacto_id)
+    if (previos.length > 0) {
+      return { negocio_id: null, error: null, duplicados: previos }
+    }
+  }
+
   // 4. Empresa jurídica: crearla y vincularla por empresa_id. Natural: crearNegocio
   //    aplica el patrón vigente (PN = su propia empresa auto, desde el contacto).
   let empresaId: string | undefined
@@ -2066,6 +2177,10 @@ export async function crearNegocioDesdeInteraccion(input: {
     empresa_id: empresaId,
     es_persona_natural: input.tipo_persona === 'natural',
     origen: origenDesdeFuenteInteraccion(inter.fuente),
+    // Se propaga el valor REAL, no un `true` fijo: con `true` siempre, el registro
+    // de "creado a sabiendas" se escribiría también en los casos donde no había
+    // ningún negocio previo, y dejaría de significar nada.
+    confirmar_duplicado: input.confirmar_duplicado,
   })
   if (res.error || !res.negocio_id) {
     return { negocio_id: null, error: res.error ?? 'No se pudo crear el negocio' }

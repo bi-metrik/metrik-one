@@ -4,10 +4,11 @@ import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { crearNegocio } from '../negocio-v2-actions'
+import { crearNegocio, type NegocioDelMismoContacto } from '../negocio-v2-actions'
 import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
 import { SECTORES_EMPRESA, ORIGENES_NEGOCIO, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { PhoneInput } from '@/components/phone-input'
+import { DialogoNegocioDuplicado } from '@/components/negocios/dialogo-negocio-duplicado'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }
@@ -37,6 +38,8 @@ export default function NuevoNegocioForm({
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [step, setStep] = useState(0)
+  /** Negocios que ya existen para el contacto elegido. null = no hay que preguntar. */
+  const [duplicados, setDuplicados] = useState<NegocioDelMismoContacto[] | null>(null)
 
   // Step 1 — Contacto
   const [contactoId, setContactoId] = useState<string | null>(null)
@@ -180,16 +183,7 @@ export default function NuevoNegocioForm({
 
   // ── Submit ─────────────────────────────────────────────────────────────────
 
-  const handleSubmit = () => {
-    // Con nombre automático, el server pone nombre = contacto; aquí mandamos el
-    // contacto como fallback. Sin auto, el nombre es obligatorio.
-    if (!autoNombre && !nombre.trim()) { toast.error('El nombre es requerido'); return }
-    if (!esPersonaNatural && !empresaNombre.trim()) {
-      toast.error('La empresa es requerida'); return
-    }
-    if (!origen) { toast.error('Elige de dónde vino el negocio'); return }
-    if (esAlianza && !aliadoId) { toast.error('Elige el aliado de la alianza'); return }
-
+  const enviar = (confirmarDuplicado: boolean) => {
     startTransition(async () => {
       const result = await crearNegocio({
         nombre: autoNombre ? contactoNombre.trim() : nombre.trim(),
@@ -203,7 +197,16 @@ export default function NuevoNegocioForm({
         es_persona_natural: esPersonaNatural,
         origen,
         aliado_id: esAlianza ? aliadoId : undefined,
+        confirmar_duplicado: confirmarDuplicado,
       })
+
+      // Sin error y sin id = el contacto ya tiene negocios y falta la decisión.
+      if (!result.error && !result.negocio_id && result.duplicados?.length) {
+        setDuplicados(result.duplicados)
+        return
+      }
+
+      setDuplicados(null)
 
       if (result.error) {
         toast.error('Error al crear negocio: ' + result.error)
@@ -212,6 +215,19 @@ export default function NuevoNegocioForm({
         router.push(`/negocios/${result.negocio_id}`)
       }
     })
+  }
+
+  const handleSubmit = () => {
+    // Con nombre automático, el server pone nombre = contacto; aquí mandamos el
+    // contacto como fallback. Sin auto, el nombre es obligatorio.
+    if (!autoNombre && !nombre.trim()) { toast.error('El nombre es requerido'); return }
+    if (!esPersonaNatural && !empresaNombre.trim()) {
+      toast.error('La empresa es requerida'); return
+    }
+    if (!origen) { toast.error('Elige de dónde vino el negocio'); return }
+    if (esAlianza && !aliadoId) { toast.error('Elige el aliado de la alianza'); return }
+
+    enviar(false)
   }
 
   const showContactoDropdown = contactoFocused && !contactoId && contactoNombre.length >= 2 &&
@@ -605,6 +621,16 @@ export default function NuevoNegocioForm({
           </button>
         )}
       </div>
+
+      {duplicados && (
+        <DialogoNegocioDuplicado
+          duplicados={duplicados}
+          nombreContacto={contactoNombre.trim() || undefined}
+          creando={isPending}
+          onCancelar={() => setDuplicados(null)}
+          onCrearIgual={() => enviar(true)}
+        />
+      )}
     </div>
   )
 }
