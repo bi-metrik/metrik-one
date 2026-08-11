@@ -227,6 +227,31 @@ export function puedeGestionarPagosExternos(user: UserContext): boolean {
   return getAreasEfectivas(user).has('financiera')
 }
 
+// ── puedeDevolverCasoPorRuta ─────────────────────────────────────────
+
+/**
+ * Decidir sobre una propuesta de REVERSA DE RUTA: devolver el caso a la primera
+ * etapa que se salto, o descartar la propuesta.
+ *
+ * Es una decision con consecuencias de plata, no una correccion de dato: devolver
+ * un caso reabre gates de saldo y puede dejar cobros y cuentas de cobro emitidas
+ * en desacuerdo con la etapa en la que quedo. Por eso NO alcanza con poder
+ * corregir el campo que la origino.
+ *
+ * Criterio: owner/admin siempre (mandan sobre el proceso completo); supervisor si,
+ * porque es quien lleva el area y ve el caso entero; operator, contador y
+ * read_only nunca. Mas amplio que `puedeAutorizarCierreNoFacturable` a proposito:
+ * ahi se decide sobre facturar, que es del area financiera, y aqui sobre por donde
+ * va el proceso, que es de quien lo supervisa.
+ *
+ * Fuente UNICA: la consumen el guard del servidor (`aplicarReversaDeRuta` /
+ * `descartarReversaDeRuta`) Y la pantalla, que decide con ella si dibuja los
+ * botones. Copiar la regla en los dos lados los desincroniza en silencio.
+ */
+export function puedeDevolverCasoPorRuta(user: UserContext): boolean {
+  return user.role === 'owner' || user.role === 'admin' || user.role === 'supervisor'
+}
+
 // ── canGestionarAliados ──────────────────────────────────────────────
 
 /**

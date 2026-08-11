@@ -37,9 +37,16 @@ import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { retornosPosibles, retornosDisparados, ejecutarRetorno } from '@/lib/correcciones/retorno'
+import {
+  detectarReversa,
+  guardarPropuesta,
+  ejecutarReversa,
+  descartarPropuesta,
+  type PropuestaPendiente,
+} from '@/lib/correcciones/reversa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
-import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
-import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
+import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
+import { guardEditarBloque, guardAvanzarStage, guardVerNegocio } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
@@ -3961,7 +3968,7 @@ export async function marcarBloqueCompleto(
   // Igual que en `actualizarBloqueData`: la respuesta y sus campos derivados se escriben
   // juntos. Hace falta en AMBOS caminos — el cliente manda por aquí cuando el bloque queda
   // completo, que es justamente el caso de una pregunta obligatoria que decide una ruta.
-  await propagarCamposDerivados(supabase, negocioBloqueId, mergedData)
+  const derivadosCambiados = await propagarCamposDerivados(supabase, negocioBloqueId, mergedData)
 
   // Traza de la corrección contra el bloque donde vive el dato (ver `actualizarBloqueData`).
   if (cambiosCorreccion.length > 0) {
@@ -3981,6 +3988,16 @@ export async function marcarBloqueCompleto(
       supabase, workspaceId, negocioBloqueId, userId, staffId,
       cambiosCorreccion, opts!.correccion!.causa as CausaCorreccion,
     )
+    // Y si el caso ya se fue por la via equivocada, se PROPONE devolverlo al tramo que se
+    // salto. Este es el camino FRECUENTE de correccion: un bloque de una etapa superada
+    // casi siempre esta completo, asi que el guardado entra por aqui y no por el borrador.
+    if (negocioId) {
+      await detectarReversaDeRuta(
+        supabase, workspaceId, negocioId, userId, staffId,
+        [...cambiosCorreccion.map(c => c.slug), ...derivadosCambiados],
+        opts!.correccion!.causa as CausaCorreccion,
+      )
+    }
   }
 
   // Siempre revalidar la página del negocio después de marcar completo
@@ -4161,19 +4178,25 @@ async function propagarCamposDerivados(
   supabase: any,
   negocioBloqueId: string,
   data: Record<string, unknown>,
-): Promise<void> {
+): Promise<string[]> {
+  // Devuelve los slugs DERIVADOS que efectivamente cambiaron de valor. Los necesita la
+  // reversa de ruta: el campo que gobierna una bifurcación suele ser un derivado, no la
+  // pregunta que el equipo toca (el patrón de "una sola pregunta, varios interruptores").
+  // Sin esto, una corrección que mueve el decisor por derivación pasaría desapercibida.
+  const derivadosCambiados: string[] = []
+
   // El bloque fuente se identifica por su slug estable. Un heredado (slug null) nunca lo es.
   const { data: fuente } = await db(supabase)
     .from('negocio_bloques')
     .select('negocio_id, bloque_configs!inner(slug, etapa_id)')
     .eq('id', negocioBloqueId)
     .single()
-  if (!fuente) return
+  if (!fuente) return derivadosCambiados
 
   const cfgFuente = (fuente as Record<string, unknown>).bloque_configs as Record<string, unknown> | null
   const slugFuente = cfgFuente?.slug as string | undefined
   const negocioId = (fuente as { negocio_id: string }).negocio_id
-  if (!slugFuente) return
+  if (!slugFuente) return derivadosCambiados
 
   // Línea del negocio → sus bloques configurados. Es una lectura de CONFIGURACIÓN (sin
   // `data`), acotada a la línea, y en un workspace sin campos derivados corta aquí mismo.
@@ -4183,7 +4206,7 @@ async function propagarCamposDerivados(
     .eq('id', cfgFuente?.etapa_id as string)
     .single()
   const lineaId = (etapaFuente as { linea_id?: string } | null)?.linea_id
-  if (!lineaId) return
+  if (!lineaId) return derivadosCambiados
 
   const { data: configs } = await db(supabase)
     .from('bloque_configs')
@@ -4216,7 +4239,7 @@ async function propagarCamposDerivados(
       })
     }
   }
-  if (candidatos.length === 0) return
+  if (candidatos.length === 0) return derivadosCambiados
 
   // Una regla puntual que convive con el mapeo (leasing → sin devolución de IVA) puede
   // leer OTRO bloque. Hay que traer su valor: sin él, el servidor escribiría el derivado
@@ -4271,6 +4294,7 @@ async function propagarCamposDerivados(
     for (const d of propios) {
       if (base[d.slug] === d.valor) continue
       cambio = true
+      derivadosCambiados.push(d.slug)
       if (d.valor === undefined) delete siguiente[d.slug]
       else siguiente[d.slug] = d.valor
       rastro[d.slug] = {
@@ -4288,6 +4312,8 @@ async function propagarCamposDerivados(
       .update({ data: siguiente, updated_at: ahora })
       .eq('id', destinoId)
   }
+
+  return [...new Set(derivadosCambiados)]
 }
 
 /**
@@ -4392,6 +4418,140 @@ async function aplicarRetornoPorDecision(
     revalidatePath(`/negocios/${negocioId}`)
     revalidatePath('/negocios')
   }
+}
+
+/**
+ * Si la corrección cambió un dato que YA decidió una ruta recorrida, deja PROPUESTO
+ * devolver el caso a la primera etapa que se saltó.
+ *
+ * Corre DESPUÉS de `aplicarRetornoPorDecision`, y ese orden no es casual: si el retorno al
+ * punto de decisión ya movió el caso, ahora está EN la etapa donde se decide y no hay
+ * ninguna ruta recorrida que revisar — la detección lo ve y no propone nada. Al revés, los
+ * dos mecanismos se pisarían.
+ *
+ * ⚠️ Solo PROPONE. Devolver un caso reabre gates de saldo y puede dejar cobros y cuentas de
+ * cobro en desacuerdo con la etapa: eso lo decide una persona, en `aplicarReversaDeRuta`.
+ *
+ * `derivados` son los campos que la propagación acaba de mover por `lock_when.mapping`. Van
+ * junto a los corregidos porque el campo que gobierna la bifurcación casi nunca es el que
+ * el equipo toca: es su consecuencia (una pregunta, varios interruptores).
+ *
+ * Opt-in por LÍNEA (`config_extra.reversa_ruta.activa`). Sin eso `detectarReversa` corta en
+ * la segunda consulta y ninguna línea cambia de comportamiento.
+ */
+async function detectarReversaDeRuta(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  negocioId: string,
+  userId: string | undefined,
+  staffId: string | null | undefined,
+  slugs: string[],
+  causa: CausaCorreccion,
+): Promise<void> {
+  if (slugs.length === 0) return
+  try {
+    const propuesta = await detectarReversa(supabase, workspaceId, negocioId, slugs)
+    if (!propuesta) return
+    await guardarPropuesta({ supabase, workspaceId, negocioId, propuesta, staffId, userId, causa })
+    revalidatePath(`/negocios/${negocioId}`)
+  } catch (err) {
+    // La corrección del dato ya está guardada: un fallo detectando la divergencia no puede
+    // tumbarla. Lo que no puede es quedar mudo.
+    console.error('[reversa] no se pudo revisar la ruta del caso:', err)
+  }
+}
+
+/**
+ * Devuelve el caso a la primera etapa omitida. **Es la decisión de una persona**, y por eso
+ * es una acción aparte: nada de esto ocurre solo.
+ *
+ * Revalida la propuesta contra el estado de AHORA en vez de confiar en la guardada: entre
+ * que se detectó y que alguien la aprueba, el caso pudo moverse o el dato pudo cambiar
+ * otra vez. Si ya no aplica, se limpia y se dice — mover un caso por una propuesta vencida
+ * sería exactamente el error que este mecanismo viene a evitar.
+ */
+export async function aplicarReversaDeRuta(
+  negocioId: string,
+  motivo: string,
+): Promise<{ error: string | null; destino?: string; omitidas?: string[] }> {
+  const { supabase, workspaceId, userId, staffId, role, areas, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const guardVer = await guardVerNegocio(negocioId)
+  if (!guardVer.ok) return { error: guardVer.error ?? 'Sin acceso a este negocio' }
+
+  // Mover un caso hacia atrás tiene consecuencias de plata: mismo criterio de autorización
+  // que la pantalla usa para dibujar el botón (`puedeDevolverCasoPorRuta`, fuente única).
+  if (!puedeDevolverCasoPorRuta({ id: staffId ?? '', role: (role ?? 'read_only') as Role, areas: (areas ?? []) as Area[] })) {
+    return { error: 'Tu rol no permite devolver un caso a una etapa anterior' }
+  }
+
+  const razon = motivo.trim()
+  // Sin motivo no hay traza que sirva: dentro de un mes nadie sabrá por qué se movió.
+  if (razon.length < 5) return { error: 'Escribe por qué se devuelve el caso' }
+
+  const { data: negRaw } = await db(supabase)
+    .from('negocios')
+    .select('metadata')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const pendiente = (((negRaw as { metadata?: Record<string, unknown> | null } | null)?.metadata
+    ?.reversa_ruta_pendiente ?? null) as PropuestaPendiente | null)
+  if (!pendiente) return { error: 'No hay una propuesta pendiente para este negocio' }
+
+  const vigente = await detectarReversa(supabase, workspaceId, negocioId, null, pendiente.decision.id)
+  if (!vigente) {
+    await descartarPropuesta({
+      supabase, workspaceId, negocioId, staffId,
+      motivo: 'La propuesta dejó de aplicar: el caso o el dato cambiaron desde que se detectó.',
+    })
+    revalidatePath(`/negocios/${negocioId}`)
+    return { error: 'La propuesta ya no aplica: el caso o el dato cambiaron. Se retiró el aviso.' }
+  }
+
+  const { resultado, error: errEjec } = await ejecutarReversa({
+    supabase,
+    workspaceId,
+    negocioId,
+    propuesta: vigente,
+    userId,
+    staffId,
+    motivo: razon,
+    // El mismo movedor del avance normal: crea las casillas de la etapa destino con su
+    // herencia y dispara el `avisar_al_entrar` por el trigger del UPDATE. Se inyecta en vez
+    // de importarse dentro de la lib para no cerrar un ciclo contra este archivo.
+    moverEtapa: cambiarEtapaNegocio,
+  })
+  if (errEjec || !resultado) return { error: errEjec ?? 'No se pudo devolver el caso' }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null, destino: resultado.destinoNombre, omitidas: resultado.omitidas }
+}
+
+/** Descarta la propuesta sin mover el caso. Exige motivo: el descarte también es un dato. */
+export async function descartarReversaDeRuta(
+  negocioId: string,
+  motivo: string,
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const guardVer = await guardVerNegocio(negocioId)
+  if (!guardVer.ok) return { error: guardVer.error ?? 'Sin acceso a este negocio' }
+  if (!puedeDevolverCasoPorRuta({ id: staffId ?? '', role: (role ?? 'read_only') as Role, areas: (areas ?? []) as Area[] })) {
+    return { error: 'Tu rol no permite decidir sobre esta propuesta' }
+  }
+
+  const razon = motivo.trim()
+  if (razon.length < 5) return { error: 'Escribe por qué se descarta' }
+
+  const r = await descartarPropuesta({ supabase, workspaceId, negocioId, motivo: razon, staffId })
+  if (r.error) return r
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
 }
 
 /**
@@ -4526,8 +4686,9 @@ export async function actualizarBloqueData(
   // Excepción: una CORRECCIÓN siempre propaga, aunque llegue por el camino del borrador.
   // Si no, un decisor derivado quedaría con el valor viejo mientras el caso ya se movió
   // por el nuevo — el motor volvería a decidir con el dato equivocado.
+  let derivadosCambiados: string[] = []
   if (opts?.revalidate !== false || cambiosCorreccion.length > 0) {
-    await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
+    derivadosCambiados = await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
   }
 
   // Traza de la corrección: valor previo, valor nuevo, causa y área DUEÑA del bloque.
@@ -4550,6 +4711,16 @@ export async function actualizarBloqueData(
       supabase, workspaceId, negocioBloqueId, userId, staffId,
       cambiosCorreccion, opts!.correccion!.causa as CausaCorreccion,
     )
+    // Y si el caso ya se fue por la via que ese dato decidio, se PROPONE devolverlo al
+    // tramo que se salto. Va despues del retorno a proposito (ver `detectarReversaDeRuta`).
+    const idNegocio = negocioId ?? ((row as Record<string, unknown>)?.negocio_id as string | undefined)
+    if (idNegocio) {
+      await detectarReversaDeRuta(
+        supabase, workspaceId, idNegocio, userId, staffId,
+        [...cambiosCorreccion.map(c => c.slug), ...derivadosCambiados],
+        opts!.correccion!.causa as CausaCorreccion,
+      )
+    }
   }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
