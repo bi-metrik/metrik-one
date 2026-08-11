@@ -51,6 +51,7 @@ import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
+import { leerAviso } from '@/lib/correcciones/retroceso'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -3669,6 +3670,32 @@ export async function cambiarEtapaNegocioConGate(
             es_gate: true,
           }],
         }
+      }
+    }
+  }
+
+  // ── El aviso de recaudo cambiado REAPARECE al intentar avanzar ──
+  //
+  // Quien cambia la plata (la financiera) casi nunca es quien mueve el caso (el
+  // comercial). Un aviso que solo se muestra una vez lo cierra quien pasaba por ahí, y
+  // el caso sigue adelante con plata que ya no tiene — que es justo el estado que el
+  // retroceso financiero viene a evitar. Por eso vuelve a frenar aquí, hasta que alguien
+  // lo resuelva de forma explícita y con motivo escrito.
+  //
+  // El override de owner/admin lo respeta igual que los demás gates: es un aviso, no una
+  // cerradura.
+  if (!motivoOverride) {
+    const aviso = await leerAviso(supabase, workspaceId, negocioId)
+    if (aviso) {
+      return {
+        error: 'gate_bloqueado',
+        bloquesPendientes: [{
+          nombre:
+            `El recaudo de este negocio cambió (referencia ${aviso.referencia}) y todavía nadie lo resolvió. ` +
+            `Motivo: ${aviso.motivo}` +
+            (aviso.destinoSugerido ? ` · Se sugirió devolverlo a ${aviso.destinoSugerido}.` : ''),
+          es_gate: true,
+        }],
       }
     }
   }

@@ -17,6 +17,7 @@ import {
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
 import PagosExternosTab from './pagos-externos-tab'
+import { RedistribuirModal } from './redistribuir-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
 import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio } from '@/lib/actions/facturacion-actions'
@@ -310,8 +311,11 @@ function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey
 }
 
 function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] }) {
+  const router = useRouter()
   const [q, setQ] = useState('')
   const [abiertas, setAbiertas] = useState<Set<string>>(new Set())
+  /** Referencia que se está corrigiendo. null = el modal está cerrado. */
+  const [redistribuyendo, setRedistribuyendo] = useState<ReferenciaPago | null>(null)
   const query = q.trim().toLowerCase()
 
   const filtradas = useMemo(() => {
@@ -439,12 +443,33 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                         Total cargado: <span className="font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.valor_pagado)}</span>
                       </p>
                     )}
+
+                    {/* La corrección se hace desde aquí, que es donde se ve el error.
+                        Antes solo existía deshacer un reparto ANTES de confirmarlo, y
+                        para entonces nadie lo ha visto todavía. */}
+                    <div className="mt-2 flex justify-end border-t pt-2" style={{ borderColor: '#F3F4F6' }}>
+                      <button
+                        onClick={() => setRedistribuyendo(r)}
+                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
+                        style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" /> Corregir el reparto
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
             )
           })}
         </div>
+      )}
+
+      {redistribuyendo && (
+        <RedistribuirModal
+          referencia={redistribuyendo}
+          onCerrar={() => setRedistribuyendo(null)}
+          onListo={() => { setRedistribuyendo(null); router.refresh() }}
+        />
       )}
     </section>
   )
