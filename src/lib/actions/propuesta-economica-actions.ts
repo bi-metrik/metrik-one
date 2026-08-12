@@ -25,6 +25,8 @@ import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
+import { tarifaConfirmadaPorNegocio, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
+import { fuenteDeLaTarifa } from '@/lib/upme/tarifa-propuesta'
 import { uvtDelAnio } from '@/lib/upme/uvt'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -247,10 +249,19 @@ async function loadBloqueContext(
   const templateSlug = (configExtra.template_slug as string) ?? 'soena/propuesta-economica'
   const driveSubfolder = (configExtra.drive_subfolder as string | undefined) ?? null
 
-  // ── Tarifa UPME (pasante) — OPT-IN por config ─────────────────────────────
-  // config_extra.tarifa_upme = { enabled: true, factura_slug?, valor_field?, anio? }
-  // Se auto-calcula desde el valor del vehículo sin IVA (Factura). Ausente →
-  // tarifaUpme = 0 (composición de precio = solo honorario, comportamiento previo).
+  // ── Tarifa UPME (pasante) ─────────────────────────────────────────────────
+  // ⚠️ La FUENTE DE VERDAD es la tarifa CONFIRMADA en Validación, la misma que el
+  // resto del sistema le cobra al cliente vía `valorARecaudar`. Antes esto solo se
+  // auto-calculaba desde la Factura cuando `config_extra.tarifa_upme.enabled` estaba
+  // activo, y en SOENA esa clave NUNCA se activó: medido el 2026-08-12, las 103
+  // instancias de propuesta con el campo lo tenían en **cero**, sin excepción. El PDF
+  // no salía incompleto, salía AFIRMANDO "Tarifa UPME $0" y un total que no es lo que
+  // se le cobra. Una propuesta que miente sobre el precio es peor que una sin la línea.
+  //
+  // La decisión NO se reimplementa aquí: se reusa `tarifaConfirmadaPorNegocio`, el
+  // mismo helper puro que usan el panel de conciliación y la cola de facturación. De
+  // ahí sale gratis la regla de que un negocio que no contrató la certificación UPME
+  // no lleva tarifa.
   const tarifaCfg = (configExtra.tarifa_upme ?? null) as
     | { enabled?: boolean; factura_slug?: string; valor_field?: string; anio?: number }
     | null
@@ -278,15 +289,45 @@ async function loadBloqueContext(
   }
 
   // Resolver la tarifa UPME. Precedencia:
-  //   1) si el operador la editó a mano (data.tarifa_upme_editada) → respetar data.tarifa_upme
-  //   2) si está habilitada → auto-calcular desde el valor sin IVA de la Factura
-  //   3) si no → 0 (sin tarifa)
+  //   1) la CONFIRMADA en Validación → manda siempre, es la que se cobra
+  //   2) editada a mano en la propuesta (`tarifa_upme_editada`) → vía legacy, 0 usos hoy
+  //   3) config legacy `tarifa_upme.enabled` → auto-calcular desde la Factura
+  //   4) si no → 0, y el PDF OMITE la línea en vez de pintarla en cero
+  //
+  // La confirmada gana sobre la edición manual a propósito: si difieren, el PDF diría
+  // una cifra y la cartera cobraría otra, que es exactamente el defecto que esto cierra.
   let tarifaUpme = 0
   let tarifaDetalle: TarifaUpmeDetalle | null = null
   const tarifaEditada = data.tarifa_upme_editada === true
-  if (tarifaEditada && typeof data.tarifa_upme === 'number') {
-    tarifaUpme = data.tarifa_upme
-  } else if (tarifaEnabled) {
+
+  const [confRes, certRes] = await Promise.all([
+    supabase
+      .from('negocio_bloques')
+      .select('negocio_id, data, bloque_configs!inner(config_extra)')
+      .eq('negocio_id', b.negocio_id)
+      .eq('bloque_configs.config_extra->tarifa_confirmacion->>enabled', 'true'),
+    supabase
+      .from('negocio_bloques')
+      .select('negocio_id, data, bloque_configs!inner(slug)')
+      .eq('negocio_id', b.negocio_id)
+      .eq('bloque_configs.slug', 'certificacion_upme'),
+  ])
+  const tarifaConfirmada = tarifaConfirmadaPorNegocio(
+    (confRes.data ?? []) as FilaBloqueTarifa[],
+    (certRes.data ?? []) as FilaBloqueTarifa[],
+  ).get(b.negocio_id as string) ?? 0
+
+  const fuenteTarifa = fuenteDeLaTarifa({
+    confirmada: tarifaConfirmada,
+    editadaAMano: tarifaEditada && typeof data.tarifa_upme === 'number' ? data.tarifa_upme : null,
+    autoCalculoHabilitado: tarifaEnabled,
+  })
+
+  if (fuenteTarifa === 'confirmada') {
+    tarifaUpme = tarifaConfirmada
+  } else if (fuenteTarifa === 'editada') {
+    tarifaUpme = data.tarifa_upme as number
+  } else if (fuenteTarifa === 'auto') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: facturaBloque } = await (supabase as any)
       .from('negocio_bloques')
@@ -321,6 +362,14 @@ async function loadBloqueContext(
     tarifaEditada,
     tarifaUpme,
     tarifaDetalle,
+    /** true si la tarifa salió de la confirmación de Validación (la que se cobra). */
+    tarifaVieneDeConfirmacion: tarifaConfirmada > 0,
+    /**
+     * true si este negocio opera bajo el modelo de tarifa (existe el bloque de
+     * confirmación). Un workspace sin ese bloque no cambia en nada: su propuesta
+     * nunca habló de tarifa y se sigue generando igual.
+     */
+    usaModeloTarifa: (confRes.data ?? []).length > 0,
   }
 }
 
@@ -353,6 +402,18 @@ export async function generarVersionPropuesta(
   }
   if (!ctx.precioBase || ctx.precioBase <= 0) {
     return { ok: false, error: 'Precio base no disponible — verifica el servicio asociado' }
+  }
+  // ⚠️ Sin tarifa NO se genera, y no es una decisión de formato: el documento habla de
+  // la tarifa en CINCO puntos más allá del cuadro de precio, incluidos los términos
+  // legales (mandato de recaudo, desistimiento). Una propuesta que en la letra dice
+  // que el cliente paga la tarifa UPME pero no dice cuánto es peor que no emitirla.
+  // Solo aplica a negocios que operan bajo el modelo de tarifa: un workspace sin el
+  // bloque de confirmación nunca habló de tarifa y no cambia en nada.
+  if (ctx.usaModeloTarifa && !(ctx.tarifaUpme > 0)) {
+    return {
+      ok: false,
+      error: 'Falta confirmar la tarifa UPME en Validación. La propuesta la cobra en sus términos, así que no puede emitirse sin ese valor.',
+    }
   }
 
   // Se conserva precisión (hasta 6 decimales, solo para matar ruido de float):
@@ -481,8 +542,6 @@ export async function generarVersionPropuesta(
       plan2_descuento_pct: `${pctMostrado(desc2)}%`,
       plan2_ahorro: formatCOP(calc.ahorro_plan2),
       // Tarifa UPME (pasante) + total a pagar por plan = honorario + tarifa.
-      // Claves extra retrocompatibles: el template las usa si están, si no las ignora.
-      // (El render del PDF se ajusta en la rama plomeria; aquí solo se alimentan.)
       tarifa_upme: formatCOP(ctx.tarifaUpme),
       tarifa_upme_valor: ctx.tarifaUpme,
       plan1_total_con_tarifa: formatCOP(calc.plan1_valor + ctx.tarifaUpme),
