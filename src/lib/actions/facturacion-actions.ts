@@ -40,6 +40,12 @@ export interface CasoPorFacturar {
   etapa_numero: number | null
   identificacion: string | null
   cliente: string | null
+  /**
+   * Celular del contacto. Ya se leía para el borrador del cliente de Siigo; se
+   * expone para poder buscar por él, que es como el equipo identifica un caso
+   * cuando el cliente llama. No se pinta en la fila.
+   */
+  telefono: string | null
   /** Honorario aprobado, CON IVA (es como ONE guarda `precio_aprobado`). */
   honorario: number | null
   /** Valor pagado a la UPME según el comprobante cargado. Recaudo de terceros. */
@@ -270,6 +276,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       etapa_numero: n.etapas_negocio?.numero ?? null,
       identificacion: cli.payload.identification || null,
       cliente: cli.payload.name.filter(Boolean).join(' ') || null,
+      telefono: contacto.telefono,
       honorario,
       valor_upme: upme,
       faltan_factura: fac.faltantes,
