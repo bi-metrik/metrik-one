@@ -49,6 +49,7 @@ export async function serialize(
     study_id: spec.study_id,
     collection_mode: spec.collection_mode,
     narrative: parsed.narrative ?? {},
+    ...(spec.closing_questions?.length ? { closing: parsed.closing ?? {} } : {}),
     capaA,
     capaB: parsed.capaB ?? [],
     classification: parsed.classification ?? {},
