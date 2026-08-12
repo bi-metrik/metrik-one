@@ -8,7 +8,7 @@ import { claudeHaiku } from "./model.ts";
 import { initState, elicitationOpening, nextTurn } from "./r1.ts";
 import { serialize } from "./r2.ts";
 import { resolverEstudioChatPorTrigger, specDeSesion, cargarEstudioChat, type EstudioChat } from "./estudios.ts";
-import { sendCtaUrl } from "../wa-respond.ts";
+import { sendCtaUrl, sendTextWithRhythm, sendTypingIndicator, enBackground } from "../wa-respond.ts";
 import type { ConversationState, StudySpec, Encuadre } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -54,6 +54,7 @@ export async function startCardumenChat(
   supabase: Supa,
   phone: string,
   estudio?: EstudioChat,
+  waMessageId?: string,
 ): Promise<void> {
   // Sin estudio explicito, el de siempre: mantiene el comportamiento de los llamadores viejos.
   const spec: StudySpec = estudio?.spec ?? FEDE_SPEC;
@@ -73,8 +74,10 @@ export async function startCardumenChat(
     await supabase.from("cardumen_chat_sessions").upsert({
       phone, state, closed: false, reminded_at: null, updated_at: new Date().toISOString(),
     });
-    await enviarEncuadre(phone, enc);
-    console.log(`[cardumen-chat] encuadre enviado (${enc.version}), esperando autorizacion de ${phone}`);
+    // En background: son cuatro mensajes con pausas, y hacerlos antes de responderle a Meta
+    // arriesga un reintento (que duplicaria el encuadre completo).
+    enBackground(enviarEncuadre(phone, enc, waMessageId));
+    console.log(`[cardumen-chat] encuadre en camino (${enc.version}), esperando autorizacion de ${phone}`);
     return;
   }
 
@@ -86,7 +89,7 @@ export async function startCardumenChat(
     reminded_at: null,
     updated_at: new Date().toISOString(),
   });
-  await sendTextMessage(
+  await sendTextWithRhythm(
     phone,
     (enc?.saludo ? enc.saludo + "\n\n" : "🐟 *Cardumen*\nGracias por sumar tu historia. Conversemos un momento — responde con tus propias palabras.\n\n⏳ *Tienes 24 horas para completarla; si no, se pierde el avance.* Lo ideal es terminarla hoy mismo. Escribe *salir* si quieres terminar antes.\n\n") + opening,
   );
@@ -98,18 +101,23 @@ export async function startCardumenChat(
  * navegador INTERNO de WhatsApp: un link de texto plano saca a la persona al navegador
  * externo, y a mitad de un ejercicio de confianza eso es perderla.
  */
-async function enviarEncuadre(phone: string, enc: Encuadre): Promise<void> {
-  if (enc.saludo) await sendTextMessage(phone, enc.saludo);
-  if (enc.rubrica) await sendTextMessage(phone, enc.rubrica);
+async function enviarEncuadre(phone: string, enc: Encuadre, waMessageId?: string): Promise<void> {
+  // Con ritmo: el encuadre son cuatro mensajes seguidos y de corrido se lee como un volcado
+  // automatico. El primero lleva el "escribiendo..." (el unico message_id que tenemos es el
+  // del mensaje que abrio la conversacion).
+  if (enc.saludo) await sendTextWithRhythm(phone, enc.saludo, { waMessageId });
+  if (enc.rubrica) await sendTextWithRhythm(phone, enc.rubrica);
   if (enc.datos) {
     if (enc.url_politica) {
+      // El CTA no pasa por sendTextWithRhythm (es interactivo), asi que la pausa va aparte.
+      await new Promise((r) => setTimeout(r, 1200));
       // display_text se recorta a 20 caracteres en wa-respond.ts
       await sendCtaUrl(phone, enc.datos, (enc.boton_politica ?? "Politica de datos").slice(0, 20), enc.url_politica);
     } else {
-      await sendTextMessage(phone, enc.datos);
+      await sendTextWithRhythm(phone, enc.datos);
     }
   }
-  if (enc.cierre_consentimiento) await sendTextMessage(phone, enc.cierre_consentimiento);
+  if (enc.cierre_consentimiento) await sendTextWithRhythm(phone, enc.cierre_consentimiento);
 }
 
 /** Elimina lo ya guardado de esta persona en este estudio. Lo promete el encuadre. */
@@ -123,7 +131,7 @@ async function borrarDatosDeParticipante(supabase: Supa, phone: string, estudio:
   await supabase.from("cardumen_chat_sessions").delete().eq("phone", phone);
 }
 
-export async function continueCardumenChat(supabase: Supa, phone: string, text: string): Promise<void> {
+export async function continueCardumenChat(supabase: Supa, phone: string, text: string, waMessageId?: string): Promise<void> {
   const exit = (text || "").trim().toLowerCase().replace(/[!¡.,]/g, "");
   const { data: row } = await supabase
     .from("cardumen_chat_sessions")
@@ -141,6 +149,8 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
   }
 
   const state = row.state as ConversationState;
+  // El turno pasa por el LLM y tarda: el indicador se manda ya, no despues.
+  if (waMessageId) await sendTypingIndicator(waMessageId);
 
   // BORRAR: vale en cualquier momento, incluso antes de autorizar. Va ANTES del modelo:
   // no tiene sentido gastar un turno de LLM para atender una peticion de borrado.
@@ -176,7 +186,7 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
         .from("cardumen_chat_sessions")
         .update({ state, updated_at: new Date().toISOString() })
         .eq("phone", phone);
-      await sendTextMessage(phone, apertura);
+      await sendTextWithRhythm(phone, apertura);
       console.log(`[cardumen-chat] autorizacion ${state.consent.version} registrada para ${phone}`);
       return;
     }
@@ -223,7 +233,7 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
       // No enviamos otra pregunta al cerrar — solo el agradecimiento/cierre (evita "pregunta + cerramos").
       await closeAndSerialize(supabase, phone, state, model, false, spec);
     } else {
-      await sendTextMessage(phone, output.message_to_user);
+      await sendTextWithRhythm(phone, output.message_to_user);
       await supabase
         .from("cardumen_chat_sessions")
         .update({ state, updated_at: new Date().toISOString() })

@@ -162,6 +162,78 @@ export async function sendTypingIndicator(messageId: string): Promise<void> {
   }
 }
 
+// ============================================================
+// Ritmo humano (estandar para TODO bot conversacional de MeTRIK)
+// ============================================================
+//
+// Un bot que contesta en 200 ms se lee como una maquina, y en una entrevista narrativa eso
+// cambia lo que la persona cuenta. Dos piezas, y las dos son necesarias:
+//   1. el indicador "escribiendo..." (`sendTypingIndicator`, ya existia y lo usan Venezuela y
+//      Customer Service) — marca leido y pone los puntos;
+//   2. una pausa proporcional a lo que se va a decir, que es lo que faltaba en todos los bots.
+//
+// La pausa se calcula, no se fija: un "listo" y un parrafo de tres lineas no pueden tardar lo
+// mismo. Formula declarada abajo, con piso y techo.
+//
+// ⚠️ El techo es deliberadamente bajo (4,5 s). El webhook responde a Meta DESPUES de procesar,
+// y Meta reintenta la entrega si el endpoint tarda demasiado — un reintento duplica mensajes,
+// que es peor que sonar rapido. Para secuencias de varios mensajes seguidos, usar
+// `enBackground()` y responder a Meta primero.
+// Nota historica: en el Sprint 1 se quito un `sleep(1s)` de `sendTextMessage` porque servia
+// para ordenar mensajes, cosa que Meta ya garantiza por `phone_number_id`. Esto NO lo revierte:
+// aquello era latencia sin proposito, esto es ritmo deliberado y medido por longitud.
+
+export interface RitmoOpts {
+  pisoMs?: number;      // minimo, para que nada salga instantaneo
+  porCharMs?: number;   // cuanto "tarda en escribir" cada caracter
+  techoMs?: number;     // maximo, para no colgar el webhook
+  waMessageId?: string; // si viene, muestra "escribiendo..." antes de la pausa
+  sinRitmo?: boolean;   // apagado explicito (pruebas, cargas masivas)
+}
+
+const RITMO_DEFAULT: Required<Pick<RitmoOpts, 'pisoMs' | 'porCharMs' | 'techoMs'>> = {
+  pisoMs: 900,
+  porCharMs: 22,
+  techoMs: 4500,
+};
+
+/** Pausa que "tardaria" una persona en escribir este texto. Pura y testeable. */
+export function calcularPausaMs(text: string, opts: RitmoOpts = {}): number {
+  const { pisoMs, porCharMs, techoMs } = { ...RITMO_DEFAULT, ...opts };
+  const largo = (text || '').length;
+  return Math.min(Math.max(pisoMs, largo * porCharMs), techoMs);
+}
+
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Envia un texto con ritmo humano: "escribiendo..." + pausa proporcional + mensaje.
+ * Es el camino por defecto para hablarle a una persona; `sendTextMessage` queda para
+ * avisos del sistema y para cuando la inmediatez es lo correcto.
+ */
+export async function sendTextWithRhythm(phone: string, text: string, opts: RitmoOpts = {}): Promise<void> {
+  if (opts.sinRitmo || Deno.env.get('WA_RITMO_HUMANO') === 'off') {
+    await sendTextMessage(phone, text);
+    return;
+  }
+  if (opts.waMessageId) await sendTypingIndicator(opts.waMessageId);
+  await dormir(calcularPausaMs(text, opts));
+  await sendTextMessage(phone, text);
+}
+
+/**
+ * Corre trabajo DESPUES de responderle a Meta, sin perderlo. Obligatorio para secuencias de
+ * varios mensajes con ritmo: si se hace antes de responder, el webhook tarda y Meta reintenta.
+ * Sin `waitUntil` el worker puede reciclarse a mitad y el trabajo se pierde en silencio (ya
+ * paso con meta-leads-webhook: 18 de 153 leads).
+ */
+// deno-lint-ignore no-explicit-any
+export function enBackground(p: Promise<unknown>): void {
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(p);
+  else void p.catch((e) => console.error('[wa-respond] trabajo en background fallo:', e));
+}
+
 /** Envia una tarjeta de contacto (vCard) para que el usuario pueda reenviarla con un toque. */
 export async function sendContact(phone: string, displayName: string, contactPhone: string): Promise<void> {
   const digits = (contactPhone || '').replace(/\D/g, '');
