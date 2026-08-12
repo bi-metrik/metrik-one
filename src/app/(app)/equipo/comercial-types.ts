@@ -22,7 +22,14 @@ export interface ComercialResumenRow {
   cerrados: number
   /** Ventas del negocio = negocios con >=1 pago de honorario recibido (venta = primer pago). */
   num_ventas: number
+  /**
+   * Valor aprobado SIN IVA (base). Lo comercial se mide por el ingreso real: el IVA
+   * se recauda para la DIAN y no es ingreso. Sale de `v_negocio_valor`, fuente unica
+   * del desglose. Para la cifra que el cliente paga, `valor_aprobado_con_iva`.
+   */
   valor_aprobado: number
+  /** Valor aprobado CON IVA: lo que el cliente paga. Es la cifra de cartera. */
+  valor_aprobado_con_iva: number
   /** Honorario recaudado = ingreso real (excluye tarifa UPME / pasante). Headline. */
   honorario_recaudado: number
   /** Tarifa UPME recaudada (pasante) = plata de terceros. Linea secundaria, aparte. */
@@ -33,10 +40,17 @@ export interface ComercialPerfilKpis {
   negocios_total: number
   negocios_abiertos: number
   num_ventas: number
+  /** SIN IVA (base): el ingreso real. Ver `ComercialResumenRow.valor_aprobado`. */
   valor_aprobado: number
+  /** CON IVA: lo que el cliente paga. */
+  valor_aprobado_con_iva: number
   honorario_recaudado: number
   tarifa_recaudada: number
-  /** Pendiente de recaudo del honorario (precio aprobado - honorario recaudado). */
+  /**
+   * Pendiente de recaudo del honorario, CON IVA (valor con IVA - honorario recaudado).
+   * Es cartera: se compara contra plata que entra, que tambien lleva IVA. Por eso NO
+   * es `valor_aprobado - honorario_recaudado`: esas dos cifras estan en bases distintas.
+   */
   pendiente_honorario: number
   /** Negocios abiertos con SLA de etapa vencido. */
   vencidos: number
@@ -75,7 +89,10 @@ export interface ComercialPerfilNegocio {
   sla_horas: number | null
   /** 'a_tiempo' | 'vencido' | 'sin_sla'. */
   sla_estado: 'a_tiempo' | 'vencido' | 'sin_sla'
+  /** SIN IVA (base). */
   valor_aprobado: number
+  /** CON IVA: lo que el cliente paga. */
+  valor_aprobado_con_iva: number
   honorario_recaudado: number
   tarifa_recaudada: number
   pendiente_honorario: number

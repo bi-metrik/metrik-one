@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { useEstadoUrl } from '@/hooks/use-estado-url'
+import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import { CardLink } from '@/components/card-link'
 import {
   Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown, UserCircle,
@@ -28,6 +30,8 @@ interface Props {
   // ¿Puede asignar responsable (owner/admin/supervisor)? Solo UX: el guard real
   // vive en las server actions de asignación.
   canAsignar: boolean
+  /** Parámetros de la URL ya resueltos por el server component: filtros iniciales. */
+  searchParams?: SearchParams
 }
 
 /**
@@ -216,6 +220,11 @@ function responsableFilterInicial(miStaffId: string | null, miRol: string | null
 
 // Orden de la vista general. Default: ultima interaccion (cualquiera).
 type SortKey = 'ultima_interaccion' | 'ultima_interaccion_meta' | 'alfabetico' | 'creacion'
+// Valores admisibles desde la URL: un `?orden=basura` debe caer al orden por defecto,
+// no dejar la lista sin ordenar.
+const SORT_VALIDOS: readonly SortKey[] = [
+  'ultima_interaccion', 'ultima_interaccion_meta', 'alfabetico', 'creacion',
+]
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ultima_interaccion', label: 'Ultima interaccion' },
   { value: 'ultima_interaccion_meta', label: 'Ultima interaccion de Meta' },
@@ -241,15 +250,24 @@ const SEGMENTO_ORDER = [
   'conectado', 'no_contesto', 'standby', 'descartado',
 ] as const
 
-export default function ContactosList({ contactos, staff, miStaffId, miRol, canAsignar }: Props) {
-  const [search, setSearch] = useState('')
-  const [rolFilter, setRolFilter] = useState<string | null>(null)
-  const [segmentoFilter, setSegmentoFilter] = useState<string | null>(null)
-  const [sortBy, setSortBy] = useState<SortKey>('ultima_interaccion')
+export default function ContactosList({ contactos, staff, miStaffId, miRol, canAsignar, searchParams }: Props) {
+  // Los filtros viven en la URL (`useEstadoUrl`), no solo en estado de React: antes,
+  // filtrar, entrar a un contacto y volver los borraba, y había que rehacerlos cada vez.
+  // El `inicial` lo resuelve el servidor desde los searchParams (ver `page.tsx`).
+  const inicialDe = <T extends ValorFiltro>(clave: string, def: T, admisibles?: readonly T[]) =>
+    ({ inicial: filtroDesdeSearchParams(searchParams, clave, def, admisibles), admisibles })
+
+  const [search, setSearch] = useEstadoUrl<string>('q', '', inicialDe('q', ''))
+  const [rolFilter, setRolFilter] = useEstadoUrl<string | null>('rol', null, inicialDe<string | null>('rol', null))
+  const [segmentoFilter, setSegmentoFilter] = useEstadoUrl<string | null>('estatus', null, inicialDe<string | null>('estatus', null))
+  const [sortBy, setSortBy] = useEstadoUrl<SortKey>('orden', 'ultima_interaccion', inicialDe('orden', 'ultima_interaccion' as SortKey, SORT_VALIDOS))
   // Filtro de responsable. Quien ejecuta entra pre-filtrado a "Mis contactos";
-  // quien coordina (owner/admin/supervisor) entra en Todos y puede acotar.
-  const [responsableFilter, setResponsableFilter] = useState<string>(
+  // quien coordina (owner/admin/supervisor) entra en Todos y puede acotar. Ese valor
+  // por rol sigue siendo el default: la URL solo manda cuando alguien eligió otra cosa.
+  const [responsableFilter, setResponsableFilter] = useEstadoUrl<string>(
+    'responsable',
     responsableFilterInicial(miStaffId, miRol),
+    inicialDe('responsable', responsableFilterInicial(miStaffId, miRol)),
   )
   // Selección múltiple para asignación masiva. Se guarda por id; lo que se
   // actúa es SIEMPRE la intersección con la lista visible (ver `seleccionados`),

@@ -1,27 +1,28 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
   Scale, CheckCircle2, Loader2, X, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
-  Landmark, Clock, FileText, AlertTriangle,
+  Clock, FileText, AlertTriangle, Receipt, Check,
 } from 'lucide-react'
 import {
   aceptarRepartoComercial,
   rechazarRepartoComercial,
-  getNegociosParaPagoFueraEpayco,
-  registrarPagoFueraEpayco,
   type ConciliacionV2,
-  type NegocioParaPagoFueraEpayco,
   type NegocioSaldo,
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
-import { MAX_LARGO_REF_EXTERNA, referenciaVisible } from '@/lib/cobros/referencia-externa'
+import PagosExternosTab from './pagos-externos-tab'
+import BusquedaInput from '@/components/busqueda-input'
+import { telefonoCoincide } from '@/lib/busqueda/telefono'
+import { RedistribuirModal } from './redistribuir-modal'
+import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
-import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio } from '@/lib/actions/facturacion-actions'
+import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio, emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
 import type { FacturaEnSiigo } from '@/lib/siigo/facturas'
 import { casoListoParaFacturar, faltantesDelCaso } from '@/lib/facturacion/caso-listo'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
@@ -111,7 +112,7 @@ export default function ConciliacionClient({ data, cola }: { data: ConciliacionV
       {tab === 'bandeja' && <TabBandeja pendientes={pendientes} onDone={() => router.refresh()} />}
       {tab === 'saldos' && <TabSaldos data={data} />}
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
-      {tab === 'fuera_epayco' && <TabPagoFueraEpayco onDone={() => router.refresh()} />}
+      {tab === 'fuera_epayco' && <PagosExternosTab onDone={() => router.refresh()} />}
       {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
     </div>
   )
@@ -312,8 +313,11 @@ function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey
 }
 
 function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] }) {
+  const router = useRouter()
   const [q, setQ] = useState('')
   const [abiertas, setAbiertas] = useState<Set<string>>(new Set())
+  /** Referencia que se está corrigiendo. null = el modal está cerrado. */
+  const [redistribuyendo, setRedistribuyendo] = useState<ReferenciaPago | null>(null)
   const query = q.trim().toLowerCase()
 
   const filtradas = useMemo(() => {
@@ -441,12 +445,33 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                         Total cargado: <span className="font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.valor_pagado)}</span>
                       </p>
                     )}
+
+                    {/* La corrección se hace desde aquí, que es donde se ve el error.
+                        Antes solo existía deshacer un reparto ANTES de confirmarlo, y
+                        para entonces nadie lo ha visto todavía. */}
+                    <div className="mt-2 flex justify-end border-t pt-2" style={{ borderColor: '#F3F4F6' }}>
+                      <button
+                        onClick={() => setRedistribuyendo(r)}
+                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
+                        style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" /> Corregir el reparto
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
             )
           })}
         </div>
+      )}
+
+      {redistribuyendo && (
+        <RedistribuirModal
+          referencia={redistribuyendo}
+          onCerrar={() => setRedistribuyendo(null)}
+          onListo={() => { setRedistribuyendo(null); router.refresh() }}
+        />
       )}
     </section>
   )
@@ -645,240 +670,9 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// PAGO FUERA DE ePAYCO — captura excepcional del área financiera
-// ════════════════════════════════════════════════════════════════════════════
-
-/**
- * Registro de un pago que NO entró por la pasarela: cayó a Davivienda u otra cuenta.
- * Formulario mínimo — negocio, valor, fecha, cuenta y referencia OPCIONAL (número de
- * consignación o comprobante, para trazabilidad). Sin referencia el registro NO se
- * bloquea: el sistema genera una interna. NO reparte y NO concilia: es solo la captura
- * del ingreso contra el negocio. Deliberadamente separado de la bandeja de
- * aceptar/rechazar repartos.
- */
-function TabPagoFueraEpayco({ onDone }: { onDone: () => void }) {
-  const hoyBogota = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
-
-  const [negocios, setNegocios] = useState<NegocioParaPagoFueraEpayco[]>([])
-  const [cargando, setCargando] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  const [q, setQ] = useState('')
-  const [negocioId, setNegocioId] = useState('')
-  const [monto, setMonto] = useState('')
-  const [fecha, setFecha] = useState(hoyBogota)
-  const [fuente, setFuente] = useState<'davivienda' | 'otra'>('davivienda')
-  const [referencia, setReferencia] = useState('')
-  const [pending, startTransition] = useTransition()
-
-  useEffect(() => {
-    let cancel = false
-    getNegociosParaPagoFueraEpayco().then((res) => {
-      if (cancel) return
-      if (res.error) setLoadError(res.error)
-      else setNegocios(res.negocios)
-      setCargando(false)
-    })
-    return () => { cancel = true }
-  }, [])
-
-  const seleccionado = useMemo(
-    () => negocios.find((n) => n.negocio_id === negocioId) ?? null,
-    [negocios, negocioId],
-  )
-
-  const query = q.trim().toLowerCase()
-  const resultados = useMemo(() => {
-    if (!query) return []
-    return negocios
-      .filter((n) => [n.codigo, n.nombre, n.empresa].filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(query)))
-      .slice(0, 8)
-  }, [negocios, query])
-
-  function registrar() {
-    if (!negocioId) return toast.error('Elige el negocio al que cae el pago')
-    const valor = Number(monto)
-    if (!Number.isFinite(valor) || valor <= 0) return toast.error('Ingresa el valor del pago')
-
-    startTransition(async () => {
-      const res = await registrarPagoFueraEpayco({
-        negocio_id: negocioId,
-        monto: valor,
-        fecha: fecha || undefined,
-        fuente,
-        referencia: referencia.trim() || undefined,
-      })
-      if (res.success) {
-        toast.success('Pago registrado')
-        setNegocioId(''); setQ(''); setMonto(''); setFecha(hoyBogota); setFuente('davivienda'); setReferencia('')
-        onDone()
-      } else {
-        toast.error(res.error)
-      }
-    })
-  }
-
-  const cuentas: { key: 'davivienda' | 'otra'; label: string }[] = [
-    { key: 'davivienda', label: 'Davivienda' },
-    { key: 'otra', label: 'Otra cuenta' },
-  ]
-
-  return (
-    <div className="max-w-xl">
-      <div className="mb-4 rounded-lg border px-4 py-3" style={{ borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }}>
-        <div className="flex items-center gap-1.5">
-          <Landmark className="h-4 w-4" style={{ color: '#B45309' }} />
-          <h2 className="text-[13px] font-bold" style={{ color: '#92400E' }}>Registro excepcional</h2>
-        </div>
-        <p className="mt-1 text-[12px]" style={{ color: '#92400E' }}>
-          Solo para el dinero que entró a una cuenta bancaria y no por ePayco. Se registra
-          el valor contra el negocio y queda marcado como pago fuera de ePayco. No reparte
-          ni concilia: eso se hace en la pestaña &quot;Por confirmar&quot;.
-        </p>
-      </div>
-
-      <div className="space-y-4 rounded-lg border bg-white p-4" style={{ borderColor: '#E5E7EB' }}>
-        {/* Negocio */}
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Negocio</span>
-          {cargando ? (
-            <div className="flex items-center gap-2 text-[13px]" style={{ color: '#6B7280' }}>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando negocios…
-            </div>
-          ) : loadError ? (
-            <p className="text-[12px]" style={{ color: '#DC2626' }}>{loadError}</p>
-          ) : seleccionado ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border px-2.5 py-1.5" style={{ borderColor: VERDE, backgroundColor: '#ECFDF5' }}>
-              <span className="min-w-0 truncate text-[13px]">
-                <span className="font-semibold" style={{ color: '#1A1A1A' }}>{seleccionado.codigo ?? '—'}</span>
-                <span style={{ color: '#6B7280' }}> · {seleccionado.empresa ?? seleccionado.nombre ?? ''}</span>
-              </span>
-              <button
-                onClick={() => { setNegocioId(''); setQ('') }}
-                className="shrink-0 rounded p-0.5 hover:bg-white"
-                aria-label="Cambiar negocio"
-              >
-                <X className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 rounded-md border px-2.5 py-1.5" style={{ borderColor: '#E5E7EB' }}>
-                <Search className="h-4 w-4" style={{ color: '#9CA3AF' }} />
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Busca por código, empresa o nombre…"
-                  className="w-full text-[13px] outline-none"
-                  style={{ color: '#1A1A1A' }}
-                />
-              </div>
-              {query && (
-                resultados.length === 0 ? (
-                  <p className="mt-1.5 text-[12px]" style={{ color: '#9CA3AF' }}>Sin resultados.</p>
-                ) : (
-                  <div className="mt-1.5 space-y-1">
-                    {resultados.map((n) => (
-                      <button
-                        key={n.negocio_id}
-                        onClick={() => setNegocioId(n.negocio_id)}
-                        className="block w-full rounded-md border px-2.5 py-1.5 text-left text-[13px] transition hover:bg-gray-50"
-                        style={{ borderColor: '#E5E7EB' }}
-                      >
-                        <span className="font-semibold" style={{ color: '#1A1A1A' }}>{n.codigo ?? '—'}</span>
-                        <span style={{ color: '#6B7280' }}> · {n.empresa ?? n.nombre ?? ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                )
-              )}
-            </>
-          )}
-        </label>
-
-        {/* Valor + fecha */}
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Valor</span>
-            <input
-              value={monto}
-              onChange={(e) => setMonto(e.target.value.replace(/[^\d]/g, ''))}
-              inputMode="numeric"
-              placeholder="ej. 1500000"
-              className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none"
-              style={{ borderColor: '#E5E7EB' }}
-            />
-            {Number(monto) > 0 && (
-              <p className="mt-1 text-right text-[11px] font-semibold" style={{ color: VERDE }}>{fmtCOP(Number(monto))}</p>
-            )}
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Fecha del pago</span>
-            <input
-              type="date"
-              value={fecha}
-              onChange={(e) => setFecha(e.target.value)}
-              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-              style={{ borderColor: '#E5E7EB' }}
-            />
-          </label>
-        </div>
-
-        {/* Cuenta */}
-        <div>
-          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>¿A qué cuenta entró?</span>
-          <div className="grid grid-cols-2 gap-2">
-            {cuentas.map((c) => (
-              <button
-                key={c.key}
-                onClick={() => setFuente(c.key)}
-                className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
-                style={fuente === c.key
-                  ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
-                  : { borderColor: '#E5E7EB', color: '#6B7280' }}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Referencia — opcional. Si no la tienes a mano, el sistema genera una interna. */}
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>
-            Referencia <span className="font-normal" style={{ color: '#9CA3AF' }}>(opcional)</span>
-          </span>
-          <input
-            value={referencia}
-            onChange={(e) => setReferencia(e.target.value.slice(0, MAX_LARGO_REF_EXTERNA))}
-            placeholder="N.º de consignación o comprobante"
-            maxLength={MAX_LARGO_REF_EXTERNA}
-            className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-            style={{ borderColor: '#E5E7EB' }}
-          />
-          <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>
-            Si no la tienes a mano, déjala vacía: el sistema genera una referencia interna.
-            Un mismo comprobante no se puede registrar dos veces.
-          </p>
-        </label>
-
-        <div className="flex justify-end">
-          <button
-            onClick={registrar}
-            disabled={pending || cargando}
-            className="inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
-            style={{ backgroundColor: VERDE }}
-          >
-            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-            Registrar pago
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+// El registro de pagos fuera de la pasarela vive en `./pagos-externos-tab.tsx`. Salio de
+// este archivo el 2026-08-11 al dejar de ser un formulario suelto: ahora lleva listado de
+// lo ya registrado, alerta de referencia sobre-asignada, soporte obligatorio y anulacion.
 
 // ── Primitivos ───────────────────────────────────────────────────────────────
 
@@ -914,9 +708,27 @@ function FuenteBadge({ fuente, small }: { fuente: string; small?: boolean }) {
  */
 type VistaFact = 'pendientes' | 'descartados' | 'facturados'
 
+/**
+ * Filtra la cola por lo tecleado. El teléfono va aparte de la comparación de
+ * texto: el mismo número está guardado con indicativo, con paréntesis o pelado,
+ * así que compararlo como cadena no encuentra casi nada (`lib/busqueda/telefono`).
+ */
+export function filtrarCasos(casos: CasoPorFacturar[], term: string): CasoPorFacturar[] {
+  if (!term) return casos
+  return casos.filter(c => {
+    const hay = [c.codigo, c.nombre, c.cliente, c.identificacion, c.etapa,
+      c.factura_numero, c.recibo_numero]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return hay.includes(term) || telefonoCoincide(c.telefono, term)
+  })
+}
+
 function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
   const router = useRouter()
   const [vista, setVista] = useState<VistaFact>('pendientes')
+  const [q, setQ] = useState('')
 
   if (cola.desde_etapa_numero == null) {
     return (
@@ -931,9 +743,14 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
     )
   }
 
-  const facturados = cola.casos.filter(c => c.ya_facturado)
-  const descartados = cola.casos.filter(c => !c.ya_facturado && c.descartado != null)
-  const pendientes = cola.casos.filter(c => !c.ya_facturado && c.descartado == null)
+  // La búsqueda se aplica ANTES de separar por vista, así que los tres contadores
+  // del selector cuentan lo mismo que se va a listar. Los tiles de arriba siguen
+  // siendo la foto de la cola completa: son el estado del trabajo, no del filtro.
+  const term = q.trim().toLowerCase()
+  const encontrados = filtrarCasos(cola.casos, term)
+  const facturados = encontrados.filter(c => c.ya_facturado)
+  const descartados = encontrados.filter(c => !c.ya_facturado && c.descartado != null)
+  const pendientes = encontrados.filter(c => !c.ya_facturado && c.descartado == null)
   const visibles = vista === 'facturados' ? facturados : vista === 'descartados' ? descartados : pendientes
 
   return (
@@ -973,6 +790,21 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
         </div>
       )}
 
+      {/* Búsqueda — misma barra que la vista general de negocios */}
+      <div className="mb-3">
+        <BusquedaInput
+          value={q}
+          onChange={setQ}
+          placeholder="Buscar por código, cliente, celular, cédula o etapa…"
+          ariaLabel="Buscar casos por facturar"
+        />
+        {term && (
+          <p className="mt-1.5 text-[11px]" style={{ color: '#6B7280' }}>
+            {encontrados.length} de {cola.casos.length} casos
+          </p>
+        )}
+      </div>
+
       {/* Selector de vista */}
       <div className="mb-3 flex flex-wrap gap-1">
         {([
@@ -998,10 +830,21 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
       {visibles.length === 0 ? (
         <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
           <p className="text-[13px]" style={{ color: '#6B7280' }}>
-            {vista === 'facturados' ? 'Ningún caso registra factura todavía.'
+            {term ? `Sin resultados para "${q.trim()}" en esta vista.`
+              : vista === 'facturados' ? 'Ningún caso registra factura todavía.'
               : vista === 'descartados' ? 'No has descartado ningún caso.'
               : 'No hay casos por facturar.'}
           </p>
+          {term && (
+            <button
+              type="button"
+              onClick={() => setQ('')}
+              className="mt-2 text-[12px] font-medium underline"
+              style={{ color: VERDE }}
+            >
+              Limpiar búsqueda
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
@@ -1117,11 +960,12 @@ function FilaPorFacturar({
         </div>
       )}
 
-      {!caso.ya_facturado && listo && caso.faltan_recibo.length > 0 && (
-        <div className="mt-2 text-[11px]" style={{ color: '#6B7280' }}>
-          La factura del honorario puede salir. El recibo del recaudo UPME no: falta{' '}
-          {caso.faltan_recibo.join(', ')}.
-        </div>
+      {/* ── El recaudo de la UPME: recibo de caja, nunca factura ────────── */}
+      {/* Va aparte de la factura a propósito: son dos documentos con naturaleza
+          distinta. El honorario es ingreso y se factura; la tarifa es plata de
+          terceros y se recauda. Mezclarlos en un botón invitaría a facturarla. */}
+      {siigoConfigurado && !caso.descartado && (
+        <ReciboUpme caso={caso} onCambio={onCambio} />
       )}
 
       {/* ── Prefactura y emisión ─────────────────────────────────────────── */}
@@ -1315,6 +1159,150 @@ function FilaPorFacturar({
           </div>
         )
       )}
+    </div>
+  )
+}
+
+
+/**
+ * Emisión del recibo de caja del recaudo de la tarifa UPME.
+ *
+ * ⚠️ **El valor es editable y esa es la decisión de diseño, no un descuido.** Desde
+ * Tesorería nadie ve el comprobante de pago, y los casos que entraron por el cargue
+ * masivo NO lo tienen: nacieron antes de que existiera ese punto de control. Medido el
+ * 2026-08-12: de 171 casos con el bloque, solo 18 traen el valor extraído. Si el campo
+ * fuera de solo lectura, el 89% de los casos no podría emitir su recibo.
+ *
+ * El extraído se precarga cuando existe; quien emite puede corregirlo porque está
+ * mirando el comprobante y el sistema no.
+ */
+function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () => void }) {
+  const [abierto, setAbierto] = useState(false)
+  const [valor, setValor] = useState<string>(caso.valor_upme != null ? String(caso.valor_upme) : '')
+  const [justificacion, setJustificacion] = useState('')
+  const [duplicados, setDuplicados] = useState<Array<{ numero: string; fecha: string; valor: number }> | null>(null)
+  const [pendiente, startTransition] = useTransition()
+
+  const monto = Number(valor.replace(/[^\d]/g, ''))
+  const montoValido = Number.isFinite(monto) && monto > 0
+
+  if (caso.recibo_numero) {
+    return (
+      <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: '#047857' }}>
+        <Check className="h-3.5 w-3.5" />
+        Recaudo UPME con recibo <strong>{caso.recibo_numero}</strong>
+      </div>
+    )
+  }
+
+  function emitir() {
+    startTransition(async () => {
+      const r = await emitirReciboDeNegocio(caso.negocio_id, {
+        valorPagado: monto,
+        justificacionDuplicado: justificacion.trim() || undefined,
+      })
+      if (r.ok) {
+        toast.success(
+          r.archivada
+            ? `Recibo ${r.numero} emitido y archivado en el negocio.`
+            : `Recibo ${r.numero} emitido. El PDF no se pudo archivar: revísalo.`,
+        )
+        setAbierto(false)
+        onCambio()
+        return
+      }
+      if (r.duplicados) { setDuplicados(r.duplicados); return }
+      toast.error(r.error)
+    })
+  }
+
+  if (!abierto) {
+    return (
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="text-[11px]" style={{ color: '#6B7280' }}>
+          Recaudo UPME sin recibo de caja
+          {caso.valor_upme == null && ' · sin valor registrado'}
+        </span>
+        <button
+          onClick={() => setAbierto(true)}
+          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
+          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+        >
+          <Receipt className="h-3.5 w-3.5" /> Emitir recibo
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-2 rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
+      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>
+        Recibo de caja · recaudo para la UPME
+      </div>
+      <p className="mt-1 text-[11px]" style={{ color: '#6B7280' }}>
+        No es una factura: esta plata se recauda para girarla a la UPME, no es ingreso.
+      </p>
+
+      <label className="mt-2 block">
+        <span className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>
+          Valor pagado a la UPME
+        </span>
+        <input
+          value={valor}
+          onChange={e => setValor(e.target.value)}
+          disabled={pendiente}
+          inputMode="numeric"
+          placeholder="Ej: 733236"
+          className="mt-1 w-full rounded-md border px-2.5 py-1.5 text-[13px] tabular-nums disabled:opacity-50"
+          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+        />
+        <span className="text-[10px]" style={{ color: '#6B7280' }}>
+          {caso.valor_upme != null
+            ? 'Viene del comprobante cargado. Si no coincide con el soporte, corrígelo.'
+            : 'Este caso no tiene comprobante cargado: escribe el valor del soporte.'}
+        </span>
+      </label>
+
+      {duplicados && (
+        <div className="mt-2 rounded-md border p-2" style={{ borderColor: '#F0C060', backgroundColor: '#FFF8E6' }}>
+          <div className="flex items-start gap-1.5 text-[11px]" style={{ color: '#7A4A00' }}>
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div>
+              Siigo ya tiene {duplicados.length === 1 ? 'un recibo' : `${duplicados.length} recibos`} de
+              este cliente: {duplicados.map(d => `${d.numero} (${fmtCOP(d.valor)})`).join(', ')}.
+              Si aun así hay que emitirlo, escribe por qué.
+            </div>
+          </div>
+          <textarea
+            value={justificacion}
+            onChange={e => setJustificacion(e.target.value)}
+            rows={2}
+            placeholder="Por qué se emite de todos modos…"
+            className="mt-2 w-full rounded border px-2 py-1 text-[12px]"
+            style={{ borderColor: '#F0C060' }}
+          />
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-end gap-2">
+        <button
+          onClick={() => { setAbierto(false); setDuplicados(null) }}
+          disabled={pendiente}
+          className="rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white disabled:opacity-50"
+          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={emitir}
+          disabled={pendiente || !montoValido || (duplicados != null && justificacion.trim().length < 10)}
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
+          style={{ backgroundColor: VERDE }}
+        >
+          {pendiente && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Emitir recibo
+        </button>
+      </div>
     </div>
   )
 }

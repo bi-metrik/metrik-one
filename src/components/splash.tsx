@@ -97,8 +97,6 @@ export default function Splash() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;800&display=swap');
-
         .sp {
           position: fixed;
           inset: 0;
@@ -127,7 +125,7 @@ export default function Splash() {
         }
 
         .sp-ch {
-          font-family: 'Montserrat', sans-serif;
+          font-family: var(--font-montserrat), 'Montserrat', sans-serif;
           font-weight: 800;
           font-size: clamp(2.2rem, 5vw, 3.2rem);
           line-height: 1;
@@ -150,7 +148,7 @@ export default function Splash() {
         }
 
         .sp-one {
-          font-family: 'Montserrat', sans-serif;
+          font-family: var(--font-montserrat), 'Montserrat', sans-serif;
           font-weight: 300;
           font-size: clamp(2.2rem, 5vw, 3.2rem);
           line-height: 1;

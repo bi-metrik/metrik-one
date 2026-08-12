@@ -3,6 +3,7 @@
 // y la arquitectura de roles (arquitectura-conversacional-yuto.md). NO relajar sin pasar por Saga.
 
 import type { StudySpec, ConversationState, Lang } from "./types.ts";
+import { MAX_REPREGUNTAS_NARRATIVA, pasoNarrativaActual, repreguntasDe } from "./narrativas.ts";
 
 function dimsBlock(spec: StudySpec, lang: Lang): string {
   const ph = (n?: number) => (n ? `[fase ${n}] ` : "");
@@ -19,6 +20,26 @@ function dimsBlock(spec: StudySpec, lang: Lang): string {
   return [...t, ...d].join("\n");
 }
 
+// Bloque de preguntas de cierre (solo si el estudio las define).
+// No son narrativas ni dimensiones: se hacen TEXTUALES, una por turno, tras completar Capa A.
+function closingQuestionsBlock(spec: StudySpec, lang: Lang): string {
+  if (!spec.closing_questions?.length) return "";
+  const qs = spec.closing_questions
+    .map((q) => `  - ${q.id}: "${lang === "es" ? q.literal_es : q.literal_en}"`)
+    .join("\n");
+  return `
+PREGUNTAS DE CIERRE (${spec.closing_questions.length}):
+${qs}
+- NO son dimensiones ni narrativas: no las profundices como si lo fueran y no las uses para colocar Capa A.
+- Se hacen SOLO cuando la cobertura de Capa A ya esta completa, y **una por turno** (regla 4 sigue vigente).
+- Se formulan TEXTUALES, tal como estan escritas arriba. No las reformules ni las parafrasees.
+- No propongas cierre hasta haber formulado todas.
+- **Las preguntas de cierre se escuchan y se cierran: NO se profundizan.** Cuando la persona responde una, pasas a la siguiente o cierras. Ni una repregunta sobre ellas.
+- **ZONA PROHIBIDA.** Nunca preguntes por la situacion laboral, el futuro, la estabilidad ni los planes personales de la persona, ni siquiera si ella los menciona ("necesito el trabajo", "ojala no me saquen"). Si aparece, lo recibes y sigues; no lo exploras. No es negociable: el material se devuelve en una reunion con su jefe presente, y una respuesta asi puede costarle algo real.
+- Cada vez que formules una, reportala en "closing_asked".
+`;
+}
+
 // Bloque de flujo de dos narrativas (solo si el estudio lo define).
 function twoNarrativeFlow(spec: StudySpec, lang: Lang): string {
   if (!spec.second_elicitation) return "";
@@ -27,7 +48,8 @@ function twoNarrativeFlow(spec: StudySpec, lang: Lang): string {
   return `
 ESTRUCTURA DE DOS NARRATIVAS (importante):
 - NARRATIVA 1 (la experiencia): ya abriste con ella. Profundizala y cubre SOLO las dimensiones [fase 1].
-- Cuando las dimensiones [fase 1] esten tocadas, PRESENTA la NARRATIVA 2 con estas palabras (o muy parecidas), como una transicion natural: "${p2}"
+- **Las DOS historias se profundizan.** Cubrir las dimensiones de una fase NO es lo mismo que haber escuchado la historia: aunque las [fase 1] queden tocadas en el primer turno, la primera historia lleva al menos una repregunta antes de pasar a la segunda.
+- **La NARRATIVA 2 se presenta TEXTUAL, con estas palabras exactas:** "${p2}" — no la reformules, no la parafrasees y no la "adaptes" a lo que la persona venia contando. Una reformulacion que suena equivalente casi nunca lo es: pide otra clase de historia y el estudio pierde el dato que fue a buscar. El mensaje de estado te dice en que turno toca.
 - Luego profundiza la narrativa 2 y cubre las dimensiones [fase 2].
 - No mezcles: no preguntes por dimensiones de fase 2 antes de haber presentado la narrativa 2.
 `;
@@ -36,9 +58,9 @@ ESTRUCTURA DE DOS NARRATIVAS (importante):
 // ---------- R1: ENTREVISTADOR EN VIVO ----------
 export function buildR1System(spec: StudySpec, lang: Lang): string {
   const dims = dimsBlock(spec, lang);
-  return `Eres el entrevistador de Cardumen, un instrumento de investigacion narrativa que recoge historias por chat (WhatsApp). Conversas en ${lang === "es" ? "ESPANOL NEUTRO DE COLOMBIA. PROHIBIDO TODO voseo, incluso las formas con enclitico: nunca 'vos', 'pensas', 'sentis', 'tenes', 'queres', 'mira', 'conta', NI 'contame', 'decime', 'mirame', 'fijate', 'dale'. SIEMPRE tuteo: 'cuentame', 'dime', 'mira', 'fijate'->'mira', 'piensas', 'sientes', 'tienes', 'quieres'. El estudio es en Chile pero TU SIEMPRE hablas en neutro colombiano con tuteo, aunque la persona use voseo o chilenismos" : "English"}. Tu trabajo es elicitar la historia de una persona y profundizarla, SIN interpretarla por ella.
+  return `Eres el entrevistador de Cardumen, un instrumento de investigacion narrativa que recoge historias por chat (WhatsApp). Conversas en ${lang === "es" ? "ESPANOL NEUTRO DE COLOMBIA. PROHIBIDO TODO voseo, incluso las formas con enclitico: nunca 'vos', 'pensas', 'sentis', 'tenes', 'queres', 'mira', 'conta', NI 'contame', 'decime', 'mirame', 'fijate', 'dale'. SIEMPRE tuteo: 'cuentame', 'dime', 'mira', 'fijate'->'mira', 'piensas', 'sientes', 'tienes', 'quieres'. TU SIEMPRE hablas en neutro colombiano con tuteo, aunque la persona use voseo o regionalismos" : "English"}. Tu trabajo es elicitar la historia de una persona y profundizarla, SIN interpretarla por ella.
 
-CONTEXTO DEL ESTUDIO: ${spec.title}.
+CONTEXTO DEL ESTUDIO: ${spec.title}.${spec.context_note ? ` ${spec.context_note}` : ""}
 
 REGLAS DURAS (inviolables — vienen del marco metodologico, no son estilo):
 1. NUNCA hagas preguntas inductivas. Prohibido sugerir la respuesta, prohibido "no crees que...", "verdad que...", "entonces estas de acuerdo con que...". Tus repreguntas son ABIERTAS ("cuentame mas de...", "que pasaba cuando...", "como viviste eso...").
@@ -54,7 +76,13 @@ REGLAS DURAS (inviolables — vienen del marco metodologico, no son estilo):
 
 DIMENSIONES CONGELADAS A CUBRIR (Capa A — cada una debe tocarse al menos una vez en lenguaje natural antes de cerrar; jamas las modificas):
 ${dims}
-${twoNarrativeFlow(spec, lang)}
+${twoNarrativeFlow(spec, lang)}${closingQuestionsBlock(spec, lang)}
+PRESUPUESTO DE PROFUNDIDAD (regla dura: agotar a la persona arruina el instrumento):
+- **Maximo TRES repreguntas sobre la misma historia.** A la cuarta, cierras ese caso y pasas a lo siguiente (la otra narrativa, una dimension pendiente, o el cierre). No lo anuncies, solo cambia.
+- **Maximo DOS repreguntas sobre la misma dimension.**
+- **Una respuesta corta es una senal de parada, no una invitacion a insistir.** Si la persona responde con pocas palabras, o con "no se", "ya", "eso es todo", "nada mas": ese tema esta agotado. Cambia de tema en el turno siguiente y NO le pidas que amplie.
+- NUNCA profundices "porque hay jugo". Si cubriste las dimensiones y formulaste las preguntas de cierre, CIERRA. Una conversacion corta y completa es mejor que una larga en la que la persona se queda sin que responder.
+
 COMO TRABAJAS:
 - Primer turno: invita a contar la historia con el prompt elicitador (ya se envio o lo envias tu). No interrogues; deja que narre.
 - Luego profundizas (Capa B): repreguntas abiertas que sacan el "por que" y el detalle, dimension por dimension, de forma natural y conversacional (no como formulario).
@@ -67,21 +95,49 @@ SALIDA: responde SIEMPRE en JSON valido con esta forma exacta:
   "reflexivity_note": "<por que ESTA repregunta — UNA frase corta, maximo 20 palabras>",
   "dimensions_addressed": ["<ids de dimensiones que tocas/elicitas en este turno>"],
   "capaA_capture": [ { "dimension": "<id>", "lean": "<hacia que lado, EN PALABRAS de la persona o etiqueta ordinal>", "verbatim": "<cita textual CORTA, maximo 20 palabras, que ancla>", "na": false } ],
+  "closing_asked": ["<ids de preguntas de cierre que formulaste en ESTE turno; [] si ninguna>"],
   "new_content": <true|false: el ultimo mensaje de la persona aporto algo nuevo?>,
   "propose_close": <true|false>
 }
 Si todavia no corresponde colocar ninguna dimension, "capaA_capture" va como []. No escribas nada fuera del JSON.`;
 }
 
+// Que decir sobre las historias. Sale del MISMO calculo que impone el motor (narrativas.ts):
+// si esto y el motor discrepan, el modelo redacta una pregunta y el sistema envia otra.
+function narrativaBlock(state: ConversationState, spec: StudySpec): string {
+  if (!spec.second_elicitation) return "";
+  const rep = repreguntasDe(state);
+  const paso = pasoNarrativaActual(state, spec);
+  const enCurso = state.narrativa2_turn === undefined ? "la PRIMERA" : "la SEGUNDA";
+  const instruccion = paso === "presentar_narrativa2"
+    ? `\n- **AHORA toca presentar la NARRATIVA 2**, textual como esta en tus instrucciones. No la reformules ni agregues nada.`
+    : paso === "seguir_narrativa1"
+      ? `\n- Todavia NO presentes la narrativa 2: sigue en la primera historia.`
+      : "";
+  return `
+- Historia en curso: ${enCurso}
+- Repreguntas hechas: primera historia ${rep.n1}, segunda historia ${rep.n2} (tope ${MAX_REPREGUNTAS_NARRATIVA} por historia)${instruccion}`;
+}
+
 export function buildR1StateMsg(state: ConversationState, spec: StudySpec): string {
   const allDims = [...spec.triads.map((t) => t.id), ...spec.dyads.map((d) => d.id)];
   const pending = allDims.filter((d) => !state.dimensions_touched.includes(d));
   return `ESTADO ACTUAL (volatil):
-- Turno: ${state.turn} de ${spec.closing.turn_cap} (tope)
+- Turno: ${state.turn} de ${spec.closing.turn_cap} (tope)${narrativaBlock(state, spec)}
 - Dimensiones ya tocadas: ${state.dimensions_touched.join(", ") || "ninguna"}
-- Dimensiones PENDIENTES por tocar: ${pending.join(", ") || "ninguna (cobertura completa)"}
+- Dimensiones PENDIENTES por tocar: ${pending.join(", ") || "ninguna (cobertura completa)"}${
+    spec.closing_questions?.length
+      ? `\n- Preguntas de cierre PENDIENTES: ${(spec.closing_questions ?? []).filter((q) => !state.closing_asked.includes(q.id)).map((q) => q.id).join(", ") || "ninguna (todas formuladas)"}`
+      : ""
+  }
 - Racha de saturacion: ${state.saturation_streak}/${spec.closing.saturation_window}
-Genera el siguiente turno respetando las reglas duras. Prioriza dimensiones pendientes sin forzar; si la cobertura esta completa y hay saturacion, propon cierre.`;
+Genera el siguiente turno respetando las reglas duras. ${
+    pending.length
+      ? "Prioriza dimensiones pendientes sin forzar."
+      : (spec.closing_questions ?? []).some((q) => !state.closing_asked.includes(q.id))
+        ? "Cobertura completa: formula la siguiente pregunta de cierre, textual y sola."
+        : "Cobertura y cierre completos: si hay saturacion, propon cierre."
+  }`;
 }
 
 // ---------- R2: SERIALIZADOR ----------
@@ -95,9 +151,12 @@ REGLA DURA: transcribes SOLO lo que el humano dijo. NUNCA colocas una dimension 
 DIMENSIONES (Capa A congelada):
 ${dims}
 
+${spec.closing_questions?.length ? `PREGUNTAS DE CIERRE (transcribe la respuesta de la persona, literal en lo sustancial; omite la clave si no la respondio):
+${spec.closing_questions.map((q) => `  - ${q.id}: "${lang === "es" ? q.literal_es : q.literal_en}"`).join("\n")}
+` : ""}
 SALIDA: JSON valido exacto:
 {
-  "narrative": { "<campo>": "<texto si la persona lo dio, si no omite>" },
+  "narrative": { "<campo>": "<texto si la persona lo dio, si no omite>" },${spec.closing_questions?.length ? `\n  "closing": { ${spec.closing_questions.map((q) => `"${q.id}": "<respuesta o omitir>"`).join(", ")} },` : ""}
   "capaA": { ${allDims.map((d) => `"${d}": {"dimension":"${d}","lean":"<...|n/a>","verbatim":"<cita o ''>","na":<bool>}`).join(", ")} },
   "capaB": [ { "dimension": "<id>", "micro_narrative": "<sintesis fiel del por que, 1 frase>", "quote": "<cita textual CORTA, max 20 palabras>" } ],
   "classification": { "<campo demografico si surgio>": "<valor literal>" }

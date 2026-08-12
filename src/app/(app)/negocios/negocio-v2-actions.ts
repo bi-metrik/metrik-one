@@ -37,13 +37,21 @@ import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { retornosPosibles, retornosDisparados, ejecutarRetorno } from '@/lib/correcciones/retorno'
+import {
+  detectarReversa,
+  guardarPropuesta,
+  ejecutarReversa,
+  descartarPropuesta,
+  type PropuestaPendiente,
+} from '@/lib/correcciones/reversa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
-import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
-import { guardEditarBloque, guardAvanzarStage } from '@/lib/permissions/guard-negocio'
+import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
+import { guardEditarBloque, guardAvanzarStage, guardVerNegocio } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
+import { leerAviso } from '@/lib/correcciones/retroceso'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -228,6 +236,8 @@ export type NegocioResumen = {
   etapa_stage: string | null
   empresa_nombre: string | null
   contacto_nombre: string | null
+  /** Celular del contacto. Solo para la búsqueda: la tarjeta no lo muestra. */
+  contacto_telefono: string | null
   // Ejecucion
   costos_ejecutados: number
   // Pausa
@@ -292,12 +302,18 @@ async function negocioCongeladoPorDuplicado(
   workspaceId: string,
   negocioId: string,
 ): Promise<string | null> {
-  // Referencias NO-split de este negocio
+  // Referencias NO-split de este negocio.
+  //
+  // `anulado_at is null`: este control cuenta por PRESENCIA de la referencia, no por
+  // monto, así que el cero de un cobro anulado no lo saca solo. Sin este filtro, anular
+  // un pago mal cargado dejaría los dos negocios congelados para siempre — justo el
+  // atasco que la anulación existe para deshacer. Ver `lib/cobros/anulacion.ts`.
   const { data: misCobros } = await db(supabase)
     .from('cobros')
     .select('external_ref, split_json')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
+    .is('anulado_at', null)
     .not('external_ref', 'is', null)
 
   const misRefs = ((misCobros ?? []) as Array<{ external_ref: string | null; split_json: { split_id?: string } | null }>)
@@ -311,6 +327,7 @@ async function negocioCongeladoPorDuplicado(
     .select('external_ref, negocio_id, split_json, negocios:negocio_id ( estado )')
     .eq('workspace_id', workspaceId)
     .in('external_ref', misRefs)
+    .is('anulado_at', null)
     .neq('negocio_id', negocioId)
 
   for (const c of ((otrosCobros ?? []) as Array<{
@@ -435,7 +452,7 @@ export async function getNegociosV2(
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
-      contactos(nombre)
+      contactos(nombre, telefono)
     `)
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
@@ -625,6 +642,8 @@ export async function getNegociosV2(
       etapa_stage: (row.etapas_negocio as { nombre: string; stage: string; numero: number } | null)?.stage ?? null,
       empresa_nombre: (row.empresas as { nombre: string } | null)?.nombre ?? null,
       contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
+      contacto_telefono:
+        (row.contactos as { telefono: string | null } | null)?.telefono ?? null,
       costos_ejecutados: Math.round((gastosPorNeg[id] ?? 0) + (horasCostoPorNeg[id] ?? 0)),
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,
@@ -1575,6 +1594,61 @@ export async function getDatosNuevoNegocio(): Promise<{
 
 // ── Crear negocio ─────────────────────────────────────────────────────────────
 
+/**
+ * Negocio que ya existe a nombre del mismo contacto.
+ *
+ * Se devuelve al intentar crear otro para que el comercial vea CUÁL es antes de
+ * decidir. No es un error: un cliente puede comprar dos vehículos. Lo que no
+ * puede es crearlo tres veces por equivocación sin que nada se lo advierta.
+ */
+export interface NegocioDelMismoContacto {
+  id: string
+  codigo: string | null
+  nombre: string
+  /** 'abierto' | 'completado' | 'perdido' | … */
+  estado: string
+  etapa_nombre: string | null
+  created_at: string
+}
+
+/**
+ * Negocios que ya existen para un contacto, del más reciente al más viejo.
+ *
+ * Vive aparte porque los dos caminos de creación (formulario y conversión de un
+ * lead de Meta) tienen que preguntar lo mismo, y el de Meta tiene que hacerlo
+ * ANTES de crear la empresa jurídica: si preguntara después, cancelar dejaría
+ * una empresa huérfana.
+ */
+async function negociosDelContacto(
+  supabase: unknown,
+  workspaceId: string,
+  contactoId: string,
+): Promise<NegocioDelMismoContacto[]> {
+  const { data } = await db(supabase)
+    .from('negocios')
+    .select('id, codigo, nombre, estado, created_at, etapas_negocio(nombre)')
+    .eq('workspace_id', workspaceId)
+    .eq('contacto_id', contactoId)
+    .order('created_at', { ascending: false })
+    .limit(10)
+
+  return ((data ?? []) as Array<{
+    id: string
+    codigo: string | null
+    nombre: string | null
+    estado: string | null
+    created_at: string
+    etapas_negocio: { nombre: string | null } | null
+  }>).map(n => ({
+    id: n.id,
+    codigo: n.codigo,
+    nombre: n.nombre ?? 'Sin nombre',
+    estado: n.estado ?? 'abierto',
+    etapa_nombre: n.etapas_negocio?.nombre ?? null,
+    created_at: n.created_at,
+  }))
+}
+
 export async function crearNegocio(input: {
   nombre: string
   linea_id?: string
@@ -1591,7 +1665,17 @@ export async function crearNegocio(input: {
   origen?: string
   /** Aliado que lo originó. Obligatorio si origen = 'alianza'; ignorado si no. */
   aliado_id?: string
-}): Promise<{ negocio_id: string | null; error: string | null }> {
+  /**
+   * El comercial ya vio los negocios que existen para este contacto y aun así
+   * quiere crear otro. Sin esto, la creación se detiene y devuelve `duplicados`.
+   */
+  confirmar_duplicado?: boolean
+}): Promise<{
+  negocio_id: string | null
+  error: string | null
+  /** Presente solo cuando la creación se detuvo esperando confirmación. */
+  duplicados?: NegocioDelMismoContacto[]
+}> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
 
@@ -1646,6 +1730,22 @@ export async function crearNegocio(input: {
       .select('id')
       .single()
     contactoId = (newContact as { id: string } | null)?.id
+  }
+
+  // ── Ya existe un negocio a nombre de este contacto ──
+  //
+  // Frena y devuelve cuáles son, para que el comercial lo vea ANTES de crear
+  // otro. No bloquea: un cliente puede comprar un segundo vehículo, y ese caso
+  // es real (hay negocios en producción nombrados "… NEGOCIO 2"). Lo que se
+  // corrige es el otro: el mismo lead creado tres veces por equivocación.
+  //
+  // Solo aplica cuando el contacto YA existía: uno recién creado aquí arriba no
+  // puede tener negocios previos, así que ni se consulta.
+  if (input.contacto_id && contactoId && !input.confirmar_duplicado) {
+    const previos = await negociosDelContacto(supabase, workspaceId, contactoId)
+    if (previos.length > 0) {
+      return { negocio_id: null, error: null, duplicados: previos }
+    }
   }
 
   // Persona natural: auto-crear empresa vinculada al contacto
@@ -1757,6 +1857,20 @@ export async function crearNegocio(input: {
   }
 
   const negocioData = negocio as { id: string }
+
+  // Crear a sabiendas de que el contacto ya tenía negocio es una decisión, y por
+  // eso queda escrita: es lo único que después distingue un segundo vehículo
+  // legítimo de un duplicado que nadie quiso crear.
+  if (input.confirmar_duplicado && input.contacto_id && staffId) {
+    await db(supabase).from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioData.id,
+      tipo: 'cambio_sistema',
+      autor_id: staffId,
+      contenido: 'Negocio creado con otro(s) ya existente(s) para el mismo contacto, confirmado por quien lo creó',
+    })
+  }
 
   // ── Auto-asignar al creador como responsable si es operator ──
   // Un operator solo ve los negocios donde es responsable (negocio_responsables N:M,
@@ -1947,7 +2061,13 @@ export async function crearNegocioDesdeInteraccion(input: {
   tipo_persona: 'natural' | 'juridica'
   empresa_nombre?: string
   empresa_nit?: string
-}): Promise<{ negocio_id: string | null; error: string | null }> {
+  /** Ver `crearNegocio`: el comercial ya vio los negocios previos del contacto. */
+  confirmar_duplicado?: boolean
+}): Promise<{
+  negocio_id: string | null
+  error: string | null
+  duplicados?: NegocioDelMismoContacto[]
+}> {
   // userId = profile.id (para assigned_by, FK a profiles). staffId = staff.id
   // (para negocio_responsables.staff_id y como fallback de responsable del negocio).
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
@@ -2024,6 +2144,16 @@ export async function crearNegocioDesdeInteraccion(input: {
   } } } | null)?.config_extra?.meta_leads?.nombre_negocio)
   const nombreNegocio = construirNombreNegocioDesdePayload(contactoNombre, cfgNombre, fieldData)
 
+  // 3.b. ¿Este contacto ya tiene negocio? Se pregunta ANTES de crear la empresa
+  //      jurídica del paso 4: si se preguntara después, cancelar dejaría una
+  //      empresa huérfana en el directorio.
+  if (!input.confirmar_duplicado) {
+    const previos = await negociosDelContacto(supabase, workspaceId, inter.contacto_id)
+    if (previos.length > 0) {
+      return { negocio_id: null, error: null, duplicados: previos }
+    }
+  }
+
   // 4. Empresa jurídica: crearla y vincularla por empresa_id. Natural: crearNegocio
   //    aplica el patrón vigente (PN = su propia empresa auto, desde el contacto).
   let empresaId: string | undefined
@@ -2059,6 +2189,10 @@ export async function crearNegocioDesdeInteraccion(input: {
     empresa_id: empresaId,
     es_persona_natural: input.tipo_persona === 'natural',
     origen: origenDesdeFuenteInteraccion(inter.fuente),
+    // Se propaga el valor REAL, no un `true` fijo: con `true` siempre, el registro
+    // de "creado a sabiendas" se escribiría también en los casos donde no había
+    // ningún negocio previo, y dejaría de significar nada.
+    confirmar_duplicado: input.confirmar_duplicado,
   })
   if (res.error || !res.negocio_id) {
     return { negocio_id: null, error: res.error ?? 'No se pudo crear el negocio' }
@@ -2654,6 +2788,95 @@ async function autocompletarGatesAnticipoPorSaldo(
       } catch { /* no bloquear por el log */ }
     }
   }
+}
+
+/**
+ * Rehace lo que dependía del recaudo de un negocio cuando ese recaudo CAMBIÓ hacia
+ * abajo — hoy, al anular un cobro (`lib/actions/pagos-externos.ts`).
+ *
+ * Dejar de sumar la plata no basta. Con esa plata ya se tomaron decisiones que quedaron
+ * escritas: el negocio pudo marcarse conciliado, su bloque de cobros pudo pasar a
+ * completo, y el gate de anticipo pudo cerrarse SOLO porque el saldo lo cubría
+ * (`autocompletarGatesAnticipoPorSaldo`). Un cobro anulado que deja un gate cerrado
+ * detrás es peor que no poder anularlo: el caso avanza con plata que ya no existe.
+ *
+ * Las tres cosas se deshacen aquí:
+ *   1. El negocio deja de estar conciliado (cambió su cobrado).
+ *   2. Sus bloques de cobros se reevalúan (`reevaluarBloquesCobros` los devuelve a
+ *      pendiente si el saldo dejó de estar cubierto).
+ *   3. Los gates cerrados con la marca `_completado_via: 'saldo'` se REABREN si el
+ *      saldo ya no alcanza. Solo esos: un gate que alguien cerró a mano no se toca,
+ *      porque no fue esta plata la que lo cerró.
+ *
+ * NO revierte un avance de etapa ya ocurrido. Reabrir el gate es lo que impide el
+ * siguiente avance; devolver un caso de etapa es una decisión con consecuencias
+ * propias (documentos, avisos, responsables) y la toma una persona, no una anulación.
+ */
+export async function recalcularNegocioPorCambioDeRecaudo(
+  negocioId: string,
+  motivo: string,
+): Promise<{ gates_reabiertos: number }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { gates_reabiertos: 0 }
+
+  // 1. El check de conciliación se cae: el cobrado ya no es el que se validó.
+  await db(supabase)
+    .from('negocio_conciliacion')
+    .update({ conciliado: false, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+
+  // 2. Bloques de cobros: completo ⇄ pendiente según el saldo real.
+  await reevaluarBloquesCobros(negocioId)
+
+  // 3. Gates de anticipo cerrados por saldo.
+  const cubierto = await anticipoCubiertoPorSaldo(supabase, workspaceId, negocioId)
+  if (cubierto) return { gates_reabiertos: 0 }
+
+  const { data: bloquesRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('id, estado, data, bloque_configs!inner(config_extra, es_gate)')
+    .eq('negocio_id', negocioId)
+
+  const aReabrir = ((bloquesRaw ?? []) as Array<{
+    id: string
+    estado: string | null
+    data: Record<string, unknown> | null
+    bloque_configs: { config_extra: Record<string, unknown> | null; es_gate: boolean | null } | null
+  }>).filter(
+    (b) =>
+      b.estado === 'completo' &&
+      b.bloque_configs?.es_gate === true &&
+      b.bloque_configs?.config_extra?.es_pagos_epayco === true &&
+      b.data?._completado_via === 'saldo',
+  )
+
+  const nowIso = new Date().toISOString()
+  for (const b of aReabrir) {
+    const data = { ...(b.data ?? {}) }
+    delete data._completado_via
+    data._nota = `Gate reabierto: el saldo que lo cerró dejó de existir (${motivo}).`
+    await db(supabase)
+      .from('negocio_bloques')
+      .update({ estado: 'pendiente', completado_at: null, data, updated_at: nowIso })
+      .eq('id', b.id)
+
+    if (staffId) {
+      try {
+        await db(supabase).from('activity_log').insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'comentario',
+          autor_id: staffId,
+          contenido: `Gate de anticipo REABIERTO: se había cerrado solo porque el saldo lo cubría, y ese saldo cambió (${motivo}).`,
+        })
+      } catch { /* no bloquear por el log */ }
+    }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { gates_reabiertos: aReabrir.length }
 }
 
 // ── El motor exige el dato antes de decidir ───────────────────────────────────
@@ -3455,6 +3678,38 @@ export async function cambiarEtapaNegocioConGate(
     }
   }
 
+  // ── El aviso de recaudo cambiado REAPARECE al intentar avanzar ──
+  //
+  // Quien cambia la plata (la financiera) casi nunca es quien mueve el caso (el
+  // comercial). Un aviso que solo se muestra una vez lo cierra quien pasaba por ahí, y
+  // el caso sigue adelante con plata que ya no tiene — que es justo el estado que el
+  // retroceso financiero viene a evitar. Por eso vuelve a frenar aquí, hasta que alguien
+  // lo resuelva de forma explícita y con motivo escrito.
+  //
+  // ⚠️ Este gate NO cede al override de owner/admin, a diferencia de los demás.
+  // Decisión de Mauricio (2026-08-11): "es un gate, no avanza hasta que no se resuelva,
+  // no importa quién". Un override aquí deja al caso avanzando con plata que ya no
+  // tiene, que es exactamente el estado que esto viene a evitar — y quien más
+  // probablemente use el override es quien menos contexto tiene de por qué se frenó.
+  //
+  // No es un callejón sin salida: la salida es RESOLVER el aviso, con motivo escrito
+  // (`resolverAviso`), que deja el rastro de por qué se dio por atendido.
+  {
+    const aviso = await leerAviso(supabase, workspaceId, negocioId)
+    if (aviso) {
+      return {
+        error: 'gate_bloqueado',
+        bloquesPendientes: [{
+          nombre:
+            `El recaudo de este negocio cambió (referencia ${aviso.referencia}) y todavía nadie lo resolvió. ` +
+            `Motivo: ${aviso.motivo}` +
+            (aviso.destinoSugerido ? ` · Se sugirió devolverlo a ${aviso.destinoSugerido}.` : ''),
+          es_gate: true,
+        }],
+      }
+    }
+  }
+
   // Salto automático de etapas ya saldadas: si al llegar no queda nada por cobrar ahí, el
   // negocio pasa de largo. QUÉ etapas participan lo decide `aplicaSaltoPorSaldo` (el flag
   // `saltar_si_saldo_cero` de la etapa, o su `stage` si no lo declara) y CUÁNDO el saldo lo
@@ -3750,7 +4005,7 @@ export async function marcarBloqueCompleto(
   // Igual que en `actualizarBloqueData`: la respuesta y sus campos derivados se escriben
   // juntos. Hace falta en AMBOS caminos — el cliente manda por aquí cuando el bloque queda
   // completo, que es justamente el caso de una pregunta obligatoria que decide una ruta.
-  await propagarCamposDerivados(supabase, negocioBloqueId, mergedData)
+  const derivadosCambiados = await propagarCamposDerivados(supabase, negocioBloqueId, mergedData)
 
   // Traza de la corrección contra el bloque donde vive el dato (ver `actualizarBloqueData`).
   if (cambiosCorreccion.length > 0) {
@@ -3770,6 +4025,16 @@ export async function marcarBloqueCompleto(
       supabase, workspaceId, negocioBloqueId, userId, staffId,
       cambiosCorreccion, opts!.correccion!.causa as CausaCorreccion,
     )
+    // Y si el caso ya se fue por la via equivocada, se PROPONE devolverlo al tramo que se
+    // salto. Este es el camino FRECUENTE de correccion: un bloque de una etapa superada
+    // casi siempre esta completo, asi que el guardado entra por aqui y no por el borrador.
+    if (negocioId) {
+      await detectarReversaDeRuta(
+        supabase, workspaceId, negocioId, userId, staffId,
+        [...cambiosCorreccion.map(c => c.slug), ...derivadosCambiados],
+        opts!.correccion!.causa as CausaCorreccion,
+      )
+    }
   }
 
   // Siempre revalidar la página del negocio después de marcar completo
@@ -3950,19 +4215,25 @@ async function propagarCamposDerivados(
   supabase: any,
   negocioBloqueId: string,
   data: Record<string, unknown>,
-): Promise<void> {
+): Promise<string[]> {
+  // Devuelve los slugs DERIVADOS que efectivamente cambiaron de valor. Los necesita la
+  // reversa de ruta: el campo que gobierna una bifurcación suele ser un derivado, no la
+  // pregunta que el equipo toca (el patrón de "una sola pregunta, varios interruptores").
+  // Sin esto, una corrección que mueve el decisor por derivación pasaría desapercibida.
+  const derivadosCambiados: string[] = []
+
   // El bloque fuente se identifica por su slug estable. Un heredado (slug null) nunca lo es.
   const { data: fuente } = await db(supabase)
     .from('negocio_bloques')
     .select('negocio_id, bloque_configs!inner(slug, etapa_id)')
     .eq('id', negocioBloqueId)
     .single()
-  if (!fuente) return
+  if (!fuente) return derivadosCambiados
 
   const cfgFuente = (fuente as Record<string, unknown>).bloque_configs as Record<string, unknown> | null
   const slugFuente = cfgFuente?.slug as string | undefined
   const negocioId = (fuente as { negocio_id: string }).negocio_id
-  if (!slugFuente) return
+  if (!slugFuente) return derivadosCambiados
 
   // Línea del negocio → sus bloques configurados. Es una lectura de CONFIGURACIÓN (sin
   // `data`), acotada a la línea, y en un workspace sin campos derivados corta aquí mismo.
@@ -3972,7 +4243,7 @@ async function propagarCamposDerivados(
     .eq('id', cfgFuente?.etapa_id as string)
     .single()
   const lineaId = (etapaFuente as { linea_id?: string } | null)?.linea_id
-  if (!lineaId) return
+  if (!lineaId) return derivadosCambiados
 
   const { data: configs } = await db(supabase)
     .from('bloque_configs')
@@ -4005,7 +4276,7 @@ async function propagarCamposDerivados(
       })
     }
   }
-  if (candidatos.length === 0) return
+  if (candidatos.length === 0) return derivadosCambiados
 
   // Una regla puntual que convive con el mapeo (leasing → sin devolución de IVA) puede
   // leer OTRO bloque. Hay que traer su valor: sin él, el servidor escribiría el derivado
@@ -4060,6 +4331,7 @@ async function propagarCamposDerivados(
     for (const d of propios) {
       if (base[d.slug] === d.valor) continue
       cambio = true
+      derivadosCambiados.push(d.slug)
       if (d.valor === undefined) delete siguiente[d.slug]
       else siguiente[d.slug] = d.valor
       rastro[d.slug] = {
@@ -4077,6 +4349,8 @@ async function propagarCamposDerivados(
       .update({ data: siguiente, updated_at: ahora })
       .eq('id', destinoId)
   }
+
+  return [...new Set(derivadosCambiados)]
 }
 
 /**
@@ -4181,6 +4455,140 @@ async function aplicarRetornoPorDecision(
     revalidatePath(`/negocios/${negocioId}`)
     revalidatePath('/negocios')
   }
+}
+
+/**
+ * Si la corrección cambió un dato que YA decidió una ruta recorrida, deja PROPUESTO
+ * devolver el caso a la primera etapa que se saltó.
+ *
+ * Corre DESPUÉS de `aplicarRetornoPorDecision`, y ese orden no es casual: si el retorno al
+ * punto de decisión ya movió el caso, ahora está EN la etapa donde se decide y no hay
+ * ninguna ruta recorrida que revisar — la detección lo ve y no propone nada. Al revés, los
+ * dos mecanismos se pisarían.
+ *
+ * ⚠️ Solo PROPONE. Devolver un caso reabre gates de saldo y puede dejar cobros y cuentas de
+ * cobro en desacuerdo con la etapa: eso lo decide una persona, en `aplicarReversaDeRuta`.
+ *
+ * `derivados` son los campos que la propagación acaba de mover por `lock_when.mapping`. Van
+ * junto a los corregidos porque el campo que gobierna la bifurcación casi nunca es el que
+ * el equipo toca: es su consecuencia (una pregunta, varios interruptores).
+ *
+ * Opt-in por LÍNEA (`config_extra.reversa_ruta.activa`). Sin eso `detectarReversa` corta en
+ * la segunda consulta y ninguna línea cambia de comportamiento.
+ */
+async function detectarReversaDeRuta(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  negocioId: string,
+  userId: string | undefined,
+  staffId: string | null | undefined,
+  slugs: string[],
+  causa: CausaCorreccion,
+): Promise<void> {
+  if (slugs.length === 0) return
+  try {
+    const propuesta = await detectarReversa(supabase, workspaceId, negocioId, slugs)
+    if (!propuesta) return
+    await guardarPropuesta({ supabase, workspaceId, negocioId, propuesta, staffId, userId, causa })
+    revalidatePath(`/negocios/${negocioId}`)
+  } catch (err) {
+    // La corrección del dato ya está guardada: un fallo detectando la divergencia no puede
+    // tumbarla. Lo que no puede es quedar mudo.
+    console.error('[reversa] no se pudo revisar la ruta del caso:', err)
+  }
+}
+
+/**
+ * Devuelve el caso a la primera etapa omitida. **Es la decisión de una persona**, y por eso
+ * es una acción aparte: nada de esto ocurre solo.
+ *
+ * Revalida la propuesta contra el estado de AHORA en vez de confiar en la guardada: entre
+ * que se detectó y que alguien la aprueba, el caso pudo moverse o el dato pudo cambiar
+ * otra vez. Si ya no aplica, se limpia y se dice — mover un caso por una propuesta vencida
+ * sería exactamente el error que este mecanismo viene a evitar.
+ */
+export async function aplicarReversaDeRuta(
+  negocioId: string,
+  motivo: string,
+): Promise<{ error: string | null; destino?: string; omitidas?: string[] }> {
+  const { supabase, workspaceId, userId, staffId, role, areas, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const guardVer = await guardVerNegocio(negocioId)
+  if (!guardVer.ok) return { error: guardVer.error ?? 'Sin acceso a este negocio' }
+
+  // Mover un caso hacia atrás tiene consecuencias de plata: mismo criterio de autorización
+  // que la pantalla usa para dibujar el botón (`puedeDevolverCasoPorRuta`, fuente única).
+  if (!puedeDevolverCasoPorRuta({ id: staffId ?? '', role: (role ?? 'read_only') as Role, areas: (areas ?? []) as Area[] })) {
+    return { error: 'Tu rol no permite devolver un caso a una etapa anterior' }
+  }
+
+  const razon = motivo.trim()
+  // Sin motivo no hay traza que sirva: dentro de un mes nadie sabrá por qué se movió.
+  if (razon.length < 5) return { error: 'Escribe por qué se devuelve el caso' }
+
+  const { data: negRaw } = await db(supabase)
+    .from('negocios')
+    .select('metadata')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const pendiente = (((negRaw as { metadata?: Record<string, unknown> | null } | null)?.metadata
+    ?.reversa_ruta_pendiente ?? null) as PropuestaPendiente | null)
+  if (!pendiente) return { error: 'No hay una propuesta pendiente para este negocio' }
+
+  const vigente = await detectarReversa(supabase, workspaceId, negocioId, null, pendiente.decision.id)
+  if (!vigente) {
+    await descartarPropuesta({
+      supabase, workspaceId, negocioId, staffId,
+      motivo: 'La propuesta dejó de aplicar: el caso o el dato cambiaron desde que se detectó.',
+    })
+    revalidatePath(`/negocios/${negocioId}`)
+    return { error: 'La propuesta ya no aplica: el caso o el dato cambiaron. Se retiró el aviso.' }
+  }
+
+  const { resultado, error: errEjec } = await ejecutarReversa({
+    supabase,
+    workspaceId,
+    negocioId,
+    propuesta: vigente,
+    userId,
+    staffId,
+    motivo: razon,
+    // El mismo movedor del avance normal: crea las casillas de la etapa destino con su
+    // herencia y dispara el `avisar_al_entrar` por el trigger del UPDATE. Se inyecta en vez
+    // de importarse dentro de la lib para no cerrar un ciclo contra este archivo.
+    moverEtapa: cambiarEtapaNegocio,
+  })
+  if (errEjec || !resultado) return { error: errEjec ?? 'No se pudo devolver el caso' }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/negocios')
+  return { error: null, destino: resultado.destinoNombre, omitidas: resultado.omitidas }
+}
+
+/** Descarta la propuesta sin mover el caso. Exige motivo: el descarte también es un dato. */
+export async function descartarReversaDeRuta(
+  negocioId: string,
+  motivo: string,
+): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const guardVer = await guardVerNegocio(negocioId)
+  if (!guardVer.ok) return { error: guardVer.error ?? 'Sin acceso a este negocio' }
+  if (!puedeDevolverCasoPorRuta({ id: staffId ?? '', role: (role ?? 'read_only') as Role, areas: (areas ?? []) as Area[] })) {
+    return { error: 'Tu rol no permite decidir sobre esta propuesta' }
+  }
+
+  const razon = motivo.trim()
+  if (razon.length < 5) return { error: 'Escribe por qué se descarta' }
+
+  const r = await descartarPropuesta({ supabase, workspaceId, negocioId, motivo: razon, staffId })
+  if (r.error) return r
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null }
 }
 
 /**
@@ -4315,8 +4723,9 @@ export async function actualizarBloqueData(
   // Excepción: una CORRECCIÓN siempre propaga, aunque llegue por el camino del borrador.
   // Si no, un decisor derivado quedaría con el valor viejo mientras el caso ya se movió
   // por el nuevo — el motor volvería a decidir con el dato equivocado.
+  let derivadosCambiados: string[] = []
   if (opts?.revalidate !== false || cambiosCorreccion.length > 0) {
-    await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
+    derivadosCambiados = await propagarCamposDerivados(supabase, negocioBloqueId, dataFinal)
   }
 
   // Traza de la corrección: valor previo, valor nuevo, causa y área DUEÑA del bloque.
@@ -4339,6 +4748,16 @@ export async function actualizarBloqueData(
       supabase, workspaceId, negocioBloqueId, userId, staffId,
       cambiosCorreccion, opts!.correccion!.causa as CausaCorreccion,
     )
+    // Y si el caso ya se fue por la via que ese dato decidio, se PROPONE devolverlo al
+    // tramo que se salto. Va despues del retorno a proposito (ver `detectarReversaDeRuta`).
+    const idNegocio = negocioId ?? ((row as Record<string, unknown>)?.negocio_id as string | undefined)
+    if (idNegocio) {
+      await detectarReversaDeRuta(
+        supabase, workspaceId, idNegocio, userId, staffId,
+        [...cambiosCorreccion.map(c => c.slug), ...derivadosCambiados],
+        opts!.correccion!.causa as CausaCorreccion,
+      )
+    }
   }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
@@ -4523,13 +4942,17 @@ export async function autoCrearCobros(
     return { error: null }
   }
 
-  // Idempotencia: verificar si ya existe un cobro anticipo para este negocio
+  // Idempotencia: verificar si ya existe un cobro anticipo para este negocio.
+  // Un anticipo ANULADO no cuenta: si contara, este camino lo UPDATEARÍA y resucitaría
+  // una fila que alguien anuló a propósito, con su motivo y su autor intactos pero con
+  // plata de vuelta. Ver `lib/cobros/anulacion.ts`.
   const { data: existente } = await db(supabase)
     .from('cobros')
     .select('id')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
     .eq('tipo_cobro', 'anticipo')
+    .is('anulado_at', null)
     .limit(1)
 
   if (existente && (existente as unknown[]).length > 0) {
