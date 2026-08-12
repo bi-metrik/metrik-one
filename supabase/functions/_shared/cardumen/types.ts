@@ -59,7 +59,36 @@ export interface ConversationState {
   saturation_streak: number;          // repreguntas seguidas sin contenido nuevo
   reflexivity_log: ReflexivityEntry[]; // por que de cada repregunta (auditoria de sesgo)
   closing_asked: string[];            // ids de preguntas de cierre ya formuladas
+  consent?: Consentimiento;           // si el estudio pide autorizacion, aqui queda
+  closing_done_turn?: number;         // turno en que se formulo la ultima pregunta de cierre
   closed: boolean;
+}
+
+// Encuadre del estudio: saludo, rubrica y tratamiento de datos. Opt-in por estudio; si el
+// estudio no lo declara, el chat abre con el encuadre generico de siempre.
+export interface Encuadre {
+  version: string;                 // queda registrada con la autorizacion: sin ella nadie puede decir QUE se acepto
+  pide_consentimiento?: boolean;
+  palabra_si?: string;
+  palabra_no?: string;
+  url_politica?: string;
+  boton_politica?: string;
+  saludo?: string;
+  rubrica?: string;
+  datos?: string;
+  cierre_consentimiento?: string;
+  al_rechazar?: string;
+  al_borrar?: string;
+}
+
+// Autorizacion de la persona, tal como quedo. Vive en el estado de la conversacion y viaja
+// al payload de la respuesta: es la prueba de autorizacion previa, expresa e informada.
+export interface Consentimiento {
+  version: string;
+  pendiente: boolean;
+  respuesta?: string;   // lo que escribio, literal
+  granted_at?: string;
+  reintentos?: number;
 }
 
 export interface ChatTurn { role: "interviewer" | "participant"; text: string; }

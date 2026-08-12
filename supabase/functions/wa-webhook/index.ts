@@ -132,7 +132,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
       return;
     }
-    await continueCardumenChat(supabase, message.phone, texto);
+    await continueCardumenChat(supabase, message.phone, texto, message.wa_message_id);
     return;
   }
 
@@ -143,7 +143,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   if (message.type === 'text') {
     const estudioChat = await resolverEstudioChat(supabase, message.text);
     if (estudioChat) {
-      await startCardumenChat(supabase, message.phone, estudioChat);
+      await startCardumenChat(supabase, message.phone, estudioChat, message.wa_message_id);
       return;
     }
   }
