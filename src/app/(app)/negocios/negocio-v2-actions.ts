@@ -236,6 +236,8 @@ export type NegocioResumen = {
   etapa_stage: string | null
   empresa_nombre: string | null
   contacto_nombre: string | null
+  /** Celular del contacto. Solo para la búsqueda: la tarjeta no lo muestra. */
+  contacto_telefono: string | null
   // Ejecucion
   costos_ejecutados: number
   // Pausa
@@ -450,7 +452,7 @@ export async function getNegociosV2(
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
-      contactos(nombre)
+      contactos(nombre, telefono)
     `)
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
@@ -640,6 +642,8 @@ export async function getNegociosV2(
       etapa_stage: (row.etapas_negocio as { nombre: string; stage: string; numero: number } | null)?.stage ?? null,
       empresa_nombre: (row.empresas as { nombre: string } | null)?.nombre ?? null,
       contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
+      contacto_telefono:
+        (row.contactos as { telefono: string | null } | null)?.telefono ?? null,
       costos_ejecutados: Math.round((gastosPorNeg[id] ?? 0) + (horasCostoPorNeg[id] ?? 0)),
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,
