@@ -7,14 +7,18 @@ import { FEDE_SPEC } from "./spec.ts";
 import { claudeHaiku } from "./model.ts";
 import { initState, elicitationOpening, nextTurn } from "./r1.ts";
 import { serialize } from "./r2.ts";
-import { resolverEstudioChatPorTrigger, specDeSesion, type EstudioChat } from "./estudios.ts";
-import type { ConversationState, StudySpec } from "./types.ts";
+import { resolverEstudioChatPorTrigger, specDeSesion, cargarEstudioChat, type EstudioChat } from "./estudios.ts";
+import { sendCtaUrl } from "../wa-respond.ts";
+import type { ConversationState, StudySpec, Encuadre } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
 
 const CHAT_KEYWORDS = ["cardumenchat", "cardumen chat"];
 const EXIT_WORDS = ["salir", "cancelar", "terminar"];
+// BORRAR no es una salida mas: cierra Y elimina lo ya guardado. Se promete en el encuadre,
+// asi que tiene que funcionar de verdad.
+const ERASE_WORDS = ["borrar", "borra todo", "eliminar mis datos"];
 
 /**
  * Estudio que abre este texto. Primero el catalogo (una fila = un estudio, varios
@@ -25,7 +29,7 @@ export async function resolverEstudioChat(supabase: Supa, text: string): Promise
   const delCatalogo = await resolverEstudioChatPorTrigger(supabase, text);
   if (delCatalogo) return delCatalogo;
   if (isCardumenChatTrigger(text)) {
-    return { estudio: FEDE_SPEC.study_id, nombre: FEDE_SPEC.title, spec: FEDE_SPEC, desdeCatalogo: false };
+    return { estudio: FEDE_SPEC.study_id, nombre: FEDE_SPEC.title, spec: FEDE_SPEC, encuadre: null, desdeCatalogo: false };
   }
   return null;
 }
@@ -58,7 +62,22 @@ export async function startCardumenChat(
   // El slug del catalogo manda sobre el study_id del spec: es el que decide con que estudio
   // se guarda la respuesta al cerrar, y tiene que ser uno solo de punta a punta.
   state.study_id = slug;
+  const enc = estudio?.encuadre ?? null;
   const opening = elicitationOpening(spec, state.lang);
+
+  // Con encuadre que pide autorizacion: se informa y NO se pregunta nada hasta el si.
+  // La primera pregunta no entra al historial todavia — si entrara, quedaria como turno del
+  // entrevistador sin haberse enviado, y R1 creeria que ya pregunto.
+  if (enc?.pide_consentimiento) {
+    state.consent = { version: enc.version, pendiente: true, reintentos: 0 };
+    await supabase.from("cardumen_chat_sessions").upsert({
+      phone, state, closed: false, reminded_at: null, updated_at: new Date().toISOString(),
+    });
+    await enviarEncuadre(phone, enc);
+    console.log(`[cardumen-chat] encuadre enviado (${enc.version}), esperando autorizacion de ${phone}`);
+    return;
+  }
+
   state.history.push({ role: "interviewer", text: opening });
   await supabase.from("cardumen_chat_sessions").upsert({
     phone,
@@ -69,9 +88,39 @@ export async function startCardumenChat(
   });
   await sendTextMessage(
     phone,
-    "🐟 *Cardumen*\nGracias por sumar tu historia. Conversemos un momento — responde con tus propias palabras.\n\n⏳ *Tienes 24 horas para completarla; si no, se pierde el avance.* Lo ideal es terminarla hoy mismo. Escribe *salir* si quieres terminar antes.\n\n" + opening,
+    (enc?.saludo ? enc.saludo + "\n\n" : "🐟 *Cardumen*\nGracias por sumar tu historia. Conversemos un momento — responde con tus propias palabras.\n\n⏳ *Tienes 24 horas para completarla; si no, se pierde el avance.* Lo ideal es terminarla hoy mismo. Escribe *salir* si quieres terminar antes.\n\n") + opening,
   );
   console.log(`[cardumen-chat] iniciada para ${phone}`);
+}
+
+/**
+ * Encuadre en tres mensajes. El del medio va como CTA para que la politica se abra en el
+ * navegador INTERNO de WhatsApp: un link de texto plano saca a la persona al navegador
+ * externo, y a mitad de un ejercicio de confianza eso es perderla.
+ */
+async function enviarEncuadre(phone: string, enc: Encuadre): Promise<void> {
+  if (enc.saludo) await sendTextMessage(phone, enc.saludo);
+  if (enc.rubrica) await sendTextMessage(phone, enc.rubrica);
+  if (enc.datos) {
+    if (enc.url_politica) {
+      // display_text se recorta a 20 caracteres en wa-respond.ts
+      await sendCtaUrl(phone, enc.datos, (enc.boton_politica ?? "Politica de datos").slice(0, 20), enc.url_politica);
+    } else {
+      await sendTextMessage(phone, enc.datos);
+    }
+  }
+  if (enc.cierre_consentimiento) await sendTextMessage(phone, enc.cierre_consentimiento);
+}
+
+/** Elimina lo ya guardado de esta persona en este estudio. Lo promete el encuadre. */
+async function borrarDatosDeParticipante(supabase: Supa, phone: string, estudio: string): Promise<void> {
+  const { error } = await supabase
+    .from("cardumen_respuestas")
+    .delete()
+    .eq("token", phone)
+    .eq("estudio", estudio);
+  if (error) console.error("[cardumen-chat] error borrando respuestas:", error.message);
+  await supabase.from("cardumen_chat_sessions").delete().eq("phone", phone);
 }
 
 export async function continueCardumenChat(supabase: Supa, phone: string, text: string): Promise<void> {
@@ -92,6 +141,71 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
   }
 
   const state = row.state as ConversationState;
+
+  // BORRAR: vale en cualquier momento, incluso antes de autorizar. Va ANTES del modelo:
+  // no tiene sentido gastar un turno de LLM para atender una peticion de borrado.
+  if (ERASE_WORDS.includes(exit)) {
+    const est = await cargarEstudioChat(supabase, state.study_id);
+    await borrarDatosDeParticipante(supabase, phone, state.study_id);
+    await sendTextMessage(
+      phone,
+      est?.encuadre?.al_borrar ?? "Hecho: borré lo que habías compartido y cerré la conversación.",
+    );
+    console.log(`[cardumen-chat] BORRADO a peticion de ${phone} (estudio ${state.study_id})`);
+    return;
+  }
+
+  // Puerta de autorizacion: mientras este pendiente, no se pregunta ni se guarda nada.
+  if (state.consent?.pendiente) {
+    const est = await cargarEstudioChat(supabase, state.study_id);
+    const enc = est?.encuadre ?? null;
+    const si = (enc?.palabra_si ?? "LISTO").toLowerCase();
+    const no = (enc?.palabra_no ?? "NO").toLowerCase();
+
+    if (exit === si) {
+      state.consent = {
+        version: state.consent.version,
+        pendiente: false,
+        respuesta: (text || "").trim(),
+        granted_at: new Date().toISOString(),
+      };
+      const specAut = await specDeSesion(supabase, state.study_id);
+      const apertura = elicitationOpening(specAut, state.lang);
+      state.history.push({ role: "interviewer", text: apertura });
+      await supabase
+        .from("cardumen_chat_sessions")
+        .update({ state, updated_at: new Date().toISOString() })
+        .eq("phone", phone);
+      await sendTextMessage(phone, apertura);
+      console.log(`[cardumen-chat] autorizacion ${state.consent.version} registrada para ${phone}`);
+      return;
+    }
+
+    if (exit === no || EXIT_WORDS.includes(exit)) {
+      // Sin autorizacion no se guarda NADA: la sesion se borra, no se cierra con datos dentro.
+      await supabase.from("cardumen_chat_sessions").delete().eq("phone", phone);
+      await sendTextMessage(phone, enc?.al_rechazar ?? "Listo, no hay problema. No guardamos nada.");
+      console.log(`[cardumen-chat] autorizacion rechazada por ${phone}`);
+      return;
+    }
+
+    // Cualquier otra cosa: se repite UNA vez y no se avanza. Un bucle infinito de "no te
+    // entendi" es peor que cerrar.
+    const reintentos = (state.consent.reintentos ?? 0) + 1;
+    state.consent = { ...state.consent, reintentos };
+    await supabase
+      .from("cardumen_chat_sessions")
+      .update({ state, updated_at: new Date().toISOString() })
+      .eq("phone", phone);
+    await sendTextMessage(
+      phone,
+      reintentos >= 2
+        ? `Te dejo el ejercicio por aquí. Cuando quieras empezar, responde *${(enc?.palabra_si ?? "LISTO")}*.`
+        : `Para empezar responde *${(enc?.palabra_si ?? "LISTO")}*, o *${(enc?.palabra_no ?? "NO")}* si prefieres no participar.`,
+    );
+    return;
+  }
+
   const model = claudeHaiku();
   // El spec sale del estudio de ESTA sesion, no de un import global: es lo que permite que
   // dos estudios corran a la vez sin pisarse.
@@ -140,7 +254,22 @@ async function closeAndSerialize(
 ): Promise<void> {
   state.closed = true;
   const spec: StudySpec = specSesion ?? FEDE_SPEC;
+  // Sin autorizacion no se guarda nada, aunque haya turnos: el consentimiento es la
+  // condicion para que el dato exista, no un tramite posterior.
+  if (state.consent?.pendiente) {
+    await supabase.from("cardumen_chat_sessions").delete().eq("phone", phone);
+    console.log(`[cardumen-chat] cerrada sin autorizacion (nada guardado) para ${phone}`);
+    return;
+  }
+
   let payload: Record<string, unknown> = { source: "chat", collection_mode: spec.collection_mode };
+  if (state.consent) {
+    payload.consent = {
+      version: state.consent.version,
+      respuesta: state.consent.respuesta,
+      granted_at: state.consent.granted_at,
+    };
+  }
   try {
     const record = await serialize(model, spec, state);
     payload = { ...payload, ...record };

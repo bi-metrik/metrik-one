@@ -10,7 +10,7 @@
 // comportamiento previo (spec importado) — asi ningun estudio vivo cambia de conducta.
 
 import { STUDY_SPEC } from "./spec.ts";
-import type { StudySpec } from "./types.ts";
+import type { StudySpec, Encuadre } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
@@ -19,6 +19,7 @@ export interface EstudioChat {
   estudio: string;          // slug canonico: es el que se guarda en cardumen_respuestas.estudio
   nombre: string | null;
   spec: StudySpec;
+  encuadre: Encuadre | null; // null = encuadre generico de siempre
   desdeCatalogo: boolean;   // false = spec importado (fallback retrocompatible)
 }
 
@@ -66,7 +67,7 @@ export async function cargarEstudioChat(
 ): Promise<EstudioChat | null> {
   const { data, error } = await supabase
     .from("cardumen_estudios")
-    .select("estudio, nombre, modo, spec, activo")
+    .select("estudio, nombre, modo, spec, activo, encuadre")
     .eq("estudio", estudio)
     .maybeSingle();
   if (error) {
@@ -84,6 +85,7 @@ export async function cargarEstudioChat(
     estudio: data.estudio,
     nombre: data.nombre ?? null,
     spec: spec ?? STUDY_SPEC,
+    encuadre: (data.encuadre ?? null) as Encuadre | null,
     desdeCatalogo: spec !== null,
   };
 }
