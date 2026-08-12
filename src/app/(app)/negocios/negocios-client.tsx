@@ -1,5 +1,5 @@
 'use client'
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { Clock } from 'lucide-react'
 import NegocioCard, { type StaffAsignable } from './negocio-card'
 import BusquedaInput from '@/components/busqueda-input'
@@ -8,10 +8,17 @@ import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import { segmentarNegocios } from '@/lib/negocios/segmentador'
+import { useEstadoUrl } from '@/hooks/use-estado-url'
+import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import type { NegocioResumen } from './negocio-v2-actions'
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
 type MotivoCierre = 'todos' | 'exitoso' | 'perdido' | 'cancelado'
+
+// Valores admisibles desde la URL. Sin esta lista, un `?fase=basura` (enlace viejo,
+// barra de direcciones editada) deja la lista vacía sin explicación.
+const FASES_VALIDAS: readonly FaseFilter[] = ['todos', 'venta', 'ejecucion', 'cobro', 'cerrados']
+const MOTIVOS_VALIDOS: readonly MotivoCierre[] = ['todos', 'exitoso', 'perdido', 'cancelado']
 
 /** Etapa del workflow de la línea, para el segmentador de nivel 2. */
 export type EtapaSeg = { numero: number; nombre: string; stage: string; orden: number }
@@ -42,6 +49,7 @@ const SIN_ORIGEN = 'sin_origen'
 
 /** Orden de la lista. Default: el del servidor (más reciente primero). */
 type SortKey = 'reciente' | 'atraso'
+const SORT_VALIDOS: readonly SortKey[] = ['reciente', 'atraso']
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'reciente', label: 'Mas reciente' },
   { value: 'atraso', label: 'Mas atrasado' },
@@ -141,6 +149,7 @@ export default function NegociosClient({
   staffList = [],
   canAsignar = false,
   canMarcar = false,
+  searchParams,
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
@@ -153,17 +162,29 @@ export default function NegociosClient({
   canAsignar?: boolean
   /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */
   canMarcar?: boolean
+  /** Parámetros de la URL ya resueltos por el server component: filtros iniciales. */
+  searchParams?: SearchParams
 }) {
   // Segmentador jerárquico: fase (stage) → etapa (numero dentro de la fase).
-  const [fase, setFase] = useState<FaseFilter>(defaultStage)
-  const [etapaNum, setEtapaNum] = useState<number | null>(null)
-  const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
-  const [q, setQ] = useState('')
-  const [seccional, setSeccional] = useState<string>('todas')
-  const [responsable, setResponsable] = useState<string>('todos')
-  const [origen, setOrigen] = useState<string>('todos')
-  const [soloAtrasados, setSoloAtrasados] = useState(false)
-  const [sortBy, setSortBy] = useState<SortKey>('reciente')
+  //
+  // Los filtros viven en la URL (`useEstadoUrl`), no solo en estado de React: antes,
+  // filtrar la lista, entrar a un caso y volver los borraba, y había que rehacerlos
+  // cada vez. De paso la vista filtrada queda compartible por enlace.
+  // El `inicial` lo resuelve el SERVIDOR desde los searchParams (ver `page.tsx`): sin
+  // él, el primer render del servidor sale sin filtrar y el del cliente filtrado, que
+  // es un desajuste de hidratación con parpadeo visible.
+  const inicialDe = <T extends ValorFiltro>(clave: string, def: T, admisibles?: readonly T[]) =>
+    ({ inicial: filtroDesdeSearchParams(searchParams, clave, def, admisibles), admisibles })
+
+  const [fase, setFase] = useEstadoUrl<FaseFilter>('fase', defaultStage, inicialDe('fase', defaultStage, FASES_VALIDAS))
+  const [etapaNum, setEtapaNum] = useEstadoUrl<number | null>('etapa', null, inicialDe('etapa', null))
+  const [motivoCierre, setMotivoCierre] = useEstadoUrl<MotivoCierre>('cierre', 'todos', inicialDe('cierre', 'todos' as MotivoCierre, MOTIVOS_VALIDOS))
+  const [q, setQ] = useEstadoUrl<string>('q', '', inicialDe('q', ''))
+  const [seccional, setSeccional] = useEstadoUrl<string>('seccional', 'todas', inicialDe('seccional', 'todas'))
+  const [responsable, setResponsable] = useEstadoUrl<string>('responsable', 'todos', inicialDe('responsable', 'todos'))
+  const [origen, setOrigen] = useEstadoUrl<string>('origen', 'todos', inicialDe('origen', 'todos'))
+  const [soloAtrasados, setSoloAtrasados] = useEstadoUrl<boolean>('atrasados', false, inicialDe('atrasados', false))
+  const [sortBy, setSortBy] = useEstadoUrl<SortKey>('orden', 'reciente', inicialDe('orden', 'reciente' as SortKey, SORT_VALIDOS))
 
   // Seccionales DIAN presentes en los negocios (para el filtro). Solo las que existen.
   const seccionalesDisponibles = useMemo(() => {
