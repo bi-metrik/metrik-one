@@ -42,6 +42,21 @@ export type UserContext = {
 export type BloqueContext = {
   /** Stage al que pertenece la etapa donde vive el bloque. */
   stage: Stage
+  /**
+   * Áreas que ADEMÁS de la dueña del stage pueden editar este bloque
+   * (`config_extra.areas_editoras`, opt-in por bloque).
+   *
+   * Existe porque el área dueña se deriva del stage de la etapa, y hay bloques
+   * cuyo trabajo real es de otra área. Caso que lo motivó (SOENA, Notificación):
+   * la etapa es de venta, pero cuando la DIAN abre agenda para un caso radicado
+   * por PQRS, quien consigue la cita es OPERACIONES — y tenía que pedirle al
+   * comercial que la registrara.
+   *
+   * Amplía, nunca restringe: sin el campo, el criterio es idéntico al anterior.
+   * Y NO toca `canAdvanceStage`: poder registrar un dato en un bloque no es
+   * poder mover el negocio de etapa.
+   */
+  areasExtra?: Area[]
 }
 
 /** Stage -> area duena del stage. cerrado no tiene area (read-only). */
@@ -97,13 +112,17 @@ export function canEditBloque(
   const areaDuena = STAGE_TO_AREA[bloque.stage]
   const tieneAreas = user.areas.length > 0
   const areasEfectivas = getAreasEfectivas(user)
-  // Cubre el stage si no tiene areas (sin segmentacion) o su area lo incluye.
-  const cubreStage = areaDuena !== null && (!tieneAreas || areasEfectivas.has(areaDuena))
+  // El bloque puede declarar áreas adicionales autorizadas a editarlo.
+  const invitada = (bloque.areasExtra ?? []).some(a => areasEfectivas.has(a))
+  // Cubre el stage si no tiene areas (sin segmentacion), su area lo incluye, o
+  // el bloque invita explicitamente a su area.
+  const cubreStage = (areaDuena !== null && (!tieneAreas || areasEfectivas.has(areaDuena))) || invitada
 
   // owner/admin: passthrough si no tienen area; con area, se restringen al stage.
   if (user.role === 'owner' || user.role === 'admin') {
     if (!tieneAreas) return true
-    return areaDuena === null ? true : areasEfectivas.has(areaDuena)
+    // Stage sin área dueña (cerrado): owner/admin conservan el paso, como antes.
+    return areaDuena === null ? true : areasEfectivas.has(areaDuena) || invitada
   }
 
   // Stage cerrado: solo owner/admin (ya retornaron arriba)
@@ -133,8 +152,17 @@ export function canAdvanceStage(
   user: UserContext,
   stageTo: Stage,
   negocioResponsables: string[],
+  /**
+   * Áreas que la ETAPA invita a avanzarla (`config_extra.areas_que_avanzan`),
+   * aunque el stage sea de otra. Existe porque hay etapas cuyo trabajo que
+   * DESBLOQUEA el avance lo hace otra área: en SOENA, Notificación es del
+   * comercial (es quien habla con el cliente) pero es operaciones quien
+   * consigue la fecha de la cita y necesita poder seguir.
+   * Sin el campo, el criterio es el de siempre.
+   */
+  areasExtra?: Area[],
 ): boolean {
-  return canEditBloque(user, { stage: stageTo }, negocioResponsables)
+  return canEditBloque(user, { stage: stageTo, areasExtra }, negocioResponsables)
 }
 
 // ── canEditHeader ────────────────────────────────────────────────────
@@ -173,6 +201,55 @@ export function puedeAutorizarCierreNoFacturable(user: UserContext): boolean {
   if (user.role === 'owner' || user.role === 'admin') return true
   if (user.role === 'read_only' || user.role === 'contador') return false
   return getAreasEfectivas(user).has('financiera')
+}
+
+// ── puedeGestionarPagosExternos ──────────────────────────────────────
+
+/**
+ * Registrar, corregir o ANULAR un pago que no entro por la pasarela.
+ *
+ * Es plata que entra sin que ninguna pasarela la respalde: el unico respaldo es el
+ * soporte que adjunta quien la registra. Y anular es tocar el saldo de un negocio
+ * hacia abajo. Las dos cosas son del area financiera, o de administracion.
+ *
+ * Hermana de `puedeAutorizarCierreNoFacturable` y con el mismo criterio: owner/admin
+ * siempre; read_only/contador nunca; el resto solo con 'financiera' en sus areas
+ * efectivas ('direccion' la expande).
+ *
+ * Fuente UNICA: la consumen el guard del servidor (`ctxPagosExternos`) Y la pantalla,
+ * que decide con ella si dibuja los botones de editar y anular. Copiar la regla en los
+ * dos lados los desincroniza en silencio: la pantalla ofreceria algo que el servidor
+ * rechaza, o se lo escondaria a quien si puede.
+ */
+export function puedeGestionarPagosExternos(user: UserContext): boolean {
+  if (user.role === 'owner' || user.role === 'admin') return true
+  if (user.role === 'read_only' || user.role === 'contador') return false
+  return getAreasEfectivas(user).has('financiera')
+}
+
+// ── puedeDevolverCasoPorRuta ─────────────────────────────────────────
+
+/**
+ * Decidir sobre una propuesta de REVERSA DE RUTA: devolver el caso a la primera
+ * etapa que se salto, o descartar la propuesta.
+ *
+ * Es una decision con consecuencias de plata, no una correccion de dato: devolver
+ * un caso reabre gates de saldo y puede dejar cobros y cuentas de cobro emitidas
+ * en desacuerdo con la etapa en la que quedo. Por eso NO alcanza con poder
+ * corregir el campo que la origino.
+ *
+ * Criterio: owner/admin siempre (mandan sobre el proceso completo); supervisor si,
+ * porque es quien lleva el area y ve el caso entero; operator, contador y
+ * read_only nunca. Mas amplio que `puedeAutorizarCierreNoFacturable` a proposito:
+ * ahi se decide sobre facturar, que es del area financiera, y aqui sobre por donde
+ * va el proceso, que es de quien lo supervisa.
+ *
+ * Fuente UNICA: la consumen el guard del servidor (`aplicarReversaDeRuta` /
+ * `descartarReversaDeRuta`) Y la pantalla, que decide con ella si dibuja los
+ * botones. Copiar la regla en los dos lados los desincroniza en silencio.
+ */
+export function puedeDevolverCasoPorRuta(user: UserContext): boolean {
+  return user.role === 'owner' || user.role === 'admin' || user.role === 'supervisor'
 }
 
 // ── canGestionarAliados ──────────────────────────────────────────────

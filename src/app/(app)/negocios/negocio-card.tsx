@@ -5,6 +5,7 @@ import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, C
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
+import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { agregarMarcaNegocio, quitarMarcaNegocio } from './marcas-actions'
 import { MARCAS_CONDICION, type MarcaCondicion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
@@ -133,7 +134,7 @@ function ResponsablesInline({
     startTransition(async () => {
       const res = await agregarResponsable(negocioId, staffId)
       if (res.error) toast.error(res.error)
-      else toast.success(`Responsable agregado: ${nombre}`)
+      else toast.success(`Responsable agregado: ${nombre}`, { description: detalleAsignacion(res) })
     })
   }
 

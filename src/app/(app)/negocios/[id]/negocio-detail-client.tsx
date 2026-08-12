@@ -27,9 +27,12 @@ import type {
   NegocioBloque,
 } from '../negocio-v2-actions'
 import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
+import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
+import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -328,7 +331,7 @@ function ResponsableSelector({
         toast.error(result.error)
       } else {
         const nombre = staffList.find(s => s.id === staffId)?.full_name ?? ''
-        toast.success(`Responsable agregado: ${nombre}`)
+        toast.success(`Responsable agregado: ${nombre}`, { description: detalleAsignacion(result) })
       }
     })
   }
@@ -694,6 +697,14 @@ function SelectorEtapa({
     setGateModal(null)
     startTransition(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo)
+
+      // ⚠️ Hay gates que NO ceden al override (el aviso de recaudo cambiado). Sin esto,
+      // el operador recibía el literal "Error: gate_bloqueado": frenaba sin decir por qué,
+      // que es tan inútil como no frenar. Se vuelve a abrir el modal con el motivo real.
+      if (result.error === 'gate_bloqueado') {
+        setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [] })
+        return
+      }
       if (result.error) {
         toast.error('Error: ' + result.error)
       } else {
@@ -1194,6 +1205,12 @@ function BloqueRenderer({
     ) return 'editable'
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
+    // Heredado que se comporta según lo que traiga: con el dato ya puesto en la
+    // etapa anterior se muestra de solo lectura; vacío se habilita aquí. El
+    // `data` que llega ya es el del origen en los bloques compartidos.
+    if (soloLecturaPorDatoLleno(configExtra, bloque.instancia?.data as Record<string, unknown> | null)) {
+      return 'visible'
+    }
     // Instance-level: bloque already completed.
     // Excepciones `datos` y `documento`: siguen editables mientras el negocio esté
     // EN esta etapa (si fuera de una etapa anterior ya habría salido arriba, por
@@ -1905,6 +1922,11 @@ export default function NegocioDetailClient({
   const reprocesoMarca = (((negocio as unknown as { metadata?: Record<string, unknown> | null }).metadata
     ?.reproceso ?? null) as ReprocesoVista | null)
 
+  // Propuesta de reversa de ruta pendiente de decision. La escribe el servidor al detectar
+  // que una correccion dejo al caso en la via equivocada; aqui solo se muestra.
+  const reversaPendiente = (((negocio as unknown as { metadata?: Record<string, unknown> | null }).metadata
+    ?.reversa_ruta_pendiente ?? null) as ReversaPendienteVista | null)
+
   const bloquesExtendidos = allBloques.filter(b => {
     // Bloques marcados no-visibles (ej. "Tipo de solicitante", auto-poblado en la
     // creación) no se renderizan, pero su data ya alimentó `datosEtapa` arriba.
@@ -1937,6 +1959,9 @@ export default function NegocioDetailClient({
     <div className="mx-auto max-w-2xl px-4 py-4">
       {/* Reproceso abierto: lo primero que se ve al abrir el negocio. */}
       <ReprocesoBanner negocioId={negocio.id} reproceso={reprocesoMarca} userRole={userRole} />
+
+      {/* El caso quedo en la via equivocada: se PROPONE devolverlo. Nunca se mueve solo. */}
+      <ReversaRutaBanner negocioId={negocio.id} propuesta={reversaPendiente} userRole={userRole} />
 
       {/* ── HEADER NOOR 5 FILAS ── */}
       {/* Fila 1 — nav (scrollea) */}

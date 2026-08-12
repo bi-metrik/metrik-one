@@ -25,6 +25,8 @@ import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } 
 import { createDriveFolder, uploadFileToDrive, setFilePublicByLink } from '../src/lib/google-drive'
 import { generarFormularioCore } from '../src/lib/actions/formulario-actions'
 import { nitSinDv, calcularDvNit } from '../src/lib/dian/nit'
+import { asignarResponsable } from '../src/lib/negocios/responsable-rol'
+import { canonizarSeccional } from '../src/lib/dian/seccionales'
 
 for (const line of readFileSync(join(process.cwd(), '.env.local'), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
@@ -288,12 +290,21 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
     nombre: f.nombre_negocio, codigo: f.codigo,
     responsable_id: f.responsable_staff_id, etapa_actual_id: f.etapa_id, stage_actual: f.stage,
     estado: 'abierto', origen: 'otro',
-    metadata: { id_hubspot: f.id_hubspot, fuente_cargue: FUENTE, seccional: f.seccional || null },
+    // La seccional se guarda CANONIZADA: el cargue de julio metió el texto del Excel
+    // tal cual ("Bogota", "Medellin") y partió en dos cada ciudad del tablero, además
+    // de dejar sin preset al 010. Ver `seccional-negocio.ts`.
+    metadata: { id_hubspot: f.id_hubspot, fuente_cargue: FUENTE, seccional: canonizarSeccional(f.seccional) },
   }).select('id').single()
   if (nerr) throw new Error(`negocio: ${nerr.message}`)
   const negocioId = (neg as { id: string }).id
   if (f.responsable_staff_id) {
-    await supabase.from('negocio_responsables').insert({ negocio_id: negocioId, staff_id: f.responsable_staff_id, assigned_by: ASSIGNED_BY })
+    // Vía el helper para que la fila nazca CON `rol`: el cargue de julio insertó sin él y
+    // dejó 247 responsables invisibles para el routing de avisos (ver responsable-rol.ts).
+    await asignarResponsable(supabase, {
+      negocioId,
+      staffId: f.responsable_staff_id,
+      assignedBy: ASSIGNED_BY,
+    })
   }
 
   // 4. carpeta Drive

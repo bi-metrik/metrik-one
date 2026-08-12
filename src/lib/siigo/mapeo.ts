@@ -43,7 +43,14 @@ export interface DatosContacto {
 
 export interface BorradorCliente {
   person_type: 'Person' | 'Company'
-  id_type: { code: string }
+  /**
+   * ⚠️ Al CREAR va como cadena ("13"), aunque al LEER Siigo lo devuelva como
+   * objeto `{code, name}`. Mandarlo como objeto se rechaza con "The field id_type
+   * is required", y como número con "Invalid data type". Comprobado el 2026-08-10
+   * contra la API, con una identificación que ya existía: así el esquema se valida
+   * sin crear un tercero de prueba.
+   */
+  id_type: string
   identification: string
   check_digit: string
   name: string[]
@@ -53,7 +60,13 @@ export interface BorradorCliente {
     address: string
     city: { country_code: string; state_code: string; city_code: string }
   }
-  phones: Array<{ number: string }>
+  /**
+   * ⚠️ OPCIONAL, y la diferencia importa: Siigo acepta el payload SIN la clave,
+   * pero rechaza `phones: []` con un error genérico ("could not be completed with
+   * the data you submitted"). Un arreglo vacío no equivale a ausente. Comprobado
+   * el 2026-08-10; era la causa de 5 de los 6 fallos del backfill.
+   */
+  phones?: Array<{ number: string }>
   contacts: Array<{ first_name: string; last_name: string; email: string }>
 }
 
@@ -113,6 +126,17 @@ export function ciudadParaSiigo(rut: RutExtraido): { country_code: string; state
   }
 }
 
+/**
+ * Telefono en la forma que Siigo acepta, o ninguno. Nunca inventa ni recorta: si
+ * el valor no queda en un numero nacional de hasta 10 digitos, el tercero se crea
+ * sin telefono (que es un dato opcional) en vez de fallar.
+ */
+function telefonoParaSiigo(telefono: string): { phones: Array<{ number: string }> } | null {
+  const digitos = limpiar(telefono).replace(/[^\d]/g, '').replace(/^57(?=\d{10}$)/, '')
+  if (!digitos || digitos.length > 10) return null
+  return { phones: [{ number: digitos }] }
+}
+
 export function borradorCliente(rut: RutExtraido, contacto: DatosContacto): Borrador<BorradorCliente> {
   const faltantes: string[] = []
   const idType = codigoTipoDocumento(rut)
@@ -145,7 +169,7 @@ export function borradorCliente(rut: RutExtraido, contacto: DatosContacto): Borr
   return {
     payload: {
       person_type: esEmpresa ? 'Company' : 'Person',
-      id_type: { code: idType },
+      id_type: idType,
       identification,
       check_digit,
       name,
@@ -156,7 +180,14 @@ export function borradorCliente(rut: RutExtraido, contacto: DatosContacto): Borr
       },
       // Se quita el indicativo de pais: ONE guarda "+57 300…" y Siigo espera el
       // numero nacional. Dejarlo pegado produce un telefono de 12 digitos.
-      phones: telefono ? [{ number: telefono.replace(/[^\d]/g, '').replace(/^57(?=\d{10}$)/, '') }] : [],
+      //
+      // ⚠️ Siigo rechaza mas de 10 caracteres, y el telefono NO es obligatorio: un
+      // numero que no se puede normalizar se OMITE en vez de tumbar la creacion del
+      // tercero entero. Medido el 2026-08-10: un caso del backfill fallaba solo por
+      // esto. Tampoco se recorta a diez digitos a la fuerza, que seria inventar un
+      // telefono que nadie contesta.
+      // La clave se OMITE cuando no hay teléfono utilizable; ver la nota del tipo.
+      ...(telefonoParaSiigo(telefono) ?? {}),
       contacts: [{
         first_name: name[0] ?? '',
         last_name: name[1] ?? '',

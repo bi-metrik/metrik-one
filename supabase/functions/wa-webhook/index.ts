@@ -8,7 +8,7 @@ import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage, sendButtons, sendCtaUrl } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
-import { isCardumenChatTrigger, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
+import { resolverEstudioChat, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
@@ -132,15 +132,20 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
       return;
     }
-    await continueCardumenChat(supabase, message.phone, texto);
+    await continueCardumenChat(supabase, message.phone, texto, message.wa_message_id);
     return;
   }
 
   // 0c. Cardumen — disparadores PÚBLICOS por palabra clave (solo si NO hay conversacion abierta).
   //     El usuario escribió la palabra → ventana de servicio 24h (mensaje gratis).
-  if (message.type === 'text' && isCardumenChatTrigger(message.text)) {
-    await startCardumenChat(supabase, message.phone);
-    return;
+  //     La palabra resuelve QUE estudio se abre (catálogo `cardumen_estudio_triggers`), así que
+  //     varios estudios conviven. Si no resuelve ninguno, cae a la palabra fija de siempre.
+  if (message.type === 'text') {
+    const estudioChat = await resolverEstudioChat(supabase, message.text);
+    if (estudioChat) {
+      await startCardumenChat(supabase, message.phone, estudioChat, message.wa_message_id);
+      return;
+    }
   }
   if (message.type === 'text' && isCardumenFlowTrigger(message.text)) {
     await sendCardumenFlow(message.phone);

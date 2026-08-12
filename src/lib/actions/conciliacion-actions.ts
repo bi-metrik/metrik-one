@@ -22,11 +22,19 @@ import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-s
 import { diasDesde } from '@/lib/negocios/antiguedad'
 import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
+import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
 import {
-  construirRefExterna,
-  normalizarRefExterna,
-  MAX_LARGO_REF_EXTERNA,
-} from '@/lib/cobros/referencia-externa'
+  guardarAviso,
+  resolverAviso,
+  etapasRecorridas,
+  ejecutarRetroceso,
+  proponerRetrocesoFinanciero,
+} from '@/lib/correcciones/retroceso'
+import type {
+  CausaRetrocesoFinanciero,
+  PropuestaRetroceso,
+} from '@/lib/negocios/retroceso-financiero'
+import { recalcularNegocioPorCambioDeRecaudo, cambiarEtapaNegocio } from '@/app/(app)/negocios/negocio-v2-actions'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -1249,6 +1257,27 @@ export interface AgregarPagoInput {
   fecha?: string
   justificacion?: string
   tipo_cobro?: string
+  /**
+   * Soporte del pago, ya archivado por el caller (Storage + carpeta del negocio en
+   * Drive). Viaja en el mismo INSERT que el cobro: un cobro sin su respaldo, aunque sea
+   * por un instante, es exactamente el estado que el soporte obligatorio quiere evitar.
+   */
+  soporte?: Record<string, unknown> | null
+  /** Marca de reparto deliberado (`split_id` + `split_total`) cuando el caller la declara. */
+  split_json?: Record<string, unknown>
+  /**
+   * Salta el bloqueo duro por referencia ya usada en otro negocio.
+   *
+   * NO es un permiso para duplicar: es para el caller que aplica el control CORRECTO
+   * sobre esa referencia, que es el de MONTO (la suma registrada no puede superar el
+   * pago original — `lib/cobros/sobreasignacion.ts`). Repetir una referencia entre
+   * negocios es legitimo cuando un pago se reparte, y hay casos reales asi en
+   * produccion; el bloqueo por unicidad los rompe.
+   *
+   * Quien la pase debe haber evaluado la sobre-asignacion ANTES y declarar el reparto
+   * con `split_json`.
+   */
+  permitirRefCompartida?: boolean
 }
 
 /**
@@ -1339,9 +1368,12 @@ export async function registrarPagoEnNegocio(
       }
     }
 
+    // Un cobro ANULADO no bloquea el re-registro (ver `lib/cobros/anulacion.ts`).
     const { data: existing } = await db(supabase)
       .from('cobros').select('id')
-      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', String(refNum)).limit(1)
+      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', String(refNum))
+      .is('anulado_at', null)
+      .limit(1)
     if (existing && (existing as unknown[]).length > 0) return { success: true }
 
     const { error: insErr } = await db(supabase).from('cobros').insert({
@@ -1359,24 +1391,35 @@ export async function registrarPagoEnNegocio(
     if (input.fuente === 'otra' && !fuenteValor) return { success: false, error: 'Indica el nombre de la fuente del pago' }
     const externalRef = referencia
 
-    // Bloqueo DURO de duplicado también para pagos manuales (Davivienda/otra).
-    const dupManual = await refDuplicadaNoSplit(supabase, workspaceId, externalRef)
-    if (dupManual && dupManual.negocio_id !== negocioId) {
-      return {
-        success: false,
-        error: `Esta referencia ya está registrada en ${dupManual.codigo ?? dupManual.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+    // Bloqueo DURO de duplicado también para pagos manuales (Davivienda/otra), SALVO
+    // que el caller ya haya aplicado el control de monto (ver `permitirRefCompartida`).
+    if (!input.permitirRefCompartida) {
+      const dupManual = await refDuplicadaNoSplit(supabase, workspaceId, externalRef)
+      if (dupManual && dupManual.negocio_id !== negocioId) {
+        return {
+          success: false,
+          error: `Esta referencia ya está registrada en ${dupManual.codigo ?? dupManual.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+        }
       }
     }
 
+    // Idempotencia: un cobro ANULADO no cuenta como "ya existe". Si contara, anular un
+    // pago mal cargado dejaría el negocio sin poder volver a registrarlo con la misma
+    // referencia — que es justo el camino que la anulación abre (el monto no se edita:
+    // se anula y se vuelve a registrar). Ver `lib/cobros/anulacion.ts`.
     const { data: existing } = await db(supabase)
       .from('cobros').select('id')
-      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', externalRef).limit(1)
+      .eq('workspace_id', workspaceId).eq('negocio_id', negocioId).eq('external_ref', externalRef)
+      .is('anulado_at', null)
+      .limit(1)
     if (existing && (existing as unknown[]).length > 0) return { success: true }
 
     const { error: insErr } = await db(supabase).from('cobros').insert({
       workspace_id: workspaceId, negocio_id: negocioId, monto,
       tipo_cobro: input.tipo_cobro ?? 'externo', fecha, external_ref: externalRef,
       fuente: fuenteValor, notas: `Pago ${fuenteValor} — Ref ${referencia}`,
+      ...(input.soporte ? { soporte: input.soporte } : {}),
+      ...(input.split_json ? { split_json: input.split_json } : {}),
     })
     if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar el pago' }
     await logFabOrigen(referencia)
@@ -1397,12 +1440,15 @@ async function refDuplicadaNoSplit(
   workspaceId: string,
   externalRef: string,
 ): Promise<{ negocio_id: string; codigo: string | null } | null> {
+  // `anulado_at is null`: el duplicado se detecta por PRESENCIA de la referencia, no por
+  // su monto, así que el cero de la anulación no basta acá. Ver `lib/cobros/anulacion.ts`.
   const { data } = await db(supabase)
     .from('cobros')
     .select('negocio_id, split_json, negocios:negocio_id ( codigo )')
     .eq('workspace_id', workspaceId)
     .eq('external_ref', externalRef)
     .not('negocio_id', 'is', null)
+    .is('anulado_at', null)
     .is('split_json->>split_id', null)
     .limit(1)
     .maybeSingle()
@@ -1799,132 +1845,311 @@ export async function rechazarRepartoComercial(
   return { success: true, eliminados: comercial.length }
 }
 
-// ── Pago fuera de ePayco (registro excepcional del área financiera) ───────────
+// El registro, listado, correccion y anulacion de pagos fuera de la pasarela vive en
+// `src/lib/actions/pagos-externos.ts`. Se movio ahi el 2026-08-11 al dejar de ser solo
+// un formulario de captura: ahora tiene listado, control de sobre-asignacion por monto,
+// soporte obligatorio y anulacion. La via unica de escritura del cobro sigue siendo
+// `registrarPagoEnNegocio`, en este archivo.
 
-/** Negocio elegible para recibir un pago que no entró por ePayco. */
-export interface NegocioParaPagoFueraEpayco {
-  negocio_id: string
-  codigo: string | null
-  nombre: string | null
-  empresa: string | null
-}
+// ── Redistribuir una referencia desde el panel de la financiera ────────────────
 
 /**
- * Lista los negocios abiertos del workspace para el buscador del registro de pago
- * fuera de ePayco. Solo área financiera (ctxFinanciero).
+ * El área financiera reescribe cómo se reparte una referencia entre negocios.
+ *
+ * Es UNA operación para los cuatro gestos que antes no existían: repartir, deshacer un
+ * reparto, dejar todo en el negocio original y mover la referencia completa a otro
+ * negocio. Todos son editar una lista de líneas.
+ *
+ * ⚠️ Lo que esto reemplaza: hasta hoy solo se podía corregir ANTES de que la financiera
+ * aceptara el reparto (`eliminarPorcionPago` exige negocio en `venta` Y conciliación sin
+ * confirmar). Los errores de plata se descubren tarde, así que en la práctica la
+ * corrección era un SQL a mano. Medido el 2026-08-11: las 2 referencias repartidas del
+ * workspace estaban las dos fuera del alcance de esa acción.
+ *
+ * Las reglas viven en `src/lib/cobros/redistribucion.ts` (puro, 15 pruebas). Aquí solo
+ * se resuelven contra la base y se ejecutan.
  */
-export async function getNegociosParaPagoFueraEpayco(): Promise<{
-  negocios: NegocioParaPagoFueraEpayco[]
-  error?: string
-}> {
+export async function redistribuirReferencia(input: {
+  externalRef: string
+  /** Valor real del pago que llegó. Se usa como techo. */
+  pagoOriginal: number
+  lineas: Array<{ negocioId: string; monto: number; porDevolver?: boolean }>
+  motivo: string
+}): Promise<
+  | { ok: true; negociosAfectados: number; gatesReabiertos: number }
+  | { ok: false; error: string; errores?: string[] }
+> {
   const ctx = await ctxFinanciero()
-  if (!ctx.ok) return { negocios: [], error: ctx.error }
-  const { supabase, workspaceId } = ctx
-
-  const { data: raw } = await db(supabase)
-    .from('negocios')
-    .select('id, codigo, nombre, empresas:empresa_id ( nombre )')
-    .eq('workspace_id', workspaceId)
-    .eq('estado', 'abierto')
-    .order('created_at', { ascending: false })
-
-  const negocios: NegocioParaPagoFueraEpayco[] = ((raw ?? []) as Array<{
-    id: string
-    codigo: string | null
-    nombre: string | null
-    empresas: { nombre: string | null } | null
-  }>).map((n) => ({
-    negocio_id: n.id,
-    codigo: n.codigo,
-    nombre: n.nombre,
-    empresa: n.empresas?.nombre ?? null,
-  }))
-
-  return { negocios }
-}
-
-export interface PagoFueraEpaycoInput {
-  negocio_id: string
-  /** Valor recibido, en pesos. */
-  monto: number
-  /** 'YYYY-MM-DD'. Default: hoy (Bogotá). */
-  fecha?: string
-  /** Cuenta por la que entró el dinero. Se guarda en `cobros.fuente`. */
-  fuente: 'davivienda' | 'otra'
-  /**
-   * OPCIONAL. Número de consignación o comprobante real, escrito por la financiera.
-   * Se persiste prefijada (`EXT-…`) en `cobros.external_ref`. Vacío → referencia
-   * interna autogenerada.
-   */
-  referencia?: string
-}
-
-/**
- * Registra un pago que NO entró por ePayco: negocio + valor + fecha + fuente, con
- * referencia opcional (número de consignación o comprobante).
- *
- * NO es conciliación ni reparto — es la captura de un ingreso excepcional que llegó
- * a una cuenta bancaria (Davivienda u otra). Exclusivo del área financiera
- * (ctxFinanciero aquí + el blindaje de `registrarPagoEnNegocio`, que revalida la
- * sesión en su rama no-ePayco).
- *
- * `cobros.external_ref` es la llave del registro de pagos y del control de duplicados
- * (`refDuplicadaNoSplit`), no puede quedar vacía. Dos casos:
- *   - Con referencia escrita: se guarda prefijada `EXT-{referencia}` (ver
- *     `referencia-externa.ts`). Vive en su propio espacio de nombres → un comprobante
- *     NO puede hacerse pasar por una referencia real de ePayco (siempre numérica
- *     pura), y a la vez SÍ cuenta para el control de duplicados: teclear dos veces el
- *     mismo comprobante queda frenado (en el mismo negocio es idempotente, en otro se
- *     rechaza).
- *   - Sin referencia (la financiera no la tiene a mano): no se bloquea el registro; se
- *     genera una interna trazable (`FUERA-EPAYCO-...`), única por construcción.
- *
- * La `fuente` se persiste aunque hoy no alimente ningún cálculo: habilita un control
- * de saldo por cuenta a futuro.
- */
-export async function registrarPagoFueraEpayco(
-  input: PagoFueraEpaycoInput,
-): Promise<{ success: true } | { success: false; error: string }> {
-  const ctx = await ctxFinanciero()
-  if (!ctx.ok) return { success: false, error: ctx.error }
+  if (!ctx.ok) return { ok: false, error: ctx.error }
   const { supabase, workspaceId, staffId } = ctx
 
-  const monto = Number(input.monto)
-  if (!Number.isFinite(monto) || monto <= 0) {
-    return { success: false, error: 'El valor del pago debe ser mayor a cero' }
-  }
-  if (input.fuente !== 'davivienda' && input.fuente !== 'otra') {
-    return { success: false, error: 'Elige la cuenta por la que entró el pago' }
-  }
+  const ref = (input.externalRef ?? '').trim()
+  if (!ref) return { ok: false, error: 'Referencia inválida' }
 
-  const refEscrita = normalizarRefExterna(input.referencia)
-  if (refEscrita && refEscrita.length > MAX_LARGO_REF_EXTERNA) {
-    return { success: false, error: `La referencia no puede superar ${MAX_LARGO_REF_EXTERNA} caracteres` }
-  }
+  // ── Estado actual: solo porciones VIGENTES ──
+  // `anulado_at is null` no es opcional: una porción anulada tiene `monto = 0` y
+  // volvería a entrar al reparto como una línea fantasma.
+  const { data: actualesRaw, error: leerErr } = await db(supabase)
+    .from('cobros')
+    .select('id, negocio_id, monto, negocios:negocio_id ( codigo, metadata )')
+    .eq('workspace_id', workspaceId)
+    .eq('external_ref', ref)
+    .is('anulado_at', null)
+    .not('negocio_id', 'is', null)
 
-  const fecha = (input.fecha ?? '').trim() || todayBogotaISO()
-  const referencia =
-    construirRefExterna(refEscrita) ??
-    `FUERA-EPAYCO-${fecha.replace(/-/g, '')}-${randomUUID().slice(0, 6).toUpperCase()}`
+  if (leerErr) return { ok: false, error: (leerErr as { message: string }).message }
 
-  const res = await registrarPagoEnNegocio(
-    supabase,
-    workspaceId,
-    staffId,
-    {
-      negocio_id: input.negocio_id,
-      fuente: input.fuente,
-      // `registrarPagoEnNegocio` exige nombre cuando la fuente es 'otra'; el
-      // formulario es mínimo y no lo pide → queda etiquetado como 'otra'.
-      fuente_nombre: input.fuente === 'otra' ? 'otra' : undefined,
-      referencia,
-      monto,
-      fecha,
-      tipo_cobro: 'externo',
-    },
-    'conciliacion',
+  const actuales = ((actualesRaw ?? []) as Array<{
+    id: string
+    negocio_id: string
+    monto: number
+    negocios: { codigo: string | null; metadata: Record<string, unknown> | null } | null
+  }>).map(c => ({
+    cobroId: c.id,
+    negocioId: c.negocio_id,
+    negocioCodigo: c.negocios?.codigo ?? null,
+    monto: Number(c.monto ?? 0),
+    negocioFacturado: Boolean(c.negocios?.metadata && 'siigo_factura' in c.negocios.metadata),
+  }))
+
+  // Códigos de los negocios destino, para que los errores hablen en el idioma del
+  // operador (V0043) y no en uuid.
+  const idsDestino = [...new Set(input.lineas.map(l => l.negocioId))]
+  // ⚠️ El error de esta consulta se LEE. Descartarlo hace que un fallo de la base sea
+  // indistinguible de "ese negocio no existe", y el operador recibe un mensaje falso
+  // sobre datos que sí están ahí (pasó en el QA del 2026-08-11).
+  const { data: negsRaw, error: negsErr } = await db(supabase)
+    .from('negocios')
+    .select('id, codigo')
+    .eq('workspace_id', workspaceId)
+    .in('id', idsDestino.length > 0 ? idsDestino : ['00000000-0000-0000-0000-000000000000'])
+
+  if (negsErr) return { ok: false, error: (negsErr as { message: string }).message }
+
+  const codigoPorId = new Map(
+    ((negsRaw ?? []) as Array<{ id: string; codigo: string | null }>).map(n => [n.id, n.codigo]),
   )
 
-  if (!res.success) return { success: false, error: res.error }
-  return { success: true }
+  const faltantes = idsDestino.filter(id => !codigoPorId.has(id))
+  if (faltantes.length > 0) {
+    return {
+      ok: false,
+      error: `No se encontró ${faltantes.length === 1 ? 'un negocio' : `${faltantes.length} negocios`} de la lista en este espacio de trabajo (${faltantes.join(', ')})`,
+    }
+  }
+
+  const plan = planearRedistribucion({
+    pagoOriginal: input.pagoOriginal,
+    actuales,
+    destino: input.lineas.map(l => ({ ...l, negocioCodigo: codigoPorId.get(l.negocioId) ?? null })),
+    motivo: input.motivo,
+  })
+
+  if (!plan.ok) {
+    return { ok: false, error: plan.errores[0] ?? 'No se puede aplicar', errores: plan.errores }
+  }
+
+  const motivo = input.motivo.trim()
+  const ahora = new Date().toISOString()
+  // Con dos o más porciones vivas TODAS llevan la misma marca. Una sola sin ella la
+  // leen `refDuplicadaNoSplit` y `negocioCongeladoPorDuplicado` como duplicado
+  // accidental y congelan los dos negocios.
+  const splitId = requiereSplitId(plan.porcionesResultantes) ? randomUUID() : null
+
+  for (const c of plan.cambios) {
+    if (c.accion === 'anular') {
+      const { error: anErr } = await db(supabase)
+        .from('cobros')
+        .update({
+          monto: 0,
+          monto_anulado: c.montoAnterior,
+          anulado_at: ahora,
+          anulado_por: staffId,
+          anulacion_motivo: `Redistribución de la referencia ${ref}: ${motivo}`.slice(0, 300),
+        })
+        .eq('id', c.cobroId)
+        .eq('workspace_id', workspaceId)
+        .is('anulado_at', null)
+      if (anErr) return { ok: false, error: (anErr as { message: string }).message }
+      continue
+    }
+
+    if (c.accion === 'crear') {
+      const { error: crErr } = await db(supabase).from('cobros').insert({
+        workspace_id: workspaceId,
+        negocio_id: c.negocioId,
+        monto: c.montoNuevo,
+        fecha: todayBogotaISO(),
+        external_ref: ref,
+        tipo_cobro: 'pago',
+        split_json: { split_id: splitId, split_total: input.pagoOriginal, origen: 'redistribucion_financiera' },
+        notas: `Redistribución de la referencia ${ref}: ${motivo}`.slice(0, 1000),
+      })
+      if (crErr) return { ok: false, error: (crErr as { message: string }).message }
+      continue
+    }
+
+    // 'ajustar' y 'sin_cambio' comparten el UPDATE: el segundo solo re-estampa la
+    // marca de reparto, que puede haber cambiado aunque su monto no.
+    const { error: upErr } = await db(supabase)
+      .from('cobros')
+      .update({
+        monto: c.montoNuevo,
+        split_json: { split_id: splitId, split_total: input.pagoOriginal, origen: 'redistribucion_financiera' },
+      })
+      .eq('id', c.cobroId)
+      .eq('workspace_id', workspaceId)
+      .is('anulado_at', null)
+    if (upErr) return { ok: false, error: (upErr as { message: string }).message }
+  }
+
+  // ── Lo que el cambio de plata desarma ──
+  // Des-concilia, reevalúa los bloques de cobros y reabre SOLO los gates que se habían
+  // cerrado con esta plata. No devuelve de etapa: eso lo decide una persona.
+  let gatesReabiertos = 0
+  for (const negocioId of plan.negociosAfectados) {
+    const r = await recalcularNegocioPorCambioDeRecaudo(
+      negocioId,
+      `redistribución de la referencia ${ref}`,
+    )
+    gatesReabiertos += r.gates_reabiertos
+
+    if (staffId) {
+      const cambio = plan.cambios.find(c => c.negocioId === negocioId)
+      const detalle = cambio
+        ? `${fmtCop(cambio.montoAnterior)} → ${fmtCop(cambio.montoNuevo)}`
+        : 'ajustado'
+      await db(supabase).from('activity_log').insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio_sistema',
+        autor_id: staffId,
+        contenido: `Recaudo redistribuido por el área financiera (ref ${ref}): ${detalle}. Motivo: ${motivo}`.slice(0, 280),
+      })
+    }
+  }
+
+  // ── El aviso que NO se puede cerrar por accidente ──
+  // Reabrir los gates no basta: el caso puede haber avanzado tres etapas con esta plata,
+  // y la pantalla se ve igual que la de un caso sano. El aviso queda pegado al negocio,
+  // lo ven la financiera y el comercial, y vuelve a frenar cuando alguien intenta
+  // avanzar (ver el guard en `cambiarEtapaNegocioConGate`).
+  for (const negocioId of plan.negociosAfectados) {
+    const { data: etapaRaw } = await db(supabase)
+      .from('negocios')
+      .select('etapas_negocio!negocios_etapa_actual_id_fkey(nombre)')
+      .eq('id', negocioId)
+      .single()
+
+    await guardarAviso({
+      supabase,
+      workspaceId,
+      negocioId,
+      referencia: ref,
+      motivo,
+      etapaAlCambiar: (etapaRaw?.etapas_negocio as { nombre: string } | null)?.nombre ?? 'sin etapa',
+      gatesReabiertos,
+      destinoSugerido: null,
+      ahora,
+      staffId,
+    })
+  }
+
+  revalidatePath('/conciliacion')
+  for (const negocioId of plan.negociosAfectados) revalidatePath(`/negocios/${negocioId}`)
+
+  return { ok: true, negociosAfectados: plan.negociosAfectados.length, gatesReabiertos }
+}
+
+// ── Retroceso financiero ──────────────────────────────────────────────────────
+
+/**
+ * A dónde puede volver el caso, según por qué cambió la plata.
+ *
+ * Devuelve una PROPUESTA con sus alternativas: la financiera decide, y puede elegir
+ * cualquier etapa que el caso haya recorrido. Las reglas viven en
+ * `src/lib/negocios/retroceso-financiero.ts` (puro, 15 pruebas).
+ */
+export async function proponerRetroceso(input: {
+  negocioId: string
+  causa: CausaRetrocesoFinanciero
+}): Promise<
+  | { ok: true; propuesta: PropuestaRetroceso; etapaActual: string }
+  | { ok: false; error: string }
+> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId } = ctx
+
+  const { data: negRaw } = await db(supabase)
+    .from('negocios')
+    .select('linea_id, etapas_negocio!negocios_etapa_actual_id_fkey(id, nombre, orden, numero, stage)')
+    .eq('id', input.negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  const actual = negRaw?.etapas_negocio as
+    | { id: string; nombre: string; orden: number; numero: number; stage: string }
+    | null
+  if (!negRaw?.linea_id || !actual) return { ok: false, error: 'Negocio sin etapa actual' }
+
+  const recorridas = await etapasRecorridas(supabase, input.negocioId, negRaw.linea_id)
+  const propuesta = proponerRetrocesoFinanciero({
+    causa: input.causa,
+    etapaActual: actual,
+    etapasRecorridas: recorridas,
+  })
+
+  return { ok: true, propuesta, etapaActual: actual.nombre }
+}
+
+/**
+ * Aplica el retroceso decidido por la financiera y retira el aviso.
+ *
+ * El movimiento reusa `cambiarEtapaNegocio` (el movedor interno que crea las instancias
+ * de la etapa destino con su herencia), inyectado como parámetro para no cerrar un ciclo
+ * de imports.
+ */
+export async function aplicarRetrocesoFinanciero(input: {
+  negocioId: string
+  causa: CausaRetrocesoFinanciero
+  destinoEtapaId: string | null
+  motivo: string
+}): Promise<{ ok: true; movido: boolean } | { ok: false; error: string; errores?: string[] }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const res = await ejecutarRetroceso({
+    supabase,
+    workspaceId,
+    negocioId: input.negocioId,
+    causa: input.causa,
+    destinoEtapaId: input.destinoEtapaId,
+    motivo: input.motivo,
+    staffId,
+    moverEtapa: (negocioId, etapaId) => cambiarEtapaNegocio(negocioId, etapaId),
+  })
+
+  if (!res.ok) return { ok: false, error: res.error ?? 'No se pudo aplicar', errores: res.errores }
+
+  // Resolver el retroceso ES resolver el aviso: el caso ya está donde su plata lo
+  // sostiene. Dejarlo puesto frenaría al comercial por algo ya atendido.
+  await resolverAviso({
+    supabase,
+    workspaceId,
+    negocioId: input.negocioId,
+    motivo: `Retroceso financiero aplicado: ${input.motivo}`,
+    staffId,
+  })
+
+  revalidatePath('/conciliacion')
+  revalidatePath(`/negocios/${input.negocioId}`)
+
+  return { ok: true, movido: res.movido }
+}
+
+function fmtCop(n: number): string {
+  return `$${Math.round(n).toLocaleString('es-CO')}`
 }

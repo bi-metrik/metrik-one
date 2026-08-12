@@ -12,6 +12,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '../src/lib/ai/extract-fields'
 import { createDriveFolder, uploadFileToDrive, setFilePublicByLink } from '../src/lib/google-drive'
 import { generarFormularioCore } from '../src/lib/actions/formulario-actions'
+import { asignarResponsable } from '../src/lib/negocios/responsable-rol'
 
 // ── env ──────────────────────────────────────────────────────────────────────
 function loadEnv() {
@@ -184,7 +185,8 @@ async function main() {
   }).select('id').single()
   if (nerr) throw new Error(`negocio: ${nerr.message}`)
   const negocioId = (neg as { id: string }).id
-  await supabase.from('negocio_responsables').insert({ negocio_id: negocioId, staff_id: JESSICA_STAFF, assigned_by: JESSICA_PROFILE })
+  // Con rol derivado del área: una fila sin rol no recibe avisos (ver responsable-rol.ts)
+  await asignarResponsable(supabase, { negocioId, staffId: JESSICA_STAFF, assignedBy: JESSICA_PROFILE })
   console.log('  negocio:', negocioId, CASO.codigo)
 
   // 5) Carpeta Drive (igual que la plataforma)

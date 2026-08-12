@@ -25,8 +25,13 @@ export interface CeldaSeleccionada {
   etapaId: string
   etapaNombre: string
   etapaNumero: number
-  /** `undefined` = todas las seccionales. `null` = solo los que no la tienen. */
-  seccional?: string | null
+  /**
+   * `undefined` = todas las seccionales. `null` = solo los que no la tienen.
+   * Un arreglo abre una columna que agrupa varias (el caso de "Sin cita").
+   */
+  seccional?: string | string[] | null
+  /** Cómo nombrar el alcance en el encabezado cuando `seccional` es un grupo. */
+  seccionalLabel?: string
   soloVencidos: boolean
   soloReproceso?: boolean
 }
@@ -67,8 +72,15 @@ export function CasosDrawer({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const alcanceSeccional =
+    celda.seccional === undefined
+      ? null
+      : Array.isArray(celda.seccional)
+        ? celda.seccionalLabel ?? celda.seccional.join(', ')
+        : celda.seccional ?? 'sin seccional registrada'
+
   const alcance = [
-    celda.seccional === undefined ? null : celda.seccional ?? 'sin seccional registrada',
+    alcanceSeccional,
     celda.soloVencidos ? 'solo atrasados' : null,
     celda.soloReproceso ? 'en reproceso' : null,
   ]

@@ -9,14 +9,21 @@
  * (decisión de Mauricio, 2026-08-06). Spec:
  * `docs/specs/2026-08-06_facturacion-fuera-del-flujo.md`.
  *
- * Esta acción SOLO LEE. No crea documentos en Siigo ni toca el negocio.
+ * `getColaFacturacion` SOLO LEE. La única que escribe en Siigo es
+ * `emitirFacturaDeNegocio`, y siempre por decisión de una persona.
  */
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { borradorCliente, borradorFactura, borradorRecibo, type RutExtraido } from '@/lib/siigo/mapeo'
+import { emitirReciboNegocio } from '@/lib/siigo/recibos'
 import type { SiigoConfig } from '@/lib/siigo/client'
+import { emitirFacturaNegocio, type FacturaEnSiigo, type MarcaFactura } from '@/lib/siigo/facturas'
+import { leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
+import { sumarRecaudoConfirmado, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
+import { descuadreConciliacion, tarifaConfirmadaPorNegocio } from '@/lib/upme/modelo-dinero'
+import { casoListoParaFacturar } from '@/lib/facturacion/caso-listo'
 import { revalidatePath } from 'next/cache'
 // La ventana vive en su propio módulo: este archivo es `'use server'` y exportar
 // una constante desde aquí anula TODOS los exports en el build.
@@ -33,6 +40,12 @@ export interface CasoPorFacturar {
   etapa_numero: number | null
   identificacion: string | null
   cliente: string | null
+  /**
+   * Celular del contacto. Ya se leía para el borrador del cliente de Siigo; se
+   * expone para poder buscar por él, que es como el equipo identifica un caso
+   * cuando el cliente llama. No se pinta en la fila.
+   */
+  telefono: string | null
   /** Honorario aprobado, CON IVA (es como ONE guarda `precio_aprobado`). */
   honorario: number | null
   /** Valor pagado a la UPME según el comprobante cargado. Recaudo de terceros. */
@@ -45,6 +58,22 @@ export interface CasoPorFacturar {
   faltan_recibo: string[]
   /** Ya tiene número de factura registrado en el negocio. */
   ya_facturado: boolean
+  /** Número de la factura, cuando la emitió ONE contra Siigo. */
+  factura_numero: string | null
+  /** Consecutivo del recibo de caja del recaudo UPME, si ya se emitió. */
+  recibo_numero: string | null
+  /**
+   * Base gravable que viajaría a Siigo. Sale del MISMO `borradorFactura` que se
+   * enviaría, no de una división hecha en la pantalla: si la pantalla calculara
+   * su propio desglose podría mostrar un número distinto del que se emite.
+   */
+  base_gravable: number | null
+  /**
+   * Lo que falta recaudar del HONORARIO. Solo se factura en cero (con la
+   * tolerancia de materialidad). Nunca se mide contra honorario + tarifa: quien
+   * le paga la tarifa directo a la UPME no le debe nada a SOENA.
+   */
+  falta_saldo: number
   /** Sacado de la cola a mano durante la puesta al día. Reversible. */
   descartado: { at: string; por: string | null; motivo: string | null } | null
 }
@@ -169,6 +198,38 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     }
   }
 
+  // ── Saldo del honorario, en lote ───────────────────────────────────────────
+  // La cola no puede mostrar como "listo" a quien todavía debe: se factura con el
+  // honorario cubierto. Se resuelve por lote (177 casos) y con los MISMOS helpers
+  // que usan el panel de conciliación y los gates de avance, para que las tres
+  // superficies no tengan tres restas distintas.
+  const [cobrosRes, conciliadoRes, tarifaRes, certRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any).from('cobros').select('negocio_id, monto, tipo_cobro, split_json').in('negocio_id', ids),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any).from('negocio_conciliacion').select('negocio_id, conciliado').in('negocio_id', ids),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any).from('negocio_bloques').select('negocio_id, data, bloque_configs!inner(slug)')
+      .in('negocio_id', ids).eq('bloque_configs.slug', 'confirmar_tarifa_upme'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any).from('negocio_bloques').select('negocio_id, data, bloque_configs!inner(slug)')
+      .in('negocio_id', ids).eq('bloque_configs.slug', 'certificacion_upme'),
+  ])
+
+  const cobrosPorNegocio = new Map<string, CobroParaRecaudo[]>()
+  for (const c of ((cobrosRes.data ?? []) as Array<CobroParaRecaudo & { negocio_id: string }>)) {
+    if (!cobrosPorNegocio.has(c.negocio_id)) cobrosPorNegocio.set(c.negocio_id, [])
+    cobrosPorNegocio.get(c.negocio_id)!.push(c)
+  }
+  const conciliados = new Set(
+    ((conciliadoRes.data ?? []) as Array<{ negocio_id: string; conciliado: boolean }>)
+      .filter(x => x.conciliado === true).map(x => x.negocio_id),
+  )
+  const tarifas = tarifaConfirmadaPorNegocio(
+    (tarifaRes.data ?? []) as Array<{ negocio_id: string; data: Record<string, unknown> | null }>,
+    (certRes.data ?? []) as Array<{ negocio_id: string; data: Record<string, unknown> | null }>,
+  )
+
   // ── Contactos (email y teléfono ganan sobre el RUT: los mantiene el comercial) ──
   const contactoIds = candidatos.map(n => n.contacto_id).filter((x): x is string => !!x)
   const contactos = new Map<string, { email: string | null; telefono: string | null }>()
@@ -199,6 +260,14 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     const upme = upmePorNegocio.get(n.id) ?? null
     const rec = borradorRecibo(cfgEval, cli.payload.identification, upme, hoy)
 
+    const recaudado = sumarRecaudoConfirmado(cobrosPorNegocio.get(n.id) ?? [], conciliados.has(n.id))
+    const { faltante } = descuadreConciliacion(
+      honorario ?? 0,
+      { tarifa_upme: tarifas.get(n.id) ?? 0, aprobado_plan: null, aprobado_honorario: honorario },
+      recaudado,
+    )
+    const marcaFactura = (n.metadata?.siigo_factura ?? null) as MarcaFactura | null
+
     return {
       negocio_id: n.id,
       codigo: n.codigo,
@@ -207,19 +276,31 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       etapa_numero: n.etapas_negocio?.numero ?? null,
       identificacion: cli.payload.identification || null,
       cliente: cli.payload.name.filter(Boolean).join(' ') || null,
+      telefono: contacto.telefono,
       honorario,
       valor_upme: upme,
       faltan_factura: fac.faltantes,
       faltan_cliente: cli.faltantes,
       faltan_recibo: rec.faltantes,
-      ya_facturado: facturadoPorNegocio.has(n.id),
+      // Dos fuentes: el bloque donde se carga el PDF de la factura, y la marca que
+      // deja la emisión desde aquí. La segunda hace falta porque emitir NO obliga a
+      // cargar el soporte, y sin ella el caso volvería a la cola listo para
+      // re-facturarse.
+      ya_facturado: facturadoPorNegocio.has(n.id) || !!marcaFactura?.numero,
+      factura_numero: marcaFactura?.numero ?? null,
+      recibo_numero: ((n.metadata?.siigo_recibo ?? null) as { numero?: string } | null)?.numero ?? null,
+      base_gravable: fac.payload.items[0]?.price ?? null,
+      falta_saldo: faltante,
       descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,
     }
   })
 
   // Pendientes primero, y dentro de esos los que ya están listos para emitir:
   // la cola debe abrir por lo que se puede resolver hoy.
-  const listo = (c: CasoPorFacturar) => c.faltan_factura.length === 0 && c.faltan_cliente.length === 0
+  // El criterio vive en `lib/facturacion/caso-listo`, compartido con la pantalla:
+  // escrito dos veces se desincroniza y la bandeja diría "3 listos" mientras la
+  // lista pinta cuatro botones.
+  const listo = (c: CasoPorFacturar) => casoListoParaFacturar(c)
   const fuera = (c: CasoPorFacturar) => c.ya_facturado || c.descartado != null
   casos.sort((a, b) => {
     if (fuera(a) !== fuera(b)) return fuera(a) ? 1 : -1
@@ -353,4 +434,238 @@ export async function restaurarEnFacturacion(negocioId: string): Promise<{ ok: b
 
   revalidatePath('/conciliacion')
   return { ok: true }
+}
+
+// ── Emisión ──────────────────────────────────────────────────────────────────
+
+export interface ResultadoEmitir {
+  ok: boolean
+  /** Número de la factura en Siigo cuando la emisión salió bien. */
+  numero?: string
+  /** Se creó sin radicar ante la DIAN. */
+  borrador?: boolean
+  /**
+   * `false` si la factura salió pero su PDF no quedó cargado en el negocio. No es
+   * un fallo de la emisión: es un pendiente que hay que decir, porque el
+   * expediente queda incompleto y en silencio nadie lo notaría.
+   */
+  archivada?: boolean
+  error?: string
+  /**
+   * Siigo ya tiene factura de este producto para el cliente. La pantalla debe
+   * mostrarlas y pedir justificación; NO se emite hasta que alguien la escriba.
+   */
+  duplicados?: FacturaEnSiigo[]
+}
+
+/**
+ * Emite la factura del honorario de un negocio contra Siigo.
+ *
+ * Todo lo que decide se re-resuelve AQUÍ, en el servidor: el cliente manda el id
+ * del negocio y, si aplica, la justificación. Nunca el valor ni la identificación.
+ * Una pantalla vieja no puede facturar por un monto que ya cambió.
+ */
+export async function emitirFacturaDeNegocio(
+  negocioId: string,
+  opciones?: { emitir?: boolean; enviarCorreo?: boolean; justificacionDuplicado?: string },
+): Promise<ResultadoEmitir> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { workspaceId } = ctx
+
+  const { supabase, staffId } = await getWorkspace()
+  const svc = createServiceClient()
+
+  let nombre: string | null = null
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: st } = await (svc as any).from('staff').select('full_name').eq('id', staffId).maybeSingle()
+    nombre = (st?.full_name as string | null) ?? null
+  }
+
+  // Modelo de dinero y recaudo, con los mismos helpers que el resto del producto.
+  const modelo = await leerModeloDineroCompleto(supabase, negocioId)
+  const [{ data: cobros }, { data: conc }] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any).from('cobros').select('monto, tipo_cobro, split_json')
+      .eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any).from('negocio_conciliacion').select('conciliado')
+      .eq('negocio_id', negocioId).eq('workspace_id', workspaceId).maybeSingle(),
+  ])
+  const recaudado = sumarRecaudoConfirmado(
+    (cobros ?? []) as CobroParaRecaudo[],
+    (conc as { conciliado: boolean } | null)?.conciliado === true,
+  )
+
+  // Dónde archivar el PDF: se declara por línea, junto al resto de la config de
+  // Siigo. Sin el dato la factura sale igual, pero el archivo no queda en el
+  // expediente y la pantalla lo dice, en vez de callarlo.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negLinea } = await (svc as any)
+    .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+  let bloqueFacturaSlug: string | undefined
+  if (negLinea?.linea_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: linea } = await (svc as any)
+      .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
+    const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
+      { bloque_factura_slug?: string } | undefined
+    bloqueFacturaSlug = cfgSiigo?.bloque_factura_slug
+  }
+
+  const r = await emitirFacturaNegocio(
+    workspaceId,
+    negocioId,
+    nombre,
+    {
+      bloqueFacturaSlug,
+      // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
+      // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
+      // sin radicar existe para la primera prueba controlada con Diana.
+      emitir: opciones?.emitir !== false,
+      enviarCorreo: opciones?.enviarCorreo === true,
+      justificacionDuplicado: opciones?.justificacionDuplicado,
+    },
+    { modelo, recaudado },
+  )
+
+  if (!r.ok) {
+    switch (r.motivo) {
+      case 'duplicado_en_siigo':
+        return { ok: false, duplicados: r.existentes, error: 'Siigo ya tiene una factura de este servicio para el cliente' }
+      case 'saldo_pendiente': {
+        const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+        return { ok: false, error: `Falta recaudar ${fmt.format(r.faltante)} del honorario` }
+      }
+      case 'faltan_datos':
+        return { ok: false, error: `Faltan datos: ${r.faltantes.join(', ')}` }
+      case 'ya_facturado_en_one':
+        return { ok: false, error: `Este negocio ya se facturó (${r.numero})` }
+      default:
+        return { ok: false, error: r.mensaje }
+    }
+  }
+
+  if (staffId) {
+    // `tipo` DEBE estar en el CHECK de activity_log o el insert falla en silencio.
+    // `autor_id` es FK a staff(id), NO a profiles.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: errLog } = await (svc as any).from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId,
+      contenido: r.emitida
+        ? `Factura ${r.numero} emitida en Siigo`
+        : `Factura ${r.numero} creada en Siigo SIN radicar ante la DIAN`,
+    })
+    if (errLog) console.error('[siigo] factura emitida pero sin registro en el timeline:', errLog.message)
+  }
+
+  revalidatePath('/conciliacion')
+  return { ok: true, numero: r.numero, borrador: !r.emitida, archivada: r.archivada }
+}
+
+// ── Recibo de caja del recaudo de la tarifa UPME ─────────────────────────────
+
+export type ResultadoRecibo =
+  | { ok: true; numero: string; valor: number; archivada: boolean }
+  | { ok: false; error: string; duplicados?: Array<{ numero: string; fecha: string; valor: number }> }
+
+/**
+ * Emite el recibo de caja del recaudo de la tarifa UPME.
+ *
+ * ⚠️ **El valor lo decide quien emite, no el sistema.** Puede venir del comprobante
+ * extraído, pero los casos que entraron por el cargue masivo NO tienen ese comprobante
+ * — nacieron antes de que existiera el punto de control — y son la mayoría: medido el
+ * 2026-08-12, de 171 casos con el bloque solo **18** traen el valor. Por eso la captura
+ * a mano es el camino frecuente y no una excepción.
+ *
+ * Cuando `valorPagado` no llega, se usa el del comprobante; si tampoco está, se rechaza
+ * en vez de emitir un recibo en cero (que consumiría numeración sin documentar nada).
+ */
+export async function emitirReciboDeNegocio(
+  negocioId: string,
+  opciones?: { valorPagado?: number; justificacionDuplicado?: string },
+): Promise<ResultadoRecibo> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { workspaceId } = ctx
+
+  const { staffId } = await getWorkspace()
+  const svc = createServiceClient()
+
+  let nombre: string | null = null
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: st } = await (svc as any).from('staff').select('full_name').eq('id', staffId).maybeSingle()
+    nombre = (st?.full_name as string | null) ?? null
+  }
+
+  // ── El valor: el capturado gana sobre el extraído ──
+  // Quien emite está mirando el comprobante; si corrige el número, es porque el
+  // extraído está mal. La extracción es una ayuda, no la autoridad.
+  let valor = opciones?.valorPagado
+  if (valor == null) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: bloques } = await (svc as any)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocioId)
+    const upme = ((bloques ?? []) as Array<{ data: Record<string, unknown> | null; bloque_configs: { slug: string | null } }>)
+      .find(b => b.bloque_configs?.slug === 'comprobante_pago_upme')
+    const campos = (upme?.data?.campos ?? {}) as Record<string, { value?: unknown }>
+    const crudo = campos.valor_pagado?.value
+    const n = typeof crudo === 'number' ? crudo : Number(String(crudo ?? '').replace(/[^\d]/g, ''))
+    if (Number.isFinite(n) && n > 0) valor = n
+  }
+
+  if (valor == null || !(valor > 0)) {
+    return {
+      ok: false,
+      error: 'Falta el valor pagado a la UPME. Cárgalo en el comprobante o escríbelo al emitir.',
+    }
+  }
+
+  // ── Dónde archivar el PDF: declarado por línea, junto al resto de la config ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negLinea } = await (svc as any)
+    .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+  let bloqueReciboSlug: string | undefined
+  if (negLinea?.linea_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: linea } = await (svc as any)
+      .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
+    const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
+      { bloque_recibo_slug?: string } | undefined
+    bloqueReciboSlug = cfgSiigo?.bloque_recibo_slug
+  }
+
+  const r = await emitirReciboNegocio(workspaceId, negocioId, valor, nombre, {
+    bloqueReciboSlug,
+    justificacionDuplicado: opciones?.justificacionDuplicado,
+  })
+
+  if (!r.ok) {
+    if (r.motivo === 'duplicado_en_siigo') {
+      return {
+        ok: false,
+        error: `Siigo ya tiene ${r.existentes.length === 1 ? 'un recibo' : `${r.existentes.length} recibos`} de este cliente por la tarifa.`,
+        duplicados: r.existentes,
+      }
+    }
+    const mensajes: Record<string, string> = {
+      ya_emitido: r.motivo === 'ya_emitido' ? `Este caso ya tiene el recibo ${r.numero}.` : '',
+      sin_valor: 'El valor tiene que ser mayor que cero.',
+      faltan_datos: r.motivo === 'faltan_datos' ? `Faltan datos: ${r.faltantes.join(', ')}.` : '',
+      error: r.motivo === 'error' ? r.mensaje : '',
+    }
+    return { ok: false, error: mensajes[r.motivo] || 'No se pudo emitir el recibo.' }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/conciliacion')
+  return { ok: true, numero: r.numero, valor: r.valor, archivada: r.archivada }
 }

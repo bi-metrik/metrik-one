@@ -1,15 +1,24 @@
 'use client'
-import { useState, useMemo } from 'react'
-import { Search, X, Clock } from 'lucide-react'
+import { useMemo } from 'react'
+import { Clock } from 'lucide-react'
 import NegocioCard, { type StaffAsignable } from './negocio-card'
+import BusquedaInput from '@/components/busqueda-input'
 import EmptyState from '@/components/empty-state'
+import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import { segmentarNegocios } from '@/lib/negocios/segmentador'
+import { useEstadoUrl } from '@/hooks/use-estado-url'
+import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import type { NegocioResumen } from './negocio-v2-actions'
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
 type MotivoCierre = 'todos' | 'exitoso' | 'perdido' | 'cancelado'
+
+// Valores admisibles desde la URL. Sin esta lista, un `?fase=basura` (enlace viejo,
+// barra de direcciones editada) deja la lista vacía sin explicación.
+const FASES_VALIDAS: readonly FaseFilter[] = ['todos', 'venta', 'ejecucion', 'cobro', 'cerrados']
+const MOTIVOS_VALIDOS: readonly MotivoCierre[] = ['todos', 'exitoso', 'perdido', 'cancelado']
 
 /** Etapa del workflow de la línea, para el segmentador de nivel 2. */
 export type EtapaSeg = { numero: number; nombre: string; stage: string; orden: number }
@@ -40,6 +49,7 @@ const SIN_ORIGEN = 'sin_origen'
 
 /** Orden de la lista. Default: el del servidor (más reciente primero). */
 type SortKey = 'reciente' | 'atraso'
+const SORT_VALIDOS: readonly SortKey[] = ['reciente', 'atraso']
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'reciente', label: 'Mas reciente' },
   { value: 'atraso', label: 'Mas atrasado' },
@@ -93,7 +103,9 @@ function aplicarFiltros(lista: NegocioResumen[], f: FiltrosLista): NegocioResume
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
-      return hay.includes(f.term)
+      // El teléfono va aparte: comparado como texto casi nunca coincide, porque el
+      // mismo número está guardado con indicativo, con paréntesis o pelado.
+      return hay.includes(f.term) || telefonoCoincide(n.contacto_telefono, f.term)
     })
   }
   return res
@@ -137,6 +149,7 @@ export default function NegociosClient({
   staffList = [],
   canAsignar = false,
   canMarcar = false,
+  searchParams,
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
@@ -149,17 +162,29 @@ export default function NegociosClient({
   canAsignar?: boolean
   /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */
   canMarcar?: boolean
+  /** Parámetros de la URL ya resueltos por el server component: filtros iniciales. */
+  searchParams?: SearchParams
 }) {
   // Segmentador jerárquico: fase (stage) → etapa (numero dentro de la fase).
-  const [fase, setFase] = useState<FaseFilter>(defaultStage)
-  const [etapaNum, setEtapaNum] = useState<number | null>(null)
-  const [motivoCierre, setMotivoCierre] = useState<MotivoCierre>('todos')
-  const [q, setQ] = useState('')
-  const [seccional, setSeccional] = useState<string>('todas')
-  const [responsable, setResponsable] = useState<string>('todos')
-  const [origen, setOrigen] = useState<string>('todos')
-  const [soloAtrasados, setSoloAtrasados] = useState(false)
-  const [sortBy, setSortBy] = useState<SortKey>('reciente')
+  //
+  // Los filtros viven en la URL (`useEstadoUrl`), no solo en estado de React: antes,
+  // filtrar la lista, entrar a un caso y volver los borraba, y había que rehacerlos
+  // cada vez. De paso la vista filtrada queda compartible por enlace.
+  // El `inicial` lo resuelve el SERVIDOR desde los searchParams (ver `page.tsx`): sin
+  // él, el primer render del servidor sale sin filtrar y el del cliente filtrado, que
+  // es un desajuste de hidratación con parpadeo visible.
+  const inicialDe = <T extends ValorFiltro>(clave: string, def: T, admisibles?: readonly T[]) =>
+    ({ inicial: filtroDesdeSearchParams(searchParams, clave, def, admisibles), admisibles })
+
+  const [fase, setFase] = useEstadoUrl<FaseFilter>('fase', defaultStage, inicialDe('fase', defaultStage, FASES_VALIDAS))
+  const [etapaNum, setEtapaNum] = useEstadoUrl<number | null>('etapa', null, inicialDe('etapa', null))
+  const [motivoCierre, setMotivoCierre] = useEstadoUrl<MotivoCierre>('cierre', 'todos', inicialDe('cierre', 'todos' as MotivoCierre, MOTIVOS_VALIDOS))
+  const [q, setQ] = useEstadoUrl<string>('q', '', inicialDe('q', ''))
+  const [seccional, setSeccional] = useEstadoUrl<string>('seccional', 'todas', inicialDe('seccional', 'todas'))
+  const [responsable, setResponsable] = useEstadoUrl<string>('responsable', 'todos', inicialDe('responsable', 'todos'))
+  const [origen, setOrigen] = useEstadoUrl<string>('origen', 'todos', inicialDe('origen', 'todos'))
+  const [soloAtrasados, setSoloAtrasados] = useEstadoUrl<boolean>('atrasados', false, inicialDe('atrasados', false))
+  const [sortBy, setSortBy] = useEstadoUrl<SortKey>('orden', 'reciente', inicialDe('orden', 'reciente' as SortKey, SORT_VALIDOS))
 
   // Seccionales DIAN presentes en los negocios (para el filtro). Solo las que existen.
   const seccionalesDisponibles = useMemo(() => {
@@ -197,7 +222,7 @@ export default function NegociosClient({
     setEtapaNum(null)
   }
 
-  // Búsqueda libre (código, nombre/contacto, empresa, vehículo, cédula, radicado) + filtro de seccional DIAN
+  // Búsqueda libre (código, nombre/contacto, empresa, vehículo, celular, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
   const filtros = useMemo<FiltrosLista>(
     () => ({ seccional, responsable, origen, term, soloAtrasados }),
@@ -374,26 +399,12 @@ export default function NegociosClient({
       )}
 
       {/* Barra de búsqueda */}
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6B7280]" />
-        <input
-          type="text"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por código, cliente, cédula, seccional o vehículo…"
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 pl-9 pr-9 text-sm text-[#1A1A1A] placeholder:text-[#6B7280] focus:border-[#1A1A1A]/30 focus:outline-none"
-        />
-        {q && (
-          <button
-            type="button"
-            onClick={() => setQ('')}
-            aria-label="Limpiar búsqueda"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A]"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
-      </div>
+      <BusquedaInput
+        value={q}
+        onChange={setQ}
+        placeholder="Buscar por código, cliente, celular, cédula, seccional o vehículo…"
+        ariaLabel="Buscar negocios"
+      />
 
       {/* Filtro por seccional DIAN (solo si hay seccionales en los negocios) */}
       {seccionalesDisponibles.length > 0 && (
@@ -509,7 +520,7 @@ export default function NegociosClient({
         sinResultadosBusqueda ? (
           <EmptyState
             title={`Sin resultados para "${q.trim()}"`}
-            description="Prueba con otro código, cliente, cédula, seccional o vehículo."
+            description="Prueba con otro código, cliente, celular, cédula, seccional o vehículo."
             primaryCta={{ label: 'Limpiar búsqueda', onClick: () => setQ('') }}
           />
         ) : fase === 'cerrados' && !isFilteringMotivo ? (
