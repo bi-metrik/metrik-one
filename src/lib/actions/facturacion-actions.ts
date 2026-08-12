@@ -54,6 +54,8 @@ export interface CasoPorFacturar {
   ya_facturado: boolean
   /** Número de la factura, cuando la emitió ONE contra Siigo. */
   factura_numero: string | null
+  /** Consecutivo del recibo de caja del recaudo UPME, si ya se emitió. */
+  recibo_numero: string | null
   /**
    * Base gravable que viajaría a Siigo. Sale del MISMO `borradorFactura` que se
    * enviaría, no de una división hecha en la pantalla: si la pantalla calculara
@@ -279,6 +281,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       // re-facturarse.
       ya_facturado: facturadoPorNegocio.has(n.id) || !!marcaFactura?.numero,
       factura_numero: marcaFactura?.numero ?? null,
+      recibo_numero: ((n.metadata?.siigo_recibo ?? null) as { numero?: string } | null)?.numero ?? null,
       base_gravable: fac.payload.items[0]?.price ?? null,
       falta_saldo: faltante,
       descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,

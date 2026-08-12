@@ -7,7 +7,7 @@ import Link from 'next/link'
 import {
   Scale, CheckCircle2, Loader2, X, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
-  Clock, FileText, AlertTriangle,
+  Clock, FileText, AlertTriangle, Receipt, Check,
 } from 'lucide-react'
 import {
   aceptarRepartoComercial,
@@ -20,7 +20,7 @@ import PagosExternosTab from './pagos-externos-tab'
 import { RedistribuirModal } from './redistribuir-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
-import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio } from '@/lib/actions/facturacion-actions'
+import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio, emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
 import type { FacturaEnSiigo } from '@/lib/siigo/facturas'
 import { casoListoParaFacturar, faltantesDelCaso } from '@/lib/facturacion/caso-listo'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
@@ -909,11 +909,12 @@ function FilaPorFacturar({
         </div>
       )}
 
-      {!caso.ya_facturado && listo && caso.faltan_recibo.length > 0 && (
-        <div className="mt-2 text-[11px]" style={{ color: '#6B7280' }}>
-          La factura del honorario puede salir. El recibo del recaudo UPME no: falta{' '}
-          {caso.faltan_recibo.join(', ')}.
-        </div>
+      {/* ── El recaudo de la UPME: recibo de caja, nunca factura ────────── */}
+      {/* Va aparte de la factura a propósito: son dos documentos con naturaleza
+          distinta. El honorario es ingreso y se factura; la tarifa es plata de
+          terceros y se recauda. Mezclarlos en un botón invitaría a facturarla. */}
+      {siigoConfigurado && !caso.descartado && (
+        <ReciboUpme caso={caso} onCambio={onCambio} />
       )}
 
       {/* ── Prefactura y emisión ─────────────────────────────────────────── */}
@@ -1107,6 +1108,150 @@ function FilaPorFacturar({
           </div>
         )
       )}
+    </div>
+  )
+}
+
+
+/**
+ * Emisión del recibo de caja del recaudo de la tarifa UPME.
+ *
+ * ⚠️ **El valor es editable y esa es la decisión de diseño, no un descuido.** Desde
+ * Tesorería nadie ve el comprobante de pago, y los casos que entraron por el cargue
+ * masivo NO lo tienen: nacieron antes de que existiera ese punto de control. Medido el
+ * 2026-08-12: de 171 casos con el bloque, solo 18 traen el valor extraído. Si el campo
+ * fuera de solo lectura, el 89% de los casos no podría emitir su recibo.
+ *
+ * El extraído se precarga cuando existe; quien emite puede corregirlo porque está
+ * mirando el comprobante y el sistema no.
+ */
+function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () => void }) {
+  const [abierto, setAbierto] = useState(false)
+  const [valor, setValor] = useState<string>(caso.valor_upme != null ? String(caso.valor_upme) : '')
+  const [justificacion, setJustificacion] = useState('')
+  const [duplicados, setDuplicados] = useState<Array<{ numero: string; fecha: string; valor: number }> | null>(null)
+  const [pendiente, startTransition] = useTransition()
+
+  const monto = Number(valor.replace(/[^\d]/g, ''))
+  const montoValido = Number.isFinite(monto) && monto > 0
+
+  if (caso.recibo_numero) {
+    return (
+      <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: '#047857' }}>
+        <Check className="h-3.5 w-3.5" />
+        Recaudo UPME con recibo <strong>{caso.recibo_numero}</strong>
+      </div>
+    )
+  }
+
+  function emitir() {
+    startTransition(async () => {
+      const r = await emitirReciboDeNegocio(caso.negocio_id, {
+        valorPagado: monto,
+        justificacionDuplicado: justificacion.trim() || undefined,
+      })
+      if (r.ok) {
+        toast.success(
+          r.archivada
+            ? `Recibo ${r.numero} emitido y archivado en el negocio.`
+            : `Recibo ${r.numero} emitido. El PDF no se pudo archivar: revísalo.`,
+        )
+        setAbierto(false)
+        onCambio()
+        return
+      }
+      if (r.duplicados) { setDuplicados(r.duplicados); return }
+      toast.error(r.error)
+    })
+  }
+
+  if (!abierto) {
+    return (
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="text-[11px]" style={{ color: '#6B7280' }}>
+          Recaudo UPME sin recibo de caja
+          {caso.valor_upme == null && ' · sin valor registrado'}
+        </span>
+        <button
+          onClick={() => setAbierto(true)}
+          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
+          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+        >
+          <Receipt className="h-3.5 w-3.5" /> Emitir recibo
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-2 rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
+      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>
+        Recibo de caja · recaudo para la UPME
+      </div>
+      <p className="mt-1 text-[11px]" style={{ color: '#6B7280' }}>
+        No es una factura: esta plata se recauda para girarla a la UPME, no es ingreso.
+      </p>
+
+      <label className="mt-2 block">
+        <span className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>
+          Valor pagado a la UPME
+        </span>
+        <input
+          value={valor}
+          onChange={e => setValor(e.target.value)}
+          disabled={pendiente}
+          inputMode="numeric"
+          placeholder="Ej: 733236"
+          className="mt-1 w-full rounded-md border px-2.5 py-1.5 text-[13px] tabular-nums disabled:opacity-50"
+          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+        />
+        <span className="text-[10px]" style={{ color: '#6B7280' }}>
+          {caso.valor_upme != null
+            ? 'Viene del comprobante cargado. Si no coincide con el soporte, corrígelo.'
+            : 'Este caso no tiene comprobante cargado: escribe el valor del soporte.'}
+        </span>
+      </label>
+
+      {duplicados && (
+        <div className="mt-2 rounded-md border p-2" style={{ borderColor: '#F0C060', backgroundColor: '#FFF8E6' }}>
+          <div className="flex items-start gap-1.5 text-[11px]" style={{ color: '#7A4A00' }}>
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div>
+              Siigo ya tiene {duplicados.length === 1 ? 'un recibo' : `${duplicados.length} recibos`} de
+              este cliente: {duplicados.map(d => `${d.numero} (${fmtCOP(d.valor)})`).join(', ')}.
+              Si aun así hay que emitirlo, escribe por qué.
+            </div>
+          </div>
+          <textarea
+            value={justificacion}
+            onChange={e => setJustificacion(e.target.value)}
+            rows={2}
+            placeholder="Por qué se emite de todos modos…"
+            className="mt-2 w-full rounded border px-2 py-1 text-[12px]"
+            style={{ borderColor: '#F0C060' }}
+          />
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-end gap-2">
+        <button
+          onClick={() => { setAbierto(false); setDuplicados(null) }}
+          disabled={pendiente}
+          className="rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white disabled:opacity-50"
+          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={emitir}
+          disabled={pendiente || !montoValido || (duplicados != null && justificacion.trim().length < 10)}
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
+          style={{ backgroundColor: VERDE }}
+        >
+          {pendiente && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Emitir recibo
+        </button>
+      </div>
     </div>
   )
 }
