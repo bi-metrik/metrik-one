@@ -2,10 +2,18 @@ import { getContactos, getStaffParaResponsable, getMiStaffContexto, tieneModuloA
 import DirectorioTabs from '../directorio-tabs'
 import ContactosList from './contactos-list'
 import { getRolePermissions } from '@/lib/roles'
+import type { SearchParams } from '@/lib/filtros/url-estado'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
 
-export default async function ContactosPage() {
+export default async function ContactosPage({
+  searchParams,
+}: {
+  // Los filtros viajan en la URL para sobrevivir al volver atrás; el servidor los
+  // resuelve aquí para que su render coincida con el del cliente al hidratar.
+  searchParams: Promise<SearchParams>
+}) {
+  const sp = await searchParams
   const [contactos, staff, yo, showAliados] = await Promise.all([
     getContactos(),
     getStaffParaResponsable(),
@@ -45,6 +53,7 @@ export default async function ContactosPage() {
         miStaffId={yo.staffId}
         miRol={yo.role}
         canAsignar={canAsignar}
+        searchParams={sp}
       />
     </div>
   )

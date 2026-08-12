@@ -10,6 +10,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
 import { getRolePermissions, puedeMarcarCondicionNegocio } from '@/lib/roles'
 import NegociosClient from './negocios-client'
+import type { SearchParams } from '@/lib/filtros/url-estado'
 
 type StageFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro'
 
@@ -28,7 +29,15 @@ function defaultStageFilter(role: string | null, areas: string[]): StageFilter {
   return 'todos'
 }
 
-export default async function NegociosPage() {
+export default async function NegociosPage({
+  searchParams,
+}: {
+  // Los filtros de la lista viajan en la URL para sobrevivir al volver atrás. El
+  // servidor los resuelve aquí y se los pasa al cliente como valores iniciales: si no,
+  // el primer render sale sin filtrar y al hidratar cambia, con parpadeo y desajuste.
+  searchParams: Promise<SearchParams>
+}) {
+  const sp = await searchParams
   const [abiertos, cerrados, stagesActivos, etapas, ws, staffList] = await Promise.all([
     getNegociosV2('abierto'),
     getNegociosV2('completado'),
@@ -70,6 +79,7 @@ export default async function NegociosPage() {
         staffList={staffList}
         canAsignar={canAsignar}
         canMarcar={canMarcar}
+        searchParams={sp}
       />
     </div>
   )
