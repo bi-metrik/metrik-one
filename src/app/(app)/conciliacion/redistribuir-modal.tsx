@@ -269,29 +269,37 @@ function FilaLinea({
   onEliminar: () => void
   deshabilitado: boolean
 }) {
-  const [buscando, setBuscando] = useState(false)
+  const [cambiando, setCambiando] = useState(false)
   const [q, setQ] = useState('')
   const [resultados, setResultados] = useState<Array<{ id: string; codigo: string | null; nombre: string | null }>>([])
+
+  // ⚠️ El buscador está a la vista cuando la línea todavía NO tiene negocio (recién
+  // agregada) o cuando se pidió cambiar el que tenía. La búsqueda depende de ESO, no de
+  // la bandera `cambiando`: una línea nueva muestra el buscador con `cambiando` en false,
+  // así que atarla a la bandera dejaba el campo mudo — se escribía y no aparecía nada,
+  // sin error. Lo destapó el QA en pantalla; ninguna prueba de los módulos puros podía
+  // verlo, porque el defecto vivía en la condición de render.
+  const buscadorVisible = !linea.negocioId || cambiando
 
   useEffect(() => {
     let vivo = true
     const termino = q.trim()
     const t = setTimeout(async () => {
-      if (!buscando || termino.length < 2) { if (vivo) setResultados([]); return }
+      if (!buscadorVisible || termino.length < 2) { if (vivo) setResultados([]); return }
       const res = await buscarNegociosParaValida(termino)
       if (vivo) setResultados(res.ok ? res.negocios.slice(0, 8) : [])
     }, 250)
     return () => { vivo = false; clearTimeout(t) }
-  }, [q, buscando])
+  }, [q, buscadorVisible])
 
   return (
     <div className="rounded-lg border p-3" style={{ borderColor: BORDE }}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          {linea.negocioId && !buscando ? (
+          {!buscadorVisible ? (
             <button
               type="button"
-              onClick={() => !deshabilitado && setBuscando(true)}
+              onClick={() => !deshabilitado && setCambiando(true)}
               className="text-left"
             >
               <span className="rounded bg-[#1A1A1A] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-white">
@@ -323,7 +331,7 @@ function FilaLinea({
                         type="button"
                         onClick={() => {
                           onCambiar({ negocioId: n.id, negocioCodigo: n.codigo, negocioNombre: n.nombre })
-                          setBuscando(false); setQ(''); setResultados([])
+                          setCambiando(false); setQ(''); setResultados([])
                         }}
                         className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-[#F5F4F2]"
                       >

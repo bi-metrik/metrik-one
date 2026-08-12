@@ -1915,17 +1915,27 @@ export async function redistribuirReferencia(input: {
   // Códigos de los negocios destino, para que los errores hablen en el idioma del
   // operador (V0043) y no en uuid.
   const idsDestino = [...new Set(input.lineas.map(l => l.negocioId))]
-  const { data: negsRaw } = await db(supabase)
+  // ⚠️ El error de esta consulta se LEE. Descartarlo hace que un fallo de la base sea
+  // indistinguible de "ese negocio no existe", y el operador recibe un mensaje falso
+  // sobre datos que sí están ahí (pasó en el QA del 2026-08-11).
+  const { data: negsRaw, error: negsErr } = await db(supabase)
     .from('negocios')
     .select('id, codigo')
     .eq('workspace_id', workspaceId)
     .in('id', idsDestino.length > 0 ? idsDestino : ['00000000-0000-0000-0000-000000000000'])
+
+  if (negsErr) return { ok: false, error: (negsErr as { message: string }).message }
+
   const codigoPorId = new Map(
     ((negsRaw ?? []) as Array<{ id: string; codigo: string | null }>).map(n => [n.id, n.codigo]),
   )
 
-  if (idsDestino.some(id => !codigoPorId.has(id))) {
-    return { ok: false, error: 'Uno de los negocios no existe en este espacio de trabajo' }
+  const faltantes = idsDestino.filter(id => !codigoPorId.has(id))
+  if (faltantes.length > 0) {
+    return {
+      ok: false,
+      error: `No se encontró ${faltantes.length === 1 ? 'un negocio' : `${faltantes.length} negocios`} de la lista en este espacio de trabajo (${faltantes.join(', ')})`,
+    }
   }
 
   const plan = planearRedistribucion({
