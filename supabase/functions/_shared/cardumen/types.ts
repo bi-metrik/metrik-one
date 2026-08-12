@@ -60,6 +60,7 @@ export interface ConversationState {
   reflexivity_log: ReflexivityEntry[]; // por que de cada repregunta (auditoria de sesgo)
   closing_asked: string[];            // ids de preguntas de cierre ya formuladas
   consent?: Consentimiento;           // si el estudio pide autorizacion, aqui queda
+  closing_done_turn?: number;         // turno en que se formulo la ultima pregunta de cierre
   closed: boolean;
 }
 

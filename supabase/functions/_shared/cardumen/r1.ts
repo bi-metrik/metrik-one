@@ -98,8 +98,18 @@ export async function nextTurn(
   // de preguntar la ultima dimension). El tope duro de turnos siempre cierra.
   // Un estudio con preguntas de cierre no cierra hasta haberlas formulado todas (salvo tope de turnos).
   const closingComplete = declaredClosing.every((id) => state.closing_asked.includes(id));
+  if (closingComplete && state.closing_done_turn === undefined) state.closing_done_turn = state.turn;
 
-  if ((coverageBefore && closingComplete && (saturated || output.propose_close)) || hitCap) {
+  // Con todo cubierto y la ultima pregunta de cierre YA RESPONDIDA, se cierra: no se espera
+  // saturacion ni que el modelo lo proponga. Exigir saturacion era el defecto de fondo — una
+  // persona que responde bien nunca se repite, asi que la racha nunca subia y el bot seguia
+  // indagando hasta el tope. Medido en la prueba del 2026-08-12: SIETE repreguntas sobre la
+  // misma historia y dos preguntas de mas despues del cierre, una de ellas sobre el futuro
+  // laboral de la persona.
+  const cierreRespondido =
+    closingComplete && state.closing_done_turn !== undefined && state.turn > state.closing_done_turn;
+
+  if ((coverageBefore && (cierreRespondido || saturated || output.propose_close)) || hitCap) {
     state.closed = true;
   }
 
