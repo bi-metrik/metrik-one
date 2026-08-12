@@ -3,6 +3,7 @@
 // y la arquitectura de roles (arquitectura-conversacional-yuto.md). NO relajar sin pasar por Saga.
 
 import type { StudySpec, ConversationState, Lang } from "./types.ts";
+import { MAX_REPREGUNTAS_NARRATIVA, pasoNarrativaActual, repreguntasDe } from "./narrativas.ts";
 
 function dimsBlock(spec: StudySpec, lang: Lang): string {
   const ph = (n?: number) => (n ? `[fase ${n}] ` : "");
@@ -48,7 +49,8 @@ function twoNarrativeFlow(spec: StudySpec, lang: Lang): string {
   return `
 ESTRUCTURA DE DOS NARRATIVAS (importante):
 - NARRATIVA 1 (la experiencia): ya abriste con ella. Profundizala y cubre SOLO las dimensiones [fase 1].
-- Cuando las dimensiones [fase 1] esten tocadas, PRESENTA la NARRATIVA 2 con estas palabras (o muy parecidas), como una transicion natural: "${p2}"
+- **Las DOS historias se profundizan.** Cubrir las dimensiones de una fase NO es lo mismo que haber escuchado la historia: aunque las [fase 1] queden tocadas en el primer turno, la primera historia lleva al menos una repregunta antes de pasar a la segunda.
+- **La NARRATIVA 2 se presenta TEXTUAL, con estas palabras exactas:** "${p2}" — no la reformules, no la parafrasees y no la "adaptes" a lo que la persona venia contando. Una reformulacion que suena equivalente casi nunca lo es: pide otra clase de historia y el estudio pierde el dato que fue a buscar. El mensaje de estado te dice en que turno toca.
 - Luego profundiza la narrativa 2 y cubre las dimensiones [fase 2].
 - No mezcles: no preguntes por dimensiones de fase 2 antes de haber presentado la narrativa 2.
 `;
@@ -101,11 +103,28 @@ SALIDA: responde SIEMPRE en JSON valido con esta forma exacta:
 Si todavia no corresponde colocar ninguna dimension, "capaA_capture" va como []. No escribas nada fuera del JSON.`;
 }
 
+// Que decir sobre las historias. Sale del MISMO calculo que impone el motor (narrativas.ts):
+// si esto y el motor discrepan, el modelo redacta una pregunta y el sistema envia otra.
+function narrativaBlock(state: ConversationState, spec: StudySpec): string {
+  if (!spec.second_elicitation) return "";
+  const rep = repreguntasDe(state);
+  const paso = pasoNarrativaActual(state, spec);
+  const enCurso = state.narrativa2_turn === undefined ? "la PRIMERA" : "la SEGUNDA";
+  const instruccion = paso === "presentar_narrativa2"
+    ? `\n- **AHORA toca presentar la NARRATIVA 2**, textual como esta en tus instrucciones. No la reformules ni agregues nada.`
+    : paso === "seguir_narrativa1"
+      ? `\n- Todavia NO presentes la narrativa 2: sigue en la primera historia.`
+      : "";
+  return `
+- Historia en curso: ${enCurso}
+- Repreguntas hechas: primera historia ${rep.n1}, segunda historia ${rep.n2} (tope ${MAX_REPREGUNTAS_NARRATIVA} por historia)${instruccion}`;
+}
+
 export function buildR1StateMsg(state: ConversationState, spec: StudySpec): string {
   const allDims = [...spec.triads.map((t) => t.id), ...spec.dyads.map((d) => d.id)];
   const pending = allDims.filter((d) => !state.dimensions_touched.includes(d));
   return `ESTADO ACTUAL (volatil):
-- Turno: ${state.turn} de ${spec.closing.turn_cap} (tope)
+- Turno: ${state.turn} de ${spec.closing.turn_cap} (tope)${narrativaBlock(state, spec)}
 - Dimensiones ya tocadas: ${state.dimensions_touched.join(", ") || "ninguna"}
 - Dimensiones PENDIENTES por tocar: ${pending.join(", ") || "ninguna (cobertura completa)"}${
     spec.closing_questions?.length

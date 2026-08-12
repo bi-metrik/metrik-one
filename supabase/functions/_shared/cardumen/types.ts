@@ -61,6 +61,8 @@ export interface ConversationState {
   closing_asked: string[];            // ids de preguntas de cierre ya formuladas
   consent?: Consentimiento;           // si el estudio pide autorizacion, aqui queda
   closing_done_turn?: number;         // turno en que se formulo la ultima pregunta de cierre
+  narrativa2_turn?: number;           // turno en que se presento la 2a narrativa (undefined = seguimos en la 1a)
+  repreguntas_narrativa?: { n1: number; n2: number }; // repreguntas hechas sobre cada historia
   closed: boolean;
 }
 

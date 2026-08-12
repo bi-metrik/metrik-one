@@ -6,6 +6,7 @@ import type {
 } from "./types.ts";
 import { buildR1System, buildR1StateMsg } from "./prompts.ts";
 import { parseLooseJSON } from "./json.ts";
+import { pasoNarrativaActual, repreguntasDe } from "./narrativas.ts";
 
 export function initState(spec: StudySpec, lang: Lang = spec.lang_default): ConversationState {
   return {
@@ -18,6 +19,7 @@ export function initState(spec: StudySpec, lang: Lang = spec.lang_default): Conv
     saturation_streak: 0,
     reflexivity_log: [],
     closing_asked: [],
+    repreguntas_narrativa: { n1: 0, n2: 0 },
     closed: false,
   };
 }
@@ -65,13 +67,39 @@ export async function nextTurn(
 
   // --- actualizar estado ---
   state.turn += 1;
-  state.history.push({ role: "interviewer", text: output.message_to_user });
-  state.reflexivity_log.push({ turn: state.turn, why: output.reflexivity_note });
 
   // Cobertura ANTES de aplicar lo de este turno: si la pregunta de este turno introduce la ultima
   // dimension, NO debe disparar el cierre en el mismo turno (el usuario aun no la ha respondido).
   const allDims = [...spec.triads.map((t) => t.id), ...spec.dyads.map((d) => d.id)];
   const coverageBefore = allDims.every((d) => state.dimensions_touched.includes(d));
+
+  // El paso a la segunda historia lo decide el CODIGO, y su texto es el LITERAL del estudio.
+  // El prompt ya lo pedia y el modelo lo reformulaba igual: en las dos pruebas con personas
+  // (2026-08-12) pregunto "una vez que no salio asi" en lugar de "algo que hayas tenido que
+  // hacer dos veces". Suenan parecidas y no lo son — la del estudio trae un REPROCESO, que es
+  // el dato que sostiene el diagnostico, y la reformulada trae un incidente cualquiera. Una
+  // pregunta del instrumento aprobado no puede depender de que el modelo respete una
+  // instruccion de estilo, asi que aqui se impone.
+  const repreguntas = repreguntasDe(state);
+  const enFaseDeCierre = state.closing_asked.length > 0 || (output.closing_asked ?? []).length > 0;
+  // Mismo calculo que ya se le informo al modelo en el mensaje de estado (fuente unica).
+  const paso = pasoNarrativaActual(state, spec);
+  const literalNarrativa2 = state.lang === "es"
+    ? spec.second_elicitation?.literal_es
+    : spec.second_elicitation?.literal_en;
+
+  if (paso === "presentar_narrativa2" && !enFaseDeCierre && literalNarrativa2) {
+    output.message_to_user = literalNarrativa2;
+    state.narrativa2_turn = state.turn;
+  } else if (!enFaseDeCierre) {
+    // Toda pregunta que no presenta una historia ni formula un cierre es una repregunta.
+    if (state.narrativa2_turn === undefined) repreguntas.n1 += 1;
+    else repreguntas.n2 += 1;
+  }
+  state.repreguntas_narrativa = repreguntas;
+
+  state.history.push({ role: "interviewer", text: output.message_to_user });
+  state.reflexivity_log.push({ turn: state.turn, why: output.reflexivity_note });
 
   for (const d of output.dimensions_addressed ?? []) {
     if (!state.dimensions_touched.includes(d)) state.dimensions_touched.push(d);
