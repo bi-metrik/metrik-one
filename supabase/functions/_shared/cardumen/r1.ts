@@ -17,6 +17,7 @@ export function initState(spec: StudySpec, lang: Lang = spec.lang_default): Conv
     capaA_confirmed: {},
     saturation_streak: 0,
     reflexivity_log: [],
+    closing_asked: [],
     closed: false,
   };
 }
@@ -80,6 +81,12 @@ export async function nextTurn(
     if (!state.dimensions_touched.includes(cap.dimension)) state.dimensions_touched.push(cap.dimension);
   }
 
+  // Preguntas de cierre formuladas en este turno (solo ids declarados en el spec: el modelo no inventa preguntas).
+  const declaredClosing = (spec.closing_questions ?? []).map((q) => q.id);
+  for (const id of output.closing_asked ?? []) {
+    if (declaredClosing.includes(id) && !state.closing_asked.includes(id)) state.closing_asked.push(id);
+  }
+
   // saturacion: si el participante no aporto contenido nuevo, sube la racha
   state.saturation_streak = output.new_content ? 0 : state.saturation_streak + 1;
 
@@ -89,7 +96,10 @@ export async function nextTurn(
 
   // Cierra solo si la cobertura YA estaba completa al iniciar este turno (asi no cierra justo despues
   // de preguntar la ultima dimension). El tope duro de turnos siempre cierra.
-  if ((coverageBefore && (saturated || output.propose_close)) || hitCap) {
+  // Un estudio con preguntas de cierre no cierra hasta haberlas formulado todas (salvo tope de turnos).
+  const closingComplete = declaredClosing.every((id) => state.closing_asked.includes(id));
+
+  if ((coverageBefore && closingComplete && (saturated || output.propose_close)) || hitCap) {
     state.closed = true;
   }
 

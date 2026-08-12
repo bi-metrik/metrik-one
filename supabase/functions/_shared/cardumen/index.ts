@@ -7,7 +7,8 @@ import { FEDE_SPEC } from "./spec.ts";
 import { claudeHaiku } from "./model.ts";
 import { initState, elicitationOpening, nextTurn } from "./r1.ts";
 import { serialize } from "./r2.ts";
-import type { ConversationState } from "./types.ts";
+import { resolverEstudioChatPorTrigger, specDeSesion, type EstudioChat } from "./estudios.ts";
+import type { ConversationState, StudySpec } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
@@ -15,6 +16,21 @@ type Supa = any;
 const CHAT_KEYWORDS = ["cardumenchat", "cardumen chat"];
 const EXIT_WORDS = ["salir", "cancelar", "terminar"];
 
+/**
+ * Estudio que abre este texto. Primero el catalogo (una fila = un estudio, varios
+ * estudios pueden convivir); si el catalogo no resuelve, cae a la palabra fija de
+ * siempre con el spec importado, para no cambiarle la conducta a lo que ya corre.
+ */
+export async function resolverEstudioChat(supabase: Supa, text: string): Promise<EstudioChat | null> {
+  const delCatalogo = await resolverEstudioChatPorTrigger(supabase, text);
+  if (delCatalogo) return delCatalogo;
+  if (isCardumenChatTrigger(text)) {
+    return { estudio: FEDE_SPEC.study_id, nombre: FEDE_SPEC.title, spec: FEDE_SPEC, desdeCatalogo: false };
+  }
+  return null;
+}
+
+/** Fallback retrocompatible: la palabra fija de siempre. */
 export function isCardumenChatTrigger(text: string): boolean {
   const t = (text || "").trim().toLowerCase().replace(/[!¡.,]/g, "");
   return CHAT_KEYWORDS.includes(t);
@@ -30,9 +46,19 @@ export async function hasOpenCardumenChat(supabase: Supa, phone: string): Promis
   return !!data;
 }
 
-export async function startCardumenChat(supabase: Supa, phone: string): Promise<void> {
-  const state = initState(FEDE_SPEC);
-  const opening = elicitationOpening(FEDE_SPEC, state.lang);
+export async function startCardumenChat(
+  supabase: Supa,
+  phone: string,
+  estudio?: EstudioChat,
+): Promise<void> {
+  // Sin estudio explicito, el de siempre: mantiene el comportamiento de los llamadores viejos.
+  const spec: StudySpec = estudio?.spec ?? FEDE_SPEC;
+  const slug = estudio?.estudio ?? FEDE_SPEC.study_id;
+  const state = initState(spec);
+  // El slug del catalogo manda sobre el study_id del spec: es el que decide con que estudio
+  // se guarda la respuesta al cerrar, y tiene que ser uno solo de punta a punta.
+  state.study_id = slug;
+  const opening = elicitationOpening(spec, state.lang);
   state.history.push({ role: "interviewer", text: opening });
   await supabase.from("cardumen_chat_sessions").upsert({
     phone,
@@ -67,18 +93,21 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
 
   const state = row.state as ConversationState;
   const model = claudeHaiku();
+  // El spec sale del estudio de ESTA sesion, no de un import global: es lo que permite que
+  // dos estudios corran a la vez sin pisarse.
+  const spec = await specDeSesion(supabase, state.study_id);
 
   // Salida explicita del participante.
   if (EXIT_WORDS.includes(exit)) {
-    await closeAndSerialize(supabase, phone, state, model, /*userExit*/ true);
+    await closeAndSerialize(supabase, phone, state, model, /*userExit*/ true, spec);
     return;
   }
 
   try {
-    const { output } = await nextTurn(model, FEDE_SPEC, state, text);
+    const { output } = await nextTurn(model, spec, state, text);
     if (state.closed) {
       // No enviamos otra pregunta al cerrar — solo el agradecimiento/cierre (evita "pregunta + cerramos").
-      await closeAndSerialize(supabase, phone, state, model, false);
+      await closeAndSerialize(supabase, phone, state, model, false, spec);
     } else {
       await sendTextMessage(phone, output.message_to_user);
       await supabase
@@ -107,19 +136,23 @@ async function closeAndSerialize(
   state: ConversationState,
   model: ReturnType<typeof claudeHaiku>,
   userExit: boolean,
+  specSesion?: StudySpec,
 ): Promise<void> {
   state.closed = true;
-  let payload: Record<string, unknown> = { source: "chat", collection_mode: FEDE_SPEC.collection_mode };
+  const spec: StudySpec = specSesion ?? FEDE_SPEC;
+  let payload: Record<string, unknown> = { source: "chat", collection_mode: spec.collection_mode };
   try {
-    const record = await serialize(model, FEDE_SPEC, state);
+    const record = await serialize(model, spec, state);
     payload = { ...payload, ...record };
   } catch (e) {
     console.error("[cardumen-chat] error serializando:", (e as Error).message);
     payload.raw_history = state.history;
   }
   // Guardar el registro en el mismo destino que la mini-web / Flow.
+  // El estudio sale del ESTADO de la conversacion, no de una env var: la env var era lo que
+  // dejaba respuestas etiquetadas con un estudio distinto del spec que las produjo.
   const { error } = await supabase.from("cardumen_respuestas").insert({
-    estudio: Deno.env.get("CARDUMEN_ESTUDIO") || "fede",
+    estudio: state.study_id || Deno.env.get("CARDUMEN_ESTUDIO") || "fede",
     token: phone,
     lang: state.lang,
     payload,

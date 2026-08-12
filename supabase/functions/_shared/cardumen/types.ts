@@ -21,13 +21,23 @@ export interface ElicitationPrompt {
   placeholder_es: string; placeholder_en: string;
   literal_es?: string; literal_en?: string;
 }
+// Preguntas de cierre: no son narrativas ni dimensiones de Capa A. Se hacen TEXTUALES,
+// una por turno, cuando la cobertura de Capa A ya esta completa. Opt-in por estudio:
+// un spec que no las declara se comporta igual que antes.
+export interface ClosingQuestion {
+  id: string;
+  literal_es: string;
+  literal_en: string;
+}
 export interface StudySpec {
   study_id: string;
   title: string;
   lang_default: Lang;
   collection_mode: "study_async" | "event_live" | "panel_recurrente";
+  context_note?: string;                  // contexto del despliegue (pais, sector). NUNCA hardcodear en el prompt.
   elicitation_prompt: ElicitationPrompt;
   second_elicitation?: ElicitationPrompt; // 2a narrativa opcional (estudios de dos fases)
+  closing_questions?: ClosingQuestion[];  // preguntas de cierre opcionales (ver ClosingQuestion)
   narrative_fields: string[];
   triads: Triad[];
   dyads: Dyad[];
@@ -48,6 +58,7 @@ export interface ConversationState {
   capaA_confirmed: Record<DimensionId, CapaAPlacement>; // lo que el HUMANO confirmo, en sus palabras
   saturation_streak: number;          // repreguntas seguidas sin contenido nuevo
   reflexivity_log: ReflexivityEntry[]; // por que de cada repregunta (auditoria de sesgo)
+  closing_asked: string[];            // ids de preguntas de cierre ya formuladas
   closed: boolean;
 }
 
@@ -70,6 +81,7 @@ export interface R1Output {
   reflexivity_note: string;      // por que esta repregunta (no se envia al usuario; va al log)
   dimensions_addressed: DimensionId[]; // dimensiones que este turno toco/elicito
   capaA_capture: CapaAPlacement[];     // colocaciones de Capa A confirmadas en este turno (puede ir vacio)
+  closing_asked?: string[];      // ids de preguntas de cierre formuladas en este turno
   new_content: boolean;          // el ultimo turno del participante aporto contenido nuevo?
   propose_close: boolean;        // R1 cree que se cumplio el criterio de cierre
 }
@@ -79,6 +91,7 @@ export interface SerializedRecord {
   study_id: string;
   collection_mode: string;
   narrative: Record<string, string>;            // Title / Utopia / Dystopia / FragmentEntry si se elicitaron
+  closing?: Record<string, string>;             // respuestas a las preguntas de cierre, por id (si el estudio las declara)
   capaA: Record<DimensionId, CapaAPlacement>;   // valores tal como el humano los coloco (NA si no se elicito)
   capaB: { dimension: DimensionId; micro_narrative: string; quote: string }[]; // profundidad por dimension
   classification: Record<string, string>;       // region/antiguedad/ocupacion/sector si surgieron
