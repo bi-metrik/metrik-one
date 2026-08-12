@@ -372,3 +372,82 @@ export async function renderGuiaDevolucion(
   const arrayBuffer = await res.arrayBuffer()
   return Buffer.from(arrayBuffer)
 }
+
+
+/** Lo que el template del recibo necesita para armarse. */
+export interface ReciboCajaRenderPayload {
+  /** Consecutivo OFICIAL que asignó Siigo (RC-1-NN). Es el respaldo del cliente. */
+  numero: string
+  fecha: string
+  cliente_nombre: string
+  cliente_identificacion: string
+  negocio_codigo: string
+  valor: number
+  concepto: string
+}
+
+/**
+ * PDF del recibo de caja del recaudo de la tarifa UPME.
+ *
+ * ⚠️ Existe porque **Siigo no expone PDF de los recibos** (404 en `/pdf` y `/print`,
+ * reconfirmado el 2026-08-12). El documento contable vive en Siigo; esto es la
+ * confirmación que recibe el cliente, y su valor está en llevar el consecutivo oficial.
+ */
+export async function renderReciboCaja(
+  templateSlug: string,
+  data: ReciboCajaRenderPayload,
+): Promise<Buffer> {
+  if (!isPdfRenderConfigured()) {
+    throw new Error('PDF render service no configurado (faltan env vars)')
+  }
+
+  const url = `${RENDER_URL}/render/recibo-caja`
+  const token = await getIdToken(RENDER_URL!)
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-MeTRIK-Secret': RENDER_SECRET!,
+    },
+    body: JSON.stringify({
+      template_slug: templateSlug,
+      data: {
+        ...data,
+        // Moneda y fecha se resuelven acá y no en el template: el servicio de render
+        // solo sustituye texto, no sabe de locales. Y el cliente no debería recibir
+        // una fecha en formato de base de datos.
+        valor_fmt: `$${Math.round(data.valor).toLocaleString('es-CO')}`,
+        fecha: fechaLegible(data.fecha),
+      },
+    }),
+  })
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`PDF render recibo-caja falló (${res.status}): ${txt.slice(0, 300)}`)
+  }
+
+  return Buffer.from(await res.arrayBuffer())
+}
+
+/**
+ * `2026-08-12` → `12 de agosto de 2026`.
+ *
+ * Se construye desde las partes de la cadena y NO con `new Date(...)`: esa forma
+ * interpreta una fecha sin hora como UTC y, en Colombia (UTC-5), la retrocede un día.
+ * Un recibo fechado un día antes es un problema contable, no un detalle de formato.
+ */
+function fechaLegible(iso: string): string {
+  const MESES = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+  ]
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim())
+  if (!m) return iso
+  const [, anio, mes, dia] = m
+  const nombreMes = MESES[Number(mes) - 1]
+  if (!nombreMes) return iso
+  return `${Number(dia)} de ${nombreMes} de ${anio}`
+}

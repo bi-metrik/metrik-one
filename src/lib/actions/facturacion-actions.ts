@@ -17,6 +17,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { borradorCliente, borradorFactura, borradorRecibo, type RutExtraido } from '@/lib/siigo/mapeo'
+import { emitirReciboNegocio } from '@/lib/siigo/recibos'
 import type { SiigoConfig } from '@/lib/siigo/client'
 import { emitirFacturaNegocio, type FacturaEnSiigo, type MarcaFactura } from '@/lib/siigo/facturas'
 import { leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
@@ -555,4 +556,106 @@ export async function emitirFacturaDeNegocio(
 
   revalidatePath('/conciliacion')
   return { ok: true, numero: r.numero, borrador: !r.emitida, archivada: r.archivada }
+}
+
+// ── Recibo de caja del recaudo de la tarifa UPME ─────────────────────────────
+
+export type ResultadoRecibo =
+  | { ok: true; numero: string; valor: number; archivada: boolean }
+  | { ok: false; error: string; duplicados?: Array<{ numero: string; fecha: string; valor: number }> }
+
+/**
+ * Emite el recibo de caja del recaudo de la tarifa UPME.
+ *
+ * ⚠️ **El valor lo decide quien emite, no el sistema.** Puede venir del comprobante
+ * extraído, pero los casos que entraron por el cargue masivo NO tienen ese comprobante
+ * — nacieron antes de que existiera el punto de control — y son la mayoría: medido el
+ * 2026-08-12, de 171 casos con el bloque solo **18** traen el valor. Por eso la captura
+ * a mano es el camino frecuente y no una excepción.
+ *
+ * Cuando `valorPagado` no llega, se usa el del comprobante; si tampoco está, se rechaza
+ * en vez de emitir un recibo en cero (que consumiría numeración sin documentar nada).
+ */
+export async function emitirReciboDeNegocio(
+  negocioId: string,
+  opciones?: { valorPagado?: number; justificacionDuplicado?: string },
+): Promise<ResultadoRecibo> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { workspaceId } = ctx
+
+  const { staffId } = await getWorkspace()
+  const svc = createServiceClient()
+
+  let nombre: string | null = null
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: st } = await (svc as any).from('staff').select('full_name').eq('id', staffId).maybeSingle()
+    nombre = (st?.full_name as string | null) ?? null
+  }
+
+  // ── El valor: el capturado gana sobre el extraído ──
+  // Quien emite está mirando el comprobante; si corrige el número, es porque el
+  // extraído está mal. La extracción es una ayuda, no la autoridad.
+  let valor = opciones?.valorPagado
+  if (valor == null) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: bloques } = await (svc as any)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocioId)
+    const upme = ((bloques ?? []) as Array<{ data: Record<string, unknown> | null; bloque_configs: { slug: string | null } }>)
+      .find(b => b.bloque_configs?.slug === 'comprobante_pago_upme')
+    const campos = (upme?.data?.campos ?? {}) as Record<string, { value?: unknown }>
+    const crudo = campos.valor_pagado?.value
+    const n = typeof crudo === 'number' ? crudo : Number(String(crudo ?? '').replace(/[^\d]/g, ''))
+    if (Number.isFinite(n) && n > 0) valor = n
+  }
+
+  if (valor == null || !(valor > 0)) {
+    return {
+      ok: false,
+      error: 'Falta el valor pagado a la UPME. Cárgalo en el comprobante o escríbelo al emitir.',
+    }
+  }
+
+  // ── Dónde archivar el PDF: declarado por línea, junto al resto de la config ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negLinea } = await (svc as any)
+    .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+  let bloqueReciboSlug: string | undefined
+  if (negLinea?.linea_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: linea } = await (svc as any)
+      .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
+    const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
+      { bloque_recibo_slug?: string } | undefined
+    bloqueReciboSlug = cfgSiigo?.bloque_recibo_slug
+  }
+
+  const r = await emitirReciboNegocio(workspaceId, negocioId, valor, nombre, {
+    bloqueReciboSlug,
+    justificacionDuplicado: opciones?.justificacionDuplicado,
+  })
+
+  if (!r.ok) {
+    if (r.motivo === 'duplicado_en_siigo') {
+      return {
+        ok: false,
+        error: `Siigo ya tiene ${r.existentes.length === 1 ? 'un recibo' : `${r.existentes.length} recibos`} de este cliente por la tarifa.`,
+        duplicados: r.existentes,
+      }
+    }
+    const mensajes: Record<string, string> = {
+      ya_emitido: r.motivo === 'ya_emitido' ? `Este caso ya tiene el recibo ${r.numero}.` : '',
+      sin_valor: 'El valor tiene que ser mayor que cero.',
+      faltan_datos: r.motivo === 'faltan_datos' ? `Faltan datos: ${r.faltantes.join(', ')}.` : '',
+      error: r.motivo === 'error' ? r.mensaje : '',
+    }
+    return { ok: false, error: mensajes[r.motivo] || 'No se pudo emitir el recibo.' }
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  revalidatePath('/conciliacion')
+  return { ok: true, numero: r.numero, valor: r.valor, archivada: r.archivada }
 }
