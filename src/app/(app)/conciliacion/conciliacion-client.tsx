@@ -17,6 +17,8 @@ import {
   type ReferenciaPago,
 } from '@/lib/actions/conciliacion-actions'
 import PagosExternosTab from './pagos-externos-tab'
+import BusquedaInput from '@/components/busqueda-input'
+import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { RedistribuirModal } from './redistribuir-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
@@ -706,9 +708,27 @@ function FuenteBadge({ fuente, small }: { fuente: string; small?: boolean }) {
  */
 type VistaFact = 'pendientes' | 'descartados' | 'facturados'
 
+/**
+ * Filtra la cola por lo tecleado. El teléfono va aparte de la comparación de
+ * texto: el mismo número está guardado con indicativo, con paréntesis o pelado,
+ * así que compararlo como cadena no encuentra casi nada (`lib/busqueda/telefono`).
+ */
+export function filtrarCasos(casos: CasoPorFacturar[], term: string): CasoPorFacturar[] {
+  if (!term) return casos
+  return casos.filter(c => {
+    const hay = [c.codigo, c.nombre, c.cliente, c.identificacion, c.etapa,
+      c.factura_numero, c.recibo_numero]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return hay.includes(term) || telefonoCoincide(c.telefono, term)
+  })
+}
+
 function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
   const router = useRouter()
   const [vista, setVista] = useState<VistaFact>('pendientes')
+  const [q, setQ] = useState('')
 
   if (cola.desde_etapa_numero == null) {
     return (
@@ -723,9 +743,14 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
     )
   }
 
-  const facturados = cola.casos.filter(c => c.ya_facturado)
-  const descartados = cola.casos.filter(c => !c.ya_facturado && c.descartado != null)
-  const pendientes = cola.casos.filter(c => !c.ya_facturado && c.descartado == null)
+  // La búsqueda se aplica ANTES de separar por vista, así que los tres contadores
+  // del selector cuentan lo mismo que se va a listar. Los tiles de arriba siguen
+  // siendo la foto de la cola completa: son el estado del trabajo, no del filtro.
+  const term = q.trim().toLowerCase()
+  const encontrados = filtrarCasos(cola.casos, term)
+  const facturados = encontrados.filter(c => c.ya_facturado)
+  const descartados = encontrados.filter(c => !c.ya_facturado && c.descartado != null)
+  const pendientes = encontrados.filter(c => !c.ya_facturado && c.descartado == null)
   const visibles = vista === 'facturados' ? facturados : vista === 'descartados' ? descartados : pendientes
 
   return (
@@ -765,6 +790,21 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
         </div>
       )}
 
+      {/* Búsqueda — misma barra que la vista general de negocios */}
+      <div className="mb-3">
+        <BusquedaInput
+          value={q}
+          onChange={setQ}
+          placeholder="Buscar por código, cliente, celular, cédula o etapa…"
+          ariaLabel="Buscar casos por facturar"
+        />
+        {term && (
+          <p className="mt-1.5 text-[11px]" style={{ color: '#6B7280' }}>
+            {encontrados.length} de {cola.casos.length} casos
+          </p>
+        )}
+      </div>
+
       {/* Selector de vista */}
       <div className="mb-3 flex flex-wrap gap-1">
         {([
@@ -790,10 +830,21 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
       {visibles.length === 0 ? (
         <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
           <p className="text-[13px]" style={{ color: '#6B7280' }}>
-            {vista === 'facturados' ? 'Ningún caso registra factura todavía.'
+            {term ? `Sin resultados para "${q.trim()}" en esta vista.`
+              : vista === 'facturados' ? 'Ningún caso registra factura todavía.'
               : vista === 'descartados' ? 'No has descartado ningún caso.'
               : 'No hay casos por facturar.'}
           </p>
+          {term && (
+            <button
+              type="button"
+              onClick={() => setQ('')}
+              className="mt-2 text-[12px] font-medium underline"
+              style={{ color: VERDE }}
+            >
+              Limpiar búsqueda
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-2">

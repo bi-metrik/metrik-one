@@ -1,8 +1,10 @@
 'use client'
 import { useState, useMemo } from 'react'
-import { Search, X, Clock } from 'lucide-react'
+import { Clock } from 'lucide-react'
 import NegocioCard, { type StaffAsignable } from './negocio-card'
+import BusquedaInput from '@/components/busqueda-input'
 import EmptyState from '@/components/empty-state'
+import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import { segmentarNegocios } from '@/lib/negocios/segmentador'
@@ -93,7 +95,9 @@ function aplicarFiltros(lista: NegocioResumen[], f: FiltrosLista): NegocioResume
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
-      return hay.includes(f.term)
+      // El teléfono va aparte: comparado como texto casi nunca coincide, porque el
+      // mismo número está guardado con indicativo, con paréntesis o pelado.
+      return hay.includes(f.term) || telefonoCoincide(n.contacto_telefono, f.term)
     })
   }
   return res
@@ -197,7 +201,7 @@ export default function NegociosClient({
     setEtapaNum(null)
   }
 
-  // Búsqueda libre (código, nombre/contacto, empresa, vehículo, cédula, radicado) + filtro de seccional DIAN
+  // Búsqueda libre (código, nombre/contacto, empresa, vehículo, celular, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
   const filtros = useMemo<FiltrosLista>(
     () => ({ seccional, responsable, origen, term, soloAtrasados }),
@@ -374,26 +378,12 @@ export default function NegociosClient({
       )}
 
       {/* Barra de búsqueda */}
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6B7280]" />
-        <input
-          type="text"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por código, cliente, cédula, seccional o vehículo…"
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 pl-9 pr-9 text-sm text-[#1A1A1A] placeholder:text-[#6B7280] focus:border-[#1A1A1A]/30 focus:outline-none"
-        />
-        {q && (
-          <button
-            type="button"
-            onClick={() => setQ('')}
-            aria-label="Limpiar búsqueda"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A]"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
-      </div>
+      <BusquedaInput
+        value={q}
+        onChange={setQ}
+        placeholder="Buscar por código, cliente, celular, cédula, seccional o vehículo…"
+        ariaLabel="Buscar negocios"
+      />
 
       {/* Filtro por seccional DIAN (solo si hay seccionales en los negocios) */}
       {seccionalesDisponibles.length > 0 && (
@@ -509,7 +499,7 @@ export default function NegociosClient({
         sinResultadosBusqueda ? (
           <EmptyState
             title={`Sin resultados para "${q.trim()}"`}
-            description="Prueba con otro código, cliente, cédula, seccional o vehículo."
+            description="Prueba con otro código, cliente, celular, cédula, seccional o vehículo."
             primaryCta={{ label: 'Limpiar búsqueda', onClick: () => setQ('') }}
           />
         ) : fase === 'cerrados' && !isFilteringMotivo ? (
