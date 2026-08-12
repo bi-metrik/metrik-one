@@ -697,6 +697,14 @@ function SelectorEtapa({
     setGateModal(null)
     startTransition(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo)
+
+      // ⚠️ Hay gates que NO ceden al override (el aviso de recaudo cambiado). Sin esto,
+      // el operador recibía el literal "Error: gate_bloqueado": frenaba sin decir por qué,
+      // que es tan inútil como no frenar. Se vuelve a abrir el modal con el motivo real.
+      if (result.error === 'gate_bloqueado') {
+        setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [] })
+        return
+      }
       if (result.error) {
         toast.error('Error: ' + result.error)
       } else {
