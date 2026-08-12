@@ -3,6 +3,7 @@
 // ============================================================
 
 import { splitMessage } from './wa-format.ts';
+import { aEspanolNeutro } from './es-neutro.ts';
 
 const META_API_VERSION = 'v21.0';
 
@@ -18,9 +19,17 @@ function getHeaders(): Record<string, string> {
   };
 }
 
-/** Send a text message, auto-splitting if > 500 chars */
+/**
+ * Send a text message, auto-splitting if > 500 chars.
+ * Pasa por el guard de espanol neutro: TODO lo que sale de cualquier bot de MeTRIK va en
+ * tuteo colombiano, y eso se garantiza aqui y no en el prompt (ver es-neutro.ts).
+ */
 export async function sendTextMessage(phone: string, text: string): Promise<void> {
-  const chunks = splitMessage(text);
+  const neutro = aEspanolNeutro(text);
+  if (neutro.correcciones.length) {
+    console.warn(`[wa-respond] voseo corregido antes de enviar: ${neutro.correcciones.join(', ')}`);
+  }
+  const chunks = splitMessage(neutro.texto);
   for (const chunk of chunks) {
     // No artificial delay — Meta keeps ordering within a single phone_number_id.
     // Removing the 1s sleep shaves ~2-3s off multi-chunk flows (Sprint 1, Yuto).
