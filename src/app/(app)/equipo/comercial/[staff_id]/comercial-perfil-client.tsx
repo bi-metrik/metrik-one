@@ -61,18 +61,31 @@ export default function ComercialPerfilClient({
   const periodoLabel = anio != null && mes != null ? `${MESES_ES[mes - 1]} ${anio}` : 'Acumulado'
 
   // Opciones del selector de periodo: acumulado + los meses de la serie del vendedor.
+  //
+  // ⚠️ El periodo activo se agrega si no esta en la serie. La serie solo trae meses CON
+  // ventas, y desde que el default es el mes en curso, un vendedor que todavia no ha
+  // vendido este mes abriria el selector con un valor que no existe entre las opciones:
+  // el navegador lo pinta vacio y parece que la pantalla esta rota.
   const opcionesPeriodo = useMemo(() => {
     const meses = [...perfil.serie]
       .map((p) => ({ value: `${p.anio}-${String(p.mes).padStart(2, '0')}`, label: `${MESES_ES[p.mes - 1]} ${p.anio}` }))
       .reverse() // mas reciente primero
+    if (anio != null && mes != null) {
+      const actual = `${anio}-${String(mes).padStart(2, '0')}`
+      if (!meses.some((o) => o.value === actual)) {
+        meses.unshift({ value: actual, label: `${MESES_ES[mes - 1]} ${anio}` })
+      }
+    }
     return meses
-  }, [perfil.serie])
+  }, [perfil.serie, anio, mes])
 
   const periodoValue = anio != null && mes != null ? `${anio}-${String(mes).padStart(2, '0')}` : 'acumulado'
 
+  // El acumulado ahora se declara en la URL. Antes era la ruta sin query, pero esa ruta
+  // pasa a significar "el mes en curso" (default nuevo), asi que dejarlo implicito
+  // devolveria al usuario al mes actual creyendo que eligio el historico.
   function cambiarPeriodo(value: string) {
-    const url = value === 'acumulado' ? pathname : `${pathname}?mes=${value}`
-    router.push(url)
+    router.push(`${pathname}?mes=${value}`)
   }
 
   return (

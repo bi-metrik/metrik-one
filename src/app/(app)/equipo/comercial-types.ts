@@ -227,3 +227,38 @@ export const MESES_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ] as const
+
+/**
+ * Un caso detras de una cifra del tablero comercial.
+ *
+ * Sale de `get_comercial_ventas_mes_soena`, que consume la MISMA vista
+ * (`v_venta_mes_comercial`) que produce la cifra. Ese es el punto: la lista no puede
+ * contradecir al numero en el que se hizo clic.
+ */
+export interface ComercialVentaCaso {
+  negocio_id: string
+  codigo: string | null
+  nombre: string
+  estado: string | null
+  responsable: string | null
+  /** Dia en que entro el primer pago: es la definicion de venta que aprobo el cliente. */
+  fecha_venta: string
+  /** Dia en que el honorario quedo cubierto. `null` mientras el caso no este completo. */
+  fecha_completado: string | null
+  fecha_creacion: string
+  /** Ultimo formulario llenado por el contacto. `null` si nunca registro interaccion. */
+  ultima_conversion: string | null
+  n_conversiones: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  recaudado: number
+  primer_pago: number
+  segundo_pago: number
+  caso_completo: boolean
+  /**
+   * El caso figura completo pero NO tiene honorario aprobado, asi que el sistema comparo
+   * su recaudo contra cero. Se marca en la lista en vez de esconderlo: es la unica forma
+   * de que quien mira la cifra entienda por que ese caso esta ahi.
+   */
+  sin_honorario_aprobado: boolean
+}

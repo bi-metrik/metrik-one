@@ -16,6 +16,7 @@ import type {
 import { MESES_ES } from '../../equipo/comercial-types'
 import { getComercialMes } from '../../equipo/comercial-actions'
 import MetasModal from '../../equipo/metas-modal'
+import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 
 const GREEN = '#059669'
 const BLUE = '#2563EB'
@@ -60,6 +61,9 @@ export function TabComercialSoena({
   const [mesData, setMesData] = useState<ComercialMesResponse | null>(mesInicial)
   const [metasModalOpen, setMetasModalOpen] = useState(false)
   const [pending, startTransition] = useTransition()
+  // Qué cifra se abrió. `null` = panel cerrado. Se monta con `key` para que al pasar de
+  // una cifra a otra el panel se remonte y no muestre por un instante la lista anterior.
+  const [cifra, setCifra] = useState<CifraSeleccionada | null>(null)
 
   function cambiarMes(delta: number) {
     let nm = mes + delta
@@ -131,15 +135,27 @@ export function TabComercialSoena({
         {pending && <span className="text-xs text-gray-400">Actualizando...</span>}
       </div>
 
-      {/* Panel KPIs del mes */}
+      {/* Panel KPIs del mes. Las cifras que representan un conjunto de casos concretos
+          abren la lista; las derivadas (ticket, promedios, proyección) no, porque detrás
+          de ellas no hay una lista que mostrar. */}
       {kpis && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           <Kpi label="Ventas del mes" value={String(kpis.num_ventas)}
-               sub={kpis.meta_num_ventas ? `meta ${kpis.meta_num_ventas} · ${pct(kpis.cumplimiento_num)}` : undefined} />
+               sub={kpis.meta_num_ventas ? `meta ${kpis.meta_num_ventas} · ${pct(kpis.cumplimiento_num)}` : undefined}
+               onAbrir={kpis.num_ventas > 0 ? () => setCifra({
+                 anio, mes, titulo: `Ventas · ${MESES_ES[mes - 1]} ${anio}`,
+               }) : undefined} />
           <Kpi label="Valor vendido (sin IVA)" value={fmtCompact(kpis.valor_sin_iva)} color={GREEN}
-               sub={kpis.meta_valor ? `meta ${fmtCompact(kpis.meta_valor)} · ${pct(kpis.cumplimiento_valor)}` : undefined} />
+               sub={kpis.meta_valor ? `meta ${fmtCompact(kpis.meta_valor)} · ${pct(kpis.cumplimiento_valor)}` : undefined}
+               onAbrir={kpis.num_ventas > 0 ? () => setCifra({
+                 anio, mes, titulo: `Valor vendido · ${MESES_ES[mes - 1]} ${anio}`,
+               }) : undefined} />
           <Kpi label="Ticket promedio" value={fmtCompact(kpis.ticket_promedio)} />
-          <Kpi label="Casos completos" value={`${kpis.casos_completos}`} sub={pct(kpis.tasa_casos_completos)} />
+          <Kpi label="Casos completos" value={`${kpis.casos_completos}`} sub={pct(kpis.tasa_casos_completos)}
+               onAbrir={kpis.casos_completos > 0 ? () => setCifra({
+                 anio, mes, titulo: `Casos completos · ${MESES_ES[mes - 1]} ${anio}`,
+                 soloCompletos: true, alcance: 'el honorario aprobado quedó cubierto',
+               }) : undefined} />
           <Kpi label="Mejor dia" value={kpis.mejor_dia ? kpis.mejor_dia.slice(8) + '/' + kpis.mejor_dia.slice(5, 7) : 'sin dato'}
                sub={kpis.mejor_dia_ventas ? `${kpis.mejor_dia_ventas} ventas` : undefined} />
           <Kpi label="Promedio ventas/dia" value={String(kpis.promedio_ventas_dia)} />
@@ -170,7 +186,20 @@ export function TabComercialSoena({
               </thead>
               <tbody>
                 {vendedoresMes.map((v) => (
-                  <FilaVendedor key={v.responsable_id ?? 'sin'} v={v} />
+                  <FilaVendedor
+                    key={v.responsable_id ?? 'sin'}
+                    v={v}
+                    onAbrir={(soloCompletos) => setCifra({
+                      anio, mes,
+                      titulo: soloCompletos
+                        ? `Casos completos · ${MESES_ES[mes - 1]} ${anio}`
+                        : `Ventas · ${MESES_ES[mes - 1]} ${anio}`,
+                      responsableId: v.responsable_id,
+                      sinResponsable: v.sin_responsable,
+                      soloCompletos,
+                      alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
+                    })}
+                  />
                 ))}
                 {lideresMes.length > 0 && (
                   <tr className="border-b border-gray-50 bg-gray-50/40">
@@ -180,7 +209,20 @@ export function TabComercialSoena({
                   </tr>
                 )}
                 {lideresMes.map((v) => (
-                  <FilaVendedor key={v.responsable_id ?? 'sin-lider'} v={v} />
+                  <FilaVendedor
+                    key={v.responsable_id ?? 'sin-lider'}
+                    v={v}
+                    onAbrir={(soloCompletos) => setCifra({
+                      anio, mes,
+                      titulo: soloCompletos
+                        ? `Casos completos · ${MESES_ES[mes - 1]} ${anio}`
+                        : `Ventas · ${MESES_ES[mes - 1]} ${anio}`,
+                      responsableId: v.responsable_id,
+                      sinResponsable: v.sin_responsable,
+                      soloCompletos,
+                      alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
+                    })}
+                  />
                 ))}
                 {porVendedor.length === 0 && (
                   <tr>
@@ -353,6 +395,16 @@ export function TabComercialSoena({
         )}
       </section>
 
+      {/* `key` por cifra: al pasar de una celda a otra el panel se remonta y arranca
+          cargando, en vez de mostrar por un instante la lista de la cifra anterior. */}
+      {cifra && (
+        <VentasDrawer
+          key={`${cifra.anio}-${cifra.mes}-${cifra.responsableId ?? 'todos'}-${cifra.sinResponsable ? 'sr' : ''}-${String(cifra.soloCompletos)}`}
+          cifra={cifra}
+          onClose={() => setCifra(null)}
+        />
+      )}
+
       {metasModalOpen && (
         <MetasModal
           anio={anio}
@@ -367,7 +419,11 @@ export function TabComercialSoena({
 }
 
 /** Fila de la tabla por vendedor. Compartida por la lista de ejecutores y la de lideres. */
-function FilaVendedor({ v }: { v: ComercialVendedorMes }) {
+function FilaVendedor({ v, onAbrir }: {
+  v: ComercialVendedorMes
+  /** Abre los casos de este vendedor. `soloCompletos` distingue las dos celdas clicables. */
+  onAbrir: (soloCompletos: boolean | null) => void
+}) {
   return (
     <tr className="border-b border-gray-50 hover:bg-gray-50/50">
 
@@ -377,7 +433,18 @@ function FilaVendedor({ v }: { v: ComercialVendedorMes }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums">
-                      {v.num_ventas}
+                      {v.num_ventas > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => onAbrir(null)}
+                          className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+                          title="Ver estas ventas"
+                        >
+                          {v.num_ventas}
+                        </button>
+                      ) : (
+                        v.num_ventas
+                      )}
                       {v.meta_num_ventas ? <span className="ml-1 text-[10px] text-gray-400">/{v.meta_num_ventas}</span> : null}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums" style={{ color: GREEN }}>
@@ -393,7 +460,18 @@ function FilaVendedor({ v }: { v: ComercialVendedorMes }) {
                       {fmtCOP(v.segundo_pago)}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-gray-700">
-                      {v.casos_completos}
+                      {v.casos_completos > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => onAbrir(true)}
+                          className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+                          title="Ver los casos con el honorario cubierto"
+                        >
+                          {v.casos_completos}
+                        </button>
+                      ) : (
+                        v.casos_completos
+                      )}
                       <span className="ml-1 text-[10px] text-gray-400">{pct(v.tasa_casos_completos)}</span>
                     </td>
                     <td className="hidden px-4 py-3 text-right tabular-nums text-gray-600 sm:table-cell">
@@ -403,13 +481,30 @@ function FilaVendedor({ v }: { v: ComercialVendedorMes }) {
   )
 }
 
-function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
-  return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+function Kpi({ label, value, sub, color, onAbrir }: {
+  label: string; value: string; sub?: string; color?: string; onAbrir?: () => void
+}) {
+  const contenido = (
+    <>
       <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
       <p className="mt-1 text-xl font-bold tabular-nums text-gray-900" style={color ? { color } : undefined}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] text-gray-400">{sub}</p>}
-    </div>
+    </>
+  )
+  // Sin `onAbrir` queda como estaba: una tarjeta, no un botón. Pintar como clicable algo
+  // que no abre nada es peor que no ofrecerlo.
+  if (!onAbrir) {
+    return <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">{contenido}</div>
+  }
+  return (
+    <button
+      type="button"
+      onClick={onAbrir}
+      className="rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-colors hover:border-gray-200 hover:bg-gray-50/60 focus:outline-none focus:ring-2 focus:ring-[#10B981]/20"
+      title="Ver los casos detrás de esta cifra"
+    >
+      {contenido}
+    </button>
   )
 }
 
