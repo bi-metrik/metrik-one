@@ -1267,7 +1267,13 @@ function BloqueRenderer({
   // `editable_siempre`: el bloque sigue editable aunque se vea desde una etapa
   // posterior (historial). Para el 010/1668: la DIAN devuelve requerimientos casi
   // siempre y hay que poder re-generar el formulario aun después de avanzar de etapa.
-  const editableSiempre = (configExtra as { editable_siempre?: boolean }).editable_siempre === true
+  // `_faltaHonorarioConfirmado`: la propuesta sigue editable aunque el caso ya
+  // haya avanzado, porque sin ese valor el registro de cobros está frenado y el
+  // bloque nativo, visto desde el historial, saldría forzado a solo lectura. Sin
+  // esto el guard deja el caso sin ningún lugar desde donde destrabarse.
+  const editableSiempre =
+    (configExtra as { editable_siempre?: boolean }).editable_siempre === true
+    || (configExtra as { _faltaHonorarioConfirmado?: boolean })._faltaHonorarioConfirmado === true
   const modoBase: 'editable' | 'visible' =
     (((bloque as { _forceReadOnly?: boolean })._forceReadOnly
       || (configExtra as { _areaReadonly?: boolean })._areaReadonly)
