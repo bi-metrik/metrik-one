@@ -40,6 +40,7 @@ export function soloLecturaPorDatoLleno(
     slug?: string
     tipo?: string
     required?: boolean
+    no_cero?: boolean
   }>)
   const d = (data ?? {}) as Record<string, unknown>
 
@@ -49,6 +50,6 @@ export function soloLecturaPorDatoLleno(
   if (requeridos.length === 0) return false
 
   return requeridos.every(f =>
-    campoRequeridoCumplido((f.tipo ?? 'texto') as CampoTipo, d[f.slug as string])
+    campoRequeridoCumplido({ tipo: (f.tipo ?? 'texto') as CampoTipo, no_cero: f.no_cero }, d[f.slug as string])
   )
 }

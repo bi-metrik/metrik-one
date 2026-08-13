@@ -50,22 +50,6 @@ const TIPOS_SIN_CAPTURA = new Set(['documentos_preview', 'doc_link', 'plantilla'
 /** Tipos de confirmación: `required` significa "tiene que quedar en verdadero". */
 const TIPOS_CONFIRMACION = new Set(['toggle', 'checkbox'])
 
-/**
- * ¿El valor satisface el campo? Solo se llama con campos `required` y visibles.
- *
- * @param tipo  `fields[i].tipo` de la config del bloque.
- * @param valor valor persistido en `negocio_bloques.data[slug]`.
- */
-export function campoRequeridoCumplido(tipo: CampoTipo, valor: unknown): boolean {
-  if (TIPOS_SIN_CAPTURA.has(tipo)) return true
-
-  // La confirmación se acepta como booleano o como la cadena 'true': los bloques
-  // configurados con `select` de opciones true/false guardan el string.
-  if (TIPOS_CONFIRMACION.has(tipo)) return valor === true || valor === 'true'
-
-  return valor !== '' && valor !== null && valor !== undefined
-}
-
 /** Forma mínima de un `config_extra.fields[i]` para evaluar completitud. */
 export interface CampoConfig {
   slug: string
@@ -73,6 +57,70 @@ export interface CampoConfig {
   required?: boolean
   label?: string
   showIf?: { field: string; equals: unknown }
+  /**
+   * `no_cero` (opt-in, solo tipo `numero`): el cero NO satisface el campo.
+   *
+   * ⚠️ POR QUÉ HIZO FALTA
+   *
+   * `required` da por cumplido cualquier valor presente, y el cero está presente.
+   * En un campo de PLATA eso no es un dato faltante: es un dato borrado, y se ve
+   * igual que una respuesta deliberada.
+   *
+   * Medido en SOENA el 2026-08-13: SEIS casos con la tarifa UPME confirmada en
+   * cero, los seis con el toggle de confirmación marcado. El sistema ya había
+   * calculado la referencia correcta en todos ($701.812, y $1.997.484 en V0294)
+   * y alguien la sobrescribió con cero. Cuatro de esos casos ya llegaron a Cita
+   * recaudando exactamente el honorario, sin un peso de la tarifa que se le gira
+   * a la UPME.
+   *
+   * Como el bloque que lo captura ya es `es_gate`, marcar el campo alcanza para
+   * que el avance se frene solo: no hace falta un gate nuevo. Sin la marca, el
+   * comportamiento es idéntico al anterior para todos los demás campos.
+   */
+  no_cero?: boolean
+}
+
+/**
+ * ¿El valor satisface el campo? Solo se llama con campos `required` y visibles.
+ *
+ * Recibe el CAMPO, no solo su tipo, porque la regla vive en su configuración.
+ * Pasar solo el tipo dejaría a los consumidores que no la conocen evaluando con
+ * un criterio distinto, que es la forma en que este repo ya se ha desincronizado
+ * antes (dos caminos de escritura, uno validado y otro no).
+ *
+ * @param campo `fields[i]` de la config del bloque (basta `tipo` + `no_cero`).
+ * @param valor valor persistido en `negocio_bloques.data[slug]`.
+ */
+export function campoRequeridoCumplido(
+  campo: Pick<CampoConfig, 'tipo'> & Partial<Pick<CampoConfig, 'no_cero'>>,
+  valor: unknown,
+): boolean {
+  const { tipo } = campo
+  if (TIPOS_SIN_CAPTURA.has(tipo)) return true
+
+  // La confirmación se acepta como booleano o como la cadena 'true': los bloques
+  // configurados con `select` de opciones true/false guardan el string.
+  if (TIPOS_CONFIRMACION.has(tipo)) return valor === true || valor === 'true'
+
+  if (valor === '' || valor === null || valor === undefined) return false
+
+  // El cero solo descalifica donde se declaró que descalifica. Se compara sobre
+  // el número, no sobre el texto: el input guarda '0', '0.00' y '$ 0' según por
+  // dónde entre, y las tres son el mismo cero.
+  if (campo.no_cero) {
+    if (typeof valor === 'number') {
+      if (valor === 0) return false
+    } else {
+      const limpio = String(valor).replace(/[^\d.-]/g, '')
+      // Sin un solo dígito no hay número que juzgar. Sin este corte, `Number('')`
+      // devuelve 0 y un texto como 'pendiente' se frenaría como si fuera un cero,
+      // con un mensaje que no explica nada. Un valor con basura es un problema de
+      // formato, no de este control.
+      if (/\d/.test(limpio) && Number(limpio) === 0) return false
+    }
+  }
+
+  return true
 }
 
 /**
@@ -108,5 +156,5 @@ export function camposRequeridosFaltantes(
 ): CampoConfig[] {
   return fields
     .filter((f) => f.required && campoVisible(f, valores))
-    .filter((f) => !campoRequeridoCumplido(f.tipo, valores[f.slug]))
+    .filter((f) => !campoRequeridoCumplido(f, valores[f.slug]))
 }

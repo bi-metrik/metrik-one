@@ -45,12 +45,13 @@ export function visiblePuedeNacerCompleto(
     slug?: string
     tipo?: string
     required?: boolean
+    no_cero?: boolean
   }>)
   const d = (data ?? {}) as Record<string, unknown>
 
   for (const f of fields) {
     if (f.required !== true || !f.slug) continue
-    if (!campoRequeridoCumplido((f.tipo ?? 'texto') as CampoTipo, d[f.slug])) return false
+    if (!campoRequeridoCumplido({ tipo: (f.tipo ?? 'texto') as CampoTipo, no_cero: f.no_cero }, d[f.slug])) return false
   }
   return true
 }
