@@ -27,6 +27,7 @@ import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado, CampoEdicion } from '@/lib/ai/extract-fields'
+import { formatFecha } from '@/lib/dates/bogota'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -94,14 +95,7 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
 // ── Marca de edición manual (trazabilidad: quién + cuándo) ────────────────────
 
 function EdicionBadge({ edicion }: { edicion: CampoEdicion }) {
-  let fecha = ''
-  try {
-    fecha = new Date(edicion.editado_en).toLocaleDateString('es-CO', {
-      day: '2-digit', month: 'short', year: 'numeric',
-    })
-  } catch {
-    fecha = edicion.editado_en
-  }
+  const fecha = formatFecha(edicion.editado_en, { day: '2-digit', month: 'short', year: 'numeric' }) ?? edicion.editado_en
   return (
     <span
       title={`Editado a mano por ${edicion.editado_por_nombre} · ${fecha}`}

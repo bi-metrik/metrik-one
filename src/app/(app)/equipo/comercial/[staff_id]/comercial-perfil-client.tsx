@@ -9,6 +9,7 @@ import {
 } from 'recharts'
 import { STAGE_LABEL, MESES_ES, type ComercialPerfil, type ComercialPerfilNegocio } from '../../comercial-types'
 import type { RankingEquipo, RankingPersona } from '../../comercial-ranking'
+import { formatFecha } from '@/lib/dates/bogota'
 
 const GREEN = '#059669'
 const GOLD = '#D97706'
@@ -21,10 +22,7 @@ function nombreCorto(s: string): string {
   return s.split(' ').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')
 }
 function fmtFecha(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: '2-digit' })
+  return formatFecha(iso, { day: '2-digit', month: 'short', year: '2-digit' }) ?? '—'
 }
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrado'

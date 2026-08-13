@@ -2,6 +2,7 @@ import React from 'react';
 import { Document, Page, Text, View, StyleSheet, renderToBuffer, Svg, Line, Image } from '@react-pdf/renderer';
 import type { InformaMatch, DualSeveridad, DualTipo } from '@/lib/actions/compliance-dual';
 import { INFORMA_LOGO_PNG } from './informa-logo';
+import { formatFecha } from '@/lib/dates/bogota'
 
 // Azul corporativo Informa Cesce — fondo de contraste para el logo (letras blancas).
 const INFORMA_AZUL = '#003DA5';
@@ -102,7 +103,7 @@ export type SoporteDualData = {
 };
 
 function fechaLarga(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return formatFecha(iso, { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? iso;
 }
 
 function MetrikWordmark() {
@@ -253,6 +254,6 @@ function DocumentoSoporte({ data, fechaGen }: { data: SoporteDualData; fechaGen:
 }
 
 export async function generarPDFSoporteDual(data: SoporteDualData): Promise<Buffer> {
-  const fechaGen = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
+  const fechaGen = formatFecha(new Date(), { day: '2-digit', month: 'short', year: 'numeric' })!;
   return renderToBuffer(<DocumentoSoporte data={data} fechaGen={fechaGen} />);
 }

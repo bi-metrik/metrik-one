@@ -5,6 +5,7 @@ import { ShieldCheck, ShieldX, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarAprobacion } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 
 interface Profile {
   id: string
@@ -22,8 +23,7 @@ interface BloqueAprobacionProps {
 }
 
 function fmtDate(iso: string | null) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return formatBogotaFechaHora(iso) ?? ''
 }
 
 export default function BloqueAprobacion({

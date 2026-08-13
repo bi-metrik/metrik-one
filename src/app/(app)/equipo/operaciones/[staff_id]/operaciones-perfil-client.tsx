@@ -8,6 +8,7 @@ import type {
   PersonaOperaciones,
   SupervisorOperaciones,
 } from '../../../tableros/operaciones-types'
+import { formatFecha } from '@/lib/dates/bogota'
 
 const VERDE = '#10B981'
 const CARBON = '#1A1A1A'
@@ -21,7 +22,7 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
 
 const pesos = (n: number) => '$' + Math.round(n).toLocaleString('es-CO')
 const fecha = (s: string | null) =>
-  s ? new Date(s).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+  formatFecha(s, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) ?? '—'
 
 interface Props {
   persona: PersonaOperaciones | null

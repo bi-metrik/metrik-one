@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { ArrowRight, MonitorPlay, TrendingDown } from 'lucide-react'
 import { MiniTable } from '../tableros/components/mini-table'
 import { GREEN, iniciales, nombreCorto, Mini, RankBadge, RankRow } from './persona-ui'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import {
   leerTendencia,
   slugAgente,
@@ -43,8 +44,7 @@ const LECTURA: Record<LecturaTendencia, { corto: string; color?: string }> = {
 
 const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
 
-const fecha = (iso: string) =>
-  new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+const fecha = (iso: string) => formatBogotaFechaCorta(iso) ?? '—'
 
 /** Vacio seguro: si un agente no trajera extra, la fila se degrada, no tumba. */
 function extraDe(mapa: Map<string, AgenteEquipo>, agente: string): AgenteEquipo {

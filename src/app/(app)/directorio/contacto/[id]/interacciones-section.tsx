@@ -16,6 +16,7 @@ import { formatCOP } from '@/lib/contacts/constants'
 import { origenDesdeFuenteInteraccion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import type { InteraccionContacto } from '../../actions'
+import { formatFecha } from '@/lib/dates/bogota'
 
 // ── Presentación por fuente / estado ────────────────────────────────
 const FUENTE_META: Record<string, { label: string; icon: typeof Megaphone; class: string }> = {
@@ -84,13 +85,8 @@ function detectarTipoPersona(fieldData: FieldDatum[]): 'natural' | 'juridica' | 
   return null
 }
 
-function formatFecha(iso: string | null): string {
-  if (!iso) return ''
-  try {
-    return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
-  } catch {
-    return ''
-  }
+function formatFechaInteraccion(iso: string | null): string {
+  return formatFecha(iso, { day: '2-digit', month: 'short', year: 'numeric' }) ?? ''
 }
 
 interface Props {
@@ -161,7 +157,7 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${fuente.class}`}>
             <FuenteIcon className="h-3 w-3" /> {fuente.label}
           </span>
-          <span className="text-[11px] text-muted-foreground">{formatFecha(it.ocurrida_at ?? it.created_at)}</span>
+          <span className="text-[11px] text-muted-foreground">{formatFechaInteraccion(it.ocurrida_at ?? it.created_at)}</span>
         </div>
         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estado.class}`}>{estado.label}</span>
       </div>

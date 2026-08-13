@@ -7,6 +7,7 @@ import {
   VARIABLE_CONTRAPARTE_LABEL,
   VARIABLE_EMPLEADO_LABEL,
 } from './segmentacion-presets';
+import { formatFecha } from '@/lib/dates/bogota'
 
 // Branding tokens — cerebro/conceptos/identidad-visual-metrik.md
 const C = {
@@ -210,7 +211,7 @@ function DocumentoMetodologia({ data, hash, fechaGen }: { data: MetodologiaData;
             <Text style={s.metaLine}>Versión</Text>
             <Text style={s.metaLineBold}>v{c.version}</Text>
             <Text style={s.metaLine}>Aplicada</Text>
-            <Text style={s.metaLineBold}>{c.aplicada_at ? new Date(c.aplicada_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</Text>
+            <Text style={s.metaLineBold}>{formatFecha(c.aplicada_at, { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'}</Text>
             <Text style={s.metaLine}>Generado</Text>
             <Text style={s.metaLineBold}>{fechaGen}</Text>
           </View>
@@ -312,6 +313,6 @@ function DocumentoMetodologia({ data, hash, fechaGen }: { data: MetodologiaData;
 
 export async function generarPDFMetodologia(data: MetodologiaData): Promise<Buffer> {
   const hash = computarHashMetodologia(data);
-  const fechaGen = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
+  const fechaGen = formatFecha(new Date(), { day: '2-digit', month: 'short', year: 'numeric' })!;
   return renderToBuffer(<DocumentoMetodologia data={data} hash={hash} fechaGen={fechaGen} />);
 }

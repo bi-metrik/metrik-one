@@ -110,17 +110,77 @@ export function formatBogotaFechaLarga(d?: Date): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+export type FechaInput = string | number | Date | null | undefined
+
+// 'YYYY-MM-DD', con hora opcional y SIN marca de zona ('Z' o '±HH:MM').
+const SIN_ZONA = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?$/
+
 /**
- * Fecha corta: "13 ago". Misma razon de zona que `formatBogotaFechaLarga` — un
- * `timestamptz` de las 20:00 Bogota es del dia siguiente en UTC, asi que sin
- * anclar la zona servidor y cliente pintan dias distintos.
- * Devuelve `undefined` si la entrada esta vacia o no es una fecha valida.
+ * Resuelve que instante hay que pintar y con que zona hay que leerlo.
+ *
+ * Son dos clases de valor y confundirlas corre la fecha un dia:
+ *
+ *   - **Instante** (`timestamptz`: '2026-08-13T03:45:00Z', o un `Date`). Es un
+ *     punto en el tiempo; para saber que dia fue en Colombia hay que leerlo en
+ *     `America/Bogota`. Sin eso, el servidor (UTC) y el navegador pintan dias
+ *     distintos entre las 19:00 y la medianoche de Colombia.
+ *   - **Fecha civil** (columna `date`: '2026-08-15'). NO es un instante: es un
+ *     dia del calendario, y ya viene en el calendario de Colombia. Aqui la
+ *     trampa es la contraria — `new Date('2026-08-15')` da medianoche UTC, que
+ *     en Bogota son las 19:00 del dia ANTERIOR, asi que leerla en Bogota la
+ *     retrocede un dia. Se lee en UTC para devolver los componentes tal cual.
+ *
+ * Las 31 columnas `date` del schema (`fecha_vencimiento`, `fecha_inicio`,
+ * `valid_until`, ...) caen en el segundo caso.
  */
-export function formatBogotaFechaCorta(value: string | Date | null | undefined): string | undefined {
-  if (!value) return undefined
+function resolverInstante(value: FechaInput): { d: Date; tz: string } | null {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'string') {
+    const m = SIN_ZONA.exec(value.trim())
+    if (m) {
+      const [y, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])]
+      const d = new Date(Date.UTC(y, mes - 1, dia, Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0)))
+      // `Date.UTC` no valida rangos: desborda en silencio y '2026-13-45' saldria
+      // como 14 de febrero de 2027. Se comprueba que los componentes vuelvan
+      // iguales, que es lo unico que distingue un desborde de una fecha real.
+      const intacta = d.getUTCFullYear() === y && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia
+      return Number.isNaN(d.getTime()) || !intacta ? null : { d, tz: 'UTC' }
+    }
+  }
   const d = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(d.getTime())) return undefined
-  return d.toLocaleDateString('es-CO', { timeZone: TZ, day: 'numeric', month: 'short' })
+  return Number.isNaN(d.getTime()) ? null : { d, tz: TZ }
+}
+
+/**
+ * Formatea una fecha para un lector en Colombia, con la zona resuelta segun la
+ * clase del valor (ver `resolverInstante`). Servidor y navegador producen
+ * SIEMPRE la misma cadena, que es lo que evita el `Minified React error #418`.
+ *
+ * Devuelve `undefined` si el valor esta vacio o no es una fecha valida — nunca
+ * la cadena "Invalid Date", que es lo que devuelve `toLocaleDateString` a secas.
+ */
+export function formatFecha(value: FechaInput, opts: Intl.DateTimeFormatOptions): string | undefined {
+  const r = resolverInstante(value)
+  if (!r) return undefined
+  return r.d.toLocaleString('es-CO', { timeZone: r.tz, ...opts })
+}
+
+/** "13 ago" */
+export function formatBogotaFechaCorta(value: FechaInput): string | undefined {
+  return formatFecha(value, { day: 'numeric', month: 'short' })
+}
+
+/** "13 ago 2026" */
+export function formatBogotaFechaCortaAno(value: FechaInput): string | undefined {
+  return formatFecha(value, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/** "13 ago 2026, 10:45 a. m." */
+export function formatBogotaFechaHora(value: FechaInput): string | undefined {
+  return formatFecha(value, {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
 }
 
 /**

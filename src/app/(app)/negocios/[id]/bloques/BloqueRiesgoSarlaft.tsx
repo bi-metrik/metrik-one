@@ -10,6 +10,7 @@ import {
   guardarDatosSarlaft,
   recalcularScoreNegocio,
 } from '@/lib/actions/valida-score'
+import { formatFecha } from '@/lib/dates/bogota'
 
 interface Props {
   negocioId: string
@@ -97,7 +98,7 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
                 </span>
                 {score.proxima_revision && (
                   <span className="text-[10px] text-[#6B7280]">
-                    Próxima revisión: {new Date(score.proxima_revision).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' })}
+                    Próxima revisión: {formatFecha(score.proxima_revision, { year: 'numeric', month: 'short', day: 'numeric' })}
                   </span>
                 )}
               </>

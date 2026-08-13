@@ -7,6 +7,7 @@ import { ChartCard } from './chart-card'
 import { AlertCard } from './alert-card'
 import { MiniTable } from './mini-table'
 import { DISCLAIMER_BANDERAS, type DuenoData } from '../../calidad/types'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
 /**
  * Recaudo y riesgo: lo vendido contra lo que de verdad entra.
@@ -36,8 +37,7 @@ const BLUE = '#3B82F6'
 
 const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
 
-const fmtDia = (iso: string) =>
-  new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+const fmtDia = (iso: string) => formatBogotaFechaCorta(iso) ?? iso
 
 export default function TabCalidad({ datos }: { datos: DuenoData }) {
   const dejadoDeRecaudar = datos.vendidoUsd - datos.recaudadoUsd

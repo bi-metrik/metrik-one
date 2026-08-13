@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import type { SkillRow } from './actions'
+import { formatFecha } from '@/lib/dates/bogota'
 
 interface Props {
   skills: SkillRow[]
@@ -142,9 +143,7 @@ export default function SkillsClient({ skills }: Props) {
 
 function SkillDetail({ skill }: { skill: SkillRow }) {
   const [showRaw, setShowRaw] = useState(false)
-  const syncDate = new Date(skill.ultima_sync).toLocaleDateString('es-CO', {
-    day: '2-digit', month: 'short', year: 'numeric'
-  })
+  const syncDate = formatFecha(skill.ultima_sync, { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white">

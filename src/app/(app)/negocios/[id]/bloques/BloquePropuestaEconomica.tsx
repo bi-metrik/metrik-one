@@ -10,6 +10,7 @@ import {
   corregirValorAprobado,
   revertirAprobacionPropuesta,
 } from '@/lib/actions/propuesta-economica-actions'
+import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 
 interface PropuestaVersion {
   n: number
@@ -79,11 +80,7 @@ interface Props {
 }
 
 function formatFechaCorta(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('es-CO', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+  return formatBogotaFechaHora(iso) ?? ''
 }
 
 // Redondeo a 2 decimales — SOLO para mostrar el % en pantalla / historial.

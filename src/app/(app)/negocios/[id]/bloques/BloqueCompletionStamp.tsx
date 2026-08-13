@@ -5,6 +5,7 @@ import { CheckCircle2, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import { formatFecha } from '@/lib/dates/bogota'
 
 interface BloqueCompletionStampProps {
   negocioBloqueId: string
@@ -57,7 +58,7 @@ export default function BloqueCompletionStamp({
 
   if (done) {
     const fechaFmt = completadoAt
-      ? new Date(completadoAt).toLocaleString('es-CO', {
+      ? formatFecha(completadoAt, {
           day: 'numeric',
           month: 'short',
           year: 'numeric',

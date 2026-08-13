@@ -36,6 +36,7 @@ import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 import { useFileDrop } from '@/hooks/use-file-drop';
+import { formatFecha } from '@/lib/dates/bogota'
 
 type TabKey = 'puntual' | 'masiva' | 'historial';
 
@@ -1212,13 +1213,7 @@ export function HistorialTable({
             {consultas.map(c => (
               <tr key={c.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F5F4F2]/60">
                 <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap text-xs">
-                  {new Date(c.created_at).toLocaleDateString('es-CO', {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {formatFecha(c.created_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </td>
                 <td className="px-4 py-2.5 font-medium text-[#1A1A1A]">{c.nombre_consultado ?? '—'}</td>
                 <td className="px-4 py-2.5 text-[#6B7280] font-mono text-xs">

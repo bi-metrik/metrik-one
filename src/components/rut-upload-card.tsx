@@ -8,6 +8,7 @@ import { uploadAndParseRUT, confirmRutData } from '@/app/(app)/directorio/action
 import type { RutParseResult, RutEmpresaUpdate } from '@/lib/rut/types'
 import { getConfidenceTier } from '@/lib/rut/types'
 import { useFileDrop } from '@/hooks/use-file-drop'
+import { formatFecha } from '@/lib/dates/bogota'
 
 type CardState = 'idle' | 'processing' | 'review' | 'done'
 
@@ -131,7 +132,7 @@ export default function RutUploadCard({ empresaId, currentRutUrl, currentRutVeri
               <p className="text-sm font-medium text-green-800">RUT verificado</p>
               {currentRutFecha && (
                 <p className="text-[10px] text-green-600">
-                  Cargado el {new Date(currentRutFecha).toLocaleDateString('es-CO')}
+                  Cargado el {formatFecha(currentRutFecha, { day: 'numeric', month: 'numeric', year: 'numeric' })}
                 </p>
               )}
             </div>

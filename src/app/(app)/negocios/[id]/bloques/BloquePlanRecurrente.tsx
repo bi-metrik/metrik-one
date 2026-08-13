@@ -6,6 +6,7 @@ import { Calendar, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import { crearPlanRecurrente, cancelarPlan } from './plan-recurrente-actions'
+import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 
 type Frecuencia = 'mensual' | 'trimestral' | 'anual'
 type Pasarela = 'wompi' | 'manual' | 'mixto'
@@ -67,9 +68,9 @@ function calcularFechaFin(fechaInicio: string, frecuencia: Frecuencia, totalCuot
 }
 
 function formatFechaCorta(iso: string | null | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso + 'T00:00:00Z')
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  // Ya estaba anclado a mano ('T00:00:00Z' + timeZone UTC); el helper hace lo
+  // mismo para una fecha civil, y deja una sola via en todo el producto.
+  return formatBogotaFechaCortaAno(iso) ?? ''
 }
 
 export default function BloquePlanRecurrente({

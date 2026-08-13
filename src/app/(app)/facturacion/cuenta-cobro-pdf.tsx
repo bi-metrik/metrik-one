@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { FileText, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { numeroALetras } from '@/lib/numero-a-letras'
+import { formatFecha } from '@/lib/dates/bogota'
 
 interface CuentaCobroPdfProps {
   invoice: {
@@ -147,7 +148,7 @@ export default function CuentaCobroPdf({ invoice, clientName, projectName, emitt
       <div class="firma-cedula">C.C. ${em.document}</div>
     </div>
   </div>
-  <div class="footer">Documento generado el ${fechaActual.toLocaleDateString('es-CO')} a las ${fechaActual.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div>
+  <div class="footer">Documento generado el ${formatFecha(fechaActual, { day: 'numeric', month: 'numeric', year: 'numeric' })} a las ${formatFecha(fechaActual, { hour: '2-digit', minute: '2-digit' })}</div>
 </body>
 </html>`
 

@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { createInvoice, markInvoicePaid, deleteInvoice } from './actions'
 import CuentaCobroPdf from './cuenta-cobro-pdf'
 import type { Invoice, Payment } from '@/types/database'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
 interface Props {
   invoices: Invoice[]
@@ -20,10 +21,7 @@ interface Props {
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-const fmtDate = (d: string) => {
-  const date = new Date(d + 'T12:00:00')
-  return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
-}
+const fmtDate = (d: string) => formatBogotaFechaCorta(d) ?? d
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   scheduled: { label: 'Pendiente', color: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' },
