@@ -89,14 +89,17 @@ Deno.serve(async (req: Request) => {
   // porque un fallo del interno no puede dejarlo sin su aviso.
   let clienteEnviado: string | null = null;
   let clienteOmitido: string | null = null;
+  // A dónde contesta el cliente. Se reporta para poder verificarlo sin abrir el correo.
+  let clienteRespondeA: string | null = null;
   if (quiereCliente) {
     const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente!);
     clienteEnviado = r.enviadoA;
     clienteOmitido = r.omitidoPor;
+    clienteRespondeA = r.respondeA ?? null;
   }
 
   if (!quiereInterno) {
-    return json({ ok: true, cliente: clienteEnviado, cliente_omitido: clienteOmitido });
+    return json({ ok: true, cliente: clienteEnviado, cliente_omitido: clienteOmitido, responde_a: clienteRespondeA });
   }
 
   // ── A quién ────────────────────────────────────────────────────────────────
@@ -184,7 +187,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'envio_fallido', status: res.status }, 502);
   }
 
-  return json({ ok: true, enviados: correos.length, cliente: clienteEnviado, cliente_omitido: clienteOmitido });
+  return json({ ok: true, enviados: correos.length, cliente: clienteEnviado, cliente_omitido: clienteOmitido, responde_a: clienteRespondeA });
 });
 
 
@@ -210,7 +213,7 @@ async function enviarAlCliente(
   negocio: any,
   etapaNombre: string,
   cfg: { titulo?: string; mensaje?: string },
-): Promise<{ enviadoA: string | null; omitidoPor: string | null }> {
+): Promise<{ enviadoA: string | null; omitidoPor: string | null; respondeA?: string | null }> {
   const { data: email } = await supabase.rpc('email_cliente_negocio', { p_negocio_id: negocio.id });
   if (!email || typeof email !== 'string') {
     // Sin correo no se inventa un destinatario. Queda en el log para que el equipo
@@ -226,13 +229,24 @@ async function enviarAlCliente(
     .maybeSingle();
 
   const marca = (ws?.nombre as string | undefined)?.trim() || 'tu proveedor';
-  // A dónde contesta el cliente. Sin esto la respuesta muere en un buzón de MeTRIK.
-  const replyTo = (ws?.config_extra as { email_respuesta?: string } | null)?.email_respuesta;
+
+  // ── A dónde contesta el cliente ────────────────────────────────────────────
+  // Primero el COMERCIAL del negocio: es quien lo conoce y quien va a responderle.
+  // Si no hay, el correo de respuesta que declare el workspace. Y si tampoco hay,
+  // el correo NO invita a responder: prometer una respuesta que cae en un buzón sin
+  // dueño es peor que no ofrecerla. (Medido en SOENA: 244 de 254 negocios abiertos
+  // tienen comercial con cuenta.)
+  const replyTo = await correoDelComercial(supabase, negocio.id)
+    ?? (ws?.config_extra as { email_respuesta?: string } | null)?.email_respuesta
+    ?? null;
 
   const titulo = (cfg.titulo ?? 'Tu tramite avanzo')
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '');
-  const cuerpo = (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}". Cualquier duda, responde a este correo.')
+  const cuerpoDefault = replyTo
+    ? 'Te contamos que tu tramite paso a la etapa "{etapa}". Cualquier duda, responde a este correo.'
+    : 'Te contamos que tu tramite paso a la etapa "{etapa}".';
+  const cuerpo = (cfg.mensaje ?? cuerpoDefault)
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
@@ -245,8 +259,9 @@ async function enviarAlCliente(
     <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151">${escapar(cuerpo)}</p>
     ${negocio.codigo ? `<p style="margin:0 0 22px;font-size:13px;color:#6B7280">Radicado: <strong style="color:#1A1A1A">${escapar(negocio.codigo)}</strong></p>` : ''}
     <p style="margin:24px 0 0;font-size:11px;color:#9CA3AF;border-top:1px solid #E5E7EB;padding-top:14px">
-      Recibes este aviso porque ${escapar(marca)} gestiona un tramite a tu nombre.
-      Si no quieres recibirlos, responde a este correo y lo damos de baja.
+      Recibes este aviso porque ${escapar(marca)} gestiona un tramite a tu nombre.${
+        replyTo ? ' Si tienes dudas o no quieres recibir mas avisos, responde a este correo.' : ''
+      }
     </p>
   </div>
 </body></html>`;
@@ -267,7 +282,36 @@ async function enviarAlCliente(
     console.error('[notificar-etapa] Resend fallo con el cliente:', res.status, await res.text());
     return { enviadoA: null, omitidoPor: `resend_${res.status}` };
   }
-  return { enviadoA: email, omitidoPor: null };
+  return { enviadoA: email, omitidoPor: null, respondeA: replyTo };
+}
+
+/**
+ * Correo del comercial responsable del negocio, para que la respuesta del cliente
+ * llegue a quien lleva el caso.
+ *
+ * `negocio_responsables` guarda `staff_id`; el correo vive en `auth.users`, alcanzable
+ * por `staff.profile_id`. Un negocio admite UN comercial (indice unico por rol), asi
+ * que no hay que elegir entre varios.
+ */
+// deno-lint-ignore no-explicit-any
+async function correoDelComercial(supabase: any, negocioId: string): Promise<string | null> {
+  const { data: resp } = await supabase
+    .from('negocio_responsables')
+    .select('staff_id')
+    .eq('negocio_id', negocioId)
+    .eq('rol', 'comercial')
+    .maybeSingle();
+  if (!resp?.staff_id) return null;
+
+  const { data: st } = await supabase
+    .from('staff')
+    .select('profile_id')
+    .eq('id', resp.staff_id)
+    .maybeSingle();
+  if (!st?.profile_id) return null;
+
+  const { data: user } = await supabase.auth.admin.getUserById(st.profile_id);
+  return user?.user?.email ?? null;
 }
 
 function json(body: unknown, status = 200) {
