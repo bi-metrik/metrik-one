@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import { TZ } from '@/lib/dates/bogota'
+import { TZ, formatBogotaFechaLarga } from '@/lib/dates/bogota'
 import Link from 'next/link'
 import {
   BarChart3,
@@ -944,7 +944,7 @@ export default function AppShell({
             </p>
             <span className="text-muted-foreground">·</span>
             <p className="text-xs font-medium text-muted-foreground">
-              {(() => { const d = new Date().toLocaleDateString('es-CO', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
+              {formatBogotaFechaLarga()}
             </p>
             {/* La zona que gobierna los cortes de mes, los vencimientos y la fecha de
                 los documentos. Se pinta desde la MISMA constante que usan los calculos
