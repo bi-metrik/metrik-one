@@ -280,10 +280,13 @@ export async function getAdminFlujoDetalle(
   const bloquesByEtapa = new Map<string, AdminBloque[]>()
   for (const b of bcs) {
     const cfgExtra = b.config_extra as
-      | { label?: string; nombre?: string; visible?: boolean; cliente_view?: boolean }
+      | { label?: string; nombre?: string; visible?: boolean; cliente_view?: boolean; desactivado?: boolean }
       | null
     if (cfgExtra?.visible === false) continue
     if (cfgExtra?.cliente_view === false) continue
+    // Misma razón que en `/flujo`: un bloque desactivado ya no opera, así que no
+    // puede seguir apareciendo en la biblioteca de workflows.
+    if (cfgExtra?.desactivado === true) continue
     const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
     const nombreDefinition = b.bloque_definitions?.nombre ?? 'Desconocido'
     const bcNombre = b.nombre && b.nombre.trim().length > 0 ? b.nombre : null
