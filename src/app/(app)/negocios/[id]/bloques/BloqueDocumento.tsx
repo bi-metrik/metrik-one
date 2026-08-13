@@ -15,6 +15,8 @@ import {
   Copy,
   Check,
   Pencil,
+  HelpCircle,
+  CalendarClock,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
@@ -995,6 +997,9 @@ export default function BloqueDocumento({
 
 // ── Cross-check panel ────────────────────────────────────────────────────────
 
+type EstadoCheckPanel = 'ok' | 'falla' | 'no_comprobable'
+type EstadoVigenciaPanel = 'vigente' | 'reemplazar' | 'esperar' | 'no_comprobable'
+
 type CrossCheckPanelData = {
   passed: boolean
   // solo_alerta: la discrepancia se reporta como alerta (no bloquea el avance).
@@ -1005,19 +1010,66 @@ type CrossCheckPanelData = {
     expected: string
     extracted: string
     ok: boolean
+    // Los tres campos siguientes son OPCIONALES a propósito: los `_cross_check` ya
+    // guardados en `negocio_bloques.data` no los tienen, y esos bloques se siguen
+    // pintando (no se recalculan solos). Si faltan, la fila cae al modo de dos
+    // estados de siempre en vez de inventar un veredicto.
+    estado?: EstadoCheckPanel
+    vigencia?: EstadoVigenciaPanel
+    pedir_desde?: string | null
   }>
 }
 
+const MESES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+]
+
+/**
+ * 'YYYY-MM-DD' → "27 de agosto".
+ *
+ * Se arma desde las partes de la cadena y NO con `new Date('YYYY-MM-DD')`: esa forma
+ * se interpreta como UTC y en Colombia (UTC-5) cae en el día anterior, así que la
+ * pantalla mandaría a pedir el documento un día antes de lo que calculó el servidor.
+ */
+function fechaLegible(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return iso
+  const mes = MESES_ES[Number(m[2]) - 1]
+  if (!mes) return iso
+  return `${Number(m[3])} de ${mes}`
+}
+
 function CrossCheckPanel({ cross_check }: { cross_check: CrossCheckPanelData }) {
-  const fallos = cross_check.results.filter(r => !r.ok)
+  // Un `_cross_check` viejo no trae `estado`; ahí `ok` sigue mandando. Uno nuevo sí,
+  // y entonces distingue "falló" de "no se pudo comprobar" — que no es lo mismo y no
+  // debe pintarse igual.
+  const estadoDe = (r: CrossCheckPanelData['results'][number]): EstadoCheckPanel =>
+    r.estado ?? (r.ok ? 'ok' : 'falla')
+
+  const fallos = cross_check.results.filter(r => estadoDe(r) === 'falla')
+  const sinComprobar = cross_check.results.filter(r => estadoDe(r) === 'no_comprobable')
+
   // Modo alerta: hay discrepancia pero NO bloquea (solo_alerta). Se muestra en ámbar
-  // (revisar/corregir si aplica), no en rojo de bloqueo.
-  const esAlerta = !cross_check.passed && cross_check.solo_alerta === true
+  // (revisar/corregir si aplica), no en rojo de bloqueo. Un check que no se pudo
+  // comprobar tampoco bloquea, así que el panel entero se queda en ámbar.
+  const esAlerta = (fallos.length > 0 && cross_check.solo_alerta === true)
+    || (fallos.length === 0 && sinComprobar.length > 0)
+  const todoBien = fallos.length === 0 && sinComprobar.length === 0
   const falloIconColor = esAlerta ? 'text-amber-600' : 'text-red-600'
+
+  const encabezado = todoBien
+    ? 'Certificado validado: los datos coinciden con el negocio.'
+    : fallos.length === 0
+      ? `Falta un dato para comprobar ${sinComprobar.length} campo(s). No bloquea el avance, pero tampoco está verificado.`
+      : cross_check.solo_alerta === true
+        ? `Alerta: ${fallos.length} de ${cross_check.results.length} campo(s) no coinciden con el negocio. Revisa y corrige el dato si aplica. No bloquea el avance.`
+        : `Discrepancia detectada (${fallos.length} de ${cross_check.results.length}). Sube un nuevo certificado o resuelve con UPME.`
+
   return (
     <div
       className={`rounded-lg border p-3 space-y-2 ${
-        cross_check.passed
+        todoBien
           ? 'border-green-200 bg-green-50/40'
           : esAlerta
             ? 'border-amber-200 bg-amber-50/40'
@@ -1025,48 +1077,109 @@ function CrossCheckPanel({ cross_check }: { cross_check: CrossCheckPanelData }) 
       }`}
     >
       <div className="flex items-center gap-2">
-        {cross_check.passed ? (
+        {todoBien ? (
           <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
         ) : (
           <AlertTriangle className={`h-4 w-4 shrink-0 ${esAlerta ? 'text-amber-600' : 'text-red-600'}`} />
         )}
-        <p className={`text-xs font-semibold ${cross_check.passed ? 'text-green-700' : esAlerta ? 'text-amber-700' : 'text-red-700'}`}>
-          {cross_check.passed
-            ? 'Certificado validado: los datos coinciden con el negocio.'
-            : esAlerta
-              ? `Alerta: ${fallos.length} de ${cross_check.results.length} campo(s) no coinciden con el negocio. Revisa y corrige el dato si aplica. No bloquea el avance.`
-              : `Discrepancia detectada (${fallos.length} de ${cross_check.results.length}). Sube un nuevo certificado o resuelve con UPME.`}
+        <p className={`text-xs font-semibold ${todoBien ? 'text-green-700' : esAlerta ? 'text-amber-700' : 'text-red-700'}`}>
+          {encabezado}
         </p>
       </div>
       <div className="space-y-1.5">
-        {cross_check.results.map(r => (
-          <div
-            key={r.slug}
-            className="flex items-start gap-2 rounded-md border border-border/50 bg-white px-2 py-1.5"
-          >
-            {r.ok ? (
-              <Check className="h-3.5 w-3.5 text-green-600 shrink-0 mt-0.5" />
-            ) : (
-              <AlertTriangle className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${falloIconColor}`} />
-            )}
-            <div className="flex-1 min-w-0 text-[11px]">
-              <p className="font-medium text-foreground">{r.label}</p>
-              <div className="grid grid-cols-2 gap-2 mt-0.5">
-                <div>
-                  <span className="text-muted-foreground">Esperado: </span>
-                  <span className="text-foreground break-words">{r.expected || '—'}</span>
+        {cross_check.results.map(r => {
+          const estado = estadoDe(r)
+          const noComprobable = estado === 'no_comprobable'
+          return (
+            <div
+              key={r.slug}
+              className="flex items-start gap-2 rounded-md border border-border/50 bg-white px-2 py-1.5"
+            >
+              {estado === 'ok' ? (
+                <Check className="h-3.5 w-3.5 text-green-600 shrink-0 mt-0.5" />
+              ) : noComprobable ? (
+                <HelpCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${falloIconColor}`} />
+              )}
+              <div className="flex-1 min-w-0 text-[11px]">
+                <p className="font-medium text-foreground">{r.label}</p>
+                <div className="grid grid-cols-2 gap-2 mt-0.5">
+                  <div>
+                    <span className="text-muted-foreground">Esperado: </span>
+                    <span className="text-foreground break-words">{r.expected || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Certificado: </span>
+                    <span className={estado === 'falla' ? 'text-red-700 font-medium' : 'text-foreground'}>
+                      {r.extracted || '—'}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Certificado: </span>
-                  <span className={r.ok ? 'text-foreground' : 'text-red-700 font-medium'}>
-                    {r.extracted || '—'}
-                  </span>
-                </div>
+                <NotaVigencia
+                  vigencia={r.vigencia}
+                  pedirDesde={r.pedir_desde}
+                  noComprobable={noComprobable}
+                />
               </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
+}
+
+/**
+ * La línea accionable de un documento con fecha de caducidad.
+ *
+ * Los cuatro estados los decide el SERVIDOR contra la hora de Bogotá; aquí solo se
+ * redactan. `esperar` existe porque decirle al comercial "pídelo" cuando un documento
+ * expedido hoy también llegaría vencido a la cita es trabajo repetido: la fecha sale
+ * calculada de la cita, nunca guardada, para que al reprogramarse no quede una fecha
+ * congelada mandando a pedirlo el día equivocado.
+ */
+function NotaVigencia({
+  vigencia,
+  pedirDesde,
+  noComprobable,
+}: {
+  vigencia?: EstadoVigenciaPanel
+  pedirDesde?: string | null
+  noComprobable: boolean
+}) {
+  if (vigencia === 'esperar' && pedirDesde) {
+    return (
+      <p className="mt-1 flex items-start gap-1 text-[11px] text-amber-700">
+        <CalendarClock className="h-3 w-3 shrink-0 mt-0.5" />
+        <span>
+          No sirve para la fecha de la cita. <strong>Pídelo a partir del {fechaLegible(pedirDesde)}</strong>
+          {' '}— uno expedido hoy también llegaría vencido.
+        </span>
+      </p>
+    )
+  }
+  if (vigencia === 'reemplazar') {
+    return (
+      <p className="mt-1 flex items-start gap-1 text-[11px] text-red-700">
+        <CalendarClock className="h-3 w-3 shrink-0 mt-0.5" />
+        <span>
+          Vencido para la fecha de la cita. <strong>Pide el reemplazo al cliente ya</strong>
+          {pedirDesde ? ` (uno expedido desde el ${fechaLegible(pedirDesde)} sirve).` : '.'}
+        </span>
+      </p>
+    )
+  }
+  // `no_comprobable` en vigencia = todavía no hay fecha de cita contra la cual medir.
+  // Se dice explícitamente en vez de callarlo: un campo sin marca se lee como validado.
+  if (noComprobable) {
+    return (
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {vigencia === 'no_comprobable'
+          ? 'Aún no hay fecha de cita para comprobar la vigencia. Se revisará cuando la DIAN la asigne.'
+          : 'Falta el dato de referencia para comprobarlo.'}
+      </p>
+    )
+  }
+  return null
 }
