@@ -999,6 +999,7 @@ export default function BloqueDocumento({
 
 type EstadoCheckPanel = 'ok' | 'falla' | 'no_comprobable'
 type EstadoVigenciaPanel = 'vigente' | 'reemplazar' | 'esperar' | 'no_comprobable'
+type CriterioVigenciaPanel = 'cita' | 'margen'
 
 type CrossCheckPanelData = {
   passed: boolean
@@ -1017,6 +1018,12 @@ type CrossCheckPanelData = {
     estado?: EstadoCheckPanel
     vigencia?: EstadoVigenciaPanel
     pedir_desde?: string | null
+    /**
+     * Contra qué midió el servidor: la fecha de la cita, o el margen mínimo de vida
+     * cuando todavía no hay cita. La frase cambia por completo entre los dos casos,
+     * y deducirlo aquí por la ausencia de `pedir_desde` sería una inferencia frágil.
+     */
+    criterio?: CriterioVigenciaPanel
   }>
 }
 
@@ -1119,6 +1126,8 @@ function CrossCheckPanel({ cross_check }: { cross_check: CrossCheckPanelData }) 
                 <NotaVigencia
                   vigencia={r.vigencia}
                   pedirDesde={r.pedir_desde}
+                  criterio={r.criterio}
+                  faltaExpedicion={!r.extracted?.trim()}
                   noComprobable={noComprobable}
                 />
               </div>
@@ -1142,12 +1151,30 @@ function CrossCheckPanel({ cross_check }: { cross_check: CrossCheckPanelData }) 
 function NotaVigencia({
   vigencia,
   pedirDesde,
+  criterio,
+  faltaExpedicion,
   noComprobable,
 }: {
   vigencia?: EstadoVigenciaPanel
   pedirDesde?: string | null
+  criterio?: CriterioVigenciaPanel
+  /** El documento no trajo fecha de expedición legible. Se deriva de la fila. */
+  faltaExpedicion: boolean
   noComprobable: boolean
 }) {
+  // Sin cita el objetivo se mueve con el día, así que nunca hay nada que esperar y
+  // no existe una fecha desde la cual pedirlo: la única frase posible es "pídelo ya".
+  if (vigencia === 'reemplazar' && criterio === 'margen') {
+    return (
+      <p className="mt-1 flex items-start gap-1 text-[11px] text-red-700">
+        <CalendarClock className="h-3 w-3 shrink-0 mt-0.5" />
+        <span>
+          Todavía no hay cita y a este certificado no le queda vigencia suficiente para
+          el trámite. <strong>Pide uno nuevo al cliente.</strong>
+        </span>
+      </p>
+    )
+  }
   if (vigencia === 'esperar' && pedirDesde) {
     return (
       <p className="mt-1 flex items-start gap-1 text-[11px] text-amber-700">
@@ -1170,14 +1197,19 @@ function NotaVigencia({
       </p>
     )
   }
-  // `no_comprobable` en vigencia = todavía no hay fecha de cita contra la cual medir.
-  // Se dice explícitamente en vez de callarlo: un campo sin marca se lee como validado.
+  // `no_comprobable` se dice explícitamente en vez de callarlo: un campo sin marca se
+  // lee como validado. **Cuál de los dos datos falta se DERIVA de la fila**, no se
+  // asume: con el margen sin cita activo, lo que suele faltar ya no es la cita sino la
+  // fecha de expedición, y afirmar la causa equivocada deja una pantalla que se ve
+  // sana y manda a esperar algo que ya llegó.
   if (noComprobable) {
     return (
       <p className="mt-1 text-[11px] text-muted-foreground">
-        {vigencia === 'no_comprobable'
-          ? 'Aún no hay fecha de cita para comprobar la vigencia. Se revisará cuando la DIAN la asigne.'
-          : 'Falta el dato de referencia para comprobarlo.'}
+        {vigencia !== 'no_comprobable'
+          ? 'Falta el dato de referencia para comprobarlo.'
+          : !faltaExpedicion
+            ? 'Aún no hay fecha de cita para comprobar la vigencia. Se revisará cuando la DIAN la asigne.'
+            : 'No se pudo leer la fecha de expedición del documento. Corrígela para comprobar la vigencia.'}
       </p>
     )
   }

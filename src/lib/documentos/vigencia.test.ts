@@ -131,6 +131,11 @@ describe('estadoVigencia', () => {
       .toBe('2026-12-11')
   })
 
+  it('declara contra qué se midió, para que la pantalla pueda redactar', () => {
+    expect(estadoVigencia('2026-08-11', '2026-09-07', { ...V30, hoyISO: HOY }).criterio).toBe('cita')
+    expect(estadoVigencia('2026-05-20', null, V30).criterio).toBeNull()
+  })
+
   it('respeta la vigencia declarada: los mismos datos cambian de estado con 10 días', () => {
     // El bloque de SOENA tenía 10 días configurados mientras el campo decía un mes.
     // Con el mismo par de fechas, el veredicto es distinto — por eso el parámetro
@@ -138,6 +143,63 @@ describe('estadoVigencia', () => {
     const args = ['2026-08-11', '2026-09-07'] as const
     expect(estadoVigencia(...args, { vigenciaDias: 30, hoyISO: HOY }).estado).toBe('vigente')
     expect(estadoVigencia(...args, { vigenciaDias: 10, hoyISO: HOY }).estado).toBe('esperar')
+  })
+})
+
+describe('estadoVigencia sin cita: margen contra el calendario', () => {
+  // Acuerdo con SOENA del 2026-08-13 (reunión con Deisy): el vencimiento se mide
+  // contra la cita cuando la hay, y contra el calendario con 10 días de tolerancia
+  // cuando no. Deisy: "cuando no tenga cita, que por lo menos tenga una vigencia de
+  // 10 días"; Mauricio: "De hoy, de hoy 10 días de vigencia".
+  const HOY = '2026-08-13'
+  const CON_MARGEN = { vigenciaDias: 30, margenSinObjetivoDias: 10, hoyISO: HOY }
+
+  it('con 30 de vigencia y 10 de margen, el corte cae a los 20 días de expedido', () => {
+    // Objetivo derivado = 2026-08-23. Un certificado del 24-jul llega con 30 días
+    // justos: sirve. El del 23-jul llega con 31: no. El límite es exacto, y por eso
+    // se prueba en los dos lados — un `<` en vez de `<=` movería la línea un día.
+    const r = estadoVigencia('2026-07-24', null, CON_MARGEN)
+    expect(r.estado).toBe('vigente')
+    expect(r.diasAlObjetivo).toBe(30)
+    expect(r.criterio).toBe('margen')
+
+    expect(estadoVigencia('2026-07-23', null, CON_MARGEN).estado).toBe('reemplazar')
+  })
+
+  it('sin cita NO existe "esperar": uno pedido hoy siempre alcanza', () => {
+    // El objetivo se mueve con el día, así que nunca hay una fecha desde la cual
+    // valga la pena esperar. Devolver `pedirDesde` aquí mandaría al comercial a
+    // agendar algo que puede hacer ya.
+    const r = estadoVigencia('2026-01-15', null, CON_MARGEN)
+    expect(r.estado).toBe('reemplazar')
+    expect(r.pedirDesde).toBeNull()
+    expect(r.criterio).toBe('margen')
+  })
+
+  it('la cita real MANDA sobre el margen', () => {
+    // Con cita el 26-sep, un certificado del 24-jul no sirve aunque pase el margen
+    // de 10 días. Derivar el objetivo teniendo cita mediría contra un día que no es
+    // el del trámite: exactamente el error que este módulo viene a evitar.
+    const r = estadoVigencia('2026-07-24', '2026-09-26', CON_MARGEN)
+    expect(r.criterio).toBe('cita')
+    expect(r.estado).toBe('esperar')
+    expect(r.pedirDesde).toBe('2026-08-27')
+  })
+
+  it('sin reloj no se inventa el objetivo: queda sin comprobar', () => {
+    // El margen se cuenta desde hoy. Sin `hoyISO` no hay contra qué medir, y
+    // suponer una fecha sería peor que declarar que no se pudo comprobar.
+    const r = estadoVigencia('2026-07-24', null, { vigenciaDias: 30, margenSinObjetivoDias: 10 })
+    expect(r.estado).toBe('no_comprobable')
+    expect(r.criterio).toBeNull()
+  })
+
+  it('quien no declara margen conserva el comportamiento previo', () => {
+    // El margen es opt-in por check. Un bloque que no lo declara sigue diciendo
+    // "no se pudo comprobar" cuando falta la cita, como hasta hoy.
+    const r = estadoVigencia('2026-07-24', null, { vigenciaDias: 30, hoyISO: HOY })
+    expect(r.estado).toBe('no_comprobable')
+    expect(r.criterio).toBeNull()
   })
 })
 

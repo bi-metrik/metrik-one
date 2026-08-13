@@ -8,7 +8,7 @@ import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
 import { nitSinDv, calcularDvNit } from '@/lib/dian/nit'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
-import { documentoVigenteEn, estadoVigencia, type EstadoVigencia } from '@/lib/documentos/vigencia'
+import { estadoVigencia, type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { montosCoinciden } from '@/lib/negocios/monto-cop'
 import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
@@ -95,6 +95,11 @@ export type CrossCheckSpec = CrossCheckSource & {
   // Solo para match_mode 'vigencia': días que el documento sigue siendo válido
   // desde su fecha de expedición. Default 30.
   vigencia_dias?: number
+  // Solo para match_mode 'vigencia': vida mínima que debe quedarle al documento
+  // cuando el negocio TODAVÍA no tiene fecha objetivo (acuerdo SOENA 2026-08-13:
+  // 10 días). Sin este dato, un caso sin cita queda `no_comprobable` como antes:
+  // el default reproduce el comportamiento previo, no la regla nueva.
+  margen_sin_cita_dias?: number
   // Solo para match_mode 'monto': margen en pesos dentro del cual dos importes se
   // consideran el mismo. Default `TOLERANCIA_SALDO_COP` ($1.000, el piso de
   // materialidad ya vigente en los gates de saldo). Comparar dinero al peso exacto
@@ -141,6 +146,12 @@ export type CrossCheckResult = {
    * cosas distintas sobre el mismo documento.
    */
   vigencia?: EstadoVigencia
+  /**
+   * Solo en `vigencia`: contra qué se midió. La pantalla redacta distinto según el
+   * caso, y sin este dato tendría que adivinarlo por la ausencia de `pedir_desde`,
+   * que es exactamente la clase de inferencia que envejece mal.
+   */
+  criterio?: CriterioVigencia
 }
 
 function normalizeText(v: unknown): string {
@@ -165,7 +176,7 @@ function compareValues(
   expected: string,
   extracted: string,
   mode: CrossCheckMatchMode = 'exact',
-  opts?: { vigencia_dias?: number; tolerancia_cop?: number },
+  opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
 ): boolean {
   // El dinero se compara como NÚMERO y con margen, nunca como texto: "$ 701.812"
   // y "701812" son el mismo monto, y "350906.00" no son 35 millones. Ver `monto-cop.ts`.
@@ -180,8 +191,16 @@ function compareValues(
     // `extracted` = fecha de expedición del documento; `expected` = fecha objetivo
     // (la cita). El documento debe seguir vigente ESE día, no el día que se carga:
     // un certificado bancario de hace tres semanas sirve hoy y no sirve para una
-    // cita del mes entrante.
-    return documentoVigenteEn(extracted, expected, opts?.vigencia_dias) !== false
+    // cita del mes entrante. Se delega en `estadoVigencia` (la MISMA función que usa
+    // `evaluarCheck`) en vez de repetir el criterio con `documentoVigenteEn`: dos
+    // implementaciones del mismo juicio se desincronizan, y aquí ya pasó — el margen
+    // sin cita habría quedado fuera de este camino sin que nada lo delatara.
+    const v = estadoVigencia(extracted, expected, {
+      vigenciaDias: opts?.vigencia_dias,
+      hoyISO: opts?.hoy_iso,
+      margenSinObjetivoDias: opts?.margen_sin_cita_dias,
+    })
+    return v.estado !== 'reemplazar' && v.estado !== 'esperar'
   }
   if (!expected || !extracted) return false
   if (mode === 'tokens') {
@@ -229,12 +248,13 @@ function evaluarCheck(
   expected: string,
   extracted: string,
   mode: CrossCheckMatchMode,
-  opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string },
-): { estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia } {
+  opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
+): { estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia; criterio?: CriterioVigencia } {
   if (mode === 'vigencia') {
     const v = estadoVigencia(extracted, expected, {
       vigenciaDias: opts?.vigencia_dias,
       hoyISO: opts?.hoy_iso,
+      margenSinObjetivoDias: opts?.margen_sin_cita_dias,
     })
     if (v.estado === 'no_comprobable') {
       return { estado: 'no_comprobable', pedirDesde: null, vigencia: v.estado }
@@ -243,6 +263,7 @@ function evaluarCheck(
       estado: v.estado === 'vigente' ? 'ok' : 'falla',
       pedirDesde: v.pedirDesde,
       vigencia: v.estado,
+      ...(v.criterio ? { criterio: v.criterio } : {}),
     }
   }
   return { estado: compareValues(expected, extracted, mode, opts) ? 'ok' : 'falla' }
@@ -301,8 +322,8 @@ async function runCrossCheck(
     srcData: Record<string, unknown>,
     extractedRaw: string,
     mode: CrossCheckMatchMode,
-    opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string },
-  ): { expected: string; estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia } => {
+    opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
+  ): { expected: string; estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia; criterio?: CriterioVigencia } => {
     if (src.source_fields && src.source_fields.length > 0) {
       const join = src.join ?? ' '
       const expected = src.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
@@ -356,18 +377,24 @@ async function runCrossCheck(
     let estado: EstadoCheck | undefined
     let pedirDesde: string | null | undefined
     let vigencia: EstadoVigencia | undefined
+    let criterio: CriterioVigencia | undefined
     for (const src of sources) {
       // Vía preferida: slug estable. Fallback legacy: (etapa_orden::nombre).
       const srcData =
         (src.source_bloque_slug ? dataPorSlug.get(src.source_bloque_slug) : undefined) ??
         dataPorBloque.get(`${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`) ??
         {}
-      const r = resolveFromSource(src, srcData, extractedRaw, mode, { vigencia_dias: check.vigencia_dias, tolerancia_cop: check.tolerancia_cop, hoy_iso: hoyIso })
-      if (r.estado === 'ok') { expectedRaw = r.expected; estado = 'ok'; pedirDesde = r.pedirDesde; vigencia = r.vigencia; break }
+      const r = resolveFromSource(src, srcData, extractedRaw, mode, {
+        vigencia_dias: check.vigencia_dias,
+        tolerancia_cop: check.tolerancia_cop,
+        hoy_iso: hoyIso,
+        margen_sin_cita_dias: check.margen_sin_cita_dias,
+      })
+      if (r.estado === 'ok') { expectedRaw = r.expected; estado = 'ok'; pedirDesde = r.pedirDesde; vigencia = r.vigencia; criterio = r.criterio; break }
       // Entre fuentes que no pasan gana la que SÍ pudo comprobarse: una falla es
       // evidencia de que el documento está mal; "no comprobable" solo dice que
       // faltó un dato. Reportar lo segundo teniendo lo primero esconde el problema.
-      if (estado !== 'falla') { estado = r.estado; pedirDesde = r.pedirDesde; vigencia = r.vigencia }
+      if (estado !== 'falla') { estado = r.estado; pedirDesde = r.pedirDesde; vigencia = r.vigencia; criterio = r.criterio }
       // Recordar el primer valor esperado no vacío para el reporte si nada matchea
       if (!expectedRaw && r.expected) expectedRaw = r.expected
     }
@@ -387,6 +414,7 @@ async function runCrossCheck(
       mode,
       ...(pedirDesde !== undefined ? { pedir_desde: pedirDesde } : {}),
       ...(vigencia !== undefined ? { vigencia } : {}),
+      ...(criterio !== undefined ? { criterio } : {}),
     })
   }
 

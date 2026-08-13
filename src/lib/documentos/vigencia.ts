@@ -83,17 +83,34 @@ export function diasAlObjetivo(expedicion: unknown, objetivo: unknown): number |
  */
 export type EstadoVigencia = 'vigente' | 'reemplazar' | 'esperar' | 'no_comprobable'
 
+/**
+ * Contra QUÉ se midió la vigencia. Sin esto la pantalla no puede redactar: "no sirve
+ * para la fecha de la cita" y "no le queda vida suficiente para el trámite" llevan al
+ * equipo a hacer cosas distintas.
+ *
+ * `cita`   — contra una fecha objetivo real.
+ * `margen` — no hay fecha objetivo, así que se exige un mínimo de vida restante
+ *            contado desde hoy (`margenSinObjetivoDias`).
+ */
+export type CriterioVigencia = 'cita' | 'margen'
+
 export interface VigenciaDocumento {
   estado: EstadoVigencia
   /** Días que tendrá el documento el día objetivo. Null si no se pudo calcular. */
   diasAlObjetivo: number | null
   /**
    * Primer día en que tiene sentido pedir el reemplazo: `objetivo - vigenciaDias`.
-   * Solo viene en `reemplazar` y `esperar`. **Se calcula, nunca se guarda**: si la
-   * fecha objetivo se mueve (la DIAN reprograma citas), un valor congelado mandaría
-   * a pedir el documento el día equivocado y la pantalla seguiría viéndose bien.
+   * Solo viene en `reemplazar` y `esperar` medidos contra una fecha objetivo real.
+   * **Se calcula, nunca se guarda**: si la fecha objetivo se mueve (la DIAN reprograma
+   * citas), un valor congelado mandaría a pedir el documento el día equivocado y la
+   * pantalla seguiría viéndose bien.
+   *
+   * En criterio `margen` va en null a propósito: sin fecha objetivo, uno pedido hoy
+   * siempre sirve, así que no hay fecha desde la cual esperar.
    */
   pedirDesde: string | null
+  /** Contra qué se midió. Null cuando no se pudo medir (`no_comprobable`). */
+  criterio: CriterioVigencia | null
 }
 
 /**
@@ -109,31 +126,52 @@ export interface VigenciaDocumento {
  * Sin `hoyISO` no se puede distinguir `reemplazar` de `esperar`, así que todo lo que
  * no sirve se reporta como `reemplazar` — el lado que pide acción, no el que la
  * aplaza.
+ *
+ * **Sin fecha objetivo hay un segundo criterio, no una excusa para no comprobar.**
+ * Si se declara `margenSinObjetivoDias`, el objetivo se DERIVA como `hoy + margen`:
+ * el documento tiene que servir al menos ese tramo hacia adelante. Es el acuerdo del
+ * 2026-08-13 con SOENA: contra la cita cuando la hay, y contra el calendario con 10
+ * días de tolerancia cuando no. Sin ese margen declarado, y sin objetivo, se devuelve
+ * `no_comprobable` como antes.
  */
 export function estadoVigencia(
   expedicion: unknown,
   objetivo: unknown,
-  opts?: { vigenciaDias?: number; hoyISO?: string },
+  opts?: { vigenciaDias?: number; hoyISO?: string; margenSinObjetivoDias?: number },
 ): VigenciaDocumento {
   const vigenciaDias = opts?.vigenciaDias ?? VIGENCIA_DIAS_DEFAULT
   const tExp = parseFechaISO(expedicion)
-  const tObj = parseFechaISO(objetivo)
+  const tObjReal = parseFechaISO(objetivo)
+  const tHoy = parseFechaISO(opts?.hoyISO)
+  const margen = opts?.margenSinObjetivoDias
+
+  // La fecha objetivo real manda siempre. El margen es el respaldo para cuando no
+  // existe todavía: derivarlo teniendo cita mediría contra un día que no es el del
+  // trámite, y ese es justo el error que este módulo viene a evitar.
+  const usaMargen = tObjReal === null && typeof margen === 'number' && tHoy !== null
+  const tObj = tObjReal ?? (usaMargen ? tHoy + margen * DIA_MS : null)
 
   if (tExp === null || tObj === null) {
-    return { estado: 'no_comprobable', diasAlObjetivo: null, pedirDesde: null }
+    return { estado: 'no_comprobable', diasAlObjetivo: null, pedirDesde: null, criterio: null }
   }
 
+  const criterio: CriterioVigencia = usaMargen ? 'margen' : 'cita'
   const dias = Math.round((tObj - tExp) / DIA_MS)
   if (dias <= vigenciaDias) {
-    return { estado: 'vigente', diasAlObjetivo: dias, pedirDesde: null }
+    return { estado: 'vigente', diasAlObjetivo: dias, pedirDesde: null, criterio }
+  }
+
+  // Sin fecha objetivo real no hay nada que esperar: el objetivo se mueve con el día,
+  // así que uno pedido hoy siempre alcanza. Pedirlo es la única acción posible.
+  if (criterio === 'margen') {
+    return { estado: 'reemplazar', diasAlObjetivo: dias, pedirDesde: null, criterio }
   }
 
   // No sirve. ¿Ya vale la pena pedir el reemplazo, o uno pedido hoy también llegaría
   // vencido? La respuesta decide si el equipo actúa hoy o agenda.
   const tPedirDesde = tObj - vigenciaDias * DIA_MS
   const pedirDesde = isoDeTimestamp(tPedirDesde)
-  const tHoy = parseFechaISO(opts?.hoyISO)
   const estado: EstadoVigencia = tHoy === null || tHoy >= tPedirDesde ? 'reemplazar' : 'esperar'
 
-  return { estado, diasAlObjetivo: dias, pedirDesde }
+  return { estado, diasAlObjetivo: dias, pedirDesde, criterio }
 }
