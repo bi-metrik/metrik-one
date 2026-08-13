@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { bogotaYearMonth } from '@/lib/dates/bogota'
 import {
   getComercialPerfil,
   getComercialResumen,
@@ -36,12 +37,18 @@ export default async function ComercialPerfilPage({ params, searchParams }: Prop
     }
   }
 
-  // Periodo: default acumulado (mes ausente). Con ?mes=YYYY-MM se segmenta ese mes.
-  // El periodo filtra TODOS los indicadores del perfil Y el ranking.
+  // Periodo: el default es el MES EN CURSO, no el acumulado. Un comercial que abre su
+  // perfil pregunta "como voy este mes"; el acumulado historico responde otra cosa y
+  // hace ver una cifra grande que no dice nada del periodo que se esta trabajando.
+  // El acumulado sigue disponible, pero ahora se declara: `?mes=acumulado`.
+  //
+  // El mes se toma en hora de Bogota: Vercel corre en UTC y despues de las 19:00 el
+  // dia 30 el perfil habria saltado al mes siguiente, en blanco.
   let anio: number | null = null
   let mes: number | null = null
-  if (sp.mes) {
-    const [a, m] = sp.mes.split('-')
+  const periodoParam = sp.mes ?? bogotaYearMonth()
+  if (periodoParam !== 'acumulado') {
+    const [a, m] = periodoParam.split('-')
     const an = Number(a)
     const mn = Number(m)
     if (an > 0 && mn >= 1 && mn <= 12) {
