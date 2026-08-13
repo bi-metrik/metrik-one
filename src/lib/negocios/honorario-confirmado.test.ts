@@ -46,10 +46,28 @@ describe('faltaHonorarioConfirmado', () => {
     expect(faltaHonorarioConfirmado(caso({ precioAprobado: null }))).toBe(true)
   })
 
-  it('V0066: plan escogido pero honorario en CERO -> FRENA', () => {
-    // Tiene aprobado_at y aprobado_plan = 2, pero aprobado_honorario = 0.
-    // Un plan que no confirma valor no cumple la regla.
+  it('cero SIN propuesta aprobada -> FRENA: nadie cotizo todavia', () => {
     expect(faltaHonorarioConfirmado(caso({ precioAprobado: 0 }))).toBe(true)
+  })
+
+  it('V0066: cero DECIDIDO (propuesta aprobada al 100% de descuento) -> PASA', () => {
+    // Medido el 2026-08-13: su propuesta esta aprobada, con Plan 1 en $850.000 y
+    // Plan 2 con 100% de descuento; se aprobo el Plan 2 y su PDF esta en Drive.
+    // El criterio anterior lo habria frenado por una decision comercial ya
+    // tomada, y el equipo no habria tenido como destrabarlo salvo cambiando un
+    // precio que alguien decidio.
+    expect(faltaHonorarioConfirmado(caso({ precioAprobado: 0, ceroDeliberado: true }))).toBe(false)
+  })
+
+  it('el cero deliberado NO se cuela cuando la linea no exige nada', () => {
+    // Redundante en la practica, pero fija el orden: la config manda primero.
+    expect(faltaHonorarioConfirmado(caso({
+      precioAprobado: 0, ceroDeliberado: true, configLinea: null,
+    }))).toBe(false)
+  })
+
+  it('el cero deliberado NO le abre la puerta a un precio negativo sin decidir', () => {
+    expect(faltaHonorarioConfirmado(caso({ precioAprobado: -1, ceroDeliberado: false }))).toBe(true)
   })
 
   it('V0306 tras regularizarse: precio 637.500 -> PASA', () => {

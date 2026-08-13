@@ -29,6 +29,30 @@ export interface EstadoHonorario {
   configLinea?: ConfigCobro | null
   /** `config_extra.cobro` del WORKSPACE. Respaldo. */
   configWorkspace?: ConfigCobro | null
+  /**
+   * ¿El honorario en cero es una DECISION, no un dato que falta?
+   *
+   * ⚠️ SIN ESTO EL GUARD FRENA UN CASO SANO Y NADIE PUEDE DESTRABARLO
+   *
+   * Un honorario en cero tiene dos causas que se ven idénticas desde
+   * `precio_aprobado`: nadie cotizó todavía, o alguien aprobó una propuesta
+   * regalando el servicio. La segunda es legítima y el producto ya la contempla
+   * (`valorARecaudar` cubre el caso "honorario 0 CON tarifa": el cliente igual
+   * paga la tarifa de la UPME).
+   *
+   * Medido en produccion el 2026-08-13: V0066 tiene su propuesta APROBADA, con
+   * Plan 1 en $850.000 y Plan 2 con 100% de descuento; se aprobó el Plan 2 y su
+   * PDF está en Drive. Con el criterio anterior el guard lo habría frenado por
+   * una decisión comercial ya tomada, y el equipo no habría tenido cómo
+   * destrabarlo salvo cambiando un precio que alguien decidió.
+   *
+   * El criterio NO se reimplementa aquí: lo calcula `esCeroDeliberado`
+   * (`src/lib/upme/modelo-dinero.ts`), que es donde ya vive, y llega resuelto.
+   * Se recibe como dato en vez de importarse para no invertir la dependencia:
+   * `lib/negocios` es el motor de avance y `lib/upme` el modelo de dinero de un
+   * cliente.
+   */
+  ceroDeliberado?: boolean
 }
 
 /**
@@ -65,6 +89,8 @@ export function lineaExigeHonorarioConfirmado(e: EstadoHonorario): boolean {
 export function faltaHonorarioConfirmado(e: EstadoHonorario): boolean {
   if (!lineaExigeHonorarioConfirmado(e)) return false
   if (e.estado !== 'abierto') return false
+  // Un cero DECIDIDO no es un cero que falta. Ver `ceroDeliberado` arriba.
+  if (e.ceroDeliberado) return false
   return (e.precioAprobado ?? 0) <= 0
 }
 

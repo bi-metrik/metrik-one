@@ -5577,11 +5577,30 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       db(supabase).from('lineas_negocio').select('config_extra').eq('id', base.negocio.linea_id).maybeSingle(),
       db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle(),
     ])
+    // Un honorario en cero puede ser una DECISION (propuesta aprobada regalando
+    // el servicio) y no un dato que falta. El criterio no se reimplementa acá:
+    // lo resuelve `esCeroDeliberado`, que es donde ya vive y que consumen el
+    // gate de handoff y el reparto. Solo se consulta cuando el precio es cero,
+    // que es el único caso en que puede cambiar la respuesta: así el detalle no
+    // paga una consulta más en los negocios que sí tienen honorario.
+    let ceroDeliberado = false
+    if ((base.negocio.precio_aprobado ?? 0) <= 0) {
+      const { data: propRows } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+        .eq('negocio_id', id)
+        .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+      ceroDeliberado = esCeroDeliberado(
+        (propRows ?? []) as Array<{ data: Record<string, unknown> | null }>,
+        base.negocio.precio_aprobado,
+      )
+    }
     faltaHonorario = faltaHonorarioConfirmado({
       precioAprobado: base.negocio.precio_aprobado,
       estado: base.negocio.estado,
       configLinea: (lineaCobroRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
       configWorkspace: (wsCobroRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
+      ceroDeliberado,
     })
   }
 
