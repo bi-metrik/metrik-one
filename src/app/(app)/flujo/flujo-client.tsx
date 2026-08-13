@@ -11,10 +11,21 @@ import { WorkflowConventions } from '@/components/workflow/workflow-conventions'
 import type { WorkflowEtapa } from '@/components/workflow/types'
 import { SlaChangeLogSection } from './sla-change-log-section'
 
+// La comparacion lado a lado termino: "Como avanza un caso" reemplaza al diagrama
+// (decision de Mauricio, 2026-08-12). Se apaga la pestana, NO se borra el componente.
+//
+// El diagrama ademas dibuja MAL cualquier etapa de mainline insertada fuera de
+// secuencia de `orden`: `computeLayout` construye bien la cadena siguiendo
+// `default_etapa_orden`, pero el bucle que arma las filas itera `sorted` (ordenado
+// por `orden`) y solo filtra por pertenencia al mainline. Verificado en SOENA: la
+// etapa "Revision radicado" (numero 8, orden 20) se pintaba al final, colgando de
+// Facturacion. Las etapas de rama no lo sufren porque van por `branchChains`.
+//
+// Para reactivarlo hay que arreglar antes ese orden de pintado.
+const MOSTRAR_DIAGRAMA: boolean = false
+
 export default function FlujoClient({ data }: { data: FlujoData }) {
   const router = useRouter()
-  // Prototipo lado a lado: la vista de rutas se propone como reemplazo del diagrama,
-  // pero se compara en produccion antes de decidir. El diagrama no se toca.
   const [vista, setVista] = useState<'rutas' | 'diagrama'>('rutas')
   const { lineas, selectedLineaId, etapas, canConfigSla, canViewSlaLog } = data
 
@@ -57,7 +68,7 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[#1A1A1A]">Workflows</h1>
             <p className="mt-1 text-sm text-[#6B7280]">
-              Diagrama del proceso de tu negocio.
+              Cómo avanza un caso en tu negocio, etapa por etapa.
             </p>
           </div>
           {/* Selector de línea siempre visible — incluso con 1 sola */}
@@ -111,7 +122,7 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
         </div>
       )}
 
-      {workflowEtapas.length > 0 && (
+      {MOSTRAR_DIAGRAMA && workflowEtapas.length > 0 && (
         <div className="flex gap-1 rounded-xl bg-gray-100 p-1 w-fit">
           <button
             onClick={() => setVista('rutas')}
