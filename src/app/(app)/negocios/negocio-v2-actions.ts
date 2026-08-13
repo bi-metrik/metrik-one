@@ -6,6 +6,7 @@ import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS
 import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
+import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
@@ -87,17 +88,12 @@ export type EtapaNegocio = {
   guia?: GuiaEtapa | null
 }
 
-/** Ayuda contextual de una etapa. Texto plano: lo escribe quien configura la línea. */
-export type GuiaEtapa = {
-  /** Qué significa que un caso esté aquí. Una frase. */
-  definicion?: string
-  /** Lo que hay que hacer, en pasos cortos. */
-  hacer?: string[]
-  /** Qué retiene el caso, en las palabras del equipo. */
-  avanzar?: string
-  /** Quién responde esta etapa. */
-  responsable?: string
-}
+/**
+ * Ayuda contextual de una etapa. El tipo vive en `@/lib/negocios/guia-etapa` porque
+ * también lo consume la vista del flujo, que no pasa por estas server actions.
+ * Se re-exporta para no romper a quien ya lo importaba desde aquí.
+ */
+export type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 
 export type BloqueDefinition = {
   id: string

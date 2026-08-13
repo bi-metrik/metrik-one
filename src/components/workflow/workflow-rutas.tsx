@@ -16,6 +16,8 @@
 import { AlertTriangle, Clock, Eye, GitBranch, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
+import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
+import { EtapaGuia } from './etapa-guia'
 import { STAGE_LABELS } from './types'
 import { SlaConfig } from './workflow-diagram'
 
@@ -45,6 +47,15 @@ export interface RutaDeclarada {
 
 function num(e: WorkflowEtapa): number {
   return typeof e.numero === 'number' ? e.numero : e.orden
+}
+
+/**
+ * La guía viaja dentro de `config_extra` de la etapa, que el server action ya manda
+ * completo. No hace falta un campo propio en `WorkflowEtapa`: el mismo objeto alimenta
+ * `label_pregunta`, `routing` y `gates`.
+ */
+function guiaDeEtapa(e: WorkflowEtapa): GuiaEtapa | null {
+  return (e.config_extra as { guia?: GuiaEtapa } | null | undefined)?.guia ?? null
 }
 
 /**
@@ -596,6 +607,10 @@ function EtapaFila({
             </ul>
           )}
           </div>
+          {/* La ayuda de la etapa va DESPUÉS de los bloques: primero qué hay que llenar,
+              después qué significa la etapa y qué la retiene. Es el mismo texto que ve
+              quien trabaja el caso dentro del negocio. */}
+          <EtapaGuia guia={guiaDeEtapa(etapa)} />
         </div>
       )}
     </div>

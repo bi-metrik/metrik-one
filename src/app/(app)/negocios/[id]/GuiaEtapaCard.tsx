@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from 'react'
 import { ChevronDown, HelpCircle } from 'lucide-react'
-import type { GuiaEtapa } from '../negocio-v2-actions'
+import { guiaTieneContenido, guiaTieneDetalle, type GuiaEtapa } from '@/lib/negocios/guia-etapa'
 
 const KEY = 'guia-etapa:abierta'
 
@@ -58,9 +58,11 @@ export function GuiaEtapaCard({
     prefStore.set(abierto ? '0' : '1')
   }
 
-  if (!guia?.definicion && !guia?.hacer?.length && !guia?.avanzar) return null
+  // Las dos superficies que muestran la guía (esta tarjeta y la vista del flujo)
+  // comparten el criterio de "hay algo que mostrar": escrito dos veces, divergiría.
+  if (!guiaTieneContenido(guia)) return null
 
-  const hayDetalle = !!(guia.hacer?.length || guia.avanzar || guia.responsable)
+  const hayDetalle = guiaTieneDetalle(guia)
 
   return (
     <div className="rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] dark:border-emerald-900/60 dark:bg-emerald-950/25">
