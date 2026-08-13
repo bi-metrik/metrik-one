@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
-import { drawFixed, type Cell } from './acroform'
+import { drawCells, drawFixed, type Cell } from './acroform'
 
 // Overlay sobre el PDF oficial de la DIAN (Formato 1668 — Información /
 // Constancia de Titularidad de Cuenta Bancaria). El fondo no se modifica.
@@ -51,12 +51,33 @@ const INFO = {
   otros_nombres: { x: 504, y: 603, maxWidth: 100 },
   // Razón social (fila y ≈ 579). Vacía para persona natural.
   razon_social: { x: 26, y: 579, maxWidth: 560 },
-  // Fecha expedición + Entidad financiera (fila y ≈ 555)
-  fecha_expedicion: { x: 26, y: 555, maxWidth: 130 },
+  // Entidad financiera (fila y ≈ 555). La fecha de expedición de esa misma fila NO
+  // va aquí: tiene rejilla propia y se dibuja con `drawCells` (ver FECHA_EXPEDICION).
   entidad_financiera: { x: 166, y: 555, maxWidth: 400 },
   // No. Cuenta + Tipo de cuenta (fila y ≈ 531)
   numero_cuenta: { x: 26, y: 531, maxWidth: 135 },
   tipo_cuenta: { x: 166, y: 531, maxWidth: 245 },
+}
+
+// ── Casilla 24: fecha de expedición, repartida por casilla ───────────────────
+//
+// El formato trae rejilla de tres grupos —AAAA | MM | DD— igual que el 010. Los
+// separadores dibujados se midieron sobre el formato en blanco RENDERIZADO a 600 dpi,
+// contando columnas de píxeles oscuros: borde 24,18 · separadores 63,78 / 83,46 /
+// 102,66 pt. De ahí salen los tres grupos y sus pasos.
+//
+// ⚠️ Se intentó primero con los trazos vectoriales (`pdftocairo -svg`) y esa medición
+// estaba CORRIDA: daba 67,22 y 87,61 donde el render muestra 63,78 y 83,46. Con esos
+// valores los dígitos caían fuera de sus casillas, y solo se vio al mirar el PDF. Si
+// alguien recalibra esto, que mida sobre el render, no sobre el SVG.
+const FECHA_EXPEDICION = {
+  y: 555,
+  size: 8,
+  groups: [
+    { count: 4, xStart: 24.18, pitch: 9.9 },  // AAAA (24,18 → 63,78)
+    { count: 2, xStart: 63.78, pitch: 9.84 }, // MM   (63,78 → 83,46)
+    { count: 2, xStart: 83.46, pitch: 9.6 },  // DD   (83,46 → 102,66)
+  ],
 }
 
 // ── Sección "Firma de quien suscribe el documento" ───────────────────────────
@@ -80,12 +101,27 @@ function nombreCompleto(d: Formulario1668Datos): string {
     .join(' ')
 }
 
-// Fecha de expedición → DD/MM/AAAA. Acepta ISO (YYYY-MM-DD) o ya formateada.
-function formatFecha(iso: string | null): string | null {
-  if (!iso) return null
-  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`
-  return iso // ya viene en otro formato (DD/MM/AAAA) → tal cual
+/**
+ * Fecha de expedición en dígitos corridos `AAAAMMDD`, para repartir por casilla.
+ *
+ * ⚠️ El orden es AAAA-MM-DD, no DD/MM/AAAA. La casilla 24 del formato tiene rejilla
+ * de tres grupos (4 + 2 + 2) igual que el 010, y hasta el 2026-08-12 esto se estampaba
+ * como UNA cadena `DD/MM/AAAA` en un solo punto: los dígitos no caían en sus casillas
+ * y además iban en orden invertido.
+ *
+ * Acepta ISO (`AAAA-MM-DD`) o ya formateada (`DD/MM/AAAA`), que es como quedaron los
+ * valores escritos a mano antes de este cambio.
+ */
+export function digitosFecha(valor: string | null): string | null {
+  if (!valor) return null
+  const s = String(valor).trim()
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[1]}${iso[2]}${iso[3]}`
+  const dmy = s.match(/^(\d{2})[/-](\d{2})[/-](\d{4})/)
+  if (dmy) return `${dmy[3]}${dmy[2]}${dmy[1]}`
+  // Formato desconocido: no se inventa una fecha. Mejor casilla vacía que una
+  // fecha equivocada en un documento que va a la DIAN.
+  return null
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -124,7 +160,8 @@ export async function generarFormulario1668(
   edit('otros_nombres', datos.otros_nombres, INFO.otros_nombres)
   // Razón social (casilla 11): persona natural → BLANCO determinista, sin campo.
 
-  edit('fecha_expedicion', formatFecha(datos.fecha_expedicion), INFO.fecha_expedicion)
+  // Casilla 24: un dígito por casilla, AAAA MM DD (no una cadena con barras).
+  drawCells(page, font, digitosFecha(datos.fecha_expedicion), FECHA_EXPEDICION)
   edit('entidad_financiera', datos.entidad_financiera, INFO.entidad_financiera)
   edit('numero_cuenta', datos.numero_cuenta, INFO.numero_cuenta)
   edit('tipo_cuenta', datos.tipo_cuenta, INFO.tipo_cuenta)
