@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { GitFork, List, GitBranch } from 'lucide-react'
 import type { FlujoData } from './actions'
-import { updateEtapaSla, guardarSlaEnLote } from './actions'
+import { updateEtapaSla, updateEtapaAviso, guardarSlaEnLote } from './actions'
 import { WorkflowDiagram } from '@/components/workflow/workflow-diagram'
 import { WorkflowRutas } from '@/components/workflow/workflow-rutas'
 import { WorkflowConventions } from '@/components/workflow/workflow-conventions'
@@ -153,6 +153,7 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
           rutas={data.rutas ?? []}
           canConfigSla={canConfigSla}
           onUpdateSla={updateEtapaSla}
+          onUpdateAviso={updateEtapaAviso}
           onGuardarSlaLote={guardarSlaEnLote}
         />
       ) : (
@@ -161,6 +162,7 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
           mode="simplified"
           canConfigSla={canConfigSla}
           onUpdateSla={updateEtapaSla}
+          onUpdateAviso={updateEtapaAviso}
         />
       )}
 
