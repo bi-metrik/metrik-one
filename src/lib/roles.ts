@@ -42,7 +42,7 @@ export const ROLE_PERMISSIONS = {
     canConfigReglasValidacion: true,  // Configurar listas cautelares / reglas vinculantes
     // ── Flujo (vista de proceso del workspace) ──────────────
     canViewFlujo: true,
-    canConfigSlaEtapas: true,         // Solo owner configura SLA
+    canConfigSlaEtapas: true,         // owner y admin configuran SLA
     canViewSlaLog: true,              // owner/admin/supervisor ven historial de SLA
     // ── Calidad de llamadas (modulo calidad_llamadas) ───────
     canViewCalidad: true,             // Entrar a /calidad
@@ -80,7 +80,10 @@ export const ROLE_PERMISSIONS = {
     canExportRiesgos: true,
     canConfigReglasValidacion: true,
     canViewFlujo: true,
-    canConfigSlaEtapas: false,        // Solo owner configura SLA
+    // Los tiempos maximos por etapa los define el equipo que opera el proceso, no
+    // solo el dueno: la sesion donde se acuerdan la lidera quien administra la
+    // operacion. Decision de Mauricio, 2026-08-12.
+    canConfigSlaEtapas: true,
     canViewSlaLog: true,
     // Calidad — admin ve toda la operacion pero no la plata del dueno
     canViewCalidad: true,

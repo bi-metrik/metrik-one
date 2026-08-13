@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 import { nitConGuion } from '@/lib/dian/nit'
+import { titularesDeDatos, concordancia } from './titulares'
 
 interface RelacionFacturasProps {
   datos: {
@@ -16,6 +17,12 @@ interface RelacionFacturasProps {
     municipio: string | null
     email: string | null
     telefono: string | null
+    // Segundo titular (copropiedad). OPCIONAL: sin estos campos el documento sale
+    // idéntico al de antes. La DIAN exige que en copropiedad firmen los dos.
+    nombre_solicitante_2?: string | null
+    numero_identificacion_2?: string | null
+    email_2?: string | null
+    telefono_2?: string | null
   }
   fechaGeneracion: string
   codigoNegocio: string
@@ -78,11 +85,12 @@ const COL = {
 }
 
 export default function RelacionFacturasPDF({ datos, fechaGeneracion }: RelacionFacturasProps) {
-  const nombre = datos.nombre_solicitante ?? '[NOMBRE SOLICITANTE]'
-  const cedula = datos.numero_identificacion ?? '[Número de Cédula]'
+  // Aquí el firmante se identifica con CÉDULA, no con NIT: este documento no
+  // recompone dígito de verificación (a diferencia de la declaración juramentada
+  // y del 010, que sí hablan de NIT). Cada documento conserva su convención.
+  const titulares = titularesDeDatos(datos)
+  const c = concordancia(titulares.length)
   const ciudad = datos.municipio ?? '[Ciudad]'
-  const email = datos.email ?? '[DIRECCIÓN DE CORREO]'
-  const telefono = datos.telefono ?? '[NÚMERO DE CELULAR]'
   const tipoVehiculo = datos.tipo_vehiculo?.toLowerCase() ?? 'híbrido / eléctrico'
   const descripcion = [datos.marca, datos.linea].filter(Boolean).join(' ') || '—'
 
@@ -115,7 +123,15 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
 
         {/* Introducción */}
         <Text style={s.intro}>
-          Yo, <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nombre}</Text>, identificado(a) con cédula de ciudadanía No. <Text style={{ fontFamily: 'Helvetica-Bold' }}>{cedula}</Text>, en calidad de solicitante, presento la siguiente relación detallada de las facturas electrónicas correspondientes a la adquisición del vehículo <Text style={{ fontFamily: 'Helvetica-Bold' }}>{tipoVehiculo}</Text>, certificado por la UPME:
+          {c.yo},
+          {titulares.map((t, i) => (
+            <Text key={i}>
+              {i > 0 ? ' y ' : ' '}
+              <Text style={{ fontFamily: 'Helvetica-Bold' }}>{t.nombre}</Text>, {c.identificado} con cédula de ciudadanía No.{' '}
+              <Text style={{ fontFamily: 'Helvetica-Bold' }}>{t.identificacion ?? '[Número de Cédula]'}</Text>
+            </Text>
+          ))}
+          , en calidad de {c.solicitante}, {c.presento} la siguiente relación detallada de las facturas electrónicas correspondientes a la adquisición del vehículo <Text style={{ fontFamily: 'Helvetica-Bold' }}>{tipoVehiculo}</Text>, certificado por la UPME:
         </Text>
 
         {/* Tabla */}
@@ -159,7 +175,7 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
 
         {/* Declaración de veracidad */}
         <Text style={s.closing}>
-          Declaro que la información contenida en la presente relación corresponde fielmente a las facturas electrónicas aportadas como soporte de la solicitud de devolución.
+          {c.declaro} que la información contenida en la presente relación corresponde fielmente a las facturas electrónicas aportadas como soporte de la solicitud de devolución.
         </Text>
 
         {/* Para constancia */}
@@ -167,15 +183,18 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
           Para constancia, se firma en la ciudad de <Text style={{ fontFamily: 'Helvetica-Bold' }}>{ciudad}</Text>, a los {dia} días del mes de {mes} de {anio}.
         </Text>
 
-        {/* Firma */}
-        <View style={s.signatureBlock}>
-          <View style={s.signatureLine}>
-            <Text style={s.signatureName}>{nombre}</Text>
-            <Text style={s.signatureDetail}>C.C. No. {cedula}</Text>
-            <Text style={s.signatureDetail}>Correo electrónico: {email}</Text>
-            <Text style={s.signatureDetail}>Celular: {telefono}</Text>
+        {/* Firmas — una por titular. `wrap={false}`: ver la nota en la declaración
+            juramentada. Aquí se vio el corte al mirar el PDF con dos firmantes. */}
+        {titulares.map((t, i) => (
+          <View key={i} style={s.signatureBlock} wrap={false}>
+            <View style={s.signatureLine}>
+              <Text style={s.signatureName}>{t.nombre}</Text>
+              <Text style={s.signatureDetail}>C.C. No. {t.identificacion ?? '[Número de Cédula]'}</Text>
+              <Text style={s.signatureDetail}>Correo electrónico: {t.email ?? '[DIRECCIÓN DE CORREO]'}</Text>
+              <Text style={s.signatureDetail}>Celular: {t.telefono ?? '[NÚMERO DE CELULAR]'}</Text>
+            </View>
           </View>
-        </View>
+        ))}
 
       </Page>
     </Document>

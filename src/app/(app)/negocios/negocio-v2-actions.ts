@@ -5,7 +5,9 @@ import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
+import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
+import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
@@ -87,17 +89,12 @@ export type EtapaNegocio = {
   guia?: GuiaEtapa | null
 }
 
-/** Ayuda contextual de una etapa. Texto plano: lo escribe quien configura la línea. */
-export type GuiaEtapa = {
-  /** Qué significa que un caso esté aquí. Una frase. */
-  definicion?: string
-  /** Lo que hay que hacer, en pasos cortos. */
-  hacer?: string[]
-  /** Qué retiene el caso, en las palabras del equipo. */
-  avanzar?: string
-  /** Quién responde esta etapa. */
-  responsable?: string
-}
+/**
+ * Ayuda contextual de una etapa. El tipo vive en `@/lib/negocios/guia-etapa` porque
+ * también lo consume la vista del flujo, que no pasa por estas server actions.
+ * Se re-exporta para no romper a quien ya lo importaba desde aquí.
+ */
+export type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 
 export type BloqueDefinition = {
   id: string
@@ -826,6 +823,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
     }))
   }
+
 
   // Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME), leído de
   // la propuesta aprobada. Se expone SIEMPRE para que el bloque de Cobro muestre el
@@ -5562,6 +5560,31 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // negocio_responsables guarda staff.id, igual que staffId de getWorkspace.
   const currentUserEsResponsable = !!staffId && base.negocio.responsables.some((r) => r.id === staffId)
 
+  // ¿Al negocio le falta el honorario confirmado para poder cobrar?
+  //
+  // Quien FRENA el cobro es el trigger sobre `cobros` (once sitios insertan ahí;
+  // el criterio no se replica en cada uno). Esto es lo otro que hace falta: si el
+  // caso ya avanzó sin propuesta aprobada, el bloque nativo de la propuesta vive
+  // en una etapa anterior y desde el historial sale forzado a solo lectura — o
+  // sea que el guard lo dejaría sin ningún lugar desde donde poner el valor que
+  // se le exige. Medido el 2026-08-13: 5 casos abiertos de SOENA ya están en Cita
+  // (etapa 13) sin precio, y la ventana de la propuesta termina en la etapa de
+  // orden 5. Es el mismo error de `revertir_hasta_etapa_orden` que este archivo
+  // ya documenta: la acción quedó inalcanzable justo en el escenario que la pidió.
+  let faltaHonorario = false
+  if (base.negocio.linea_id) {
+    const [lineaCobroRes, wsCobroRes] = await Promise.all([
+      db(supabase).from('lineas_negocio').select('config_extra').eq('id', base.negocio.linea_id).maybeSingle(),
+      db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle(),
+    ])
+    faltaHonorario = faltaHonorarioConfirmado({
+      precioAprobado: base.negocio.precio_aprobado,
+      estado: base.negocio.estado,
+      configLinea: (lineaCobroRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
+      configWorkspace: (wsCobroRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
+    })
+  }
+
   // Visibilidad: operator solo accede al detalle de negocios donde es responsable
   // (espejo del filtro de la lista; cierra el acceso por URL a negocios ajenos).
   if (role === 'operator') {
@@ -6464,6 +6487,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
     if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
       enrichedConfigExtra._puedeCorregirPrecio = true
+    }
+    // Sin honorario confirmado el cobro está frenado, así que la propuesta tiene
+    // que quedar alcanzable AUNQUE el caso ya haya avanzado de etapa — incluso
+    // desde el historial, que es donde vive el bloque nativo cuando el negocio ya
+    // se fue. Se apaga solo en el momento en que alguien aprueba: no es una
+    // ventana declarada, es la ausencia del dato que el guard exige.
+    if (defTipo === 'propuesta_economica' && faltaHonorario) {
+      enrichedConfigExtra._faltaHonorarioConfirmado = true
     }
 
     // Preview para BloqueGuiaDevolucion: resuelve nombre, NIT, ciudad, fecha cita

@@ -2,7 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
-import type { ComercialResumenRow, ComercialPerfil } from './comercial-types'
+import type { ComercialResumenRow, ComercialPerfil, ComercialVentaCaso } from './comercial-types'
 
 /**
  * Resumen comercial por responsable del workspace activo (incluye bucket sin
@@ -171,4 +171,42 @@ export async function guardarMetaComercial(input: {
   if (error) return { ok: false, error: error.message }
   revalidatePath('/equipo')
   return { ok: true }
+}
+
+/**
+ * Los casos detras de una cifra del tablero comercial (drill-down).
+ *
+ * Se carga bajo demanda al hacer clic: la tabla no arrastra el detalle de las 30 ventas
+ * del mes por si acaso. Mismo periodo y mismo criterio que la cifra, porque la RPC
+ * consume la misma vista que la produjo.
+ */
+export async function getComercialVentasMes(input: {
+  anio: number
+  mes: number
+  /** Filtra a un vendedor. `null` = todos. */
+  responsableId?: string | null
+  /** `true` = solo casos completos, `false` = solo incompletos, ausente = todos. */
+  soloCompletos?: boolean | null
+  /** Abre el bucket de negocios sin comercial atribuido. */
+  sinResponsable?: boolean
+}): Promise<ComercialVentaCaso[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_ventas_mes_soena', {
+    p_workspace_id: workspaceId,
+    p_anio: input.anio,
+    p_mes: input.mes,
+    p_responsable_id: input.responsableId ?? null,
+    p_solo_completos: input.soloCompletos ?? null,
+    p_sin_responsable: input.sinResponsable ?? false,
+  })
+  // El error se lee y se registra: descartarlo devuelve lista vacia y la pantalla diria
+  // "no hay casos aqui" sobre una cifra que dice que si los hay — el fallo mudo que este
+  // repo ya documenta con los selectores que "no encuentran nada".
+  if (rpcError) {
+    console.error('[comercial] no se pudieron traer los casos del mes:', rpcError)
+    return []
+  }
+  return (data as ComercialVentaCaso[]) ?? []
 }
