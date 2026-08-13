@@ -937,6 +937,24 @@ function FilaPorFacturar({
           <div className="mt-0.5 text-[11px]" style={{ color: '#6B7280' }}>
             {[caso.cliente, caso.identificacion, caso.etapa].filter(Boolean).join(' · ')}
           </div>
+          {/* El concepto es lo que el cliente lee en la factura: se ve ANTES de
+              emitir, no después. Cuando sale del default se advierte, porque
+              entonces no refleja lo que el cliente contrató sino un supuesto. */}
+          {!caso.ya_facturado && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span style={{ color: '#6B7280' }}>Concepto:</span>
+              <span className="font-medium" style={{ color: '#1A1A1A' }}>
+                {caso.concepto.nombre ?? `código ${caso.concepto.code}`}
+              </span>
+              {caso.concepto.porDefecto && (
+                <span className="rounded-full px-1.5 py-0.5 text-[10px]"
+                      style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}
+                      title="Nadie declaró qué contrató el cliente: este concepto es el de por defecto.">
+                  por defecto
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="text-right">
           <div className="text-[14px] font-bold" style={{ color: '#1A1A1A' }}>
@@ -992,7 +1010,11 @@ function FilaPorFacturar({
                 {[
                   ['Cliente', caso.cliente ?? '—'],
                   ['Identificación', caso.identificacion ?? '—'],
-                  ['Concepto', 'Incentivos tributarios UPME'],
+                  // ⚠️ Este renglón estaba escrito a mano ("Incentivos tributarios
+                  // UPME"): la pantalla afirmaba un concepto que podía no ser el
+                  // que se emitía, y habría seguido diciéndolo si alguien
+                  // renombraba el producto en Siigo. Sale del catálogo.
+                  ['Concepto', caso.concepto.nombre ?? `código ${caso.concepto.code}`],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-3">
                     <dt style={{ color: '#6B7280' }}>{k}</dt>

@@ -18,7 +18,12 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { borradorCliente, borradorFactura, borradorRecibo, type RutExtraido } from '@/lib/siigo/mapeo'
 import { emitirReciboNegocio } from '@/lib/siigo/recibos'
-import type { SiigoConfig } from '@/lib/siigo/client'
+import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
+import {
+  conceptoFactura,
+  type ConceptosConfig,
+  type ServicioContratado,
+} from '@/lib/siigo/concepto'
 import { emitirFacturaNegocio, type FacturaEnSiigo, type MarcaFactura } from '@/lib/siigo/facturas'
 import { leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { sumarRecaudoConfirmado, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
@@ -46,6 +51,20 @@ export interface CasoPorFacturar {
    * cuando el cliente llama. No se pinta en la fila.
    */
   telefono: string | null
+  /**
+   * Qué concepto sale en la factura y por qué. Se muestra ANTES de emitir: es
+   * lo que el cliente va a leer y lo que queda ante la DIAN.
+   */
+  concepto: {
+    /** `code` del producto de Siigo que viaja en el ítem. */
+    code: string
+    /** Nombre del producto en el catálogo del cliente. null si Siigo no responde. */
+    nombre: string | null
+    /** Servicio declarado que lo gobernó; null si el caso no lo declara. */
+    servicio: ServicioContratado | null
+    /** true si salió del default y no de lo que el cliente contrató. */
+    porDefecto: boolean
+  }
   /** Honorario aprobado, CON IVA (es como ONE guarda `precio_aprobado`). */
   honorario: number | null
   /** Valor pagado a la UPME según el comprobante cargado. Recaudo de terceros. */
@@ -139,9 +158,14 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   const { data: lineas } = await (svc as any)
     .from('lineas_negocio').select('id, config_extra').eq('workspace_id', workspaceId)
   let desde: number | null = null
-  for (const l of ((lineas ?? []) as Array<{ config_extra?: Record<string, unknown> | null }>)) {
+  // Los conceptos se resuelven POR LÍNEA: cada una vende cosas distintas y su
+  // catálogo de Siigo no tiene por qué coincidir.
+  const conceptosPorLinea = new Map<string, ConceptosConfig>()
+  for (const l of ((lineas ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null }>)) {
     const f = (l.config_extra?.facturacion ?? {}) as { desde_etapa_numero?: number }
-    if (typeof f.desde_etapa_numero === 'number') { desde = f.desde_etapa_numero; break }
+    if (typeof f.desde_etapa_numero === 'number' && desde === null) desde = f.desde_etapa_numero
+    const s = (l.config_extra?.siigo ?? {}) as { conceptos?: ConceptosConfig }
+    if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
   }
   if (desde == null) {
     return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
@@ -151,12 +175,13 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: negocios } = await (svc as any)
     .from('negocios')
-    .select('id, codigo, nombre, precio_aprobado, contacto_id, metadata, etapas_negocio!inner(nombre, numero)')
+    .select('id, codigo, nombre, precio_aprobado, contacto_id, linea_id, metadata, etapas_negocio!inner(nombre, numero)')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
   type Neg = {
     id: string; codigo: string | null; nombre: string | null
     precio_aprobado: number | null; contacto_id: string | null
+    linea_id: string | null
     metadata: Record<string, unknown> | null
     etapas_negocio: { nombre: string | null; numero: number | null } | null
   }
@@ -173,12 +198,20 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     .from('negocio_bloques')
     .select('negocio_id, data, bloque_configs!inner(slug)')
     .in('negocio_id', ids)
-    .in('bloque_configs.slug', ['rut', 'comprobante_pago_upme', 'factura_emitida'])
-  type Bl = { negocio_id: string; data: { campos?: Record<string, { value?: unknown }> } | null; bloque_configs: { slug: string } }
+    .in('bloque_configs.slug', ['rut', 'comprobante_pago_upme', 'factura_emitida', 'servicio_contratado'])
+  // ⚠️ Los bloques `datos` guardan plano (`data.servicio`) y los `documento` bajo
+  // `data.campos[slug].value`. Leer el servicio como si fuera documento devuelve
+  // null para todos y el concepto caería al default sin que nadie lo note.
+  type Bl = {
+    negocio_id: string
+    data: ({ campos?: Record<string, { value?: unknown }> } & Record<string, unknown>) | null
+    bloque_configs: { slug: string }
+  }
 
   const rutPorNegocio = new Map<string, RutExtraido>()
   const upmePorNegocio = new Map<string, number>()
   const facturadoPorNegocio = new Set<string>()
+  const servicioPorNegocio = new Map<string, unknown>()
 
   for (const b of ((bloques ?? []) as unknown as Bl[])) {
     const campos = b.data?.campos ?? {}
@@ -195,6 +228,13 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     } else if (slug === 'factura_emitida') {
       const n = String(campos.numero_factura?.value ?? '').trim()
       if (n) facturadoPorNegocio.add(b.negocio_id)
+    } else if (slug === 'servicio_contratado') {
+      // Plano, no bajo `campos`. Conserva la primera instancia con valor: el
+      // bloque vive en Negociación y se hereda de solo lectura aguas abajo.
+      const v = b.data?.servicio
+      if (v != null && v !== '' && !servicioPorNegocio.has(b.negocio_id)) {
+        servicioPorNegocio.set(b.negocio_id, v)
+      }
     }
   }
 
@@ -245,6 +285,25 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   // Config de respaldo solo para poder EVALUAR los borradores cuando el workspace
   // aún no tiene Siigo configurado. No se usa para emitir: sin configuración real
   // el panel no deja enviar nada.
+  // ── Nombres de los productos, que es lo que el cliente lee en la factura ──
+  // La fuente es el catálogo de Siigo, no una etiqueta copiada en la config: si
+  // alguien renombra el producto allá, la pantalla tiene que decir lo nuevo. Si
+  // Siigo no responde, el mapa queda vacío y la pantalla muestra el código —
+  // nunca un nombre inventado.
+  const nombreProducto = new Map<string, string>()
+  if (siigo_configurado) {
+    try {
+      const prods = await siigoRequest<{ results?: Array<{ code?: string; name?: string }> }>(
+        workspaceId, '/v1/products?page_size=100', { method: 'GET' },
+      )
+      for (const p of prods.results ?? []) {
+        if (p.code && p.name) nombreProducto.set(p.code, p.name)
+      }
+    } catch {
+      // La cola se puede revisar aunque el catálogo no cargue.
+    }
+  }
+
   const cfgEval: SiigoConfig = siigoCfg ?? {
     facturaDocumentId: 0, reciboDocumentId: 0, sellerId: 0,
     productoCode: '', ivaId: 0, facturaPaymentId: 0, reciboPaymentId: 0,
@@ -256,7 +315,16 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     const contacto = contactos.get(n.contacto_id ?? '') ?? { email: null, telefono: null }
     const cli = borradorCliente(rut, contacto)
     const honorario = n.precio_aprobado == null ? null : Number(n.precio_aprobado)
-    const fac = borradorFactura(cfgEval, cli.payload.identification, honorario, hoy, 19)
+    // El concepto sale del MISMO helper que usa la emisión: si la pantalla y el
+    // documento lo resolvieran por su cuenta, se verían distintos el día que
+    // alguien toque uno de los dos.
+    const concepto = conceptoFactura(
+      servicioPorNegocio.get(n.id),
+      conceptosPorLinea.get(n.linea_id ?? ''),
+      cfgEval.productoCode,
+    )
+    const fac = borradorFactura(cfgEval, cli.payload.identification, honorario, hoy, 19,
+      { productoCode: concepto.code })
     const upme = upmePorNegocio.get(n.id) ?? null
     const rec = borradorRecibo(cfgEval, cli.payload.identification, upme, hoy)
 
@@ -277,6 +345,12 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       identificacion: cli.payload.identification || null,
       cliente: cli.payload.name.filter(Boolean).join(' ') || null,
       telefono: contacto.telefono,
+      concepto: {
+        code: concepto.code,
+        nombre: nombreProducto.get(concepto.code) ?? null,
+        servicio: concepto.servicio,
+        porDefecto: concepto.porDefecto,
+      },
       honorario,
       valor_upme: upme,
       faltan_factura: fac.faltantes,
