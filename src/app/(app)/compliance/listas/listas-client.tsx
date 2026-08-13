@@ -31,6 +31,7 @@ import {
   type DualTipo,
   type InformaMatch,
 } from '@/lib/actions/compliance-dual';
+import { formatFecha } from '@/lib/dates/bogota'
 
 const SEVERIDAD_CLASS: Record<DualSeveridad, string> = {
   alto: 'bg-[#EF4444] text-white',
@@ -949,13 +950,7 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
                       ) : null}
                     </td>
                     <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap text-xs">
-                      {new Date(c.created_at).toLocaleDateString('es-CO', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {formatFecha(c.created_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="px-4 py-2.5 font-medium text-[#1A1A1A]">
                       {c.nombre_consultado ?? '—'}

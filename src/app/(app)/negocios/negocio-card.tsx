@@ -10,6 +10,7 @@ import { agregarMarcaNegocio, quitarMarcaNegocio } from './marcas-actions'
 import { MARCAS_CONDICION, type MarcaCondicion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
 export type StaffAsignable = { id: string; full_name: string }
 
@@ -61,9 +62,7 @@ function formatAtraso(horas: number): string {
 }
 
 function formatDateShort(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+  return formatBogotaFechaCorta(iso) ?? ''
 }
 
 function openFolder(url: string, e: React.MouseEvent) {

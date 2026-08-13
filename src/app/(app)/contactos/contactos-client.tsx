@@ -33,6 +33,7 @@ import {
   createContact, updateContact, deleteContact, convertToPromoter,
   createCompany, updateCompany, deleteCompany,
 } from './actions'
+import { formatFecha } from '@/lib/dates/bogota'
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -406,14 +407,8 @@ export default function ContactosClient({
 
   // ── Helpers ──
 
-  const formatDate = (date: string | null) => {
-    if (!date) return '—'
-    return new Date(date).toLocaleDateString('es-CO', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    })
-  }
+  const formatDate = (date: string | null) =>
+    formatFecha(date, { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 
   const getTypeBadge = (type: string) => {
     switch (type) {

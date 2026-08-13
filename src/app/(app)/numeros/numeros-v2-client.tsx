@@ -12,6 +12,7 @@ import DrillDownSheet from './drill-down-sheet'
 import type { NumerosData } from './actions-v2'
 import { getNumeros } from './actions-v2'
 import { FEATURES } from '@/lib/feature-flags'
+import { formatFecha } from '@/lib/dates/bogota'
 
 interface Props {
   initialData: NumerosData | null
@@ -72,8 +73,7 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
   const monthType: 'current' | 'past' | 'future' =
     mesRef === currentMes ? 'current' : mesRef < currentMes ? 'past' : 'future'
 
-  const [yyyy, mm] = mesRef.split('-').map(Number)
-  const monthName = new Date(yyyy, mm - 1).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
+  const monthName = formatFecha(`${mesRef}-15`, { month: 'long', year: 'numeric' }) ?? mesRef
 
   // D108-rev: Cards always visible. Capa 1 is informative, not blocking.
   const showCards = true

@@ -6,6 +6,7 @@ import { ArrowLeft, Save, Trash2, ShieldCheck, AlertTriangle, Check, X } from 'l
 import { actualizarRiesgo, eliminarRiesgo } from '@/lib/actions/riesgos'
 import type { Riesgo } from '@/lib/actions/riesgos'
 import { toast } from 'sonner'
+import { formatFecha } from '@/lib/dates/bogota'
 
 const NIVEL_COLORS: Record<string, string> = {
   BAJO: 'bg-green-100 text-green-800',
@@ -504,11 +505,11 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
           </div>
           <div>
             <span className="text-[#6B7280]">Creado:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium">{new Date(riesgo.created_at).toLocaleDateString('es-CO')}</span>
+            <span className="text-[#1A1A1A] font-medium">{formatFecha(riesgo.created_at, { day: 'numeric', month: 'numeric', year: 'numeric' })}</span>
           </div>
           <div>
             <span className="text-[#6B7280]">Actualizado:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium">{new Date(riesgo.updated_at).toLocaleDateString('es-CO')}</span>
+            <span className="text-[#1A1A1A] font-medium">{formatFecha(riesgo.updated_at, { day: 'numeric', month: 'numeric', year: 'numeric' })}</span>
           </div>
         </div>
       </div>

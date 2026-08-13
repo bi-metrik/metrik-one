@@ -38,6 +38,7 @@ import {
   type PagoExternoFila,
   type PanelPagosExternos,
 } from '@/lib/actions/pagos-externos'
+import { formatFecha } from '@/lib/dates/bogota'
 
 const VERDE = '#10B981'
 const BUCKET = 've-documentos'
@@ -47,15 +48,9 @@ const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 
 function fmtFechaHora(iso: string | null): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString('es-CO', {
-      timeZone: 'America/Bogota', day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    })
-  } catch {
-    return iso.slice(0, 10)
-  }
+  return formatFecha(iso, {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }) ?? '—'
 }
 
 export default function PagosExternosTab({ onDone }: { onDone: () => void }) {

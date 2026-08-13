@@ -21,6 +21,7 @@ import {
   type PerfilAgente,
   type Semaforo,
 } from '../../types'
+import { formatBogotaFechaCorta, formatFecha } from '@/lib/dates/bogota'
 
 /**
  * Perfil de agente. Responde dos preguntas y nada mas:
@@ -134,10 +135,10 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
   // Serie del grafico: un punto por dia. `x` es el dia como numero para que el
   // eje sea temporal de verdad — si el agente no trabajo el martes, el hueco
   // tiene que verse, no cerrarse como si el miercoles siguiera al lunes.
-  const t0 = new Date(`${perfil.desde}T00:00:00`).getTime()
+  const t0 = Date.parse(`${perfil.desde}T00:00:00Z`)
   const serie: Fila[] = dias.map((d) => ({
     ...d,
-    x: Math.round((new Date(`${d.dia}T00:00:00`).getTime() - t0) / 86_400_000),
+    x: Math.round((Date.parse(`${d.dia}T00:00:00Z`) - t0) / 86_400_000),
   }))
 
   const maxLlamadas = Math.max(1, ...dias.map((d) => d.llamadas))
@@ -147,8 +148,7 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
   const llamadasDelDia = diaSel ? puntos.filter((p) => p.dia === diaSel) : []
   const detalleDia = diaSel ? dias.find((d) => d.dia === diaSel) : undefined
 
-  const fecha = (iso: string) =>
-    new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+  const fecha = (iso: string) => formatBogotaFechaCorta(iso) ?? iso
 
   // Tres, no diez: una sesion de entrenamiento no cabe mas, y una lista larga
   // se lee como un expediente. Entra solo el bloque con puntaje real en juego Y
@@ -246,8 +246,8 @@ export default function PerfilAgenteClient({ perfil }: { perfil: PerfilAgente })
                   tickLine={false}
                   axisLine={{ stroke: C.line }}
                   tickFormatter={(v: number) => {
-                    const d = new Date(t0 + v * 86_400_000)
-                    return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+                    const iso = new Date(t0 + v * 86_400_000).toISOString().slice(0, 10)
+                    return formatFecha(iso, { day: 'numeric', month: 'short' }) ?? ''
                   }}
                 />
                 <YAxis

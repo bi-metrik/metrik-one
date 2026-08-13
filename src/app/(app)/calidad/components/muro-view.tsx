@@ -12,6 +12,7 @@ import {
   type Semaforo,
   type UmbralesRanking,
 } from '../types'
+import { formatFecha } from '@/lib/dates/bogota'
 
 /**
  * Muro proyectable, v5.
@@ -117,18 +118,13 @@ const FUNDIDO_MS = 220
  * fuera la coma, mayuscula solo en la primera letra.
  */
 function fechaLegible(iso: string): string {
-  const t = new Date(`${iso}T12:00:00`)
-    .toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })
-    .replace(',', '')
+  const t = (formatFecha(iso, { weekday: 'long', day: 'numeric', month: 'long' }) ?? iso).replace(',', '')
   return t.charAt(0).toUpperCase() + t.slice(1)
 }
 
 /** "29 de junio" — para los extremos del rango de semana y mes. */
 function fechaCorta(iso: string): string {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', {
-    day: 'numeric',
-    month: 'long',
-  })
+  return formatFecha(iso, { day: 'numeric', month: 'long' }) ?? iso
 }
 
 export default function MuroView({

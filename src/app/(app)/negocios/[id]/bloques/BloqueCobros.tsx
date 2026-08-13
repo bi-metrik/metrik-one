@@ -11,6 +11,7 @@ import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
+import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 
 interface Cobro {
   id: string
@@ -65,8 +66,7 @@ const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
 function fmtDate(iso: string | null) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+  return formatBogotaFechaCortaAno(iso) ?? ''
 }
 
 const TIPO_LABELS: Record<string, string> = {

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from '@/app/(app)/activity-actions'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
 /**
  * Equipos etiquetables. Son las áreas que ya gobiernan permisos y routing en el
@@ -84,7 +85,7 @@ function timeAgo(dateStr: string) {
   if (hours < 24) return `hace ${hours}h`
   const days = Math.floor(hours / 24)
   if (days < 7) return `hace ${days}d`
-  return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+  return formatBogotaFechaCorta(date) ?? ''
 }
 
 const SHOW_SYSTEM_KEY = 'activity-log:show-system'

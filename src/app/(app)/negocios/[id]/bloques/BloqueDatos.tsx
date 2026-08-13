@@ -16,6 +16,7 @@ import { campoVisible, camposRequeridosFaltantes, type CampoConfig } from '@/lib
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
+import { formatFecha } from '@/lib/dates/bogota'
 
 export interface DatosField {
   slug: string
@@ -589,7 +590,7 @@ export default function BloqueDatos({
                 )}
                 {ediciones[f.slug] && (
                   <span
-                    title={ediciones[f.slug].en ? `Corregido el ${new Date(ediciones[f.slug].en as string).toLocaleString('es-CO')}` : undefined}
+                    title={ediciones[f.slug].en ? `Corregido el ${formatFecha(ediciones[f.slug].en as string, { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : undefined}
                     className="inline-flex items-center rounded bg-[#FEF3C7] px-1.5 py-0.5 text-[9px] font-medium text-[#92400E] border border-[#FDE68A]"
                   >
                     Editado · {ediciones[f.slug].por_nombre ?? 'Usuario'}

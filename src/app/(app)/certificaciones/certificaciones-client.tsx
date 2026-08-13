@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { formatFecha } from '@/lib/dates/bogota'
 import {
   crearBorrador, enviarAprobacion, aprobarPublicar, devolverBorrador,
   revocar, recertificar, getQr, subirDatabookLinea,
@@ -24,8 +25,7 @@ interface Props {
 }
 
 function fmtFecha(iso: string | null) {
-  if (!iso) return '—'
-  return new Date(iso + 'T00:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+  return formatFecha(iso, { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 }
 
 type EstadoVis = { key: string; label: string; color: string; soft: string }

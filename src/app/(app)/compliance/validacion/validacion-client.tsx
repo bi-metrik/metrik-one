@@ -8,6 +8,7 @@ import { ShieldAlert, ShieldCheck, FileDown, Search } from 'lucide-react';
 import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
+import { formatFecha } from '@/lib/dates/bogota'
 
 type Props = {
   historial: ConsultaResumen[];
@@ -269,9 +270,7 @@ export default function ValidacionClient({
                     <td className="px-4 py-2.5 font-medium text-[#1A1A1A]">{c.nombre_consultado}</td>
                     <td className="px-4 py-2.5 text-[#6B7280]">{c.documento_consultado ?? '—'}</td>
                     <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap">
-                      {new Date(c.creada_en).toLocaleDateString('es-CO', {
-                        year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                      })}
+                      {formatFecha(c.creada_en, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="px-4 py-2.5 text-center font-semibold">{c.total_matches}</td>
                     <td className="px-4 py-2.5 text-center">

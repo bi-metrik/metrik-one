@@ -5,6 +5,7 @@ import { CheckSquare, Square, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueItem, marcarBloqueCompleto, inicializarBloqueItems } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 
 interface ChecklistItemTemplate {
   label: string
@@ -31,8 +32,7 @@ interface BloqueChecklistProps {
 }
 
 function fmtDate(iso: string | null) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+  return formatBogotaFechaCortaAno(iso) ?? ''
 }
 
 export default function BloqueChecklist({
