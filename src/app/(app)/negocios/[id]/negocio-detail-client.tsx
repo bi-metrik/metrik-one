@@ -48,6 +48,7 @@ import type { DocumentoConfig } from './bloques/BloqueDocumentos'
 import BloqueDocumento from './bloques/BloqueDocumento'
 import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen, FacturaDraft } from '../negocio-v2-actions'
+import type { ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import BloqueFacturacion from './bloques/BloqueFacturacion'
 import BloqueCobros from './bloques/BloqueCobros'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
@@ -488,6 +489,84 @@ function BarraProgreso({
 
 // ── Modal de gates bloqueados ─────────────────────────────────────────────────
 
+/**
+ * Confirmación antes de entregarle el caso a otra área.
+ *
+ * El texto NO lo decide esta pantalla: llega del servidor, que lo arma desde la
+ * configuración de la etapa destino ya resuelta (`confirmar_al_avanzar`) y le mete el
+ * saldo real. Escribirlo aquí obligaría a mantener dos textos y a que el cliente
+ * adivinara a qué etapa va a aterrizar el caso.
+ */
+function ModalConfirmarAvance({
+  confirmacion,
+  onClose,
+  onConfirmar,
+  pendiente,
+}: {
+  confirmacion: ConfirmacionAvance
+  onClose: () => void
+  onConfirmar: () => void
+  pendiente: boolean
+}) {
+  // Mismo tratamiento que el modal de gate: scroll bloqueado y Escape para cerrar.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  if (typeof document === 'undefined') return null
+
+  // Portal a document.body por el header sticky con `backdrop-blur`, que atrapa
+  // cualquier `fixed inset-0` montado dentro (ya documentado en el repo).
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain select-none bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="my-auto flex max-h-[90vh] w-full max-w-sm flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-start gap-3 border-b border-[#E5E7EB] p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+          <h3 className="flex-1 text-sm font-semibold text-[#1A1A1A]">{confirmacion.titulo}</h3>
+        </div>
+
+        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          {confirmacion.parrafos.map((p, i) => (
+            <p key={i} className="text-[13px] leading-relaxed text-[#1A1A1A]">{p}</p>
+          ))}
+        </div>
+
+        <div className="flex shrink-0 justify-end gap-2 border-t border-[#E5E7EB] p-4">
+          <button
+            onClick={onClose}
+            disabled={pendiente}
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-[#6B7280] hover:text-[#1A1A1A] disabled:opacity-50"
+          >
+            {confirmacion.cancelar}
+          </button>
+          <button
+            onClick={onConfirmar}
+            disabled={pendiente}
+            className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white transition disabled:opacity-50"
+            style={{ backgroundColor: '#10B981' }}
+          >
+            {pendiente ? 'Pasando…' : confirmacion.confirmar}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function ModalGateBloqueado({
   bloques,
   onClose,
@@ -641,6 +720,11 @@ function SelectorEtapa({
     etapaId: string
     bloques: Array<{ nombre: string; es_gate: boolean }>
   } | null>(null)
+  const [confirmarModal, setConfirmarModal] = useState<{
+    etapaId: string
+    nombreFallback: string
+    confirmacion: ConfirmacionAvance
+  } | null>(null)
   const [showCierreDialog, setShowCierreDialog] = useState(false)
   const [showPausaDialog, setShowPausaDialog] = useState(false)
 
@@ -677,15 +761,23 @@ function SelectorEtapa({
   const estadosCerrados = ['cerrado', 'perdido', 'cancelado', 'completado']
   if (negocioEstado && estadosCerrados.includes(negocioEstado)) return null
 
-  function handleAvanzar() {
+  function handleAvanzar(confirmado = false) {
     if (!siguienteEtapa) return
     startTransition(async () => {
-      const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id)
+      const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id, undefined, confirmado)
       if (result.error === 'gate_bloqueado') {
         setGateModal({ etapaId: siguienteEtapa.id, bloques: result.bloquesPendientes ?? [] })
+      } else if (result.error === 'requiere_confirmacion' && result.confirmacion) {
+        // El caso NO se movió: el servidor resolvió el destino y devolvió qué preguntar.
+        setConfirmarModal({
+          etapaId: siguienteEtapa.id,
+          nombreFallback: result.etapaDestinoNombre ?? siguienteEtapa.nombre,
+          confirmacion: result.confirmacion,
+        })
       } else if (result.error) {
         toast.error('Error al cambiar etapa: ' + result.error)
       } else {
+        setConfirmarModal(null)
         // El destino REAL lo resuelve el routing en el server; el toast lo nombra
         // (siguienteEtapa por orden puede no ser el destino cuando el routing salta).
         toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? siguienteEtapa.nombre}`)
@@ -783,7 +875,11 @@ function SelectorEtapa({
         ) : (
           <>
             <button
-              onClick={handleAvanzar}
+              // Con `onClick={handleAvanzar}` React pasa el MouseEvent como primer
+              // argumento, y ese argumento ahora es `confirmado`: cada clic normal
+              // habría llegado al servidor como "ya confirmado" y el diálogo no se
+              // habría mostrado nunca. Lo atrapó `tsc`, no la pantalla.
+              onClick={() => handleAvanzar()}
               disabled={isPending}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
             >
@@ -830,6 +926,15 @@ function SelectorEtapa({
           bloques={gateModal.bloques}
           onClose={() => setGateModal(null)}
           onOverride={motivo => handleOverride(gateModal.etapaId, motivo)}
+        />
+      )}
+
+      {confirmarModal && (
+        <ModalConfirmarAvance
+          confirmacion={confirmarModal.confirmacion}
+          pendiente={isPending}
+          onClose={() => setConfirmarModal(null)}
+          onConfirmar={() => handleAvanzar(true)}
         />
       )}
 
