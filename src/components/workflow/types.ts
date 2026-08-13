@@ -50,6 +50,10 @@ export interface WorkflowEtapa {
   // Config de la ETAPA. El diagrama la usa para `label_pregunta`: la pregunta de una
   // decisión pertenece a la etapa que la declara, no al campo que la alimenta.
   config_extra?: Record<string, unknown> | null
+  /** ¿Avisa por correo al EQUIPO al entrar un negocio? (config de la etapa) */
+  aviso_interno?: boolean
+  /** ¿Avisa por correo al CLIENTE al entrar su negocio? */
+  aviso_cliente?: boolean
   // Solo en modo 'detailed':
   is_active?: boolean
   routing?: WorkflowRouting | null

@@ -50,6 +50,10 @@ export interface FlujoEtapa {
   vencidos: number
   routing: FlujoRouting | null
   gates: string[]
+  /** ¿Avisa al EQUIPO por correo al entrar un negocio a esta etapa? */
+  aviso_interno: boolean
+  /** ¿Avisa al CLIENTE por correo al entrar un negocio a esta etapa? */
+  aviso_cliente: boolean
 }
 
 /**
@@ -144,6 +148,27 @@ const BLOQUE_LABELS: Record<string, string> = {
 function labelFor(tipo: string, nombreConfig: string | null | undefined): string {
   if (nombreConfig && nombreConfig.trim().length > 0) return nombreConfig
   return BLOQUE_LABELS[tipo] ?? tipo
+}
+
+/**
+ * ¿La etapa avisa por correo al EQUIPO cuando entra un negocio?
+ *
+ * La config existía desde antes (`avisar_al_entrar`, con sus áreas y su texto) y se
+ * declaraba por SQL. Aquí solo se LEE para pintar el interruptor. Un `avisar_al_entrar`
+ * presente sin `activo` cuenta como encendido: es como se comportó siempre, y el flag
+ * nació para poder apagarlo sin borrar el texto que alguien redactó.
+ */
+function avisoInternoActivo(cfg: Record<string, unknown> | null | undefined): boolean {
+  const av = (cfg as { avisar_al_entrar?: { activo?: boolean; email?: boolean } } | null)?.avisar_al_entrar
+  if (!av) return false
+  if (av.activo === false) return false
+  return av.email === true
+}
+
+/** ¿La etapa avisa por correo al CLIENTE cuando entra su negocio? */
+function avisoClienteActivo(cfg: Record<string, unknown> | null | undefined): boolean {
+  const av = (cfg as { avisar_al_cliente?: { email?: boolean } } | null)?.avisar_al_cliente
+  return av?.email === true
 }
 
 // ── Server actions ─────────────────────────────────────────────────────────
@@ -358,6 +383,8 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       config_extra: (e.config_extra ?? null) as Record<string, unknown> | null,
       routing: e.config_extra?.routing ?? null,
       gates: Array.isArray(e.config_extra?.gates) ? (e.config_extra.gates as string[]) : [],
+      aviso_interno: avisoInternoActivo(e.config_extra),
+      aviso_cliente: avisoClienteActivo(e.config_extra),
     }
   })
 
@@ -507,4 +534,81 @@ export async function getSlaChangeLog(
     old_sla_horas: r.old_sla_horas,
     new_sla_horas: r.new_sla_horas,
   }))
+}
+
+// ── Avisos por etapa: al equipo y al cliente (owner) ──────────────────────
+
+/**
+ * Prende o apaga el aviso por correo de una etapa.
+ *
+ * Dos destinos independientes, porque son dos conversaciones distintas:
+ *  - `interno`: le avisa al EQUIPO que un negocio entró a su etapa. El motor ya existe
+ *    (trigger `avisar_entrada_etapa` + edge function `notificar-etapa`).
+ *  - `cliente`: le avisa al CLIENTE que su caso avanzó. Se guarda la preferencia; el
+ *    envío se despacha aparte.
+ *
+ * Apagar NO borra la configuración (áreas, título, mensaje): escribe `activo: false`.
+ * Borrarla obligaría a redactar el texto otra vez para volver a encenderlo.
+ */
+export async function updateEtapaAviso(
+  etapaId: string,
+  destino: 'interno' | 'cliente',
+  activo: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !role) return { ok: false, error: 'No autenticado' }
+
+  // Mismo permiso que gobierna el SLA: los dos son configuración de la etapa.
+  const perms = getRolePermissions(role)
+  if (!perms.canConfigSlaEtapas) return { ok: false, error: 'Sin permisos' }
+
+  if (destino !== 'interno' && destino !== 'cliente') {
+    return { ok: false, error: 'Destino invalido' }
+  }
+
+  // La etapa tiene que ser del workspace de la sesión: el id llega del navegador.
+  const { data: etapaRaw } = await supabase
+    .from('etapas_negocio')
+    .select('id, stage, config_extra, lineas_negocio!inner(workspace_id)')
+    .eq('id', etapaId)
+    .single()
+
+  type EtapaJoin = {
+    id: string
+    stage: 'venta' | 'ejecucion' | 'cobro'
+    config_extra: Record<string, unknown> | null
+    lineas_negocio: { workspace_id: string } | null
+  }
+  const etapa = etapaRaw as unknown as EtapaJoin | null
+  if (!etapa) return { ok: false, error: 'Etapa no encontrada' }
+  if (etapa.lineas_negocio?.workspace_id !== workspaceId) {
+    return { ok: false, error: 'Etapa fuera de workspace' }
+  }
+
+  const cfg = { ...((etapa.config_extra ?? {}) as Record<string, unknown>) }
+
+  if (destino === 'interno') {
+    const previo = (cfg.avisar_al_entrar ?? {}) as Record<string, unknown>
+    // Sin config previa, el aviso nace apuntando al área dueña de la etapa (la que
+    // el motor ya deriva del stage) con el texto por defecto del trigger. Así el
+    // interruptor basta para encenderlo, sin pedir que alguien redacte nada.
+    cfg.avisar_al_entrar = { ...previo, email: activo, activo }
+  } else {
+    const previo = (cfg.avisar_al_cliente ?? {}) as Record<string, unknown>
+    cfg.avisar_al_cliente = { ...previo, email: activo }
+  }
+
+  // Mismo cast puntual que usa `updateEtapaSla`: `config_extra` es jsonb y los tipos
+  // generados no admiten un objeto suelto.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: updErr } = await (supabase as any)
+    .from('etapas_negocio')
+    .update({ config_extra: cfg })
+    .eq('id', etapaId)
+
+  if (updErr) return { ok: false, error: (updErr as { message: string }).message }
+
+  revalidatePath('/flujo')
+  revalidatePath('/admin/workflows')
+  return { ok: true }
 }

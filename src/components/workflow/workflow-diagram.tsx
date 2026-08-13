@@ -36,6 +36,7 @@ import {
   ArrowRight,
   Eye,
   GitBranch,
+  Mail,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
@@ -48,6 +49,12 @@ interface Props {
   // simplified mode
   canConfigSla?: boolean
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
+  /** Prende/apaga el aviso por correo de la etapa (equipo o cliente). */
+  onUpdateAviso?: (
+    etapaId: string,
+    destino: 'interno' | 'cliente',
+    activo: boolean,
+  ) => Promise<{ ok: boolean; error?: string }>
 }
 
 // ── Stage indicator color (borde superior) ─────────────────────────────────
@@ -249,7 +256,7 @@ function resolveDecisionLabel(
 
 // ── Componente principal ───────────────────────────────────────────────────
 
-export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Props) {
+export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla, onUpdateAviso }: Props) {
   const layout = useMemo(() => computeLayout(etapas), [etapas])
   const sorted = useMemo(() => [...etapas].sort((a, b) => a.orden - b.orden), [etapas])
 
@@ -358,6 +365,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
                     etapa={row.etapa}
                     mode={mode}
                     canConfigSla={canConfigSla}
+                    onUpdateAviso={onUpdateAviso}
                     onUpdateSla={onUpdateSla}
                   />
                   <Connector />
@@ -404,6 +412,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
                         etapa={firstBranch}
                         mode={mode}
                         canConfigSla={canConfigSla}
+                        onUpdateAviso={onUpdateAviso}
                         onUpdateSla={onUpdateSla}
                         isBranch
                       />
@@ -414,6 +423,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
                             etapa={etapa}
                             mode={mode}
                             canConfigSla={canConfigSla}
+                    onUpdateAviso={onUpdateAviso}
                             onUpdateSla={onUpdateSla}
                             isBranch
                           />
@@ -428,6 +438,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
                         etapa={firstBranch}
                         mode={mode}
                         canConfigSla={canConfigSla}
+                        onUpdateAviso={onUpdateAviso}
                         onUpdateSla={onUpdateSla}
                         isBranch
                       />
@@ -438,6 +449,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla }: Pro
                             etapa={etapa}
                             mode={mode}
                             canConfigSla={canConfigSla}
+                    onUpdateAviso={onUpdateAviso}
                             onUpdateSla={onUpdateSla}
                             isBranch
                           />
@@ -635,12 +647,18 @@ function EtapaCard({
   etapa,
   mode,
   canConfigSla,
+  onUpdateAviso,
   onUpdateSla,
   isBranch,
 }: {
   etapa: WorkflowEtapa
   mode: 'simplified' | 'detailed'
   canConfigSla?: boolean
+  onUpdateAviso?: (
+    etapaId: string,
+    destino: 'interno' | 'cliente',
+    activo: boolean,
+  ) => Promise<{ ok: boolean; error?: string }>
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
   isBranch?: boolean
 }) {
@@ -759,6 +777,14 @@ function EtapaCard({
         slaHoras={etapa.sla_horas}
         canEdit={Boolean(canConfigSla)}
         onUpdateSla={onUpdateSla}
+      />
+
+      <AvisosConfig
+        etapaId={etapa.id}
+        avisoInterno={Boolean(etapa.aviso_interno)}
+        avisoCliente={Boolean(etapa.aviso_cliente)}
+        canEdit={Boolean(canConfigSla)}
+        onUpdateAviso={onUpdateAviso}
       />
 
       {/* Bloques */}
@@ -1116,5 +1142,106 @@ export function SlaConfig({
       </div>
       <p className="mt-1 text-[10px] text-[#6B7280]">Excluye sábados, domingos y festivos. Vacía el campo para desactivar la alerta.</p>
     </div>
+  )
+}
+
+/**
+ * Interruptores de aviso de la etapa: al equipo y al cliente.
+ *
+ * Dos destinos separados porque son dos conversaciones distintas: que a operaciones le
+ * llegue un caso nuevo no tiene nada que ver con contarle al cliente que su tramite
+ * avanzo. Se pintan juntos porque la pregunta que resuelve el equipo es una sola:
+ * "cuando un negocio entra AQUI, ¿a quien se le avisa?".
+ */
+export function AvisosConfig({
+  etapaId,
+  avisoInterno,
+  avisoCliente,
+  canEdit,
+  onUpdateAviso,
+}: {
+  etapaId: string
+  avisoInterno: boolean
+  avisoCliente: boolean
+  canEdit: boolean
+  onUpdateAviso?: (
+    etapaId: string,
+    destino: 'interno' | 'cliente',
+    activo: boolean,
+  ) => Promise<{ ok: boolean; error?: string }>
+}) {
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
+
+  // Sin permiso y sin ningun aviso puesto no hay nada que contar.
+  if (!canEdit && !avisoInterno && !avisoCliente) return null
+
+  const toggle = (destino: 'interno' | 'cliente', actual: boolean, label: string) => {
+    if (!onUpdateAviso) return
+    startTransition(async () => {
+      const res = await onUpdateAviso(etapaId, destino, !actual)
+      if (res.ok) {
+        toast.success(`${label}: ${!actual ? 'activado' : 'desactivado'}`)
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'No se pudo guardar')
+      }
+    })
+  }
+
+  return (
+    <div
+      className="flex items-center gap-1.5 border-b px-4 py-2"
+      style={{ borderColor: '#E5E7EB' }}
+    >
+      <span className="text-[11px] text-[#6B7280]">Avisar al entrar:</span>
+      <ChipAviso
+        activo={avisoInterno}
+        label="equipo"
+        disabled={!canEdit || isPending}
+        onToggle={() => toggle('interno', avisoInterno, 'equipo')}
+        title="Correo al área responsable cuando un negocio entra a esta etapa"
+      />
+      <ChipAviso
+        activo={avisoCliente}
+        label="cliente"
+        disabled={!canEdit || isPending}
+        onToggle={() => toggle('cliente', avisoCliente, 'cliente')}
+        title="Correo al cliente contándole que su caso llegó a esta etapa"
+      />
+    </div>
+  )
+}
+
+/** Interruptor de un destino de aviso. Fuera del render: no se crean componentes dentro. */
+function ChipAviso({
+  activo,
+  label,
+  disabled,
+  onToggle,
+  title,
+}: {
+  activo: boolean
+  label: string
+  disabled: boolean
+  onToggle: () => void
+  title: string
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onToggle}
+      title={title}
+      aria-pressed={activo}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors disabled:opacity-60 ${
+        activo
+          ? 'border-[#10B981] bg-[#10B981]/10 text-[#059669]'
+          : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#10B981]/40 hover:text-[#059669]'
+      }`}
+    >
+      <Mail className="h-2.5 w-2.5" />
+      {label}
+    </button>
   )
 }

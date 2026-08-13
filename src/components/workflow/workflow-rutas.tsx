@@ -17,7 +17,7 @@ import { AlertTriangle, Clock, Eye, GitBranch, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
 import { STAGE_LABELS } from './types'
-import { SlaConfig } from './workflow-diagram'
+import { SlaConfig, AvisosConfig } from './workflow-diagram'
 
 const CARBON = '#1A1A1A'
 const GRIS = '#6B7280'
@@ -132,11 +132,17 @@ export function WorkflowRutas({
   etapas,
   rutas,
   canConfigSla,
+  onUpdateAviso,
   onUpdateSla,
 }: {
   etapas: WorkflowEtapa[]
   rutas: RutaDeclarada[]
   canConfigSla?: boolean
+  onUpdateAviso?: (
+    etapaId: string,
+    destino: 'interno' | 'cliente',
+    activo: boolean,
+  ) => Promise<{ ok: boolean; error?: string }>
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
 }) {
   const activas = etapas.filter(e => e.is_active !== false)
@@ -272,6 +278,7 @@ export function WorkflowRutas({
                 maxAbiertos={maxAbiertos}
                 abrirBloques={verBloques}
                 canConfigSla={canConfigSla}
+                onUpdateAviso={onUpdateAviso}
                 onUpdateSla={onUpdateSla}
               />
             </div>
@@ -304,6 +311,7 @@ function EtapaFila({
   maxAbiertos,
   abrirBloques,
   canConfigSla,
+  onUpdateAviso,
   onUpdateSla,
 }: {
   etapa: WorkflowEtapa
@@ -312,6 +320,11 @@ function EtapaFila({
   maxAbiertos: number
   abrirBloques: boolean
   canConfigSla?: boolean
+  onUpdateAviso?: (
+    etapaId: string,
+    destino: 'interno' | 'cliente',
+    activo: boolean,
+  ) => Promise<{ ok: boolean; error?: string }>
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
 }) {
   const [abiertoLocal, setAbiertoLocal] = useState(false)
@@ -405,6 +418,14 @@ function EtapaFila({
             slaHoras={etapa.sla_horas}
             canEdit={Boolean(canConfigSla)}
             onUpdateSla={onUpdateSla}
+          />
+
+          <AvisosConfig
+            etapaId={etapa.id}
+            avisoInterno={Boolean(etapa.aviso_interno)}
+            avisoCliente={Boolean(etapa.aviso_cliente)}
+            canEdit={Boolean(canConfigSla)}
+            onUpdateAviso={onUpdateAviso}
           />
           <div className="px-3 py-2">
           {etapa.bloques.length === 0 ? (
