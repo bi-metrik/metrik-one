@@ -17,6 +17,7 @@ import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreCo
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import {
   sumarRecaudoConfirmado,
   recaudoPendienteDeConfirmar,
@@ -2987,12 +2988,20 @@ async function camposDecisionDelNegocio(
 export async function cambiarEtapaNegocioConGate(
   negocioId: string,
   nuevaEtapaId: string,
-  motivoOverride?: string
+  motivoOverride?: string,
+  /**
+   * El usuario ya vio y aceptó la confirmación de la etapa destino. Solo lo manda la
+   * pantalla en el segundo intento; en el primero el servidor resuelve el destino y
+   * devuelve `requiere_confirmacion` sin mover nada.
+   */
+  confirmado?: boolean,
 ): Promise<{
   error: string | null
   bloquesPendientes?: Array<{ nombre: string; es_gate: boolean }>
   /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
   etapaDestinoNombre?: string
+  /** Presente solo con `error === 'requiere_confirmacion'`. */
+  confirmacion?: ConfirmacionAvance
 }> {
   const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
@@ -3168,6 +3177,13 @@ export async function cambiarEtapaNegocioConGate(
     }
   }
 
+  // Marcar un gate vencido como "no aplica" es una escritura irreversible, y la
+  // confirmación de la etapa destino se resuelve mucho más abajo (necesita el routing
+  // ya resuelto). Si se escribiera aquí, cancelar el diálogo dejaría bloques marcados
+  // en un caso que NO se movió. Por eso la VALIDACIÓN se queda donde está y la
+  // ESCRITURA se difiere hasta que el avance sea seguro.
+  let aplicarOmisiones: (() => Promise<string | null>) | null = null
+
   // Verificar gates si no hay motivo de override
   if (!motivoOverride && negocio.etapa_actual_id) {
     // ANTES de evaluar los gates: cerrar automáticamente los bloques gate de anticipo
@@ -3227,41 +3243,47 @@ export async function cambiarEtapaNegocioConGate(
       // Todos los que faltaban vencieron: se marcan como "no aplica" —con motivo,
       // autor y fecha— y el negocio sigue. NO se marcan como completos a secas:
       // eso afirmaría que el trabajo se hizo.
-      const ahora = new Date().toISOString()
-      for (const p of omitibles) {
-        const cfg = cfgPorId.get(p.bloque_config_id)
-        const marca = marcaOmitido(cfg, { id: staffId ?? null, nombre: null }, ahora)
-        const { data: inst } = await db(supabase)
-          .from('negocio_bloques')
-          .select('id, data')
-          .eq('negocio_id', negocioId)
-          .eq('bloque_config_id', p.bloque_config_id)
-          .maybeSingle()
-        if (!inst) continue
-        const dataPrevia = ((inst as { data: Record<string, unknown> | null }).data ?? {})
-        const { error: errOmitir } = await db(supabase)
-          .from('negocio_bloques')
-          .update({
-            estado: 'completo',
-            completado_at: ahora,
-            data: { ...dataPrevia, [CLAVE_OMITIDO]: marca },
-          })
-          .eq('id', (inst as { id: string }).id)
-        if (errOmitir) return { error: `No se pudo marcar "${p.nombre ?? 'el bloque'}" como no aplica: ${errOmitir.message}` }
+      //
+      // La escritura queda diferida (ver `aplicarOmisiones` arriba): solo corre cuando
+      // el avance está confirmado y a punto de ejecutarse.
+      aplicarOmisiones = async () => {
+        const ahora = new Date().toISOString()
+        for (const p of omitibles) {
+          const cfg = cfgPorId.get(p.bloque_config_id)
+          const marca = marcaOmitido(cfg, { id: staffId ?? null, nombre: null }, ahora)
+          const { data: inst } = await db(supabase)
+            .from('negocio_bloques')
+            .select('id, data')
+            .eq('negocio_id', negocioId)
+            .eq('bloque_config_id', p.bloque_config_id)
+            .maybeSingle()
+          if (!inst) continue
+          const dataPrevia = ((inst as { data: Record<string, unknown> | null }).data ?? {})
+          const { error: errOmitir } = await db(supabase)
+            .from('negocio_bloques')
+            .update({
+              estado: 'completo',
+              completado_at: ahora,
+              data: { ...dataPrevia, [CLAVE_OMITIDO]: marca },
+            })
+            .eq('id', (inst as { id: string }).id)
+          if (errOmitir) return `No se pudo marcar "${p.nombre ?? 'el bloque'}" como no aplica: ${errOmitir.message}`
 
-        // El rastro va al timeline. `autor_id` es staff.id (campo minado ya
-        // documentado: no confundir con profile.id).
-        try {
-          await db(supabase).from('activity_log').insert({
-            workspace_id: workspaceId,
-            entidad_tipo: 'negocio',
-            entidad_id: negocioId,
-            tipo: 'cambio',
-            autor_id: staffId,
-            campo_modificado: 'bloque_datos',
-            contenido: `Bloque "${p.nombre ?? 'sin nombre'}" quedó en "${marca.label}" al avanzar de etapa`,
-          })
-        } catch (e) { console.error('[cambiarEtapa] no se pudo registrar la omisión en el timeline:', e) }
+          // El rastro va al timeline. `autor_id` es staff.id (campo minado ya
+          // documentado: no confundir con profile.id).
+          try {
+            await db(supabase).from('activity_log').insert({
+              workspace_id: workspaceId,
+              entidad_tipo: 'negocio',
+              entidad_id: negocioId,
+              tipo: 'cambio',
+              autor_id: staffId,
+              campo_modificado: 'bloque_datos',
+              contenido: `Bloque "${p.nombre ?? 'sin nombre'}" quedó en "${marca.label}" al avanzar de etapa`,
+            })
+          } catch (e) { console.error('[cambiarEtapa] no se pudo registrar la omisión en el timeline:', e) }
+        }
+        return null
       }
     }
 
@@ -3839,16 +3861,76 @@ export async function cambiarEtapaNegocioConGate(
   // con el que se declara la configuración; `orden` es interno y no coincide).
   const { data: nuevaEtapaInfoRaw } = await db(supabase)
     .from('etapas_negocio')
-    .select('nombre, numero, linea_id')
+    .select('nombre, numero, linea_id, config_extra')
     .eq('id', resolvedEtapaId)
     .single()
   const nuevaEtapaInfo = nuevaEtapaInfoRaw as
-    { nombre: string; numero: number | null; linea_id: string | null } | null
+    { nombre: string; numero: number | null; linea_id: string | null
+      config_extra: Record<string, unknown> | null } | null
   const nuevaEtapaNombre = nuevaEtapaInfo?.nombre ?? resolvedEtapaId
+
+  // ── Confirmación antes de entregarle el caso a otra área ────────────────────
+  //
+  // Se pregunta con el destino YA RESUELTO (routing + saltos encadenados), nunca antes:
+  // el cliente no sabe a dónde va a aterrizar el caso, y preguntar sobre un destino
+  // supuesto avisaría del área equivocada. Por eso el flujo es: el servidor resuelve,
+  // devuelve `requiere_confirmacion` SIN MOVER nada, y la pantalla vuelve a llamar con
+  // `confirmado`. Ver `lib/negocios/confirmacion-avance.ts` para el porqué del texto.
+  const pideConfirmar = confirmacionAvance(nuevaEtapaInfo?.config_extra, null)
+  if (pideConfirmar && !confirmado) {
+    // El faltante sale de `descuadreConciliacion`, la MISMA fuente que usan los gates de
+    // saldo. Una resta propia aquí sería una segunda vara para la misma plata.
+    const [negValRes, cobrosConfRes, modeloConf, conciliadoConfRes] = await Promise.all([
+      db(supabase).from('negocios').select('precio_aprobado, precio_estimado').eq('id', negocioId).single(),
+      db(supabase).from('cobros').select('monto, split_json').eq('negocio_id', negocioId),
+      leerModeloDineroCompleto(supabase, negocioId),
+      db(supabase).from('negocio_conciliacion').select('conciliado')
+        .eq('negocio_id', negocioId).eq('workspace_id', workspaceId).maybeSingle(),
+    ])
+    const negVal = negValRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+    const honorarioConf = negVal?.precio_aprobado ?? negVal?.precio_estimado ?? 0
+    const recaudadoConf = sumarRecaudoConfirmado(
+      (cobrosConfRes.data ?? []) as CobroParaRecaudo[],
+      (conciliadoConfRes.data as { conciliado: boolean } | null)?.conciliado === true,
+    )
+    const { faltante } = descuadreConciliacion(honorarioConf, modeloConf, recaudadoConf)
+
+    return {
+      error: 'requiere_confirmacion',
+      confirmacion: confirmacionAvance(nuevaEtapaInfo?.config_extra, faltante) ?? undefined,
+      etapaDestinoNombre: nuevaEtapaNombre,
+    }
+  }
+
+  // Ya no hay vuelta atrás por decisión del usuario: recién aquí se escriben los gates
+  // vencidos que quedaron como "no aplica".
+  if (aplicarOmisiones) {
+    const errOmision = await aplicarOmisiones()
+    if (errOmision) return { error: errOmision }
+  }
 
   // Cambiar etapa
   const resultCambio = await cambiarEtapaNegocio(negocioId, resolvedEtapaId)
   if (resultCambio.error) return resultCambio
+
+  // Quién aceptó entregar el caso queda escrito. Sin esto no hay forma de saber si el
+  // aviso se está leyendo o si el equipo aprendió a cerrarlo: exactamente lo que este
+  // control viene a evitar. `autor_id` es staff.id (campo minado ya documentado).
+  if (pideConfirmar && confirmado && staffId) {
+    try {
+      await db(supabase).from('activity_log').insert({
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio_etapa',
+        autor_id: staffId,
+        contenido: `Confirmó el paso a ${nuevaEtapaNombre} sabiendo que el caso sale del proceso comercial.`.slice(0, 280),
+      })
+    } catch (e) {
+      // El caso ya se movió: no convertir el rastro en un fallo del avance.
+      console.error('[cambiarEtapa] no se pudo registrar la confirmación:', e)
+    }
+  }
 
   // El status del contacto ya NO se toca al avanzar de etapa. Era un derivado del
   // ciclo de vida del negocio y ahora es gestión comercial del contacto (intentos
