@@ -91,6 +91,39 @@ export function formatBogotaEs(d?: Date): string {
 }
 
 /**
+ * Fecha larga capitalizada: "Miércoles, 13 de agosto de 2026".
+ *
+ * Anclar la zona NO es cosmetico: sin `timeZone` el servidor (Vercel corre en
+ * UTC) y el navegador del usuario producen cadenas distintas entre las 19:00 y
+ * la medianoche de Colombia, React detecta el texto cambiado al hidratar y
+ * aborta con `Minified React error #418`. Usar esto en cualquier componente que
+ * pinte "hoy" y se hidrate en el cliente.
+ */
+export function formatBogotaFechaLarga(d?: Date): string {
+  const s = (d ?? new Date()).toLocaleDateString('es-CO', {
+    timeZone: TZ,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/**
+ * Fecha corta: "13 ago". Misma razon de zona que `formatBogotaFechaLarga` — un
+ * `timestamptz` de las 20:00 Bogota es del dia siguiente en UTC, asi que sin
+ * anclar la zona servidor y cliente pintan dias distintos.
+ * Devuelve `undefined` si la entrada esta vacia o no es una fecha valida.
+ */
+export function formatBogotaFechaCorta(value: string | Date | null | undefined): string | undefined {
+  if (!value) return undefined
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return undefined
+  return d.toLocaleDateString('es-CO', { timeZone: TZ, day: 'numeric', month: 'short' })
+}
+
+/**
  * ISO timestamp con offset explicito de Bogota: '2026-05-12T19:00:00-05:00'.
  * Util cuando se necesita persistir un instante "local" sin que se reinterprete
  * como UTC. Si solo necesitas el dia, usa `todayBogotaISO()`.

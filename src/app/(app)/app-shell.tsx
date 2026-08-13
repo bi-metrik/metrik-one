@@ -36,6 +36,7 @@ import FAB from './fab'
 import { PlatformAdminBar } from '@/components/platform-admin-bar'
 import ImpersonationBar from './impersonation-bar'
 import type { PlatformAdminState } from '@/lib/actions/platform-admin'
+import { formatBogotaFechaLarga } from '@/lib/dates/bogota'
 
 interface BrandingProps {
   colorPrimario?: string
@@ -943,7 +944,7 @@ export default function AppShell({
             </p>
             <span className="text-muted-foreground">·</span>
             <p className="text-xs font-medium text-muted-foreground">
-              {(() => { const d = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
+              {formatBogotaFechaLarga()}
             </p>
           </div>
           <div className="flex items-center gap-3">

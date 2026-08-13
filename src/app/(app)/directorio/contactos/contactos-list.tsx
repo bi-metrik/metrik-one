@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, STATUS_CONTACTO, resolverStatusContacto } from '@/lib/catalogos/constants'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import {
   deleteContacto,
   updateContactoSegmento,
@@ -295,15 +296,9 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
   const getSegmentoChip = (value: string | null) => resolverStatusContacto(value).chipClass
 
   // Fecha corta absoluta (pura, calcada de negocio-card). Evita Date.now() en
-  // render (regla react-hooks/purity).
-  const fechaCorta = (date: string | null) => {
-    if (!date) return undefined
-    try {
-      return new Date(date).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
-    } catch {
-      return undefined
-    }
-  }
+  // render (regla react-hooks/purity) y ancla la zona a Bogota para que el
+  // servidor (UTC) y el navegador pinten el mismo dia.
+  const fechaCorta = (date: string | null) => formatBogotaFechaCorta(date)
 
   const cycleSegmento = (id: string, currentSegmento: string | null) => {
     const current = currentSegmento ?? 'primer_contacto'
