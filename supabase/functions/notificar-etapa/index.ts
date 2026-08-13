@@ -65,13 +65,39 @@ Deno.serve(async (req: Request) => {
     .eq('id', negocio.etapa_actual_id)
     .maybeSingle();
 
-  const aviso = (etapa?.config_extra as Record<string, unknown> | null)?.avisar_al_entrar as
-    | { email?: boolean; titulo?: string; mensaje?: string; areas?: string[] }
+  const cfgEtapa = etapa?.config_extra as Record<string, unknown> | null;
+
+  const avisoRaw = cfgEtapa?.avisar_al_entrar as
+    | { email?: boolean; activo?: boolean; titulo?: string; mensaje?: string; areas?: string[] }
+    | undefined;
+  // `activo: false` apaga el aviso interno conservando su texto (ver la migración
+  // 20260813000001). Ausente = encendido, que es como se comportó siempre.
+  const aviso = avisoRaw?.activo === false ? undefined : avisoRaw;
+
+  const avisoCliente = cfgEtapa?.avisar_al_cliente as
+    | { email?: boolean; titulo?: string; mensaje?: string }
     | undefined;
 
-  // Sin config de aviso o con el correo apagado -> nada que hacer (la
-  // notificación in-app ya se creó igual).
-  if (!aviso?.email) return json({ ok: true, skipped: 'sin_aviso_email' });
+  // Dos destinos independientes. Si ninguno pide correo no hay nada que hacer (la
+  // notificación in-app del equipo ya la creó el trigger).
+  const quiereInterno = aviso?.email === true;
+  const quiereCliente = avisoCliente?.email === true;
+  if (!quiereInterno && !quiereCliente) return json({ ok: true, skipped: 'sin_aviso_email' });
+
+  // ── El aviso al CLIENTE ────────────────────────────────────────────────────
+  // Se despacha antes que el interno porque es el que el cliente está esperando, y
+  // porque un fallo del interno no puede dejarlo sin su aviso.
+  let clienteEnviado: string | null = null;
+  let clienteOmitido: string | null = null;
+  if (quiereCliente) {
+    const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente!);
+    clienteEnviado = r.enviadoA;
+    clienteOmitido = r.omitidoPor;
+  }
+
+  if (!quiereInterno) {
+    return json({ ok: true, cliente: clienteEnviado, cliente_omitido: clienteOmitido });
+  }
 
   // ── A quién ────────────────────────────────────────────────────────────────
   // Dos modos, y el correo TIENE que resolver igual que el trigger o la campana
@@ -158,8 +184,91 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'envio_fallido', status: res.status }, 502);
   }
 
-  return json({ ok: true, enviados: correos.length });
+  return json({ ok: true, enviados: correos.length, cliente: clienteEnviado, cliente_omitido: clienteOmitido });
 });
+
+
+/**
+ * Aviso de avance al CLIENTE.
+ *
+ * Sale desde el correo de MeTRIK (somos el operador de la plataforma) pero el mensaje
+ * habla de parte del workspace: quien contrató el trámite es cliente de SOENA y no
+ * conoce a MeTRIK. Por eso el nombre del workspace encabeza el correo y el `reply_to`
+ * apunta a su gente: si el cliente responde —y va a responder— tiene que caer donde
+ * alguien lo lee, no en un buzón nuestro.
+ *
+ * Nunca lleva enlace a la plataforma: el cliente no tiene cuenta.
+ *
+ * El destinatario lo resuelve `email_cliente_negocio` en la base, que es la unica
+ * definicion de "cual es el correo de este cliente" (contacto -> RUT).
+ */
+async function enviarAlCliente(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  resendKey: string,
+  // deno-lint-ignore no-explicit-any
+  negocio: any,
+  etapaNombre: string,
+  cfg: { titulo?: string; mensaje?: string },
+): Promise<{ enviadoA: string | null; omitidoPor: string | null }> {
+  const { data: email } = await supabase.rpc('email_cliente_negocio', { p_negocio_id: negocio.id });
+  if (!email || typeof email !== 'string') {
+    // Sin correo no se inventa un destinatario. Queda en el log para que el equipo
+    // pueda pedirle el dato al cliente.
+    console.warn('[notificar-etapa] sin correo de cliente:', negocio.codigo);
+    return { enviadoA: null, omitidoPor: 'sin_correo' };
+  }
+
+  const { data: ws } = await supabase
+    .from('workspaces')
+    .select('nombre, config_extra')
+    .eq('id', negocio.workspace_id)
+    .maybeSingle();
+
+  const marca = (ws?.nombre as string | undefined)?.trim() || 'tu proveedor';
+  // A dónde contesta el cliente. Sin esto la respuesta muere en un buzón de MeTRIK.
+  const replyTo = (ws?.config_extra as { email_respuesta?: string } | null)?.email_respuesta;
+
+  const titulo = (cfg.titulo ?? 'Tu tramite avanzo')
+    .replaceAll('{etapa}', etapaNombre)
+    .replaceAll('{codigo}', negocio.codigo ?? '');
+  const cuerpo = (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}". Cualquier duda, responde a este correo.')
+    .replaceAll('{etapa}', etapaNombre)
+    .replaceAll('{codigo}', negocio.codigo ?? '')
+    .replaceAll('{negocio}', negocio.nombre ?? '');
+
+  const html = `<!DOCTYPE html>
+<html lang="es"><body style="margin:0;padding:24px;background:#F5F4F2;font-family:Helvetica,Arial,sans-serif;color:#1A1A1A">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:28px">
+    <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(marca)}</p>
+    <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
+    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151">${escapar(cuerpo)}</p>
+    ${negocio.codigo ? `<p style="margin:0 0 22px;font-size:13px;color:#6B7280">Radicado: <strong style="color:#1A1A1A">${escapar(negocio.codigo)}</strong></p>` : ''}
+    <p style="margin:24px 0 0;font-size:11px;color:#9CA3AF;border-top:1px solid #E5E7EB;padding-top:14px">
+      Recibes este aviso porque ${escapar(marca)} gestiona un tramite a tu nombre.
+      Si no quieres recibirlos, responde a este correo y lo damos de baja.
+    </p>
+  </div>
+</body></html>`;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: `${marca} (via MeTRIK) <noreply@metrikone.co>`,
+      to: [email],
+      ...(replyTo ? { reply_to: replyTo } : {}),
+      subject: titulo,
+      html,
+    }),
+  });
+
+  if (!res.ok) {
+    console.error('[notificar-etapa] Resend fallo con el cliente:', res.status, await res.text());
+    return { enviadoA: null, omitidoPor: `resend_${res.status}` };
+  }
+  return { enviadoA: email, omitidoPor: null };
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
