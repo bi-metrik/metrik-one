@@ -1,5 +1,5 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
-import { calcularDvNit } from '@/lib/dian/nit'
+import { titularesDeDatos, nitConDv, concordancia } from './titulares'
 
 interface DeclaracionJuramentadaProps {
   datos: {
@@ -12,6 +12,12 @@ interface DeclaracionJuramentadaProps {
     email: string | null
     telefono: string | null
     municipio: string | null
+    // Segundo titular (copropiedad). OPCIONAL: sin estos campos el documento sale
+    // idéntico al de antes. La DIAN exige que en copropiedad firmen los dos.
+    nombre_solicitante_2?: string | null
+    numero_identificacion_2?: string | null
+    email_2?: string | null
+    telefono_2?: string | null
   }
   fechaGeneracion: string
   codigoNegocio: string
@@ -41,17 +47,12 @@ const s = StyleSheet.create({
 })
 
 export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: DeclaracionJuramentadaProps) {
-  const nombre = datos.nombre_solicitante ?? '[NOMBRE SOLICITANTE]'
-  // NIT SIEMPRE con dígito de verificación CALCULADO (algoritmo DIAN módulo 11).
-  // El DV es determinista; el del RUT puede venir mal extraído, así que se calcula
-  // siempre sobre la base limpia (rut.numero_identificacion) para garantizar el
-  // correcto y ser consistente con el Formato 010 del mismo expediente.
-  const nitBase = (datos.numero_identificacion ?? '').trim() || null
-  const dvFinal = nitBase ? calcularDvNit(nitBase) : null
-  const nitConDv = nitBase ? (dvFinal != null ? `${nitBase}-${dvFinal}` : nitBase) : '[NIT]'
+  // El NIT lleva SIEMPRE dígito de verificación calculado (módulo 11 de la DIAN):
+  // el del RUT puede venir mal extraído. Criterio compartido en `titulares.ts`,
+  // el mismo del Formato 010 del expediente.
+  const titulares = titularesDeDatos(datos)
+  const c = concordancia(titulares.length)
   const ciudad = datos.municipio ?? '[Ciudad]'
-  const email = datos.email ?? '[DIRECCIÓN DE CORREO]'
-  const telefono = datos.telefono ?? '[NÚMERO DE CELULAR]'
 
   const d = new Date(fechaGeneracion)
   const dia = d.getUTCDate()
@@ -77,9 +78,17 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
           <Text style={s.asuntoBold}>ASUNTO: DECLARACIÓN JURAMENTADA</Text>
         </View>
 
-        {/* Introducción */}
+        {/* Introducción — se conjuga según cuántos titulares firman */}
         <Text style={s.intro}>
-          Yo, <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nombre}</Text>, identificado(a) con NIT No. <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nitConDv}</Text>, actuando en nombre propio, manifiesto bajo la gravedad de juramento, de conformidad con el artículo 7 del Decreto 1165 de 2019:
+          {c.yo},
+          {titulares.map((t, i) => (
+            <Text key={i}>
+              {i > 0 ? ' y ' : ' '}
+              <Text style={{ fontFamily: 'Helvetica-Bold' }}>{t.nombre}</Text>, {c.identificado} con NIT No.{' '}
+              <Text style={{ fontFamily: 'Helvetica-Bold' }}>{nitConDv(t.identificacion)}</Text>
+            </Text>
+          ))}
+          , actuando en nombre propio, {c.manifiesto} bajo la gravedad de juramento, de conformidad con el artículo 7 del Decreto 1165 de 2019:
         </Text>
 
         {/* Cláusulas */}
@@ -108,15 +117,21 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
           Para constancia, se firma en {ciudad}, a los {dia} días del mes de {mes} de {anio}.
         </Text>
 
-        {/* Firma */}
-        <View style={s.signatureBlock}>
-          <View style={s.signatureLine}>
-            <Text style={s.signatureName}>{nombre}</Text>
-            <Text style={s.signatureDetail}>NIT: {nitConDv}</Text>
-            <Text style={s.signatureDetail}>Correo: {email}</Text>
-            <Text style={s.signatureDetail}>Tel: {telefono}</Text>
+        {/* Firmas — una por titular.
+            `wrap={false}` es obligatorio: con dos firmantes el bloque se partía
+            entre páginas y el nombre quedaba en una hoja y su identificación en la
+            siguiente. Una firma partida en un documento que va a la DIAN no sirve;
+            así el bloque completo salta de página si no cabe. */}
+        {titulares.map((t, i) => (
+          <View key={i} style={s.signatureBlock} wrap={false}>
+            <View style={s.signatureLine}>
+              <Text style={s.signatureName}>{t.nombre}</Text>
+              <Text style={s.signatureDetail}>NIT: {nitConDv(t.identificacion)}</Text>
+              <Text style={s.signatureDetail}>Correo: {t.email ?? '[DIRECCIÓN DE CORREO]'}</Text>
+              <Text style={s.signatureDetail}>Tel: {t.telefono ?? '[NÚMERO DE CELULAR]'}</Text>
+            </View>
           </View>
-        </View>
+        ))}
 
         {/* Nota legal */}
         <Text style={s.nota}>

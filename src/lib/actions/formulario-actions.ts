@@ -296,6 +296,12 @@ function getTemplateComponent(
           email: string | null
           telefono: string | null
           municipio: string | null
+          // Copropiedad: los declara la config del bloque (`campos_fuente`), y son
+          // opcionales. Sin ellos el documento sale con un solo firmante.
+          nombre_solicitante_2?: string | null
+          numero_identificacion_2?: string | null
+          email_2?: string | null
+          telefono_2?: string | null
         },
         fechaGeneracion,
         codigoNegocio,
@@ -331,6 +337,10 @@ function getTemplateComponent(
           municipio: string | null
           email: string | null
           telefono: string | null
+          nombre_solicitante_2?: string | null
+          numero_identificacion_2?: string | null
+          email_2?: string | null
+          telefono_2?: string | null
         },
         fechaGeneracion,
         codigoNegocio,
