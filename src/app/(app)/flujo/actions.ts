@@ -290,6 +290,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       | {
           cliente_view?: boolean
           visible?: boolean
+          desactivado?: boolean
           readonly?: boolean
           source_etapa_orden?: number
           condition?: { field?: string; value?: string }
@@ -299,6 +300,14 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       | null
     if (cfgExtra?.cliente_view === false) continue
     if (cfgExtra?.visible === false) continue
+    // Un bloque desactivado salió del flujo: ni se renderiza en el negocio ni cuenta
+    // como gate (`gates_pendientes_etapa` lo filtra). Sin esta línea el diagrama lo
+    // seguía dibujando y sumando al conteo de la etapa, así que /flujo describía un
+    // proceso que la ejecución ya no hace — justo el drift que estas dos superficies
+    // no pueden tener. Detectado el 2026-08-12 al desactivar tres bloques de Envío en
+    // SOENA: el motor bajó de 4 gates pendientes a 1 y la pantalla seguía diciendo
+    // "12 bloques · 4 gates".
+    if (cfgExtra?.desactivado === true) continue
     const tipo = b.bloque_definitions?.tipo ?? 'desconocido'
     const bcNombre = b.nombre
     const cfgLabel = cfgExtra?.label
