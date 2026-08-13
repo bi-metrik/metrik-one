@@ -15,6 +15,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './client'
 import { borradorFactura, type BorradorFactura } from './mapeo'
+import { resolverConceptoDeNegocio } from './concepto-negocio'
 import { asegurarClienteSiigo } from './clientes'
 import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { archivarPdfEnBloque } from './archivar-documento'
@@ -167,12 +168,12 @@ export async function emitirFacturaNegocio(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: negRaw, error: errNeg } = await (svc as any)
     .from('negocios')
-    .select('id, precio_aprobado, metadata')
+    .select('id, precio_aprobado, linea_id, metadata')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
   if (errNeg || !negRaw) return { ok: false, motivo: 'error', mensaje: 'Negocio no encontrado' }
-  const negocio = negRaw as DatosNegocio
+  const negocio = negRaw as DatosNegocio & { linea_id: string | null }
 
   // ── 1. ¿ONE ya sabe que está facturado? ───────────────────────────────────
   const yaFacturado = (negocio.metadata?.siigo_factura ?? null) as MarcaFactura | null
@@ -200,12 +201,22 @@ export async function emitirFacturaNegocio(
   try {
     const cfg = await getSiigoConfig(workspaceId)
 
+    // ── 3.bis. El CONCEPTO que va a leer el cliente ──────────────────────────
+    // Se resuelve con el mismo helper que usa la cola. Se hace aquí, contra el
+    // estado de AHORA, y no se recibe del cliente: entre que la pantalla pintó
+    // la fila y alguien confirma, el servicio contratado pudo corregirse, y la
+    // factura tiene que decir lo que el negocio dice hoy.
+    const concepto = await resolverConceptoDeNegocio(svc, negocioId, negocio.linea_id, cfg.productoCode)
+
     // ── 4. ¿Siigo ya tiene una factura de este producto para el cliente? ────
     // Es la barrera que ONE no puede resolver mirándose a sí mismo. Medido el
     // 2026-08-09: 7 casos de la cola ya estaban facturados en Siigo sin que ONE
     // lo supiera, 3 de ellos con precio aprobado, o sea que la cola los mostraba
     // listos para emitir.
-    const existentes = await facturasDelClienteEnSiigo(workspaceId, identificacion, cfg.productoCode, ESPERA_429_EMISION_MS)
+    // Se pregunta por el MISMO producto que se va a emitir: con conceptos por
+    // servicio, buscar duplicados del producto base dejaría pasar una segunda
+    // factura del concepto real.
+    const existentes = await facturasDelClienteEnSiigo(workspaceId, identificacion, concepto.code, ESPERA_429_EMISION_MS)
     const justificacion = opciones.justificacionDuplicado?.trim()
     if (existentes.length > 0 && !justificacion) {
       return { ok: false, motivo: 'duplicado_en_siigo', existentes }
@@ -215,7 +226,11 @@ export async function emitirFacturaNegocio(
     const hoy = new Date().toISOString().slice(0, 10)
     const { payload, faltantes } = borradorFactura(
       cfg, identificacion, honorario, hoy, contexto.ivaPct ?? 19,
-      { emitir: opciones.emitir, enviarCorreo: opciones.enviarCorreo === true },
+      {
+        emitir: opciones.emitir,
+        enviarCorreo: opciones.enviarCorreo === true,
+        productoCode: concepto.code,
+      },
     )
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
 

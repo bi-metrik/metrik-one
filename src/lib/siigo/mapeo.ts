@@ -265,7 +265,17 @@ export function borradorFactura(
   honorarioConIva: number | null,
   fecha: string,
   ivaPct: number,
-  opciones?: { emitir?: boolean; enviarCorreo?: boolean; observaciones?: string },
+  opciones?: {
+    emitir?: boolean
+    enviarCorreo?: boolean
+    observaciones?: string
+    /**
+     * Producto del catálogo que define el CONCEPTO de la factura. Se resuelve
+     * con `conceptoFactura` a partir del servicio contratado. Sin él manda
+     * `cfg.productoCode`, que es el comportamiento de siempre.
+     */
+    productoCode?: string
+  },
 ): Borrador<BorradorFactura> {
   const faltantes: string[] = []
   if (!identificacion) faltantes.push('identificación')
@@ -283,7 +293,7 @@ export function borradorFactura(
       customer: { identification: identificacion, branch_office: 0 },
       seller: cfg.sellerId,
       items: [{
-        code: cfg.productoCode,
+        code: opciones?.productoCode || cfg.productoCode,
         quantity: 1,
         price: base,
         taxes: [{ id: cfg.ivaId }],
