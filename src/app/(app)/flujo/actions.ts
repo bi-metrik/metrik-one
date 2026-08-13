@@ -454,6 +454,50 @@ export async function updateEtapaSla(
   return { ok: true }
 }
 
+// ── Guardar SLA de varias etapas de una sola vez ──────────────────────────
+//
+// Definir los tiempos maximos es una tarea de LOTE: se hace de corrido, una vez,
+// con el equipo sentado. Editarlos de a uno obliga a expandir cada etapa y
+// guardar 19 veces, que es el flujo equivocado para esa tarea.
+//
+// Reusa `updateEtapaSla` en vez de reimplementar el guardado: esa funcion ya
+// valida permisos, comprueba que la etapa sea del workspace, es idempotente
+// (no escribe log si el valor no cambio) y deja la traza en `etapa_sla_log`.
+// Duplicar esa logica aqui la desincronizaria en silencio.
+
+export async function guardarSlaEnLote(
+  cambios: { etapaId: string; slaHoras: number | null }[]
+): Promise<{ ok: boolean; guardados: number; error?: string }> {
+  if (cambios.length === 0) return { ok: true, guardados: 0 }
+
+  // Tope defensivo: una linea real no tiene cientos de etapas, y sin este limite
+  // un cliente manipulado podria disparar N escrituras en una sola llamada.
+  if (cambios.length > 100) {
+    return { ok: false, guardados: 0, error: 'Demasiadas etapas en una sola operación' }
+  }
+
+  let guardados = 0
+  const fallos: string[] = []
+
+  for (const c of cambios) {
+    const r = await updateEtapaSla(c.etapaId, c.slaHoras)
+    if (r.ok) guardados++
+    else fallos.push(r.error ?? 'error desconocido')
+  }
+
+  // Se reporta el parcial en vez de fingir exito: si 3 de 19 fallaron, quien
+  // guarda tiene que saber cuales quedaron sin aplicar.
+  if (fallos.length > 0) {
+    return {
+      ok: false,
+      guardados,
+      error: `${fallos.length} etapa(s) no se guardaron: ${fallos[0]}`,
+    }
+  }
+
+  return { ok: true, guardados }
+}
+
 // ── Historial de cambios SLA ──────────────────────────────────────────────
 
 export async function getSlaChangeLog(

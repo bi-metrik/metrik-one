@@ -133,11 +133,15 @@ export function WorkflowRutas({
   rutas,
   canConfigSla,
   onUpdateSla,
+  onGuardarSlaLote,
 }: {
   etapas: WorkflowEtapa[]
   rutas: RutaDeclarada[]
   canConfigSla?: boolean
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
+  onGuardarSlaLote?: (
+    cambios: { etapaId: string; slaHoras: number | null }[]
+  ) => Promise<{ ok: boolean; guardados: number; error?: string }>
 }) {
   const activas = etapas.filter(e => e.is_active !== false)
   const [rutaSel, setRutaSel] = useState(0)
@@ -146,6 +150,56 @@ export function WorkflowRutas({
   // "Qué quedó en cada etapa" es el uso principal de esta pantalla, así que los bloques
   // se pueden abrir todos de una vez en vez de etapa por etapa.
   const [verBloques, setVerBloques] = useState(false)
+  // Definir los tiempos máximos es una tarea de LOTE: se hace de corrido con el equipo,
+  // no etapa por etapa. En este modo toda la lista queda editable y se guarda de una.
+  const [modoSla, setModoSla] = useState(false)
+  const [borradorSla, setBorradorSla] = useState<Record<string, string>>({})
+  const [guardandoSla, setGuardandoSla] = useState(false)
+  const [errorSla, setErrorSla] = useState<string | null>(null)
+
+  const abrirModoSla = () => {
+    // El borrador arranca con lo que ya está configurado: quien edita ve los valores
+    // vigentes, no campos vacíos que parecen "sin tiempo".
+    const inicial: Record<string, string> = {}
+    for (const e of activas) inicial[e.id] = e.sla_horas != null ? String(e.sla_horas) : ''
+    setBorradorSla(inicial)
+    setErrorSla(null)
+    setModoSla(true)
+  }
+
+  // Solo viaja lo que de verdad cambió. Un campo vacío significa "sin tiempo máximo"
+  // (null), que es distinto de no haberlo tocado.
+  const cambiosSla = activas
+    .map(e => {
+      const crudo = borradorSla[e.id]
+      if (crudo === undefined) return null
+      const limpio = crudo.trim()
+      const nuevo = limpio === '' ? null : Number(limpio)
+      if (nuevo !== null && (!Number.isInteger(nuevo) || nuevo < 0 || nuevo > 9999)) return 'invalido'
+      const actual = e.sla_horas ?? null
+      return nuevo === actual ? null : { etapaId: e.id, slaHoras: nuevo }
+    })
+    .filter(c => c !== null)
+
+  const hayInvalidos = cambiosSla.some(c => c === 'invalido')
+  const cambiosValidos = cambiosSla.filter(
+    (c): c is { etapaId: string; slaHoras: number | null } => c !== 'invalido'
+  )
+
+  const guardarSla = async () => {
+    if (!onGuardarSlaLote || hayInvalidos || cambiosValidos.length === 0) return
+    setGuardandoSla(true)
+    setErrorSla(null)
+    const r = await onGuardarSlaLote(cambiosValidos)
+    setGuardandoSla(false)
+    if (r.ok) {
+      setModoSla(false)
+      return
+    }
+    // Se reporta el parcial: si se guardaron algunos, el modo sigue abierto para
+    // que se vea qué quedó pendiente en vez de cerrar como si todo hubiera salido.
+    setErrorSla(r.error ?? 'No se pudieron guardar los tiempos')
+  }
 
   if (activas.length === 0) {
     return (
@@ -170,7 +224,10 @@ export function WorkflowRutas({
   const totalAbiertos = camino.reduce((s, e) => s + (e.abiertos ?? 0), 0)
 
   return (
-    <div>
+    // Ancho acotado y centrado: a ancho completo el nombre de la etapa y sus cifras
+    // quedaban a lado y lado de un desierto de ~1000 px, y por proximidad se leían
+    // como datos sin relación. Recomendación de Noor, 2026-08-12.
+    <div className="mx-auto w-full max-w-[720px]">
       {rutas.length > 0 && (
         <div className="mb-4">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: GRIS }}>
@@ -236,15 +293,76 @@ export function WorkflowRutas({
           <strong style={{ color: CARBON }}>{camino.length} etapas</strong> · {totalAbiertos} negocios
           abiertos en este recorrido
         </p>
-        <button
-          type="button"
-          onClick={() => setVerBloques(v => !v)}
-          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[#F5F4F2]"
-          style={{ color: '#10B981' }}
-        >
-          {verBloques ? 'Ocultar bloques' : 'Ver qué hay en cada etapa'}
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {canConfigSla && onGuardarSlaLote && !modoSla && (
+            <button
+              type="button"
+              onClick={abrirModoSla}
+              className="rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[#F5F4F2]"
+              style={{ color: GRIS }}
+            >
+              Configurar tiempos
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setVerBloques(v => !v)}
+            className="rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[#F5F4F2]"
+            style={{ color: '#10B981' }}
+          >
+            {verBloques ? 'Ocultar bloques' : 'Ver qué hay en cada etapa'}
+          </button>
+        </div>
       </div>
+
+      {modoSla && (
+        <div
+          className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+          style={{ borderColor: '#10B981', backgroundColor: '#F0FDF4' }}
+        >
+          <p className="text-[11px]" style={{ color: CARBON }}>
+            Escribe el tiempo máximo de cada etapa en <strong>horas hábiles</strong>. Déjalo vacío
+            para que la etapa no tenga tiempo máximo.
+            {errorSla && (
+              <span className="mt-1 block font-semibold" style={{ color: '#B91C1C' }}>
+                {errorSla}
+              </span>
+            )}
+            {hayInvalidos && !errorSla && (
+              <span className="mt-1 block font-semibold" style={{ color: '#B91C1C' }}>
+                Hay valores inválidos: usa números enteros de 0 a 9999.
+              </span>
+            )}
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setModoSla(false)
+                setErrorSla(null)
+              }}
+              disabled={guardandoSla}
+              className="rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-white disabled:opacity-50"
+              style={{ color: GRIS }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={guardarSla}
+              disabled={guardandoSla || hayInvalidos || cambiosValidos.length === 0}
+              className="rounded-md px-3 py-1.5 text-[11px] font-semibold text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: '#10B981' }}
+            >
+              {guardandoSla
+                ? 'Guardando…'
+                : cambiosValidos.length === 0
+                  ? 'Sin cambios'
+                  : `Guardar ${cambiosValidos.length} cambio${cambiosValidos.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         {camino.map((etapa, i) => {
@@ -273,6 +391,9 @@ export function WorkflowRutas({
                 abrirBloques={verBloques}
                 canConfigSla={canConfigSla}
                 onUpdateSla={onUpdateSla}
+                modoSla={modoSla}
+                valorSla={borradorSla[etapa.id] ?? ''}
+                onChangeSla={v => setBorradorSla(prev => ({ ...prev, [etapa.id]: v }))}
               />
             </div>
           )
@@ -296,6 +417,10 @@ export function WorkflowRutas({
  * Fila de etapa con posiciones FIJAS: cada dato en su columna, siempre en el mismo
  * sitio. Antes iban en una tira donde el tiempo máximo, la carga y los atrasados
  * aparecían y desaparecían según el caso, y no se sabía qué era cada número.
+ *
+ * Las tres métricas van AGRUPADAS a la derecha (no repartidas a lo ancho): sueltas
+ * se leían como datos sin relación entre sí. La fila tiene además un modo de
+ * configuración de tiempos, que la convierte en un campo editable.
  */
 function EtapaFila({
   etapa,
@@ -305,6 +430,9 @@ function EtapaFila({
   abrirBloques,
   canConfigSla,
   onUpdateSla,
+  modoSla,
+  valorSla,
+  onChangeSla,
 }: {
   etapa: WorkflowEtapa
   numero: number
@@ -313,6 +441,9 @@ function EtapaFila({
   abrirBloques: boolean
   canConfigSla?: boolean
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
+  modoSla?: boolean
+  valorSla?: string
+  onChangeSla?: (valor: string) => void
 }) {
   const [abiertoLocal, setAbiertoLocal] = useState(false)
   const abierto = abrirBloques || abiertoLocal
@@ -320,6 +451,60 @@ function EtapaFila({
   const vencidos = etapa.vencidos ?? 0
   const pct = maxAbiertos > 0 ? (abiertos / maxAbiertos) * 100 : 0
   const gates = etapa.bloques.filter(b => b.es_gate).length
+
+  // La identidad de la etapa se pinta igual en los dos modos.
+  const identidad = (
+    <>
+      <span
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
+        style={{ border: `2px solid ${color}`, color: CARBON }}
+      >
+        {numero}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-bold" style={{ color: CARBON }}>
+          {etapa.nombre}
+        </span>
+        <span className="block text-[10px]" style={{ color: GRIS }}>
+          {etapa.bloques.length} bloque{etapa.bloques.length === 1 ? '' : 's'}
+          {gates > 0 && ` · ${gates} gate${gates === 1 ? '' : 's'}`}
+        </span>
+      </span>
+    </>
+  )
+
+  // En modo configuración la fila NO puede ser un <button>: un <input> dentro de un
+  // botón es HTML inválido y el contenedor se roba los clics del campo (gotcha ya
+  // documentado con <label>). Por eso esta variante es un <div> sin colapsar.
+  if (modoSla) {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-xl border bg-white px-3 py-2.5"
+        style={{ borderColor: BORDE, borderTop: `3px solid ${color}` }}
+      >
+        {identidad}
+        <label className="flex shrink-0 items-center gap-1.5">
+          <span className="sr-only">Tiempo máximo de {etapa.nombre} en horas hábiles</span>
+          <Clock className="h-3 w-3" style={{ color: GRIS }} aria-hidden />
+          <input
+            type="number"
+            min={0}
+            max={9999}
+            step={1}
+            inputMode="numeric"
+            value={valorSla ?? ''}
+            onChange={e => onChangeSla?.(e.target.value)}
+            placeholder="—"
+            className="w-16 rounded-md border px-2 py-1 text-right text-[12px] tabular-nums focus:outline-none focus:ring-2"
+            style={{ borderColor: BORDE, color: CARBON }}
+          />
+          <span className="text-[11px]" style={{ color: GRIS }}>
+            h
+          </span>
+        </label>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -332,67 +517,59 @@ function EtapaFila({
         className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
       >
         {/* 1. Identidad */}
-        <span
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
-          style={{ border: `2px solid ${color}`, color: CARBON }}
-        >
-          {numero}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-bold" style={{ color: CARBON }}>
-            {etapa.nombre}
-          </span>
-          <span className="block text-[10px]" style={{ color: GRIS }}>
-            {etapa.bloques.length} bloque{etapa.bloques.length === 1 ? '' : 's'}
-            {gates > 0 && ` · ${gates} gate${gates === 1 ? '' : 's'}`}
-          </span>
-        </span>
+        {identidad}
 
-        {/* 2. Tiempo máximo */}
-        <span
-          className="hidden w-16 shrink-0 items-center justify-end gap-1 text-[11px] sm:flex"
-          style={{ color: etapa.sla_horas ? GRIS : BORDE }}
-          title={etapa.sla_horas ? `Tiempo máximo: ${etapa.sla_horas} horas hábiles` : 'Sin tiempo máximo configurado'}
-        >
-          <Clock className="h-3 w-3" />
-          {etapa.sla_horas ? `${etapa.sla_horas}h` : '—'}
-        </span>
-
-        {/* 3. Carga actual */}
-        <span
-          className="flex w-24 shrink-0 items-center gap-1.5"
-          title={`${abiertos} negocio(s) abierto(s) en esta etapa`}
-        >
-          <span className="h-1.5 flex-1 rounded-full" style={{ backgroundColor: BORDE }}>
-            <span
-              className="block h-1.5 rounded-full"
-              style={{ width: `${pct}%`, backgroundColor: color }}
-            />
-          </span>
+        {/* 2. Métricas, agrupadas. Antes eran tres columnas sueltas con su propio
+            ancho fijo, repartidas a lo ancho de la fila: el ojo las leía como datos
+            sin relación entre sí. Juntas y pegadas a la derecha se leen como el
+            estado de ESTA etapa (proximidad de Gestalt). */}
+        <span className="flex shrink-0 items-center gap-2.5">
+          {/* Tiempo máximo */}
           <span
-            className="w-5 text-right text-[11px] font-semibold tabular-nums"
-            style={{ color: abiertos > 0 ? CARBON : BORDE }}
+            className="hidden w-12 items-center justify-end gap-1 text-[11px] sm:flex"
+            style={{ color: etapa.sla_horas ? GRIS : BORDE }}
+            title={etapa.sla_horas ? `Tiempo máximo: ${etapa.sla_horas} horas hábiles` : 'Sin tiempo máximo configurado'}
           >
-            {abiertos}
+            <Clock className="h-3 w-3" />
+            {etapa.sla_horas ? `${etapa.sla_horas}h` : '—'}
           </span>
-        </span>
 
-        {/* 4. Atrasados */}
-        <span className="w-12 shrink-0 text-right">
-          {vencidos > 0 ? (
+          {/* Carga actual */}
+          <span
+            className="flex w-20 items-center gap-1.5"
+            title={`${abiertos} negocio(s) abierto(s) en esta etapa`}
+          >
+            <span className="h-1.5 flex-1 rounded-full" style={{ backgroundColor: BORDE }}>
+              <span
+                className="block h-1.5 rounded-full"
+                style={{ width: `${pct}%`, backgroundColor: color }}
+              />
+            </span>
             <span
-              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-              style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}
-              title={`${vencidos} negocio(s) por encima del tiempo máximo`}
+              className="w-5 text-right text-[11px] font-semibold tabular-nums"
+              style={{ color: abiertos > 0 ? CARBON : BORDE }}
             >
-              <AlertTriangle className="h-3 w-3" />
-              {vencidos}
+              {abiertos}
             </span>
-          ) : (
-            <span className="text-[10px]" style={{ color: BORDE }}>
-              —
-            </span>
-          )}
+          </span>
+
+          {/* Atrasados */}
+          <span className="w-10 text-right">
+            {vencidos > 0 ? (
+              <span
+                className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}
+                title={`${vencidos} negocio(s) por encima del tiempo máximo`}
+              >
+                <AlertTriangle className="h-3 w-3" />
+                {vencidos}
+              </span>
+            ) : (
+              <span className="text-[10px]" style={{ color: BORDE }}>
+                —
+              </span>
+            )}
+          </span>
         </span>
       </button>
 
