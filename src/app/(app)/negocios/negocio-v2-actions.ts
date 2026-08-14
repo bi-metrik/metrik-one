@@ -35,6 +35,7 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { recolectarReferenciasFuente, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
+import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
@@ -6322,6 +6323,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // el recorrido y se cierran de una sola vez al terminar (el `map` no admite `await`).
   const gatesHeredadosACerrar: string[] = []
 
+  // UNA marca de tiempo para todo el recorrido: dos documentos del mismo negocio
+  // no pueden salir con veredictos distintos por haber cruzado la medianoche
+  // entre uno y otro. Bogotá y no UTC (después de las 19:00 el día ya cambió allá).
+  const hoyBogotaISO = todayBogotaISO()
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -6368,6 +6374,33 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const srcData = srcSlug ? datosCompartidosPorSlug.get(srcSlug) : undefined
       if (srcData) {
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
+      }
+    }
+
+    // La VIGENCIA se reevalúa aquí, contra el objetivo de hoy, en vez de leerse
+    // del veredicto que quedó guardado el día de la carga. Ese veredicto envejece
+    // solo: la cita se reprograma, y con el criterio del margen el objetivo es
+    // `hoy + margen`, así que un certificado guardado como vigente lo seguiría
+    // pareciendo para siempre. Una pantalla así se ve sana y miente.
+    // Es derivado, no se persiste (mismo criterio que `pedirDesde`).
+    if (defTipo === 'documento' && b.instancia?.data) {
+      const checks = (configExtra.cross_check as { checks?: SpecVigencia[] } | undefined)?.checks ?? []
+      const data = b.instancia.data as Record<string, unknown>
+      const ccGuardado = data._cross_check as CrossCheckGuardado | undefined
+      if (checks.length > 0 && ccGuardado) {
+        const cc = refrescarVigenciaCrossCheck(ccGuardado, checks, spec => {
+          // Vía preferida el slug; el orden de etapa queda de respaldo legacy.
+          const src =
+            (spec.source_bloque_slug ? datosPorSlug[spec.source_bloque_slug] : undefined)
+            ?? (typeof spec.source_etapa_orden === 'number' ? datosOtrasEtapas[spec.source_etapa_orden] : undefined)
+          // Sin bloque fuente resuelto no se recalcula: `null` significa "no sé",
+          // que no es lo mismo que "todavía no hay cita" (cadena vacía).
+          if (!src || !spec.source_field) return null
+          return String(src[spec.source_field] ?? '')
+        }, hoyBogotaISO)
+        if (cc !== ccGuardado) {
+          b = { ...b, instancia: { ...b.instancia, data: { ...data, _cross_check: cc } } }
+        }
       }
     }
 
