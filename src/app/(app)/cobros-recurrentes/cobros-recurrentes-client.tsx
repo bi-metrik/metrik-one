@@ -6,6 +6,7 @@ import { aprobarYEnviarCuentaCobro, reenviarCuentaCobro } from '@/lib/actions/cu
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import EmitirPeriodoDialog from './emitir-periodo-dialog'
+import RegistrarPagoDialog, { type CobroDeCuentaUI } from './registrar-pago-dialog'
 
 const MESES_NOMBRES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -38,6 +39,7 @@ type Cuenta = {
 
 interface Props {
   cuentas: Cuenta[]
+  cobros: CobroDeCuentaUI[]
   role: string
 }
 
@@ -61,7 +63,7 @@ function formatFecha(iso: string): string {
   return `${m[3]}/${m[2]}/${m[1]}`
 }
 
-export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
+export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props) {
   const [filtroEstado, setFiltroEstado] = useState<string>('todos')
   const [filtroAnio, setFiltroAño] = useState<number>(new Date().getFullYear())
   const [aprobandoId, setAprobandoId] = useState<string | null>(null)
@@ -104,6 +106,11 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
       }
     })
   }
+
+  const cobrosPorId = useMemo(
+    () => new Map(cobros.map(c => [c.id, c])),
+    [cobros],
+  )
 
   const cuentasFiltradas = useMemo(() => {
     return cuentas.filter(c => {
@@ -249,9 +256,19 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
                           >
                             Abrir <ExternalLink className="h-3 w-3" />
                           </a>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                        ) : null}
+                        {(role === 'owner' || role === 'admin')
+                          && (c.estado === 'enviada' || c.estado === 'aprobada_lista_envio') ? (
+                          <div className="mt-1">
+                            <RegistrarPagoDialog
+                              cuentaId={c.id}
+                              numero={c.numero}
+                              cobros={c.cobros_ids
+                                .map(id => cobrosPorId.get(id))
+                                .filter((x): x is CobroDeCuentaUI => Boolean(x))}
+                            />
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2">
                         {role === 'owner' && c.estado === 'emitida_pendiente_aprobacion' ? (
@@ -280,9 +297,19 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
                               <><RotateCcw className="h-3 w-3" /> Reenviar</>
                             )}
                           </button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                        ) : null}
+                        {(role === 'owner' || role === 'admin')
+                          && (c.estado === 'enviada' || c.estado === 'aprobada_lista_envio') ? (
+                          <div className="mt-1">
+                            <RegistrarPagoDialog
+                              cuentaId={c.id}
+                              numero={c.numero}
+                              cobros={c.cobros_ids
+                                .map(id => cobrosPorId.get(id))
+                                .filter((x): x is CobroDeCuentaUI => Boolean(x))}
+                            />
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   )
