@@ -46,7 +46,13 @@ export async function ejecutarGenerarCuentasCobroPeriodo(
   try {
     const result = await generarCuentasCobroPeriodo(supabase, workspaceId, anio, mes, options)
 
-    // Notificar a Mauricio (email) por cada cuenta creada pendiente de aprobación.
+    // Un dry-run devuelve los detalles con estado 'creada' (es el preview de lo que
+    // se crearia), asi que sin este corte un PREVIEW mandaria los correos de
+    // aprobacion de cuentas que no existen. Nada de lo que sigue puede correr en
+    // dry-run: no se escribio nada que notificar ni que revalidar.
+    if (options.dryRun) return { success: true, data: result }
+
+    // Notificar por correo cada cuenta creada pendiente de aprobación.
     // La notificación in-app ya quedó persistida dentro de generarCuentasCobroPeriodo.
     const workspaceSlug = (ws as { slug: string } | null)?.slug ?? 'workspace'
     for (const detalle of result.detalles) {

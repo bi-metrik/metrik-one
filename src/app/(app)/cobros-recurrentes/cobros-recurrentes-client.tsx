@@ -5,6 +5,7 @@ import { Receipt, ExternalLink, Filter, FileCheck2, Clock, Send, CheckCircle2, A
 import { aprobarYEnviarCuentaCobro, reenviarCuentaCobro } from '@/lib/actions/cuentas-cobro-actions'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
+import EmitirPeriodoDialog from './emitir-periodo-dialog'
 
 const MESES_NOMBRES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -131,15 +132,16 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
             <Receipt className="h-5 w-5 text-primary" /> Cuentas de cobro
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Cuentas mensuales emitidas a clientes con acuerdos recurrentes. El cron del día 15 las genera automáticamente.
+            Cuentas mensuales emitidas a clientes con acuerdos recurrentes. El proceso automático las genera desde el día 10.
           </p>
         </div>
+        {(role === 'owner' || role === 'admin') && <EmitirPeriodoDialog />}
       </div>
 
       {/* Stats */}
@@ -293,8 +295,13 @@ export default function CobrosRecurrentesClient({ cuentas, role }: Props) {
 
       {/* Nota informativa */}
       <p className="text-xs text-muted-foreground">
-        El cron diario evalúa cobros del mes y, el día 15, emite automáticamente las cuentas agrupando por empresa pagadora.
-        Las cuentas se notifican para aprobación antes de enviar por email al cliente.
+        El proceso diario evalúa los cobros del mes y, desde el día 10, emite las cuentas agrupando por empresa pagadora.
+        Las cuentas se notifican para aprobación antes de enviarlas por correo al cliente.
+        {(role === 'owner' || role === 'admin') && (
+          <span className="block mt-1">
+            Si un mes se queda sin emitir, «Emitir período» lo hace a mano. No duplica lo que ya existe.
+          </span>
+        )}
         {role !== 'owner' && role !== 'admin' && (
           <span className="block mt-1">Solo owner y admin pueden aprobar y enviar.</span>
         )}
