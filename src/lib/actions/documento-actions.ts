@@ -8,7 +8,8 @@ import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
 import { nitSinDv, calcularDvNit } from '@/lib/dian/nit'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
-import { documentoVigenteEn } from '@/lib/documentos/vigencia'
+import { estadoVigencia, type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import { montosCoinciden } from '@/lib/negocios/monto-cop'
 import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
@@ -94,6 +95,11 @@ export type CrossCheckSpec = CrossCheckSource & {
   // Solo para match_mode 'vigencia': días que el documento sigue siendo válido
   // desde su fecha de expedición. Default 30.
   vigencia_dias?: number
+  // Solo para match_mode 'vigencia': vida mínima que debe quedarle al documento
+  // cuando el negocio TODAVÍA no tiene fecha objetivo (acuerdo SOENA 2026-08-13:
+  // 10 días). Sin este dato, un caso sin cita queda `no_comprobable` como antes:
+  // el default reproduce el comportamiento previo, no la regla nueva.
+  margen_sin_cita_dias?: number
   // Solo para match_mode 'monto': margen en pesos dentro del cual dos importes se
   // consideran el mismo. Default `TOLERANCIA_SALDO_COP` ($1.000, el piso de
   // materialidad ya vigente en los gates de saldo). Comparar dinero al peso exacto
@@ -106,13 +112,46 @@ export type CrossCheckSpec = CrossCheckSource & {
   optional?: boolean
 }
 
+/**
+ * Un check tiene TRES desenlaces, no dos.
+ *
+ * `ok`             — se comparó y coincide.
+ * `falla`          — se comparó y no coincide.
+ * `no_comprobable` — faltó un dato para comparar (hoy solo pasa en `vigencia`,
+ *                    cuando el negocio aún no tiene fecha objetivo).
+ *
+ * ⚠️ `no_comprobable` NO es `ok`. Colapsarlo dejó 87 certificados vencidos pasando
+ * el check sin que nadie los viera: no es que el control los aprobara, es que ni
+ * siquiera los evaluaba. Tampoco es `falla`: no hay evidencia de que el documento
+ * esté mal, así que **no bloquea** — se reporta para que la pantalla lo muestre.
+ */
+export type EstadoCheck = 'ok' | 'falla' | 'no_comprobable'
+
 export type CrossCheckResult = {
   slug: string
   label: string
   expected: string
   extracted: string
   ok: boolean
+  /** Opcional para no romper los `_cross_check` ya guardados en `data`. */
+  estado?: EstadoCheck
   mode?: CrossCheckMatchMode
+  /** Solo en `vigencia`: desde cuándo tiene sentido pedir el reemplazo (calculado). */
+  pedir_desde?: string | null
+  /**
+   * Solo en `vigencia`: el estado fino de los cuatro, para que la pantalla distinga
+   * "reemplázalo ya" de "todavía no vale la pena pedirlo" **sin comparar relojes en
+   * el navegador**. El servidor ya decidió contra `todayBogotaISO()`; que el cliente
+   * lo recalcule con su propia hora es justo la puerta a que dos pantallas digan
+   * cosas distintas sobre el mismo documento.
+   */
+  vigencia?: EstadoVigencia
+  /**
+   * Solo en `vigencia`: contra qué se midió. La pantalla redacta distinto según el
+   * caso, y sin este dato tendría que adivinarlo por la ausencia de `pedir_desde`,
+   * que es exactamente la clase de inferencia que envejece mal.
+   */
+  criterio?: CriterioVigencia
 }
 
 function normalizeText(v: unknown): string {
@@ -137,7 +176,7 @@ function compareValues(
   expected: string,
   extracted: string,
   mode: CrossCheckMatchMode = 'exact',
-  opts?: { vigencia_dias?: number; tolerancia_cop?: number },
+  opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
 ): boolean {
   // El dinero se compara como NÚMERO y con margen, nunca como texto: "$ 701.812"
   // y "701812" son el mismo monto, y "350906.00" no son 35 millones. Ver `monto-cop.ts`.
@@ -145,14 +184,23 @@ function compareValues(
     return montosCoinciden(expected, extracted, opts?.tolerancia_cop ?? TOLERANCIA_SALDO_COP)
   }
   // La vigencia se evalúa ANTES del guard de vacíos: en una seccional que no exige
-  // cita no hay fecha objetivo, y ahí el check no aplica en vez de fallar. Solo un
-  // vencimiento comprobado marca el check como no cumplido.
+  // cita no hay fecha objetivo. Ese caso NO es "cumple": es "no se pudo comprobar",
+  // y lo resuelve `evaluarCheck` con su propio estado. Aquí solo interesa el
+  // veredicto binario para los consumidores que aún esperan un booleano.
   if (mode === 'vigencia') {
     // `extracted` = fecha de expedición del documento; `expected` = fecha objetivo
     // (la cita). El documento debe seguir vigente ESE día, no el día que se carga:
     // un certificado bancario de hace tres semanas sirve hoy y no sirve para una
-    // cita del mes entrante.
-    return documentoVigenteEn(extracted, expected, opts?.vigencia_dias) !== false
+    // cita del mes entrante. Se delega en `estadoVigencia` (la MISMA función que usa
+    // `evaluarCheck`) en vez de repetir el criterio con `documentoVigenteEn`: dos
+    // implementaciones del mismo juicio se desincronizan, y aquí ya pasó — el margen
+    // sin cita habría quedado fuera de este camino sin que nada lo delatara.
+    const v = estadoVigencia(extracted, expected, {
+      vigenciaDias: opts?.vigencia_dias,
+      hoyISO: opts?.hoy_iso,
+      margenSinObjetivoDias: opts?.margen_sin_cita_dias,
+    })
+    return v.estado !== 'reemplazar' && v.estado !== 'esperar'
   }
   if (!expected || !extracted) return false
   if (mode === 'tokens') {
@@ -188,14 +236,47 @@ function compareValues(
   return normalizeText(expected) === normalizeText(extracted)
 }
 
+/**
+ * Evalúa un check y devuelve su estado real, distinguiendo el caso en que no se
+ * pudo comprobar. Solo `vigencia` puede quedar `no_comprobable`: los demás modos
+ * comparan textos o montos y siempre concluyen.
+ *
+ * `hoyISO` viaja como parámetro (no se lee el reloj aquí) para que todo el lote
+ * comparta una sola marca y para poder probarlo; ver `estadoVigencia`.
+ */
+function evaluarCheck(
+  expected: string,
+  extracted: string,
+  mode: CrossCheckMatchMode,
+  opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
+): { estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia; criterio?: CriterioVigencia } {
+  if (mode === 'vigencia') {
+    const v = estadoVigencia(extracted, expected, {
+      vigenciaDias: opts?.vigencia_dias,
+      hoyISO: opts?.hoy_iso,
+      margenSinObjetivoDias: opts?.margen_sin_cita_dias,
+    })
+    if (v.estado === 'no_comprobable') {
+      return { estado: 'no_comprobable', pedirDesde: null, vigencia: v.estado }
+    }
+    return {
+      estado: v.estado === 'vigente' ? 'ok' : 'falla',
+      pedirDesde: v.pedirDesde,
+      vigencia: v.estado,
+      ...(v.criterio ? { criterio: v.criterio } : {}),
+    }
+  }
+  return { estado: compareValues(expected, extracted, mode, opts) ? 'ok' : 'falla' }
+}
+
 async function runCrossCheck(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
   negocioId: string,
   checks: CrossCheckSpec[],
   camposExtraidos: Record<string, CampoResultado>,
-): Promise<{ passed: boolean; results: CrossCheckResult[] }> {
-  if (checks.length === 0) return { passed: true, results: [] }
+): Promise<{ passed: boolean; results: CrossCheckResult[]; sin_comprobar: string[] }> {
+  if (checks.length === 0) return { passed: true, results: [], sin_comprobar: [] }
 
   // Cargar bloques de etapas previas relevantes (las de cada check + sus alternativas)
   const ordenesNecesarias = Array.from(new Set(
@@ -241,25 +322,36 @@ async function runCrossCheck(
     srcData: Record<string, unknown>,
     extractedRaw: string,
     mode: CrossCheckMatchMode,
-    opts?: { vigencia_dias?: number; tolerancia_cop?: number },
-  ): { expected: string; ok: boolean } => {
+    opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
+  ): { expected: string; estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia; criterio?: CriterioVigencia } => {
     if (src.source_fields && src.source_fields.length > 0) {
       const join = src.join ?? ' '
       const expected = src.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
-      return { expected, ok: compareValues(expected, extractedRaw, mode, opts) }
+      return { expected, ...evaluarCheck(expected, extractedRaw, mode, opts) }
     }
     if (src.source_field_alternatives && src.source_field_alternatives.length > 0) {
-      // Probar cada alternativa de campo; pasar si CUALQUIERA matchea
+      // Probar cada alternativa de campo; pasar si CUALQUIERA matchea. Se evalúa una
+      // sola vez por candidato y se conserva el veredicto completo: quedarse solo con
+      // `estado: 'ok'` perdería el detalle de vigencia del candidato que sí pasó.
       const candidates = src.source_field_alternatives.map(f => String(srcData[f] ?? '')).filter(s => s)
-      const matched = candidates.find(c => compareValues(c, extractedRaw, mode, opts))
-      return { expected: matched ?? candidates[0] ?? '', ok: !!matched }
+      const evaluados = candidates.map(c => ({ expected: c, ...evaluarCheck(c, extractedRaw, mode, opts) }))
+      const matched = evaluados.find(e => e.estado === 'ok')
+      if (matched) return matched
+      const primero = evaluados[0]
+      return primero ?? { expected: '', ...evaluarCheck('', extractedRaw, mode, opts) }
     }
     if (src.source_field) {
       const expected = String(srcData[src.source_field] ?? '')
-      return { expected, ok: compareValues(expected, extractedRaw, mode, opts) }
+      return { expected, ...evaluarCheck(expected, extractedRaw, mode, opts) }
     }
-    return { expected: '', ok: false }
+    return { expected: '', estado: 'falla' }
   }
+
+  // UNA marca de tiempo para todo el lote: dos checks del mismo documento no pueden
+  // salir con veredictos distintos por haber cruzado la medianoche entre uno y otro.
+  // Bogotá y no UTC: Vercel corre en UTC y a partir de las 19:00 en Colombia el día
+  // de allá ya cambió, lo que correría un día la fecha de "pídelo a partir de".
+  const hoyIso = todayBogotaISO()
 
   const results: CrossCheckResult[] = []
   for (const check of checks) {
@@ -269,7 +361,7 @@ async function runCrossCheck(
     // Check opcional sin valor extraído (ej. 2º beneficiario ausente en el
     // certificado) → no aplica, pasa sin comparar.
     if (check.optional && !extractedRaw) {
-      results.push({ slug: check.slug, label: check.label, expected: '', extracted: '', ok: true, mode })
+      results.push({ slug: check.slug, label: check.label, expected: '', extracted: '', ok: true, estado: 'ok', mode })
       continue
     }
 
@@ -278,30 +370,63 @@ async function runCrossCheck(
     // existencia. Pasa si la principal O alguna alternativa valida.
     const sources: CrossCheckSource[] = [check, ...(check.source_alternatives ?? [])]
     let expectedRaw = ''
-    let ok = false
+    // ⚠️ `undefined` como valor inicial, NO 'falla': un centinela que coincide con un
+    // estado real es indistinguible de él. Con 'falla' de arranque, un check de fuente
+    // única que sale `no_comprobable` se reportaba como falla y bloqueaba el gate —
+    // exactamente el caso que este estado existe para NO bloquear.
+    let estado: EstadoCheck | undefined
+    let pedirDesde: string | null | undefined
+    let vigencia: EstadoVigencia | undefined
+    let criterio: CriterioVigencia | undefined
     for (const src of sources) {
       // Vía preferida: slug estable. Fallback legacy: (etapa_orden::nombre).
       const srcData =
         (src.source_bloque_slug ? dataPorSlug.get(src.source_bloque_slug) : undefined) ??
         dataPorBloque.get(`${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`) ??
         {}
-      const r = resolveFromSource(src, srcData, extractedRaw, mode, { vigencia_dias: check.vigencia_dias, tolerancia_cop: check.tolerancia_cop })
-      if (r.ok) { expectedRaw = r.expected; ok = true; break }
+      const r = resolveFromSource(src, srcData, extractedRaw, mode, {
+        vigencia_dias: check.vigencia_dias,
+        tolerancia_cop: check.tolerancia_cop,
+        hoy_iso: hoyIso,
+        margen_sin_cita_dias: check.margen_sin_cita_dias,
+      })
+      if (r.estado === 'ok') { expectedRaw = r.expected; estado = 'ok'; pedirDesde = r.pedirDesde; vigencia = r.vigencia; criterio = r.criterio; break }
+      // Entre fuentes que no pasan gana la que SÍ pudo comprobarse: una falla es
+      // evidencia de que el documento está mal; "no comprobable" solo dice que
+      // faltó un dato. Reportar lo segundo teniendo lo primero esconde el problema.
+      if (estado !== 'falla') { estado = r.estado; pedirDesde = r.pedirDesde; vigencia = r.vigencia; criterio = r.criterio }
       // Recordar el primer valor esperado no vacío para el reporte si nada matchea
       if (!expectedRaw && r.expected) expectedRaw = r.expected
     }
+
+    // Sin fuentes evaluadas no hay evidencia de nada: `falla` es el lado seguro para
+    // un control (retener, no dejar pasar), y es lo que hacía la versión anterior.
+    const estadoFinal: EstadoCheck = estado ?? 'falla'
 
     results.push({
       slug: check.slug,
       label: check.label,
       expected: expectedRaw,
       extracted: extractedRaw,
-      ok,
+      // `ok` conserva su significado histórico para los consumidores que ya existen.
+      ok: estadoFinal === 'ok',
+      estado: estadoFinal,
       mode,
+      ...(pedirDesde !== undefined ? { pedir_desde: pedirDesde } : {}),
+      ...(vigencia !== undefined ? { vigencia } : {}),
+      ...(criterio !== undefined ? { criterio } : {}),
     })
   }
 
-  return { passed: results.every(r => r.ok), results }
+  // ⚠️ `passed` NO cambia de semántica: sigue significando "ningún check comprobado
+  // falló", porque de él cuelga el bloqueo del gate. Un check que no se pudo
+  // comprobar no retiene el negocio — retenerlo por un dato que todavía no existe
+  // (la fecha de la cita) dejaría el caso sin salida posible. Se reporta aparte.
+  return {
+    passed: results.every(r => r.estado !== 'falla'),
+    results,
+    sin_comprobar: results.filter(r => r.estado === 'no_comprobable').map(r => r.slug),
+  }
 }
 
 /**

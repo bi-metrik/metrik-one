@@ -1,9 +1,10 @@
 /**
  * Referencias al bloque FUENTE que un bloque declara en su `config_extra`.
  *
- * Un bloque puede apuntar a otro para tres cosas: decidir si se muestra
- * (`condition`), autollenar un campo (`auto_fill`) o bloquear/forzar un valor
- * (`lock_when`). El origen se declara de dos formas:
+ * Un bloque puede apuntar a otro para cuatro cosas: decidir si se muestra
+ * (`condition`), autollenar un campo (`auto_fill`), bloquear/forzar un valor
+ * (`lock_when`) o contrastar un dato extraído contra el negocio (`cross_check`).
+ * El origen se declara de dos formas:
  *
  *   - `source_bloque_slug` — identidad estable, vía preferida (ver
  *     `docs/specs/2026-05-26_block-references-by-slug.md`)
@@ -34,6 +35,11 @@ type ConfigExtraConReferencias = {
     auto_fill?: ReferenciaFuente | null
     lock_when?: ReferenciaFuente | null
   }> | null
+  cross_check?: {
+    checks?: Array<ReferenciaFuente & {
+      source_alternatives?: ReferenciaFuente[] | null
+    }> | null
+  } | null
 } | null | undefined
 
 export type ReferenciasFuente = {
@@ -59,6 +65,14 @@ export function recolectarReferenciasFuente(
     for (const f of ce?.fields ?? []) {
       registrar(f?.auto_fill)
       registrar(f?.lock_when)
+    }
+    // Los cross-check también necesitan su origen cargado: la vigencia de un
+    // documento se REEVALÚA al leer el negocio contra la fecha objetivo de HOY,
+    // no contra la que había el día que se cargó el archivo. Sin el origen aquí,
+    // ese refresco no tendría contra qué medir. Ver `refrescar-vigencia.ts`.
+    for (const c of ce?.cross_check?.checks ?? []) {
+      registrar(c)
+      for (const alt of c?.source_alternatives ?? []) registrar(alt)
     }
   }
 
