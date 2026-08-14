@@ -1372,13 +1372,19 @@ function BloqueRenderer({
   // `editable_siempre`: el bloque sigue editable aunque se vea desde una etapa
   // posterior (historial). Para el 010/1668: la DIAN devuelve requerimientos casi
   // siempre y hay que poder re-generar el formulario aun después de avanzar de etapa.
-  // `_faltaHonorarioConfirmado`: la propuesta sigue editable aunque el caso ya
-  // haya avanzado, porque sin ese valor el registro de cobros está frenado y el
-  // bloque nativo, visto desde el historial, saldría forzado a solo lectura. Sin
-  // esto el guard deja el caso sin ningún lugar desde donde destrabarse.
+  // `_faltaHonorarioConfirmado`: el servidor lo pone en la propuesta económica y
+  // en las superficies que capturan el pago, pero significa cosas distintas en
+  // cada una. En la PROPUESTA abre la edición aunque el caso ya haya avanzado,
+  // porque sin ese valor el registro de cobros está frenado y el bloque nativo,
+  // visto desde el historial, saldría forzado a solo lectura: el guard dejaría el
+  // caso sin ningún lugar desde donde destrabarse. En las de PAGO solo dispara el
+  // aviso — abrirles la edición sería lo contrario de lo que el flag pide, así
+  // que la excepción se acota al tipo que la necesita.
+  const faltaHonorarioConfirmado =
+    (configExtra as { _faltaHonorarioConfirmado?: boolean })._faltaHonorarioConfirmado === true
   const editableSiempre =
     (configExtra as { editable_siempre?: boolean }).editable_siempre === true
-    || (configExtra as { _faltaHonorarioConfirmado?: boolean })._faltaHonorarioConfirmado === true
+    || (tipo === 'propuesta_economica' && faltaHonorarioConfirmado)
   const modoBase: 'editable' | 'visible' =
     (((bloque as { _forceReadOnly?: boolean })._forceReadOnly
       || (configExtra as { _areaReadonly?: boolean })._areaReadonly)
@@ -1445,6 +1451,7 @@ function BloqueRenderer({
             tipoCobro={(configExtra.tipo_cobro as string) ?? 'pago'}
             nota={configExtra.nota as string | undefined}
             validarEpayco={!!configExtra.validar_epayco}
+            faltaHonorario={faltaHonorarioConfirmado}
           />
         )
       }
@@ -1456,6 +1463,7 @@ function BloqueRenderer({
             instancia={bloque.instancia}
             modo={modo}
             nota={configExtra.nota as string | undefined}
+            faltaHonorario={faltaHonorarioConfirmado}
           />
         )
       }
@@ -1466,6 +1474,7 @@ function BloqueRenderer({
             instancia={bloque.instancia}
             modo={modo}
             fields={fields as MultiPagoField[]}
+            faltaHonorario={faltaHonorarioConfirmado}
           />
         )
       }

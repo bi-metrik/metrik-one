@@ -6,6 +6,7 @@ import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS
 import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
+import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
 import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
@@ -6634,6 +6635,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // se fue. Se apaga solo en el momento en que alguien aprueba: no es una
     // ventana declarada, es la ausencia del dato que el guard exige.
     if (defTipo === 'propuesta_economica' && faltaHonorario) {
+      enrichedConfigExtra._faltaHonorarioConfirmado = true
+    }
+    // Y la MISMA bandera viaja a las superficies que capturan el pago, para que el
+    // aviso llegue ANTES de llenar el formulario. Sin esto el operador se entera
+    // por el rechazo del trigger, o sea despues de teclear referencia y valor: el
+    // control existe pero llega tarde, que es como no tenerlo.
+    if (faltaHonorario && esSuperficieDeCapturaDeCobro(configExtra)) {
       enrichedConfigExtra._faltaHonorarioConfirmado = true
     }
 
