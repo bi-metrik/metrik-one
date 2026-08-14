@@ -54,6 +54,8 @@ export interface FlujoEtapa {
   aviso_interno: boolean
   /** ¿Avisa al CLIENTE por correo al entrar un negocio a esta etapa? */
   aviso_cliente: boolean
+  /** ¿Avisa al CLIENTE por WhatsApp? Canal aparte del correo: se pueden usar los dos. */
+  aviso_cliente_whatsapp: boolean
 }
 
 /**
@@ -169,6 +171,19 @@ function avisoInternoActivo(cfg: Record<string, unknown> | null | undefined): bo
 function avisoClienteActivo(cfg: Record<string, unknown> | null | undefined): boolean {
   const av = (cfg as { avisar_al_cliente?: { email?: boolean } } | null)?.avisar_al_cliente
   return av?.email === true
+}
+
+/**
+ * ¿La etapa avisa al CLIENTE por WhatsApp?
+ *
+ * Vive junto al correo en `avisar_al_cliente` porque es el mismo aviso al mismo
+ * destinatario, pero es una clave aparte: en SOENA el 95% de los clientes tiene celular
+ * utilizable y solo el 67% correo, así que hay etapas que van a querer WhatsApp sin
+ * correo. El despacho lo hace la misma edge function.
+ */
+function avisoClienteWhatsappActivo(cfg: Record<string, unknown> | null | undefined): boolean {
+  const av = (cfg as { avisar_al_cliente?: { whatsapp?: boolean } } | null)?.avisar_al_cliente
+  return av?.whatsapp === true
 }
 
 // ── Server actions ─────────────────────────────────────────────────────────
@@ -385,6 +400,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
       gates: Array.isArray(e.config_extra?.gates) ? (e.config_extra.gates as string[]) : [],
       aviso_interno: avisoInternoActivo(e.config_extra),
       aviso_cliente: avisoClienteActivo(e.config_extra),
+      aviso_cliente_whatsapp: avisoClienteWhatsappActivo(e.config_extra),
     }
   })
 
@@ -596,7 +612,7 @@ export async function getSlaChangeLog(
  */
 export async function updateEtapaAviso(
   etapaId: string,
-  destino: 'interno' | 'cliente',
+  destino: 'interno' | 'cliente' | 'cliente_whatsapp',
   activo: boolean,
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, role, error } = await getWorkspace()
@@ -606,7 +622,7 @@ export async function updateEtapaAviso(
   const perms = getRolePermissions(role)
   if (!perms.canConfigSlaEtapas) return { ok: false, error: 'Sin permisos' }
 
-  if (destino !== 'interno' && destino !== 'cliente') {
+  if (destino !== 'interno' && destino !== 'cliente' && destino !== 'cliente_whatsapp') {
     return { ok: false, error: 'Destino invalido' }
   }
 
@@ -638,8 +654,13 @@ export async function updateEtapaAviso(
     // interruptor basta para encenderlo, sin pedir que alguien redacte nada.
     cfg.avisar_al_entrar = { ...previo, email: activo, activo }
   } else {
+    // Los dos canales del cliente comparten título y mensaje, así que se conserva lo
+    // que hubiera y solo se toca la clave del canal que se está prendiendo o apagando.
+    // Escribir el objeto entero borraría el copy que alguien redactó para el otro.
     const previo = (cfg.avisar_al_cliente ?? {}) as Record<string, unknown>
-    cfg.avisar_al_cliente = { ...previo, email: activo }
+    cfg.avisar_al_cliente = destino === 'cliente_whatsapp'
+      ? { ...previo, whatsapp: activo }
+      : { ...previo, email: activo }
   }
 
   // Mismo cast puntual que usa `updateEtapaSla`: `config_extra` es jsonb y los tipos

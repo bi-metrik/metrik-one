@@ -75,14 +75,18 @@ Deno.serve(async (req: Request) => {
   const aviso = avisoRaw?.activo === false ? undefined : avisoRaw;
 
   const avisoCliente = cfgEtapa?.avisar_al_cliente as
-    | { email?: boolean; titulo?: string; mensaje?: string }
+    | { email?: boolean; whatsapp?: boolean; titulo?: string; mensaje?: string }
     | undefined;
 
-  // Dos destinos independientes. Si ninguno pide correo no hay nada que hacer (la
-  // notificación in-app del equipo ya la creó el trigger).
+  // Dos destinos independientes, y el del cliente tiene dos canales que también son
+  // independientes: se puede querer WhatsApp sin correo. Si nadie pide nada no hay
+  // trabajo (la notificación in-app del equipo ya la creó el trigger).
   const quiereInterno = aviso?.email === true;
   const quiereCliente = avisoCliente?.email === true;
-  if (!quiereInterno && !quiereCliente) return json({ ok: true, skipped: 'sin_aviso_email' });
+  const quiereClienteWa = avisoCliente?.whatsapp === true;
+  if (!quiereInterno && !quiereCliente && !quiereClienteWa) {
+    return json({ ok: true, skipped: 'sin_aviso_email' });
+  }
 
   // ── El aviso al CLIENTE ────────────────────────────────────────────────────
   // Se despacha antes que el interno porque es el que el cliente está esperando, y
@@ -98,8 +102,26 @@ Deno.serve(async (req: Request) => {
     clienteRespondeA = r.respondeA ?? null;
   }
 
+  // ── El aviso al cliente por WHATSAPP ───────────────────────────────────────
+  // Canal aparte y con su propio try: los dos van al mismo cliente, así que un fallo
+  // de FunnelChat no puede dejarlo sin el correo que sí salió, ni al revés.
+  let waDisparado: string | null = null;
+  let waOmitido: string | null = null;
+  if (quiereClienteWa) {
+    const r = await enviarWhatsAppAlCliente(supabase, negocio, etapa?.nombre ?? '', avisoCliente!);
+    waDisparado = r.disparadoA;
+    waOmitido = r.omitidoPor;
+  }
+
   if (!quiereInterno) {
-    return json({ ok: true, cliente: clienteEnviado, cliente_omitido: clienteOmitido, responde_a: clienteRespondeA });
+    return json({
+      ok: true,
+      cliente: clienteEnviado,
+      cliente_omitido: clienteOmitido,
+      responde_a: clienteRespondeA,
+      whatsapp_disparado: waDisparado,
+      whatsapp_omitido: waOmitido,
+    });
   }
 
   // ── A quién ────────────────────────────────────────────────────────────────
@@ -187,7 +209,15 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'envio_fallido', status: res.status }, 502);
   }
 
-  return json({ ok: true, enviados: correos.length, cliente: clienteEnviado, cliente_omitido: clienteOmitido, responde_a: clienteRespondeA });
+  return json({
+    ok: true,
+    enviados: correos.length,
+    cliente: clienteEnviado,
+    cliente_omitido: clienteOmitido,
+    responde_a: clienteRespondeA,
+    whatsapp_disparado: waDisparado,
+    whatsapp_omitido: waOmitido,
+  });
 });
 
 
@@ -236,7 +266,7 @@ async function enviarAlCliente(
   // el correo NO invita a responder: prometer una respuesta que cae en un buzón sin
   // dueño es peor que no ofrecerla. (Medido en SOENA: 244 de 254 negocios abiertos
   // tienen comercial con cuenta.)
-  const replyTo = await correoDelComercial(supabase, negocio.id)
+  const replyTo = (await comercialDelNegocio(supabase, negocio.id))?.email
     ?? (ws?.config_extra as { email_respuesta?: string } | null)?.email_respuesta
     ?? null;
 
@@ -286,15 +316,130 @@ async function enviarAlCliente(
 }
 
 /**
- * Correo del comercial responsable del negocio, para que la respuesta del cliente
- * llegue a quien lleva el caso.
+ * Aviso de avance al cliente por WHATSAPP, vía FunnelChat.
+ *
+ * FunnelChat no expone una API para enviar: expone un DISPARADOR. Se le hace POST a la
+ * URL de un flujo suyo y ese flujo es el que le escribe al cliente. Por eso aquí no se
+ * arma un mensaje de WhatsApp sino el juego de datos que el flujo mapea a campos del
+ * contacto (documentado en `proyectos/soena/ve/2026-08-14_mensaje-daniela-funnelchat.md`,
+ * que es el mismo contrato que se le pidió configurar a SOENA).
+ *
+ * ⚠️ La URL del disparador ES la credencial: no lleva token, no lleva firma, y quien la
+ * tenga puede mandarle WhatsApps a los clientes. Por eso vive en `config_extra` del
+ * workspace (server-only, mismo trato que las credenciales de Siigo) y nunca en una
+ * tabla que el cliente autenticado pueda leer.
+ *
+ * ⚠️ Lo que devuelve NO es una confirmación de entrega, y por eso se reporta como
+ * `whatsapp_disparado` y no como "enviado": un 200 de FunnelChat dice que el disparo se
+ * recibió, no que el mensaje le llegó a nadie. Está preguntado (pregunta 3 del mensaje a
+ * Daniela) y hasta que se responda, afirmar "avisado" sería exactamente la pantalla que
+ * miente. Del mismo tamaño es la pregunta de las plantillas de Meta: fuera de la ventana
+ * de 24 horas, WhatsApp solo entrega plantillas aprobadas, y un aviso de avance de
+ * trámite casi siempre cae fuera de esa ventana.
+ */
+async function enviarWhatsAppAlCliente(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  // deno-lint-ignore no-explicit-any
+  negocio: any,
+  etapaNombre: string,
+  cfg: { titulo?: string; mensaje?: string },
+): Promise<{ disparadoA: string | null; omitidoPor: string | null }> {
+  const { data: ws } = await supabase
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', negocio.workspace_id)
+    .maybeSingle();
+
+  const url = (ws?.config_extra as { funnelchat?: { trigger_url?: string } } | null)
+    ?.funnelchat?.trigger_url;
+  if (!url) {
+    // El workspace no declaró disparador. No es un error: es un workspace que no usa
+    // WhatsApp, y en ese caso la etapa no debería tener el interruptor encendido.
+    return { disparadoA: null, omitidoPor: 'sin_trigger_url' };
+  }
+
+  // La URL viene de la base, así que un admin podría escribir cualquier cosa ahí y esta
+  // función haría de puente hacia donde diga. Se acota al proveedor.
+  let host: string;
+  try {
+    const u = new URL(url);
+    host = u.hostname;
+    if (u.protocol !== 'https:' || !host.endsWith('.funnelchat.app')) {
+      return { disparadoA: null, omitidoPor: 'trigger_url_no_permitida' };
+    }
+  } catch {
+    return { disparadoA: null, omitidoPor: 'trigger_url_invalida' };
+  }
+
+  const { data: telefono } = await supabase.rpc('telefono_cliente_negocio', {
+    p_negocio_id: negocio.id,
+  });
+  if (!telefono || typeof telefono !== 'string') {
+    // Sin número no se inventa un destinatario. Queda en el log para que el equipo
+    // pueda pedirle el dato al cliente. Medido en SOENA: pasa en 12 de 254 abiertos.
+    console.warn('[notificar-etapa] sin telefono de cliente:', negocio.codigo);
+    return { disparadoA: null, omitidoPor: 'sin_telefono' };
+  }
+
+  const comercial = await comercialDelNegocio(supabase, negocio.id);
+
+  // El mismo copy del correo, con los mismos reemplazos: si los dos canales dijeran
+  // cosas distintas sobre el mismo hecho, el cliente creería la peor de las dos.
+  const cuerpo = (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}".')
+    .replaceAll('{etapa}', etapaNombre)
+    .replaceAll('{codigo}', negocio.codigo ?? '')
+    .replaceAll('{negocio}', negocio.nombre ?? '');
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telefono,
+        nombre_cliente: negocio.nombre ?? '',
+        codigo_caso: negocio.codigo ?? '',
+        etapa: etapaNombre,
+        mensaje: cuerpo,
+        // Viaja el comercial para que FunnelChat pueda asignarle la conversación. El
+        // cruce entre plataformas es por CORREO: es la única llave estable entre una
+        // persona de ONE y un agente de FunnelChat.
+        comercial_nombre: comercial?.nombre ?? '',
+        comercial_email: comercial?.email ?? '',
+      }),
+      // Sin tope, un FunnelChat lento dejaría colgada la función que también manda el
+      // correo interno.
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!res.ok) {
+      console.error('[notificar-etapa] FunnelChat fallo:', res.status, await res.text());
+      return { disparadoA: null, omitidoPor: `funnelchat_${res.status}` };
+    }
+    return { disparadoA: telefono, omitidoPor: null };
+  } catch (e) {
+    console.error('[notificar-etapa] FunnelChat inalcanzable:', e);
+    return { disparadoA: null, omitidoPor: 'funnelchat_sin_respuesta' };
+  }
+}
+
+/**
+ * Comercial responsable del negocio: su nombre y su correo.
+ *
+ * El correo sirve para dos cosas distintas y por eso se resuelve una sola vez: es el
+ * `reply_to` del aviso por correo, y es la llave con la que FunnelChat puede identificar
+ * al agente que atiende la conversación.
  *
  * `negocio_responsables` guarda `staff_id`; el correo vive en `auth.users`, alcanzable
  * por `staff.profile_id`. Un negocio admite UN comercial (indice unico por rol), asi
  * que no hay que elegir entre varios.
  */
 // deno-lint-ignore no-explicit-any
-async function correoDelComercial(supabase: any, negocioId: string): Promise<string | null> {
+async function comercialDelNegocio(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  negocioId: string,
+): Promise<{ nombre: string | null; email: string | null } | null> {
   const { data: resp } = await supabase
     .from('negocio_responsables')
     .select('staff_id')
@@ -305,13 +450,17 @@ async function correoDelComercial(supabase: any, negocioId: string): Promise<str
 
   const { data: st } = await supabase
     .from('staff')
-    .select('profile_id')
+    .select('profile_id, full_name')
     .eq('id', resp.staff_id)
     .maybeSingle();
-  if (!st?.profile_id) return null;
+  if (!st) return null;
+
+  // Un comercial sin cuenta de plataforma igual tiene nombre: sirve para que FunnelChat
+  // sepa de quién es el caso aunque no se le pueda atar el agente por correo.
+  if (!st.profile_id) return { nombre: st.full_name ?? null, email: null };
 
   const { data: user } = await supabase.auth.admin.getUserById(st.profile_id);
-  return user?.user?.email ?? null;
+  return { nombre: st.full_name ?? null, email: user?.user?.email ?? null };
 }
 
 function json(body: unknown, status = 200) {
