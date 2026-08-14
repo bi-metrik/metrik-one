@@ -6486,11 +6486,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // pareciendo para siempre. Una pantalla así se ve sana y miente.
     // Es derivado, no se persiste (mismo criterio que `pedirDesde`).
     if (defTipo === 'documento' && b.instancia?.data) {
-      const checks = (configExtra.cross_check as { checks?: SpecVigencia[] } | undefined)?.checks ?? []
+      // Se pasa el `cross_check` COMPLETO, no solo sus checks: al sintetizar el
+      // veredicto no hay guardado del cual heredar `solo_alerta`, y sin esa marca
+      // el panel nace en rojo diciendo "discrepancia" sobre un control que no
+      // bloquea nada. Se vio en la pantalla de V0027.
+      const specCross = configExtra.cross_check as
+        { checks?: SpecVigencia[]; solo_alerta?: boolean } | undefined
       const data = b.instancia.data as Record<string, unknown>
       const ccGuardado = data._cross_check as CrossCheckGuardado | undefined
-      if (checks.length > 0) {
-        const cc = refrescarVigenciaCrossCheck(ccGuardado, checks, spec => {
+      if ((specCross?.checks?.length ?? 0) > 0) {
+        const cc = refrescarVigenciaCrossCheck(ccGuardado, specCross, spec => {
           // Vía preferida el slug; el orden de etapa queda de respaldo legacy.
           const src =
             (spec.source_bloque_slug ? datosPorSlug[spec.source_bloque_slug] : undefined)
