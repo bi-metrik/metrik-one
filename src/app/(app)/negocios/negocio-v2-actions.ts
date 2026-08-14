@@ -6387,7 +6387,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const checks = (configExtra.cross_check as { checks?: SpecVigencia[] } | undefined)?.checks ?? []
       const data = b.instancia.data as Record<string, unknown>
       const ccGuardado = data._cross_check as CrossCheckGuardado | undefined
-      if (checks.length > 0 && ccGuardado) {
+      if (checks.length > 0) {
         const cc = refrescarVigenciaCrossCheck(ccGuardado, checks, spec => {
           // Vía preferida el slug; el orden de etapa queda de respaldo legacy.
           const src =
@@ -6397,7 +6397,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           // que no es lo mismo que "todavía no hay cita" (cadena vacía).
           if (!src || !spec.source_field) return null
           return String(src[spec.source_field] ?? '')
-        }, hoyBogotaISO)
+        }, hoyBogotaISO, spec => {
+          // Solo se usa para SINTETIZAR el veredicto de un documento cargado antes
+          // de que el check existiera. La fecha vive donde la dejó la extracción.
+          const campos = data.campos as Record<string, { value?: unknown }> | undefined
+          const valor = campos?.[spec.slug]?.value
+          return valor === null || valor === undefined || valor === '' ? null : String(valor)
+        })
         if (cc !== ccGuardado) {
           b = { ...b, instancia: { ...b.instancia, data: { ...data, _cross_check: cc } } }
         }

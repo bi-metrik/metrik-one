@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from './refrescar-vigencia'
 
 const CHECK_CON_CITA: SpecVigencia = {
+  label: 'Certificado vigente el día de la cita',
   slug: 'fecha_expedicion',
   match_mode: 'vigencia',
   vigencia_dias: 30,
@@ -93,10 +94,39 @@ describe('refrescarVigenciaCrossCheck', () => {
     expect(out).toBe(cc)
   })
 
-  it('un cross_check vacío o ausente pasa sin tocarse', () => {
+  it('sin resolvedor del extraído, un cross_check ausente pasa sin tocarse', () => {
     expect(refrescarVigenciaCrossCheck(null, [CHECK_CON_MARGEN], () => '', '2026-08-13')).toBeNull()
     const vacio: CrossCheckGuardado = { passed: true, results: [] }
     expect(refrescarVigenciaCrossCheck(vacio, [CHECK_CON_MARGEN], () => '', '2026-08-13')).toBe(vacio)
+  })
+
+  it('SINTETIZA el veredicto de un documento cargado antes de que el check existiera', () => {
+    // Medido en SOENA: 136 abiertos con certificado y solo 22 con veredicto. Sin
+    // esto la alerta llegaría a uno de cada seis.
+    const out = refrescarVigenciaCrossCheck(
+      null, [CHECK_CON_MARGEN], () => '', '2026-08-24', () => '2026-07-24',
+    )
+    expect(out?.results).toHaveLength(1)
+    expect(out?.results[0].vigencia).toBe('reemplazar')
+    expect(out?.results[0].label).toBe(CHECK_CON_MARGEN.label)
+    expect(out?.passed).toBe(false)
+  })
+
+  it('NO sintetiza si el bloque tiene checks de otros modos sin evaluar', () => {
+    // Un panel que dice "validado" afirmaría de más sobre comprobaciones que
+    // nadie hizo: sin extracción no se puede recalcular un match de texto.
+    const otro: SpecVigencia = { slug: 'nit', match_mode: 'exact' }
+    const out = refrescarVigenciaCrossCheck(
+      null, [CHECK_CON_MARGEN, otro], () => '', '2026-08-24', () => '2026-07-24',
+    )
+    expect(out).toBeNull()
+  })
+
+  it('no sintetiza cuando el documento no trajo la fecha de expedición', () => {
+    const out = refrescarVigenciaCrossCheck(
+      null, [CHECK_CON_MARGEN], () => '', '2026-08-24', () => null,
+    )
+    expect(out).toBeNull()
   })
 
   it('recuperarse también se ve: un certificado nuevo vuelve a vigente', () => {

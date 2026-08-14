@@ -48,6 +48,7 @@ export type CrossCheckGuardado = {
 /** La parte de la config del check que gobierna la vigencia. */
 export type SpecVigencia = {
   slug: string
+  label?: string
   match_mode?: string
   vigencia_dias?: number
   margen_sin_cita_dias?: number
@@ -64,6 +65,13 @@ export type SpecVigencia = {
 export type ResolverObjetivo = (spec: SpecVigencia) => string | null
 
 /**
+ * Valor extraído del documento para ese check (la fecha de expedición), leído
+ * del bloque. Solo hace falta para SINTETIZAR el veredicto de un documento que
+ * se cargó antes de que el check existiera: sin él no habría nada que evaluar.
+ */
+export type ResolverExtraido = (spec: SpecVigencia) => string | null
+
+/**
  * Recalcula las filas de `match_mode: 'vigencia'` contra el objetivo de hoy.
  *
  * Devuelve el MISMO objeto si nada cambió, para que quien llama pueda evitar
@@ -76,14 +84,37 @@ export function refrescarVigenciaCrossCheck(
   checks: SpecVigencia[],
   resolverObjetivo: ResolverObjetivo,
   hoyISO: string,
+  resolverExtraido?: ResolverExtraido,
 ): CrossCheckGuardado | null | undefined {
-  if (!cc || !Array.isArray(cc.results) || cc.results.length === 0) return cc
-
   const specPorSlug = new Map<string, SpecVigencia>()
   for (const c of checks) {
     if ((c?.match_mode ?? 'exact') === 'vigencia' && c?.slug) specPorSlug.set(c.slug, c)
   }
   if (specPorSlug.size === 0) return cc
+
+  // Un documento cargado ANTES de que el check existiera no tiene veredicto
+  // guardado, y sin esto la señal solo llegaría a los que se volvieran a subir.
+  // Medido en SOENA (2026-08-13): 136 casos abiertos con certificado, y solo 22
+  // con veredicto — o sea que sin sintetizar, la alerta cubriría uno de cada seis.
+  //
+  // Se sintetiza SOLO si todos los checks del bloque son de vigencia: si hubiera
+  // otros modos sin evaluar, un panel que dice "validado" afirmaría de más sobre
+  // comprobaciones que nadie hizo.
+  if (!cc || !Array.isArray(cc.results) || cc.results.length === 0) {
+    if (!resolverExtraido || specPorSlug.size !== checks.length) return cc
+    const results = [...specPorSlug.values()].flatMap(spec => {
+      const extraido = resolverExtraido(spec)
+      const objetivo = resolverObjetivo(spec)
+      if (extraido === null || objetivo === null) return []
+      return [filaVigencia(spec, extraido, objetivo, hoyISO)]
+    })
+    if (results.length === 0) return cc
+    return {
+      ...(cc ?? {}),
+      passed: results.every(r => r.estado !== 'falla'),
+      results,
+    }
+  }
 
   let cambio = false
   const results = cc.results.map(r => {
@@ -100,27 +131,8 @@ export function refrescarVigenciaCrossCheck(
     // criterio del margen.
     if (objetivo === null) return r
 
-    const v = estadoVigencia(r.extracted, objetivo, {
-      vigenciaDias: spec.vigencia_dias,
-      hoyISO,
-      margenSinObjetivoDias: spec.margen_sin_cita_dias,
-    })
-
-    const estado: 'ok' | 'falla' | 'no_comprobable' =
-      v.estado === 'no_comprobable' ? 'no_comprobable' : v.estado === 'vigente' ? 'ok' : 'falla'
-
-    const fila: ResultadoCrossCheck = {
-      ...r,
-      expected: objetivo,
-      ok: estado === 'ok',
-      estado,
-      pedir_desde: v.pedirDesde,
-      ...(v.estado === 'no_comprobable'
-        ? { vigencia: 'no_comprobable' as const }
-        : { vigencia: v.estado }),
-      ...(v.criterio ? { criterio: v.criterio } : {}),
-    }
-    if (!v.criterio) delete fila.criterio
+    const fila = { ...r, ...filaVigencia(spec, r.extracted, objetivo, hoyISO) }
+    if (!fila.criterio) delete fila.criterio
 
     if (
       fila.expected !== r.expected
@@ -140,4 +152,33 @@ export function refrescarVigenciaCrossCheck(
   // tumba el conjunto (ese es justo el estado que existe para no bloquear).
   const passed = results.every(r => (r.estado ?? (r.ok ? 'ok' : 'falla')) !== 'falla')
   return { ...cc, passed, results }
+}
+
+/** El veredicto de una fila de vigencia, calculado contra el objetivo de hoy. */
+function filaVigencia(
+  spec: SpecVigencia,
+  extraido: string,
+  objetivo: string,
+  hoyISO: string,
+): ResultadoCrossCheck {
+  const v = estadoVigencia(extraido, objetivo, {
+    vigenciaDias: spec.vigencia_dias,
+    hoyISO,
+    margenSinObjetivoDias: spec.margen_sin_cita_dias,
+  })
+  const estado: 'ok' | 'falla' | 'no_comprobable' =
+    v.estado === 'no_comprobable' ? 'no_comprobable' : v.estado === 'vigente' ? 'ok' : 'falla'
+
+  return {
+    slug: spec.slug,
+    label: spec.label ?? spec.slug,
+    expected: objetivo,
+    extracted: extraido,
+    ok: estado === 'ok',
+    mode: 'vigencia',
+    estado,
+    vigencia: v.estado,
+    pedir_desde: v.pedirDesde,
+    ...(v.criterio ? { criterio: v.criterio } : {}),
+  }
 }
