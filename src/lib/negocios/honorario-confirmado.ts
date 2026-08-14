@@ -94,9 +94,16 @@ export function faltaHonorarioConfirmado(e: EstadoHonorario): boolean {
   return (e.precioAprobado ?? 0) <= 0
 }
 
+/**
+ * Texto unico del aviso. Lo consumen el motivo del servidor y el aviso que la
+ * pantalla muestra ANTES de que el operador llene el formulario de pago: escrito
+ * dos veces, la pantalla y el rechazo del servidor terminarian diciendo cosas
+ * distintas sobre el mismo bloqueo.
+ */
+export const MENSAJE_HONORARIO_PENDIENTE =
+  'Este caso no tiene el honorario confirmado. Aprueba la propuesta economica (elige el plan) antes de registrar el cobro.'
+
 /** Motivo legible para la pantalla. `null` si el negocio SI puede recibir cobros. */
 export function motivoNoPuedeCobrar(e: EstadoHonorario): string | null {
-  return faltaHonorarioConfirmado(e)
-    ? 'Este caso no tiene el honorario confirmado. Aprueba la propuesta economica (elige el plan) antes de registrar el cobro.'
-    : null
+  return faltaHonorarioConfirmado(e) ? MENSAJE_HONORARIO_PENDIENTE : null
 }

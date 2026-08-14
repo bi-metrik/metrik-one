@@ -8,7 +8,8 @@ import {
   startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
 } from './timer-actions'
 import { FEATURES } from '@/lib/feature-flags'
-import { agregarPagoFab, getNegociosParaPagoFab, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+import { agregarPagoFab, getNegociosParaPagoFab, negocioPuedeRecibirCobro, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 
@@ -450,6 +451,15 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [epaycoData, setEpaycoData] = useState<EpaycoDesglose | null>(null)
   const [epaycoError, setEpaycoError] = useState<string | null>(null)
 
+  // ¿El negocio elegido puede recibir el cobro? Se pregunta al elegirlo, no al
+  // enviar: el trigger de `cobros` ya rechaza, pero ese rechazo llega después de
+  // teclear referencia y valor.
+  // Se guarda el ID del negocio bloqueado, no un booleano: al cambiar de negocio
+  // el aviso se apaga solo porque el id deja de coincidir, sin quedar prendido
+  // por el resultado del anterior mientras la consulta del nuevo está en vuelo.
+  const [negocioSinHonorario, setNegocioSinHonorario] = useState<string | null>(null)
+  const faltaHonorario = negocioSinHonorario !== null && negocioSinHonorario === negocioId
+
   const esEpayco = fuente === 'epayco'
 
   useEffect(() => {
@@ -462,6 +472,15 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     })
     return () => { cancel = true }
   }, [])
+
+  useEffect(() => {
+    if (!negocioId) return
+    let cancel = false
+    negocioPuedeRecibirCobro(negocioId).then((res) => {
+      if (!cancel && !res.puede) setNegocioSinHonorario(negocioId)
+    })
+    return () => { cancel = true }
+  }, [negocioId])
 
   // Debounce de verificacion ePayco
   useEffect(() => {
@@ -496,6 +515,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
 
   function handleSubmit() {
     if (!negocioId) return toast.error('Elige el negocio')
+    if (faltaHonorario) return toast.error(MENSAJE_HONORARIO_PENDIENTE)
     if (!referencia.trim()) return toast.error('Ingresa la referencia del pago')
     if (esEpayco && epaycoStatus !== 'success') return toast.error('Verifica la referencia ePayco antes de registrar')
     if (!esEpayco && (!Number(monto) || Number(monto) <= 0)) return toast.error('Ingresa el monto del pago')
@@ -552,6 +572,13 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
               </select>
             )}
           </PagoField>
+
+          {faltaHonorario && (
+            <div className="rounded-md border px-3 py-2 text-[12px] leading-relaxed" style={{ borderColor: '#FCD34D', backgroundColor: '#FFFBEB', color: '#78350F' }}>
+              <span className="font-semibold">Falta confirmar el honorario. </span>
+              {MENSAJE_HONORARIO_PENDIENTE}
+            </div>
+          )}
 
           <PagoField label="Fuente del pago">
             <div className="grid grid-cols-1 gap-2">
@@ -659,7 +686,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
           <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
-          <button onClick={handleSubmit} disabled={pending || loadingNegocios || (esEpayco && epaycoStatus !== 'success')} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
+          <button onClick={handleSubmit} disabled={pending || loadingNegocios || faltaHonorario || (esEpayco && epaycoStatus !== 'success')} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
             Registrar pago
           </button>

@@ -9,6 +9,7 @@ import {
 } from '@/lib/actions/pago-externo-actions'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
 
 interface BloquePagoExternoProps {
   negocioBloqueId: string
@@ -16,6 +17,12 @@ interface BloquePagoExternoProps {
   instancia: NegocioBloque | null
   modo: 'editable' | 'visible'
   nota?: string // texto guía explícito sobre qué referencia ingresar
+  /**
+   * El negocio no tiene el honorario confirmado, así que el trigger de `cobros`
+   * va a rechazar el registro. Se avisa ANTES de abrir el formulario: el listado
+   * de lo ya registrado se conserva, porque esa es su otra razón de existir.
+   */
+  faltaHonorario?: boolean
 }
 
 const fmt = (v: number) =>
@@ -43,6 +50,7 @@ export default function BloquePagoExterno({
   instancia,
   modo,
   nota,
+  faltaHonorario = false,
 }: BloquePagoExternoProps) {
   const [pagos, setPagos] = useState<PagoExternoRegistrado[]>(
     () => ((instancia?.data as { pagos_externos?: PagoExternoRegistrado[] } | null)?.pagos_externos) ?? [],
@@ -167,10 +175,13 @@ export default function BloquePagoExterno({
         </div>
       )}
 
+      {faltaHonorario && <AvisoHonorarioPendiente />}
+
       {!showForm ? (
         <button
           onClick={() => setShowForm(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-medium text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+          disabled={faltaHonorario}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-medium text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-50 disabled:hover:bg-white transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
           Agregar pago externo

@@ -5,6 +5,7 @@ import { Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
 
 export interface MultiPagoField {
   slug: string
@@ -24,6 +25,12 @@ interface BloqueDatosMultiPagoProps {
   modo: 'editable' | 'visible'
   fields: MultiPagoField[]
   onComplete?: () => void
+  /**
+   * El negocio no tiene el honorario confirmado. El auto-cobro que dispara este
+   * bloque al completarse lo rechazaría el trigger de `cobros`, así que la
+   * captura se cierra y el aviso llega antes de teclear referencia y valor.
+   */
+  faltaHonorario?: boolean
 }
 
 const fmt = (v: number) =>
@@ -35,6 +42,7 @@ export default function BloqueDatosMultiPago({
   modo,
   fields,
   onComplete,
+  faltaHonorario = false,
 }: BloqueDatosMultiPagoProps) {
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
   const savedPagos = (saved.pagos ?? []) as PagoRow[]
@@ -127,6 +135,8 @@ export default function BloqueDatosMultiPago({
   // Modo editable: filas dinamicas
   return (
     <div className="space-y-3">
+      {faltaHonorario && <AvisoHonorarioPendiente />}
+
       {pagos.map((pago, i) => (
         <div key={i} className="flex items-start gap-2">
           <div className="flex-1 space-y-2">
@@ -139,7 +149,7 @@ export default function BloqueDatosMultiPago({
                 type="text"
                 value={pago.referencia_epayco}
                 onChange={e => updateRow(i, 'referencia_epayco', e.target.value)}
-                disabled={isPending}
+                disabled={isPending || faltaHonorario}
                 placeholder="Ej: REF-12345"
                 className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
               />
@@ -153,7 +163,7 @@ export default function BloqueDatosMultiPago({
                 type="number"
                 value={pago.valor_pago}
                 onChange={e => updateRow(i, 'valor_pago', e.target.value)}
-                disabled={isPending}
+                disabled={isPending || faltaHonorario}
                 placeholder="0"
                 className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
               />
@@ -174,7 +184,7 @@ export default function BloqueDatosMultiPago({
 
       <button
         onClick={addRow}
-        disabled={isPending}
+        disabled={isPending || faltaHonorario}
         className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#E5E7EB] py-2 text-xs font-medium text-[#6B7280] hover:border-[#10B981] hover:text-[#10B981] transition-colors disabled:opacity-40"
       >
         <Plus className="h-3.5 w-3.5" />

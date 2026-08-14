@@ -102,6 +102,32 @@ export async function getNegociosParaPagoFab(): Promise<{
 }
 
 /**
+ * ¿Este negocio puede recibir un cobro hoy? Se pregunta al ELEGIR el negocio en
+ * el modal, antes de teclear referencia y valor.
+ *
+ * Aquí el flag no puede viajar precomputado como en el detalle: el FAB elige el
+ * negocio desde una lista de todos los abiertos (223 en SOENA), y resolverlo para
+ * cada uno costaría una llamada por fila. Por eso pregunta una sola vez, cuando
+ * ya se sabe por cuál.
+ *
+ * El criterio NO se reimplementa: lo responde `negocio_puede_recibir_cobro`, la
+ * misma función que sostiene el trigger de `cobros`. Ante `null` (negocio de otro
+ * workspace) o error se deja pasar: el trigger sigue siendo la barrera dura, y un
+ * aviso que aparece por no poder leer el estado enseña a ignorarlo.
+ */
+export async function negocioPuedeRecibirCobro(
+  negocioId: string,
+): Promise<{ puede: boolean }> {
+  const ctx = await ctxFabPago()
+  if (!ctx.ok) return { puede: true }
+  const { data, error } = await db(ctx.supabase).rpc('negocio_puede_recibir_cobro', {
+    p_negocio_id: negocioId,
+  })
+  if (error || data == null) return { puede: true }
+  return { puede: data === true }
+}
+
+/**
  * Registra un pago desde el FAB global. Guard por ROL (no por área de etapa) +
  * REUSA la vía única `registrarPagoEnNegocio` (misma validación ePayco/duplicado,
  * mismo saldo, mismo des-conciliar). Etiqueta el origen 'fab' en activity_log.

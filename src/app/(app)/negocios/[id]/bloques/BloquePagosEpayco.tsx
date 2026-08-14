@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { consultarEpayco, registrarPagoEpayco, type NegocioExistente } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
 
 export interface PagoRegistrado {
   ref_payco: number
@@ -34,6 +35,12 @@ interface BloquePagosEpaycoProps {
    * Sin el flag, el bloque se comporta igual que hoy.
    */
   validarEpayco?: boolean
+  /**
+   * El negocio no tiene el honorario confirmado, así que el trigger de `cobros`
+   * va a rechazar el registro. Se avisa ANTES del formulario y se cierra la
+   * entrada: dejarla abierta manda a teclear referencia y valor para nada.
+   */
+  faltaHonorario?: boolean
 }
 
 const fmt = (v: number) =>
@@ -47,6 +54,7 @@ export default function BloquePagosEpayco({
   tipoCobro,
   nota,
   validarEpayco = false,
+  faltaHonorario = false,
 }: BloquePagosEpaycoProps) {
   const [pagos, setPagos] = useState<PagoRegistrado[]>(
     () => ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
@@ -227,6 +235,11 @@ export default function BloquePagosEpayco({
       {/* New payment section */}
       <div className="border-t border-[#E5E7EB] pt-3 mt-1">
         <p className="text-[11px] font-medium text-[#6B7280] mb-2">Nuevo pago</p>
+        {faltaHonorario && (
+          <div className="mb-2">
+            <AvisoHonorarioPendiente />
+          </div>
+        )}
         {nota && (
           <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
             {nota}
@@ -245,7 +258,7 @@ export default function BloquePagosEpayco({
                 if (v.length <= 9) setNewRef(v)
               }}
               placeholder="Ej: 344799998"
-              disabled={consultando || isPending}
+              disabled={consultando || isPending || faltaHonorario}
               className={`w-full rounded-lg border bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60 ${
                 newRef.length > 0 && newRef.length !== 9
                   ? 'border-amber-400 focus:border-amber-400'
@@ -260,7 +273,7 @@ export default function BloquePagosEpayco({
           </div>
           <button
             onClick={handleConsultar}
-            disabled={consultando || newRef.length !== 9}
+            disabled={consultando || newRef.length !== 9 || faltaHonorario}
             className="inline-flex items-center gap-1.5 rounded-lg bg-[#3B82F6] px-3 py-2 text-[10px] font-medium text-white hover:bg-[#2563EB] disabled:opacity-60 transition-colors whitespace-nowrap self-start"
           >
             {consultando ? 'Consultando...' : <><Search className="h-3 w-3" />Consultar</>}
