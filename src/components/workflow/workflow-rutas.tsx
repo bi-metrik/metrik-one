@@ -152,7 +152,7 @@ export function WorkflowRutas({
   canConfigSla?: boolean
   onUpdateAviso?: (
     etapaId: string,
-    destino: 'interno' | 'cliente',
+    destino: 'interno' | 'cliente' | 'cliente_whatsapp',
     activo: boolean,
   ) => Promise<{ ok: boolean; error?: string }>
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
@@ -461,7 +461,7 @@ function EtapaFila({
   canConfigSla?: boolean
   onUpdateAviso?: (
     etapaId: string,
-    destino: 'interno' | 'cliente',
+    destino: 'interno' | 'cliente' | 'cliente_whatsapp',
     activo: boolean,
   ) => Promise<{ ok: boolean; error?: string }>
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
@@ -612,6 +612,7 @@ function EtapaFila({
             etapaId={etapa.id}
             avisoInterno={Boolean(etapa.aviso_interno)}
             avisoCliente={Boolean(etapa.aviso_cliente)}
+            avisoClienteWhatsapp={Boolean(etapa.aviso_cliente_whatsapp)}
             canEdit={Boolean(canConfigSla)}
             onUpdateAviso={onUpdateAviso}
           />

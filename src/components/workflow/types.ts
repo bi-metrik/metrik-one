@@ -54,6 +54,8 @@ export interface WorkflowEtapa {
   aviso_interno?: boolean
   /** ¿Avisa por correo al CLIENTE al entrar su negocio? */
   aviso_cliente?: boolean
+  /** ¿Avisa al CLIENTE por WhatsApp? Canal independiente del correo. */
+  aviso_cliente_whatsapp?: boolean
   // Solo en modo 'detailed':
   is_active?: boolean
   routing?: WorkflowRouting | null
