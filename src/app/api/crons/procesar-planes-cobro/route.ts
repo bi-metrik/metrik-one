@@ -14,6 +14,12 @@ import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
 
 const DIAS_ANTICIPACION = 3
 const DIAS_GRACIA = 3
+// Dia del mes en que se ABRE la ventana de emision de cuentas. La ventana no se
+// cierra: ver el comentario del paso 4.
+const DIA_APERTURA_EMISION = 10
+// Dia con el que se fecha la cuenta (dia de envio al cliente). No depende del dia
+// en que el cron logre correr.
+const DIA_EMISION_CUENTA = 13
 
 export const runtime = 'nodejs'
 
@@ -219,12 +225,22 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── 4. Emitir cuentas de cobro el dia 10 ──────────────────
+  // ── 4. Emitir cuentas de cobro DESDE el dia 10 ────────────
   // Para workspaces con modules.cobros_recurrentes=true, agrupa cobros
   // programados del mes por empresa pagadora y emite 1 cuenta por grupo.
-  // Emite el dia 10 para dar margen de revision/aprobacion antes del envio (dia 13)
-  // y del vencimiento (dia 15). Idempotente: si la cuenta ya existe para ese
-  // workspace+empresa+periodo, skip.
+  // La ventana se abre el dia 10 para dar margen de revision/aprobacion antes
+  // del envio (dia 13) y del vencimiento (dia 15).
+  //
+  // La ventana se queda ABIERTA el resto del mes a proposito. Con la guarda
+  // anterior (`diaHoy === 10`) una sola invocacion perdida dejaba el mes entero
+  // sin facturar, en silencio y sin reintento: paso el 2026-08-10, cuando el
+  // proyecto todavia estaba en plan Hobby de Vercel (precision por hora, no por
+  // minuto) y ese cron no se disparo ese dia, mientras el de las 13:00 si corrio.
+  // La emision ya es idempotente (`generarCuentasCobroPeriodo` salta la cuenta si
+  // ya existe para workspace + anio + mes + empresa), asi que reintentar cada dia
+  // no duplica nada: el dia 11 emite lo que el 10 no pudo, y del 12 en adelante
+  // no hace nada. La fecha de emision sigue clavada al dia 13 para que la cuenta
+  // no cambie de forma segun el dia en que el cron logre correr.
   let cuentasEmitidas = 0
   let cuentasOmitidas = 0
   const cuentasErrores: { workspace_id: string; error: string }[] = []
@@ -235,7 +251,7 @@ export async function GET(req: NextRequest) {
   const añoHoy = parseInt(añoStr, 10)
   const mesHoy = parseInt(mesStr, 10)
 
-  if (diaHoy === 10) {
+  if (diaHoy >= DIA_APERTURA_EMISION) {
     const { data: workspacesConFlag } = await supabase
       .from('workspaces')
       .select('id, slug')
@@ -246,9 +262,9 @@ export async function GET(req: NextRequest) {
         const r = await generarCuentasCobroPeriodo(supabase, ws.id, añoHoy, mesHoy, {
           dryRun: false,
           isDraft: false,
-          // Emite el dia 10 pero la cuenta se fecha el dia 13 (dia de envio al cliente);
-          // el vencimiento sigue el dia 15 (fechaEsperada interna).
-          fechaEmisionOverride: `${añoHoy}-${String(mesHoy).padStart(2, '0')}-13`,
+          // La cuenta se fecha el dia 13 (dia de envio al cliente) corra el cron el
+          // dia que corra; el vencimiento sigue el dia 15 (fechaEsperada interna).
+          fechaEmisionOverride: `${añoHoy}-${String(mesHoy).padStart(2, '0')}-${DIA_EMISION_CUENTA}`,
         })
         cuentasEmitidas += r.cuentasCreadas
         cuentasOmitidas += r.cuentasOmitidas
