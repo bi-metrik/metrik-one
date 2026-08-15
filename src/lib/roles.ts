@@ -121,7 +121,15 @@ export const ROLE_PERMISSIONS = {
     canExportRiesgos: true,
     canConfigReglasValidacion: false,
     canViewFlujo: true,
-    canConfigSlaEtapas: false,
+    // El supervisor de cada área configura SU proceso: los tiempos máximos de cada
+    // etapa y a quién se le avisa al entrar un caso (al equipo y al cliente). Los dos
+    // controles cuelgan de este permiso porque son la misma decisión: cómo se opera
+    // la etapa. Sin él, quien lleva el día a día tiene que pedirle cada ajuste al
+    // dueño, y la configuración se queda vieja — que es justo lo que pasó en SOENA:
+    // Daniela y Deisy definieron en la capacitación qué se notifica en cada etapa y
+    // no podían activarlo. Sigue fuera de su alcance el resto de la configuración
+    // del flujo (etapas, bloques, gates), que es de owner/admin.
+    canConfigSlaEtapas: true,
     canViewSlaLog: true,
     // Calidad — el supervisor de calidad es quien audita: ve todos los agentes,
     // no ve el dinero (esa vista es exclusiva del dueno).

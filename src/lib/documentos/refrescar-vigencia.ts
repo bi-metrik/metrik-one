@@ -81,11 +81,15 @@ export type ResolverExtraido = (spec: SpecVigencia) => string | null
  */
 export function refrescarVigenciaCrossCheck(
   cc: CrossCheckGuardado | null | undefined,
-  checks: SpecVigencia[],
+  spec: { checks?: SpecVigencia[] | null; solo_alerta?: boolean } | null | undefined,
   resolverObjetivo: ResolverObjetivo,
   hoyISO: string,
   resolverExtraido?: ResolverExtraido,
 ): CrossCheckGuardado | null | undefined {
+  // Se recibe el `cross_check` COMPLETO de la config, no solo sus checks: al
+  // sintetizar hace falta `solo_alerta`, y sin él el panel nace en rojo diciendo
+  // "discrepancia" sobre un control que no bloquea nada. Se vio en pantalla.
+  const checks = spec?.checks ?? []
   const specPorSlug = new Map<string, SpecVigencia>()
   for (const c of checks) {
     if ((c?.match_mode ?? 'exact') === 'vigencia' && c?.slug) specPorSlug.set(c.slug, c)
@@ -111,6 +115,9 @@ export function refrescarVigenciaCrossCheck(
     if (results.length === 0) return cc
     return {
       ...(cc ?? {}),
+      // `solo_alerta` sale de la CONFIG, no del guardado: en una síntesis no hay
+      // guardado del cual heredarlo.
+      ...(spec?.solo_alerta !== undefined ? { solo_alerta: spec.solo_alerta } : {}),
       passed: results.every(r => r.estado !== 'falla'),
       results,
     }

@@ -52,7 +52,7 @@ interface Props {
   /** Prende/apaga el aviso por correo de la etapa (equipo o cliente). */
   onUpdateAviso?: (
     etapaId: string,
-    destino: 'interno' | 'cliente',
+    destino: 'interno' | 'cliente' | 'cliente_whatsapp',
     activo: boolean,
   ) => Promise<{ ok: boolean; error?: string }>
 }
@@ -656,7 +656,7 @@ function EtapaCard({
   canConfigSla?: boolean
   onUpdateAviso?: (
     etapaId: string,
-    destino: 'interno' | 'cliente',
+    destino: 'interno' | 'cliente' | 'cliente_whatsapp',
     activo: boolean,
   ) => Promise<{ ok: boolean; error?: string }>
   onUpdateSla?: (etapaId: string, slaHoras: number | null) => Promise<{ ok: boolean; error?: string }>
@@ -783,6 +783,7 @@ function EtapaCard({
         etapaId={etapa.id}
         avisoInterno={Boolean(etapa.aviso_interno)}
         avisoCliente={Boolean(etapa.aviso_cliente)}
+        avisoClienteWhatsapp={Boolean(etapa.aviso_cliente_whatsapp)}
         canEdit={Boolean(canConfigSla)}
         onUpdateAviso={onUpdateAviso}
       />
@@ -1157,16 +1158,18 @@ export function AvisosConfig({
   etapaId,
   avisoInterno,
   avisoCliente,
+  avisoClienteWhatsapp,
   canEdit,
   onUpdateAviso,
 }: {
   etapaId: string
   avisoInterno: boolean
   avisoCliente: boolean
+  avisoClienteWhatsapp: boolean
   canEdit: boolean
   onUpdateAviso?: (
     etapaId: string,
-    destino: 'interno' | 'cliente',
+    destino: 'interno' | 'cliente' | 'cliente_whatsapp',
     activo: boolean,
   ) => Promise<{ ok: boolean; error?: string }>
 }) {
@@ -1174,9 +1177,13 @@ export function AvisosConfig({
   const router = useRouter()
 
   // Sin permiso y sin ningun aviso puesto no hay nada que contar.
-  if (!canEdit && !avisoInterno && !avisoCliente) return null
+  if (!canEdit && !avisoInterno && !avisoCliente && !avisoClienteWhatsapp) return null
 
-  const toggle = (destino: 'interno' | 'cliente', actual: boolean, label: string) => {
+  const toggle = (
+    destino: 'interno' | 'cliente' | 'cliente_whatsapp',
+    actual: boolean,
+    label: string,
+  ) => {
     if (!onUpdateAviso) return
     startTransition(async () => {
       const res = await onUpdateAviso(etapaId, destino, !actual)
@@ -1208,6 +1215,13 @@ export function AvisosConfig({
         disabled={!canEdit || isPending}
         onToggle={() => toggle('cliente', avisoCliente, 'cliente')}
         title="Correo al cliente contándole que su caso llegó a esta etapa"
+      />
+      <ChipAviso
+        activo={avisoClienteWhatsapp}
+        label="cliente · WhatsApp"
+        disabled={!canEdit || isPending}
+        onToggle={() => toggle('cliente_whatsapp', avisoClienteWhatsapp, 'cliente por WhatsApp')}
+        title="WhatsApp al cliente contándole que su caso llegó a esta etapa. Requiere el disparador de FunnelChat configurado en el workspace"
       />
     </div>
   )

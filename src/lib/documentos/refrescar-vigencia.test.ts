@@ -37,12 +37,12 @@ describe('refrescarVigenciaCrossCheck', () => {
   it('sin cita, el veredicto CADUCA con el paso del tiempo', () => {
     // Expedido el 24-jul. El 13-ago le quedan 20 días de los 30: con margen de
     // 10 todavía sirve. Es el estado que quedó guardado.
-    const alDia = refrescarVigenciaCrossCheck(guardado(), [CHECK_CON_MARGEN], () => '', '2026-08-13')
+    const alDia = refrescarVigenciaCrossCheck(guardado(), { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-13')
     expect(alDia?.results[0].vigencia).toBe('vigente')
 
     // Diez días después el mismo documento ya no alcanza, y la pantalla tiene
     // que decirlo aunque nadie haya vuelto a tocar el bloque.
-    const despues = refrescarVigenciaCrossCheck(guardado(), [CHECK_CON_MARGEN], () => '', '2026-08-24')
+    const despues = refrescarVigenciaCrossCheck(guardado(), { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-24')
     expect(despues?.results[0].vigencia).toBe('reemplazar')
     expect(despues?.results[0].estado).toBe('falla')
     expect(despues?.results[0].ok).toBe(false)
@@ -54,7 +54,7 @@ describe('refrescarVigenciaCrossCheck', () => {
     // Guardado contra una cita del 20-ago (26 días: vigente). La DIAN la corre
     // al 30-sep y el certificado deja de servir.
     const cc = guardado({ expected: '2026-08-20', criterio: 'cita' })
-    const out = refrescarVigenciaCrossCheck(cc, [CHECK_CON_CITA], () => '2026-09-30', '2026-08-13')
+    const out = refrescarVigenciaCrossCheck(cc, { checks: [CHECK_CON_CITA], solo_alerta: true }, () => '2026-09-30', '2026-08-13')
     expect(out?.results[0].expected).toBe('2026-09-30')
     expect(out?.results[0].vigencia).toBe('esperar')
     expect(out?.results[0].criterio).toBe('cita')
@@ -64,7 +64,7 @@ describe('refrescarVigenciaCrossCheck', () => {
 
   it('un check sin cambios devuelve el MISMO objeto (no reescribe por gusto)', () => {
     const cc = guardado({ expected: '', criterio: 'margen', vigencia: 'vigente' })
-    const out = refrescarVigenciaCrossCheck(cc, [CHECK_CON_MARGEN], () => '', '2026-08-13')
+    const out = refrescarVigenciaCrossCheck(cc, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-13')
     expect(out).toBe(cc)
   })
 
@@ -73,7 +73,7 @@ describe('refrescarVigenciaCrossCheck', () => {
       passed: false,
       results: [{ slug: 'nit', expected: '900', extracted: '901', ok: false, mode: 'exact', estado: 'falla' }],
     }
-    const out = refrescarVigenciaCrossCheck(cc, [CHECK_CON_MARGEN], () => '2026-09-30', '2026-08-13')
+    const out = refrescarVigenciaCrossCheck(cc, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '2026-09-30', '2026-08-13')
     expect(out).toBe(cc)
   })
 
@@ -82,7 +82,7 @@ describe('refrescarVigenciaCrossCheck', () => {
     // reproducir ese criterio aquí sería una segunda copia de la misma regla.
     const spec: SpecVigencia = { ...CHECK_CON_MARGEN, source_alternatives: [{}] }
     const cc = guardado()
-    const out = refrescarVigenciaCrossCheck(cc, [spec], () => '', '2026-08-24')
+    const out = refrescarVigenciaCrossCheck(cc, { checks: [spec], solo_alerta: true }, () => '', '2026-08-24')
     expect(out).toBe(cc)
   })
 
@@ -90,26 +90,31 @@ describe('refrescarVigenciaCrossCheck', () => {
     // `null` (no se pudo resolver) es distinto de '' (no hay cita todavía, que
     // sí es una respuesta y activa el margen).
     const cc = guardado()
-    const out = refrescarVigenciaCrossCheck(cc, [CHECK_CON_MARGEN], () => null, '2026-08-24')
+    const out = refrescarVigenciaCrossCheck(cc, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => null, '2026-08-24')
     expect(out).toBe(cc)
   })
 
   it('sin resolvedor del extraído, un cross_check ausente pasa sin tocarse', () => {
-    expect(refrescarVigenciaCrossCheck(null, [CHECK_CON_MARGEN], () => '', '2026-08-13')).toBeNull()
+    expect(refrescarVigenciaCrossCheck(null, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-13')).toBeNull()
     const vacio: CrossCheckGuardado = { passed: true, results: [] }
-    expect(refrescarVigenciaCrossCheck(vacio, [CHECK_CON_MARGEN], () => '', '2026-08-13')).toBe(vacio)
+    expect(refrescarVigenciaCrossCheck(vacio, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-13')).toBe(vacio)
   })
 
   it('SINTETIZA el veredicto de un documento cargado antes de que el check existiera', () => {
     // Medido en SOENA: 136 abiertos con certificado y solo 22 con veredicto. Sin
     // esto la alerta llegaría a uno de cada seis.
     const out = refrescarVigenciaCrossCheck(
-      null, [CHECK_CON_MARGEN], () => '', '2026-08-24', () => '2026-07-24',
+      null, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-24', () => '2026-07-24',
     )
     expect(out?.results).toHaveLength(1)
     expect(out?.results[0].vigencia).toBe('reemplazar')
     expect(out?.results[0].label).toBe(CHECK_CON_MARGEN.label)
     expect(out?.passed).toBe(false)
+    // ⚠️ Sin esto el panel nace en ROJO diciendo "discrepancia detectada" sobre un
+    // control que no bloquea nada. Se vio en la pantalla de V0027, no en las
+    // pruebas: al sintetizar no hay veredicto guardado del cual heredar la marca,
+    // así que tiene que salir de la config.
+    expect(out?.solo_alerta).toBe(true)
   })
 
   it('NO sintetiza si el bloque tiene checks de otros modos sin evaluar', () => {
@@ -117,14 +122,14 @@ describe('refrescarVigenciaCrossCheck', () => {
     // nadie hizo: sin extracción no se puede recalcular un match de texto.
     const otro: SpecVigencia = { slug: 'nit', match_mode: 'exact' }
     const out = refrescarVigenciaCrossCheck(
-      null, [CHECK_CON_MARGEN, otro], () => '', '2026-08-24', () => '2026-07-24',
+      null, { checks: [CHECK_CON_MARGEN, otro], solo_alerta: true }, () => '', '2026-08-24', () => '2026-07-24',
     )
     expect(out).toBeNull()
   })
 
   it('no sintetiza cuando el documento no trajo la fecha de expedición', () => {
     const out = refrescarVigenciaCrossCheck(
-      null, [CHECK_CON_MARGEN], () => '', '2026-08-24', () => null,
+      null, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-24', () => null,
     )
     expect(out).toBeNull()
   })
@@ -133,7 +138,7 @@ describe('refrescarVigenciaCrossCheck', () => {
     // El equipo reemplazó el documento y el bloque quedó guardado como vencido
     // por la corrida anterior; al releer con la expedición nueva, sale vigente.
     const cc = guardado({ extracted: '2026-08-20', vigencia: 'reemplazar', estado: 'falla', ok: false })
-    const out = refrescarVigenciaCrossCheck(cc, [CHECK_CON_MARGEN], () => '', '2026-08-24')
+    const out = refrescarVigenciaCrossCheck(cc, { checks: [CHECK_CON_MARGEN], solo_alerta: true }, () => '', '2026-08-24')
     expect(out?.results[0].vigencia).toBe('vigente')
     expect(out?.passed).toBe(true)
   })
