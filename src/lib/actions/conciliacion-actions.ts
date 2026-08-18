@@ -7,8 +7,8 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { randomUUID } from 'crypto'
 import { consultarTransaccionEpayco } from '@/lib/epayco'
 import { ctxFabPago } from '@/lib/actions/fab-pago-actions'
+import { escalonesDelNegocio, imputarPago } from '@/lib/upme/imputacion-pago'
 import {
-  repartirPagoTarifaHonorario,
   tipoCobroHonorario,
   tarifaConfirmadaPorNegocio,
   valorARecaudarCartera,
@@ -1575,9 +1575,38 @@ export async function crearCobrosSoenaCore(
   const fecha = (opts?.fecha ?? '').trim() || todayBogotaISO()
   const fuente = (opts?.fuente ?? 'epayco').trim() || 'epayco'
 
-  // La tarifa (pasante) se cubre PRIMERO; el resto es honorario (helper puro).
-  const { monto_pasante: montoPasante, monto_honorario: montoHonorario } =
-    repartirPagoTarifaHonorario(monto, modelo.tarifa_upme)
+  // ── Como se parte este pago ──
+  // HONORARIO PRIMERO, despues la tarifa (decision de Mauricio, 2026-08-18: "sin eso
+  // no detona lo demas"). Antes era al reves, y esa era la segunda regla de imputacion
+  // del sistema: la vista del P&L (`v_cobro_valor`) siempre imputo por escalones
+  // honorario, tarifa, honorario. Ahora hay una sola, en `lib/upme/imputacion-pago.ts`.
+  //
+  // `consumidoAntes` es lo que el negocio ya recaudo: sin eso, un segundo pago volveria
+  // a llenar el anticipo que ya estaba cubierto y llamaria honorario a plata que es
+  // tarifa.
+  const { data: previosRaw } = await db(supabase)
+    .from('cobros')
+    .select('monto, external_ref')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+    .not('fecha', 'is', null)
+  const consumidoAntes = ((previosRaw ?? []) as Array<{ monto: number | null; external_ref: string | null }>)
+    // Los de ESTA referencia no cuentan: son este mismo pago, ya partido en una
+    // corrida anterior. Contarlos desplazaria la imputacion en cada reintento.
+    .filter((c) => c.external_ref !== referencia)
+    .reduce((sum, c) => sum + Number(c.monto ?? 0), 0)
+
+  const imputacion = imputarPago({
+    pago: monto,
+    consumidoAntes,
+    escalones: escalonesDelNegocio(
+      modelo.aprobado_honorario ?? 0,
+      modelo.tarifa_upme,
+      modelo.aprobado_plan,
+    ),
+  })
+  const montoPasante = imputacion.pasante
+  const montoHonorario = imputacion.honorario
   const tipoHonorario = tipoCobroHonorario(modelo.aprobado_plan)
 
   // Idempotencia: buscar cobros ya existentes de esta referencia en este negocio,

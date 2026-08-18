@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   valorARecaudar,
-  repartirPagoTarifaHonorario,
   tipoCobroHonorario,
   saldoEsperadoPorModalidad,
   umbralRecaudoHandoff,
@@ -44,35 +43,6 @@ describe('valorARecaudar — honorario (precio_aprobado) + tarifa (pasante)', ()
   })
   it('redondea a peso', () => {
     expect(valorARecaudar(1_000_000.4, modelo({ tarifa_upme: 500_000.4 }))).toBe(1_500_001)
-  })
-})
-
-describe('repartirPagoTarifaHonorario — la tarifa se cubre primero', () => {
-  it('pago > tarifa → pasante = tarifa, honorario = resto', () => {
-    const r = repartirPagoTarifaHonorario(4_200_000, 1_200_000)
-    expect(r.monto_pasante).toBe(1_200_000)
-    expect(r.monto_honorario).toBe(3_000_000)
-  })
-  it('pago = tarifa → todo pasante, honorario 0', () => {
-    const r = repartirPagoTarifaHonorario(1_200_000, 1_200_000)
-    expect(r.monto_pasante).toBe(1_200_000)
-    expect(r.monto_honorario).toBe(0)
-  })
-  it('SIN BARRERAS: pago < tarifa → pasante toma todo el pago, honorario 0 (no rechaza)', () => {
-    const r = repartirPagoTarifaHonorario(800_000, 1_200_000)
-    expect(r.monto_pasante).toBe(800_000)
-    expect(r.monto_honorario).toBe(0)
-  })
-  it('50/50: 1er pago = tarifa completa + 50% honorario', () => {
-    // honorario 3M, tarifa 1.2M. 1er pago (anticipo) = 1.2M + 1.5M = 2.7M
-    const r = repartirPagoTarifaHonorario(2_700_000, 1_200_000)
-    expect(r.monto_pasante).toBe(1_200_000)   // tarifa completa primero
-    expect(r.monto_honorario).toBe(1_500_000) // 50% del honorario de 3M
-  })
-  it('sin tarifa (0) → todo honorario', () => {
-    const r = repartirPagoTarifaHonorario(3_000_000, 0)
-    expect(r.monto_pasante).toBe(0)
-    expect(r.monto_honorario).toBe(3_000_000)
   })
 })
 
@@ -147,10 +117,13 @@ describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
     expect(p.cubierto).toBe(false)
   })
 
-  it('Plan 1, recaudo parcial que solo cubre la UPME → falta el anticipo del honorario', () => {
+  it('Plan 1, recaudo parcial: la plata entra al HONORARIO primero, no a la UPME', () => {
+    // $1.200.000 recaudados. Con la regla vieja (tarifa primero) esto dejaba la UPME
+    // cubierta y $1.500.000 de honorario pendiente. Con honorario primero, los
+    // $1.200.000 son honorario y lo que falta es casi toda la tarifa.
     const p = calcularPendienteHandoff(HONORARIO, modeloP1, 1_200_000)
-    expect(p.pendienteUpme).toBe(0)          // UPME cubierta (reparto tarifa-primero)
-    expect(p.pendienteHonorario).toBe(1_500_000)
+    expect(p.pendienteHonorario).toBe(300_000)
+    expect(p.pendienteUpme).toBe(1_200_000)
     expect(p.pendienteTotal).toBe(1_500_000)
     expect(p.cubierto).toBe(false)
   })
@@ -163,11 +136,14 @@ describe('calcularPendienteHandoff — desglose UPME vs honorario', () => {
     expect(p.cubierto).toBe(true)
   })
 
-  it('Plan 2, recaudo = tarifa + 50% honorario NO alcanza (exige 100% honorario)', () => {
+  it('Plan 2, recaudo de $2.700.000 NO alcanza: exige el honorario completo + tarifa', () => {
     const p = calcularPendienteHandoff(HONORARIO, modeloP2, 2_700_000)
     expect(p.umbral).toBe(valorRecaudar)
-    expect(p.pendienteUpme).toBe(0)
-    expect(p.pendienteHonorario).toBe(1_500_000)
+    // Honorario primero: de los $2.700.000, $2.700.000 son honorario (techo $3M) y
+    // nada toca todavia la tarifa.
+    expect(p.pendienteHonorario).toBe(300_000)
+    expect(p.pendienteUpme).toBe(1_200_000)
+    expect(p.pendienteTotal).toBe(1_500_000)
     expect(p.cubierto).toBe(false)
   })
 
