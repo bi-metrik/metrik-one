@@ -6,6 +6,7 @@ import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerc
 import { getOperacionesBono } from './operaciones-actions'
 import { getDatosDueno } from '../calidad/actions'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
+import { necesitaDatosGenericos } from '@/lib/tableros/pestanas'
 import TablerosClient from './tableros-client'
 import VitrinaPlaceholder from '@/components/vitrina-placeholder'
 import { getVitrinaCopy } from '@/lib/workspace/vitrina'
@@ -39,8 +40,11 @@ export default async function TablerosPage() {
     modules = (ws?.modules as Record<string, boolean> | null) ?? { business: true }
   }
 
-  // Only fetch business data if business module is active
-  const [comercial, operativo, financiero] = modules.business
+  // Las tres genericas (Financiero/Comercial/Operativo) solo se consultan cuando
+  // se van a pintar: son tres rondas de consultas y un workspace con tableros
+  // propios no muestra ninguna. La condicion es la MISMA que usa la pantalla
+  // para dibujarlas (`@/lib/tableros/pestanas`), escrita una sola vez.
+  const [comercial, operativo, financiero] = necesitaDatosGenericos(modules)
     ? await Promise.all([
         getComercialData('mes'),
         getOperativoData('mes'),
@@ -91,13 +95,14 @@ export default async function TablerosPage() {
     ? await getDatosDueno()
     : null
 
-  // Foto del proceso por etapa (gate propio). La pestaña Operativo generica mide
-  // `proyectos`, vacio en los workspaces Clarity; esta mide `negocios`.
+  // Vista "Casos" de la pestaña Operaciones: foto del proceso por etapa (gate
+  // propio). La pestaña Operativo generica mide `proyectos`, vacio en los
+  // workspaces Clarity; esta mide `negocios`.
   const procesoSeccional = modules.proceso_semanal ? await getProcesoPorSeccional() : null
 
-  // Bono de operaciones (gate propio). Mide a las PERSONAS del area de
-  // operaciones, no el estado de los casos: son preguntas distintas y por eso no
-  // cuelga de `proceso_semanal`. El recorte del dinero lo hace la accion.
+  // Vista "Personas" de la misma pestaña (gate propio). Mide a las PERSONAS del
+  // area, no el estado de los casos: son preguntas distintas y por eso cada una
+  // conserva su modulo. El recorte del dinero lo hace la accion.
   const [anioOps, mesOps] = bogotaYearMonth().split('-')
   const operaciones = modules.operaciones_bonos
     ? await getOperacionesBono(Number(anioOps), Number(mesOps))
