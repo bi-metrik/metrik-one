@@ -257,18 +257,6 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
                             Abrir <ExternalLink className="h-3 w-3" />
                           </a>
                         ) : null}
-                        {(role === 'owner' || role === 'admin')
-                          && (c.estado === 'enviada' || c.estado === 'aprobada_lista_envio') ? (
-                          <div className="mt-1">
-                            <RegistrarPagoDialog
-                              cuentaId={c.id}
-                              numero={c.numero}
-                              cobros={c.cobros_ids
-                                .map(id => cobrosPorId.get(id))
-                                .filter((x): x is CobroDeCuentaUI => Boolean(x))}
-                            />
-                          </div>
-                        ) : null}
                       </td>
                       <td className="px-3 py-2">
                         {role === 'owner' && c.estado === 'emitida_pendiente_aprobacion' ? (
