@@ -56,6 +56,7 @@ import { guardEditarBloque, guardAvanzarStage, guardVerNegocio } from '@/lib/per
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
+import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 
@@ -5327,8 +5328,11 @@ export async function reevaluarBloquesCobros(
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  // Precio del negocio y cobros aprobados/causados en paralelo
-  const [negocioRes, cobrosRes] = await Promise.all([
+  // Precio del negocio, sus cobros y el modelo de dinero, en paralelo. El modelo hace
+  // falta porque lo que el cliente debe es honorario MAS tarifa pasante confirmada:
+  // comparar contra el honorario pelado daba el bloque por completo en 42 negocios de
+  // SOENA que no habian pagado la tarifa. Ver `lib/cobros/saldo-negocio.ts`.
+  const [negocioRes, cobrosRes, modelo] = await Promise.all([
     db(supabase)
       .from('negocios')
       .select('precio_aprobado, precio_estimado')
@@ -5336,17 +5340,19 @@ export async function reevaluarBloquesCobros(
       .single(),
     supabase
       .from('cobros')
-      .select('monto')
+      .select('monto, fecha')
       .eq('negocio_id', negocioId)
       ,
+    leerModeloDineroCompleto(supabase, negocioId),
   ])
 
   const neg = negocioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
   const precio = neg?.precio_aprobado ?? neg?.precio_estimado ?? 0
-  const totalCobrado = ((cobrosRes.data ?? []) as Array<{ monto: number }>)
-    .reduce((sum, c) => sum + (c.monto ?? 0), 0)
-  const saldo = precio - totalCobrado
-  const shouldBeComplete = precio > 0 && saldo <= 0
+  // Un workspace sin modelo de dinero (sin tarifa pasante) da tarifa 0, y entonces el
+  // valor a recaudar es el precio: el comportamiento generico no cambia.
+  const aRecaudar = valorARecaudar(precio, modelo)
+  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null }>)
+  const shouldBeComplete = bloqueCobrosCompleto({ valorARecaudar: aRecaudar, cobrado: totalCobrado })
 
   // Buscar todas las instancias de bloques cobros del negocio
   const { data: bloquesRaw } = await db(supabase)
