@@ -421,6 +421,12 @@ AS $function$
   );
 $function$;
 
+-- CREATE OR REPLACE conserva los grants de la definicion anterior; se re-declaran
+-- para que esta migracion sea explicita y auto-contenida.
+REVOKE EXECUTE ON FUNCTION public.get_operaciones_bono_resumen(uuid, integer, integer) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.get_operaciones_bono_resumen(uuid, integer, integer) FROM anon;
+GRANT  EXECUTE ON FUNCTION public.get_operaciones_bono_resumen(uuid, integer, integer) TO authenticated;
+
 COMMENT ON FUNCTION public.get_operaciones_bono_resumen(uuid, integer, integer) IS
   'Tablero de bono de operaciones para un mes: 4 indicadores por persona, con cobertura de datos, puntaje y bono. Calidad Y correcciones van NULL si no hay reprocesos que las respalden. SECURITY DEFINER, scope al workspace del llamante. El filtro de quien ve el dinero es de la capa server.';
 
