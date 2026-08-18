@@ -19,6 +19,7 @@ import {
   type SeccionalDIAN,
 } from '@/lib/dian/seccionales'
 import type { GuiaVersion, GuiaData, GenerarGuiaInput } from './guia-devolucion-types'
+import { fechaHoraEnLetras } from '@/lib/negocios/fecha-hora-campo'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -27,12 +28,10 @@ const MESES_ES = [
   'julio','agosto','septiembre','octubre','noviembre','diciembre',
 ]
 
-function fechaEnLetras(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso + 'T00:00:00')
-  if (Number.isNaN(d.getTime())) return ''
-  return `${d.getDate()} de ${MESES_ES[d.getMonth()]} de ${d.getFullYear()}`
-}
+// La cita puede venir con hora ('2026-09-26T09:30') o heredada sin ella
+// ('2026-09-26'). `fechaHoraEnLetras` cubre los dos casos; concatenar 'T00:00:00'
+// como antes rompía el valor con hora y dejaba la Guía sin fecha de cita.
+const fechaEnLetras = (iso: string | null): string => fechaHoraEnLetras(iso)
 
 function fechaGeneracion(d: Date): string {
   return `Generada el ${d.getDate()} de ${MESES_ES[d.getMonth()]} de ${d.getFullYear()}`
