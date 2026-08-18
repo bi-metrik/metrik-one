@@ -7,7 +7,7 @@ import {
   registrarPagoExterno,
   type PagoExternoRegistrado,
 } from '@/lib/actions/pago-externo-actions'
-import { todayBogotaISO } from '@/lib/dates/bogota'
+import { todayBogotaISO, formatFecha } from '@/lib/dates/bogota'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
 
@@ -33,15 +33,8 @@ const fmt = (v: number) =>
   }).format(v)
 
 function fmtDate(iso: string) {
-  if (!iso) return ''
-  // iso 'YYYY-MM-DD' — construir Date local sin sufijo Z para no correr el día
-  const [y, m, d] = iso.split('-').map(Number)
-  if (!y || !m || !d) return iso
-  return new Date(y, m - 1, d).toLocaleDateString('es-CO', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  // `formatFecha` ya trata 'YYYY-MM-DD' como dia civil: no lo corre a la zona.
+  return formatFecha(iso, { day: 'numeric', month: 'short', year: 'numeric' }) ?? iso
 }
 
 export default function BloquePagoExterno({

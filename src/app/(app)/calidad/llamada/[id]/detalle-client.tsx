@@ -9,6 +9,7 @@ import { BloquesTecnica } from '../../components/bloques-tecnica'
 import { HablaSplit } from '../../components/habla-split'
 import { OrigenBadge, SeveridadBadge } from '../../components/semaforo-badge'
 import { DISCLAIMER_BANDERAS, duracion, mmss, SEMAFORO_LABEL, type LlamadaDetalle } from '../../types'
+import { formatFecha } from '@/lib/dates/bogota'
 
 export default function DetalleClient({ llamada }: { llamada: LlamadaDetalle }) {
   // Clic en una bandera → la cinta salta a su segundo. Es el gesto que conecta
@@ -44,7 +45,7 @@ export default function DetalleClient({ llamada }: { llamada: LlamadaDetalle }) 
       <div style={{ marginBottom: 20 }}>
         <div style={eyebrow}>
           Detalle de llamada ·{' '}
-          {new Date(llamada.fechaHora).toLocaleString('es-CO', {
+          {formatFecha(llamada.fechaHora, {
             day: '2-digit',
             month: 'long',
             year: 'numeric',
@@ -96,7 +97,7 @@ export default function DetalleClient({ llamada }: { llamada: LlamadaDetalle }) 
           >
             Grabación del{' '}
             <b style={{ color: C.ink }}>
-              {new Date(llamada.fechaGrabacion).toLocaleString('es-CO', {
+              {formatFecha(llamada.fechaGrabacion, {
                 day: '2-digit',
                 month: 'long',
                 year: 'numeric',

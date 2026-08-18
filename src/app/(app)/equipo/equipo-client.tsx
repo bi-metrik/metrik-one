@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { getRolePermissions } from '@/lib/roles'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { HoraEntry } from './actions'
+import { formatFecha } from '@/lib/dates/bogota'
 import {
   aprobarHora, rechazarHora, revertirHora, aprobarTodasHoras, getStaffResumen,
 } from './actions'
@@ -74,7 +75,7 @@ export default function EquipoClient({
     navigate('mes', d.toISOString().slice(0, 7))
   }
 
-  const mesLabel = new Date(filtroMes + '-15').toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
+  const mesLabel = formatFecha(`${filtroMes}-15`, { month: 'long', year: 'numeric' }) ?? filtroMes
 
   // Active filter count
   const activeFilterCount = [filtroStaff, filtroProyecto, filtroEstado].filter(f => f !== 'todos').length
@@ -277,7 +278,7 @@ export default function EquipoClient({
                     <span className="truncate">{h.proyecto_nombre}</span>
                   </>
                 )}
-                <span className="ml-auto shrink-0">{new Date(h.fecha + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}</span>
+                <span className="ml-auto shrink-0">{formatFecha(h.fecha, { day: 'numeric', month: 'short' })}</span>
               </div>
 
               {/* Line 3: staff */}

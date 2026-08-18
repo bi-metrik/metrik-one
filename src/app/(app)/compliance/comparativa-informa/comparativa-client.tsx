@@ -25,6 +25,7 @@ import {
   type DualListResponse,
   type DualMetrics,
 } from '@/lib/actions/compliance-dual';
+import { formatFecha } from '@/lib/dates/bogota'
 
 type TabKey = 'cronologico' | 'dashboard';
 
@@ -348,13 +349,7 @@ function ConsultaRow({
       className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F5F4F2]/60 cursor-pointer"
     >
       <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap text-xs">
-        {new Date(item.fecha).toLocaleDateString('es-CO', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        })}
+        {formatFecha(item.fecha, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
       </td>
       <td className="px-4 py-2.5 text-[#1A1A1A] font-medium text-xs">{item.workspace_origen}</td>
       <td className="px-4 py-2.5 text-[#6B7280] text-xs">{item.modo}</td>
@@ -471,7 +466,7 @@ function DetalleContent({
           {detail.identificacion || detail.nombre || '—'}
         </p>
         <p className="text-xs text-[#6B7280] mt-0.5">
-          {new Date(detail.fecha).toLocaleString('es-CO')}
+          {formatFecha(detail.fecha, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </p>
       </div>
 

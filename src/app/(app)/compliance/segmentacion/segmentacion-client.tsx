@@ -19,6 +19,7 @@ import {
   VARIABLE_EMPLEADO_LABEL,
   pesosSumanUno,
 } from '@/lib/valida/segmentacion-presets';
+import { formatFecha } from '@/lib/dates/bogota'
 
 type TabKey = 'contrapartes' | 'empleados' | 'resultados';
 
@@ -114,7 +115,7 @@ export default function SegmentacionClient({
               Parametriza la metodología de segmentación de riesgo del workspace. Versión actual:{' '}
               <strong>{configInicial.version}</strong>
               {configInicial.aplicada_at && (
-                <> · Aplicada {new Date(configInicial.aplicada_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}</>
+                <> · Aplicada {formatFecha(configInicial.aplicada_at, { day: 'numeric', month: 'short', year: 'numeric' })}</>
               )}
             </p>
           </div>

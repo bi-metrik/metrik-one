@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Image from 'next/image'
 import { RotateCcw } from 'lucide-react'
 import ReabrirNegocioModal from './reabrir-negocio-modal'
+import { formatFecha } from '@/lib/dates/bogota'
 
 interface Props {
   negocioId: string
@@ -23,13 +24,7 @@ const MOTIVO_LABEL: Record<'exitoso' | 'perdido' | 'cancelado', string> = {
 }
 
 function formatDateLong(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleDateString('es-CO', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
+  return formatFecha(iso, { day: 'numeric', month: 'long', year: 'numeric' }) ?? ''
 }
 
 /**

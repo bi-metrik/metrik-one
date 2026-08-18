@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, ExternalLink, Loader2 } from 'lucide-react'
 import type { NegocioDelMismoContacto } from '@/app/(app)/negocios/negocio-v2-actions'
+import { formatFecha } from '@/lib/dates/bogota'
 
 const CARBON = '#1A1A1A'
 const GRIS = '#6B7280'
@@ -23,8 +24,7 @@ function etiquetaEstado(estado: string): string {
 }
 
 function fechaCorta(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+  return formatFecha(iso, { day: '2-digit', month: 'short', year: 'numeric' }) ?? ''
 }
 
 /**

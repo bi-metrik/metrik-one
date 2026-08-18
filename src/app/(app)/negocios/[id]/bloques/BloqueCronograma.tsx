@@ -5,6 +5,7 @@ import { CalendarDays, Plus, CheckCircle2, Circle, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 
 interface CronogramaItem {
   id: string
@@ -29,8 +30,7 @@ interface BloqueCronogramaProps {
 }
 
 function fmtDate(iso: string | null | undefined) {
-  if (!iso) return '—'
-  return new Date(iso + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+  return formatBogotaFechaCortaAno(iso) ?? '—'
 }
 
 export default function BloqueCronograma({

@@ -71,6 +71,7 @@ import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
 import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { GuiaEtapaCard } from './GuiaEtapaCard'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -2177,7 +2178,7 @@ export default function NegocioDetailClient({
             <Pause className="h-3.5 w-3.5 text-amber-600 shrink-0" />
             <div className="flex-1 text-xs">
               <span className="font-medium text-amber-800 dark:text-amber-300">
-                Pausado hasta {new Date(negocio.pausado_hasta + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
+                Pausado hasta {formatBogotaFechaCorta(negocio.pausado_hasta)}
               </span>
               {negocio.motivo_pausa && (
                 <span className="text-amber-700 dark:text-amber-400 ml-1">

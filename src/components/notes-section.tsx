@@ -5,6 +5,7 @@ import { MessageSquare, Trash2, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { getNotes, addNote, deleteNote } from '@/app/(app)/notes-actions'
 import type { Note } from '@/types/database'
+import { formatFecha } from '@/lib/dates/bogota'
 
 interface NotesSectionProps {
   entityType: string   // 'opportunity', 'project', 'contact', etc.
@@ -158,7 +159,7 @@ export default function NotesSection({ entityType, entityId, inheritedFrom }: No
                       {typeConfig.label}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
-                      {new Date(note.created_at ?? '').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {formatFecha(note.created_at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </span>
                     {note.inherited && inheritedFrom && (
                       <span className="text-[9px] text-muted-foreground italic">

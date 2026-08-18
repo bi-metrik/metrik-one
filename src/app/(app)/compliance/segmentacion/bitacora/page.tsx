@@ -5,6 +5,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { listarBitacoraSegmentacion } from '@/lib/actions/valida-segmentacion';
 import { PRESET_LABEL, VARIABLE_CONTRAPARTE_LABEL, VARIABLE_EMPLEADO_LABEL } from '@/lib/valida/segmentacion-presets';
 import type { EntradaBitacora } from '@/lib/valida/segmentacion-presets';
+import { formatFecha } from '@/lib/dates/bogota'
 
 export const dynamic = 'force-dynamic';
 
@@ -97,8 +98,7 @@ export default async function BitacoraPage() {
 }
 
 function EntradaCard({ entrada, nombreUsuario }: { entrada: EntradaBitacora; nombreUsuario: string | null }) {
-  const fecha = new Date(entrada.aplicada_at).toLocaleString('es-CO', {
-    timeZone: 'America/Bogota',
+  const fecha = formatFecha(entrada.aplicada_at, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

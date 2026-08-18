@@ -7,13 +7,13 @@ import { FileAudio } from 'lucide-react'
 import { C, MONO } from './components/tokens'
 import { OrigenBadge, SemaforoBadge } from './components/semaforo-badge'
 import { duracion, slugAgente, type ListaLlamadas, type Semaforo } from './types'
+import { formatBogotaFechaCorta, formatFecha } from '@/lib/dates/bogota'
 
 /** Miles con punto: 2533 se lee mal, 2.533 se lee de un golpe. */
 const num = (n: number) => n.toLocaleString('es-CO')
 
 /** `2026-06-29` → `29 de jun`. */
-const fmtDia = (iso: string) =>
-  new Date(`${iso}T12:00:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+const fmtDia = (iso: string) => formatBogotaFechaCorta(iso) ?? iso
 
 const FILTROS = [
   { key: 'todas', label: 'Todas' },
@@ -26,13 +26,9 @@ const FILTROS = [
 type FiltroKey = (typeof FILTROS)[number]['key']
 
 function fmtFecha(iso: string) {
-  return new Date(iso).toLocaleString('es-CO', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
+  return formatFecha(iso, {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+  }) ?? iso
 }
 
 export default function CalidadClient({
