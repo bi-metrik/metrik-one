@@ -23,6 +23,8 @@ import { diasDesde } from '@/lib/negocios/antiguedad'
 import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
+import { evaluarAnulabilidad } from '@/lib/cobros/anulabilidad'
+import { esCobroAnulado, montoRegistrado } from '@/lib/cobros/anulacion'
 import {
   guardarAviso,
   resolverAviso,
@@ -522,6 +524,15 @@ export interface RefPorcion {
   es_reparto: boolean
   /** Valor total del pago de la referencia, persistido en el cobro de origen. */
   ref_total: number | null
+  /** Ya esta anulada. Su `monto` es 0; lo que registro vive en `monto_registrado`. */
+  anulado: boolean
+  /** Lo que la porcion registro, este anulada o no. Es lo que va en pantalla. */
+  monto_registrado: number
+  anulacion_motivo: string | null
+  /** ¿La financiera puede anularla desde aqui? Lo decide `evaluarAnulabilidad`. */
+  anulable: boolean
+  /** Si no es anulable, por que. Texto listo para mostrar. */
+  bloqueo_anulacion: string | null
 }
 
 /** Una referencia de pago cargada al workspace, con sus porciones. */
@@ -717,6 +728,12 @@ interface CobroRow {
   external_ref: string | null
   fuente: string | null
   fecha: string | null
+  /** Marca las cuotas de un plan de cobro. Lo lee `evaluarAnulabilidad`. */
+  plan_cobro_id: string | null
+  /** En una fila anulada `monto` vale 0: el valor que tenia vive en `monto_anulado`. */
+  anulado_at: string | null
+  monto_anulado: number | null
+  anulacion_motivo: string | null
   split_json: { split_id?: string; por_reparto?: boolean; ref_total?: number; por_devolver?: boolean; origen?: string; split_total?: number } | null
 }
 
@@ -824,7 +841,7 @@ async function cargarNegociosYCobros(
   // deciden si la tarifa de un negocio es cartera (ver `tarifaEsCartera`).
   const { data: cobrosRaw } = await db(supabase)
     .from('cobros')
-    .select('id, negocio_id, monto, tipo_cobro, external_ref, fuente, fecha, split_json')
+    .select('id, negocio_id, monto, tipo_cobro, plan_cobro_id, external_ref, fuente, fecha, split_json, anulado_at, monto_anulado, anulacion_motivo')
     .eq('workspace_id', workspaceId)
   const cobros = (cobrosRaw ?? []) as CobroRow[]
 
@@ -972,6 +989,34 @@ function inferirFuente(c: CobroRow): string | null {
 
 // ── getConciliacionV2 — fuente única del panel rediseñado ────────────────────
 
+/**
+ * Ids de los cobros que respaldan una cuenta de cobro emitida y NO anulada.
+ *
+ * El vinculo vive en `cuentas_cobro_emitidas.cobros_ids` (un array), no en
+ * `cobros.factura_id`, que esta en 0 de 189 filas. Se resuelve en una consulta para todo
+ * el panel. Si la consulta falla se devuelve `null`, y el panel trata TODO como
+ * respaldado: no poder comprobar el soporte no es permiso para anular.
+ */
+async function cobrosConCuentaDeCobroViva(
+  supabase: unknown,
+  workspaceId: string,
+): Promise<{ tiene: (cobroId: string) => boolean }> {
+  const ids = new Set<string>()
+  const { data, error } = await db(supabase)
+    .from('cuentas_cobro_emitidas')
+    .select('cobros_ids, estado')
+    .eq('workspace_id', workspaceId)
+  // No poder comprobar el soporte no es permiso para anular: si la consulta falla, TODO
+  // queda como respaldado. Ver `parametro-pendiente-no-se-elige-comodo`.
+  if (error) return { tiene: () => true }
+  for (const cc of ((data ?? []) as Array<{ cobros_ids: string[] | null; estado: string | null }>)) {
+    // Una cuenta con estado NULL retiene igual: el descarte es solo para las anuladas.
+    if (cc.estado === 'anulada') continue
+    for (const id of cc.cobros_ids ?? []) ids.add(id)
+  }
+  return { tiene: (cobroId: string) => ids.has(cobroId) }
+}
+
 export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
@@ -1002,6 +1047,10 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
     conciliadoNegocio.set(r.negocio_id, r.conciliado)
   }
 
+  // Que cobros respaldan una cuenta de cobro EMITIDA y no anulada. Se lee una vez para
+  // todo el panel: por cobro serian tantas consultas como porciones en pantalla.
+  const enCuentaCobro = await cobrosConCuentaDeCobroViva(supabase, workspaceId)
+
   // Agrupar cobros por external_ref → referencias
   const refMap = new Map<string, CobroRow[]>()
   for (const c of cobros) {
@@ -1016,6 +1065,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
     const fuente = inferirFuente(rows[0])
     const porciones: RefPorcion[] = rows.map((r) => {
       const neg = r.negocio_id ? negocios.get(r.negocio_id) : null
+      const veredicto = evaluarAnulabilidad(r, { enCuentaCobroEmitida: enCuentaCobro.tiene(r.id) })
       return {
         cobro_id: r.id,
         negocio_id: r.negocio_id,
@@ -1027,6 +1077,11 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
         por_devolver: r.tipo_cobro === 'devolucion_pendiente',
         es_reparto: r.split_json?.por_reparto === true,
         ref_total: r.split_json?.ref_total ?? null,
+        anulado: esCobroAnulado(r),
+        monto_registrado: montoRegistrado(r),
+        anulacion_motivo: r.anulacion_motivo,
+        anulable: veredicto.anulable,
+        bloqueo_anulacion: veredicto.anulable ? null : veredicto.error,
       }
     })
     const valorPagado = porciones.filter((p) => !p.por_devolver).reduce((s, p) => s + p.monto, 0)
