@@ -130,9 +130,13 @@ export default function OperacionesPerfilClient({
             titulo="Correcciones de la DIAN"
             peso={P.peso_correcciones * 100}
             score={persona.score_correcciones}
-            cuerpo={persona.correcciones.pct === null
-              ? 'No hubo radicaciones ante la DIAN en el mes.'
-              : `${persona.correcciones.correcciones} correcciones sobre ${persona.correcciones.radicaciones} radicaciones`}
+            cuerpo={!persona.correcciones.medida
+              ? `${persona.correcciones.radicaciones > 0
+                  ? `Hubo ${persona.correcciones.radicaciones} radicacion(es) ante la DIAN, pero `
+                  : ''}nadie registro devoluciones de la DIAN en el mes: no hay con que medir este indicador.`
+              : persona.correcciones.pct === null
+                ? 'No hubo radicaciones ante la DIAN en el mes.'
+                : `${persona.correcciones.correcciones} correcciones sobre ${persona.correcciones.radicaciones} radicaciones`}
             regla={`Por debajo de ${P.piso_operativo * 100}% el indicador vale 0`}
           />
         </div>

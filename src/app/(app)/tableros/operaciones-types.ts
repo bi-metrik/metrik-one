@@ -18,9 +18,17 @@ export interface IndicadorRango {
 }
 
 export interface IndicadorCorrecciones {
+  /** null = no se pudo calcular: sin radicaciones, o sin evidencia que lo respalde. */
   pct: number | null
   radicaciones: number
   correcciones: number
+  /**
+   * false = nadie registro la evidencia que este indicador necesita, asi que
+   * "cero correcciones" no significa trabajo impecable. Es la misma distincion
+   * que `calidad_medida`, y aqui hacia falta: el denominador (radicaciones) se
+   * mide solo, el numerador (devoluciones) sale de `reproceso_eventos`.
+   */
+  medida: boolean
 }
 
 export interface PersonaOperaciones {
@@ -77,6 +85,8 @@ export interface ParametrosBono {
   peso_radicacion: number
   peso_envio: number
   peso_correcciones: number
+  /** Que evidencia exige el indicador de correcciones para calcularse. */
+  correcciones_cobertura: 'devolucion_dian' | 'cualquier_reproceso'
   piso_operativo: number
   techo_operativo: number
   horas_radicacion: number
@@ -93,6 +103,9 @@ export interface OperacionesBonoData {
   /** false = el mecanismo de reprocesos no registro nada en el mes. */
   calidad_medida: boolean
   reprocesos_mes: number
+  /** false = sin la evidencia que pide `correcciones_cobertura`; el indicador no se calcula. */
+  correcciones_medida: boolean
+  devoluciones_mes: number
   personas: PersonaOperaciones[]
   supervisor: SupervisorOperaciones | null
 }
