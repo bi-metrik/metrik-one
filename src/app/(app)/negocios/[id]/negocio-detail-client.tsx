@@ -33,6 +33,7 @@ import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-ba
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import ActivityLog from '@/components/activity-log'
 import CierreNegocioDialog from './cierre-negocio-dialog'
@@ -809,21 +810,27 @@ function SelectorEtapa({
   // línea marca una etapa con es_cierre, ESA es la única terminal (SOENA:
   // Facturación). Si ninguna la marca, cae a la heurística legacy "últimas 3
   // etapas por orden" (retrocompat para líneas sin el flag).
-  const hayEtapaCierre = etapasLinea.some(e => e.es_cierre)
+  const hayEtapaCierre = lineaDeclaraCierre(etapasLinea.map(e => ({ esCierre: e.es_cierre })))
   const maxOrden = etapasLinea.length > 0 ? Math.max(...etapasLinea.map(e => e.orden)) : 0
   const isTerminalStage = etapaActual
     ? (hayEtapaCierre ? etapaActual.es_cierre === true : etapaActual.orden >= maxOrden - 2)
     : false
 
-  // Texto y estilo del boton de cierre segun stage
-  const esEjecucionTerminal = stageActual === 'ejecucion' && isTerminalStage
-  const cierreConfig = esEjecucionTerminal
-    ? { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' }
-    : ({
-        venta: { label: 'Perder', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
-        ejecucion: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
-        cobro: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
-      }[stageActual ?? 'venta'] ?? { label: 'Cerrar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' })
+  // La etapa tal como la lee la regla de cierre. `terminalLegacy` solo pesa cuando la
+  // linea NO declara etapa de cierre; con declaracion, manda la declaracion.
+  const etapaParaCierre: EtapaCierre = {
+    stage: (stageActual as EtapaCierre['stage']) ?? null,
+    esCierre: etapaActual?.es_cierre === true,
+    terminalLegacy: isTerminalStage,
+  }
+
+  // Texto y estilo del boton de cierre. Ya NO se deduce del stage: el stage dice quien
+  // trabaja en la etapa, no si el proceso termina ahi. Ver `lib/negocios/etapa-cierre.ts`.
+  const cierreConfig = {
+    cerrar: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
+    perder: { label: 'Perder', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+    cancelar: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+  }[accionDeCierre(etapaParaCierre, hayEtapaCierre)]
 
   const CierreIcon = cierreConfig.icon
 
@@ -847,6 +854,8 @@ function SelectorEtapa({
             negocioId={negocioId}
             stage={stageActual ?? 'venta'}
             isTerminalStage={isTerminalStage}
+            esEtapaCierre={etapaParaCierre.esCierre}
+            lineaDeclaraCierre={hayEtapaCierre}
             esBuzonLeads={etapaActual?.es_buzon === true}
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
@@ -943,6 +952,8 @@ function SelectorEtapa({
           negocioId={negocioId}
           stage={stageActual ?? 'venta'}
           isTerminalStage={isTerminalStage}
+          esEtapaCierre={etapaParaCierre.esCierre}
+          lineaDeclaraCierre={hayEtapaCierre}
           esBuzonLeads={etapaActual?.es_buzon === true}
           resumenFinanciero={resumenFinanciero}
           precioAprobado={precioAprobado}
