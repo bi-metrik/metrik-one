@@ -7337,6 +7337,36 @@ export async function cancelarNegocio(
 // workspace. Devuelve mensaje de error o null si pasa. Lo satisface igual la
 // extracción IA (manual) que el volcado de Siigo (futuro): ambos escriben en
 // data.campos del mismo bloque.
+/**
+ * ¿Esta linea declara donde cierra, y la etapa actual es esa?
+ *
+ * El `stage` dice QUIEN trabaja la etapa (venta/ejecucion/cobro), no si el proceso termina
+ * ahi. Atarlos dejaba sin cerrar a las etapas finales de `stage: 'venta'` y ofrecia cerrar
+ * desde cualquier etapa de cobro, incluida una que solo existe porque ahi paga la financiera.
+ *
+ * Devuelve el criterio VIEJO (`lineaDeclara: false`) cuando la linea no declara ninguna
+ * etapa de cierre, que al 2026-08-18 son todas menos GIT EV/HEV de SOENA.
+ */
+async function resolverContextoCierre(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  lineaId: string | null,
+  etapaId: string | null,
+): Promise<{ lineaDeclara: boolean; esCierre: boolean }> {
+  if (!lineaId) return { lineaDeclara: false, esCierre: false }
+  const { data: etapas } = await db(supabase)
+    .from('etapas_negocio')
+    .select('id, config_extra')
+    .eq('linea_id', lineaId)
+    .eq('is_active', true)
+  const filas = (etapas ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null }>
+  const esDeCierre = (f: (typeof filas)[number]) => f.config_extra?.etapa_cierre === true
+  return {
+    lineaDeclara: filas.some(esDeCierre),
+    esCierre: filas.some(f => f.id === etapaId && esDeCierre(f)),
+  }
+}
+
 async function validarGateFacturaEmitida(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
@@ -7408,14 +7438,28 @@ export async function completarNegocio(
   // Validar que existe y esta en stage cobro
   const { data: negocio } = await db(supabase)
     .from('negocios')
-    .select('id, stage_actual, estado, precio_aprobado, precio_estimado, etapa_actual_id')
+    .select('id, stage_actual, estado, precio_aprobado, precio_estimado, etapa_actual_id, linea_id')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
 
   if (!negocio) return { error: 'Negocio no encontrado' }
-  if (negocio.stage_actual === 'venta') {
-    return { error: 'Los negocios en etapa de venta se cierran con Perder, no con Completar' }
+
+  const ctxCierre = await resolverContextoCierre(
+    supabase,
+    (negocio as { linea_id?: string | null }).linea_id ?? null,
+    negocio.etapa_actual_id as string | null,
+  )
+
+  // Con la linea declarando su etapa de cierre, manda la declaracion: una etapa final de
+  // `stage: 'venta'` (Entrega, Seguimiento) SI puede completar. Sin declaracion, el criterio
+  // viejo intacto: venta se cierra con Perder.
+  if (ctxCierre.lineaDeclara ? !ctxCierre.esCierre : negocio.stage_actual === 'venta') {
+    return {
+      error: ctxCierre.lineaDeclara
+        ? 'Este negocio solo se puede completar desde la etapa de cierre de su linea.'
+        : 'Los negocios en etapa de venta se cierran con Perder, no con Completar',
+    }
   }
   if (negocio.estado !== 'abierto') {
     return { error: 'El negocio ya esta cerrado' }
@@ -7433,7 +7477,10 @@ export async function completarNegocio(
   if (!esCierreNoFacturable) {
     if (gateErr) return { error: gateErr }
   } else {
-    if (negocio.stage_actual !== 'cobro') {
+    // Misma regla que completar, y a proposito: la excepcion es una FORMA de cerrar, no una
+    // capacidad aparte. Amarrada a `stage === 'cobro'` quedaba invisible justo en la etapa
+    // donde el proceso de verdad termina.
+    if (ctxCierre.lineaDeclara ? !ctxCierre.esCierre : negocio.stage_actual !== 'cobro') {
       return { error: 'El cierre no facturable solo está disponible en la etapa de cierre.' }
     }
     if (!motivoNoFacturable || !motivosNoFacturable.has(motivoNoFacturable)) {
@@ -7460,9 +7507,11 @@ export async function completarNegocio(
       return { error: 'Solo administración o financiera puede autorizar un cierre no facturable.' }
     }
 
-    // Conserva la segmentación de áreas y responsabilidad que aplica a la etapa
-    // de cobro. El chequeo anterior es la autorización adicional del override.
-    const permisoCierre = await guardAvanzarStage(negocioId, 'cobro')
+    // Conserva la segmentación de áreas y responsabilidad que aplica a la etapa donde el
+    // negocio ESTA. Clavarlo en 'cobro' medía el permiso contra una fase que puede no ser la
+    // suya: con el cierre declarado por config, la etapa de cierre puede ser de venta.
+    const stageCierre = (negocio.stage_actual ?? 'cobro') as Stage
+    const permisoCierre = await guardAvanzarStage(negocioId, stageCierre)
     if (!permisoCierre.ok) {
       return { error: permisoCierre.error ?? 'Sin permisos para cerrar en esta fase.' }
     }

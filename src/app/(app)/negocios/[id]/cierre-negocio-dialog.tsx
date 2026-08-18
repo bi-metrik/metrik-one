@@ -10,6 +10,7 @@ import {
   completarNegocio,
 } from '../negocio-v2-actions'
 import { RAZONES_PERDIDA_NEGOCIO, RAZONES_DESCARTE_LEAD, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
+import { permiteCompletar, permiteCierreNoFacturable as puedeOfrecerNoFacturable, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,10 @@ interface CierreNegocioDialogProps {
   negocioId: string
   stage: string // 'venta' | 'ejecucion' | 'cobro'
   isTerminalStage?: boolean
+  /** `config_extra.etapa_cierre` de la etapa actual: la linea declara que aqui cierra. */
+  esEtapaCierre?: boolean
+  /** ¿La linea declara AL MENOS una etapa de cierre? Sin eso rige el criterio viejo. */
+  lineaDeclaraCierre?: boolean
   esBuzonLeads?: boolean // descarte desde el buzón de entrada (Recepción)
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   precioAprobado: number | null
@@ -382,14 +387,23 @@ export default function CierreNegocioDialog({
   negocioId,
   stage,
   isTerminalStage,
+  esEtapaCierre = false,
+  lineaDeclaraCierre = false,
   esBuzonLeads,
   resumenFinanciero,
   precioAprobado,
   puedeCierreNoFacturable = false,
   onClose,
 }: CierreNegocioDialogProps) {
-  const showCompletar = stage === 'cobro' || (stage === 'ejecucion' && isTerminalStage)
-  const showCancelar = stage === 'ejecucion' && !isTerminalStage
+  // El stage dice QUIEN trabaja la etapa, no si el proceso termina ahi. Con la linea
+  // declarando su etapa de cierre, manda la declaracion. Ver `lib/negocios/etapa-cierre.ts`.
+  const etapaParaCierre: EtapaCierre = {
+    stage: (stage as EtapaCierre['stage']) ?? null,
+    esCierre: esEtapaCierre,
+    terminalLegacy: isTerminalStage,
+  }
+  const showCompletar = permiteCompletar(etapaParaCierre, lineaDeclaraCierre)
+  const showCancelar = stage === 'ejecucion' && !showCompletar
 
   // Bloquear scroll del fondo + cerrar con Escape. No se cierra al hacer click
   // fuera a proposito: aqui hay un formulario y un click accidental en el fondo
@@ -419,7 +433,7 @@ export default function CierreNegocioDialog({
       {/* max-h + scroll interno: el formulario de cierre crecio con la excepcion
           no facturable y en pantallas bajas se salia del viewport. */}
       <div className="my-auto flex max-h-[90vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-white shadow-xl p-6 space-y-1">
-        {stage === 'venta' && (
+        {stage === 'venta' && !showCompletar && (
           <PerderForm negocioId={negocioId} esBuzonLeads={esBuzonLeads} onClose={onClose} />
         )}
         {showCancelar && (
@@ -430,7 +444,7 @@ export default function CierreNegocioDialog({
             negocioId={negocioId}
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
-            permiteCierreNoFacturable={stage === 'cobro' && puedeCierreNoFacturable}
+            permiteCierreNoFacturable={puedeOfrecerNoFacturable(etapaParaCierre, lineaDeclaraCierre) && puedeCierreNoFacturable}
             onClose={onClose}
           />
         )}
