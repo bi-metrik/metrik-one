@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { requiereCitaDian, seccionalDesdeRut, SECCIONALES_DIAN } from './seccionales'
+import { requiereCitaDian, seccionalDesdeRut, mapCiudadASeccional, SECCIONALES_DIAN } from './seccionales'
 
 /**
  * Los textos de entrada son los valores REALES que la extracción del RUT
@@ -77,6 +77,28 @@ describe('seccionalDesdeRut', () => {
       const resuelta = seccionalDesdeRut(seccional.nombre_oficial, seccional.tipo_persona)
       expect(resuelta?.slug, seccional.slug).toBe(seccional.slug)
     }
+  })
+})
+
+describe('el domicilio fiscal manda sobre la ciudad de compra', () => {
+  // Caso V0226 (SOENA, 2026-08-18): el vehiculo se compro en Bogota y la clienta
+  // tributa en Barranquilla. El correo al cliente derivaba la seccional de la ciudad
+  // de la FACTURA y nombraba Bogota, mientras el formulario 010 llevaba Barranquilla,
+  // que es la correcta. Las dos superficies leian fuentes distintas.
+  it('el RUT y la ciudad de la factura pueden discrepar, y gana el RUT', () => {
+    const porRut = seccionalDesdeRut('Impuestos de Barranquilla')
+    const porCiudadDeCompra = mapCiudadASeccional('BOGOTA, D.C.', 'natural')
+
+    expect(porRut?.slug).toBe('barranquilla')
+    expect(porCiudadDeCompra?.slug).toBe('bogota-naturales')
+    expect(porRut?.slug).not.toBe(porCiudadDeCompra?.slug)
+    // Y el buzon del correo sale de la misma entrada, asi que tampoco se cruzan.
+    expect(porRut?.email).not.toBe(porCiudadDeCompra?.email)
+  })
+
+  it('el texto del RUT llega con el prefijo "Impuestos de" y se resuelve igual', () => {
+    expect(seccionalDesdeRut('Impuestos de Cali')?.slug).toBe('cali')
+    expect(seccionalDesdeRut('Impuestos de Barranquilla')?.slug).toBe('barranquilla')
   })
 })
 

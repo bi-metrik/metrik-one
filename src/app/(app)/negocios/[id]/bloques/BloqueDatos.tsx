@@ -11,7 +11,7 @@ import type { NegocioBloque } from '../../negocio-v2-actions'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/lib/afi/template-mapping'
-import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug } from '@/lib/dian/seccionales'
+import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug, seccionalDesdeRut } from '@/lib/dian/seccionales'
 import { campoVisible, camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
@@ -216,10 +216,24 @@ export default function BloqueDatos({
     fields.forEach(f => {
       const fallback = f.default !== undefined ? f.default : (f.tipo === 'toggle' ? false : '')
       init[f.slug] = saved[f.slug] ?? autoFillDefaults?.[f.slug] ?? fallback
-      // Seccional DIAN: auto-seleccionar según la ciudad de venta si no hay valor guardado.
+      // Seccional DIAN: la devolución se radica en la seccional del DOMICILIO FISCAL,
+      // que vive en la `direccion_seccional` del RUT — no en la ciudad donde se compró
+      // el vehículo. Son distintas cada vez que el cliente compra fuera de su ciudad
+      // (medido en SOENA: 27 casos abiertos), y ahí el correo nombraba una seccional
+      // mientras el formulario 010 llevaba la correcta.
+      //
+      // Si el campo declara `auto_fill` (apuntándolo al RUT), su valor manda y se
+      // resuelve con `seccionalDesdeRut`, el MISMO resolvedor que decide si el caso
+      // requiere cita. Sin ese `auto_fill` se conserva el comportamiento anterior,
+      // así que ninguna línea que no lo declare cambia.
       if (f.opciones_fuente === 'seccionales_dian' && !saved[f.slug]) {
-        const ciudad = (saved['ciudad_venta'] ?? autoFillDefaults?.['ciudad_venta']) as string | undefined
-        const sec = mapCiudadASeccional(ciudad, 'natural')
+        const desdeRut = autoFillDefaults?.[f.slug] as string | undefined
+        const sec = desdeRut
+          ? seccionalDesdeRut(desdeRut, (saved['tipo_persona'] ?? autoFillDefaults?.['tipo_persona']) as string | undefined)
+          : mapCiudadASeccional(
+              (saved['ciudad_venta'] ?? autoFillDefaults?.['ciudad_venta']) as string | undefined,
+              'natural',
+            )
         if (sec) init[f.slug] = sec.slug
       }
     })
