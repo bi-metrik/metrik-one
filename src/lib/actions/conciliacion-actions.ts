@@ -408,98 +408,6 @@ async function avisarConciliacionPendiente(
   }
 }
 
-/**
- * Elimina UNA porción de un pago (un cobro de un split) PROPUESTA por el comercial.
- * Guard COMERCIAL (`ctxFabPago`). Gate: solo si el negocio del cobro está en
- * `stage_actual='venta'` Y su conciliación NO está confirmada (`negocio_conciliacion.
- * conciliado` != true). Fuera de eso, bloqueado con mensaje que distingue el motivo.
- *
- * Al eliminar: borra el cobro, setea `negocio_conciliacion.conciliado=false`
- * (defensivo), registra en activity_log y revalida. Esto deja la referencia con saldo
- * sin asignar (porciones restantes < total).
- */
-export async function eliminarPorcionPago(
-  cobroId: string,
-): Promise<{ success: true } | { success: false; error: string }> {
-  const ctx = await ctxFabPago()
-  if (!ctx.ok) return { success: false, error: ctx.error }
-  const { supabase, workspaceId, staffId } = ctx
-
-  if (!cobroId) return { success: false, error: 'Porción inválida' }
-
-  // Cargar el cobro + su negocio (stage) en el workspace.
-  const { data: cobroRaw } = await db(supabase)
-    .from('cobros')
-    .select('id, negocio_id, external_ref, monto, negocios:negocio_id ( id, stage_actual, codigo )')
-    .eq('id', cobroId)
-    .eq('workspace_id', workspaceId)
-    .maybeSingle()
-  const cobro = cobroRaw as {
-    id: string
-    negocio_id: string | null
-    external_ref: string | null
-    monto: number
-    negocios: { id: string; stage_actual: string | null; codigo: string | null } | null
-  } | null
-  if (!cobro || !cobro.negocio_id || !cobro.negocios) {
-    return { success: false, error: 'Porción no encontrada' }
-  }
-
-  const negocioId = cobro.negocio_id
-  const stage = cobro.negocios.stage_actual
-
-  // Gate 1: negocio en venta.
-  if (stage !== 'venta') {
-    return {
-      success: false,
-      error: 'Solo puedes eliminar una porción mientras el negocio está en venta. Este negocio ya avanzó — pide al área financiera que la ajuste.',
-    }
-  }
-
-  // Gate 2: la conciliación de este negocio NO está confirmada por la financiera.
-  const { data: concRaw } = await db(supabase)
-    .from('negocio_conciliacion')
-    .select('conciliado')
-    .eq('workspace_id', workspaceId)
-    .eq('negocio_id', negocioId)
-    .maybeSingle()
-  const conciliado = (concRaw as { conciliado?: boolean } | null)?.conciliado === true
-  if (conciliado) {
-    return {
-      success: false,
-      error: 'Esta porción ya fue conciliada por el área financiera. No se puede eliminar — pídele que la ajuste.',
-    }
-  }
-
-  // Borrar la porción.
-  const { error: delErr } = await db(supabase).from('cobros').delete().eq('id', cobroId).eq('workspace_id', workspaceId)
-  if (delErr) return { success: false, error: (delErr as { message?: string }).message ?? 'No se pudo eliminar la porción' }
-
-  // Defensivo: el negocio deja de estar conciliado (cambió su cobrado).
-  await db(supabase)
-    .from('negocio_conciliacion')
-    .update({ conciliado: false, updated_at: new Date().toISOString() })
-    .eq('workspace_id', workspaceId)
-    .eq('negocio_id', negocioId)
-
-  if (staffId && cobro.external_ref) {
-    try {
-      await db(supabase).from('activity_log').insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioId,
-        tipo: 'comentario',
-        autor_id: staffId,
-        contenido: `Porción de pago eliminada por el comercial — libera la referencia ${cobro.external_ref}.`,
-      })
-    } catch { /* no bloquear por el log */ }
-  }
-
-  revalidatePath(`/negocios/${negocioId}`)
-  revalidatePath('/conciliacion')
-  return { success: true }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONCILIACIÓN v2 — modelo por REFERENCIA de pago + 5 pestañas
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1924,11 +1832,12 @@ export async function rechazarRepartoComercial(
  * reparto, dejar todo en el negocio original y mover la referencia completa a otro
  * negocio. Todos son editar una lista de líneas.
  *
- * ⚠️ Lo que esto reemplaza: hasta hoy solo se podía corregir ANTES de que la financiera
- * aceptara el reparto (`eliminarPorcionPago` exige negocio en `venta` Y conciliación sin
- * confirmar). Los errores de plata se descubren tarde, así que en la práctica la
- * corrección era un SQL a mano. Medido el 2026-08-11: las 2 referencias repartidas del
- * workspace estaban las dos fuera del alcance de esa acción.
+ * ⚠️ Lo que esto reemplaza: hasta el 2026-08-11 solo se podía corregir ANTES de que la
+ * financiera aceptara el reparto. Esa acción (`eliminarPorcionPago`, borrada el
+ * 2026-08-18) exigía negocio en `venta` Y conciliación sin confirmar, y los errores de
+ * plata se descubren tarde: en la práctica la corrección era un SQL a mano. Medido el
+ * 2026-08-11: las 2 referencias repartidas del workspace estaban las dos fuera de su
+ * alcance.
  *
  * Las reglas viven en `src/lib/cobros/redistribucion.ts` (puro, 15 pruebas). Aquí solo
  * se resuelven contra la base y se ejecutan.

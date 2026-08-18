@@ -2,10 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle2, Clock, AlertTriangle, Trash2, Loader2, Wallet } from 'lucide-react'
+import { CheckCircle2, Clock, AlertTriangle, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
-import { eliminarPorcionPago } from '@/lib/actions/conciliacion-actions'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
@@ -37,12 +36,6 @@ interface BloqueCobrosProps {
   pendienteHandoff?: PendienteHandoff | null
   /** Modelo de dinero del negocio (plan de pago + honorario + tarifa UPME) leído de la propuesta aprobada. */
   modeloDinero?: ModeloDinero | null
-  /**
-   * Stage del negocio. Cuando es 'venta' Y modo='editable', el comercial puede
-   * eliminar una porción de pago que él propuso (es_reparto_comercial) — el server
-   * (eliminarPorcionPago) valida además que no esté conciliada.
-   */
-  stageActual?: string | null
   /** Costos ePayco descontados por cobro, keyed por ref_payco (= external_ref del cobro). */
   epaycoCostos?: Record<string, EpaycoCostoCobro>
   /**
@@ -82,33 +75,13 @@ const TIPO_LABELS: Record<string, string> = {
 
 function CobroConfirmadoRow({
   cobro,
-  eliminable,
   costo,
 }: {
   cobro: Cobro
-  eliminable: boolean
   costo?: EpaycoCostoCobro | null
 }) {
-  const router = useRouter()
-  const [confirmando, setConfirmando] = useState(false)
-  const [isPending, startTransition] = useTransition()
-
   const descontado = costo && costo.totalDescontado > 0 ? costo.totalDescontado : 0
   const neto = descontado > 0 ? cobro.monto - descontado : null
-
-  const handleEliminar = () => {
-    startTransition(async () => {
-      const res = await eliminarPorcionPago(cobro.id)
-      if (res.success) {
-        toast.success('Porción eliminada. La referencia queda con saldo sin asignar.')
-        setConfirmando(false)
-        router.refresh()
-      } else {
-        toast.error(res.error)
-        setConfirmando(false)
-      }
-    })
-  }
 
   return (
     <div className="rounded-lg border border-[#E5E7EB] p-2.5">
@@ -139,15 +112,6 @@ function CobroConfirmadoRow({
         <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
           {fmt(cobro.monto)}
         </span>
-        {eliminable && !confirmando && (
-          <button
-            onClick={() => setConfirmando(true)}
-            title="Eliminar esta porción (libera la referencia)"
-            className="shrink-0 rounded p-1 hover:bg-red-50"
-          >
-            <Trash2 className="h-3.5 w-3.5 text-[#DC2626]" />
-          </button>
-        )}
       </div>
 
       {/* Desglose ePayco: lo que descuenta la pasarela y el neto recibido por SOENA. */}
@@ -170,28 +134,6 @@ function CobroConfirmadoRow({
         </div>
       )}
 
-      {eliminable && confirmando && (
-        <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-2">
-          <p className="text-[11px] text-[#B91C1C]">¿Eliminar esta porción? Libera la referencia para volver a repartir.</p>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <button
-              onClick={() => setConfirmando(false)}
-              disabled={isPending}
-              className="rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[11px] font-medium text-[#6B7280] hover:bg-[#F5F4F2] disabled:opacity-50"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleEliminar}
-              disabled={isPending}
-              className="inline-flex items-center gap-1 rounded-md bg-[#DC2626] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#B91C1C] disabled:opacity-50"
-            >
-              {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-              Eliminar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -261,9 +203,6 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
   // Cobros es SOLO-LECTURA: registrar y repartir pagos vive en el bloque de Pagos
   // ePayco (una sola puerta para el comercial). Aquí solo se visualiza.
   const permiteRegistrarPago = false
-  // Cobros es SOLO-LECTURA: se quitó "eliminar porción" (las correcciones de reparto
-  // se harán desde el módulo de conciliación / bloque de Pagos).
-  const permiteEliminar = false
   // Confirmados = todos los cobros con fecha (entraron). Cuentan en saldo.
   const confirmados = cobros.filter(c => c.fecha !== null)
   // Programados pendientes = tipo programado + sin fecha confirmada
@@ -423,7 +362,6 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
               <CobroConfirmadoRow
                 key={c.id}
                 cobro={c}
-                eliminable={permiteEliminar && c.es_reparto_comercial === true}
                 costo={c.external_ref ? epaycoCostos?.[c.external_ref] : null}
               />
             ))}

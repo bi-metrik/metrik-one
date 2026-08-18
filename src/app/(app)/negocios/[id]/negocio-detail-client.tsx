@@ -1255,7 +1255,6 @@ function BloqueRenderer({
   datosPorSlug,
   pendienteHandoff,
   modeloDinero,
-  stageActual,
   epaycoCostos,
   registrarPagoEnabled = false,
   negocioFijado,
@@ -1288,7 +1287,6 @@ function BloqueRenderer({
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
-  stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
   registrarPagoEnabled?: boolean
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
@@ -1617,9 +1615,6 @@ function BloqueRenderer({
           precioTotal={precioTotal}
           pendienteHandoff={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : pendienteHandoff}
           modeloDinero={modeloDinero}
-          // Eliminar porción del comercial: solo en la etapa activa (no en historial readonly)
-          // y solo cuando el negocio está en venta. El server valida además "no conciliado".
-          stageActual={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? null : stageActual}
           epaycoCostos={epaycoCostos}
           // Registrar pago inline: solo en la etapa activa (no en historial readonly).
           registrarPagoEnabled={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? false : registrarPagoEnabled}
@@ -1787,7 +1782,6 @@ function BloqueCard({
   datosPorSlug,
   pendienteHandoff,
   modeloDinero,
-  stageActual,
   epaycoCostos,
   registrarPagoEnabled = false,
   negocioFijado,
@@ -1820,7 +1814,6 @@ function BloqueCard({
   datosPorSlug?: Record<string, Record<string, unknown>>
   pendienteHandoff?: PendienteHandoff | null
   modeloDinero?: ModeloDinero | null
-  stageActual?: string | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
   registrarPagoEnabled?: boolean
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
@@ -1929,7 +1922,6 @@ function BloqueCard({
               datosPorSlug={datosPorSlug}
               pendienteHandoff={pendienteHandoff}
               modeloDinero={modeloDinero}
-              stageActual={stageActual}
               epaycoCostos={epaycoCostos}
               registrarPagoEnabled={registrarPagoEnabled}
               negocioFijado={negocioFijado}
@@ -2288,7 +2280,6 @@ export default function NegocioDetailClient({
                   datosPorSlug={datosPorSlug}
                   pendienteHandoff={negocio.pendiente_handoff ?? null}
                   modeloDinero={negocio.modelo_dinero ?? null}
-                  stageActual={negocio.stage_actual}
                   epaycoCostos={negocio.epayco_costos ?? {}}
                   registrarPagoEnabled={registrarPagoEnabled}
                   negocioFijado={{ negocio_id: negocio.id, codigo: negocio.codigo, nombre: negocio.nombre }}
