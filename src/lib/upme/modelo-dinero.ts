@@ -28,6 +28,8 @@
  * REGLA DURA: nada aquí bloquea, descarta ni "gatea" — solo compone y reparte.
  */
 
+import { imputarPago } from './imputacion-pago'
+
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 
 /**
@@ -150,27 +152,6 @@ export function tarifaConfirmadaPorNegocio(
   return tarifas
 }
 
-export interface RepartoPago {
-  /** Porción que cubre la tarifa (pasante): min(pago, tarifa). */
-  monto_pasante: number
-  /** Resto = honorario: pago − monto_pasante (nunca negativo). */
-  monto_honorario: number
-}
-
-/**
- * Reparte UN pago en tarifa (pasante) + honorario. La tarifa se cubre PRIMERO.
- * SIN BARRERAS: si el pago es menor a la tarifa, el pasante toma todo el pago y el
- * honorario queda en 0 (la diferencia la maneja la conciliación); si es mayor, el
- * excedente es honorario. Nunca rechaza ni lanza.
- */
-export function repartirPagoTarifaHonorario(pago: number, tarifaUpme: number): RepartoPago {
-  const p = Number.isFinite(pago) && pago > 0 ? pago : 0
-  const t = Number.isFinite(tarifaUpme) && tarifaUpme > 0 ? tarifaUpme : 0
-  const montoPasante = Math.min(p, t)
-  const montoHonorario = Math.round((p - montoPasante) * 100) / 100
-  return { monto_pasante: montoPasante, monto_honorario: montoHonorario }
-}
-
 /**
  * tipo_cobro del componente honorario según la modalidad:
  *   - 50/50 (plan 1) → 'anticipo' (el 1er pago es el anticipo; el saldo llega después)
@@ -229,9 +210,10 @@ export interface PendienteHandoff {
 
 /**
  * Calcula el pendiente para el handoff a operaciones, desglosado en UPME vs
- * honorario. Coherente con `repartirPagoTarifaHonorario`: el recaudo cubre la
- * tarifa UPME PRIMERO, así que el chequeo agregado (recaudado ≥ umbral) ya
- * garantiza ambas bolsas; el desglose es para comunicar qué falta.
+ * honorario. El chequeo agregado (recaudado ≥ umbral) no depende del orden y no
+ * cambió; el desglose sí, y ahora usa la regla única del sistema (`imputarPago`):
+ * **el recaudo cubre el HONORARIO primero, después la tarifa** (decisión de Mauricio,
+ * 2026-08-18). Antes decía lo contrario, y eso mandaba a cobrar la bolsa equivocada.
  *
  * @param precioAprobado precio_aprobado del negocio = HONORARIO, en COP.
  * @param modelo         modelo de dinero del negocio (plan + honorario + tarifa confirmada).
@@ -246,12 +228,16 @@ export function calcularPendienteHandoff(
   const rec = Number.isFinite(recaudado) && recaudado > 0 ? recaudado : 0
 
   const tarifa = modelo && Number.isFinite(modelo.tarifa_upme) && modelo.tarifa_upme > 0 ? modelo.tarifa_upme : 0
-  // Reparto tarifa-primero: la UPME se cubre antes que el honorario.
-  const recUpme = Math.min(rec, tarifa)
-  const pendienteUpme = Math.max(0, Math.round(tarifa - recUpme))
   const honorarioRequerido = Math.max(0, umbral - tarifa)
-  const recHonorario = Math.max(0, rec - tarifa)
-  const pendienteHonorario = Math.max(0, Math.round(honorarioRequerido - recHonorario))
+  // HONORARIO PRIMERO, la misma regla que parte los cobros (`imputarPago`). El total
+  // pendiente no depende del orden; el desglose si, y decir "falta la tarifa" cuando lo
+  // que falta es el honorario manda a cobrar lo que no es.
+  const imputado = imputarPago({
+    pago: rec,
+    escalones: { techoTramo1: honorarioRequerido, techoTarifa: tarifa, techoTramo2: 0 },
+  })
+  const pendienteUpme = Math.max(0, Math.round(tarifa - imputado.a_tarifa))
+  const pendienteHonorario = Math.max(0, Math.round(honorarioRequerido - imputado.a_tramo1))
 
   const pendienteTotal = Math.max(0, Math.round(umbral - rec))
   return {
