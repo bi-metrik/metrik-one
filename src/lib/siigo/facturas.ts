@@ -20,6 +20,7 @@ import { asegurarClienteSiigo } from './clientes'
 import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 
 /**
  * Emitir SÍ aguanta la pausa del límite de peticiones de Siigo (pide ~19 s).
@@ -161,7 +162,7 @@ export async function emitirFacturaNegocio(
   negocioId: string,
   staffNombre: string | null,
   opciones: OpcionesEmision,
-  contexto: { modelo: ModeloDinero | null; recaudado: number; ivaPct?: number },
+  contexto: { modelo: ModeloDinero | null; recaudado: number; ivaPct?: number; staffId?: string | null },
 ): Promise<ResultadoEmision> {
   const svc = createServiceClient()
 
@@ -290,6 +291,17 @@ export async function emitirFacturaNegocio(
     // guard de duplicados de Siigo lo atajaría, pero eso es la red, no el piso.
     if (errUp) {
       console.error('[siigo] factura emitida pero NO marcada en el negocio:', errUp.message)
+    }
+
+    // Si el caso ya estaba ESPERANDO en su etapa de cierre, la factura que acaba de
+    // emitirse es justo lo que le faltaba. Nada de lo que pase aqui puede convertir una
+    // emision exitosa en un fallo: la factura ya existe en Siigo y es irreversible.
+    if (!errUp) {
+      try {
+        await cerrarNegocioSiQuedaResuelto(svc, workspaceId, negocioId, contexto.staffId ?? null)
+      } catch (e) {
+        console.error('[siigo] no se pudo evaluar el cierre automatico:', (e as Error).message)
+      }
     }
 
     return {

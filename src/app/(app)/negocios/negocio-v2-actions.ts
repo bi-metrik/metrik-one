@@ -7553,6 +7553,100 @@ async function camposDeCierre(
   }
 }
 
+/**
+ * Cierra el negocio si YA ESTA en su etapa de cierre y su gate acaba de quedar resuelto.
+ *
+ * Es el segundo disparador del cierre automatico. El primero vive en
+ * `cambiarEtapaNegocioConGate` y actua sobre la LLEGADA: el caso entra a Facturacion ya
+ * facturado y no se detiene. Este actua sobre el HECHO: el caso ya estaba esperando en la
+ * bandeja y la factura aparece despues, que es el escenario para el que Facturacion existe.
+ *
+ * Sin este segundo disparador, el caso que llega sin factura se queda ahi para siempre
+ * aunque se facture al dia siguiente, y alguien tiene que acordarse de volver a cerrarlo.
+ *
+ * ── Aqui NO hay riesgo de aviso falso ─────────────────────────────────────────────────
+ * A diferencia de la llegada, este camino no mueve la etapa, asi que el trigger de
+ * `avisar_al_entrar` ni se entera. Por eso puede ser un update simple.
+ *
+ * ── Barato primero ────────────────────────────────────────────────────────────────────
+ * Lo llaman caminos calientes (guardar un bloque, emitir una factura), asi que descarta en
+ * la primera consulta: si el negocio no esta abierto o no esta parado en una etapa de
+ * cierre, sale sin tocar nada mas.
+ *
+ * Devuelve `true` solo si CERRO.
+ */
+export async function cerrarNegocioSiQuedaResuelto(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  negocioId: string,
+  staffId?: string | null,
+): Promise<boolean> {
+  const { data: negRaw } = await db(supabase)
+    .from('negocios')
+    .select('id, estado, etapa_actual_id, linea_id, precio_aprobado, precio_estimado, etapas_negocio(config_extra)')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+
+  const neg = negRaw as {
+    estado?: string | null
+    etapa_actual_id?: string | null
+    linea_id?: string | null
+    precio_aprobado?: number | null
+    precio_estimado?: number | null
+    etapas_negocio?: { config_extra?: Record<string, unknown> | null } | null
+  } | null
+
+  if (!neg || neg.estado !== 'abierto' || !neg.etapa_actual_id || !neg.linea_id) return false
+  if ((neg.etapas_negocio?.config_extra as { etapa_cierre?: unknown } | null | undefined)?.etapa_cierre !== true) {
+    return false
+  }
+
+  const { data: lineaRaw } = await db(supabase)
+    .from('lineas_negocio')
+    .select('config_extra')
+    .eq('id', neg.linea_id)
+    .maybeSingle()
+  if (!cierreAutomaticoActivo((lineaRaw as { config_extra: Record<string, unknown> | null } | null)?.config_extra)) {
+    return false
+  }
+
+  // Mismo criterio que el cierre manual y que el de la llegada. Ante error de lectura NO
+  // cierra: el caso se queda en la bandeja, que es el estado seguro.
+  let gateCumplido: boolean | null = null
+  try {
+    gateCumplido = (await validarGateFacturaEmitida(supabase, negocioId, neg.etapa_actual_id)) === null
+  } catch {
+    gateCumplido = null
+  }
+  if (!cierraAlLlegar({ esCierre: true, gateCumplido }, true)) return false
+
+  const campos = await camposDeCierre(supabase, negocioId, neg)
+  const { error: errCierre } = await db(supabase)
+    .from('negocios')
+    .update(campos)
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'abierto')   // no re-cerrar si otro camino gano la carrera
+  if (errCierre) return false
+
+  if (staffId) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId,
+      campo_modificado: 'estado',
+      valor_anterior: 'abierto',
+      valor_nuevo: 'completado',
+      contenido: MOTIVO_CIERRE_AUTOMATICO,
+    })
+  }
+  return true
+}
+
 export async function completarNegocio(
   negocioId: string,
   lecciones?: string,
