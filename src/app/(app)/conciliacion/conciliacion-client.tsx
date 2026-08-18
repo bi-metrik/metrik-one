@@ -7,7 +7,7 @@ import Link from 'next/link'
 import {
   Scale, CheckCircle2, Loader2, X, ExternalLink,
   Search, Wallet, LayoutGrid, ArrowRightLeft, Undo2, ChevronRight, ChevronDown,
-  Clock, FileText, AlertTriangle, Receipt, Check,
+  Clock, FileText, AlertTriangle, Receipt, Check, Ban, Lock,
 } from 'lucide-react'
 import {
   aceptarRepartoComercial,
@@ -15,7 +15,10 @@ import {
   type ConciliacionV2,
   type NegocioSaldo,
   type ReferenciaPago,
+  type RefPorcion,
 } from '@/lib/actions/conciliacion-actions'
+import { anularCobro } from '@/lib/actions/pagos-externos'
+import { MOTIVO_ANULACION_MIN } from '@/lib/cobros/anulacion'
 import PagosExternosTab from './pagos-externos-tab'
 import BusquedaInput from '@/components/busqueda-input'
 import { telefonoCoincide } from '@/lib/busqueda/telefono'
@@ -318,6 +321,8 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
   const [abiertas, setAbiertas] = useState<Set<string>>(new Set())
   /** Referencia que se está corrigiendo. null = el modal está cerrado. */
   const [redistribuyendo, setRedistribuyendo] = useState<ReferenciaPago | null>(null)
+  /** Porción que se está anulando. null = nadie. */
+  const [anulando, setAnulando] = useState<RefPorcion | null>(null)
   const query = q.trim().toLowerCase()
 
   const filtradas = useMemo(() => {
@@ -410,6 +415,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                           <th className="py-1 font-semibold">Negocio</th>
                           <th className="py-1 font-semibold">Etapa</th>
                           <th className="py-1 text-right font-semibold">Cargado</th>
+                          <th className="py-1 text-right font-semibold sr-only">Anular</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -428,12 +434,44 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                             </td>
                             <td className="py-1.5" style={{ color: '#6B7280' }}>{p.etapa_nombre ?? '—'}</td>
                             <td className="py-1.5 text-right tabular-nums">
-                              {p.por_devolver ? (
+                              {p.anulado ? (
+                                // El monto de una fila anulada es 0: se muestra el que registró,
+                                // tachado. Sumarlo sería resucitar la plata en pantalla.
+                                <span className="font-semibold line-through" style={{ color: '#9CA3AF' }}>
+                                  {fmtCOP(p.monto_registrado)}
+                                </span>
+                              ) : p.por_devolver ? (
                                 <span className="inline-flex items-center gap-1 font-semibold" style={{ color: '#B45309' }}>
                                   <Undo2 className="h-3 w-3" /> {fmtCOP(Math.abs(p.monto))} por devolver
                                 </span>
                               ) : (
                                 <span className="font-semibold" style={{ color: '#1A1A1A' }}>{fmtCOP(p.monto)}</span>
+                              )}
+                            </td>
+                            <td className="w-8 py-1.5 text-right">
+                              {p.anulado ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold"
+                                  style={{ color: '#9CA3AF' }}
+                                  title={p.anulacion_motivo ?? undefined}
+                                >
+                                  <Ban className="h-3 w-3" /> Anulado
+                                </span>
+                              ) : p.anulable ? (
+                                <button
+                                  onClick={() => setAnulando(p)}
+                                  title="Anular este cobro"
+                                  className="inline-flex items-center rounded p-1 transition-colors hover:bg-[#FEF2F2]"
+                                  style={{ color: '#DC2626' }}
+                                >
+                                  <Ban className="h-3.5 w-3.5" />
+                                </button>
+                              ) : (
+                                // No se puede anular: el candado dice POR QUÉ. Esconder la razón
+                                // deja al operador buscando un botón que no existe.
+                                <span title={p.bloqueo_anulacion ?? undefined} style={{ color: '#D1D5DB' }}>
+                                  <Lock className="inline h-3 w-3" />
+                                </span>
                               )}
                             </td>
                           </tr>
@@ -473,7 +511,83 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
           onListo={() => { setRedistribuyendo(null); router.refresh() }}
         />
       )}
+
+      {anulando && (
+        <ModalAnularPorcion
+          porcion={anulando}
+          onCerrar={() => setAnulando(null)}
+          onListo={() => { setAnulando(null); router.refresh() }}
+        />
+      )}
     </section>
+  )
+}
+
+/**
+ * Anular UNA porción de una referencia, desde donde se ve el error.
+ *
+ * Vive en conciliación y no en la pantalla del negocio a propósito: anular es una
+ * operación del área financiera (decisión de Mauricio, 2026-08-18), y el guard del
+ * servidor (`ctxPagosExternos`) ya lo exige. Ponerla en el negocio la habría dejado a la
+ * vista de comerciales y operativos que igual reciben un "no puedes".
+ *
+ * No es lo mismo que "Corregir el reparto": ahí la plata se MUEVE entre negocios y la
+ * referencia sigue cuadrando. Aquí la plata no debía estar, y deja de contar.
+ */
+function ModalAnularPorcion({
+  porcion, onCerrar, onListo,
+}: { porcion: RefPorcion; onCerrar: () => void; onListo: () => void }) {
+  const [motivo, setMotivo] = useState('')
+  const [pending, startTransition] = useTransition()
+  const corto = motivo.trim().length < MOTIVO_ANULACION_MIN
+
+  function anular() {
+    if (corto) return toast.error(`Escribe el motivo (mínimo ${MOTIVO_ANULACION_MIN} caracteres)`)
+    startTransition(async () => {
+      const res = await anularCobro(porcion.cobro_id, motivo)
+      if (res.success) { toast.success('Cobro anulado'); onListo() }
+      else toast.error(res.error)
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" style={FONT}>
+      <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-[14px] font-bold" style={{ color: '#1A1A1A' }}>Anular cobro</h3>
+          <button onClick={onCerrar} style={{ color: '#9CA3AF' }}><X className="h-4 w-4" /></button>
+        </div>
+
+        <p className="text-[12px]" style={{ color: '#B91C1C' }}>
+          Anular <strong>{fmtCOP(porcion.monto_registrado)}</strong>
+          {porcion.negocio_codigo ? <> de <strong>{porcion.negocio_codigo}</strong></> : null}. La fila
+          se conserva con tu nombre, la fecha y el motivo; el negocio deja de contar esa plata y,
+          si algún paso se había habilitado solo por ese saldo, se vuelve a exigir.
+        </p>
+
+        <label className="mt-3 block">
+          <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#7F1D1D' }}>Motivo</span>
+          <textarea
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value.slice(0, 300))}
+            rows={2}
+            placeholder="ej. se cargó dos veces la misma consignación"
+            className="w-full rounded-md border bg-white px-2.5 py-1.5 text-[13px] outline-none"
+            style={{ borderColor: '#FCA5A5' }}
+          />
+        </label>
+
+        <div className="mt-3 flex justify-end gap-2">
+          <button onClick={onCerrar} className="rounded-md border bg-white px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
+            Cancelar
+          </button>
+          <button onClick={anular} disabled={pending || corto}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50" style={{ backgroundColor: '#DC2626' }}>
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Anular cobro
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
