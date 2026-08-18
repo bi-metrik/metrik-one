@@ -1,6 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
+import { TZ } from '@/lib/dates/bogota'
 import Link from 'next/link'
 import {
   BarChart3,
@@ -943,8 +944,18 @@ export default function AppShell({
             </p>
             <span className="text-muted-foreground">·</span>
             <p className="text-xs font-medium text-muted-foreground">
-              {(() => { const d = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
+              {(() => { const d = new Date().toLocaleDateString('es-CO', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return d.charAt(0).toUpperCase() + d.slice(1) })()}
             </p>
+            {/* La zona que gobierna los cortes de mes, los vencimientos y la fecha de
+                los documentos. Se pinta desde la MISMA constante que usan los calculos
+                (`TZ` en `lib/dates/bogota`): un rotulo escrito a mano podria decir
+                "Bogota" mientras el servidor corta en UTC, que es peor que no tenerlo. */}
+            <span
+              className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={`Todas las fechas y cortes de mes de este espacio se calculan en ${TZ} (UTC-5)`}
+            >
+              Hora Colombia · UTC-5
+            </span>
           </div>
           <div className="flex items-center gap-3">
             {notificationBell}

@@ -14,6 +14,7 @@
  */
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { borradorCliente, borradorFactura, borradorRecibo, type RutExtraido } from '@/lib/siigo/mapeo'
@@ -308,7 +309,9 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     facturaDocumentId: 0, reciboDocumentId: 0, sellerId: 0,
     productoCode: '', ivaId: 0, facturaPaymentId: 0, reciboPaymentId: 0,
   }
-  const hoy = new Date().toISOString().slice(0, 10)
+  // Fecha del documento fiscal. Va a Siigo, asi que es el dia civil de Bogota y no
+  // el de UTC: emitir a las 8 p.m. del 31 fechaba la factura el 1 del mes siguiente.
+  const hoy = todayBogotaISO()
 
   const casos: CasoPorFacturar[] = candidatos.map(n => {
     const rut = rutPorNegocio.get(n.id) ?? {}
