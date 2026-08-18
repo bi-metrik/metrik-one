@@ -14,7 +14,8 @@
  *      sobre-asignada, ANTES de guardar (y como señal en el listado).
  *   3. soporte adjunto OBLIGATORIO, por la via de archivos que ya usa el producto
  *      (Storage -> carpeta del negocio en Drive).
- *   4. `editarPagoExterno` / `anularPagoExterno` — un cobro no se borra, se anula.
+ *   4. `editarPagoExterno` / `anularCobro` — un cobro no se borra, se anula. `anularCobro`
+ *      es el unico de este modulo que NO se limita a los pagos fuera de la pasarela.
  *
  * GENERICO Y OPT-IN. Nada aqui es de un workspace concreto: el comportamiento se
  * declara en `workspaces.config_extra.pagos_externos`. Un workspace que no declare nada
@@ -51,6 +52,7 @@ import {
   notaAnulacion,
   MOTIVO_ANULACION_MIN,
 } from '@/lib/cobros/anulacion'
+import { evaluarAnulabilidad } from '@/lib/cobros/anulabilidad'
 
 // Los tipos generados de `cobros` no declaran `split_json` ni las columnas nuevas de
 // anulacion/soporte (ver la nota de tipos stale en `lib/negocios/recaudo-confirmado.ts`).
@@ -195,6 +197,8 @@ interface CobroRaw {
   monto: number | null
   monto_anulado: number | null
   tipo_cobro: string | null
+  /** Solo lo trae `leerCobroParaAnular`: marca las cuotas de un plan de cobro. */
+  plan_cobro_id?: string | null
   external_ref: string | null
   fuente: string | null
   fecha: string | null
@@ -914,10 +918,10 @@ export async function editarPagoExterno(
   return { success: true }
 }
 
-// ── anularPagoExterno ────────────────────────────────────────────────────────
+// ── anularCobro ──────────────────────────────────────────────────────────────
 
 /**
- * ANULA un pago. No lo borra.
+ * ANULA un cobro. No lo borra.
  *
  * La fila se conserva con motivo, autor y fecha, y deja de contar para saldos, gates y
  * cartera: su `monto` queda en 0 y el valor original se preserva en `monto_anulado`
@@ -928,8 +932,14 @@ export async function editarPagoExterno(
  * reevalua sus bloques de cobros y REABRE el gate de anticipo si se habia cerrado solo
  * por saldo y el saldo ya no alcanza. Un cobro anulado que deja un gate cerrado detras
  * es exactamente el estado que la anulacion existe para evitar.
+ *
+ * ⚠️ **Ya no exige `tipo_cobro='externo'`** (2026-08-18). Se llamaba `anularPagoExterno`
+ * y solo alcanzaba a 7 de los 189 cobros del sistema; el resto se corregia por SQL a
+ * mano. Quien decide ahora es `evaluarAnulabilidad`, que bloquea por lo que quedaria
+ * desarmado detras (pasarela, cuota de plan, cuenta de cobro emitida) y no por el tipo.
+ * El permiso de quien puede hacerlo NO cambio: sigue siendo `ctxPagosExternos`.
  */
-export async function anularPagoExterno(
+export async function anularCobro(
   cobroId: string,
   motivo: string,
 ): Promise<{ success: true } | { success: false; error: string }> {
@@ -945,9 +955,13 @@ export async function anularPagoExterno(
     }
   }
 
-  const cobro = await leerPagoExterno(supabase, workspaceId, cobroId)
-  if (!cobro) return { success: false, error: 'Pago no encontrado' }
-  if (esCobroAnulado(cobro)) return { success: false, error: 'Este pago ya estaba anulado' }
+  const cobro = await leerCobroParaAnular(supabase, workspaceId, cobroId)
+  if (!cobro) return { success: false, error: 'Cobro no encontrado' }
+
+  const veredicto = evaluarAnulabilidad(cobro, {
+    enCuentaCobroEmitida: await estaEnCuentaCobroEmitida(supabase, workspaceId, cobro.id),
+  })
+  if (!veredicto.anulable) return { success: false, error: veredicto.error }
 
   const montoOriginal = Number(cobro.monto ?? 0)
   const ahora = new Date().toISOString()
@@ -978,7 +992,7 @@ export async function anularPagoExterno(
       workspaceId,
       cobro.negocio_id,
       staffId,
-      `Pago ANULADO — ${cop(montoOriginal)}, referencia ${referenciaVisible(cobro.external_ref ?? '')}. Motivo: ${motivoLimpio}. Deja de contar para el saldo del negocio.`,
+      `Cobro ANULADO por ${cop(montoOriginal)}${cobro.external_ref ? `, referencia ${referenciaVisible(cobro.external_ref)}` : ''}. Motivo: ${motivoLimpio}. Deja de contar para el saldo del negocio.`,
     )
     // Lo que dependia de esa plata se recalcula. Ver el comentario de la funcion.
     await recalcularNegocioPorCambioDeRecaudo(cobro.negocio_id, `anulacion de pago (${motivoLimpio})`)
@@ -990,6 +1004,59 @@ export async function anularPagoExterno(
 }
 
 // ── Helpers internos ─────────────────────────────────────────────────────────
+
+/**
+ * Lee CUALQUIER cobro del workspace, sin filtrar por tipo.
+ *
+ * A diferencia de `leerPagoExterno`, que gobierna la pantalla de pagos fuera de la
+ * pasarela, este lector existe para la anulacion, que ya no es exclusiva de esa
+ * superficie. Quien decide si procede es `evaluarAnulabilidad`, no esta consulta:
+ * devolver `null` para un cobro que si existe seria decirle al operador "no encontrado"
+ * cuando el problema es otro, que es justo lo que hacia el codigo anterior.
+ */
+async function leerCobroParaAnular(
+  supabase: unknown,
+  workspaceId: string,
+  cobroId: string,
+): Promise<CobroRaw | null> {
+  if (!cobroId) return null
+  const { data } = await db(supabase)
+    .from('cobros')
+    .select(
+      'id, negocio_id, monto, monto_anulado, tipo_cobro, plan_cobro_id, external_ref, fuente, fecha, notas, created_at, created_by, split_json, soporte, anulado_at, anulado_por, anulacion_motivo',
+    )
+    .eq('id', cobroId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  return (data as CobroRaw | null) ?? null
+}
+
+/**
+ * ¿Este cobro respalda una cuenta de cobro ya emitida?
+ *
+ * El vinculo vive en `cuentas_cobro_emitidas.cobros_ids` (un array), no en
+ * `cobros.factura_id`, que esta en 0 de 189 filas. Una cuenta ANULADA no retiene nada:
+ * su soporte ya no sostiene ningun documento vivo.
+ */
+async function estaEnCuentaCobroEmitida(
+  supabase: unknown,
+  workspaceId: string,
+  cobroId: string,
+): Promise<boolean> {
+  const { data, error } = await db(supabase)
+    .from('cuentas_cobro_emitidas')
+    .select('id, estado')
+    .eq('workspace_id', workspaceId)
+    .contains('cobros_ids', [cobroId])
+  // Un fallo de esta consulta NO habilita la anulacion: si no se puede comprobar el
+  // soporte, se asume que existe. Ver `parametro-pendiente-no-se-elige-comodo`.
+  if (error) return true
+  const cuentas = (data ?? []) as Array<{ estado: string | null }>
+  // El descarte se hace aqui y no con un `.neq` en la consulta a proposito: en SQL,
+  // `estado <> 'anulada'` descarta tambien las filas con estado NULL, que es la opcion
+  // comoda (dejaria anular). Una cuenta sin estado retiene igual.
+  return cuentas.some((c) => c.estado !== 'anulada')
+}
 
 async function leerPagoExterno(
   supabase: unknown,

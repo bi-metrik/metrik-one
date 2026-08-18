@@ -31,7 +31,7 @@ import {
   consultarReferencia,
   registrarPagoExterno,
   editarPagoExterno,
-  anularPagoExterno,
+  anularCobro,
   type CuentaPagoExterno,
   type EstadoReferenciaConsulta,
   type NegocioParaPagoExterno,
@@ -773,7 +773,7 @@ function FormAnular({
       return toast.error(`Escribe el motivo (mínimo ${panel.min_largo_motivo} caracteres)`)
     }
     startTransition(async () => {
-      const res = await anularPagoExterno(pago.cobro_id, motivo)
+      const res = await anularCobro(pago.cobro_id, motivo)
       if (res.success) { toast.success('Pago anulado'); onAnulado() }
       else toast.error(res.error)
     })

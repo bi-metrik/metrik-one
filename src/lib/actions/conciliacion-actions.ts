@@ -51,10 +51,19 @@ function db(client: unknown): any {
 // responsable — pero la conciliación es cross-negocio, así que un operator NO
 // concilia (no es responsable de "todos" los negocios). read_only/contador: nunca.
 async function ctxFinanciero(): Promise<
-  | { ok: true; supabase: unknown; workspaceId: string; staffId: string | null; user: UserContext }
+  | {
+      ok: true
+      supabase: unknown
+      workspaceId: string
+      /** profiles.id. Es el que va a `cobros.created_by` y `cobros.anulado_por`. */
+      userId: string | null
+      /** staff.id. Es el que va a `activity_log.autor_id`. Son tablas distintas. */
+      staffId: string | null
+      user: UserContext
+    }
   | { ok: false; error: string }
 > {
-  const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: error ?? 'No autenticado' }
   const user: UserContext = {
     id: staffId ?? '',
@@ -67,7 +76,7 @@ async function ctxFinanciero(): Promise<
   if (!canEditBloque(user, { stage: 'cobro' }, [])) {
     return { ok: false, error: 'Solo el área financiera puede conciliar pagos' }
   }
-  return { ok: true, supabase, workspaceId, staffId, user }
+  return { ok: true, supabase, workspaceId, userId: userId ?? null, staffId, user }
 }
 
 /**
@@ -1881,7 +1890,7 @@ export async function redistribuirReferencia(input: {
 > {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { ok: false, error: ctx.error }
-  const { supabase, workspaceId, staffId } = ctx
+  const { supabase, workspaceId, userId, staffId } = ctx
 
   const ref = (input.externalRef ?? '').trim()
   if (!ref) return { ok: false, error: 'Referencia inválida' }
@@ -1964,7 +1973,10 @@ export async function redistribuirReferencia(input: {
           monto: 0,
           monto_anulado: c.montoAnterior,
           anulado_at: ahora,
-          anulado_por: staffId,
+          // profiles.id, NO staff.id: son tablas disjuntas (0 de 52 ids coinciden) y
+          // quien lee esta columna la resuelve contra `profiles`. Escribir el staffId
+          // dejaba la anulacion sin autor visible en la pantalla de pagos.
+          anulado_por: userId,
           anulacion_motivo: `Redistribución de la referencia ${ref}: ${motivo}`.slice(0, 300),
         })
         .eq('id', c.cobroId)
