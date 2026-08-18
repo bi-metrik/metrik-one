@@ -370,9 +370,22 @@ function limpiarValorDeclarado(v: string): string {
  *  config_extra.data_desde_metadata = { source, map:{fieldSlug: metaFieldName}, clean? }.
  *  `source` apunta a un arreglo [{name, values[]}] dentro de metadata (ej. el
  *  field_data de un lead de Meta). Genérico: cualquier workspace puede exponer
- *  datos de metadata en un bloque de solo lectura sin duplicarlos en DB. */
+ *  datos de metadata en un bloque de solo lectura sin duplicarlos en DB.
+ *
+ *  El nombre de cada campo puede declararse como una cadena o como una LISTA de
+ *  nombres aceptados, en orden de preferencia (mismo criterio que
+ *  `campos_fuente.source_alternatives`). Hace falta porque quien renombra el
+ *  campo es el formulario de Meta, no nosotros: con un solo nombre, un rename
+ *  deja el bloque vacío sin error y sin aviso. Medido en SOENA el 2026-08-18,
+ *  tras un rename del formulario: 9 de 17 negocios con el dato completo en
+ *  metadata mostraban el bloque en blanco. */
 function dataDesdeMetadata(
-  cfg: { source: string; map: Record<string, string>; clean?: boolean; numeric?: string[] },
+  cfg: {
+    source: string
+    map: Record<string, string | string[]>
+    clean?: boolean
+    numeric?: string[]
+  },
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
   const arr = metadata[cfg.source]
@@ -387,7 +400,17 @@ function dataDesdeMetadata(
   const numeric = new Set(cfg.numeric ?? [])
   const out: Record<string, unknown> = {}
   for (const [fieldSlug, metaName] of Object.entries(cfg.map)) {
-    const raw = byName.get(metaName)
+    // Primer nombre con valor gana; los siguientes son los nombres que el
+    // formulario usó antes (o usará después de un rename).
+    const candidatos = Array.isArray(metaName) ? metaName : [metaName]
+    let raw: string | undefined
+    for (const n of candidatos) {
+      const v = byName.get(n)
+      if (v != null && v !== '') {
+        raw = v
+        break
+      }
+    }
     if (raw == null) continue
     if (numeric.has(fieldSlug)) {
       // Valor declarado sucio ("76.000.000", "$ 132.734.513", "163000000") → número
@@ -2219,10 +2242,23 @@ export async function crearNegocioDesdeInteraccion(input: {
   // sin responsable (mientras haya alguno de los dos).
   const responsableId = contactoInfo?.responsable_id ?? staffId ?? null
 
+  // El `field_data` del lead viaja al negocio: el bloque "Datos del lead (Meta)" lo
+  // lee de `negocios.metadata` (config_extra.data_desde_metadata.source = 'field_data'),
+  // no de la interacción. Sin esta copia el bloque sale vacío aunque el dato exista
+  // en `contacto_interacciones.payload`, que es lo que pasaba hasta ahora.
+  // Solo se escribe si el lead trajo campos: un arreglo vacío haría ver "sin datos"
+  // igual que la ausencia, pero afirmándolo.
   await db(supabase)
     .from('negocios')
     .update({
-      metadata: { ...metadataActual, interaccion_id: inter.id, leadgen_id: leadgenId, fuente_cargue: 'meta_lead', atribucion },
+      metadata: {
+        ...metadataActual,
+        interaccion_id: inter.id,
+        leadgen_id: leadgenId,
+        fuente_cargue: 'meta_lead',
+        atribucion,
+        ...(fieldData.length ? { field_data: fieldData } : {}),
+      },
       ...(responsableId ? { responsable_id: responsableId } : {}),
     })
     .eq('id', res.negocio_id)
