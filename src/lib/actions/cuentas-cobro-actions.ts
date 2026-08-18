@@ -5,6 +5,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { generarCuentasCobroPeriodo, type GenerarCuentasResult } from '@/lib/cobros/generar-cuentas-cobro'
 import { enviarCuentaCobroEmail } from '@/lib/email/send-cuenta-cobro'
 import { enviarEmailAprobacionPendiente } from '@/lib/email/send-aprobacion-cuenta-cobro'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import {
   planearCobrosCompletos,
   planearAbonoParcial,
@@ -283,7 +284,10 @@ export async function registrarPagoCuentaCobro(
     fecha: c.fecha,
   }))
 
-  const hoy = new Date().toISOString().slice(0, 10)
+  // El dia civil es el de Bogota, no el de UTC: Vercel corre en UTC y a partir de
+  // las 7 p.m. de Colombia `toISOString()` ya devuelve el dia siguiente. La traza
+  // de un abono registrado a las 8 p.m. del 31 quedaba fechada el 1 del mes que viene.
+  const hoy = todayBogotaISO()
 
   if (input.modo === 'cobros_completos') {
     const plan = planearCobrosCompletos(cobrosDeLaCuenta, input.cobrosIds, input.monto)
