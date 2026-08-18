@@ -254,7 +254,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       .in('negocio_id', ids).eq('bloque_configs.slug', 'confirmar_tarifa_upme'),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (svc as any).from('negocio_bloques').select('negocio_id, data, bloque_configs!inner(slug)')
-      .in('negocio_id', ids).eq('bloque_configs.slug', 'certificacion_upme'),
+      .in('negocio_id', ids).eq('bloque_configs.slug', 'servicio_contratado'),
   ])
 
   const cobrosPorNegocio = new Map<string, CobroParaRecaudo[]>()
