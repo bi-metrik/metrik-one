@@ -18,7 +18,7 @@ const SOENA: EtapaRetorno[] = [
   { id: 'e2', nombre: 'Inclusion', orden: 2, numero: 2, routing: { default_etapa_orden: 4, conditional: [] } },
   { id: 'e4', nombre: 'Propuesta', orden: 4, numero: 3, routing: null },
   { id: 'e5', nombre: 'Negociacion', orden: 5, numero: 4, routing: null },
-  { id: 'e6', nombre: 'Documentacion', orden: 6, numero: 5, routing: { default_etapa_orden: 7, conditional: [{ condition: { field: 'requiere_certificacion_upme', value: 'false' }, etapa_orden: 10 }] } },
+  { id: 'e6', nombre: 'Documentacion', orden: 6, numero: 5, routing: { default_etapa_orden: 7, conditional: [{ condition: { field: 'servicio', value: 'solo_iva' }, etapa_orden: 10 }] } },
   { id: 'e7', nombre: 'Cargue', orden: 7, numero: 6, routing: null },
   { id: 'e8', nombre: 'Pago UPME', orden: 8, numero: 7, routing: null },
   { id: 'e9', nombre: 'Certificacion', orden: 9, numero: 8, routing: null },

@@ -49,10 +49,10 @@ describe('qué campos gobiernan la bifurcación', () => {
     expect(camposDeDecision({
       default_etapa_orden: 9,
       conditional: [
-        { condition: { field: 'requiere_certificacion_upme', value: 'false' }, etapa_orden: 10 },
+        { condition: { field: 'servicio', value: 'solo_iva' }, etapa_orden: 10 },
         { condition: { field: 'requiere_devolucion_iva', value: 'true' }, etapa_orden: 11 },
       ],
-    })).toEqual(['requiere_certificacion_upme', 'requiere_devolucion_iva'])
+    })).toEqual(['servicio', 'requiere_devolucion_iva'])
   })
 })
 

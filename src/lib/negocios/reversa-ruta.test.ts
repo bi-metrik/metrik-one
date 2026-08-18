@@ -21,7 +21,7 @@ const BASE: Omit<EtapaRuta, 'tieneCasillas' | 'puedeSaltarsePorSaldo'>[] = [
   { id: 'e2', nombre: 'Inclusion', orden: 2, numero: 2, routing: { default_etapa_orden: 4, conditional: [] } },
   { id: 'e4', nombre: 'Propuesta', orden: 4, numero: 3, routing: null },
   { id: 'e5', nombre: 'Negociacion', orden: 5, numero: 4, routing: null },
-  { id: 'e6', nombre: 'Documentacion', orden: 6, numero: 5, routing: { default_etapa_orden: 7, source_etapa_orden: 5, conditional: [{ condition: { field: 'requiere_certificacion_upme', value: 'false' }, etapa_orden: 10 }] } },
+  { id: 'e6', nombre: 'Documentacion', orden: 6, numero: 5, routing: { default_etapa_orden: 7, source_etapa_orden: 5, conditional: [{ condition: { field: 'servicio', value: 'solo_iva' }, etapa_orden: 10 }] } },
   { id: 'e7', nombre: 'Cargue', orden: 7, numero: 6, routing: null },
   { id: 'e8', nombre: 'Pago UPME', orden: 8, numero: 7, routing: null },
   { id: 'e9', nombre: 'Certificacion', orden: 9, numero: 8, routing: null },
@@ -85,16 +85,16 @@ describe('reversaActiva', () => {
 
 describe('destinoDeEtapa', () => {
   it('la condicion que coincide gana sobre el camino por defecto', () => {
-    expect(destinoDeEtapa(etapa(6), SOENA, todas({ requiere_certificacion_upme: 'false' }))).toBe(10)
+    expect(destinoDeEtapa(etapa(6), SOENA, todas({ servicio: 'solo_iva' }))).toBe(10)
   })
 
   it('sin coincidencia, el camino por defecto', () => {
-    expect(destinoDeEtapa(etapa(6), SOENA, todas({ requiere_certificacion_upme: 'true' }))).toBe(7)
+    expect(destinoDeEtapa(etapa(6), SOENA, todas({ servicio: 'completo' }))).toBe(7)
   })
 
   it('un booleano se compara como el motor: String(valor) contra el valor de la condicion', () => {
-    expect(destinoDeEtapa(etapa(6), SOENA, todas({ requiere_certificacion_upme: false }))).toBe(10)
-    expect(destinoDeEtapa(etapa(6), SOENA, todas({ requiere_certificacion_upme: true }))).toBe(7)
+    expect(destinoDeEtapa(etapa(6), SOENA, todas({ servicio: 'solo_iva' }))).toBe(10)
+    expect(destinoDeEtapa(etapa(6), SOENA, todas({ servicio: 'completo' }))).toBe(7)
   })
 
   it('campo VACIO cae al camino por defecto — es como el motor decide sin dato', () => {
@@ -116,8 +116,8 @@ describe('destinoDeEtapa', () => {
     // Documentacion (6) declara `source_etapa_orden: 5` en produccion: el interruptor lo
     // responde el comercial en Negociacion. Leer la etapa propia daria la rama contraria.
     const valores: ValoresPorOrden = {
-      5: { requiere_certificacion_upme: 'false' },
-      6: { requiere_certificacion_upme: 'true' },
+      5: { servicio: 'solo_iva' },
+      6: { servicio: 'completo' },
     }
     expect(destinoDeEtapa(etapa(6), SOENA, valores)).toBe(10)
   })
@@ -125,12 +125,12 @@ describe('destinoDeEtapa', () => {
 
 describe('recorridoDesde', () => {
   it('el caso V0122 corregido: de Documentacion pasa por Cargue, Pago UPME y Certificacion', () => {
-    const camino = recorridoDesde(SOENA, 6, todas({ requiere_certificacion_upme: 'true' }), 10)
+    const camino = recorridoDesde(SOENA, 6, todas({ servicio: 'completo' }), 10)
     expect(camino).toEqual([7, 8, 9, 10])
   })
 
   it('con el dato equivocado va derecho a Precobro', () => {
-    expect(recorridoDesde(SOENA, 6, todas({ requiere_certificacion_upme: 'false' }), 10)).toEqual([10])
+    expect(recorridoDesde(SOENA, 6, todas({ servicio: 'solo_iva' }), 10)).toEqual([10])
   })
 
   it('el orden NO ordena el recorrido: Anexos (18) enruta a Generacion (13)', () => {
@@ -157,7 +157,7 @@ describe('divergenciaDeRuta', () => {
     divergenciaDeRuta({
       etapas: SOENA,
       decisionOrden: 6,
-      valores: todas({ requiere_certificacion_upme: 'true' }),
+      valores: todas({ servicio: 'completo' }),
       recorridas: new Set(recorridas),
       etapaActualOrden,
     })
@@ -184,7 +184,7 @@ describe('divergenciaDeRuta', () => {
     const d = divergenciaDeRuta({
       etapas: SOENA,
       decisionOrden: 6,
-      valores: todas({ requiere_certificacion_upme: 'false' }),
+      valores: todas({ servicio: 'solo_iva' }),
       recorridas: new Set([0, 1, 4, 5, 6, 10]),
       etapaActualOrden: 10,
     })
@@ -210,7 +210,7 @@ describe('divergenciaDeRuta', () => {
     const d = divergenciaDeRuta({
       etapas: sinCasillas(7),
       decisionOrden: 6,
-      valores: todas({ requiere_certificacion_upme: 'true' }),
+      valores: todas({ servicio: 'completo' }),
       recorridas: new Set([0, 1, 4, 5, 6, 10]),
       etapaActualOrden: 10,
     })
@@ -225,7 +225,7 @@ describe('divergenciaDeRuta', () => {
     const d = divergenciaDeRuta({
       etapas: SOENA,
       decisionOrden: 6,
-      valores: todas({ requiere_certificacion_upme: 'true', requiere_cita_dian: 'true' }),
+      valores: todas({ servicio: 'completo', requiere_cita_dian: 'true' }),
       recorridas: new Set([1, 4, 5, 6, 16, 18]),
       etapaActualOrden: 16,
     })
@@ -238,7 +238,7 @@ describe('divergenciaDeRuta', () => {
     const d = divergenciaDeRuta({
       etapas: SOENA,
       decisionOrden: 6,
-      valores: todas({ requiere_certificacion_upme: 'true' }),
+      valores: todas({ servicio: 'completo' }),
       recorridas: new Set([0, 1, 4, 5, 6, 7, 8, 9, 11]),
       etapaActualOrden: 11,
     })

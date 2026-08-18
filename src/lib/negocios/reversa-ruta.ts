@@ -11,8 +11,14 @@
  * creó el 03-ago y el negocio había avanzado el 01-ago, dos días antes de que existiera.
  * Nadie respondió la pregunta, `requiere_certificacion_upme` quedó en `false` y el motor
  * lo mandó por la vía corta: se saltó **Cargue, Pago UPME y Certificación**, que el
- * cliente sí había contratado. Se corrigió a mano por SQL. Hay al menos dos casos más con
- * la misma forma (V0107, V0114).
+ * cliente sí había contratado. Se corrigió a mano por SQL.
+ *
+ * Desenlace (2026-08-18): la forma se repetía en cinco negocios y al preguntarle a
+ * operaciones caso por caso, dos habían contratado la certificación (V0114, V0115) y tres
+ * no (V0086, V0107, V0109). Solo V0114 tuvo que devolverse: V0115 ya había recorrido las
+ * etapas por su cuenta, y a él el derivado en `false` solo le anuló la tarifa. Desde
+ * entonces la bifurcación de Documentación decide por `servicio`, la respuesta misma, y
+ * el campo derivado dejó de gobernar nada.
  *
  * ── Qué hace este módulo ──────────────────────────────────────────────────────────────
  * Nada más que las REGLAS, puras y probadas: recorrer el routing con un juego de valores,

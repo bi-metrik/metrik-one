@@ -323,7 +323,7 @@ async function loadBloqueContext(
       .from('negocio_bloques')
       .select('negocio_id, data, bloque_configs!inner(slug)')
       .eq('negocio_id', b.negocio_id)
-      .eq('bloque_configs.slug', 'certificacion_upme'),
+      .eq('bloque_configs.slug', 'servicio_contratado'),
   ])
   const tarifaConfirmada = tarifaConfirmadaPorNegocio(
     (confRes.data ?? []) as FilaBloqueTarifa[],
