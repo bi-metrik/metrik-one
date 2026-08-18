@@ -79,7 +79,9 @@ const SECTIONS: SectionDef[] = [
   { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
   { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'], modules: ['business'] },
-  { key: 'terminos-propuesta', label: 'Términos de la propuesta', icon: FileText, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], wsTipo: 'nativo' },
+  // Sin `wsTipo`: SOENA, el workspace para el que se construyo la pantalla, es
+  // `clarity`. Copiar el filtro de 'mi-flujo' la escondia justo donde hacia falta.
+  { key: 'terminos-propuesta', label: 'Términos de la propuesta', icon: FileText, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
   { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
