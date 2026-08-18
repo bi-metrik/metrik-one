@@ -131,3 +131,10 @@ as $function$
     select id from etiquetados
   ) u;
 $function$;
+
+-- `create or replace` conserva el ACL de la funcion que ya existe, pero en un entorno
+-- donde nazca de cero llegaria ejecutable por PUBLIC, y `anon` la alcanza por ahi. Se
+-- redeclara igual que en 20260811000001: la cuenta de casos por conciliar es de usuario
+-- autenticado, nunca del cliente anonimo.
+revoke execute on function public.count_negocios_por_conciliar(uuid) from public, anon;
+grant execute on function public.count_negocios_por_conciliar(uuid) to authenticated;
