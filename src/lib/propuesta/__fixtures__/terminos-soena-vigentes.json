@@ -1,0 +1,156 @@
+[
+  {
+    "titulo": "Objeto y alcance",
+    "parrafos": [
+      {
+        "texto": "SOENA se obliga a gestionar el certificado UPME, entregar la guía técnica de aplicación tributaria y estructurar, radicar y hacer seguimiento de la solicitud de devolución del IVA por pago de lo no debido ante la DIAN, conforme a la normativa vigente. La responsabilidad de SOENA se limita al alcance aquí definido y no se extiende a obligaciones legales, fiscales o técnicas distintas de las expresamente pactadas. SOENA no realiza entrega de documentación que no se encuentre dentro del alcance de esta propuesta."
+      }
+    ]
+  },
+  {
+    "titulo": "Pago de la tarifa UPME (mandato de recaudo)",
+    "parrafos": [
+      {
+        "texto": "El pago de la tarifa UPME lo asume el Cliente. La UPME exige que dicho pago se realice al momento del cargue de la información. En consecuencia, el Cliente confiere a SOENA mandato para **recaudar la tarifa UPME en su nombre y por su cuenta y desembolsarla a la UPME**. Dicha tarifa se liquida conforme al valor del vehículo antes de impuestos según la Resolución UPME 135 de 2025, es independiente del honorario de SOENA, no constituye ingreso de SOENA y su valor final es el que determine la plataforma de la UPME. Una vez desembolsada a la UPME, SOENA no responde por su devolución, correspondiendo cualquier reclamación a dicha entidad, sin perjuicio de la garantía de resultado prevista en estos términos."
+      }
+    ]
+  },
+  {
+    "titulo": "Tratamiento de datos personales",
+    "parrafos": [
+      {
+        "texto": "El Cliente autoriza a SOENA a recolectar, almacenar, usar y tratar sus datos personales y los de su vehículo para la ejecución de la Gestión ante la UPME y la DIAN, conforme a la Ley 1581 de 2012 y a la Política de Tratamiento de Datos Personales de SOENA disponible en soena.com.co. El Cliente podrá conocer, actualizar, rectificar y suprimir sus datos y revocar esta autorización en los términos de la ley."
+      }
+    ]
+  },
+  {
+    "titulo": "Radicación por el canal del contribuyente",
+    "parrafos": [
+      {
+        "texto": "El trámite de devolución de IVA se presenta desde los canales oficiales del Cliente, utilizando su correo electrónico y/o usuario registrado ante la DIAN, conforme a la normativa aplicable. El Cliente autoriza expresamente a SOENA a asistirlo en la radicación electrónica y acepta que cualquier comunicación oficial será enviada directamente por la DIAN al correo registrado del contribuyente."
+      }
+    ]
+  },
+  {
+    "titulo": "Obligaciones del Cliente",
+    "parrafos": [
+      {
+        "texto": "El Cliente se obliga a suministrar información completa, veraz y oportuna; a reenviar a SOENA cualquier comunicación, requerimiento o acto administrativo emitido por la DIAN dentro de los dos (2) días hábiles siguientes a su recepción; y a atender oportunamente los requerimientos adicionales que la DIAN formule. La omisión en el suministro de información o el reenvío inoportuno de comunicaciones podrá afectar la garantía de devolución."
+      }
+    ]
+  },
+  {
+    "titulo": "Condición de entrega y de inicio de la gestión ante la DIAN",
+    "parrafos": [
+      {
+        "texto": "La entrega del certificado UPME y de las instrucciones para el trámite ante la DIAN, así como el inicio de la gestión de devolución del IVA, están condicionados al pago del 100% del valor pactado con SOENA. Una vez recibido el pago total, SOENA inicia el proceso interno de gestión de la devolución."
+      }
+    ]
+  },
+  {
+    "titulo": "Garantía de resultado",
+    "parrafos": [
+      {
+        "texto": "SOENA asume la responsabilidad sobre el resultado de la Gestión. La garantía opera cuando la solicitud haya sido estructurada por SOENA conforme a los requisitos legales y radicada por el Cliente dentro de los tres (3) meses siguientes a la fecha en que SOENA le envíe la documentación completa para la devolución, y siempre que el Cliente no presente deudas pendientes con la DIAN que conlleven compensación en lugar de devolución del IVA. En tal caso: (i) si la certificación UPME no es aprobada, SOENA devuelve el 100% del dinero pagado en cualquier plan; (ii) si la certificación UPME es aprobada pero la DIAN niega la devolución del IVA (acto en firme), el Cliente no paga el 50% de su servicio en el Plan 1, o SOENA le devuelve el 50% del valor pagado en el Plan 2."
+      }
+    ]
+  },
+  {
+    "titulo": "Definición de \"no devolución del IVA\"",
+    "parrafos": [
+      {
+        "texto": "Se entiende por \"no devolución\" únicamente el acto administrativo formal de la DIAN, debidamente notificado al contribuyente y en firme, que niegue totalmente la devolución solicitada. No constituyen \"no devolución\": requerimientos de información, suspensiones temporales del trámite, solicitudes de subsanación, demoras administrativas propias del proceso, negativas derivadas de inconsistencias, omisiones o información incompleta o incorrecta suministrada por el Cliente o por terceros, ni el auto inadmisorio."
+      }
+    ]
+  },
+  {
+    "titulo": "Devolución directa de la DIAN",
+    "parrafos": [
+      {
+        "texto": "Si la DIAN devuelve el IVA directamente al Cliente, este se obliga a informar a SOENA dentro de los diez (10) días calendario siguientes a su recepción o consignación. Verificada por SOENA la devolución y no informada dentro de dicho plazo, se entenderá cumplida la condición para el pago del saldo pendiente y SOENA podrá facturar el valor restante del servicio según el plan contratado."
+      }
+    ]
+  },
+  {
+    "titulo": "Derecho de retracto",
+    "parrafos": [
+      {
+        "texto": "Cuando el Cliente sea persona natural y la contratación se realice por medios no presenciales, podrá retractarse dentro de los cinco (5) días hábiles siguientes a la aceptación de la propuesta, y SOENA reintegrará la totalidad de lo pagado, siempre que la Gestión no haya iniciado con autorización expresa del Cliente dentro de dicho término."
+      }
+    ]
+  },
+  {
+    "titulo": "Desistimiento del Cliente",
+    "parrafos": [
+      {
+        "texto": "Vencido el término de retracto o iniciada la Gestión con autorización del Cliente, si este decide no continuar: (i) la tarifa UPME no se retiene en ningún caso, devolviéndose si aún no ha sido desembolsada a la UPME, o entendiéndose pagada a la UPME en su beneficio si ya lo fue; (ii) los honorarios pagados corresponden a la gestión efectivamente realizada por SOENA a la fecha del desistimiento y no son reembolsables."
+      }
+    ]
+  },
+  {
+    "titulo": "Proceso y tiempos de la Gestión",
+    "parrafos": [
+      {
+        "texto": "La Gestión comprende diferentes etapas ante la UPME y la DIAN, cuyos tiempos dependen de los procedimientos, disponibilidad, plataformas, agenda y capacidad de atención de dichas entidades. Por lo anterior, **SOENA no garantiza una fecha determinada para la culminación del trámite, expedición del certificado UPME, asignación de citas, decisión de la DIAN o desembolso de los recursos**."
+      },
+      {
+        "texto": "Una vez la solicitud ante la UPME sea **radicada exitosamente y proceda a evaluación, la UPME dispone de hasta treinta (30) días hábiles para resolver de fondo la solicitud, conforme a la Resolución UPME 000563 de 2026**. Este término podrá suspenderse o modificarse en los casos previstos en la normativa aplicable. La etapa ante la DIAN solo podrá iniciarse una vez se cuente con el certificado UPME y la documentación requerida. Los términos de devolución serán los establecidos por la normativa vigente según el tipo de solicitud."
+      },
+      {
+        "subtitulo": "RUT e información del Cliente",
+        "texto": "El Cliente deberá entregar a SOENA, **desde el inicio de la Gestión, su RUT completamente actualizado, junto con la información de correo electrónico, dirección, teléfono y demás datos requeridos. Con la información contenida en dicho RUT se gestionará la certificación UPME** y, una vez obtenida, con la misma información se adelantará la **solicitud de devolución ante la DIAN**."
+      },
+      {
+        "texto": "El Cliente deberá mantener dicha información vigente y consistente durante todo el proceso y, en particular, hasta que la DIAN profiera el acto administrativo que defina la solicitud de devolución. Cualquier modificación del RUT que pueda afectar la información utilizada en la certificación UPME o en la solicitud de devolución deberá ser informada previamente a SOENA y podrá **afectar, suspender o impedir la continuidad de la Gestión. Cualquier retraso derivado de información incompleta, incorrecta o desactualizada del Cliente, así como de actuaciones, requerimientos, disponibilidad, agenda, plataformas o tiempos de la UPME, DIAN u otras entidades, no será imputable a SOENA**."
+      }
+    ]
+  },
+  {
+    "titulo": "Mecánica de reembolsos",
+    "parrafos": [
+      {
+        "texto": "Los reembolsos por garantía proceden dentro de los treinta (30) días hábiles siguientes a la verificación del hecho que los origina (incluido el acto administrativo negativo debidamente notificado y en firme), por el mismo medio de pago del Cliente o mediante transferencia bancaria certificada."
+      }
+    ]
+  },
+  {
+    "titulo": "Responsabilidad frente a terceros",
+    "parrafos": [
+      {
+        "texto": "SOENA no responde por retrasos del ente evaluador (UPME o DIAN), por los tiempos internos de decisión administrativa, ni por conceptos negativos derivados de información incompleta, inexacta o extemporánea del Cliente o sus terceros. SOENA no garantiza la aprobación de la devolución por ser una decisión discrecional de la autoridad."
+      }
+    ]
+  },
+  {
+    "titulo": "Cambios normativos",
+    "parrafos": [
+      {
+        "texto": "Cualquier cambio en la normativa aplicable (UPME, ANLA, DIAN u otras entidades) que afecte el alcance, los tiempos o los resultados dará lugar a la revisión de las condiciones de la propuesta y exonerará a SOENA de responsabilidad por los efectos derivados de dicho cambio."
+      }
+    ]
+  },
+  {
+    "titulo": "Confidencialidad",
+    "parrafos": [
+      {
+        "texto": "Durante la ejecución de la propuesta las partes podrán conocer información de carácter confidencial. Ambas quedan obligadas a guardar reserva y a no reproducir sin autorización de la otra ningún dato, información, secreto comercial, informe, imagen o documento conocido con ocasión de la Gestión."
+      }
+    ]
+  },
+  {
+    "titulo": "Ley aplicable",
+    "parrafos": [
+      {
+        "texto": "Esta propuesta se rige por la ley colombiana. Cuando el Cliente sea consumidor, se aplicará el Estatuto del Consumidor (Ley 1480 de 2011)."
+      }
+    ]
+  },
+  {
+    "titulo": "Perfeccionamiento y validez",
+    "parrafos": [
+      {
+        "texto": "La propuesta se perfecciona con la firma del Cliente, quien declara haber leído y comprendido su alcance y estos términos. Tiene la validez indicada en la portada de la oferta."
+      }
+    ]
+  }
+]
