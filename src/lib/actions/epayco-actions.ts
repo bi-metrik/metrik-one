@@ -4,6 +4,7 @@ import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { fechaTransaccionBogota } from '@/lib/epayco/fecha-transaccion'
 
 // Cast a untyped para tablas nuevas no en database.ts
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -268,13 +269,26 @@ export async function registrarPagoEpayco(
       .limit(1)
 
     if (!existingCobro || (existingCobro as unknown[]).length === 0) {
+      // La fecha del cobro es la del PAGO en ePayco, no la del registro en ONE
+      // (decision de Mauricio, 2026-08-18). `v_venta_mes_comercial.fecha_venta`
+      // es el `min(cobros.fecha)` del negocio, asi que esto decide en que mes
+      // cuenta la venta: conciliar en agosto un pago de julio lo contaba como
+      // venta de agosto. Medido en SOENA: V0046, V0122 y V0123.
+      //
+      // Si el crudo de ePayco no se puede leer NO se inventa la fecha: se cae en
+      // el dia de registro, que es lo unico cierto, y queda dicho en la nota. Un
+      // fallback mudo repondria el defecto sin que nadie lo vea.
+      const fechaPago = fechaTransaccionBogota(desgloseFinal.fecha)
+      const notaBase = tipoCobro === 'anticipo' ? 'Anticipo' : 'Pago'
       const cobro = {
         workspace_id: workspaceId,
         negocio_id: negocioId,
-        notas: tipoCobro === 'anticipo' ? 'Anticipo' : 'Pago',
+        notas: fechaPago
+          ? notaBase
+          : `${notaBase} — fecha de registro: ePayco no devolvio una fecha legible para la ref ${desgloseFinal.ref_payco}`,
         monto: desgloseFinal.monto_bruto,
         tipo_cobro: tipoCobro,
-        fecha: todayBogotaISO(),
+        fecha: fechaPago ?? todayBogotaISO(),
         external_ref: String(desgloseFinal.ref_payco),
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
