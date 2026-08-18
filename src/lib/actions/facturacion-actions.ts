@@ -601,7 +601,7 @@ export async function emitirFacturaDeNegocio(
       enviarCorreo: opciones?.enviarCorreo === true,
       justificacionDuplicado: opciones?.justificacionDuplicado,
     },
-    { modelo, recaudado },
+    { modelo, recaudado, staffId },
   )
 
   if (!r.ok) {

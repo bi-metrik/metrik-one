@@ -18,6 +18,7 @@ import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreCo
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
 import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import {
   sumarRecaudoConfirmado,
@@ -2456,7 +2457,17 @@ async function crearCotizacionAutomatica(
 
 export async function cambiarEtapaNegocio(
   negocioId: string,
-  nuevaEtapaId: string
+  nuevaEtapaId: string,
+  /**
+   * Campos que viajan en el MISMO update que la etapa.
+   *
+   * Existe por el aviso de entrada: lo dispara un trigger colgado del UPDATE de
+   * `etapa_actual_id`, asi que cualquier cosa que deba ser cierta ANTES de que ese trigger
+   * corra tiene que escribirse aqui, no en un update posterior. El caso que lo pidio es el
+   * cierre automatico: mover y despues cerrar le manda a financiera un correo pidiendo una
+   * factura que ya existe. Sin este parametro, comportamiento identico.
+   */
+  camposExtra?: Record<string, unknown>,
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
@@ -2476,6 +2487,7 @@ export async function cambiarEtapaNegocio(
       etapa_actual_id: nuevaEtapaId,
       stage_actual: etapa.stage,
       updated_at: new Date().toISOString(),
+      ...(camposExtra ?? {}),
     })
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
@@ -3955,9 +3967,71 @@ export async function cambiarEtapaNegocioConGate(
     if (errOmision) return { error: errOmision }
   }
 
+  // ── ¿Este arribo CIERRA el negocio? ─────────────────────────────────────────────
+  // La etapa de cierre no es una parada obligatoria: si el caso llega con su gate ya
+  // resuelto (en SOENA: la factura ya emitida), no queda nada que pedirle a nadie.
+  //
+  // ⚠️ Se decide ANTES de mover, y los campos del cierre viajan en el MISMO update. El aviso
+  // de entrada cuelga de un trigger sobre `etapa_actual_id` y en esa etapa manda CORREO:
+  // mover primero y cerrar después le pide a financiera una factura que ya existe, y un
+  // correo no se desmanda. El trigger, además, ya no avisa si el negocio llega cerrado
+  // (migración `20260818000002`).
+  let camposCierreAuto: Record<string, unknown> | undefined
+  const destinoEsCierre =
+    (nuevaEtapaInfo?.config_extra as { etapa_cierre?: unknown } | null | undefined)?.etapa_cierre === true
+  if (destinoEsCierre && nuevaEtapaInfo?.linea_id) {
+    const { data: lineaCfgRaw } = await db(supabase)
+      .from('lineas_negocio')
+      .select('config_extra')
+      .eq('id', nuevaEtapaInfo.linea_id)
+      .maybeSingle()
+    const lineaCfg = (lineaCfgRaw as { config_extra: Record<string, unknown> | null } | null)?.config_extra
+
+    if (cierreAutomaticoActivo(lineaCfg)) {
+      let gateCumplido: boolean | null = null
+      try {
+        // El MISMO criterio que valida el cierre manual. Dos definiciones de "está
+        // facturado" divergirían, y el síntoma sería un negocio que cierra solo cuando a
+        // mano no dejaría.
+        gateCumplido = (await validarGateFacturaEmitida(supabase, negocioId, resolvedEtapaId)) === null
+      } catch {
+        gateCumplido = null // no comprobable: NO cierra, el caso queda en la bandeja
+      }
+
+      if (cierraAlLlegar({ esCierre: true, gateCumplido }, true)) {
+        const { data: negCierre } = await db(supabase)
+          .from('negocios')
+          .select('precio_aprobado, precio_estimado')
+          .eq('id', negocioId)
+          .single()
+        camposCierreAuto = await camposDeCierre(
+          supabase,
+          negocioId,
+          (negCierre ?? {}) as { precio_aprobado?: number | null; precio_estimado?: number | null },
+        )
+      }
+    }
+  }
+
   // Cambiar etapa
-  const resultCambio = await cambiarEtapaNegocio(negocioId, resolvedEtapaId)
+  const resultCambio = await cambiarEtapaNegocio(negocioId, resolvedEtapaId, camposCierreAuto)
   if (resultCambio.error) return resultCambio
+
+  // El cierre automático deja su propia línea en el timeline: un negocio que aparece cerrado
+  // sin que nadie lo cerrara es un misterio para quien lo lea después.
+  if (camposCierreAuto && staffId) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId,
+      campo_modificado: 'estado',
+      valor_anterior: 'abierto',
+      valor_nuevo: 'completado',
+      contenido: MOTIVO_CIERRE_AUTOMATICO,
+    })
+  }
 
   // Quién aceptó entregar el caso queda escrito. Sin esto no hay forma de saber si el
   // aviso se está leyendo o si el equipo aprendió a cerrarlo: exactamente lo que este
@@ -7424,6 +7498,155 @@ async function validarGateFacturaEmitida(
   return null
 }
 
+/**
+ * Los campos que escribe un cierre, calculados en UN solo lugar.
+ *
+ * Los consumen el cierre manual (`completarNegocio`) y el automatico al llegar a la etapa de
+ * cierre. Escrito dos veces, las dos formas de cerrar el mismo negocio producirian snapshots
+ * distintos, que es la familia de defecto que este producto ya pago caro con la formula de
+ * saldo repartida en cuatro sitios.
+ */
+async function camposDeCierre(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioId: string,
+  negocio: { precio_aprobado?: number | null; precio_estimado?: number | null },
+  opts?: { lecciones?: string | null; noFacturable?: { motivo?: string; nota?: string | null; staffId?: string | null } },
+): Promise<Record<string, unknown>> {
+  const { data: cobrosData } = await db(supabase)
+    .from('cobros')
+    .select('monto, revisado')
+    .eq('negocio_id', negocioId)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number }>
+  // 2026-04-28: todos los cobros registrados cuentan. revisado es para contador.
+  const totalCobrado = cobros.reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
+  const pendiente = Math.max(0, precioAprobado - totalCobrado)
+  const nf = opts?.noFacturable
+  const now = new Date().toISOString()
+
+  return {
+    estado: 'completado',
+    lecciones_aprendidas: opts?.lecciones?.trim() || null,
+    closed_at: now,
+    cierre_snapshot: {
+      fecha_cierre: now,
+      precio_aprobado: precioAprobado,
+      total_cobrado: totalCobrado,
+      // Se conserva el numero tal cual (es lo que quedo sin cobrar de verdad), pero
+      // en un cierre no facturable ese saldo NO es cartera: nadie lo va a cobrar.
+      // Sin la marca, cualquier lector futuro del snapshot lo suma como plata por
+      // entrar, que es justo lo que la excepcion existe para evitar.
+      pendiente_cobro: pendiente,
+      ...(nf ? { no_facturable: true, motivo_no_facturable: nf.motivo } : {}),
+      margen: totalCobrado - 0, // sin costos ejecutados por ahora
+    },
+    ...(nf ? {
+      cierre_no_facturable: true,
+      cierre_no_facturable_motivo: nf.motivo,
+      cierre_no_facturable_nota: nf.nota,
+      cierre_no_facturable_at: now,
+      cierre_no_facturable_por: nf.staffId,
+    } : {}),
+  }
+}
+
+/**
+ * Cierra el negocio si YA ESTA en su etapa de cierre y su gate acaba de quedar resuelto.
+ *
+ * Es el segundo disparador del cierre automatico. El primero vive en
+ * `cambiarEtapaNegocioConGate` y actua sobre la LLEGADA: el caso entra a Facturacion ya
+ * facturado y no se detiene. Este actua sobre el HECHO: el caso ya estaba esperando en la
+ * bandeja y la factura aparece despues, que es el escenario para el que Facturacion existe.
+ *
+ * Sin este segundo disparador, el caso que llega sin factura se queda ahi para siempre
+ * aunque se facture al dia siguiente, y alguien tiene que acordarse de volver a cerrarlo.
+ *
+ * ── Aqui NO hay riesgo de aviso falso ─────────────────────────────────────────────────
+ * A diferencia de la llegada, este camino no mueve la etapa, asi que el trigger de
+ * `avisar_al_entrar` ni se entera. Por eso puede ser un update simple.
+ *
+ * ── Barato primero ────────────────────────────────────────────────────────────────────
+ * Lo llaman caminos calientes (guardar un bloque, emitir una factura), asi que descarta en
+ * la primera consulta: si el negocio no esta abierto o no esta parado en una etapa de
+ * cierre, sale sin tocar nada mas.
+ *
+ * Devuelve `true` solo si CERRO.
+ */
+export async function cerrarNegocioSiQuedaResuelto(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  negocioId: string,
+  staffId?: string | null,
+): Promise<boolean> {
+  const { data: negRaw } = await db(supabase)
+    .from('negocios')
+    .select('id, estado, etapa_actual_id, linea_id, precio_aprobado, precio_estimado, etapas_negocio(config_extra)')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+
+  const neg = negRaw as {
+    estado?: string | null
+    etapa_actual_id?: string | null
+    linea_id?: string | null
+    precio_aprobado?: number | null
+    precio_estimado?: number | null
+    etapas_negocio?: { config_extra?: Record<string, unknown> | null } | null
+  } | null
+
+  if (!neg || neg.estado !== 'abierto' || !neg.etapa_actual_id || !neg.linea_id) return false
+  if ((neg.etapas_negocio?.config_extra as { etapa_cierre?: unknown } | null | undefined)?.etapa_cierre !== true) {
+    return false
+  }
+
+  const { data: lineaRaw } = await db(supabase)
+    .from('lineas_negocio')
+    .select('config_extra')
+    .eq('id', neg.linea_id)
+    .maybeSingle()
+  if (!cierreAutomaticoActivo((lineaRaw as { config_extra: Record<string, unknown> | null } | null)?.config_extra)) {
+    return false
+  }
+
+  // Mismo criterio que el cierre manual y que el de la llegada. Ante error de lectura NO
+  // cierra: el caso se queda en la bandeja, que es el estado seguro.
+  let gateCumplido: boolean | null = null
+  try {
+    gateCumplido = (await validarGateFacturaEmitida(supabase, negocioId, neg.etapa_actual_id)) === null
+  } catch {
+    gateCumplido = null
+  }
+  if (!cierraAlLlegar({ esCierre: true, gateCumplido }, true)) return false
+
+  const campos = await camposDeCierre(supabase, negocioId, neg)
+  const { error: errCierre } = await db(supabase)
+    .from('negocios')
+    .update(campos)
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .eq('estado', 'abierto')   // no re-cerrar si otro camino gano la carrera
+  if (errCierre) return false
+
+  if (staffId) {
+    await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId,
+      campo_modificado: 'estado',
+      valor_anterior: 'abierto',
+      valor_nuevo: 'completado',
+      contenido: MOTIVO_CIERRE_AUTOMATICO,
+    })
+  }
+  return true
+}
+
 export async function completarNegocio(
   negocioId: string,
   lecciones?: string,
@@ -7517,48 +7740,17 @@ export async function completarNegocio(
     }
   }
 
-  // Calcular snapshot financiero: buscar cobros del negocio
-  const { data: cobrosData } = await db(supabase)
-    .from('cobros')
-    .select('monto, revisado')
-    .eq('negocio_id', negocioId)
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number }>
-  // 2026-04-28: todos los cobros registrados cuentan. revisado es para contador.
-  const totalCobrado = cobros.reduce((sum, c) => sum + (c.monto ?? 0), 0)
-  const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
-  const pendiente = Math.max(0, precioAprobado - totalCobrado)
-
-  const now = new Date().toISOString()
-  const snapshot = {
-    fecha_cierre: now,
-    precio_aprobado: precioAprobado,
-    total_cobrado: totalCobrado,
-    // Se conserva el numero tal cual (es lo que quedo sin cobrar de verdad), pero
-    // en un cierre no facturable ese saldo NO es cartera: nadie lo va a cobrar.
-    // Sin la marca, cualquier lector futuro del snapshot lo suma como plata por
-    // entrar, que es justo lo que la excepcion existe para evitar.
-    pendiente_cobro: pendiente,
-    ...(esCierreNoFacturable ? { no_facturable: true, motivo_no_facturable: motivoNoFacturable } : {}),
-    margen: totalCobrado - 0, // sin costos ejecutados por ahora
-  }
+  // El snapshot y los campos del cierre salen del MISMO sitio que usa el cierre automatico.
+  const campos = await camposDeCierre(supabase, negocioId, negocio, {
+    lecciones,
+    noFacturable: esCierreNoFacturable
+      ? { motivo: motivoNoFacturable, nota: notaNoFacturable, staffId }
+      : undefined,
+  })
 
   const { error: updErr } = await db(supabase)
     .from('negocios')
-    .update({
-      estado: 'completado',
-      lecciones_aprendidas: lecciones?.trim() || null,
-      cierre_snapshot: snapshot,
-      closed_at: now,
-      ...(esCierreNoFacturable ? {
-        cierre_no_facturable: true,
-        cierre_no_facturable_motivo: motivoNoFacturable,
-        cierre_no_facturable_nota: notaNoFacturable,
-        cierre_no_facturable_at: now,
-        cierre_no_facturable_por: staffId,
-      } : {}),
-    })
+    .update(campos)
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
 

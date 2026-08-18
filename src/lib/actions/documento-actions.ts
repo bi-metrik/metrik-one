@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -514,7 +515,7 @@ export async function procesarDocumento(
   extraction_error?: string
   error?: string
 }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const guard = await guardEditarBloque(negocioBloqueId)
@@ -736,7 +737,17 @@ export async function procesarDocumento(
         .eq('id', negocioBloqueId)
     }
 
-    // ── 11. Revalidar ───────────────────────────────────────────────────
+    // ── 11. Cierre automatico + revalidar ───────────────────────────────
+
+  // La factura puede aparecer DESPUES de que el caso llego a su etapa de cierre: ese es
+  // justo el escenario para el que existe la bandeja de Facturacion. El helper descarta en
+  // la primera consulta si el negocio no esta parado ahi, asi que no encarece el resto.
+  try {
+    await cerrarNegocioSiQuedaResuelto(supabase, workspaceId, negocioId, staffId ?? null)
+  } catch {
+    // Un fallo evaluando el cierre NO puede tumbar el guardado del documento.
+  }
+
     revalidatePath(`/negocios/${negocioId}`)
     console.log('[documento] DONE — all steps completed')
 
@@ -999,6 +1010,16 @@ export async function actualizarCampoDocumento(
       causa: correccion!.causa as CausaCorreccion,
       sesionId: correccion!.sesion_id as string,
     })
+  }
+
+
+  // La factura puede aparecer DESPUES de que el caso llego a su etapa de cierre: ese es
+  // justo el escenario para el que existe la bandeja de Facturacion. El helper descarta en
+  // la primera consulta si el negocio no esta parado ahi, asi que no encarece el resto.
+  try {
+    await cerrarNegocioSiQuedaResuelto(supabase, workspaceId, negocioId, staffId ?? null)
+  } catch {
+    // Un fallo evaluando el cierre NO puede tumbar el guardado del documento.
   }
 
   revalidatePath(`/negocios/${negocioId}`)
