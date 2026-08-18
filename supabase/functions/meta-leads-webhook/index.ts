@@ -283,7 +283,10 @@ type MetaLeadsConfig = {
     fuente_adquisicion?: string;
     fuente_detalle?: string;
     rol_natural?: string;
-    tipo_persona_field?: string;
+    // Uno o varios nombres aceptados, en orden de preferencia: el formulario de
+    // Meta se renombra por fuera y con un solo nombre el dato deja de llegar sin
+    // error (mismo criterio que campos_fuente.source_alternatives).
+    tipo_persona_field?: string | string[];
     natural_value?: string;
     // Segmento inicial del contacto recién creado desde un lead (aún sin gestionar).
     segmento_inicial?: string;
@@ -406,7 +409,10 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
   // rol = decisor si el lead es persona natural. Solo aplican al CREAR el contacto;
   // un contacto ya existente (dedup) no se pisa.
   const cc = cfg.contacto ?? {};
-  const tipoPersona = cc.tipo_persona_field ? getField([cc.tipo_persona_field]) : null;
+  const tipoPersonaNames = cc.tipo_persona_field
+    ? (Array.isArray(cc.tipo_persona_field) ? cc.tipo_persona_field : [cc.tipo_persona_field])
+    : [];
+  const tipoPersona = tipoPersonaNames.length ? getField(tipoPersonaNames) : null;
   const esNatural = !!tipoPersona
     && tipoPersona.trim().toLowerCase().replace(/_+$/, '') === (cc.natural_value ?? 'natural').toLowerCase();
   const contactoRol = esNatural ? (cc.rol_natural ?? null) : null;
