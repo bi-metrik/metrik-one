@@ -70,6 +70,13 @@ export function TabOperaciones({ data: inicial }: { data: OperacionesBonoData })
           titulo="La calidad no se esta midiendo"
           cuerpo={`No se registro ningun reproceso en ${MESES[periodo.mes - 1]}. El indicador de calidad pesa el ${(P.calidad_base + P.calidad_tramo) * 100}% del bono y sale de los reprocesos marcados en el sistema. Sin ellos, "cero certificados malos" no quiere decir trabajo impecable: quiere decir que nadie midio, y por eso aqui aparece en blanco y no en 40 puntos.`} />
       )}
+      {!data.correcciones_medida && (
+        <Aviso tono="alerta"
+          titulo="Las correcciones de la DIAN no se estan midiendo"
+          cuerpo={`${data.devoluciones_mes === 0
+            ? `No se registro ninguna devolucion de la DIAN en ${MESES[periodo.mes - 1]}.`
+            : 'Falta la evidencia que exige la configuracion del indicador.'} Las radicaciones si se cuentan solas, pero las correcciones salen de los reprocesos marcados en el sistema: sin ellos, "ninguna correccion" no quiere decir trabajo impecable. El indicador pesa el ${P.peso_correcciones * 100}% del bono y por eso aqui aparece en blanco y no en ${P.peso_correcciones * 100} puntos.`} />
+      )}
       {sinSalarios && (
         <Aviso tono="info"
           titulo="Sin salarios registrados"
@@ -213,9 +220,11 @@ function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: n
           ? (p.envio.eventos > 0 ? 'sin fecha de cita' : 'sin casos')
           : `${pct(p.envio.pct)} · ${p.envio.a_tiempo}/${p.envio.medibles}`} />
       <ScoreCelda score={p.score_correcciones}
-        detalle={p.correcciones.pct === null
-          ? 'sin radicaciones'
-          : `${p.correcciones.correcciones}/${p.correcciones.radicaciones}`} />
+        detalle={!p.correcciones.medida
+          ? 'sin medir'
+          : p.correcciones.pct === null
+            ? 'sin radicaciones'
+            : `${p.correcciones.correcciones}/${p.correcciones.radicaciones}`} />
       <td className="px-3 py-3 text-center">
         <div className="font-semibold" style={{ color: CARBON }}>
           {(p.puntaje * 100).toFixed(0)}%
