@@ -90,6 +90,13 @@ export type EtapaNegocio = {
   // hace quien abre un caso: dónde está, qué le toca y qué falta para avanzar.
   // Opt-in: una línea sin `guia` se ve exactamente igual que hoy.
   guia?: GuiaEtapa | null
+  // config_extra.routing → por dónde sigue el proceso al salir de esta etapa. Sin este
+  // campo, `siguienteEtapaPorDefecto` no puede aplicar su regla 2 (destino declarado) y
+  // toda etapa cae a la regla 3, "la siguiente por orden ascendente". La consecuencia no
+  // es un destino equivocado, porque el servidor lo autocorrige con el routing: es que la
+  // etapa de MAYOR orden se queda sin ninguna después, el cálculo devuelve null y la
+  // pantalla concluye que el proceso termina ahí, dejándola sin botón de avanzar.
+  routing?: { default_etapa_orden?: number } | null
 }
 
 /**
@@ -847,6 +854,7 @@ export async function getNegocioDetalle(id: string): Promise<{
       guia: ((e.config_extra as { guia?: GuiaEtapa } | null)?.guia ?? null),
       es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
+      routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
     }))
   }
 
