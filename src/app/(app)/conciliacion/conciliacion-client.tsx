@@ -701,7 +701,7 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
   return (
     <div>
       <p className="mb-3 text-[11px]" style={{ color: '#9CA3AF' }}>
-        Vista de solo lectura de la cartera. Para registrar o repartir un pago, entra al bloque de pagos del negocio.
+        Vista de solo lectura de la cartera, ordenada de más viejo a más reciente. Para registrar o repartir un pago, entra al bloque de pagos del negocio.
       </p>
 
       {/* Tarjetas de resumen */}

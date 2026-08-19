@@ -20,7 +20,7 @@ import {
   type PropuestaBloqueData,
 } from '@/lib/upme/modelo-dinero'
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
-import { diasDesde } from '@/lib/negocios/antiguedad'
+import { diasDesde, compararPorAntiguedad } from '@/lib/negocios/antiguedad'
 import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
@@ -1152,7 +1152,10 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
     if (saldoCuadrado(saldo)) conciliadosList.push(fila)
     else saldos.push(fila)
   }
-  saldos.sort((a, b) => b.saldo - a.saldo)
+  // Primero lo más viejo; el monto solo desempata. El criterio vive en
+  // `compararPorAntiguedad`, no acá: ordenar por monto no ordenaba nada porque 86 de los
+  // 119 faltantes de SOENA caen en dos grupos de valor idéntico. Ver el módulo.
+  saldos.sort(compararPorAntiguedad)
 
   // Pestaña 3: DUPLICADOS
   const duplicados: DuplicadoRef[] = []
