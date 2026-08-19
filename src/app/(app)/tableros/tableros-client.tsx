@@ -1,18 +1,18 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import type { ComercialData, OperativoData, FinancieroData, RentabilidadComercialData, Periodo, ProcesoSeccionalData } from './types'
 import { TabComercial } from './components/tab-comercial'
 import { TabOperativo } from './components/tab-operativo'
 import { TabFinanciero } from './components/tab-financiero'
 import { TabRentabilidadComercial } from './components/tab-rentabilidad-comercial'
 import { TabComercialSoena } from './components/tab-comercial-soena'
-import { TabProceso } from './components/tab-proceso'
 import TabCalidad from './components/tab-calidad'
 import { TabOperaciones } from './components/tab-operaciones'
 import type { OperacionesBonoData } from './operaciones-types'
 import type { DuenoData } from '../calidad/types'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
+import { pestanasDeTableros, type TableroKey } from '@/lib/tableros/pestanas'
 import { ShieldCheck, LayoutDashboard } from 'lucide-react'
 import type {
   ComercialResumenRow,
@@ -21,27 +21,9 @@ import type {
   MetaComercial,
 } from '../equipo/comercial-types'
 
-type TabKey = 'rentabilidad_comercial' | 'comercial_negocios' | 'proceso' | 'operaciones' | 'financiero' | 'comercial' | 'operativo' | 'cumplimiento' | 'calidad'
-
-const RENTABILIDAD_TAB: { key: TabKey; label: string } = { key: 'rentabilidad_comercial', label: 'Rentabilidad Comercial' }
-const COMERCIAL_NEGOCIOS_TAB: { key: TabKey; label: string } = { key: 'comercial_negocios', label: 'Comercial' }
-// Foto del proceso por etapa. Gateada por su propio modulo: la pestana Operativo
-// generica mide `proyectos`, que en los workspaces Clarity esta vacio (SOENA: 0).
-const PROCESO_TAB: { key: TabKey; label: string } = { key: 'proceso', label: 'Proceso' }
-// Bono de operaciones: mide a las PERSONAS del area, no el estado de los casos.
-const OPERACIONES_TAB: { key: TabKey; label: string } = { key: 'operaciones', label: 'Operaciones' }
-
-const BUSINESS_TABS: { key: TabKey; label: string }[] = [
-  { key: 'financiero', label: 'Financiero' },
-  { key: 'comercial', label: 'Comercial' },
-  { key: 'operativo', label: 'Operativo' },
-]
-
-const COMPLIANCE_TAB: { key: TabKey; label: string } = { key: 'cumplimiento', label: 'Cumplimiento' }
-
-// Calidad de llamadas: dinero, embudo de cobro y riesgo. Se empuja FUERA de la
-// rama de business, igual que Cumplimiento — su modulo no depende de aquel.
-const CALIDAD_TAB: { key: TabKey; label: string } = { key: 'calidad', label: 'Recaudo y riesgo' }
+// Que pestanas ve cada workspace lo decide `@/lib/tableros/pestanas`: la misma
+// funcion que usa `page.tsx` para saber que datos pedir.
+type TabKey = TableroKey
 
 const PERIODOS: { key: Periodo; label: string }[] = [
   { key: 'mes', label: 'Este mes' },
@@ -49,6 +31,11 @@ const PERIODOS: { key: Periodo; label: string }[] = [
   { key: '6meses', label: '6 meses' },
   { key: 'anio', label: 'Anual' },
 ]
+
+// Las unicas pestanas que releen su dato cuando cambia el periodo. Declarado en
+// positivo: la lista negativa anterior mostraba el selector tambien cuando no
+// habia ninguna pestana, sobre la pantalla que dice que no hay tableros.
+const PESTANAS_CON_PERIODO: TabKey[] = ['financiero', 'comercial', 'operativo']
 
 export interface ComercialNegociosBundle {
   equipo: ComercialResumenRow[]
@@ -85,33 +72,14 @@ export default function TablerosClient({
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
-  const tabs = useMemo(() => {
-    const t: { key: TabKey; label: string }[] = []
-    if (mod.rentabilidad_comercial) {
-      // Workspace de Rentabilidad Comercial (alimentado por ventas_hechos): Tableros
-      // muestra solo esa vista. Las pestañas de negocio (Financiero/Comercial/Operativo)
-      // dependen de la operación viva en ONE, que este workspace aún no tiene.
-      t.push(RENTABILIDAD_TAB)
-    } else if (mod.business) {
-      // Tablero comercial sobre negocios (Clarity, ej. SOENA): reemplaza la pestaña
-      // "Comercial" generica del pipeline por la vista por vendedor cuando el modulo
-      // comercial_negocios esta activo.
-      if (mod.comercial_negocios && initialComercialNegocios) {
-        t.push(COMERCIAL_NEGOCIOS_TAB)
-        t.push(...BUSINESS_TABS.filter(tab => tab.key !== 'comercial'))
-      } else {
-        t.push(...BUSINESS_TABS)
-      }
-      // Va despues de Comercial: primero cuanto se vendio, luego donde esta atascado.
-      if (mod.proceso_semanal && initialProcesoSeccional) t.splice(1, 0, PROCESO_TAB)
-      // Va detras de Proceso: primero donde estan atascados los casos, luego como
-      // le fue a cada persona.
-      if (mod.operaciones_bonos && initialOperaciones) t.push(OPERACIONES_TAB)
-    }
-    if (mod.compliance) t.push(COMPLIANCE_TAB)
-    if (mod.calidad_llamadas && initialCalidad) t.push(CALIDAD_TAB)
-    return t
-  }, [mod.rentabilidad_comercial, mod.business, mod.compliance, mod.comercial_negocios, mod.proceso_semanal, mod.operaciones_bonos, mod.calidad_llamadas, initialComercialNegocios, initialProcesoSeccional, initialOperaciones, initialCalidad])
+  // Sin `useMemo`: armar una lista de seis elementos no justifica mantener un
+  // arreglo de dependencias que hay que acordarse de ampliar con cada modulo.
+  const tabs = pestanasDeTableros(mod, {
+    comercialNegocios: Boolean(initialComercialNegocios),
+    procesoSeccional: Boolean(initialProcesoSeccional),
+    operacionesBono: Boolean(initialOperaciones),
+    calidad: Boolean(initialCalidad),
+  })
 
   // Sin `?? 'cumplimiento'`: cuando no hay ninguna pestaña, caer en la de
   // Cumplimiento hacia que la pantalla mostrara su vacio — un escudo verde y
@@ -170,8 +138,10 @@ export default function TablerosClient({
           ))}
         </div>
 
-        {/* Periodo selector — only for business tabs (no aplica a Rentabilidad Comercial ni Cumplimiento) */}
-        {activeTab !== 'cumplimiento' && activeTab !== 'rentabilidad_comercial' && activeTab !== 'comercial_negocios' && activeTab !== 'proceso' && activeTab !== 'operaciones' && activeTab !== 'calidad' && (
+        {/* Selector de periodo: SOLO para las tres genericas. Las demas pestanas
+            traen su propio control de tiempo (o son una foto de hoy), y un
+            segundo reloj arriba diria que manda sobre lo que se ve debajo. */}
+        {activeTab !== null && PESTANAS_CON_PERIODO.includes(activeTab) && (
           <div className="flex gap-1">
             {PERIODOS.map(p => (
               <button
@@ -206,11 +176,11 @@ export default function TablerosClient({
             puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
           />
         )}
-        {activeTab === 'proceso' && initialProcesoSeccional && (
-          <TabProceso data={initialProcesoSeccional} />
-        )}
-        {activeTab === 'operaciones' && initialOperaciones && (
-          <TabOperaciones data={initialOperaciones} />
+        {activeTab === 'operaciones' && (
+          <TabOperaciones
+            proceso={initialProcesoSeccional ?? null}
+            personas={initialOperaciones ?? null}
+          />
         )}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}

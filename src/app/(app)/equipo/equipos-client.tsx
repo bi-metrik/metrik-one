@@ -14,7 +14,7 @@
 
 import { useState } from 'react'
 import EquipoComercialPersonasClient from './equipo-comercial-personas-client'
-import { TabOperaciones } from '../tableros/components/tab-operaciones'
+import { TabOperacionesPersonas } from '../tableros/components/tab-operaciones-personas'
 import type { ComercialResumenRow, ComercialMesResponse } from './comercial-types'
 import type { OperacionesBonoData } from '../tableros/operaciones-types'
 
@@ -69,7 +69,7 @@ export default function EquiposClient({ comercial, operaciones, inicial }: Props
           metasPorVendedor={comercial.metasPorVendedor}
         />
       ) : operaciones ? (
-        <TabOperaciones data={operaciones} />
+        <TabOperacionesPersonas data={operaciones} />
       ) : (
         // Sin datos NO se pinta un tablero en ceros: eso se leería como un mes sin
         // errores y sin trabajo, que es lo contrario de "todavía no hay medición".
