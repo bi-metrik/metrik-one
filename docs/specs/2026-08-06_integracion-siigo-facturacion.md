@@ -104,6 +104,32 @@ Respuesta 201: `id` (UUID), `name` (por ejemplo `FV-2-22`), `number`, `total`,
 `balance`, **`stamp.status`**, **`stamp.cufe`** (y `cude`), `stamp.errors`,
 `mail.status`, `metadata.created`.
 
+### La base gravable va con 6 decimales, no con 2 (2026-08-19)
+
+Siigo no recibe el total: recibe `items[].price` (la BASE) y reconstruye impuesto y
+total. El pago que se declara en `payments[].value` tiene que coincidir **exacto**
+con ese total reconstruido; la API no tolera ni un centavo, y ahí no hay tolerancia
+de ONE que aplicar (`TOLERANCIA_SALDO_COP` gobierna el gate de recaudo, que es otra
+cosa y ya pasaba).
+
+Con la base redondeada a 2 decimales, el total de Siigo no siempre vuelve al
+honorario. Medido sobre 19.991 montos entre $1.000 y $2.000.000 con IVA 19%:
+
+| Decimales de la base | Montos que descuadran |
+|---|---|
+| 2 | 15,9 % |
+| 4 | 0,72 % |
+| 6 | 0 % |
+
+En producción bloqueó a V0317 y V0319 de SOENA el 2026-08-19: honorario 637.500,
+total que armaba Siigo 637.500,01, factura rechazada. La corrección vive en
+`baseYTotalGravado` (`lib/siigo/mapeo.ts`), que además deriva el valor del pago de
+la misma base en vez de reusar el honorario, para que sigan iguales si cambia la
+tarifa de IVA.
+
+⚠️ 6 es el máximo que Siigo documenta para `items[].price`. Subirlo hace que la API
+rechace el campo.
+
 ### Idempotencia
 
 Header **`Idempotency-Key`**, alfanumérico sin caracteres especiales ni espacios,

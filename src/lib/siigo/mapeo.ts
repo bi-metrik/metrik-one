@@ -251,13 +251,60 @@ export interface BorradorFactura {
 }
 
 /**
+ * Decimales con los que viaja la BASE gravable.
+ *
+ * Siigo no recibe el total: recibe la base y él reconstruye impuesto y total. Si
+ * la base va redondeada a 2 decimales, ese total no siempre vuelve al honorario,
+ * y entonces Siigo rechaza la factura porque `payments[].value` no coincide con
+ * el total que él mismo armó. No es un descuadre de plata: es un centavo de
+ * redondeo que la API no tolera (y no hay tolerancia que aplicarle, la valida
+ * Siigo, no ONE).
+ *
+ * Medido sobre 19.991 montos entre $1.000 y $2.000.000 con IVA 19%: a 2 decimales
+ * descuadra el 15,9%, a 4 el 0,72%, a 6 ninguno. En producción bloqueó a V0317 y
+ * V0319 de SOENA el 2026-08-19 (honorario 637.500 ⇄ total Siigo 637.500,01).
+ *
+ * ⚠️ 6 es el MÁXIMO que Siigo documenta para `items[].price`. Subirlo hace que la
+ * API rechace el campo.
+ */
+const DECIMALES_BASE = 6
+
+function redondear(valor: number, decimales: number): number {
+  const factor = 10 ** decimales
+  return Math.round(valor * factor) / factor
+}
+
+/**
+ * La base gravable y el total que Siigo va a reconstruir a partir de ella.
+ *
+ * El total se calcula COMO LO CALCULA SIIGO (base + impuesto redondeado a 2
+ * decimales) en lugar de reusar el honorario: lo que el pago tiene que igualar es
+ * el total que arma Siigo, no el que ONE tenía en mente. Con 6 decimales los dos
+ * coinciden siempre en el rango medido, así que en la práctica el cliente ve el
+ * mismo valor de siempre; derivarlo así es lo que garantiza que sigan iguales si
+ * mañana cambia la tarifa de IVA.
+ *
+ * Puro: no toca DB ni red.
+ */
+export function baseYTotalGravado(
+  totalConIva: number,
+  ivaPct: number,
+): { base: number; total: number } {
+  const bruto = Number.isFinite(totalConIva) && totalConIva > 0 ? totalConIva : 0
+  const base = redondear(bruto / (1 + ivaPct / 100), DECIMALES_BASE)
+  const impuesto = redondear((base * ivaPct) / 100, 2)
+  return { base, total: redondear(base + impuesto, 2) }
+}
+
+/**
  * Factura del HONORARIO. La tarifa UPME queda fuera a propósito (va por recibo).
  *
  * ⚠️ `precio_aprobado` de ONE es el honorario CON IVA (verificado contra las
- * facturas reales de SOENA: precio 318.750 ⇄ total 318.750, base 267.857,14).
- * Siigo espera en `items[].price` la BASE gravable y él calcula el impuesto, así
- * que hay que DIVIDIR por (1 + iva), no multiplicar. Mandar el precio con IVA
- * facturaría un 19% de más.
+ * facturas reales de SOENA: precio 318.750 ⇄ total 318.750). Siigo espera en
+ * `items[].price` la BASE gravable y él calcula el impuesto, así que hay que
+ * DIVIDIR por (1 + iva), no multiplicar. Mandar el precio con IVA facturaría un
+ * 19% de más. Con cuántos decimales viaja esa base no es cosmético: ver
+ * `DECIMALES_BASE`.
  */
 export function borradorFactura(
   cfg: SiigoConfig,
@@ -281,10 +328,7 @@ export function borradorFactura(
   if (!identificacion) faltantes.push('identificación')
   if (honorarioConIva == null || !(honorarioConIva > 0)) faltantes.push('honorario aprobado')
 
-  const total = honorarioConIva ?? 0
-  // Redondeo a 2 decimales: Siigo acepta hasta 6 en price, pero más precisión
-  // solo arrastra ruido de coma flotante al total que valida la DIAN.
-  const base = Math.round((total / (1 + ivaPct / 100)) * 100) / 100
+  const { base, total } = baseYTotalGravado(honorarioConIva ?? 0, ivaPct)
 
   return {
     payload: {
