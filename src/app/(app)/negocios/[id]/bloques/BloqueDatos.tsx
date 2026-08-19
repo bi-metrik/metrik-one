@@ -17,11 +17,15 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { formatFecha } from '@/lib/dates/bogota'
+import { paraInputFechaHora, sinHoraRegistrada, rechazoPorFechaPasada } from '@/lib/negocios/fecha-hora-campo'
 
 export interface DatosField {
   slug: string
   label: string
-  tipo: 'texto' | 'numero' | 'fecha' | 'toggle' | 'checkbox' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview' | 'doc_link' | 'plantilla'
+  // `fecha_hora` guarda día Y hora civil de Bogotá ('YYYY-MM-DDTHH:mm'). Se usa donde
+  // la hora es parte del compromiso, no un detalle: la cita en la DIAN se atiende a una
+  // hora asignada y el cliente tiene que enviar los documentos en ese momento.
+  tipo: 'texto' | 'numero' | 'fecha' | 'fecha_hora' | 'toggle' | 'checkbox' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview' | 'doc_link' | 'plantilla'
   required?: boolean
   options?: string[]
   // `solo_si` (opt-in) restringe una opción a los casos donde aplica. Ver `opcion-condicional.ts`.
@@ -256,6 +260,8 @@ export default function BloqueDatos({
   // `subiendo`: por slug del campo imagen, true mientras el pantallazo viaja a Storage.
   const [subiendo, setSubiendo] = useState<Record<string, boolean>>({})
   const [aiFilled, setAiFilled] = useState<Record<string, boolean>>({})
+  // Rechazo de validación por campo (hoy solo `fecha_hora`). Cadena vacía = sin error.
+  const [errorCampo, setErrorCampo] = useState<Record<string, string>>({})
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Guardado: estado pasivo + refs para flush al desmontar (cero pérdida de datos).
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -453,6 +459,15 @@ export default function BloqueDatos({
       next['correo_seccional'] = getSeccionalBySlug(value as string)?.email ?? ''
     }
     setValues(next)
+    if (f?.tipo === 'fecha_hora') {
+      // La regla muerde al ESCRIBIR, no al avanzar: el aviso llega donde está el error y
+      // no sobre un botón que no explica nada. Y muerde solo sobre lo que se escribe
+      // ahora — decenas de casos cerrados guardan citas ya cumplidas, y validar el valor
+      // heredado los dejaría trabados sin poder avanzar por algo que ya ocurrió.
+      const rechazo = rechazoPorFechaPasada(value)
+      setErrorCampo(prev => ({ ...prev, [slug]: rechazo ?? '' }))
+      if (rechazo) return
+    }
     void persist(next, true)
   }
 
@@ -589,7 +604,7 @@ export default function BloqueDatos({
               </div>
             )
           }
-          const isCopyable = ['texto', 'numero', 'fecha', 'select', 'radio'].includes(f.tipo)
+          const isCopyable = ['texto', 'numero', 'fecha', 'fecha_hora', 'select', 'radio'].includes(f.tipo)
           const copyValue = f.tipo === 'select' || f.tipo === 'radio'
             ? (f.opciones?.find(o => o.value === v)?.label ?? (v as string | null))
             : (v as string | number | null | undefined)
@@ -827,6 +842,32 @@ export default function BloqueDatos({
               className={`${inputBaseClass} ${inputBg(f.slug)}`}
             />
           )}
+
+          {f.tipo === 'fecha_hora' && (() => {
+            const heredadoSinHora = sinHoraRegistrada(values[f.slug])
+            return (
+              <div className="flex flex-col gap-0.5">
+                <input
+                  type="datetime-local"
+                  value={paraInputFechaHora(values[f.slug])}
+                  onChange={e => handleToggleChange(f.slug, e.target.value)}
+                  disabled={isPending}
+                  className={`${inputBaseClass} ${inputBg(f.slug)}`}
+                />
+                {errorCampo[f.slug] && (
+                  <span className="text-[11px] text-red-600 font-medium">{errorCampo[f.slug]}</span>
+                )}
+                {heredadoSinHora && !errorCampo[f.slug] && (
+                  // El valor viene de cuando el campo era solo día. La medianoche que
+                  // muestra el input es relleno, no la hora real: decirlo evita que el
+                  // equipo llame al cliente citándole las 12:00 de la noche.
+                  <span className="text-[11px] text-[#B45309]">
+                    Se registró antes de que existiera la hora. Confirma la hora real con la DIAN.
+                  </span>
+                )}
+              </div>
+            )
+          })()}
 
           {f.tipo === 'toggle' && (() => {
             const lk = lockState(f)

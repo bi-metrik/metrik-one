@@ -22,6 +22,7 @@ import { getCachedUser } from '@/lib/supabase/auth-user'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
+import { clausulasAHtml, normalizarTerminos } from '@/lib/propuesta/terminos'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
@@ -41,7 +42,9 @@ export type PropuestaVersion = {
   pdf_drive_id: string | null
   pdf_url: string | null
   generated_at: string
-  generated_by: string | null
+  generated_by: string | null  /** Version de los terminos vigentes al generar este PDF. `null` = los del render.
+   *  Sin esto, una propuesta firmada no se puede rastrear al texto que la regia. */
+  terminos_version: number | null
 }
 
 export type PropuestaData = {
@@ -249,6 +252,16 @@ async function loadBloqueContext(
   const templateSlug = (configExtra.template_slug as string) ?? 'soena/propuesta-economica'
   const driveSubfolder = (configExtra.drive_subfolder as string | undefined) ?? null
 
+  // Terminos y condiciones editables por el cliente desde /mi-negocio. Se arman
+  // AQUI, escapados: el servicio de render hace reemplazo literal de cadenas y no
+  // tiene como defenderse de marcado roto. Si la linea no los ha configurado, no
+  // se manda nada y el render cae a su listado por defecto — nunca sale una
+  // propuesta sin terminos.
+  const terminosCfg = normalizarTerminos(configExtra.propuesta)
+  const terminosHtml = terminosCfg ? clausulasAHtml(terminosCfg.clausulas) : null
+  const cierreTexto = terminosCfg?.cierre || null
+  const terminosVersion = terminosCfg?.version ?? null
+
   // ── Tarifa UPME (pasante) ─────────────────────────────────────────────────
   // ⚠️ La FUENTE DE VERDAD es la tarifa CONFIRMADA en Validación, la misma que el
   // resto del sistema le cobra al cliente vía `valorARecaudar`. Antes esto solo se
@@ -310,7 +323,7 @@ async function loadBloqueContext(
       .from('negocio_bloques')
       .select('negocio_id, data, bloque_configs!inner(slug)')
       .eq('negocio_id', b.negocio_id)
-      .eq('bloque_configs.slug', 'certificacion_upme'),
+      .eq('bloque_configs.slug', 'servicio_contratado'),
   ])
   const tarifaConfirmada = tarifaConfirmadaPorNegocio(
     (confRes.data ?? []) as FilaBloqueTarifa[],
@@ -358,6 +371,9 @@ async function loadBloqueContext(
     umbralAprobacion,
     templateSlug,
     driveSubfolder,
+    terminosHtml,
+    cierreTexto,
+    terminosVersion,
     tarifaEnabled,
     tarifaEditada,
     tarifaUpme,
@@ -558,6 +574,10 @@ export async function generarVersionPropuesta(
       vehiculo_linea: vehiculoLinea,
       vehiculo_anio: vehiculoAnio,
       vehiculo_img: vehiculoImg,
+      // Solo se mandan si la linea los configuro; `undefined` deja que el
+      // servicio use su texto por defecto en vez de imprimir un hueco.
+      ...(ctx.terminosHtml ? { terminos_html: ctx.terminosHtml } : {}),
+      ...(ctx.cierreTexto ? { cierre_texto: ctx.cierreTexto } : {}),
     })
   } catch (e) {
     renderError = e instanceof Error ? e.message : String(e)
@@ -607,6 +627,7 @@ export async function generarVersionPropuesta(
     pdf_url: pdfUrl,
     generated_at: ahora.toISOString(),
     generated_by: staffId ?? null,
+    terminos_version: ctx.terminosVersion,
   }
 
   const nuevoData: PropuestaData = {

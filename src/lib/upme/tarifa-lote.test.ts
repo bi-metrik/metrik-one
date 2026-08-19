@@ -37,19 +37,29 @@ describe('tarifaConfirmadaDeData — solo la tarifa CONFIRMADA cuenta', () => {
   })
 })
 
-describe('niegaCertificacionUpme — el campo tiene que existir y estar en false', () => {
-  it('declarado en false → niega', () => {
-    expect(niegaCertificacionUpme({ requiere_certificacion_upme: false })).toBe(true)
+describe('niegaCertificacionUpme — lo decide el servicio contratado', () => {
+  it('solo_iva → niega', () => {
+    expect(niegaCertificacionUpme({ servicio: 'solo_iva' })).toBe(true)
   })
 
-  it('bloque sin tocar (campo ausente) → NO niega', () => {
+  it('las otras dos ramas SÍ llevan certificación → NO niegan', () => {
+    expect(niegaCertificacionUpme({ servicio: 'completo' })).toBe(false)
+    expect(niegaCertificacionUpme({ servicio: 'solo_upme' })).toBe(false)
+  })
+
+  it('bloque sin responder → NO niega', () => {
     // Un bloque recién nacido no debe anular la tarifa de un negocio normal.
     expect(niegaCertificacionUpme({})).toBe(false)
     expect(niegaCertificacionUpme(null)).toBe(false)
   })
 
-  it('declarado en true → NO niega', () => {
-    expect(niegaCertificacionUpme({ requiere_certificacion_upme: true })).toBe(false)
+  it('el campo DERIVADO ya no decide: leerlo fue lo que costó plata', () => {
+    // Cinco negocios llegaron con `requiere_certificacion_upme: false` puesto por un
+    // relleno retroactivo, no por una respuesta. Dos SÍ habían contratado la
+    // certificación y el sistema les anulaba la tarifa. Se lee la fuente, no el reflejo.
+    expect(niegaCertificacionUpme({ requiere_certificacion_upme: false })).toBe(false)
+    expect(niegaCertificacionUpme({ requiere_certificacion_upme: false, servicio: 'completo' })).toBe(false)
+    expect(niegaCertificacionUpme({ requiere_certificacion_upme: true, servicio: 'solo_iva' })).toBe(true)
   })
 })
 
@@ -100,12 +110,12 @@ describe('tarifaConfirmadaPorNegocio — resolución en lote', () => {
     // tarifa que no le corresponde y su sobrepago real quedaría escondido.
     const m = tarifaConfirmadaPorNegocio(
       [conf('a', { tarifa_confirmada: true, tarifa_upme_confirmada: 350906 })],
-      [conf('a', { requiere_certificacion_upme: false })],
+      [conf('a', { servicio: 'solo_iva' })],
     )
     expect(m.get('a') ?? 0).toBe(0)
   })
 
-  it('el bloque de certificación sin tocar no anula la tarifa', () => {
+  it('el bloque de servicio sin responder no anula la tarifa', () => {
     const m = tarifaConfirmadaPorNegocio(
       [conf('a', { tarifa_confirmada: true, tarifa_upme_confirmada: 350906 })],
       [conf('a', {})],

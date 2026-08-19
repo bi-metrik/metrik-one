@@ -111,13 +111,23 @@ export function tarifaConfirmadaDeData(data: Record<string, unknown> | null | un
 }
 
 /**
- * ¿Este bloque declara que el negocio NO contrató la certificación UPME? Solo cuenta
- * si el campo EXISTE y está en `false`: un bloque sin tocar no debe anular la tarifa
- * de un negocio normal.
+ * ¿Este bloque declara que el negocio NO contrató la certificación UPME?
+ *
+ * Lo decide el SERVICIO CONTRATADO, que es la respuesta del comercial: de las tres
+ * ramas (`completo`, `solo_upme`, `solo_iva`) solo `solo_iva` va sin certificación.
+ * Un bloque sin responder no anula la tarifa de un negocio normal.
+ *
+ * ⚠️ Antes esto leía `requiere_certificacion_upme`, un campo DERIVADO que colgaba de
+ * `servicio` por `lock_when`. Derivado y fuente se desincronizaban en silencio cada vez
+ * que alguien escribía por fuera de la app (cargue masivo, SQL, instancias viejas), y esa
+ * desincronización costó plata real: cinco negocios llegaron a producción con el derivado
+ * en `false` porque un relleno retroactivo lo puso ahí, no porque nadie lo hubiera
+ * respondido. Dos de ellos SÍ habían contratado la certificación y el sistema les anulaba
+ * $1.552.461. Se lee la fuente, no su reflejo.
  */
 export function niegaCertificacionUpme(data: Record<string, unknown> | null | undefined): boolean {
   if (!data || typeof data !== 'object') return false
-  return 'requiere_certificacion_upme' in data && data.requiere_certificacion_upme === false
+  return data.servicio === 'solo_iva'
 }
 
 /**
@@ -131,11 +141,11 @@ export function niegaCertificacionUpme(data: Record<string, unknown> | null | un
  * Puro: no toca DB ni red.
  *
  * @param confirmaciones filas de los bloques con `config_extra.tarifa_confirmacion.enabled`.
- * @param certificaciones filas del bloque `certificacion_upme` (decisión comercial).
+ * @param servicios filas del bloque `servicio_contratado` (decisión comercial).
  */
 export function tarifaConfirmadaPorNegocio(
   confirmaciones: FilaBloqueTarifa[],
-  certificaciones: FilaBloqueTarifa[],
+  servicios: FilaBloqueTarifa[],
 ): Map<string, number> {
   const tarifas = new Map<string, number>()
   for (const fila of confirmaciones) {
@@ -145,7 +155,7 @@ export function tarifaConfirmadaPorNegocio(
     // Máximo entre filas: determinista, no depende del orden en que lleguen.
     tarifas.set(fila.negocio_id, Math.max(tarifas.get(fila.negocio_id) ?? 0, tarifa))
   }
-  for (const fila of certificaciones) {
+  for (const fila of servicios) {
     if (!fila?.negocio_id) continue
     if (niegaCertificacionUpme(fila.data)) tarifas.set(fila.negocio_id, 0)
   }

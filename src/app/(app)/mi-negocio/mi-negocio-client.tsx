@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2 } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
@@ -21,6 +21,7 @@ import PlanSection from './plan-section'
 import FlujoSection from './flujo-section'
 import ReglasValidacionSection from './reglas-validacion-section'
 import PilaSection from './pila-section'
+import TerminosSection from './terminos-section'
 
 // ── Types ──────────────────────────────────────────
 
@@ -78,6 +79,9 @@ const SECTIONS: SectionDef[] = [
   { key: 'gastos-fijos', label: 'Mis gastos fijos', icon: Receipt, maxScore: 3, scoreKey: 'gastos', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'mi-equipo', label: 'Mi equipo', icon: UsersRound, maxScore: 2, scoreKey: 'equipo', roles: ['owner', 'admin'] },
   { key: 'metas-mensuales', label: 'Mis metas', icon: Target, maxScore: 3, scoreKey: 'metas', roles: ['owner', 'admin'], modules: ['business'] },
+  // Sin `wsTipo`: SOENA, el workspace para el que se construyo la pantalla, es
+  // `clarity`. Copiar el filtro de 'mi-flujo' la escondia justo donde hacia falta.
+  { key: 'terminos-propuesta', label: 'Términos de la propuesta', icon: FileText, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
   { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
@@ -148,6 +152,8 @@ export default function MiNegocioClient({
       }
       case 'metas-mensuales':
         return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
+      case 'terminos-propuesta':
+        return 'Texto del PDF'
       case 'reglas-validacion':
         return 'Listas cautelares'
       default:
@@ -381,6 +387,9 @@ function renderSection(
           onClose={props.onClose}
         />
       )
+
+    case 'terminos-propuesta':
+      return <TerminosSection />
 
     case 'mi-marca':
       return (

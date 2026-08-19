@@ -10,6 +10,7 @@ import { ctxFabPago } from '@/lib/actions/fab-pago-actions'
 import { escalonesDelNegocio, imputarPago } from '@/lib/upme/imputacion-pago'
 import {
   tipoCobroHonorario,
+  niegaCertificacionUpme,
   tarifaConfirmadaPorNegocio,
   valorARecaudarCartera,
   saldoConciliacion,
@@ -19,7 +20,7 @@ import {
   type PropuestaBloqueData,
 } from '@/lib/upme/modelo-dinero'
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
-import { diasDesde } from '@/lib/negocios/antiguedad'
+import { diasDesde, compararPorAntiguedad } from '@/lib/negocios/antiguedad'
 import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
@@ -674,7 +675,7 @@ async function cargarTarifasConfirmadas(
       .from('negocio_bloques')
       .select('negocio_id, data, bloque_configs!inner(slug)')
       .in('negocio_id', negocioIds)
-      .eq('bloque_configs.slug', 'certificacion_upme'),
+      .eq('bloque_configs.slug', 'servicio_contratado'),
   ])
 
   return tarifaConfirmadaPorNegocio(
@@ -1151,7 +1152,10 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
     if (saldoCuadrado(saldo)) conciliadosList.push(fila)
     else saldos.push(fila)
   }
-  saldos.sort((a, b) => b.saldo - a.saldo)
+  // Primero lo más viejo; el monto solo desempata. El criterio vive en
+  // `compararPorAntiguedad`, no acá: ordenar por monto no ordenaba nada porque 86 de los
+  // 119 faltantes de SOENA caen en dos grupos de valor idéntico. Ver el módulo.
+  saldos.sort(compararPorAntiguedad)
 
   // Pestaña 3: DUPLICADOS
   const duplicados: DuplicadoRef[] = []
@@ -1515,21 +1519,17 @@ export async function leerModeloDineroCompleto(
   // corresponde. Y como este es el único lugar donde se arma el ModeloDinero, basta
   // anularla aquí para que queden bien el gate de handoff, el saldo de Cobros y el
   // reparto pasante/honorario.
+  //
+  // La regla NO se reimplementa: es `niegaCertificacionUpme`, la misma que usan el
+  // recaudo, la propuesta y la conciliación. Estaba duplicada a mano aquí, y una copia
+  // es justo lo que permite que dos lugares respondan distinto a la misma pregunta.
   const { data: servicioBloques } = await db(supabase)
     .from('negocio_bloques')
     .select('data, bloque_configs!inner(slug)')
     .eq('negocio_id', negocioId)
-    .eq('bloque_configs.slug', 'certificacion_upme')
-  let sinCertificacionUpme = false
-  for (const sb of ((servicioBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
-    const d = (sb.data ?? {}) as Record<string, unknown>
-    // Solo cuenta como "no la contrató" si el campo existe y está en false. Un
-    // bloque sin tocar no debe anular la tarifa de un negocio normal.
-    if ('requiere_certificacion_upme' in d && d.requiere_certificacion_upme === false) {
-      sinCertificacionUpme = true
-      break
-    }
-  }
+    .eq('bloque_configs.slug', 'servicio_contratado')
+  const sinCertificacionUpme = ((servicioBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)
+    .some(sb => niegaCertificacionUpme(sb.data))
   if (sinCertificacionUpme) {
     tarifaConfirmada = 0
     tarifaRef = 0

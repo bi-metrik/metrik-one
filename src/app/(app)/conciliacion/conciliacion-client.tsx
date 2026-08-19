@@ -24,6 +24,7 @@ import BusquedaInput from '@/components/busqueda-input'
 import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { RedistribuirModal } from './redistribuir-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
+import { imputarPago, escalonesDelNegocio } from '@/lib/upme/imputacion-pago'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
 import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio, emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
 import type { FacturaEnSiigo } from '@/lib/siigo/facturas'
@@ -597,6 +598,55 @@ function ModalAnularPorcion({
 
 type SaldoFiltro = 'sobrante' | 'faltante' | 'cero'
 
+/**
+ * Las dos bolsas de la fila, separadas: el HONORARIO (que sí es cartera de SOENA) y la
+ * TARIFA UPME (plata de terceros que SOENA recauda y gira).
+ *
+ * Antes esta línea era un solo par, `cobrado / valor_a_recaudar`, que sumaba las dos.
+ * El número está bien para el SOBRANTE — un cliente que paga honorario y tarifa en un
+ * solo recaudo no pagó de más — pero leído en la pestaña de cartera dice que el cliente
+ * le debe la tarifa a SOENA, y no se la debe: la tarifa es un gate para avanzar de
+ * etapa, no un resultado financiero (decisión de Mauricio, 2026-08-18).
+ *
+ * ⚠️ Esto es SOLO presentación. `valor_a_recaudar` sigue igual y sigue siendo la vara
+ * del sobrepago: medido contra producción el 2026-08-18, sacarle la tarifa inventaba
+ * **42 sobrepagos por $27.848.113** en negocios abiertos. Es la regresión del #214.
+ *
+ * El recaudo se parte con `imputarPago`, la ÚNICA regla de imputación del sistema desde
+ * el #314: honorario primero, después la tarifa. Acá no se escribe ninguna resta nueva.
+ * El excedente no se pinta: ya lo dice el "Sobra" de la misma fila.
+ *
+ * ⚠️ El plan no viaja en la fila, así que se imputa como pago único. Es lo mismo que
+ * hace el resto del panel, que arma su modelo con `aprobado_plan: null`.
+ */
+function DesgloseRecaudo({
+  honorario,
+  tarifa,
+  cobrado,
+}: {
+  honorario: number
+  tarifa: number
+  cobrado: number
+}) {
+  const imputado = imputarPago({
+    pago: cobrado,
+    escalones: escalonesDelNegocio(honorario, tarifa, null),
+  })
+  const alHonorario = imputado.a_tramo1 + imputado.a_tramo2
+  return (
+    <div className="mt-0.5 text-[10px]" style={{ color: '#9CA3AF' }}>
+      <div title="Honorario de SOENA. Esto es lo que sí es cartera.">
+        Honorario {fmtCOP(alHonorario)} / {fmtCOP(honorario)}
+      </div>
+      {tarifa > 0 && (
+        <div title="Tarifa UPME: plata de terceros que SOENA recauda y gira. No es cartera; solo condiciona el avance de etapa.">
+          Tarifa UPME {fmtCOP(imputado.a_tarifa)} / {fmtCOP(tarifa)} · pasante
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TabSaldos({ data }: { data: ConciliacionV2 }) {
   const [q, setQ] = useState('')
   const [filtros, setFiltros] = useState<Record<SaldoFiltro, boolean>>({ sobrante: true, faltante: false, cero: false })
@@ -636,7 +686,9 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
 
   const cards: { label: string; value: number; color: string; hint: string }[] = [
     { label: 'Sobrante (sin definir)', value: totales.sobrante, color: '#DC2626', hint: 'Pagos de más por distribuir' },
-    { label: 'Faltante (cartera)', value: totales.faltante, color: '#B45309', hint: 'Saldo por cobrar' },
+    // El faltante SIEMPRE se midió contra el honorario (ver `saldoConciliacion`); lo que
+    // faltaba era decirlo en la pantalla, que dejaba pensar que la tarifa entra a la cartera.
+    { label: 'Faltante (cartera)', value: totales.faltante, color: '#B45309', hint: 'Honorario por cobrar · sin tarifa UPME' },
     { label: 'Diferencia neta', value: totales.diferencia, color: '#1A1A1A', hint: 'Faltante − sobrante' },
   ]
 
@@ -649,7 +701,7 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
   return (
     <div>
       <p className="mb-3 text-[11px]" style={{ color: '#9CA3AF' }}>
-        Vista de solo lectura de la cartera. Para registrar o repartir un pago, entra al bloque de pagos del negocio.
+        Vista de solo lectura de la cartera, ordenada de más viejo a más reciente. Para registrar o repartir un pago, entra al bloque de pagos del negocio.
       </p>
 
       {/* Tarjetas de resumen */}
@@ -751,17 +803,11 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
                       {fmtCOP(n.pendiente_de_confirmar)} sin confirmar
                     </div>
                   )}
-                  <div
-                    className="mt-0.5 text-[10px]"
-                    style={{ color: '#9CA3AF' }}
-                    title={
-                      n.tarifa_upme > 0
-                        ? `Honorario ${fmtCOP(n.precio)} + tarifa UPME ${fmtCOP(n.tarifa_upme)}`
-                        : undefined
-                    }
-                  >
-                    {fmtCOP(n.cobrado)} / {fmtCOP(n.valor_a_recaudar)}
-                  </div>
+                  <DesgloseRecaudo
+                    honorario={n.precio}
+                    tarifa={n.tarifa_upme}
+                    cobrado={n.cobrado}
+                  />
                 </div>
               </div>
               {n.referencias.length > 0 && (

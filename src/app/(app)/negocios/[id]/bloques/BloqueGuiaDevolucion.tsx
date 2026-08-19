@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { generarVersionGuia, aprobarVersionGuia } from '@/lib/actions/guia-devolucion-actions'
 import type { GuiaData } from '@/lib/actions/guia-devolucion-types'
 import { SECCIONALES_DIAN, type SeccionalDIAN } from '@/lib/dian/seccionales'
+import { fechaHoraEnLetras } from '@/lib/negocios/fecha-hora-campo'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 
 interface Props {
@@ -156,7 +157,9 @@ export default function BloqueGuiaDevolucion({
         </div>
         <div className="rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5">
           <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Fecha cita</p>
-          <p className="text-foreground truncate">{preview?.fecha_cita ?? 'No requiere'}</p>
+          {/* El valor llega crudo ('2026-09-26T09:30'). Sin humanizar, la tarjeta
+              mostraba la T del formato ISO en la cara del operador. */}
+          <p className="text-foreground truncate">{fechaHoraEnLetras(preview?.fecha_cita) || 'No requiere'}</p>
         </div>
       </div>
 
