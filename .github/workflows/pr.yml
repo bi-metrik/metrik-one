@@ -1,0 +1,80 @@
+# Verificacion de todo PR. Es el gate que permite mergear sin que Mauricio revise
+# a mano: si esto pasa, el merge no depende de criterio humano.
+#
+# Por que no estaba: el repo tenia un solo workflow (migraciones.yml) que solo
+# corre cuando el PR toca supabase/migrations/. Todo lo demas entraba a main sin
+# que nada lo ejecutara, y asi paso inadvertido que un archivo de pruebas ni
+# siquiera colectaba.
+#
+# `next build` corre SIN variables de entorno a proposito: se verifico que pasa
+# limpio sin `.env.local`. Si algun dia el build empieza a exigir una variable,
+# preferimos enterarnos aqui y no en el deploy.
+name: PR
+
+on:
+  pull_request:
+
+# Un PR que recibe varios push seguidos solo verifica el ultimo.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tipos-y-pruebas:
+    name: Tipos y pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Pruebas
+        run: npm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Build de produccion
+        run: npx next build
+
+  lint:
+    name: Lint de lo que cambia
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Se compara contra la base del PR: hace falta mas de un commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # Deliberadamente NO se corre eslint sobre todo el repo: main arrastra 114
+      # errores previos y un check que nace rojo entrena a ignorarlo. Esto es un
+      # trinquete: lo que toca el PR entra limpio, y la deuda vieja se paga aparte.
+      - name: Lint de los archivos del PR
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1 --quiet
+          ARCHIVOS=$(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD \
+            | grep -E '\.(ts|tsx|js|jsx|mjs)$' || true)
+          if [ -z "$ARCHIVOS" ]; then
+            echo "El PR no toca archivos de codigo. Nada que revisar."
+            exit 0
+          fi
+          echo "Revisando:"; echo "$ARCHIVOS" | sed 's/^/  /'
+          # shellcheck disable=SC2086
+          npx eslint $ARCHIVOS
