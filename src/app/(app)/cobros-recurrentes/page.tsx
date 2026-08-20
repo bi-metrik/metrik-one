@@ -2,13 +2,14 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import CobrosRecurrentesClient from './cobros-recurrentes-client'
 import type { CobroDeCuentaUI } from './registrar-pago-dialog'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export const runtime = 'nodejs'
 
 export default async function CobrosRecurrentesPage() {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) redirect('/login')
 
   const { data: profile } = await supabase

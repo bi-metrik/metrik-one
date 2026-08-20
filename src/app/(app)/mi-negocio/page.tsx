@@ -5,10 +5,11 @@ import { getLineasDisponibles } from './actions'
 import { getEquipoConAreas, getWorkspaceDefaultResponsables } from '@/lib/actions/equipo-areas'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYear } from '@/lib/dates/bogota'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export default async function MiNegocioPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
 
   if (!user) redirect('/login')
 

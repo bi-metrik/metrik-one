@@ -21,7 +21,13 @@ import * as XLSX from 'xlsx';
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: { id: 'user-test' } } }) },
+    auth: {
+      getUser: async () => ({ data: { user: { id: 'user-test' } } }),
+      // `getCachedUser` resuelve al usuario verificando la firma del token
+      // (`getClaims`), no preguntandole al servidor de Auth. El doble mock deja
+      // el test valido con cualquiera de los dos caminos.
+      getClaims: async () => ({ data: { claims: { sub: 'user-test' } }, error: null }),
+    },
   }),
   createServiceClient: () => servicioFalso(),
 }));

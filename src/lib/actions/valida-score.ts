@@ -1,9 +1,10 @@
 'use server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 import { calcularScoreNegocio, persistirScore } from '@/lib/valida/calculo-score';
 import type { FactoresAplicados } from '@/lib/valida/calculo-score';
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export type DatosSarlaftInput = {
   universo: 'contraparte' | 'empleado';
@@ -58,8 +59,7 @@ export async function guardarDatosSarlaft(
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;

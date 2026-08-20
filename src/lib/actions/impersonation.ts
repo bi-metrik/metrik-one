@@ -3,6 +3,7 @@
 import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 const IMPERSONATE_COOKIE = '__impersonate'
 
@@ -22,7 +23,7 @@ export async function getImpersonationOptions(): Promise<{
   current: string | null
 }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { ok: false, users: [], current: null }
 
   const { data: profile } = await supabase
@@ -58,7 +59,7 @@ export async function setImpersonation(
   targetProfileId: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { ok: false, error: 'No autenticado' }
 
   const { data: profile } = await supabase

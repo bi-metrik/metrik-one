@@ -2,10 +2,11 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export async function getMonthlyTargets(year: number) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return []
 
   const { data: profile } = await supabase
@@ -32,7 +33,7 @@ export async function upsertMonthlyTarget(formData: {
   collection_target: number
 }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -87,7 +88,7 @@ export async function bulkUpsertMonthlyTargets(
   targets: { month: number; sales_target: number; collection_target: number }[]
 ) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase

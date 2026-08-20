@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { generarPDFSoporteDual, type SoporteDualData } from '@/lib/compliance/pdf-soporte-dual';
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -14,8 +15,7 @@ export async function GET(
 ) {
   const { consulta_id } = await params;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
   if (!user) {
     return Response.json({ error: 'no_auth' }, { status: 401 });
   }

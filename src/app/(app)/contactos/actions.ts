@@ -2,10 +2,11 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 async function getWorkspace() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) throw new Error('No autenticado')
   const { data: profile } = await supabase
     .from('profiles')
