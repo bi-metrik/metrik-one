@@ -52,6 +52,7 @@ function KpiCard({ label, value, sub, accent }: { label: string; value: string; 
   )
 }
 
+const MESES_ORDEN: Record<string, number> = { ENERO: 1, FEBRERO: 2, MARZO: 3, ABRIL: 4, MAYO: 5, JUNIO: 6, JULIO: 7, AGOSTO: 8, SEPTIEMBRE: 9, OCTUBRE: 10, NOVIEMBRE: 11, DICIEMBRE: 12 }
 function mesLabel(mes: string | null): string {
   if (!mes) return ''
   return mes.charAt(0) + mes.slice(1).toLowerCase()
