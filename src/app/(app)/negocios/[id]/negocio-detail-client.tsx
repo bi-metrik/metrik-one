@@ -30,6 +30,8 @@ import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizar
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
+import { EtapasNoAplican } from './etapas-no-aplican'
+import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
@@ -1955,6 +1957,8 @@ interface Props {
     }>
   }>
   etapasLinea: EtapaNegocio[]
+  /** Etapas que este caso no va a recorrer, con la respuesta que las dejo fuera. */
+  etapasNoAplican?: EtapaNoAplica[]
   profiles: Array<{ id: string; full_name: string | null; email: string | null }>
   currentUserId: string | null
   currentUserEsResponsable: boolean
@@ -2002,6 +2006,7 @@ export default function NegocioDetailClient({
   negocio,
   bloques,
   etapasLinea,
+  etapasNoAplican,
   profiles,
   currentUserId,
   currentUserEsResponsable,
@@ -2239,6 +2244,10 @@ export default function NegocioDetailClient({
           etapaActualId={negocio.etapa_actual_id}
           stageActual={negocio.stage_actual}
         />
+
+        {/* Etapas que el proceso se salto con razon. Va pegado a la barra de progreso
+            porque responde la misma pregunta: por donde va el caso. */}
+        <EtapasNoAplican etapas={etapasNoAplican ?? []} />
       </div>
 
       {/* ── BODY: Bloques ── */}
