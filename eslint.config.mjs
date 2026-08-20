@@ -20,6 +20,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Worktrees de sesion: son copias del mismo repo dentro del repo, asi que
+    // sin esto `eslint .` cuenta cada archivo una vez por worktree abierto y la
+    // deuda de lint se ve varias veces mas grande de lo que es. Estan en
+    // .gitignore, pero eslint no lee .gitignore.
+    ".claude/worktrees/**",
   ]),
 ]);
 
