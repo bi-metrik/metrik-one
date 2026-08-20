@@ -43,7 +43,6 @@ ${qs}
 // Bloque de flujo de dos narrativas (solo si el estudio lo define).
 function twoNarrativeFlow(spec: StudySpec, lang: Lang): string {
   if (!spec.second_elicitation) return "";
-  const p1 = lang === "es" ? spec.elicitation_prompt.literal_es : spec.elicitation_prompt.literal_en;
   const p2 = lang === "es" ? spec.second_elicitation.literal_es : spec.second_elicitation.literal_en;
   return `
 ESTRUCTURA DE DOS NARRATIVAS (importante):

@@ -8,7 +8,6 @@ envFile.split('\n').forEach(line => {
 });
 const svc = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const LINEA = '34a0fa6b-9ed3-4652-a419-42601132d1a8';
-const WS = '7dea141d-d4da-483d-a78d-b14ef35500c5';
 
 console.log('=== 5.1 Etapas orden + stage final ===');
 const { data: etapas } = await svc.from('etapas_negocio')

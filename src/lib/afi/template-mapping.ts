@@ -26,7 +26,6 @@ const SARLAFT_AMP_CODES = [
 ]
 const PTEE_CODES = ['MA-PTE-001', 'GU-PTE-002', 'DC-PTE-003', 'DC-PTE-004']
 const OFICIAL_CODES = ['AC-SAR-AMP-008']  // Acta designacion oficial — solo cuando contrata Oficial
-const CONTRATO_CODE = ['CT-SAR-CLIENTE']  // El contrato armado modular vivira con este codigo
 
 export function templatesAGenerar(productos: ProductosContratados): string[] {
   const codes: string[] = []

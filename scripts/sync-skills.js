@@ -106,7 +106,7 @@ async function main() {
     }
 
     const raw = fs.readFileSync(skillPath, 'utf-8')
-    const { meta, body } = parseFrontmatter(raw)
+    const { meta } = parseFrontmatter(raw)
 
     const nombre = meta.name || entry.name
 
