@@ -61,20 +61,14 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      # Deliberadamente NO se corre eslint sobre todo el repo: main arrastra 114
-      # errores previos y un check que nace rojo entrena a ignorarlo. Esto es un
-      # trinquete: lo que toca el PR entra limpio, y la deuda vieja se paga aparte.
-      - name: Lint de los archivos del PR
+      # Deliberadamente NO se corre eslint sobre todo el repo: main arrastra
+      # deuda vieja y un check que nace rojo entrena a ignorarlo. Esto es un
+      # trinquete: lo que el PR ESCRIBE entra limpio, y la deuda vieja se paga
+      # aparte. Antes revisaba el archivo completo, y eso castigaba tocar un
+      # archivo sucio aunque el cambio fuera de una linea (paso en el #336).
+      - name: Lint de las lineas del PR
         env:
           BASE_REF: origin/${{ github.base_ref }}
         run: |
           git fetch origin "${{ github.base_ref }}" --depth=1 --quiet
-          ARCHIVOS=$(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD \
-            | grep -E '\.(ts|tsx|js|jsx|mjs)$' || true)
-          if [ -z "$ARCHIVOS" ]; then
-            echo "El PR no toca archivos de codigo. Nada que revisar."
-            exit 0
-          fi
-          echo "Revisando:"; echo "$ARCHIVOS" | sed 's/^/  /'
-          # shellcheck disable=SC2086
-          npx eslint $ARCHIVOS
+          node scripts/lint-lineas-cambiadas.mjs "$BASE_REF"

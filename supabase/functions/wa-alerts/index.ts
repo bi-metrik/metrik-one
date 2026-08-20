@@ -61,8 +61,6 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
   console.log('[wa-alerts] Running W25 — Factura Vencida');
 
   // Find invoices with pending balance > 0 and emitted > 30 days ago
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
   const { data: overdueInvoices } = await supabase
     .from('v_facturas_estado')
     .select('factura_id, numero_factura, fecha_emision, saldo_pendiente, proyecto_id, workspace_id, dias_antiguedad')
