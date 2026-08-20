@@ -7,6 +7,7 @@ import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
+import { esBloqueReactivado, reactivacionActiva } from '@/lib/negocios/bloque-reactivado'
 import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
@@ -5801,11 +5802,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // orden 5. Es el mismo error de `revertir_hasta_etapa_orden` que este archivo
   // ya documenta: la acción quedó inalcanzable justo en el escenario que la pidió.
   let faltaHonorario = false
+  // La config de la LINEA se lee una sola vez y se guarda: más abajo, el historial de
+  // etapas previas la necesita para el opt-in `reactivar_bloques`, y volver a
+  // consultarla ahí sería una segunda consulta por la misma fila.
+  let lineaConfigExtra: Record<string, unknown> | null = null
   if (base.negocio.linea_id) {
     const [lineaCobroRes, wsCobroRes] = await Promise.all([
       db(supabase).from('lineas_negocio').select('config_extra').eq('id', base.negocio.linea_id).maybeSingle(),
       db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle(),
     ])
+    lineaConfigExtra = (lineaCobroRes.data as { config_extra?: Record<string, unknown> } | null)?.config_extra ?? null
     // Un honorario en cero puede ser una DECISION (propuesta aprobada regalando
     // el servicio) y no un dato que falta. El criterio no se reimplementa acá:
     // lo resuelve `esCeroDeliberado`, que es donde ya vive y que consumen el
@@ -6463,6 +6469,53 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // orden de aparicion (etapa_orden ASC, bloque.orden ASC).
       const etapaInfoById = new Map(etapasPrevias.map(e => [e.id, { orden: e.orden, nombre: e.nombre }]))
       const HIDDEN_TYPES = new Set(['resumen_financiero', 'ejecucion', 'historial', 'historial_valida'])
+
+      // ── Bloques que se ACTIVARON tarde ────────────────────────────────────────
+      // Un bloque condicional de una etapa ya pasada puede aplicar HOY porque
+      // alguien corrigió la respuesta que lo gobierna, y hasta ahora no aparecía en
+      // ninguna pantalla: los dos filtros de abajo (sin instancia / vacío y
+      // pendiente) lo escondían justo cuando hacía falta. `esBloqueReactivado` es
+      // quien decide; aquí solo se aplica. Ver `src/lib/negocios/bloque-reactivado.ts`.
+      const reactivables = new Set<string>()
+      {
+        const activa = reactivacionActiva(lineaConfigExtra)
+        const fuentes = { porSlug: datosPorSlug, porEtapaOrden: datosOtrasEtapas }
+        // Instancias que hay que CREAR: sin fila no hay dónde escribir el dato, y un
+        // bloque configurado después de que el caso pasó por su etapa nunca la tuvo.
+        const nacen: Array<{ negocio_id: string; bloque_config_id: string; estado: string; data: Record<string, unknown> }> = []
+        for (const cfg of ((prevConfigs ?? []) as Record<string, unknown>[])) {
+          const ce = ceMap.get(cfg.id as string) ?? {}
+          const def = cfg.bloque_definitions as BloqueHistorialFull['bloque_definitions']
+          if (def && HIDDEN_TYPES.has(def.tipo)) continue
+          // Un bloque declarado `visible` es de solo lectura POR DISEÑO; que su
+          // condición se cumpla hoy no lo vuelve capturable.
+          if (cfg.estado === 'visible') continue
+          const inst = instanciasMap.get(cfg.id as string) ?? null
+          if (!esBloqueReactivado({ activa, configExtra: ce, data: inst?.data ?? null, estado: inst?.estado ?? null, fuentes })) continue
+          reactivables.add(cfg.id as string)
+          if (!inst) {
+            nacen.push({ negocio_id: id, bloque_config_id: cfg.id as string, estado: 'pendiente', data: computeFieldDefaults(ce) })
+          }
+        }
+        if (nacen.length > 0) {
+          const { data: creadas, error: errCrear } = await db(supabase)
+            .from('negocio_bloques')
+            .insert(nacen)
+            .select('id, negocio_id, bloque_config_id, estado, data')
+          // Sin esto el fallo sería mudo: el bloque aparecería y no habría dónde guardar.
+          if (errCrear) console.error('[getNegocioDetalleCompleto] crear instancias reactivadas:', errCrear)
+          for (const nb of ((creadas ?? []) as Record<string, unknown>[])) {
+            instanciasMap.set(nb.bloque_config_id as string, {
+              id: nb.id as string,
+              negocio_id: nb.negocio_id as string,
+              bloque_config_id: nb.bloque_config_id as string,
+              estado: (nb.estado as string) ?? 'pendiente',
+              data: nb.data as Record<string, unknown> | null,
+            })
+          }
+        }
+      }
+
       for (const cfg of ((prevConfigs ?? []) as Record<string, unknown>[])) {
         const inst = instanciasMap.get(cfg.id as string) ?? null
         if (!inst) continue
@@ -6511,12 +6564,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         }
 
         // Excluir solo si todo esta vacio: sin data persistida, sin auto_fill
-        // resuelto, y la instancia esta pendiente.
+        // resuelto, y la instancia esta pendiente. Excepcion: un bloque REACTIVADO
+        // esta vacio por definicion — es justo el que hay que mostrar.
+        const esReactivado = reactivables.has(cfg.id as string)
         const dataEmpty = !inst.data || Object.keys(inst.data).length === 0
         const autoFillEmpty = Object.keys(autoFillHist).length === 0
-        if (dataEmpty && autoFillEmpty && inst.estado === 'pendiente') continue
+        if (dataEmpty && autoFillEmpty && inst.estado === 'pendiente' && !esReactivado) continue
 
-        const ceEnriched = autoFillEmpty ? ce : { ...ce, _auto_fill: autoFillHist }
+        const ceBase = esReactivado ? { ...ce, _reactivable: true } : ce
+        const ceEnriched = autoFillEmpty ? ceBase : { ...ceBase, _auto_fill: autoFillHist }
 
         bloquesEtapasPrevias.push({
           etapa_orden: etapaInfo.orden,

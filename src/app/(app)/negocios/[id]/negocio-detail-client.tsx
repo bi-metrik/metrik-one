@@ -1187,12 +1187,21 @@ function HistorialEtapasPrevias({
                     <span className="text-sm font-medium truncate">{b.nombre ?? def?.nombre ?? 'Bloque'}</span>
                     <span className="text-[10px] text-muted-foreground/60 shrink-0 hidden sm:inline">· {b.etapa_nombre}</span>
                   </div>
+                  {/* Un bloque REACTIVADO no es un pendiente cualquiera: aplica desde
+                      que alguien corrigió la decisión que lo gobierna, y el equipo
+                      necesita distinguirlo de lo que lleva ahí desde siempre. */}
                   <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
                     b.instancia?.estado === 'completo'
                       ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                      : 'bg-muted text-muted-foreground'
+                      : (b.config_extra as { _reactivable?: boolean })?._reactivable
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                        : 'bg-muted text-muted-foreground'
                   }`}>
-                    {b.instancia?.estado === 'completo' ? 'Completo' : 'Pendiente'}
+                    {b.instancia?.estado === 'completo'
+                      ? 'Completo'
+                      : (b.config_extra as { _reactivable?: boolean })?._reactivable
+                        ? 'Ahora aplica'
+                        : 'Pendiente'}
                   </span>
                 </button>
                 {bloqueAbierto === b.id && (
@@ -1400,8 +1409,16 @@ function BloqueRenderer({
   const editableSiempre =
     (configExtra as { editable_siempre?: boolean }).editable_siempre === true
     || (tipo === 'propuesta_economica' && faltaHonorarioConfirmado)
+  // Bloque REACTIVADO: aplica hoy porque alguien corrigió la decisión que lo
+  // gobierna, y su etapa ya pasó. El historial fuerza solo lectura a todo, así que
+  // sin esta excepción el bloque aparece y no hay dónde llenarlo — que es el mismo
+  // callejón sin salida de la propuesta económica dos comentarios más abajo.
+  // ⚠️ Levanta `_forceReadOnly`, NUNCA `_areaReadonly`: si el área del usuario no
+  // cubre el stage del bloque, el servidor lo rechazaría igual y ofrecer el campo
+  // solo enseña a chocarse. Lo decide el servidor (`esBloqueReactivado`).
+  const esReactivado = (configExtra as { _reactivable?: boolean })._reactivable === true
   const modoBase: 'editable' | 'visible' =
-    (((bloque as { _forceReadOnly?: boolean })._forceReadOnly
+    ((((bloque as { _forceReadOnly?: boolean })._forceReadOnly && !esReactivado)
       || (configExtra as { _areaReadonly?: boolean })._areaReadonly)
       && !editableSiempre)
       ? 'visible'
