@@ -3,6 +3,13 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 import { resolverNombresUsuarios } from './_usuarios';
+import { listarSegmentos } from './compliance-segmentos';
+import {
+  claveSegmento,
+  FILTRO_SIN_SEGMENTO,
+  type ComplianceSegmento,
+} from '@/lib/compliance/segmentos';
+import type { UniversoSegmentacion } from '@/lib/valida/segmentacion-presets';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 
@@ -158,14 +165,34 @@ async function jsonOrError<T>(res: Response): Promise<Result<T>> {
 
 // ─── UI 1: Consulta puntual (alma-afi) ─────────────────────────────────────
 
-export type DualConsultaInput = {
+/**
+ * Lo que la fuente (metrik-valida) necesita para consultar. El segmento NO viaja:
+ * es una etiqueta operativa de ONE, no un criterio de búsqueda.
+ */
+export type DualConsultaBase = {
   tipo?: DualTipo;
   identificacion?: string;
   nombre?: string;
 };
 
+/**
+ * Input de una consulta que se persiste en el historial.
+ *
+ * `segmento_id` es una clave OBLIGATORIA con valor nullable a propósito: obliga a
+ * cada llamador a decidir explícitamente (el compilador no deja omitirla), y el
+ * `null` sirve para las filas de un lote que ya vienen con error y que igual se
+ * registran para que quede constancia de por qué no se consultaron.
+ *
+ * Para una consulta REAL el segmento es obligatorio y lo exige
+ * `consultaDualPersistente` en tiempo de ejecución, ANTES de llamar a la fuente
+ * (cada llamada es facturable: no se gasta una consulta para después rechazarla).
+ */
+export type DualConsultaInput = DualConsultaBase & {
+  segmento_id: string | null;
+};
+
 export async function consultaDual(
-  input: DualConsultaInput
+  input: DualConsultaBase
 ): Promise<Result<DualConsultaPublica>> {
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
@@ -251,25 +278,72 @@ export async function consultaDualBatch(formData: FormData): Promise<
 }
 
 /**
- * Descarga la plantilla en blanco (para UI 1) y la entrega como base64 al client.
+ * Genera la plantilla del cargue masivo AQUÍ, en ONE.
+ *
+ * Antes se descargaba de la API de metrik-valida mientras `prepararLoteDual`
+ * (que vive en este archivo) era quien la parseaba: el contrato estaba partido
+ * en dos repos y una columna nueva en el parser no llegaba nunca al archivo que
+ * bajaba el usuario. Además el catálogo de segmentos es POR WORKSPACE, así que
+ * la plantilla ya no puede ser un archivo estático.
+ *
+ * Quien define el formato de parseo emite la plantilla. Una sola fuente.
+ *
+ * La hoja 1 va con ENCABEZADOS Y NADA MÁS: una fila de ejemplo sería una
+ * consulta facturable contra la cuenta del cliente si alguien sube la plantilla
+ * tal cual. Los valores válidos y las instrucciones viven en la hoja 2.
  */
-export async function descargarPlantillaBatch(): Promise<
+export async function generarPlantillaLoteDual(): Promise<
   Result<{ base64: string; filename: string }>
 > {
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual/batch`, {
-      headers: { Authorization: `Bearer ${getApiKey()}` },
-      cache: 'no-store',
-    });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    const buf = Buffer.from(await res.arrayBuffer());
-    const cd = res.headers.get('content-disposition') ?? '';
-    const m = /filename\s*=\s*"?([^"]+)"?/i.exec(cd);
-    const filename = m?.[1] ?? 'plantilla-listas-restrictivas.xlsx';
-    return { ok: true, data: { base64: buf.toString('base64'), filename } };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+
+  const cat = await listarSegmentos();
+  if (!cat.ok) return { ok: false, error: cat.error };
+  if (cat.data.length === 0) {
+    return { ok: false, error: ERROR_CATALOGO_VACIO };
   }
+
+  const nombres = cat.data.map((s) => s.nombre);
+
+  const hojaDatos = XLSX.utils.aoa_to_sheet([[...COLUMNAS_PLANTILLA]]);
+  hojaDatos['!cols'] = [{ wch: 14 }, { wch: 20 }, { wch: 38 }, { wch: 24 }];
+
+  const instrucciones: string[][] = [
+    ['Cómo llenar la plantilla'],
+    [''],
+    ['Llena la hoja "Consultas". Una fila por persona o empresa. Hasta ' + LOTE_LIMITE + ' filas.'],
+    ['No cambies los nombres de las columnas ni el orden de la primera fila.'],
+    [''],
+    ['Columna', 'Obligatoria', 'Valores válidos'],
+    ['tipo', 'Sí', 'natural | juridica'],
+    ['identificacion', 'Al menos una de las dos', 'Cédula o NIT, solo números'],
+    ['nombre', 'Al menos una de las dos', 'Nombre completo o razón social'],
+    ['segmento', 'Sí', nombres.join(' | ')],
+    [''],
+    ['Segmentos configurados en este espacio de trabajo'],
+    ['Segmento', 'Universo'],
+    ...cat.data.map((s) => [s.nombre, s.universo]),
+    [''],
+    ['Si necesitas un segmento que no está en esta lista, pídeselo al oficial de cumplimiento:'],
+    ['se configura en Compliance → Catálogo de segmentos.'],
+  ];
+  const hojaInstrucciones = XLSX.utils.aoa_to_sheet(instrucciones);
+  hojaInstrucciones['!cols'] = [{ wch: 46 }, { wch: 26 }, { wch: 46 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hojaDatos, HOJA_DATOS);
+  XLSX.utils.book_append_sheet(wb, hojaInstrucciones, 'Instrucciones');
+
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+  return {
+    ok: true,
+    data: {
+      base64: buf.toString('base64'),
+      filename: 'plantilla-listas-restrictivas.xlsx',
+    },
+  };
 }
 
 // ─── UI 2: Listado / Detalle / Audit / Metrics (workspace metrik) ──────────
@@ -409,6 +483,15 @@ export type DualHistorialItem = {
   error_mensaje: string | null;
   created_at: string;
   consultado_por: string | null;
+  /** null en consultas anteriores al catálogo de segmentos. */
+  segmento_id: string | null;
+  /**
+   * null con `segmento_id` no nulo = el segmento ya no está en el catálogo.
+   * La pantalla lo dice ("Segmento no encontrado") en vez de pintar un guion
+   * indistinguible de "nunca tuvo segmento".
+   */
+  segmento_nombre: string | null;
+  segmento_universo: UniversoSegmentacion | null;
 };
 
 export type DualHistorialFiltros = {
@@ -418,11 +501,35 @@ export type DualHistorialFiltros = {
   fecha_hasta?: string;
   lote_id?: string;
   limite?: number;
+  /**
+   * id del catálogo, o `FILTRO_SIN_SEGMENTO` para ver solo las consultas
+   * históricas que no lo tienen. Un id que no exista en el catálogo se rechaza
+   * con error: un filtro que devuelve vacío por silencio es indistinguible de
+   * "no hay consultas de ese segmento".
+   */
+  segmento_id?: string;
 };
 
 export type DualConsultaPersistida = DualConsultaPublica & {
   consulta_local_id: string;
   severidad: DualSeveridad;
+  segmento_id: string;
+  segmento_nombre: string;
+};
+
+export type DualConsultaMeta = {
+  lote_id?: string | null;
+  titulo_lote?: string | null;
+  tipo?: 'puntual' | 'masiva_item';
+  /**
+   * Fila de un lote que ya venía inválida desde el XLSX.
+   *
+   * Se registra el error TAL CUAL lo detectó `prepararLoteDual` y NO se llama a
+   * la fuente: la fila hay que corregirla igual, y cada llamada es facturable.
+   * Antes se enviaba el input mutilado y el historial guardaba
+   * `validation_error`, que no le dice a nadie qué celda arreglar.
+   */
+  error_fila?: string | null;
 };
 
 /**
@@ -431,7 +538,7 @@ export type DualConsultaPersistida = DualConsultaPublica & {
  */
 export async function consultaDualPersistente(
   input: DualConsultaInput,
-  meta: { lote_id?: string | null; titulo_lote?: string | null; tipo?: 'puntual' | 'masiva_item' } = {},
+  meta: DualConsultaMeta = {},
 ): Promise<Result<DualConsultaPersistida>> {
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
@@ -447,27 +554,58 @@ export async function consultaDualPersistente(
   const idTrim = input.identificacion?.trim() ?? null;
   const nombreTrim = input.nombre?.trim() ?? null;
   const tipoPersona: DualTipo = input.tipo ?? 'natural';
+  const errorFila = meta.error_fila?.trim() || null;
 
-  const r = await consultaDual(input);
+  const filaBase = {
+    workspace_id: workspaceId,
+    lote_id: meta.lote_id ?? null,
+    tipo: tipoRow,
+    tipo_persona: tipoPersona,
+    nombre_consultado: nombreTrim,
+    documento_tipo: idTrim ? (tipoPersona === 'juridica' ? 'NIT' : 'CC') : null,
+    documento_numero: idTrim,
+    titulo_lote: meta.titulo_lote ?? null,
+    created_by: userId,
+  };
+
+  // Fila que ya llegó inválida: se deja constancia y NO se gasta una consulta.
+  if (errorFila) {
+    if (tipoRow === 'masiva_item') {
+      await svc.from('consultas_listas_dual').insert({
+        ...filaBase,
+        segmento_id: input.segmento_id,
+        dual_id: null,
+        severidad: 'error',
+        total_matches: 0,
+        matches: [],
+        error_mensaje: errorFila,
+      });
+    }
+    return { ok: false, error: errorFila };
+  }
+
+  // El segmento se valida ANTES de llamar a la fuente: rechazarlo después
+  // habría quemado una consulta facturable sin poder registrarla bien.
+  const segmento = await resolverSegmentoParaConsulta(workspaceId, input.segmento_id);
+  if (!segmento.ok) return { ok: false, error: segmento.error };
+
+  const r = await consultaDual({
+    tipo: input.tipo,
+    identificacion: input.identificacion,
+    nombre: input.nombre,
+  });
 
   // Caso error: persistimos un registro con severidad='error' (solo si es masiva_item para no ensuciar el historial con errores ad-hoc del usuario en puntual)
   if (!r.ok) {
     if (tipoRow === 'masiva_item') {
       await svc.from('consultas_listas_dual').insert({
-        workspace_id: workspaceId,
-        lote_id: meta.lote_id ?? null,
-        tipo: tipoRow,
-        tipo_persona: tipoPersona,
-        nombre_consultado: nombreTrim,
-        documento_tipo: idTrim ? (tipoPersona === 'juridica' ? 'NIT' : 'CC') : null,
-        documento_numero: idTrim,
+        ...filaBase,
+        segmento_id: segmento.data.id,
         dual_id: null,
         severidad: 'error',
         total_matches: 0,
         matches: [],
-        titulo_lote: meta.titulo_lote ?? null,
         error_mensaje: r.error,
-        created_by: userId,
       });
     }
     return { ok: false, error: r.error };
@@ -478,19 +616,12 @@ export async function consultaDualPersistente(
   const { data: row, error: errIns } = await svc
     .from('consultas_listas_dual')
     .insert({
-      workspace_id: workspaceId,
-      lote_id: meta.lote_id ?? null,
-      tipo: tipoRow,
-      tipo_persona: tipoPersona,
-      nombre_consultado: nombreTrim,
-      documento_tipo: idTrim ? (tipoPersona === 'juridica' ? 'NIT' : 'CC') : null,
-      documento_numero: idTrim,
+      ...filaBase,
+      segmento_id: segmento.data.id,
       dual_id: r.data.dual_id,
       severidad,
       total_matches: r.data.total_matches,
       matches: r.data.matches,
-      titulo_lote: meta.titulo_lote ?? null,
-      created_by: userId,
     })
     .select('id')
     .single();
@@ -505,8 +636,41 @@ export async function consultaDualPersistente(
       ...r.data,
       consulta_local_id: row.id,
       severidad,
+      segmento_id: segmento.data.id,
+      segmento_nombre: segmento.data.nombre,
     },
   };
+}
+
+/**
+ * El segmento de una consulta nueva es obligatorio, tiene que existir en el
+ * catálogo del workspace y tiene que estar activo. Los tres casos fallan con
+ * mensaje propio: "no lo mandaste", "no existe" y "está desactivado" mandan a
+ * lugares distintos.
+ */
+async function resolverSegmentoParaConsulta(
+  workspaceId: string,
+  segmentoId: string | null,
+): Promise<Result<ComplianceSegmento>> {
+  if (!segmentoId) return { ok: false, error: 'segmento_requerido' };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+  const { data, error } = await svc
+    .from('compliance_segmentos')
+    .select('id, nombre, universo, activo, orden')
+    .eq('id', segmentoId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: 'segmento_no_encontrado' };
+
+  const seg = data as ComplianceSegmento;
+  if (!seg.activo) {
+    return { ok: false, error: `segmento_inactivo ("${seg.nombre}" está desactivado en el catálogo)` };
+  }
+  return { ok: true, data: seg };
 }
 
 export async function listarHistorialDual(
@@ -518,11 +682,25 @@ export async function listarHistorialDual(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
 
+  // El catalogo completo (activos e inactivos): una consulta vieja puede apuntar
+  // a un segmento ya desactivado y su nombre tiene que seguir apareciendo.
+  const catalogo = await listarSegmentos({ incluirInactivos: true });
+  if (!catalogo.ok) return { ok: false, error: catalogo.error };
+  const segMap = new Map(catalogo.data.map((sg) => [sg.id, sg]));
+
+  // Un filtro por un segmento que no existe devolveria cero filas, que en
+  // pantalla es identico a "este segmento no tiene consultas". Se corta aqui.
+  if (filtros.segmento_id && filtros.segmento_id !== FILTRO_SIN_SEGMENTO) {
+    if (!segMap.has(filtros.segmento_id)) {
+      return { ok: false, error: 'segmento_desconocido (no esta en el catalogo del workspace)' };
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let q: any = svc
     .from('consultas_listas_dual')
     .select(
-      'id, dual_id, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, titulo_lote, lote_id, error_mensaje, created_at, created_by',
+      'id, dual_id, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, titulo_lote, lote_id, error_mensaje, created_at, created_by, segmento_id',
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
@@ -533,16 +711,25 @@ export async function listarHistorialDual(
   if (filtros.lote_id) q = q.eq('lote_id', filtros.lote_id);
   if (filtros.fecha_desde) q = q.gte('created_at', filtros.fecha_desde);
   if (filtros.fecha_hasta) q = q.lte('created_at', `${filtros.fecha_hasta}T23:59:59.999Z`);
+  if (filtros.segmento_id === FILTRO_SIN_SEGMENTO) q = q.is('segmento_id', null);
+  else if (filtros.segmento_id) q = q.eq('segmento_id', filtros.segmento_id);
 
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
 
   // Resolver usuario que realizo cada consulta (trazabilidad — mostrar SIEMPRE quien consulto)
   const userMap = await resolverNombresUsuarios(svc, (data ?? []).map((r: { created_by: string | null }) => r.created_by));
-  const items: DualHistorialItem[] = (data ?? []).map((r: Record<string, unknown>) => ({
-    ...(r as unknown as DualHistorialItem),
-    consultado_por: r.created_by ? (userMap.get(r.created_by as string) ?? null) : null,
-  }));
+  const items: DualHistorialItem[] = (data ?? []).map((r: Record<string, unknown>) => {
+    const segId = (r.segmento_id as string | null) ?? null;
+    const seg = segId ? segMap.get(segId) : undefined;
+    return {
+      ...(r as unknown as DualHistorialItem),
+      consultado_por: r.created_by ? (userMap.get(r.created_by as string) ?? null) : null,
+      segmento_id: segId,
+      segmento_nombre: seg?.nombre ?? null,
+      segmento_universo: seg?.universo ?? null,
+    };
+  });
 
   return { ok: true, data: items };
 }
@@ -563,6 +750,17 @@ export type DualLotePreparado = {
 
 const LOTE_LIMITE = 500;
 
+/**
+ * Contrato de la plantilla. Lo consumen las DOS puntas —
+ * `generarPlantillaLoteDual` (que emite el archivo) y `prepararLoteDual` (que lo
+ * parsea)— para que no puedan divergir.
+ */
+const HOJA_DATOS = 'Consultas';
+const COLUMNAS_PLANTILLA = ['tipo', 'identificacion', 'nombre', 'segmento'] as const;
+
+const ERROR_CATALOGO_VACIO =
+  'catalogo_segmentos_vacio (el oficial de cumplimiento debe crear al menos un segmento en Compliance -> Catalogo de segmentos)';
+
 function normalizarTipo(v: unknown): DualTipo | null {
   if (typeof v !== 'string') return null;
   const t = v.trim().toLowerCase();
@@ -581,11 +779,17 @@ function asStr(v: unknown): string {
  * Lee el XLSX subido por el usuario y devuelve filas validadas listas para
  * consultar fila por fila. NO golpea metrik-valida — solo parsea.
  *
- * Formato esperado de la plantilla (1ra hoja):
+ * Formato esperado de la plantilla (hoja de datos, la que emite
+ * `generarPlantillaLoteDual`):
  *   columna A: tipo            (natural | juridica)
  *   columna B: identificacion  (opcional)
  *   columna C: nombre          (opcional)
+ *   columna D: segmento        (obligatorio, del catalogo del workspace)
  * Al menos uno de los dos (identificacion o nombre) es obligatorio.
+ *
+ * Una fila con segmento vacio o desconocido queda marcada como error de fila:
+ * NO se consulta (cada consulta es facturable) y el motivo viaja hasta el
+ * historial para que se sepa que celda corregir.
  */
 export async function prepararLoteDual(
   formData: FormData,
@@ -597,6 +801,14 @@ export async function prepararLoteDual(
   if (!(file instanceof File)) return { ok: false, error: 'archivo_requerido' };
   if (file.size > 5 * 1024 * 1024) return { ok: false, error: 'archivo_muy_grande' };
 
+  const catalogo = await listarSegmentos();
+  if (!catalogo.ok) return { ok: false, error: catalogo.error };
+  if (catalogo.data.length === 0) return { ok: false, error: ERROR_CATALOGO_VACIO };
+
+  const porClave = new Map<string, ComplianceSegmento>();
+  for (const seg of catalogo.data) porClave.set(claveSegmento(seg.nombre), seg);
+  const nombresValidos = catalogo.data.map((seg) => seg.nombre).join(' | ');
+
   const buffer = Buffer.from(await file.arrayBuffer());
 
   let workbook: XLSX.WorkBook;
@@ -606,7 +818,11 @@ export async function prepararLoteDual(
     return { ok: false, error: 'xlsx_invalido' };
   }
 
-  const sheetName = workbook.SheetNames[0];
+  // La plantilla trae una segunda hoja de instrucciones: se busca la de datos
+  // por nombre y solo si no esta se cae a la primera (archivos viejos o propios).
+  const sheetName = workbook.SheetNames.includes(HOJA_DATOS)
+    ? HOJA_DATOS
+    : workbook.SheetNames[0];
   if (!sheetName) return { ok: false, error: 'xlsx_sin_hojas' };
 
   const sheet = workbook.Sheets[sheetName];
@@ -627,20 +843,38 @@ export async function prepararLoteDual(
     const tipoRaw = row.tipo ?? row.Tipo ?? row.TIPO;
     const identificacion = asStr(row.identificacion ?? row.Identificacion ?? row.IDENTIFICACION);
     const nombre = asStr(row.nombre ?? row.Nombre ?? row.NOMBRE);
+    const segmentoRaw = asStr(row.segmento ?? row.Segmento ?? row.SEGMENTO);
+
+    const segmento = segmentoRaw ? porClave.get(claveSegmento(segmentoRaw)) : undefined;
+    const segmentoId = segmento?.id ?? null;
 
     const tipo = normalizarTipo(tipoRaw);
     if (!tipo) {
       return {
         posicion,
-        input: { tipo: 'natural' },
+        input: { tipo: 'natural', segmento_id: segmentoId },
         error: 'tipo_invalido (esperado: natural | juridica)',
       };
     }
     if (!identificacion && !nombre) {
       return {
         posicion,
-        input: { tipo },
+        input: { tipo, segmento_id: segmentoId },
         error: 'fila_sin_identificacion_ni_nombre',
+      };
+    }
+    if (!segmentoRaw) {
+      return {
+        posicion,
+        input: { tipo, segmento_id: null },
+        error: `fila_sin_segmento (columna 'segmento' obligatoria - esperado: ${nombresValidos})`,
+      };
+    }
+    if (!segmento) {
+      return {
+        posicion,
+        input: { tipo, segmento_id: null },
+        error: `segmento_invalido "${segmentoRaw}" (esperado: ${nombresValidos})`,
       };
     }
 
@@ -648,6 +882,7 @@ export async function prepararLoteDual(
       posicion,
       input: {
         tipo,
+        segmento_id: segmento.id,
         ...(identificacion ? { identificacion } : {}),
         ...(nombre ? { nombre } : {}),
       },

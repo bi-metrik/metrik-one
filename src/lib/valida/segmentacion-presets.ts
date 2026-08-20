@@ -5,8 +5,41 @@
  * los ajusta y documenta como metodología propia (indelegable).
  */
 
+/**
+ * Los dos universos en los que se parte el mundo para SARLAFT.
+ *
+ * Es el MISMO eje en tres lugares: los pesos y umbrales de esta metodología
+ * (`pesos_contrapartes` / `pesos_empleados`), la columna `universo` de
+ * `valida_score_negocio`, y el catálogo `compliance_segmentos` que etiqueta cada
+ * consulta de listas. Vive aquí para que no nazcan dos nociones de "segmento"
+ * que no se hablan: el universo es el eje estable, el segmento es la etiqueta
+ * operativa que cuelga de él.
+ */
+export type UniversoSegmentacion = 'contraparte' | 'empleado';
+
+export const UNIVERSOS_SEGMENTACION: readonly UniversoSegmentacion[] = ['contraparte', 'empleado'];
+
+export const UNIVERSO_LABEL: Record<UniversoSegmentacion, string> = {
+  contraparte: 'Contrapartes',
+  empleado: 'Empleados',
+};
+
+export function esUniversoSegmentacion(v: unknown): v is UniversoSegmentacion {
+  return v === 'contraparte' || v === 'empleado';
+}
+
 export type VariableContraparte = 'pais' | 'ciiu' | 'calidad_verificado' | 'forma_operacion' | 'pep_listas';
 export type VariableEmpleado = 'ubicacion' | 'tipo_contrato' | 'criticidad_cargo' | 'pep_listas' | 'endeudamiento';
+
+/**
+ * Variables que aplican a cada universo. Amarra `UniversoSegmentacion` con los
+ * tipos de variable que ya existían: si mañana se agrega un universo, esto no
+ * compila hasta que se declaren sus variables.
+ */
+export type VariablesDeUniverso = {
+  contraparte: VariableContraparte;
+  empleado: VariableEmpleado;
+};
 
 export type PesosContrapartes = Record<VariableContraparte, number>;
 export type PesosEmpleados = Record<VariableEmpleado, number>;
