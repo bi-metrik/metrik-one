@@ -4,10 +4,12 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
+import VersionWatcher from '@/components/version-watcher'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { getNotificaciones } from '@/lib/actions/notificaciones'
+import { versionDelBuild } from '@/lib/version/build'
 
 export default async function AppLayout({
   children,
@@ -175,6 +177,10 @@ export default async function AppLayout({
       >
         {children}
       </AppShell>
+      {/* Vigilante de pestaña vieja: compara el build cargado contra el vivo y
+          recarga (sola si no hay nada que perder, con aviso si la persona esta
+          escribiendo). Techo de 8h aunque no haya deploy nuevo. */}
+      <VersionWatcher version={versionDelBuild()} />
       {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
         <DevWorkspaceBar workspaces={allWorkspaces} activeSlug={activeSlug ?? ''} />
       )}
