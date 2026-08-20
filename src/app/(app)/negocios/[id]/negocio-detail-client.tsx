@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
+import { useState, useTransition, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import {
@@ -307,25 +307,29 @@ function ResponsableSelector({
   const popoverRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
+  // Cerrar vacia el buscador. Vive aqui y no en un effect porque limpiar es consecuencia
+  // de CERRAR, no de que `open` cambie: hacerlo en el effect es un render en cascada
+  // (react-hooks/set-state-in-effect) y ademas se dispara en el primer montaje.
+  const cerrar = useCallback(() => {
+    setOpen(false)
+    setSearch('')
+  }, [])
+
   // Close on outside click
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setOpen(false)
+        cerrar()
       }
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [open])
+  }, [open, cerrar])
 
   // Focus search on open
   useEffect(() => {
-    if (open) {
-      setTimeout(() => searchRef.current?.focus(), 0)
-    } else {
-      setSearch('')
-    }
+    if (open) setTimeout(() => searchRef.current?.focus(), 0)
   }, [open])
 
   function handleAdd(staffId: string) {
@@ -409,7 +413,7 @@ function ResponsableSelector({
       ))}
 
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => (open ? cerrar() : setOpen(true))}
         disabled={isPending}
         className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
       >
@@ -1167,7 +1171,6 @@ function HistorialEtapasPrevias({
         <div className="divide-y divide-border">
           {bloques.map(b => {
             const def = b.bloque_definitions
-            const tipo = def?.tipo ?? ''
             return (
               <div key={b.id} className="bg-card">
                 <button
@@ -2031,7 +2034,6 @@ export default function NegocioDetailClient({
 
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
-  const etapaActual = negocio.etapas_negocio
 
   // Evaluar condiciones: filtrar bloques cuya condition no se cumpla
   const allBloques = (bloques as BloqueExtendido[]).map(b => ({
