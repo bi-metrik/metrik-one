@@ -1096,13 +1096,28 @@ export async function actualizarTarifaUpmePropuesta(
   return { ok: true, tarifa_upme: nuevaTarifa }
 }
 
-// ── Corrección del valor aprobado ───────────────────────────────────────────
+// ── Corrección de la aprobación (valor y/o plan) ────────────────────────────
 //
 // Camino APARTE del flujo de aprobación: no genera versión ni PDF, no toca lo que
-// se le envió al cliente. Solo corrige el valor que quedó mal registrado (caso
+// se le envió al cliente. Solo corrige lo que quedó mal registrado (caso
 // canónico: V0048, cargue histórico que puso el precio estándar 637.500 cuando lo
 // pactado y cobrado eran 634.500, dejando $3.000 de saldo que iban a trabar el
 // gate de cierre en Cobro).
+//
+// **También corrige el PLAN** (2026-08-20). Antes solo movía el honorario, y el
+// plan decide cuánto recaudo exige el gate de handoff a operaciones: Plan 1 pide
+// tarifa + 50% del honorario, Plan 2 lo pide completo. Un plan mal elegido después
+// de que se cierra la ventana de "Revertir aprobación" (etapa posterior o pago ya
+// recibido) no tenía forma de arreglarse desde la aplicación: quedaba el plan viejo
+// mandando sobre un valor nuevo, y la única salida era SQL. Caso que lo pidió:
+// V0318, aprobado en Plan 2 mientras el cliente paga 50/50, frenado en Documentación
+// por $425.000 que no debe.
+//
+// Plan y honorario NO son independientes: la versión aprobada declara un valor por
+// plan. Al cambiar el plan sin dar un valor explícito, el honorario se deriva de
+// `valor_final_plan{N}` de esa versión — así el bloque sigue diciendo lo mismo que
+// el PDF que recibió el cliente. Un valor explícito gana (es el caso "quedó mal
+// cargado", que por definición no coincide con la versión).
 //
 // PERMISO PROPIO, declarado por persona (decisión de Mauricio, 2026-07-29):
 //   workspaces.config_extra.correccion_precio.staff_ids = ["<staff_id>", ...]
@@ -1116,17 +1131,54 @@ export async function actualizarTarifaUpmePropuesta(
 // `ROLES_CORRECCION_DOCUMENTOS` en src/lib/roles.ts: afirmar algo sobre la plata
 // del negocio es otra decisión que corregir un dato mal leído.
 
-export async function corregirValorAprobado(
+// Helpers SIN export: en un archivo `'use server'` todo export tiene que ser una
+// función async, así que un helper sync exportado rompe el build entero del módulo
+// (y el error apunta al importador, no aquí).
+function nombrePlan(plan: 1 | 2 | undefined): string {
+  if (plan === 1) return 'Plan 1 (50/50)'
+  if (plan === 2) return 'Plan 2 (pago anticipado)'
+  return 'sin plan'
+}
+
+function resumenCorreccion(x: {
+  cambiaHonorario: boolean
+  cambiaPlan: boolean
+  nuevo: number
+  planNuevo: 1 | 2 | undefined
+}): string {
+  const partes: string[] = []
+  if (x.cambiaHonorario) partes.push(`el valor aprobado cambió a ${formatCOP(x.nuevo)}`)
+  if (x.cambiaPlan) partes.push(`el plan cambió a ${nombrePlan(x.planNuevo)}`)
+  return partes.join(' y ')
+}
+
+export interface CambiosAprobacion {
+  /** Honorario correcto. Si se omite y el plan cambia, se deriva de la versión aprobada. */
+  honorario?: number
+  /** Plan correcto: 1 (tarifa plena, 50/50) o 2 (pago anticipado). */
+  plan?: 1 | 2
+}
+
+export async function corregirAprobacion(
   negocioId: string,
-  nuevoHonorario: number,
+  cambios: CambiosAprobacion,
   motivo: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, role, staffId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
 
   const razon = (motivo ?? '').trim()
-  if (!razon) return { ok: false, error: 'Escribe por qué se corrige el valor' }
-  if (!Number.isFinite(nuevoHonorario) || nuevoHonorario <= 0) {
+  if (!razon) return { ok: false, error: 'Escribe por qué se corrige' }
+
+  const pidePlan = cambios?.plan !== undefined
+  const pideHonorario = cambios?.honorario !== undefined
+  if (!pidePlan && !pideHonorario) {
+    return { ok: false, error: 'Indica qué se corrige: el valor, el plan, o los dos' }
+  }
+  if (pidePlan && cambios.plan !== 1 && cambios.plan !== 2) {
+    return { ok: false, error: 'El plan debe ser 1 o 2' }
+  }
+  if (pideHonorario && (!Number.isFinite(cambios.honorario!) || cambios.honorario! <= 0)) {
     return { ok: false, error: 'El valor debe ser un número mayor que cero' }
   }
 
@@ -1154,51 +1206,111 @@ export async function corregirValorAprobado(
     .single()
   if (!negocio) return { ok: false, error: 'Negocio no encontrado' }
 
-  const anterior = Number(negocio.precio_aprobado ?? 0)
-  const nuevo = Math.round(nuevoHonorario)
-  if (anterior === nuevo) return { ok: false, error: 'El valor es el mismo que ya está registrado' }
-
-  // El honorario aprobado vive en el bloque origen Y en sus copias heredadas: si
-  // solo se corrigiera el origen, las etapas siguientes seguirían mostrando el
-  // valor viejo y nadie sabría cuál creer. Las `versiones[]` NO se tocan: son el
-  // registro de lo que se le mandó al cliente.
+  // El honorario y el plan aprobados viven en el bloque origen Y en sus copias
+  // heredadas: si solo se corrigiera el origen, las etapas siguientes seguirían
+  // mostrando lo viejo y nadie sabría cuál creer. Peor con el plan: el motor lo
+  // resuelve recorriendo las instancias y quedándose con la PRIMERA que traiga un
+  // plan válido (`anticipoCubiertoPorSaldo`), así que dejar copias divergentes hace
+  // que el gate dependa del orden en que vuelvan las filas. Las `versiones[]` NO se
+  // tocan: son el registro de lo que se le mandó al cliente.
   const { data: instancias } = await sb
     .from('negocio_bloques')
     .select('id, data, bloque_configs!inner(bloque_definitions!inner(tipo))')
     .eq('negocio_id', negocioId)
-  for (const inst of (instancias ?? []) as Array<{ id: string; data: Record<string, unknown>; bloque_configs?: { bloque_definitions?: { tipo?: string } } }>) {
-    if (inst.bloque_configs?.bloque_definitions?.tipo !== 'propuesta_economica') continue
-    if (!(inst.data ?? {}).hasOwnProperty('aprobado_honorario')) continue
+
+  const filas = ((instancias ?? []) as Array<{
+    id: string
+    data: Record<string, unknown>
+    bloque_configs?: { bloque_definitions?: { tipo?: string } }
+  }>).filter(
+    inst =>
+      inst.bloque_configs?.bloque_definitions?.tipo === 'propuesta_economica' &&
+      Object.prototype.hasOwnProperty.call(inst.data ?? {}, 'aprobado_honorario'),
+  )
+
+  // Estado vigente. El plan se lee con el MISMO criterio que el motor (primera
+  // instancia con un plan válido) para no corregir contra una lectura distinta de
+  // la que decide el gate.
+  const planAnterior =
+    filas.map(f => f.data?.aprobado_plan).find(p => p === 1 || p === 2) as 1 | 2 | undefined
+  const planNuevo = (cambios.plan ?? planAnterior) as 1 | 2 | undefined
+
+  const anterior = Number(negocio.precio_aprobado ?? 0)
+  let nuevo = anterior
+  if (pideHonorario) {
+    nuevo = Math.round(cambios.honorario!)
+  } else if (pidePlan && planNuevo !== planAnterior) {
+    // Sin valor explícito, el honorario sale de la versión aprobada: cada plan trae
+    // el suyo, y con descuentos distintos cambiar de plan cambia lo que se cobra.
+    // Si la versión no se puede leer, se conserva el valor actual antes que inventar.
+    const conVersiones = filas.find(f => Array.isArray(f.data?.versiones))
+    const versiones = (conVersiones?.data?.versiones ?? []) as PropuestaVersion[]
+    const nVersion = conVersiones?.data?.aprobado_version
+    const version = versiones.find(v => v.n === nVersion)
+    const derivado = planNuevo === 1 ? version?.valor_final_plan1 : version?.valor_final_plan2
+    if (Number.isFinite(derivado) && (derivado as number) > 0) nuevo = Math.round(derivado as number)
+  }
+
+  const cambiaHonorario = nuevo !== anterior
+  const cambiaPlan = pidePlan && planNuevo !== planAnterior
+  if (!cambiaHonorario && !cambiaPlan) {
+    return { ok: false, error: 'Los valores son los mismos que ya están registrados' }
+  }
+
+  for (const inst of filas) {
+    const data = { ...inst.data }
+    if (cambiaHonorario) data.aprobado_honorario = nuevo
+    if (cambiaPlan) data.aprobado_plan = planNuevo
     await sb
       .from('negocio_bloques')
-      .update({ data: { ...inst.data, aprobado_honorario: nuevo }, updated_at: new Date().toISOString() })
+      .update({ data, updated_at: new Date().toISOString() })
       .eq('id', inst.id)
   }
 
-  await sb
-    .from('negocios')
-    .update({ precio_aprobado: nuevo, updated_at: new Date().toISOString() })
-    .eq('id', negocioId)
+  if (cambiaHonorario) {
+    await sb
+      .from('negocios')
+      .update({ precio_aprobado: nuevo, updated_at: new Date().toISOString() })
+      .eq('id', negocioId)
+  }
 
   // Rastro. `tipo` debe existir en el CHECK de activity_log (solo admite
   // comentario|cambio|sistema|cambio_etapa|cambio_estado|solicitud_conciliacion|
   // conciliacion_atendida): se usa 'cambio', no un tipo nuevo — un tipo fuera del
   // CHECK hace fallar el insert EN SILENCIO, y eso ya costó tres incidentes.
   // `contenido` tiene tope de 280 caracteres por CHECK.
-  await sb.from('activity_log').insert({
-    workspace_id: workspaceId,
-    entidad_tipo: 'negocio',
-    entidad_id: negocioId,
-    tipo: 'cambio',
-    autor_id: staffId,
-    campo_modificado: 'precio_aprobado',
-    valor_anterior: String(anterior),
-    valor_nuevo: String(nuevo),
-    contenido: `Valor aprobado corregido: ${formatCOP(anterior)} → ${formatCOP(nuevo)}. ${razon}`.slice(0, 280),
-  })
+  // Una fila POR CAMPO: el timeline se lee por `campo_modificado`, y un evento que
+  // mezclara los dos dejaría el cambio de plan invisible para quien filtre por él.
+  const eventos: Array<Record<string, unknown>> = []
+  if (cambiaHonorario) {
+    eventos.push({
+      campo_modificado: 'precio_aprobado',
+      valor_anterior: String(anterior),
+      valor_nuevo: String(nuevo),
+      contenido: `Valor aprobado corregido: ${formatCOP(anterior)} → ${formatCOP(nuevo)}. ${razon}`.slice(0, 280),
+    })
+  }
+  if (cambiaPlan) {
+    eventos.push({
+      campo_modificado: 'aprobado_plan',
+      valor_anterior: planAnterior ? String(planAnterior) : '',
+      valor_nuevo: String(planNuevo),
+      contenido: `Plan aprobado corregido: ${nombrePlan(planAnterior)} → ${nombrePlan(planNuevo)}. ${razon}`.slice(0, 280),
+    })
+  }
+  for (const evento of eventos) {
+    await sb.from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      ...evento,
+    })
+  }
 
-  // Aviso al comercial responsable: le cambió el valor de SU negocio y no fue él.
-  // No se avisa al área financiera porque quien corrige ya es de esa área.
+  // Aviso al comercial responsable: le cambió la aprobación de SU negocio y no fue
+  // él. No se avisa al área financiera porque quien corrige ya es de esa área.
   const { data: resp } = await sb
     .from('negocio_responsables')
     .select('staff_id, rol')
@@ -1212,11 +1324,22 @@ export async function corregirValorAprobado(
         p_workspace_id: workspaceId,
         p_destinatario_id: st.profile_id,
         p_tipo: 'precio_corregido',
-        p_contenido: `${negocio.codigo ?? 'Negocio'}: el valor aprobado cambió a ${formatCOP(nuevo)}`.slice(0, 280),
+        p_contenido: `${negocio.codigo ?? 'Negocio'}: ${resumenCorreccion({
+          cambiaHonorario,
+          cambiaPlan,
+          nuevo,
+          planNuevo,
+        })}`.slice(0, 280),
         p_entidad_tipo: 'negocio',
         p_entidad_id: negocioId,
         p_deep_link: `/negocios/${negocioId}`,
-        p_metadata: { anterior, nuevo, motivo: razon },
+        p_metadata: {
+          anterior,
+          nuevo,
+          plan_anterior: planAnterior ?? null,
+          plan_nuevo: planNuevo ?? null,
+          motivo: razon,
+        },
         p_permitir_repetidas: true,
       })
     }

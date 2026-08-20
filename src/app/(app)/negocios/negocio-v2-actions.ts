@@ -5862,7 +5862,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // ¿Este usuario puede corregir el valor aprobado? Capacidad declarada por
   // persona (`config_extra.correccion_precio.staff_ids`), no heredada del rol.
   // Fail-closed: sin lista, solo el owner. Espejo exacto del guard de
-  // `corregirValorAprobado`, que es la barrera real.
+  // `corregirAprobacion`, que es la barrera real.
   const staffIdsPrecio = (((wsRow as { config_extra?: { correccion_precio?: { staff_ids?: unknown } } } | null)
     ?.config_extra?.correccion_precio?.staff_ids ?? []) as string[])
   const puedeCorregirPrecioWs = role === 'owner' || (!!staffId && staffIdsPrecio.includes(staffId))
@@ -6862,7 +6862,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .some(a => areasEfectivasUsuario.has(a))
     if (areaReadonly && !invitadoAEsteBloque) enrichedConfigExtra._areaReadonly = true
     // Corrección del valor aprobado: capacidad declarada por persona en el
-    // workspace, NO derivada del rol (ver `corregirValorAprobado`). Se resuelve
+    // workspace, NO derivada del rol (ver `corregirAprobacion`). Se resuelve
     // en el servidor y viaja como flag para que el bloque sepa si mostrar el
     // botón; la action revalida la lista antes de escribir.
     // Revertir la aprobación: la ventana NO es la etapa donde vive el bloque, es hasta
