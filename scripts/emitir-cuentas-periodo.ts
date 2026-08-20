@@ -1,6 +1,13 @@
 /**
  * Emite las cuentas de cobro de UN periodo (anio + mes) para UN workspace.
  *
+ * Cubre los DOS caminos, igual que el cron:
+ *   - planes uniformes  → una cuenta agrupada por empresa, vencimiento dia 15
+ *   - planes con cronograma explicito (`plan_cobro_cuotas`) → una cuenta por
+ *     cuota, con el monto y el vencimiento exactos del contrato
+ * Si el rescate solo corriera el primero, un cliente con cronograma explicito
+ * (Trappvel) quedaria fuera aqui igual que quedaba fuera del cron.
+ *
  * Reemplaza los scripts de un solo uso (`generar-cuentas-mayo-metrik.ts`,
  * `generar-cuentas-junio-metrik.ts`), que eran el mismo codigo con el mes
  * clavado. Un script por mes invita a copiar y pegar un tercero, y cada copia
@@ -104,33 +111,71 @@ async function main() {
 
   const wsId = (ws as { id: string }).id
   const { generarCuentasCobroPeriodo } = await import('../src/lib/cobros/generar-cuentas-cobro')
+  const { emitirCuentasExplicitasPeriodo } = await import('../src/lib/cobros/emitir-cuota-explicita')
 
   console.log(`▶ Cuentas de cobro ${periodo} · workspace ${WS_SLUG}`)
   console.log(`  modo: ${COMMIT ? 'REAL (--commit)' : 'dry-run (no toca DB ni Drive)'}`)
-  console.log(`  emision: ${fechaEmision} · vence: ${periodo}-15\n`)
+  console.log(`  emision: ${fechaEmision} · vence: ${periodo}-15 (uniformes) / segun contrato (explicitas)\n`)
 
+  // ── Planes uniformes: una cuenta agrupada por empresa ──────────────
   const result = await generarCuentasCobroPeriodo(sb as never, wsId, ANIO!, MES!, {
     dryRun: !COMMIT,
     isDraft: false,
     fechaEmisionOverride: fechaEmision,
   })
 
-  const total = result.detalles
+  let total = result.detalles
     .filter((d) => d.estado === 'creada')
     .reduce((s, d) => s + d.monto_total, 0)
+  let hayCreadas = result.detalles.some((d) => d.estado === 'creada')
 
-  console.log(`✓ creadas: ${result.cuentasCreadas} · omitidas (ya existian): ${result.cuentasOmitidas}`)
+  console.log('· Planes uniformes (vencimiento dia 15)')
+  console.log(`  creadas: ${result.cuentasCreadas} · omitidas (ya existian): ${result.cuentasOmitidas}`)
   for (const d of result.detalles) {
     console.log(`  · [${d.estado}] ${d.numero ?? '—'} · ${d.empresa_nombre} · ${formatCOP(d.monto_total)} · ${d.cobros_ids.length} cobro(s)`)
     if (d.pdf_drive_url) console.log(`      Drive: ${d.pdf_drive_url}`)
   }
-  if (result.detalles.some((d) => d.estado === 'creada')) {
-    console.log(`  total: ${formatCOP(total)}`)
-  }
+  if (!result.detalles.length) console.log('  (ninguno en el periodo)')
 
-  if (result.errores.length) {
-    console.log(`\n✗ errores (${result.errores.length}):`)
-    for (const e of result.errores) console.log(`  - ${e.empresa_id}: ${e.error}`)
+  // ── Planes con cronograma explicito: una cuenta por cuota ──────────
+  // El offset arranca donde quedo el dry-run de arriba: en dry-run nada se
+  // inserta, asi que sin el las dos listas imprimirian el mismo correlativo.
+  const previewsUniformes = COMMIT ? 0 : result.detalles.filter((d) => d.estado === 'creada').length
+  const explicitas = await emitirCuentasExplicitasPeriodo(sb as never, wsId, ANIO!, MES!, {
+    dryRun: !COMMIT,
+    isDraft: false,
+    fechaEmisionOverride: fechaEmision,
+    numeroOffset: previewsUniformes,
+  })
+
+  console.log('\n· Planes con cronograma explicito (plan_cobro_cuotas)')
+  console.log(`  creadas: ${explicitas.cuentasCreadas} · omitidas (ya existian): ${explicitas.cuentasOmitidas}`)
+  for (const d of explicitas.detalles) {
+    if (!d.success) {
+      console.log(`  · [error] cuota ${d.planCuotaId}: ${d.error}`)
+      continue
+    }
+    console.log(
+      `  · [${d.estado}] ${d.numero} · ${d.empresaNombre} · ${formatCOP(d.monto)}` +
+        ` · cuota ${d.numeroCuota} · vence ${d.fechaVencimiento} · emision ${d.fechaEmision}`,
+    )
+    if (d.pdfUrl) console.log(`      Drive: ${d.pdfUrl}`)
+    if (d.estado === 'creada' || d.estado === 'preview') {
+      total += d.monto
+      hayCreadas = true
+    }
+  }
+  if (!explicitas.detalles.length) console.log('  (ninguna cuota vence en el periodo)')
+
+  if (hayCreadas) console.log(`\n  total a emitir: ${formatCOP(total)}`)
+
+  const errores = [
+    ...result.errores.map((e) => `${e.empresa_id}: ${e.error}`),
+    ...explicitas.errores.map((e) => `cuota ${e.plan_cuota_id}: ${e.error}`),
+  ]
+  if (errores.length) {
+    console.log(`\n✗ errores (${errores.length}):`)
+    for (const e of errores) console.log(`  - ${e}`)
     process.exitCode = 1
   }
 

@@ -30,6 +30,8 @@ import { renderCuentaCobro, type CuentaCobroConcepto } from '@/lib/pdf/pdf-rende
 import { createDriveFolder, uploadFileToDrive } from '@/lib/google-drive'
 import { EMISOR_MAURICIO, getAnioGravableDeclaracion } from './emisor-mauricio'
 import { formatCOP, formatFechaLetras, montoEnLetrasCOP } from './format'
+import { particionarPorCronograma, planesConCronogramaExplicito } from './cronograma-explicito'
+import { siguienteNumeroCuenta } from './numero-cuenta'
 
 const SUBFOLDER_CUENTAS = '4. Cuentas de cobro'
 const TEMPLATE_SLUG = 'metrik'
@@ -152,8 +154,18 @@ export async function generarCuentasCobroPeriodo(
   if (pErr) throw new Error(`Error leyendo planes_cobro: ${pErr.message}`)
   if (!planes || planes.length === 0) return result
 
+  // 1b. Los planes CON cronograma explicito no pasan por aqui: su monto y su
+  // vencimiento salen de `plan_cobro_cuotas`, no de `plan.monto` + dia 15.
+  // Los emite `emitirCuentasExplicitasPeriodo`. Retrocompat de la migracion
+  // 20260630000001: un plan SIN filas alli sigue exactamente igual que antes.
+  const idsExplicitos = await planesConCronogramaExplicito(
+    supabase,
+    (planes as PlanRow[]).map((p) => p.id),
+  )
+  const { uniformes } = particionarPorCronograma(planes as PlanRow[], idsExplicitos)
+
   // 2. Para cada plan, calcular numero_cuota del periodo
-  const planesEnPeriodo = (planes as PlanRow[])
+  const planesEnPeriodo = uniformes
     .map(p => ({
       plan: p,
       numeroCuota: calcularNumeroCuota(p.fecha_inicio, p.total_cuotas, anio, mes),
@@ -220,6 +232,11 @@ export async function generarCuentasCobroPeriodo(
 
   const grupos = new Map<string, CobroConNegocio[]>()
   for (const c of cobros as unknown as CobroConNegocio[]) {
+    // Una empresa puede tener a la vez un plan uniforme y uno explicito. El corte
+    // del paso 1b saca el plan explicito del calculo, pero si un cobro suyo ya
+    // existiera con vencimiento el dia 15 caeria igual en esta relectura y se
+    // colaria dentro de la cuenta agrupada de la empresa.
+    if (c.plan_cobro_id && idsExplicitos.has(c.plan_cobro_id)) continue
     const empresaId = c.negocios?.empresa_id
     if (!empresaId) {
       result.errores.push({
@@ -256,6 +273,10 @@ export async function generarCuentasCobroPeriodo(
   const fechaEmision = options.fechaEmisionOverride ?? fechaEsperada
   const fechaVencimiento = fechaEsperada
   const anioGravable = getAnioGravableDeclaracion(new Date(fechaEmision + 'T12:00:00Z'))
+
+  // Solo dry-run: nada se inserta entre iteraciones, asi que sin desplazar el
+  // correlativo todas las previsualizaciones del mes saldrian con el MISMO numero.
+  let previews = 0
 
   for (const [empresaId, cobrosGrupo] of grupos) {
     const empresa = empresaMap.get(empresaId)
@@ -360,15 +381,18 @@ export async function generarCuentasCobroPeriodo(
         año_gravable_declaracion: String(anioGravable),
       }
 
-      // Pre-asignar numero por la function DB (para incluirlo en el PDF)
-      const { data: numeroRow } = await supabase
-        .rpc('generate_cuenta_cobro_numero', {
-          p_workspace_id: workspaceId,
-          p_anio: anio,
-          p_mes: mes,
-        })
-
-      const numero = (numeroRow as unknown as string) || `CC-${anio}-${String(mes).padStart(2, '0')}-PREVIEW`
+      // Pre-asignar numero (para incluirlo en el PDF). Mismo correlativo que el
+      // camino explicito: `siguienteNumeroCuenta` es la unica fuente de la serie.
+      // Antes, si el RPC no respondia, esto caia a un literal
+      // `CC-YYYY-MM-PREVIEW` que se insertaba tal cual en la tabla.
+      const numero = await siguienteNumeroCuenta(
+        supabase,
+        workspaceId,
+        anio,
+        mes,
+        options.dryRun ? previews : 0,
+      )
+      if (options.dryRun) previews++
       payload.numero = numero
 
       if (options.dryRun) {

@@ -9,7 +9,8 @@
  * y deja la cuenta en 'emitida_pendiente_aprobacion' — el envío al cliente sigue siendo
  * gate humano (server action aprobarYEnviarCuentaCobro).
  *
- * NO modifica el generador de período: los planes sin plan_cobro_cuotas siguen igual.
+ * Los planes sin cronograma explícito no pasan por aquí: siguen en el generador
+ * de período. El corte lo hace `cronograma-explicito.ts`.
  *
  * Refs: docs/specs/2026-06-30_vinculo-negocio-carpeta-contrato.md (Slice 2)
  */
@@ -19,6 +20,7 @@ import { renderCuentaCobro, type CuentaCobroRenderPayload } from '@/lib/pdf/pdf-
 import { createDriveFolder, uploadFileToDrive } from '@/lib/google-drive'
 import { EMISOR_MAURICIO, getAnioGravableDeclaracion } from './emisor-mauricio'
 import { formatCOP, formatFechaLetras, montoEnLetrasCOP } from './format'
+import { siguienteNumeroCuenta } from './numero-cuenta'
 
 const SUBFOLDER_CUENTAS = '4. Cuentas de cobro'
 const TEMPLATE_SLUG = 'metrik'
@@ -29,25 +31,17 @@ function extractFolderIdFromUrl(url: string | null): string | null {
   return m ? m[1] : null
 }
 
-/** Siguiente correlativo CC-YYYY-MM-NNN del período (no hay RPC en DB; se calcula por max). */
-async function siguienteNumeroCuenta(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  anio: number,
-  mes: number,
-): Promise<string> {
-  const { data } = await supabase
-    .from('cuentas_cobro_emitidas')
-    .select('numero')
-    .eq('workspace_id', workspaceId)
-    .eq('anio', anio)
-    .eq('mes', mes)
-  let max = 0
-  for (const r of (data ?? []) as { numero: string }[]) {
-    const m = r.numero?.match(/-(\d+)$/)
-    if (m) max = Math.max(max, parseInt(m[1], 10))
-  }
-  return `CC-${anio}-${String(mes).padStart(2, '0')}-${String(max + 1).padStart(3, '0')}`
+/**
+ * Una cuenta no puede nacer fechada DESPUÉS de su propio vencimiento.
+ *
+ * El cron fecha todas las cuentas el día 13 (día de envío) para que el documento
+ * no cambie de forma según el día en que el cron logre correr. Con vencimiento el
+ * 15 o el 20 eso está bien, pero un cronograma explícito puede vencer el 5: ahí
+ * el override del 13 produciría una cuenta emitida ocho días después de la fecha
+ * en que se pide el pago. Se recorta al vencimiento.
+ */
+export function fechaEmisionSegura(fechaEmision: string, fechaVencimiento: string): string {
+  return fechaEmision > fechaVencimiento ? fechaVencimiento : fechaEmision
 }
 
 type CuotaRow = {
@@ -81,9 +75,45 @@ type EmpresaRow = {
   contacto_nombre: string | null
 }
 
+export type EmitirCuotaOptions = {
+  /** No escribe en DB ni sube PDF: solo devuelve el preview de lo que se emitiría. */
+  dryRun?: boolean
+  /** Watermark BORRADOR en el PDF. */
+  isDraft?: boolean
+  /** Fecha de emisión de la cuenta (YYYY-MM-DD). Default: hoy. Se recorta al vencimiento. */
+  fechaEmisionOverride?: string
+  /** Solo dry-run: desplaza el correlativo previsualizado. Ver `desplazarNumero`. */
+  numeroOffset?: number
+}
+
+/** Datos de la cuota, comunes a todos los desenlaces salvo el error temprano. */
+export type EmitirCuotaDatos = {
+  planCuotaId: string
+  numeroCuota: number
+  negocioNombre: string
+  empresaNombre: string
+  monto: number
+  fechaVencimiento: string
+  fechaEmision: string
+}
+
 export type EmitirCuotaResult =
-  | { success: true; numero: string; cuentaId: string; pdfUrl: string | null; omitida?: boolean }
-  | { success: false; error: string }
+  | ({
+      success: true
+      /** `creada` escribió · `omitida` ya estaba emitida · `preview` es dry-run */
+      estado: 'creada' | 'omitida' | 'preview'
+      numero: string
+      cuentaId: string | null
+      pdfUrl: string | null
+    } & EmitirCuotaDatos)
+  | { success: false; estado: 'error'; planCuotaId: string; error: string }
+
+export type EmitirExplicitasResult = {
+  cuentasCreadas: number
+  cuentasOmitidas: number
+  errores: { plan_cuota_id: string; error: string }[]
+  detalles: EmitirCuotaResult[]
+}
 
 /**
  * Emite la cuenta de cobro de UNA cuota explícita. Idempotente:
@@ -93,15 +123,22 @@ export type EmitirCuotaResult =
 export async function emitirCuentaDesdeCuota(
   supabase: SupabaseClient,
   planCuotaId: string,
-  options: { isDraft?: boolean; fechaEmisionOverride?: string } = {},
+  options: EmitirCuotaOptions = {},
 ): Promise<EmitirCuotaResult> {
+  const fallo = (error: string): EmitirCuotaResult => ({
+    success: false,
+    estado: 'error',
+    planCuotaId,
+    error,
+  })
+
   // 1. Cuota + plan + negocio + empresa
   const { data: cuotaData, error: qErr } = await supabase
     .from('plan_cobro_cuotas')
     .select('id, workspace_id, plan_cobro_id, numero, tipo, monto, fecha_vencimiento, concepto_detalle')
     .eq('id', planCuotaId)
     .maybeSingle()
-  if (qErr || !cuotaData) return { success: false, error: `Cuota ${planCuotaId} no encontrada` }
+  if (qErr || !cuotaData) return fallo(`Cuota ${planCuotaId} no encontrada`)
   const cuota = cuotaData as CuotaRow
   const workspaceId = cuota.workspace_id
 
@@ -110,7 +147,7 @@ export async function emitirCuentaDesdeCuota(
     .select('id, negocio_id, total_cuotas, concepto_detalle_template')
     .eq('id', cuota.plan_cobro_id)
     .maybeSingle()
-  if (!planData) return { success: false, error: 'Plan de cobro no encontrado' }
+  if (!planData) return fallo('Plan de cobro no encontrado')
   const plan = planData as PlanRow
 
   const { data: negData } = await supabase
@@ -119,7 +156,7 @@ export async function emitirCuentaDesdeCuota(
     .eq('id', plan.negocio_id)
     .maybeSingle()
   const negocio = negData as NegocioRow | null
-  if (!negocio?.empresa_id) return { success: false, error: 'Negocio sin empresa asociada' }
+  if (!negocio?.empresa_id) return fallo('Negocio sin empresa asociada')
 
   const { data: empData } = await supabase
     .from('empresas')
@@ -127,7 +164,25 @@ export async function emitirCuentaDesdeCuota(
     .eq('id', negocio.empresa_id)
     .maybeSingle()
   const empresa = empData as EmpresaRow | null
-  if (!empresa) return { success: false, error: 'Empresa no encontrada' }
+  if (!empresa) return fallo('Empresa no encontrada')
+
+  // 4a. Fechas (se calculan antes para poder describir hasta los desenlaces cortos)
+  const [anio, mes] = cuota.fecha_vencimiento.split('-').map(Number)
+  const fechaVencimiento = cuota.fecha_vencimiento
+  const fechaEmision = fechaEmisionSegura(
+    options.fechaEmisionOverride ?? new Date().toISOString().slice(0, 10),
+    fechaVencimiento,
+  )
+
+  const datos: EmitirCuotaDatos = {
+    planCuotaId,
+    numeroCuota: cuota.numero,
+    negocioNombre: negocio.nombre,
+    empresaNombre: empresa.razon_social ?? empresa.nombre,
+    monto: Number(cuota.monto),
+    fechaVencimiento,
+    fechaEmision,
+  }
 
   // 2. Cobro de la cuota (idempotente por unique plan+numero_cuota)
   const { data: cobroExist } = await supabase
@@ -138,7 +193,7 @@ export async function emitirCuentaDesdeCuota(
     .maybeSingle()
 
   let cobroId = (cobroExist as { id: string } | null)?.id ?? null
-  if (!cobroId) {
+  if (!cobroId && !options.dryRun) {
     const { data: cobroNuevo, error: cErr } = await supabase
       .from('cobros')
       .insert({
@@ -154,27 +209,56 @@ export async function emitirCuentaDesdeCuota(
       })
       .select('id')
       .single()
-    if (cErr) return { success: false, error: `Insert cobro: ${cErr.message}` }
+    if (cErr) return fallo(`Insert cobro: ${cErr.message}`)
     cobroId = (cobroNuevo as { id: string }).id
   }
 
   // 3. Idempotencia de cuenta: ¿ya hay una cuenta que incluye este cobro?
-  const { data: cuentaPrevia } = await supabase
-    .from('cuentas_cobro_emitidas')
-    .select('id, numero, pdf_drive_url')
-    .eq('workspace_id', workspaceId)
-    .contains('cobros_ids', [cobroId])
-    .maybeSingle()
-  if (cuentaPrevia) {
-    const cp = cuentaPrevia as { id: string; numero: string; pdf_drive_url: string | null }
-    return { success: true, numero: cp.numero, cuentaId: cp.id, pdfUrl: cp.pdf_drive_url, omitida: true }
+  //
+  // Sin `.limit(1)` esto usaba `.maybeSingle()`, que ante DOS filas devuelve
+  // error y `data: null` — y el null se leía como "no hay cuenta previa", o sea
+  // reemitía justo en el caso en que más había que frenar. Pasa de verdad: el
+  // anticipo de Trappvel (cobro b3c958eb) está en CC-2026-06-003 (anulada) y en
+  // CC-2026-07-001 (pagada). Cualquier cuenta que ya contenga el cobro bloquea,
+  // anulada incluida: reemitir sobre una anulación es decisión de una persona,
+  // no de un cron.
+  if (cobroId) {
+    const { data: cuentasPrevias } = await supabase
+      .from('cuentas_cobro_emitidas')
+      .select('id, numero, pdf_drive_url, created_at')
+      .eq('workspace_id', workspaceId)
+      .contains('cobros_ids', [cobroId])
+      .order('created_at', { ascending: true })
+      .limit(1)
+    const cuentaPrevia = ((cuentasPrevias ?? []) as {
+      id: string
+      numero: string
+      pdf_drive_url: string | null
+    }[])[0]
+    if (cuentaPrevia) {
+      return {
+        success: true,
+        estado: 'omitida',
+        numero: cuentaPrevia.numero,
+        cuentaId: cuentaPrevia.id,
+        pdfUrl: cuentaPrevia.pdf_drive_url,
+        ...datos,
+      }
+    }
   }
 
-  // 4. Fechas + número
-  const [anio, mes] = cuota.fecha_vencimiento.split('-').map(Number)
-  const fechaEmision = options.fechaEmisionOverride ?? new Date().toISOString().slice(0, 10)
-  const fechaVencimiento = cuota.fecha_vencimiento
-  const numero = await siguienteNumeroCuenta(supabase, workspaceId, anio, mes)
+  // 4b. Número — mismo correlativo que el generador uniforme (RPC en DB)
+  const numero = await siguienteNumeroCuenta(
+    supabase,
+    workspaceId,
+    anio,
+    mes,
+    options.dryRun ? (options.numeroOffset ?? 0) : 0,
+  )
+
+  if (options.dryRun) {
+    return { success: true, estado: 'preview', numero, cuentaId: null, pdfUrl: null, ...datos }
+  }
 
   // 5. Concepto
   const conceptoDetalle =
@@ -255,7 +339,7 @@ export async function emitirCuentaDesdeCuota(
     fecha_vencimiento: fechaVencimiento,
     email_destinatarios: empresa.email_fiscal ? [empresa.email_fiscal] : null,
   })
-  if (insErr) return { success: false, error: `Insert cuenta: ${insErr.message}` }
+  if (insErr) return fallo(`Insert cuenta: ${insErr.message}`)
 
   const { data: cuentaIns } = await supabase
     .from('cuentas_cobro_emitidas')
@@ -266,10 +350,19 @@ export async function emitirCuentaDesdeCuota(
 
   return {
     success: true,
+    estado: 'creada',
     numero,
-    cuentaId: (cuentaIns as { id: string } | null)?.id ?? '',
+    cuentaId: (cuentaIns as { id: string } | null)?.id ?? null,
     pdfUrl: pdfDriveUrl,
+    ...datos,
   }
+}
+
+/** Primer y último día del mes en formato YYYY-MM-DD. */
+export function rangoDelMes(anio: number, mes: number): { desde: string; hasta: string } {
+  const ultimoDia = new Date(Date.UTC(anio, mes, 0)).getUTCDate()
+  const mm = String(mes).padStart(2, '0')
+  return { desde: `${anio}-${mm}-01`, hasta: `${anio}-${mm}-${String(ultimoDia).padStart(2, '0')}` }
 }
 
 /**
@@ -281,23 +374,58 @@ export async function emitirCuentasExplicitasPeriodo(
   workspaceId: string,
   anio: number,
   mes: number,
-  options: { isDraft?: boolean; fechaEmisionOverride?: string } = {},
-): Promise<EmitirCuotaResult[]> {
-  const mesInicio = `${anio}-${String(mes).padStart(2, '0')}-01`
-  const ultimoDia = new Date(Date.UTC(anio, mes, 0)).getUTCDate()
-  const mesFin = `${anio}-${String(mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`
+  options: EmitirCuotaOptions = {},
+): Promise<EmitirExplicitasResult> {
+  const { desde, hasta } = rangoDelMes(anio, mes)
 
-  const { data: cuotas } = await supabase
+  const { data: cuotas, error } = await supabase
     .from('plan_cobro_cuotas')
-    .select('id, planes_cobro!inner(activo, workspace_id)')
+    .select('id, fecha_vencimiento, numero, planes_cobro!inner(activo, workspace_id)')
     .eq('planes_cobro.workspace_id', workspaceId)
     .eq('planes_cobro.activo', true)
-    .gte('fecha_vencimiento', mesInicio)
-    .lte('fecha_vencimiento', mesFin)
+    .gte('fecha_vencimiento', desde)
+    .lte('fecha_vencimiento', hasta)
+    .order('fecha_vencimiento', { ascending: true })
 
-  const results: EmitirCuotaResult[] = []
-  for (const q of (cuotas ?? []) as { id: string }[]) {
-    results.push(await emitirCuentaDesdeCuota(supabase, q.id, options))
+  const result: EmitirExplicitasResult = {
+    cuentasCreadas: 0,
+    cuentasOmitidas: 0,
+    errores: [],
+    detalles: [],
   }
-  return results
+
+  if (error) {
+    result.errores.push({ plan_cuota_id: '—', error: `Error leyendo plan_cobro_cuotas: ${error.message}` })
+    return result
+  }
+
+  // El offset solo corre en dry-run: sin él, previsualizar dos cuotas del mismo
+  // mes imprimiría el mismo número dos veces (nada se insertó entre medio).
+  // Arranca en `numeroOffset` para que quien ya previsualizó cuentas uniformes
+  // del mismo período (el script de rescate) siga la serie en vez de repetirla.
+  let previews = options.numeroOffset ?? 0
+
+  for (const q of (cuotas ?? []) as { id: string }[]) {
+    let r: EmitirCuotaResult
+    try {
+      r = await emitirCuentaDesdeCuota(supabase, q.id, { ...options, numeroOffset: previews })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      r = { success: false, estado: 'error', planCuotaId: q.id, error: msg }
+    }
+    result.detalles.push(r)
+    if (!r.success) {
+      result.errores.push({ plan_cuota_id: r.planCuotaId, error: r.error })
+    } else if (r.estado === 'creada') {
+      result.cuentasCreadas++
+    } else if (r.estado === 'omitida') {
+      result.cuentasOmitidas++
+    } else {
+      // preview: no cuenta como creada (igual que el generador uniforme en
+      // dry-run). Lo que se emitiría se lee en `detalles`.
+      previews++
+    }
+  }
+
+  return result
 }
