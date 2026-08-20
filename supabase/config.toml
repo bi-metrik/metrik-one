@@ -386,6 +386,15 @@ verify_jwt = false
 # Notificaciones internas invocadas sin JWT de Supabase.
 verify_jwt = false
 
+[functions.meta-leads-backfill]
+# Backfill de un solo uso: recupera la atribucion de campana que la Graph API
+# omitio en silencio mientras el token no tenia permiso sobre la cuenta
+# publicitaria. NO usa el JWT de Supabase: se invoca a mano con curl, y el gateway
+# ya no acepta el service key legacy. Se protege con secreto interno verificado
+# dentro de la funcion (META_LEADS_BACKFILL_SECRET, o META_LEADS_VERIFY_TOKEN si
+# el primero no existe). Por defecto corre en dry run y no escribe nada.
+verify_jwt = false
+
 [functions.meta-leads-webhook]
 # Webhook de Meta Lead Ads (leadgen): NO usa el JWT de Supabase. Meta no lo
 # envia, y la autenticidad se valida dentro de la funcion con la firma
