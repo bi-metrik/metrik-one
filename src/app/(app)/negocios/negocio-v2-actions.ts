@@ -18,6 +18,7 @@ import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreCo
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
 import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import {
@@ -770,6 +771,7 @@ export async function getNegocioDetalle(id: string): Promise<{
   negocio: NegocioDetalle
   bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }>
   etapasLinea: EtapaNegocio[]
+  etapasNoAplican: EtapaNoAplica[]
   blockIdByConfigId: Record<string, string>
 } | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -839,12 +841,29 @@ export async function getNegocioDetalle(id: string): Promise<{
 
   // Cargar etapas de la línea para la barra de progreso
   let etapasLinea: EtapaNegocio[] = []
+  let etapasNoAplican: EtapaNoAplica[] = []
   if (negocioTyped.linea_id) {
     const { data: etapas } = await db(supabase)
       .from('etapas_negocio')
       .select('id, linea_id, stage, nombre, orden, numero, config_extra')
       .eq('linea_id', negocioTyped.linea_id)
       .order('orden', { ascending: true })
+
+    // Etapas que este caso no va a recorrer nunca, y la respuesta que las dejó fuera. Sale
+    // sin tocar la base si la línea no bifurca; ver `ruta-descartada-negocio.ts`.
+    etapasNoAplican = await resolverEtapasNoAplican(
+      supabase,
+      id,
+      ((etapas ?? []) as Record<string, unknown>[]).map(e => ({
+        id: e.id as string,
+        nombre: (e.nombre as string) ?? '',
+        orden: e.orden as number,
+        numero: (e.numero as number) ?? (e.orden as number),
+        stage: (e.stage as string | null) ?? null,
+        config_extra: (e.config_extra ?? null) as Record<string, unknown> | null,
+      })),
+      negocioTyped.etapa_actual_id ?? null,
+    )
 
     etapasLinea = ((etapas ?? []) as Record<string, unknown>[]).map(e => ({
       id: e.id as string,
@@ -1581,6 +1600,7 @@ export async function getNegocioDetalle(id: string): Promise<{
     negocio: negocioTyped,
     bloques,
     etapasLinea,
+    etapasNoAplican,
     blockIdByConfigId: Object.fromEntries(blockIdByConfigId),
   }
 }
@@ -5658,6 +5678,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }>
   }>
   etapasLinea: EtapaNegocio[]
+  etapasNoAplican: EtapaNoAplica[]
   datosOtrasEtapas: Record<number, Record<string, unknown>>
   datosPorSlug: Record<string, Record<string, unknown>>
   bloquesEtapasPrevias: Array<{
@@ -6841,6 +6862,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     negocio: base.negocio,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
+    etapasNoAplican: base.etapasNoAplican,
     datosOtrasEtapas,
     // Data de bloques fuente indexada por slug estable — para que el cliente
     // evalúe `condition.source_bloque_slug` por identidad (no por etapa_orden).
