@@ -1,7 +1,8 @@
 /**
  * OAuth bootstrap — obtiene un refresh_token de Google para Drive (+ Calendar).
  *
- * Levanta un servidor local en localhost:8080 que captura el callback OAuth.
+ * Levanta un servidor local (puerto OAUTH_PORT, 8080 por defecto) que captura
+ * el callback OAuth.
  * Imprime una URL para abrir en el navegador, donde se autoriza el acceso.
  * Al callback intercambia el code por refresh_token y lo imprime en consola.
  *
@@ -32,14 +33,18 @@
  * Para pedir otro conjunto: OAUTH_SCOPES="url1 url2" npx tsx ...
  *
  * Requisito en Google Cloud Console, sobre el OAuth Client que se use:
- *   - `http://localhost:8080/oauth/callback` en URIs de redireccion autorizados.
+ *   - El URI de redireccion EXACTO que imprime el script (el puerto lo fija
+ *     OAUTH_PORT; por defecto 8080).
  *   - El scope de Calendar habilitado en la pantalla de consentimiento.
  */
 
 import http from 'http'
 import { URL } from 'url'
 
-const REDIRECT_URI = 'http://localhost:8080/oauth/callback'
+// El puerto se declara con OAUTH_PORT: en el servidor el 8080 suele estar
+// ocupado. El URI resultante debe estar registrado TAL CUAL en el OAuth Client.
+const PORT = Number(process.env.OAUTH_PORT ?? 8080)
+const REDIRECT_URI = `http://localhost:${PORT}/oauth/callback`
 
 const SCOPE_DRIVE = 'https://www.googleapis.com/auth/drive'
 const SCOPE_CALENDAR = 'https://www.googleapis.com/auth/calendar.readonly'
@@ -74,7 +79,7 @@ console.log('\nScopes solicitados:')
 for (const s of SCOPES) console.log(`  - ${s}`)
 console.log('\n→ Abre esta URL en el navegador (loggeado con la cuenta dueña de los archivos):\n')
 console.log(authUrl.toString())
-console.log('\n→ Esperando callback en http://localhost:8080/oauth/callback ...\n')
+console.log(`\n→ Esperando callback en ${REDIRECT_URI} ...\n`)
 
 async function exchangeCodeForTokens(code: string): Promise<void> {
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -174,6 +179,6 @@ const server = http.createServer(async (req, res) => {
   process.exit(0)
 })
 
-server.listen(8080, () => {
+server.listen(PORT, () => {
   // listo
 })
