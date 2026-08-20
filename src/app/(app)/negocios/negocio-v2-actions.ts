@@ -40,6 +40,7 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
+import { resolverDestinoCompartido } from '@/lib/negocios/casilla-compartida'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
@@ -4364,50 +4365,7 @@ export async function marcarBloqueCompleto(
   return { error: null }
 }
 
-// ── Actualizar data del bloque sin marcar completo ────────────────────────────
-
-/**
- * Bloque compartido entre etapas: devuelve la fila donde debe escribirse el dato.
- *
- * Un bloque `datos` marcado con `config_extra.compartido_con_origen` es la MISMA casilla
- * vista desde otra etapa, no una copia. Caso canónico (SOENA): la fecha de la cita DIAN
- * la registra operaciones en Cita si consiguió agendamiento, o el comercial en
- * Notificación si la cita salió por PQR y el cliente le reportó la fecha después.
- *
- * Sin esto habría dos filas y dos fechas que nadie concilia, y quien lee el dato (el
- * cross-check de vigencia del certificado bancario) solo miraría una de las dos.
- *
- * Devuelve el id recibido cuando el bloque no es compartido, o cuando el origen no se
- * encuentra: ante la duda se escribe donde el usuario está, nunca se pierde el dato.
- */
-async function resolverDestinoCompartido(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  negocioBloqueId: string,
-): Promise<string> {
-  const { data: actual } = await db(supabase)
-    .from('negocio_bloques')
-    .select('negocio_id, bloque_configs!inner(config_extra)')
-    .eq('id', negocioBloqueId)
-    .single()
-  if (!actual) return negocioBloqueId
-
-  const cfg = ((actual as Record<string, unknown>).bloque_configs as Record<string, unknown> | null)
-  const ce = (cfg?.config_extra ?? {}) as Record<string, unknown>
-  if (ce.compartido_con_origen !== true) return negocioBloqueId
-
-  const srcSlug = ce.source_bloque_slug as string | undefined
-  if (!srcSlug) return negocioBloqueId
-
-  const { data: origen } = await db(supabase)
-    .from('negocio_bloques')
-    .select('id, bloque_configs!inner(slug)')
-    .eq('negocio_id', (actual as { negocio_id: string }).negocio_id)
-    .eq('bloque_configs.slug', srcSlug)
-    .maybeSingle()
-
-  return (origen as { id?: string } | null)?.id ?? negocioBloqueId
-}
+// ── Actualizar data del bloque sin marcar completo ────────────────────────
 
 /**
  * Propaga los campos DERIVADOS de un bloque que acaba de guardarse.
