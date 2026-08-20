@@ -29,7 +29,7 @@ type ReferenciaFuente = {
   [otras: string]: unknown
 }
 
-type ConfigExtraConReferencias = {
+export type ConfigExtraConReferencias = {
   condition?: ReferenciaFuente | null
   fields?: Array<{
     auto_fill?: ReferenciaFuente | null
@@ -93,4 +93,31 @@ export function aplanarDataBloque(data: Record<string, unknown> | null): Record<
     }
   }
   return plano
+}
+
+/**
+ * De un conjunto de `config_extra`, qué orígenes hace falta ir a buscar todavía.
+ *
+ * ⚠️ Las bolsas de datos (`porSlug`, `porEtapaOrden`) se arman con lo que declaran
+ * los bloques de la ETAPA ACTUAL. Un bloque del HISTORIAL no aportaba sus propias
+ * referencias, así que su condición se evaluaba contra una bolsa vacía: daba falso
+ * y el bloque quedaba escondido justo cuando alguien acababa de corregir el dato
+ * que lo activa. Medido en SOENA: ningún bloque de Cita referencia `titularidad`,
+ * y por eso el caso V0141 nunca mostró dónde subir el RUT del segundo titular.
+ * Es la misma clase de defecto que documenta el encabezado de este archivo, un
+ * nivel más arriba: allí faltaba una de las dos vías, aquí falta un conjunto de
+ * bloques.
+ */
+export function referenciasFaltantes(
+  configs: Iterable<ConfigExtraConReferencias>,
+  yaResueltas: {
+    porSlug: Record<string, unknown>
+    porEtapaOrden: Record<number, unknown>
+  }
+): { slugs: string[]; etapaOrdens: number[] } {
+  const { etapaOrdens, bloqueSlugs } = recolectarReferenciasFuente(configs)
+  return {
+    slugs: [...bloqueSlugs].filter(s => !yaResueltas.porSlug[s]),
+    etapaOrdens: [...etapaOrdens].filter(o => !yaResueltas.porEtapaOrden[o]),
+  }
 }

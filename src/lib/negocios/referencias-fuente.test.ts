@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { recolectarReferenciasFuente, aplanarDataBloque } from './referencias-fuente'
+import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from './referencias-fuente'
 
 // La topología real que destapó el defecto (SOENA, etapa Notificación): los tres
 // bloques dependen de `via_solicitud`, que se responde en la etapa anterior (Cita)
@@ -79,5 +79,58 @@ describe('aplanarDataBloque', () => {
 
   it('devuelve un objeto vacío cuando el bloque no tiene data', () => {
     expect(aplanarDataBloque(null)).toEqual({})
+  })
+})
+
+// El caso V0141 (SOENA): `rut_solicitante_2` vive en Documentación y se activa con
+// `titularidad`, pero el negocio está en Cita. Las bolsas llegan vacías porque
+// ningún bloque de Cita referencia esa fuente.
+const RUT_SOLICITANTE_2 = {
+  condition: { field: 'modalidad_solicitante', value_in: ['copropiedad'], source_bloque_slug: 'titularidad' },
+}
+
+describe('referenciasFaltantes', () => {
+  it('pide la fuente que un bloque del historial declara y nadie resolvió', () => {
+    const faltan = referenciasFaltantes([RUT_SOLICITANTE_2], { porSlug: {}, porEtapaOrden: {} })
+    expect(faltan.slugs).toEqual(['titularidad'])
+  })
+
+  it('no vuelve a pedir lo que las bolsas ya traen', () => {
+    const faltan = referenciasFaltantes([RUT_SOLICITANTE_2], {
+      porSlug: { titularidad: { modalidad_solicitante: 'copropiedad' } },
+      porEtapaOrden: {},
+    })
+    expect(faltan.slugs).toEqual([])
+  })
+
+  it('una bolsa vacía para ese slug NO cuenta como resuelta', () => {
+    // Un `{}` es indistinguible de "el bloque no tiene data", pero la clave existe:
+    // si el índice ya la registró, volver a consultarla no cambia nada.
+    const faltan = referenciasFaltantes([RUT_SOLICITANTE_2], {
+      porSlug: { titularidad: {} },
+      porEtapaOrden: {},
+    })
+    expect(faltan.slugs).toEqual([])
+  })
+
+  it('pide también la etapa origen de la vía legacy', () => {
+    const faltan = referenciasFaltantes(
+      [{ condition: { field: 'requiere_certificacion_upme', value: 'true', source_etapa_orden: 5 } }],
+      { porSlug: {}, porEtapaOrden: {} }
+    )
+    expect(faltan.etapaOrdens).toEqual([5])
+  })
+
+  it('no pide una etapa que la pasada principal ya cargó', () => {
+    const faltan = referenciasFaltantes(
+      [{ condition: { field: 'requiere_certificacion_upme', value: 'true', source_etapa_orden: 5 } }],
+      { porSlug: {}, porEtapaOrden: { 5: { requiere_certificacion_upme: 'true' } } }
+    )
+    expect(faltan.etapaOrdens).toEqual([])
+  })
+
+  it('no pide nada cuando ningún bloque declara referencias', () => {
+    const faltan = referenciasFaltantes([{ fields: [{}] }, null, undefined], { porSlug: {}, porEtapaOrden: {} })
+    expect(faltan).toEqual({ slugs: [], etapaOrdens: [] })
   })
 })
