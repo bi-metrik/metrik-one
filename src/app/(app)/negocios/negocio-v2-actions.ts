@@ -39,7 +39,7 @@ import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoN
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
-import { recolectarReferenciasFuente, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
+import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
@@ -6479,7 +6479,52 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const reactivables = new Set<string>()
       {
         const activa = reactivacionActiva(lineaConfigExtra)
-        const fuentes = { porSlug: datosPorSlug, porEtapaOrden: datosOtrasEtapas }
+        // ⚠️ Las bolsas de arriba se armaron SOLO con lo que declaran los bloques de
+        // la ETAPA ACTUAL. Un bloque del historial no aportaba sus propias
+        // referencias, así que su condición se medía contra una bolsa vacía, daba
+        // falso y el bloque seguía escondido justo cuando alguien acababa de
+        // corregir el dato que lo activa. Medido en SOENA: ningún bloque de Cita
+        // referencia `titularidad`, y por eso V0141 nunca mostró dónde subir el RUT
+        // del segundo titular. Se resuelve aquí y no arriba porque solo hace falta
+        // cuando la reactivación está encendida: quien no la usa no paga consultas.
+        const porSlug: Record<string, Record<string, unknown>> = { ...datosPorSlug }
+        const porEtapaOrden: Record<number, Record<string, unknown>> = { ...datosOtrasEtapas }
+        if (activa && base.negocio.linea_id) {
+          const faltan = referenciasFaltantes([...ceMap.values()], { porSlug, porEtapaOrden })
+          if (faltan.slugs.length > 0) {
+            const { data: filasPorSlug, error: errSlug } = await db(supabase)
+              .from('negocio_bloques')
+              .select('data, bloque_configs!inner(slug, etapas_negocio!inner(linea_id))')
+              .eq('negocio_id', id)
+              .eq('bloque_configs.etapas_negocio.linea_id', base.negocio.linea_id)
+              .in('bloque_configs.slug', faltan.slugs)
+            // Se registra en vez de subir: un fallo aquí devuelve el comportamiento
+            // anterior (el bloque no aparece), no rompe el detalle del negocio.
+            if (errSlug) console.error('[getNegocioDetalleCompleto] fuentes del historial por slug:', errSlug)
+            for (const b of ((filasPorSlug ?? []) as Record<string, unknown>[])) {
+              const slug = (b.bloque_configs as { slug?: string | null } | null)?.slug
+              if (slug) porSlug[slug] = aplanarDataBloque(b.data as Record<string, unknown> | null)
+            }
+          }
+          if (faltan.etapaOrdens.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: filasPorOrden, error: errOrden } = await (db(supabase) as any)
+              .from('negocio_bloques')
+              .select('data, bloque_configs!inner(etapas_negocio!inner(linea_id, orden))')
+              .eq('negocio_id', id)
+              .eq('bloque_configs.etapas_negocio.linea_id', base.negocio.linea_id)
+              .in('bloque_configs.etapas_negocio.orden', faltan.etapaOrdens)
+            if (errOrden) console.error('[getNegocioDetalleCompleto] fuentes del historial por etapa:', errOrden)
+            for (const b of ((filasPorOrden ?? []) as Record<string, unknown>[])) {
+              const orden = (b.bloque_configs as { etapas_negocio?: { orden?: number } } | null)?.etapas_negocio?.orden
+              if (typeof orden !== 'number') continue
+              // Se mezcla, no se pisa: la etapa aporta el dato de TODOS sus bloques,
+              // igual que la pasada principal de arriba.
+              porEtapaOrden[orden] = { ...(porEtapaOrden[orden] ?? {}), ...aplanarDataBloque(b.data as Record<string, unknown> | null) }
+            }
+          }
+        }
+        const fuentes = { porSlug, porEtapaOrden }
         // Instancias que hay que CREAR: sin fila no hay dónde escribir el dato, y un
         // bloque configurado después de que el caso pasó por su etapa nunca la tuvo.
         const nacen: Array<{ negocio_id: string; bloque_config_id: string; estado: string; data: Record<string, unknown> }> = []
