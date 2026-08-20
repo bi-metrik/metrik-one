@@ -50,7 +50,11 @@ comment on column compliance_segmentos.activo is
 comment on column compliance_segmentos.orden is
   'Orden de presentación en los selectores. Menor primero.';
 
--- RLS — mismo patrón que el resto del módulo compliance
+-- server-only: todo acceso al catálogo pasa por server actions con
+-- `createServiceClient()` (compliance-segmentos.ts y compliance-dual.ts). El
+-- cliente nunca lo consulta directo, así que no se otorga nada a `authenticated`.
+-- Las policies de abajo NO sobran: son la red por si mañana un consumidor lo
+-- lee con el cliente autenticado — sin ellas ese día se leería cross-tenant.
 alter table compliance_segmentos enable row level security;
 
 drop policy if exists compliance_segmentos_select on compliance_segmentos;
@@ -70,6 +74,11 @@ begin
   return new;
 end;
 $$;
+
+-- Toda función nace ejecutable por PUBLIC y `anon` la alcanza por ahí; el default
+-- de la base no lo puede evitar, así que el revoke explícito es el único mecanismo.
+-- Disparar un trigger NO exige EXECUTE, solo crearlo.
+revoke execute on function public.set_updated_at_compliance_segmentos() from public, anon;
 
 drop trigger if exists trg_compliance_segmentos_updated_at on compliance_segmentos;
 create trigger trg_compliance_segmentos_updated_at
