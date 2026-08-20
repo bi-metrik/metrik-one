@@ -7,7 +7,7 @@ import { formatCOP } from '@/lib/contacts/constants'
 import {
   generarVersionPropuesta,
   aprobarVersionPropuesta,
-  corregirValorAprobado,
+  corregirAprobacion,
   revertirAprobacionPropuesta,
 } from '@/lib/actions/propuesta-economica-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
@@ -37,7 +37,7 @@ interface PropuestaData {
   aprobado_por?: string | null
   aprobado_version?: number | null
   aprobado_plan?: 1 | 2 | null
-  /** Honorario efectivamente aprobado. Es lo que corrige `corregirValorAprobado`
+  /** Honorario efectivamente aprobado. Es lo que corrige `corregirAprobacion`
    *  cuando quedó mal registrado; las `versiones[]` conservan lo que se le envió
    *  al cliente y no se tocan. */
   aprobado_honorario?: number | null
@@ -52,7 +52,7 @@ interface ConfigExtra {
   /**
    * Lo resuelve el servidor: el usuario está declarado en
    * `workspaces.config_extra.correccion_precio.staff_ids` (o es el owner) y por
-   * tanto puede corregir el valor aprobado. NO se deriva del rol.
+   * tanto puede corregir la aprobación (valor y plan). NO se deriva del rol.
    */
   _puedeCorregirPrecio?: boolean
   /**
@@ -105,6 +105,7 @@ export default function BloquePropuestaEconomica({
   const [corrigiendoValor, setCorrigiendoValor] = useState(false)
   const [valorCorregido, setValorCorregido] = useState('')
   const [motivoCorreccion, setMotivoCorreccion] = useState('')
+  const [planCorregido, setPlanCorregido] = useState<1 | 2 | null>(null)
   // Reversión de la aprobación (sí reabre el bloque: ver la action).
   const [revirtiendo, setRevirtiendo] = useState(false)
   const [motivoReversion, setMotivoReversion] = useState('')
@@ -308,19 +309,21 @@ export default function BloquePropuestaEconomica({
             </button>
           )}
 
-          {/* Corrección del valor aprobado. Solo para quien está declarado en la
-              config del workspace. No toca las versiones ni el PDF enviado. */}
+          {/* Corrección de la aprobación (valor y/o plan). Solo para quien está
+              declarado en la config del workspace. No toca las versiones ni el PDF
+              enviado. */}
           {aprobada && configExtra._puedeCorregirPrecio && !corrigiendoValor && (
             <button
               type="button"
               onClick={() => {
                 setValorCorregido(String(data.aprobado_honorario ?? valorAprobado ?? ''))
+                setPlanCorregido(planAprobado ?? null)
                 setCorrigiendoValor(true)
               }}
               className="inline-flex items-center gap-1.5 rounded-md border border-muted-foreground/30 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
             >
               <Pencil className="h-3.5 w-3.5" />
-              Corregir valor aprobado
+              Corregir aprobación
             </button>
           )}
         </div>
@@ -365,13 +368,56 @@ export default function BloquePropuestaEconomica({
           </div>
         )}
 
-        {corrigiendoValor && (
+        {corrigiendoValor && (() => {
+          // Valor que la versión aprobada declara para cada plan: al cambiar de plan
+          // se precarga, para que el número que se guarda sea el que la persona ve.
+          const valorDePlan = (p: 1 | 2) =>
+            versionMostrar ? (p === 1 ? versionMostrar.valor_final_plan1 : versionMostrar.valor_final_plan2) : null
+          const valorNum = Number(valorCorregido)
+          const valorValido = Number.isFinite(valorNum) && valorNum > 0
+          const cambiaValor = valorValido && valorNum !== (data.aprobado_honorario ?? valorAprobado ?? 0)
+          const cambiaPlan = !!planCorregido && planCorregido !== (planAprobado ?? null)
+          const PLANES: Array<{ n: 1 | 2; label: string }> = [
+            { n: 1, label: 'Plan 1 · 50/50' },
+            { n: 2, label: 'Plan 2 · pago anticipado' },
+          ]
+          return (
           <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs text-amber-900">
-              Corrige el valor registrado cuando quedó mal cargado. No genera propuesta nueva
-              ni cambia el PDF que ya recibió el cliente. Queda registrado con tu nombre y se
-              le avisa al comercial del negocio.
+              Corrige lo que quedó mal registrado. No genera propuesta nueva ni cambia el PDF
+              que ya recibió el cliente. Queda registrado con tu nombre y se le avisa al
+              comercial del negocio.
             </p>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-amber-900">Plan aprobado</span>
+              <div className="flex flex-wrap gap-2">
+                {PLANES.map(p => (
+                  <button
+                    key={p.n}
+                    type="button"
+                    onClick={() => {
+                      setPlanCorregido(p.n)
+                      const v = valorDePlan(p.n)
+                      if (v !== null && v > 0) setValorCorregido(String(v))
+                    }}
+                    className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${
+                      planCorregido === p.n
+                        ? 'border-amber-600 bg-amber-600 text-white'
+                        : 'border-amber-300 bg-white text-amber-900 hover:border-amber-500'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              {cambiaPlan && (
+                <span className="text-[11px] text-amber-800">
+                  El plan cambia cuánto recaudo exige el sistema antes de pasar el caso a
+                  operaciones: el Plan 1 pide la tarifa más la mitad del honorario; el Plan 2, el
+                  honorario completo.
+                </span>
+              )}
+            </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 type="number"
@@ -391,11 +437,17 @@ export default function BloquePropuestaEconomica({
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={isPending || !motivoCorreccion.trim() || !valorCorregido}
+                disabled={isPending || !motivoCorreccion.trim() || (!cambiaValor && !cambiaPlan)}
                 onClick={() => startTransition(async () => {
-                  const r = await corregirValorAprobado(negocioId, Number(valorCorregido), motivoCorreccion)
+                  // El honorario viaja siempre que el campo tenga un número válido: lo
+                  // que se guarda es lo que la persona está viendo, no una derivación
+                  // que el servidor haga por su cuenta.
+                  const cambios: { honorario?: number; plan?: 1 | 2 } = {}
+                  if (valorValido) cambios.honorario = valorNum
+                  if (cambiaPlan) cambios.plan = planCorregido!
+                  const r = await corregirAprobacion(negocioId, cambios, motivoCorreccion)
                   if (!r.ok) { toast.error(r.error ?? 'No se pudo corregir'); return }
-                  toast.success('Valor corregido')
+                  toast.success(cambiaPlan && cambiaValor ? 'Plan y valor corregidos' : cambiaPlan ? 'Plan corregido' : 'Valor corregido')
                   setCorrigiendoValor(false)
                   setMotivoCorreccion('')
                 })}
@@ -413,7 +465,8 @@ export default function BloquePropuestaEconomica({
               </button>
             </div>
           </div>
-        )}
+          )
+        })()}
       </div>
     )
   }
