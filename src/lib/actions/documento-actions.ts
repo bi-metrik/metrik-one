@@ -14,6 +14,7 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { montosCoinciden } from '@/lib/negocios/monto-cop'
 import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
+import { resolverDestino } from '@/lib/negocios/casilla-compartida'
 
 const BUCKET = 've-documentos'
 
@@ -524,6 +525,13 @@ export async function procesarDocumento(
   const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
   if (heredado) return { success: false, error: heredado }
 
+  // Casilla compartida: el permiso lo da la etapa donde el usuario ESTÁ trabajando (los dos
+  // guards de arriba), pero el archivo se escribe en la fila canónica. Se lee también de ella,
+  // así la subcarpeta de Drive, los campos de extracción y los cross-checks salen de la config
+  // del origen y el bloque espejo se comporta igual sin copiarle nada.
+  const destino = await resolverDestino(supabase, negocioBloqueId)
+  const bloqueId = destino.id
+
   const admin = createServiceClient()
   const mimeType = mimeTypeFromName(fileName)
   const ext = fileName.split('.').pop()?.toLowerCase() || 'pdf'
@@ -552,7 +560,7 @@ export async function procesarDocumento(
         bloque_config_id,
         bloque_configs(config_extra)
       `)
-      .eq('id', negocioBloqueId)
+      .eq('id', bloqueId)
       .single()
 
     const configExtra = (bloqueData?.bloque_configs as Record<string, unknown>)?.config_extra as Record<string, unknown> ?? {}
@@ -726,7 +734,7 @@ export async function procesarDocumento(
           completado_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
-        .eq('id', negocioBloqueId)
+        .eq('id', bloqueId)
     } else {
       await db(supabase)
         .from('negocio_bloques')
@@ -734,7 +742,7 @@ export async function procesarDocumento(
           data: newData,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', negocioBloqueId)
+        .eq('id', bloqueId)
     }
 
     // ── 11. Cierre automatico + revalidar ───────────────────────────────
@@ -795,12 +803,15 @@ export async function reprocesarDocumento(
   const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
   if (heredado) return { success: false, error: heredado }
 
+  // Casilla compartida: se relee y reescribe la fila canónica (ver `procesarDocumento`).
+  const bloqueId = (await resolverDestino(supabase, negocioBloqueId)).id
+
   try {
     // 1. Leer bloque + config
     const { data: bloqueData } = await db(supabase)
       .from('negocio_bloques')
       .select('data, bloque_configs(config_extra)')
-      .eq('id', negocioBloqueId)
+      .eq('id', bloqueId)
       .single()
 
     if (!bloqueData) return { success: false, error: 'Bloque no encontrado' }
@@ -874,7 +885,7 @@ export async function reprocesarDocumento(
         ...(isComplete ? { estado: 'completo', completado_at: now } : { estado: 'pendiente', completado_at: null }),
         updated_at: now,
       })
-      .eq('id', negocioBloqueId)
+      .eq('id', bloqueId)
 
     revalidatePath(`/negocios/${negocioId}`)
 
@@ -927,6 +938,12 @@ export async function actualizarCampoDocumento(
   const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
   if (heredado) return { success: false, error: heredado }
 
+  // Casilla compartida: se escribe en la fila canónica, igual que la subida del archivo. El
+  // contexto de corrección de más abajo SÍ se mide contra el bloque que el usuario tiene
+  // abierto: lo que decide si esto es una corrección es la etapa donde él está parado, no
+  // dónde viva la fila.
+  const bloqueId = (await resolverDestino(supabase, negocioBloqueId)).id
+
   // Nombre del editor para la marca de trazabilidad (snapshot).
   let editorNombre = 'Usuario'
   if (userId) {
@@ -941,7 +958,7 @@ export async function actualizarCampoDocumento(
   const { data: bloque } = await db(supabase)
     .from('negocio_bloques')
     .select('data')
-    .eq('id', negocioBloqueId)
+    .eq('id', bloqueId)
     .single()
 
   const currentData = (bloque?.data as Record<string, unknown>) ?? {}
@@ -985,7 +1002,7 @@ export async function actualizarCampoDocumento(
         completado_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', negocioBloqueId)
+      .eq('id', bloqueId)
   } else {
     await db(supabase)
       .from('negocio_bloques')
@@ -993,7 +1010,7 @@ export async function actualizarCampoDocumento(
         data: currentData,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', negocioBloqueId)
+      .eq('id', bloqueId)
   }
 
   // Traza de la corrección (valor previo, valor nuevo, causa, área dueña del bloque).
