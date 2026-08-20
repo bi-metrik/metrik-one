@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
+import { emitirCuentasExplicitasPeriodo } from '@/lib/cobros/emitir-cuota-explicita'
+import { particionarPorCronograma, planesConCronogramaExplicito } from '@/lib/cobros/cronograma-explicito'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
+//      (solo planes SIN cronograma explicito — los que lo tienen los cubre el paso 4)
 //   2. Marca como vencido cobros programados pasados con 3+ dias de gracia sin confirmar
 //   3. Genera notificaciones cobro_vencido a responsable + dueno + staff del area financiera (staff_areas)
-//   4. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
+//   4. Emite las cuentas del mes: agrupadas por empresa (planes uniformes) + una por
+//      cuota (planes con cronograma explicito en plan_cobro_cuotas)
+//   5. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 // Schedule: 0 13 * * * (mismo bucket que crons existentes)
@@ -91,7 +96,22 @@ export async function GET(req: NextRequest) {
     .select('id, workspace_id, negocio_id, monto, frecuencia, fecha_inicio, fecha_fin, total_cuotas, pasarela')
     .eq('activo', true)
 
-  for (const plan of (planes ?? []) as PlanCobro[]) {
+  // Un plan CON cronograma explicito no se toca aqui: sus cuotas tienen monto y
+  // vencimiento propios en `plan_cobro_cuotas`, y este paso las crearia con
+  // `plan.monto` uniforme y la fecha calculada desde `fecha_inicio`. Sobre
+  // Trappvel eso significa la cuota 6 por $833.333 en vez de $833.335; como la
+  // idempotencia es el unique (plan_cobro_id, numero_cuota), gana el que llegue
+  // primero y el monto equivocado se queda. Las emite el paso 4.
+  const planesExplicitos = await planesConCronogramaExplicito(
+    supabase,
+    ((planes ?? []) as PlanCobro[]).map((p) => p.id),
+  )
+  const { uniformes: planesUniformes } = particionarPorCronograma(
+    (planes ?? []) as PlanCobro[],
+    planesExplicitos,
+  )
+
+  for (const plan of planesUniformes) {
     // Encontrar cuotas cuya fecha esperada cae en [hoy, hoy + 3d] y aun no existen
     for (let n = 1; n <= plan.total_cuotas; n++) {
       const fechaEsp = fechaCuota(plan.fecha_inicio, plan.frecuencia, n)
@@ -274,6 +294,34 @@ export async function GET(req: NextRequest) {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         cuentasErrores.push({ workspace_id: ws.id, error: msg })
+      }
+
+      // Cronogramas explicitos (`plan_cobro_cuotas`): una cuenta por cuota, con
+      // el monto y el vencimiento del contrato. El generador de arriba no los ve
+      // — filtra por `fecha_esperada = dia 15` y estas cuotas vencen cuando dice
+      // el contrato (Trappvel: el 20). Sin esta llamada el emisor explicito
+      // existia sin que nadie lo invocara, y Trappvel llevaba desde julio sin
+      // que se le emitiera una sola cuota.
+      //
+      // Reintentar cada dia no duplica: `emitirCuentaDesdeCuota` aborta si el
+      // cobro de la cuota ya esta dentro de una cuenta emitida.
+      try {
+        const rx = await emitirCuentasExplicitasPeriodo(supabase, ws.id, añoHoy, mesHoy, {
+          dryRun: false,
+          isDraft: false,
+          // Misma fecha de envio que el camino uniforme. Si la cuota vence ANTES
+          // del 13, `fechaEmisionSegura` recorta al vencimiento: una cuenta no
+          // puede nacer fechada despues del dia en que se pide el pago.
+          fechaEmisionOverride: `${añoHoy}-${String(mesHoy).padStart(2, '0')}-${String(DIA_EMISION_CUENTA).padStart(2, '0')}`,
+        })
+        cuentasEmitidas += rx.cuentasCreadas
+        cuentasOmitidas += rx.cuentasOmitidas
+        for (const e of rx.errores) {
+          cuentasErrores.push({ workspace_id: ws.id, error: `cuota ${e.plan_cuota_id}: ${e.error}` })
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        cuentasErrores.push({ workspace_id: ws.id, error: `explicitas: ${msg}` })
       }
     }
   }
