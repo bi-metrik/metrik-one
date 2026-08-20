@@ -166,7 +166,7 @@ export async function sendTypingIndicator(messageId: string): Promise<void> {
         typing_indicator: { type: 'text' },
       }),
     });
-  } catch (_e) {
+  } catch {
     // ignorar: el indicador es cosmetico, nunca debe romper la conversacion
   }
 }
