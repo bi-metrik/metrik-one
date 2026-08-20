@@ -30,6 +30,7 @@ import {
   Receipt,
   Headphones,
   PhoneCall,
+  Tags,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -157,6 +158,10 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   // UX transparente — solo cuando el flag esta activo (alma-afi). Incluye operator:
   // en ws compliance-only la consulta de listas es funcion nuclear del equipo.
   { href: '/compliance/listas', label: 'Listas Restrictivas', icon: ListChecks, roles: ['owner', 'admin', 'supervisor', 'read_only', 'operator'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  // Catalogo de segmentos de consulta: configuracion del oficial de cumplimiento.
+  // Los operadores eligen segmento al consultar, pero no tocan el catalogo — misma
+  // regla que riesgos/causas/controles (solo owner/admin editan configuracion).
+  { href: '/compliance/segmentos', label: 'Catálogo de segmentos', icon: Tags, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Comparativa interna MeTRIK — solo workspace metrik
   { href: '/compliance/comparativa-informa', label: 'Comparativa Informa', icon: Scale, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_audit', value: true } },
 ]

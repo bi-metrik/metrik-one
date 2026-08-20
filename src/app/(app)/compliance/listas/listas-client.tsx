@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState, useTransition } from 'react';
+import { Fragment, useCallback, useEffect, useState, useTransition } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -11,7 +11,9 @@ import {
   FileSpreadsheet,
   History,
   ListChecks,
+  RefreshCw,
   Search,
+  Tags,
   Upload,
   User,
   Users,
@@ -20,7 +22,7 @@ import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import {
   consultaDualPersistente,
-  descargarPlantillaBatch,
+  generarPlantillaLoteDual,
   listarHistorialDual,
   prepararLoteDual,
   type DualConsultaPersistida,
@@ -31,7 +33,98 @@ import {
   type DualTipo,
   type InformaMatch,
 } from '@/lib/actions/compliance-dual';
+import { listarSegmentos } from '@/lib/actions/compliance-segmentos';
+import {
+  etiquetaSegmento,
+  FILTRO_SIN_SEGMENTO,
+  type ComplianceSegmento,
+} from '@/lib/compliance/segmentos';
 import { formatFecha } from '@/lib/dates/bogota'
+
+/**
+ * Carga el catalogo de segmentos del workspace.
+ *
+ * Si el catalogo esta vacio NO se deja consultar: una consulta sin segmento es
+ * una consulta que despues no se puede volver a barrer por poblacion, que es
+ * justo para lo que existe el campo. El aviso manda al oficial de cumplimiento.
+ */
+function useSegmentos() {
+  const [segmentos, setSegmentos] = useState<ComplianceSegmento[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [cargando, setCargando] = useState(true);
+  const [, startTransition] = useTransition();
+
+  // Nada de setState sincrono en el efecto: el estado arranca en "cargando" y
+  // solo se toca despues del await, dentro de la transicion. Mismo patron que
+  // el resto de las cargas de esta pantalla.
+  const recargar = useCallback(async () => {
+    const r = await listarSegmentos();
+    if (r.ok) {
+      setSegmentos(r.data);
+      setError(null);
+    } else {
+      setError(r.error);
+    }
+    setCargando(false);
+  }, []);
+
+  useEffect(() => {
+    startTransition(() => {
+      recargar();
+    });
+  }, [recargar]);
+
+  return { segmentos, error, cargando, recargar };
+}
+
+function SinCatalogoAviso() {
+  return (
+    <div className="p-4 rounded-lg bg-[#FEF3C7] border border-[#F59E0B]/40 text-[#92400E] text-sm flex items-start gap-2">
+      <Tags className="h-4 w-4 mt-0.5 shrink-0" />
+      <span>
+        Todavia no hay segmentos configurados. El oficial de cumplimiento los crea en{' '}
+        <strong>Catalogo de segmentos</strong>; sin al menos uno no se puede consultar, porque
+        cada consulta tiene que quedar asociada a una poblacion.
+      </span>
+    </div>
+  );
+}
+
+function SelectorSegmento({
+  segmentos,
+  valor,
+  onChange,
+  id,
+}: {
+  segmentos: ComplianceSegmento[];
+  valor: string;
+  onChange: (v: string) => void;
+  id?: string;
+}) {
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2"
+      >
+        Segmento <span className="text-[#EF4444] normal-case font-medium">(obligatorio)</span>
+      </label>
+      <select
+        id={id}
+        value={valor}
+        onChange={e => onChange(e.target.value)}
+        className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white"
+      >
+        <option value="">Selecciona un segmento…</option>
+        {segmentos.map(sg => (
+          <option key={sg.id} value={sg.id}>
+            {sg.nombre}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 const SEVERIDAD_CLASS: Record<DualSeveridad, string> = {
   alto: 'bg-[#EF4444] text-white',
@@ -164,14 +257,17 @@ function ConsultaPuntualForm() {
   const [tipo, setTipo] = useState<DualTipo>('natural');
   const [identificacion, setIdentificacion] = useState('');
   const [nombre, setNombre] = useState('');
+  const [segmentoId, setSegmentoId] = useState('');
   const [resultado, setResultado] = useState<DualConsultaPersistida | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const { segmentos, error: errorSegmentos, cargando: cargandoSegmentos } = useSegmentos();
 
   const idTrim = identificacion.trim();
   const nombreTrim = nombre.trim();
   const isEmpty = idTrim.length === 0 && nombreTrim.length === 0;
+  const sinCatalogo = !cargandoSegmentos && !errorSegmentos && segmentos.length === 0;
 
   const labelDocumento = tipo === 'juridica' ? 'NIT' : 'Cédula';
   const placeholderDocumento = tipo === 'juridica' ? '900123456' : '1077089147';
@@ -189,10 +285,15 @@ function ConsultaPuntualForm() {
       setValidation('Debes llenar al menos uno de los dos campos.');
       return;
     }
+    if (!segmentoId) {
+      setValidation('Elige el segmento al que pertenece esta contraparte.');
+      return;
+    }
 
     startTransition(async () => {
       const r = await consultaDualPersistente({
         tipo,
+        segmento_id: segmentoId,
         ...(idTrim ? { identificacion: idTrim } : {}),
         ...(nombreTrim ? { nombre: nombreTrim } : {}),
       });
@@ -208,10 +309,23 @@ function ConsultaPuntualForm() {
         data-tutorial-target="consulta-puntual-form"
         className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-4"
       >
+        {errorSegmentos && <ErrorBox msg={`No se pudo cargar el catalogo de segmentos: ${errorSegmentos}`} />}
+        {sinCatalogo && <SinCatalogoAviso />}
+
         <SelectorTipoPersona
           tipo={tipo}
           onChange={(t) => {
             setTipo(t);
+            setValidation(null);
+          }}
+        />
+
+        <SelectorSegmento
+          id="segmento-puntual"
+          segmentos={segmentos}
+          valor={segmentoId}
+          onChange={(v) => {
+            setSegmentoId(v);
             setValidation(null);
           }}
         />
@@ -257,7 +371,7 @@ function ConsultaPuntualForm() {
 
         <button
           type="submit"
-          disabled={pending || isEmpty}
+          disabled={pending || isEmpty || !segmentoId}
           className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
         >
           <Search className="h-4 w-4" />
@@ -308,10 +422,14 @@ function ConsultaMasivaForm() {
   const [titulo, setTitulo] = useState('');
   const [estado, setEstado] = useState<EstadoCargue>({ fase: 'inicial' });
   const [pendingTpl, startTplTransition] = useTransition();
+  const { segmentos, error: errorSegmentos, cargando: cargandoSegmentos } = useSegmentos();
+  const sinCatalogo = !cargandoSegmentos && !errorSegmentos && segmentos.length === 0;
 
   function descargarPlantilla() {
     startTplTransition(async () => {
-      const r = await descargarPlantillaBatch();
+      // La plantilla se genera en ONE con los segmentos de ESTE workspace:
+      // el catalogo es por cliente, asi que no puede ser un archivo estatico.
+      const r = await generarPlantillaLoteDual();
       if (!r.ok) {
         setEstado({ fase: 'error', mensaje: r.error });
         return;
@@ -371,10 +489,13 @@ function ConsultaMasivaForm() {
     tituloLote: string | null,
   ): Promise<DualSeveridad> {
     if (fila.error) {
+      // Se registra el motivo REAL de la fila (que celda corregir) y no se
+      // consulta: la fila hay que arreglarla igual y cada consulta se factura.
       await consultaDualPersistente(fila.input, {
         lote_id: loteId,
         titulo_lote: tituloLote,
         tipo: 'masiva_item',
+        error_fila: fila.error,
       });
       return 'error';
     }
@@ -403,7 +524,8 @@ function ConsultaMasivaForm() {
           <h3 className="text-base font-bold text-[#1A1A1A]">Carga masiva (XLSX)</h3>
           <p className="text-sm text-[#6B7280] mt-1">
             Sube un XLSX con la plantilla. Hasta 500 filas. Cada fila se procesa y queda
-            registrada en el historial.
+            registrada en el historial. La columna <strong>segmento</strong> es obligatoria y
+            solo acepta los segmentos configurados en este espacio de trabajo.
           </p>
         </div>
         <button
@@ -416,6 +538,9 @@ function ConsultaMasivaForm() {
           {pendingTpl ? 'Descargando…' : 'Descargar plantilla'}
         </button>
       </div>
+
+      {errorSegmentos && <ErrorBox msg={`No se pudo cargar el catalogo de segmentos: ${errorSegmentos}`} />}
+      {sinCatalogo && <SinCatalogoAviso />}
 
       {estado.fase === 'completado' ? (
         <ResumenCargueCompletado estado={estado} onReiniciar={reiniciar} />
@@ -753,6 +878,17 @@ function HistorialPanel() {
   const [tipo, setTipo] = useState<'puntual' | 'masiva_item' | ''>('');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
+  const [segmentoFiltro, setSegmentoFiltro] = useState('');
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  const { segmentos } = useSegmentos();
+
+  const filtrosActuales: DualHistorialFiltros = {
+    severidad: severidad || undefined,
+    tipo: tipo || undefined,
+    fecha_desde: fechaDesde || undefined,
+    fecha_hasta: fechaHasta || undefined,
+    segmento_id: segmentoFiltro || undefined,
+  };
 
   async function cargar(filtros: DualHistorialFiltros = {}) {
     const r = await listarHistorialDual(filtros);
@@ -762,6 +898,10 @@ function HistorialPanel() {
     } else {
       setError(r.error);
     }
+    // La seleccion se limpia con cada recarga: mantener ids de una lista que
+    // ya no esta en pantalla es la receta para re-consultar (y facturar) filas
+    // que el usuario cree que no eligio.
+    setSeleccion(new Set());
     setLoading(false);
   }
 
@@ -773,12 +913,7 @@ function HistorialPanel() {
 
   function aplicarFiltros() {
     startTransition(async () => {
-      await cargar({
-        severidad: severidad || undefined,
-        tipo: tipo || undefined,
-        fecha_desde: fechaDesde || undefined,
-        fecha_hasta: fechaHasta || undefined,
-      });
+      await cargar(filtrosActuales);
     });
   }
 
@@ -787,14 +922,54 @@ function HistorialPanel() {
     setTipo('');
     setFechaDesde('');
     setFechaHasta('');
+    setSegmentoFiltro('');
     startTransition(() => cargar({}));
+  }
+
+  function recargarConFiltros() {
+    startTransition(async () => {
+      await cargar(filtrosActuales);
+    });
+  }
+
+  function alternarSeleccion(id: string) {
+    setSeleccion(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function alternarTodas() {
+    setSeleccion(prev =>
+      prev.size === consultas.length ? new Set() : new Set(consultas.map(c => c.id)),
+    );
   }
 
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
         <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Filtros</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              Segmento
+            </label>
+            <select
+              value={segmentoFiltro}
+              onChange={e => setSegmentoFiltro(e.target.value)}
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+            >
+              <option value="">Todos</option>
+              {segmentos.map(sg => (
+                <option key={sg.id} value={sg.id}>
+                  {sg.nombre}
+                </option>
+              ))}
+              <option value={FILTRO_SIN_SEGMENTO}>Sin segmento (consultas antiguas)</option>
+            </select>
+          </div>
           <div>
             <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
               Severidad
@@ -879,14 +1054,271 @@ function HistorialPanel() {
           Sin consultas con los filtros aplicados.
         </div>
       ) : (
-        <HistorialTablaDual consultas={consultas} />
+        <>
+          <ReconsultaBar
+            consultas={consultas}
+            seleccion={seleccion}
+            segmentos={segmentos}
+            onTerminado={recargarConFiltros}
+          />
+          <HistorialTablaDual
+            consultas={consultas}
+            seleccion={seleccion}
+            onAlternar={alternarSeleccion}
+            onAlternarTodas={alternarTodas}
+          />
+        </>
       )}
     </div>
   );
 }
 
-function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
+// ─── Re-consulta en lote desde el historial ────────────────────────────────
+
+type EstadoReconsulta =
+  | { fase: 'inactivo' }
+  | { fase: 'confirmando' }
+  | { fase: 'corriendo'; total: number; procesadas: number; severidades: Record<DualSeveridad, number> }
+  | { fase: 'listo'; total: number; severidades: Record<DualSeveridad, number>; omitidas: string[] };
+
+/**
+ * Vuelve a consultar las filas marcadas del historial.
+ *
+ * Cada fila re-consultada es una consulta facturable contra la cuenta del
+ * cliente, asi que hay un paso de confirmacion explicito con el numero exacto
+ * y nada arranca solo.
+ *
+ * Las consultas antiguas no traen segmento y las que apuntan a un segmento
+ * desactivado tampoco sirven: en vez de saltarselas en silencio, la barra pide
+ * un segmento de reemplazo y no deja seguir sin el.
+ */
+function ReconsultaBar({
+  consultas,
+  seleccion,
+  segmentos,
+  onTerminado,
+}: {
+  consultas: DualHistorialItem[];
+  seleccion: Set<string>;
+  segmentos: ComplianceSegmento[];
+  onTerminado: () => void;
+}) {
+  const [estado, setEstado] = useState<EstadoReconsulta>({ fase: 'inactivo' });
+  const [segmentoFallback, setSegmentoFallback] = useState('');
+  const [validacion, setValidacion] = useState<string | null>(null);
+
+  const activos = new Set(segmentos.map(sg => sg.id));
+  const elegidas = consultas.filter(c => seleccion.has(c.id));
+  const sinSegmentoUtil = elegidas.filter(c => !c.segmento_id || !activos.has(c.segmento_id));
+  const sinCriterio = elegidas.filter(c => !c.documento_numero && !c.nombre_consultado);
+
+  if (elegidas.length === 0 && estado.fase === 'inactivo') return null;
+
+  function abrirConfirmacion() {
+    setValidacion(null);
+    setEstado({ fase: 'confirmando' });
+  }
+
+  function cancelar() {
+    setValidacion(null);
+    setEstado({ fase: 'inactivo' });
+  }
+
+  async function ejecutar() {
+    if (sinSegmentoUtil.length > 0 && !segmentoFallback) {
+      setValidacion(
+        `${sinSegmentoUtil.length} de las filas elegidas no tienen un segmento vigente. ` +
+          'Elige con cual re-consultarlas antes de continuar.',
+      );
+      return;
+    }
+
+    const ejecutables = elegidas.filter(c => c.documento_numero || c.nombre_consultado);
+    const omitidas = sinCriterio.map(
+      c => `Fila del ${formatFecha(c.created_at, { day: 'numeric', month: 'short' })}: sin documento ni nombre, no hay con que consultar.`,
+    );
+
+    const severidades = severidadesIniciales();
+    setEstado({ fase: 'corriendo', total: ejecutables.length, procesadas: 0, severidades });
+
+    const loteId = crypto.randomUUID();
+    const tituloLote = `Re-consulta desde historial · ${formatFecha(new Date().toISOString(), { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+
+    let procesadas = 0;
+    for (const c of ejecutables) {
+      const segmentoId =
+        c.segmento_id && activos.has(c.segmento_id) ? c.segmento_id : segmentoFallback;
+
+      const r = await consultaDualPersistente(
+        {
+          tipo: c.tipo_persona,
+          segmento_id: segmentoId,
+          ...(c.documento_numero ? { identificacion: c.documento_numero } : {}),
+          ...(c.nombre_consultado ? { nombre: c.nombre_consultado } : {}),
+        },
+        { lote_id: loteId, titulo_lote: tituloLote, tipo: 'masiva_item' },
+      );
+
+      const sev: DualSeveridad = r.ok ? r.data.severidad : 'error';
+      severidades[sev] = (severidades[sev] ?? 0) + 1;
+      procesadas += 1;
+      setEstado({
+        fase: 'corriendo',
+        total: ejecutables.length,
+        procesadas,
+        severidades: { ...severidades },
+      });
+    }
+
+    setEstado({ fase: 'listo', total: ejecutables.length, severidades, omitidas });
+    onTerminado();
+  }
+
+  if (estado.fase === 'corriendo') {
+    const pct = estado.total === 0 ? 0 : Math.round((estado.procesadas / estado.total) * 100);
+    return (
+      <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-3">
+        <p className="text-sm font-semibold text-[#1A1A1A]">
+          Re-consultando {estado.procesadas} / {estado.total}…
+        </p>
+        <div className="h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
+          <div
+            className="h-full bg-[#10B981] transition-[width] duration-200 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <DistribucionSeveridadDual sev={estado.severidades} />
+        <p className="text-[11px] text-[#6B7280]">No cierres esta pestaña hasta que termine.</p>
+      </div>
+    );
+  }
+
+  if (estado.fase === 'listo') {
+    return (
+      <div className="rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 p-5 space-y-3">
+        <div className="flex items-center gap-2 text-[#059669] font-semibold">
+          <Check className="h-5 w-5" />
+          Re-consulta terminada · {estado.total} consulta(s)
+        </div>
+        <DistribucionSeveridadDual sev={estado.severidades} />
+        {estado.omitidas.length > 0 && (
+          <ul className="text-xs text-[#B91C1C] space-y-1">
+            {estado.omitidas.map((m, i) => (
+              <li key={i}>· {m}</li>
+            ))}
+          </ul>
+        )}
+        <button
+          type="button"
+          onClick={cancelar}
+          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] bg-white text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+        >
+          Cerrar
+        </button>
+      </div>
+    );
+  }
+
+  if (estado.fase === 'confirmando') {
+    const ejecutables = elegidas.length - sinCriterio.length;
+    return (
+      <div className="bg-white rounded-lg border border-[#F59E0B]/50 p-5 space-y-4">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="h-5 w-5 text-[#B45309] mt-0.5 shrink-0" />
+          <div className="text-sm text-[#1A1A1A]">
+            <p className="font-semibold">
+              Se van a hacer {ejecutables} consulta(s) nuevas.
+            </p>
+            <p className="text-[#6B7280] mt-1">
+              Cada una queda registrada en el historial como un cargue nuevo. Las consultas
+              anteriores no se borran.
+            </p>
+          </div>
+        </div>
+
+        {sinCriterio.length > 0 && (
+          <p className="text-xs text-[#B91C1C]">
+            {sinCriterio.length} fila(s) no tienen documento ni nombre y se van a omitir.
+          </p>
+        )}
+
+        {sinSegmentoUtil.length > 0 && (
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              Segmento para las {sinSegmentoUtil.length} fila(s) sin segmento vigente
+            </label>
+            <select
+              value={segmentoFallback}
+              onChange={e => {
+                setSegmentoFallback(e.target.value);
+                setValidacion(null);
+              }}
+              className="w-full sm:w-80 h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+            >
+              <option value="">Selecciona un segmento…</option>
+              {segmentos.map(sg => (
+                <option key={sg.id} value={sg.id}>
+                  {sg.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {validacion && <ErrorBox msg={validacion} />}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={ejecutar}
+            disabled={ejecutables === 0}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Confirmar y re-consultar
+          </button>
+          <button
+            type="button"
+            onClick={cancelar}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-[#E5E7EB] p-4 flex items-center justify-between gap-3 flex-wrap">
+      <p className="text-sm text-[#1A1A1A]">
+        <strong>{elegidas.length}</strong> fila(s) seleccionada(s) en el historial.
+      </p>
+      <button
+        type="button"
+        onClick={abrirConfirmacion}
+        className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#374151] transition-colors"
+      >
+        <RefreshCw className="h-4 w-4" />
+        Re-consultar seleccionadas
+      </button>
+    </div>
+  );
+}
+
+function HistorialTablaDual({
+  consultas,
+  seleccion,
+  onAlternar,
+  onAlternarTodas,
+}: {
+  consultas: DualHistorialItem[];
+  seleccion: Set<string>;
+  onAlternar: (id: string) => void;
+  onAlternarTodas: () => void;
+}) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const todasMarcadas = consultas.length > 0 && seleccion.size === consultas.length;
 
   function toggle(id: string) {
     setExpanded(prev => {
@@ -903,6 +1335,15 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
+              <th className="w-10 px-2 py-2.5 text-center">
+                <input
+                  type="checkbox"
+                  checked={todasMarcadas}
+                  onChange={onAlternarTodas}
+                  aria-label="Seleccionar todas las consultas listadas"
+                  className="h-4 w-4 accent-[#1A1A1A] cursor-pointer"
+                />
+              </th>
               <th className="w-8" />
               <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Fecha
@@ -915,6 +1356,9 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
               </th>
               <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Consultado por
+              </th>
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Segmento
               </th>
               <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Tipo
@@ -934,12 +1378,23 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
             {consultas.map(c => {
               const isOpen = expanded.has(c.id);
               const canExpand = c.total_matches > 0 || c.error_mensaje;
+              const seg = etiquetaSegmento(c.segmento_id, c.segmento_nombre);
               return (
                 <Fragment key={c.id}>
                   <tr
                     className={`border-b border-[#E5E7EB] last:border-0 ${canExpand ? 'hover:bg-[#F5F4F2]/60 cursor-pointer' : ''}`}
                     onClick={() => canExpand && toggle(c.id)}
                   >
+                    <td className="px-2 py-2.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={seleccion.has(c.id)}
+                        onChange={() => onAlternar(c.id)}
+                        onClick={e => e.stopPropagation()}
+                        aria-label={`Seleccionar consulta de ${c.nombre_consultado ?? c.documento_numero ?? 'sin identificar'}`}
+                        className="h-4 w-4 accent-[#1A1A1A] cursor-pointer"
+                      />
+                    </td>
                     <td className="px-2 py-2.5 text-[#6B7280] text-center">
                       {canExpand ? (
                         isOpen ? (
@@ -962,6 +1417,11 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
                     </td>
                     <td className="px-4 py-2.5 text-[#1A1A1A] text-xs">
                       {c.consultado_por ?? '—'}
+                    </td>
+                    <td
+                      className={`px-4 py-2.5 text-xs ${seg.huerfano ? 'text-[#B91C1C] font-semibold' : 'text-[#1A1A1A]'}`}
+                    >
+                      {seg.texto}
                     </td>
                     <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-[#6B7280]">
                       {c.tipo === 'puntual' ? 'Puntual' : 'Cargue'}
@@ -993,7 +1453,8 @@ function HistorialTablaDual({ consultas }: { consultas: DualHistorialItem[] }) {
                   {isOpen && (
                     <tr className="border-b border-[#E5E7EB] bg-[#F5F4F2]/40">
                       <td />
-                      <td colSpan={8} className="px-4 py-4">
+                      <td />
+                      <td colSpan={9} className="px-4 py-4">
                         {c.error_mensaje && (
                           <div className="mb-3 text-xs text-[#B91C1C]">
                             Error: {c.error_mensaje}
