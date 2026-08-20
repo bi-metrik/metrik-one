@@ -12,6 +12,23 @@ import {
 } from '../_shared/wa-format.ts';
 import { STREAK_MILESTONES } from '../_shared/types.ts';
 
+// Formas de fila que piden los .select() de este archivo. El cliente de
+// `supabase-client.ts` se crea SIN el generico `Database`, asi que lo que
+// devuelve cada consulta llega como `any`: estos tipos no lo validan contra la
+// base, dejan escrito que columna espera cada calculo. Los numeros llegan como
+// texto en algunas columnas, de ahi el `Number()` en cada uso.
+type ValorNumerico = number | string | null;
+type FilaMonto = { monto: ValorNumerico };
+type FilaHoras = { horas: ValorNumerico };
+type FilaNegocio = {
+  nombre: string;
+  precio_estimado: ValorNumerico;
+  precio_aprobado: ValorNumerico;
+  updated_at: string;
+};
+type FilaCartera = { saldo_pendiente: ValorNumerico; dias_antiguedad: ValorNumerico };
+type ContactoDelNegocio = { nombre?: string | null } | null;
+
 Deno.serve(async (req) => {
   // This function is triggered by Supabase pg_cron or external cron
   // Accept POST with { action: 'w25' | 'w29' | 'w33' | 'streak_eval' | 'stale_opps' | 'recaudo_check' }
@@ -162,7 +179,7 @@ async function buildWeeklySummary(
     .select('monto')
     .eq('workspace_id', workspaceId)
     .gte('fecha', weekAgoStr);
-  const totalCobros = (cobrosWeek || []).reduce((s: number, c: any) => s + Number(c.monto), 0);
+  const totalCobros = (cobrosWeek || []).reduce((s: number, c: FilaMonto) => s + Number(c.monto), 0);
 
   // --- Gastos this week ---
   const { data: gastosWeek } = await supabase
@@ -170,7 +187,7 @@ async function buildWeeklySummary(
     .select('monto')
     .eq('workspace_id', workspaceId)
     .gte('fecha', weekAgoStr);
-  const totalGastos = (gastosWeek || []).reduce((s: number, g: any) => s + Number(g.monto), 0);
+  const totalGastos = (gastosWeek || []).reduce((s: number, g: FilaMonto) => s + Number(g.monto), 0);
 
   // --- Horas this week ---
   const { data: horasWeek } = await supabase
@@ -178,7 +195,7 @@ async function buildWeeklySummary(
     .select('horas')
     .eq('workspace_id', workspaceId)
     .gte('fecha', weekAgoStr);
-  const totalHoras = (horasWeek || []).reduce((s: number, h: any) => s + Number(h.horas), 0);
+  const totalHoras = (horasWeek || []).reduce((s: number, h: FilaHoras) => s + Number(h.horas), 0);
 
   // --- Bank status ---
   const { data: lastSaldo } = await supabase
@@ -213,7 +230,7 @@ async function buildWeeklySummary(
 
   let projectLines = '';
   if (enEjecucion && enEjecucion.length > 0) {
-    const lines = enEjecucion.map((n: any, i: number) => {
+    const lines = enEjecucion.map((n: FilaNegocio, i: number) => {
       const precio = Number(n.precio_aprobado || n.precio_estimado || 0);
       const prefix = i === enEjecucion.length - 1 ? '└' : '├';
       return `${prefix} ${bold(n.nombre)}${precio > 0 ? ` — ${formatCOPShort(precio)}` : ''}`;
@@ -235,13 +252,13 @@ async function buildWeeklySummary(
   let staleLine = '';
   if (enVenta && enVenta.length > 0) {
     const totalVenta = enVenta.reduce(
-      (s: number, n: any) => s + Number(n.precio_aprobado || n.precio_estimado || 0),
+      (s: number, n: FilaNegocio) => s + Number(n.precio_aprobado || n.precio_estimado || 0),
       0,
     );
     pipelineLine = `📋 En venta: ${enVenta.length} negocio${enVenta.length > 1 ? 's' : ''} (${formatCOPShort(totalVenta)})`;
 
     // Check stale negocios (>10 days without activity)
-    const staleNeg = enVenta.filter((n: any) => daysSince(n.updated_at) > 10);
+    const staleNeg = enVenta.filter((n: FilaNegocio) => daysSince(n.updated_at) > 10);
     if (staleNeg.length > 0) {
       const s = staleNeg[0];
       staleLine = `⚠️ ${bold(s.nombre)} sin actividad ${formatAgo(daysSince(s.updated_at))}`;
@@ -259,8 +276,8 @@ async function buildWeeklySummary(
 
   let carteraLine = '';
   if (cartera && cartera.length > 0) {
-    const totalCartera = cartera.reduce((s: number, f: any) => s + Number(f.saldo_pendiente), 0);
-    const vencidas = cartera.filter((f: any) => Number(f.dias_antiguedad) > 30).length;
+    const totalCartera = cartera.reduce((s: number, f: FilaCartera) => s + Number(f.saldo_pendiente), 0);
+    const vencidas = cartera.filter((f: FilaCartera) => Number(f.dias_antiguedad) > 30).length;
     carteraLine = `💵 Cartera: ${formatCOP(totalCartera)}`;
     if (vencidas > 0) carteraLine += ` (${vencidas} vencida${vencidas > 1 ? 's' : ''} ⚠️)`;
   } else {
@@ -469,7 +486,7 @@ async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>):
     let msg = `⚠️ Negocios en venta sin movimiento:\n`;
     for (const n of staleNeg) {
       const dias = daysSince(n.updated_at);
-      const contacto = (n.contactos as any)?.nombre || '';
+      const contacto = (n.contactos as ContactoDelNegocio)?.nombre || '';
       msg += `\n• ${bold(n.nombre)} — ${dias}d sin actividad`;
       if (contacto) msg += ` (${contacto})`;
     }
@@ -524,7 +541,7 @@ async function runRecaudoCheck(supabase: ReturnType<typeof getServiceClient>): P
       .gte('fecha', mesInicio)
       .lt('fecha', mesFin);
 
-    const totalCobros = (cobros || []).reduce((s: number, c: any) => s + Number(c.monto), 0);
+    const totalCobros = (cobros || []).reduce((s: number, c: FilaMonto) => s + Number(c.monto), 0);
     const pctMeta = (totalCobros / metaRecaudo) * 100;
 
     if (pctMeta >= 50) continue; // On track, skip
