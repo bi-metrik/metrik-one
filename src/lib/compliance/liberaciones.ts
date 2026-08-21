@@ -85,10 +85,30 @@ export function claveContraparte(
   documentoTipo: string | null | undefined,
   documentoNumero: string | null | undefined,
 ): string | null {
+  const partes = partesContraparte(documentoTipo, documentoNumero);
+  return partes ? `${partes.tipo}:${partes.numero}` : null;
+}
+
+/**
+ * La identidad canónica, en piezas.
+ *
+ * Es lo que se GUARDA en `compliance_liberaciones`: si cada fila conservara la
+ * escritura con la que llegó, la búsqueda de la bitácora de una contraparte
+ * tendría que leer el workspace entero y filtrar en memoria, y el índice por
+ * (documento_tipo, documento_numero) no serviría para nada.
+ *
+ * Las consultas de `consultas_listas_dual` NO están normalizadas (guardan lo que
+ * tecleó quien consultó), y por eso el cruce entre las dos tablas pasa igual por
+ * `claveContraparte` en vez de comparar columnas.
+ */
+export function partesContraparte(
+  documentoTipo: string | null | undefined,
+  documentoNumero: string | null | undefined,
+): { tipo: string; numero: string } | null {
   const tipo = (documentoTipo ?? '').trim().toUpperCase();
   const numero = (documentoNumero ?? '').replace(/[\s.\-_]/g, '').trim().toUpperCase();
   if (!tipo || !numero) return null;
-  return `${tipo}:${numero}`;
+  return { tipo, numero };
 }
 
 // ─── Regla de cobertura ────────────────────────────────────────────────────
