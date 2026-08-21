@@ -99,6 +99,21 @@ function timeAgo(dateStr: string) {
 
 const SHOW_SYSTEM_KEY = 'activity-log:show-system'
 
+/**
+ * El default de "ver eventos del sistema" depende de la entidad.
+ *
+ * En negocio el bloque es sobre todo conversacion, y esconder los automaticos es
+ * lo que lo hace legible. En contacto pasa lo contrario: hoy TODO lo que registra
+ * es sistema (quien movio el segmento y cuando), asi que con el default heredado
+ * la funcion nacia invisible —el historial existia y la pantalla decia "sin
+ * actividad"—. Ademas guarda su preferencia en su propia clave: compartirla hacia
+ * que apagar el ruido en un negocio apagara el historial del contacto, que es
+ * justo lo que se pidio ver.
+ */
+const claveShowSystem = (tipo: string) =>
+  tipo === 'contacto' ? `${SHOW_SYSTEM_KEY}:contacto` : SHOW_SYSTEM_KEY
+const showSystemPorDefecto = (tipo: string) => tipo === 'contacto'
+
 export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId }: ActivityLogProps) {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -119,14 +134,16 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
   // Default: ocultos — solo comentarios visibles. El toggle los revela bajo demanda.
   // Lazy init seguro porque el toggle solo se renderiza tras cargar entries.
   const [showSystem, setShowSystem] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false
-    return window.localStorage.getItem(SHOW_SYSTEM_KEY) === '1'
+    if (typeof window === 'undefined') return showSystemPorDefecto(entidadTipo)
+    const guardado = window.localStorage.getItem(claveShowSystem(entidadTipo))
+    // `null` = nunca lo tocaron: manda el default de la entidad, no el "apagado".
+    return guardado === null ? showSystemPorDefecto(entidadTipo) : guardado === '1'
   })
   const toggleShowSystem = () => {
     setShowSystem(prev => {
       const next = !prev
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem(SHOW_SYSTEM_KEY, next ? '1' : '0')
+        window.localStorage.setItem(claveShowSystem(entidadTipo), next ? '1' : '0')
       }
       return next
     })
@@ -351,7 +368,14 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
       {entries.length === 0 ? (
         <div className="rounded-lg border border-dashed p-4 text-center">
           <MessageSquare className="mx-auto h-6 w-6 text-muted-foreground/30" />
-          <p className="mt-1 text-xs text-muted-foreground">Sin actividad aun. Agrega el primer comentario.</p>
+          {/* En contacto el vacio NO es "todavia nadie comento": es "todavia nadie
+              movio el segmento". Decir lo segundo evita que la pantalla parezca
+              rota cuando en realidad no ha pasado nada que registrar. */}
+          <p className="mt-1 text-xs text-muted-foreground">
+            {entidadTipo === 'contacto'
+              ? 'Sin movimientos aun. Cuando alguien cambie el segmento, queda aqui quien lo hizo y cuando.'
+              : 'Sin actividad aun. Agrega el primer comentario.'}
+          </p>
         </div>
       ) : (
         <>

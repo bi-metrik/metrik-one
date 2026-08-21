@@ -212,7 +212,10 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
           movio y cuando, que es lo que se pidio. El mismo componente del detalle
           de negocio, sin variante propia: si manana se auditan mas campos del
           contacto, aparecen aqui sin tocar esta pantalla. */}
-      <div className="rounded-lg border p-4">
+      <div className="space-y-3 rounded-lg border p-4">
+        {/* Con titulo: sin el, el bloque abre con una caja de texto suelta y no se
+            lee como historial — en el QA no se encontro por eso. */}
+        <h2 className="text-sm font-semibold">Historial y comentarios</h2>
         <ActivityLog entidadTipo="contacto" entidadId={contacto.id} staffList={staff} />
       </div>
 
