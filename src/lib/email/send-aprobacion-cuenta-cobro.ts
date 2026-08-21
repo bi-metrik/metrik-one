@@ -1,7 +1,13 @@
 /**
  * Notificación a Mauricio cuando una cuenta de cobro queda pendiente de aprobación.
  *
- * Complementa la notificación in-app (ya emitida por generarCuentasCobroPeriodo).
+ * Complementa la notificación in-app en el camino uniforme (la emite
+ * generarCuentasCobroPeriodo). En el camino de cronograma explícito no hay
+ * notificación in-app: ahí este correo es el único aviso de que hay una cuenta
+ * esperando aprobación.
+ *
+ * Va solo a Mauricio (NOTIFY_TO), nunca al cliente: el envío al pagador lo
+ * dispara una persona desde /cobros-recurrentes.
  * Email simple con deep link al módulo /cobros-recurrentes.
  */
 

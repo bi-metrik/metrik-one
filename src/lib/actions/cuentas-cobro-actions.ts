@@ -2,7 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { generarCuentasCobroPeriodo, type GenerarCuentasResult } from '@/lib/cobros/generar-cuentas-cobro'
+import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
+import { emitirCuentasExplicitasPeriodo } from '@/lib/cobros/emitir-cuota-explicita'
+import {
+  offsetCorrelativoExplicitas,
+  resumirEmisionPeriodo,
+  type EmitirPeriodoResult,
+} from '@/lib/cobros/resumen-emision-periodo'
 import { enviarCuentaCobroEmail } from '@/lib/email/send-cuenta-cobro'
 import { enviarEmailAprobacionPendiente } from '@/lib/email/send-aprobacion-cuenta-cobro'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -22,8 +28,18 @@ type ActionResult<T> = { success: true; data: T } | { success: false; error: str
 /**
  * Server action: dispara emisión de cuentas de cobro del período (anio + mes).
  *
+ * Cubre los DOS caminos, igual que el cron y que `scripts/emitir-cuentas-periodo.ts`:
+ *   - planes uniformes → una cuenta agrupada por empresa (vencimiento día 15)
+ *   - planes con cronograma explícito (`plan_cobro_cuotas`) → una cuenta por cuota,
+ *     con el monto y el vencimiento del contrato
+ *
+ * Hasta hoy solo llamaba al primero: un cliente con cronograma explícito (Trappvel)
+ * quedaba fuera del botón igual que estuvo fuera del cron hasta el PR #330. Con la
+ * emisión de agosto bloqueada y las credenciales de render irrecuperables en local
+ * (Vercel devuelve `[SENSITIVE]`), este botón es la única vía para emitir esa cuota.
+ *
  * Usado desde:
- *   - UI manual: módulo /cobros-recurrentes (botón "Generar mes")
+ *   - UI manual: módulo /cobros-recurrentes (botón "Emitir período")
  *   - Retroactivo: ejecución manual desde script de QA
  *
  * Validaciones:
@@ -35,7 +51,7 @@ export async function ejecutarGenerarCuentasCobroPeriodo(
   anio: number,
   mes: number,
   options: { dryRun?: boolean; isDraft?: boolean } = {},
-): Promise<ActionResult<GenerarCuentasResult>> {
+): Promise<ActionResult<EmitirPeriodoResult>> {
   const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -55,24 +71,59 @@ export async function ejecutarGenerarCuentasCobroPeriodo(
   }
 
   try {
-    const result = await generarCuentasCobroPeriodo(supabase, workspaceId, anio, mes, options)
+    const uniformes = await generarCuentasCobroPeriodo(supabase, workspaceId, anio, mes, options)
 
-    // Un dry-run devuelve los detalles con estado 'creada' (es el preview de lo que
-    // se crearia), asi que sin este corte un PREVIEW mandaria los correos de
-    // aprobacion de cuentas que no existen. Nada de lo que sigue puede correr en
+    // Las cuotas explícitas se emiten DESPUÉS de las uniformes, y con el correlativo
+    // desplazado en dry-run: el preview no inserta nada, así que el `MAX+1` de la
+    // base no se movió entre un camino y el otro y las dos listas imprimirían el
+    // mismo número. El offset lo decide `offsetCorrelativoExplicitas`, la misma
+    // función que usa el script de rescate.
+    //
+    // `fechaEmisionOverride` va con el día de HOY en Bogotá, no con `toISOString()`:
+    // Vercel corre en UTC y a las 7 p.m. de Colombia ya devuelve el día siguiente.
+    // `fechaEmisionSegura` lo recorta al vencimiento, así que una emisión tardía
+    // (o retroactiva) no puede fechar la cuenta después del día en que pide el pago.
+    // El camino uniforme conserva su fecha de siempre (el día 15 del período): este
+    // frente no viene a cambiar cómo se fechan las cuentas que ya funcionaban.
+    const explicitas = await emitirCuentasExplicitasPeriodo(supabase, workspaceId, anio, mes, {
+      ...options,
+      fechaEmisionOverride: todayBogotaISO(),
+      numeroOffset: offsetCorrelativoExplicitas(uniformes.detalles, options.dryRun ?? false),
+    })
+
+    const resumen = resumirEmisionPeriodo(uniformes, explicitas)
+    const result: EmitirPeriodoResult = { ...resumen, uniformes, explicitas }
+
+    // Un dry-run devuelve los detalles con estado 'creada'/'preview' (es el preview
+    // de lo que se crearia), asi que sin este corte un PREVIEW mandaria los correos
+    // de aprobacion de cuentas que no existen. Nada de lo que sigue puede correr en
     // dry-run: no se escribio nada que notificar ni que revalidar.
     if (options.dryRun) return { success: true, data: result }
 
     // Notificar por correo cada cuenta creada pendiente de aprobación.
-    // La notificación in-app ya quedó persistida dentro de generarCuentasCobroPeriodo.
+    // Para las uniformes la notificación in-app ya quedó persistida dentro de
+    // generarCuentasCobroPeriodo; las explícitas NO crean notificación in-app, así
+    // que este correo es el único aviso de que hay una cuenta esperando aprobación.
+    // Sin él, una cuenta explícita se queda en 'emitida_pendiente_aprobacion' sin
+    // que nadie lo sepa — que es exactamente cómo Trappvel llegó a agosto sin
+    // facturar. El correo NO envía nada al cliente: el gate humano sigue intacto.
     const workspaceSlug = (ws as { slug: string } | null)?.slug ?? 'workspace'
-    for (const detalle of result.detalles) {
+    for (const detalle of uniformes.detalles) {
       if (detalle.estado !== 'creada' || !detalle.numero) continue
       await enviarEmailAprobacionPendiente({
         workspaceSlug,
         numero: detalle.numero,
         empresaNombre: detalle.empresa_nombre,
         montoTotal: detalle.monto_total,
+      })
+    }
+    for (const detalle of explicitas.detalles) {
+      if (!detalle.success || detalle.estado !== 'creada') continue
+      await enviarEmailAprobacionPendiente({
+        workspaceSlug,
+        numero: detalle.numero,
+        empresaNombre: detalle.empresaNombre,
+        montoTotal: detalle.monto,
       })
     }
 

@@ -13,10 +13,12 @@
  * clavado. Un script por mes invita a copiar y pegar un tercero, y cada copia
  * es una oportunidad de que el periodo y la fecha de emision se desincronicen.
  *
- * Existe porque la emision solo vive dentro del cron
+ * Existe porque la emision vive dentro del cron
  * (`/api/crons/procesar-planes-cobro`, tras la guarda `if (diaHoy === 10)`):
- * si el cron no corre ese dia, el mes se queda sin facturar y no hay ninguna
- * via para emitirlo. Esta es la via de rescate manual.
+ * si el cron no corre ese dia, el mes se queda sin facturar. Esta es la via de
+ * rescate por terminal; el boton «Emitir período» de /cobros-recurrentes hace
+ * lo mismo desde la app desplegada, que es la unica via cuando las credenciales
+ * de render y Drive no se pueden bajar a local.
  *
  * Idempotente: `generarCuentasCobroPeriodo` salta la cuenta si ya existe para
  * (workspace, anio, mes, empresa). Correrlo dos veces no duplica nada.
@@ -112,6 +114,7 @@ async function main() {
   const wsId = (ws as { id: string }).id
   const { generarCuentasCobroPeriodo } = await import('../src/lib/cobros/generar-cuentas-cobro')
   const { emitirCuentasExplicitasPeriodo } = await import('../src/lib/cobros/emitir-cuota-explicita')
+  const { offsetCorrelativoExplicitas } = await import('../src/lib/cobros/resumen-emision-periodo')
 
   console.log(`▶ Cuentas de cobro ${periodo} · workspace ${WS_SLUG}`)
   console.log(`  modo: ${COMMIT ? 'REAL (--commit)' : 'dry-run (no toca DB ni Drive)'}`)
@@ -140,7 +143,9 @@ async function main() {
   // ── Planes con cronograma explicito: una cuenta por cuota ──────────
   // El offset arranca donde quedo el dry-run de arriba: en dry-run nada se
   // inserta, asi que sin el las dos listas imprimirian el mismo correlativo.
-  const previewsUniformes = COMMIT ? 0 : result.detalles.filter((d) => d.estado === 'creada').length
+  // La regla vive en `resumen-emision-periodo` porque el boton de
+  // /cobros-recurrentes la necesita igual; copiada aqui se desincronizaria.
+  const previewsUniformes = offsetCorrelativoExplicitas(result.detalles, !COMMIT)
   const explicitas = await emitirCuentasExplicitasPeriodo(sb as never, wsId, ANIO!, MES!, {
     dryRun: !COMMIT,
     isDraft: false,

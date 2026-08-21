@@ -11,6 +11,10 @@
  * El flujo es en dos pasos a proposito: primero un PREVIEW (`dryRun`) que no
  * escribe nada, y solo despues la emision. Emitir crea documentos con
  * consecutivo fiscal y sube PDFs a Drive: no puede colgar de un solo clic.
+ *
+ * Pinta los DOS caminos por separado porque no son la misma fila: una uniforme es
+ * una empresa con N cobros agrupados y una explicita es UNA cuota con su
+ * vencimiento propio. El total y el contador del boton si los suman.
  */
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
@@ -19,25 +23,26 @@ import { CalendarPlus, Loader2, X, AlertTriangle, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ejecutarGenerarCuentasCobroPeriodo } from '@/lib/actions/cuentas-cobro-actions'
+import type { EmitirPeriodoResult, ErrorEmision } from '@/lib/cobros/resumen-emision-periodo'
 
 const MESES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ] as const
 
-type Detalle = {
-  empresa_id: string
-  empresa_nombre: string
-  numero: string | null
-  monto_total: number
-  cobros_ids: string[]
-  pdf_drive_url: string | null
-  estado: 'creada' | 'omitida' | 'error'
-}
+type DetalleExplicita = EmitirPeriodoResult['explicitas']['detalles'][number]
+/** La variante con datos de la cuota (la de error solo trae el id y el mensaje). */
+type CuotaResuelta = Extract<DetalleExplicita, { success: true }>
 
 type Preview = {
-  detalles: Detalle[]
-  errores: { empresa_id: string; error: string }[]
+  uniformes: EmitirPeriodoResult['uniformes']['detalles']
+  explicitas: DetalleExplicita[]
+  errores: ErrorEmision[]
+}
+
+/** Type guard: sin él, filtrar la unión no estrecha el tipo y hay que castear. */
+function esCuotaEn(estado: CuotaResuelta['estado']) {
+  return (d: DetalleExplicita): d is CuotaResuelta => d.success && d.estado === estado
 }
 
 function formatCOP(n: number): string {
@@ -92,7 +97,11 @@ export default function EmitirPeriodoDialog() {
       const res = await ejecutarGenerarCuentasCobroPeriodo(anio, mes, { dryRun: true })
       setCargando(null)
       if (!res.success) { toast.error(res.error); return }
-      setPreview({ detalles: res.data.detalles, errores: res.data.errores })
+      setPreview({
+        uniformes: res.data.uniformes.detalles,
+        explicitas: res.data.explicitas.detalles,
+        errores: res.data.errores,
+      })
     })
   }
 
@@ -117,9 +126,21 @@ export default function EmitirPeriodoDialog() {
     })
   }
 
-  const aCrear = preview?.detalles.filter(d => d.estado === 'creada') ?? []
-  const yaExisten = preview?.detalles.filter(d => d.estado === 'omitida') ?? []
-  const total = aCrear.reduce((s, d) => s + d.monto_total, 0)
+  // Uniformes: la fila es una empresa con sus cobros del mes agrupados.
+  const aCrearUniformes = preview?.uniformes.filter(d => d.estado === 'creada') ?? []
+  // Explicitas: la fila es UNA cuota del cronograma. En dry-run el estado es
+  // 'preview' (no 'creada'): el emisor explicito distingue el preview de la
+  // escritura real, y confundirlos dejaria la seccion vacia justo en el paso
+  // que existe para mirarla.
+  const aCrearExplicitas = preview?.explicitas.filter(esCuotaEn('preview')) ?? []
+  const yaExisten = [
+    ...(preview?.uniformes.filter(d => d.estado === 'omitida').map(d => d.numero ?? d.empresa_nombre) ?? []),
+    ...(preview?.explicitas.filter(esCuotaEn('omitida')).map(d => d.numero) ?? []),
+  ]
+  const totalACrear = aCrearUniformes.length + aCrearExplicitas.length
+  const total =
+    aCrearUniformes.reduce((s, d) => s + d.monto_total, 0) +
+    aCrearExplicitas.reduce((s, d) => s + d.monto, 0)
   const anios = [ahora.getFullYear(), ahora.getFullYear() - 1]
 
   return (
@@ -146,8 +167,9 @@ export default function EmitirPeriodoDialog() {
               <div>
                 <h2 className="text-base font-bold">Emitir cuentas del período</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Agrupa los cobros programados del mes por empresa pagadora. Las cuentas quedan
-                  pendientes de aprobación: no se envía nada al cliente.
+                  Agrupa los cobros programados del mes por empresa pagadora y emite las cuotas
+                  del mes de los contratos con cronograma. Las cuentas quedan pendientes de
+                  aprobación: no se envía nada al cliente.
                 </p>
               </div>
               <button
@@ -208,20 +230,20 @@ export default function EmitirPeriodoDialog() {
 
               {preview && (
                 <div className="space-y-3">
-                  {aCrear.length === 0 && yaExisten.length === 0 && preview.errores.length === 0 && (
+                  {totalACrear === 0 && yaExisten.length === 0 && preview.errores.length === 0 && (
                     <div className="p-3 border border-border rounded-md text-sm text-muted-foreground">
                       No hay cobros programados sin pagar para {MESES[mes]} {anio}. No hay nada que emitir.
                     </div>
                   )}
 
-                  {aCrear.length > 0 && (
+                  {aCrearUniformes.length > 0 && (
                     <div className="border border-border rounded-md overflow-hidden">
                       <div className="px-3 py-2 bg-muted/40 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                        Se emitirían {aCrear.length} cuenta(s)
+                        Planes uniformes · {aCrearUniformes.length} cuenta(s)
                       </div>
                       <table className="w-full text-sm">
                         <tbody>
-                          {aCrear.map(d => (
+                          {aCrearUniformes.map(d => (
                             <tr key={d.empresa_id} className="border-t border-border">
                               <td className="px-3 py-2">
                                 <div className="font-medium">{d.empresa_nombre}</div>
@@ -232,18 +254,46 @@ export default function EmitirPeriodoDialog() {
                               <td className="px-3 py-2 text-right font-mono">{formatCOP(d.monto_total)}</td>
                             </tr>
                           ))}
-                          <tr className="border-t border-border bg-muted/20">
-                            <td className="px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Total</td>
-                            <td className="px-3 py-2 text-right font-mono font-bold">{formatCOP(total)}</td>
-                          </tr>
                         </tbody>
                       </table>
                     </div>
                   )}
 
+                  {aCrearExplicitas.length > 0 && (
+                    <div className="border border-border rounded-md overflow-hidden">
+                      <div className="px-3 py-2 bg-muted/40 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Cronograma del contrato · {aCrearExplicitas.length} cuota(s)
+                      </div>
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {aCrearExplicitas.map(d => (
+                            <tr key={d.planCuotaId} className="border-t border-border">
+                              <td className="px-3 py-2">
+                                <div className="font-medium">{d.empresaNombre}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  Cuota {d.numeroCuota} · vence {d.fechaVencimiento} · se fecha {d.fechaEmision}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono">{formatCOP(d.monto)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {totalACrear > 0 && (
+                    <div className="flex items-center justify-between px-3 py-2 border border-border rounded-md bg-muted/20">
+                      <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Total · {totalACrear} cuenta(s)
+                      </span>
+                      <span className="font-mono font-bold text-sm">{formatCOP(total)}</span>
+                    </div>
+                  )}
+
                   {yaExisten.length > 0 && (
                     <div className="text-xs text-muted-foreground">
-                      Ya existen y no se tocan: {yaExisten.map(d => d.numero ?? d.empresa_nombre).join(', ')}.
+                      Ya existen y no se tocan: {yaExisten.join(', ')}.
                     </div>
                   )}
 
@@ -253,7 +303,9 @@ export default function EmitirPeriodoDialog() {
                         <AlertTriangle className="h-3.5 w-3.5" /> {preview.errores.length} problema(s)
                       </div>
                       {preview.errores.map((e, i) => (
-                        <div key={i} className="text-xs text-muted-foreground">{e.empresa_id}: {e.error}</div>
+                        <div key={i} className="text-xs text-muted-foreground">
+                          {e.origen === 'explicita' ? 'Cuota' : 'Empresa'} {e.ref}: {e.error}
+                        </div>
                       ))}
                     </div>
                   )}
@@ -274,12 +326,12 @@ export default function EmitirPeriodoDialog() {
               <button
                 type="button"
                 onClick={emitir}
-                disabled={!!cargando || aCrear.length === 0}
+                disabled={!!cargando || totalACrear === 0}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#10B981] text-white hover:bg-[#059669] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {cargando === 'emitir'
                   ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Emitiendo…</>
-                  : <>Emitir {aCrear.length > 0 ? `${aCrear.length} cuenta(s)` : ''}</>}
+                  : <>Emitir {totalACrear > 0 ? `${totalACrear} cuenta(s)` : ''}</>}
               </button>
             </div>
           </div>
