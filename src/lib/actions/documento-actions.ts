@@ -15,6 +15,7 @@ import { montosCoinciden } from '@/lib/negocios/monto-cop'
 import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { resolverDestino } from '@/lib/negocios/casilla-compartida'
+import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 
 const BUCKET = 've-documentos'
 
@@ -726,10 +727,15 @@ export async function procesarDocumento(
     }
 
     if (isComplete) {
+      // El documento bueno ya llego: si este bloque estaba devuelto, la devolucion se
+      // cierra AQUI y la marca sale en el MISMO update. Escribirlo aparte dejaria una
+      // ventana en la que el bloque ya esta completo y la pantalla sigue pidiendo que
+      // lo corrijan. Ver `cerrar-devolucion.ts`.
+      const dataFinal = await cerrarDevolucionAlCompletar(bloqueId, newData, staffId ?? null)
       await db(supabase)
         .from('negocio_bloques')
         .update({
-          data: newData,
+          data: dataFinal,
           estado: 'completo',
           completado_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),

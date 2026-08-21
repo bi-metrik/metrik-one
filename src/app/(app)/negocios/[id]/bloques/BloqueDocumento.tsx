@@ -17,12 +17,22 @@ import {
   Pencil,
   HelpCircle,
   CalendarClock,
+  Undo2,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { puedeCorregirDocumentos } from '@/lib/roles'
+import { devolverBloque } from '@/lib/actions/devolucion-actions'
+import {
+  devolucionHabilitada,
+  leerDevolucion,
+  puedeDevolverBloque,
+  MOTIVOS_DEVOLUCION,
+  LABEL_MOTIVO,
+  type MotivoDevolucion,
+} from '@/lib/negocios/devolucion'
 import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import type { NegocioBloque } from '../../negocio-v2-actions'
@@ -379,6 +389,121 @@ function EditableCampoVisible({
   )
 }
 
+// ── Devolucion del bloque ────────────────────────────────────────────────────
+
+/**
+ * Aviso de que este documento esta devuelto para correccion.
+ *
+ * Se pinta en TODOS los modos, incluido el de solo lectura del historial: el area de
+ * origen suele llegar al bloque desde una etapa ya superada, y si el aviso solo saliera
+ * en modo editable el mensaje no alcanzaria a quien tiene que corregir.
+ */
+function BannerDevolucion({
+  motivo,
+  nota,
+  porNombre,
+  etapa,
+}: {
+  motivo: MotivoDevolucion
+  nota: string | null
+  porNombre: string | null
+  etapa: string | null
+}) {
+  return (
+    <div className="rounded-md border border-amber-300 bg-amber-50/60 px-3 py-2">
+      <p className="flex items-start gap-1.5 text-[11px] text-amber-900">
+        <Undo2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          <strong>Devuelto para corregir:</strong> {LABEL_MOTIVO[motivo]}.
+          {nota ? ` ${nota}` : ''}
+        </span>
+      </p>
+      {(porNombre || etapa) && (
+        <p className="mt-1 pl-5 text-[10px] text-amber-700">
+          {porNombre ? `Lo devolvio ${porNombre}` : 'Devuelto'}
+          {etapa ? ` desde ${etapa}` : ''}. Carga el documento corregido para cerrarlo.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Dialogo para devolver. El motivo sale de una lista CERRADA a proposito: un motivo en
+ * texto libre no se puede agrupar, y sin agrupar no hay indicador — que es justo lo que
+ * este frente viene a construir. La nota es complemento, nunca sustituto.
+ */
+function DialogoDevolucion({
+  abierto,
+  motivo,
+  nota,
+  enviando,
+  onMotivo,
+  onNota,
+  onCerrar,
+  onConfirmar,
+}: {
+  abierto: boolean
+  motivo: MotivoDevolucion | ''
+  nota: string
+  enviando: boolean
+  onMotivo: (m: MotivoDevolucion) => void
+  onNota: (n: string) => void
+  onCerrar: () => void
+  onConfirmar: () => void
+}) {
+  if (!abierto) return null
+  return (
+    <div className="rounded-md border border-amber-300 bg-amber-50/40 p-3 space-y-2">
+      <p className="text-[11px] font-medium text-amber-900">
+        ¿Por que se devuelve este documento?
+      </p>
+      <div className="space-y-1">
+        {MOTIVOS_DEVOLUCION.map(m => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onMotivo(m)}
+            className={`block w-full rounded-md border px-2.5 py-1.5 text-left text-[11px] transition-colors ${
+              motivo === m
+                ? 'border-amber-500 bg-amber-100 text-amber-900'
+                : 'border-border bg-white text-foreground hover:bg-amber-50'
+            }`}
+          >
+            {LABEL_MOTIVO[m]}
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={nota}
+        onChange={e => onNota(e.target.value)}
+        rows={2}
+        placeholder="Detalle opcional para quien lo corrige"
+        className="w-full rounded-md border border-border bg-white px-2.5 py-1.5 text-[11px]"
+      />
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={onCerrar}
+          disabled={enviando}
+          className="rounded-md border border-border bg-white px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={onConfirmar}
+          disabled={!motivo || enviando}
+          className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+        >
+          {enviando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+          {enviando ? 'Devolviendo…' : 'Devolver'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Componente principal ─────────────────────────────────────────────────────
 
 export default function BloqueDocumento({
@@ -415,6 +540,36 @@ export default function BloqueDocumento({
   // corrección, no tres. `sesionDoc` es lo que las agrupa en el registro.
   const [causaDoc, setCausaDoc] = useState<CausaCorreccion | null>(null)
   const sesionDoc = useRef<string | null>(null)
+
+  // Devolucion del bloque a su area de origen. La habilita la CONFIGURACION; quien la
+  // puede usar sale del MISMO helper que consume el guard del servidor, para que la
+  // pantalla no ofrezca un boton que el servidor va a rechazar.
+  const devolucionActiva = devolucionHabilitada(configExtra as Record<string, unknown>)
+  const marcaDevolucion = leerDevolucion(saved)
+  const puedeDevolver = devolucionActiva && puedeDevolverBloque(userRole, esResponsable)
+  const [devolviendo, setDevolviendo] = useState(false)
+  const [dialogoDevolucion, setDialogoDevolucion] = useState(false)
+  const [motivoDevolucion, setMotivoDevolucion] = useState<MotivoDevolucion | ''>('')
+  const [notaDevolucion, setNotaDevolucion] = useState('')
+
+  async function handleDevolver() {
+    if (!motivoDevolucion) return
+    setDevolviendo(true)
+    const res = await devolverBloque(negocioBloqueId, {
+      motivo: motivoDevolucion,
+      nota: notaDevolucion,
+    })
+    setDevolviendo(false)
+    if (!res.ok) {
+      toast.error(res.error ?? 'No se pudo devolver el documento')
+      return
+    }
+    setDialogoDevolucion(false)
+    setMotivoDevolucion('')
+    setNotaDevolucion('')
+    toast.success(`"${res.bloqueNombre}" quedo devuelto para correccion`)
+    router.refresh()
+  }
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
     if (saved.drive_url) return 'uploaded'
@@ -610,6 +765,14 @@ export default function BloqueDocumento({
   if (modo === 'visible') {
     return (
       <div className="space-y-2">
+        {marcaDevolucion && (
+          <BannerDevolucion
+            motivo={marcaDevolucion.motivo}
+            nota={marcaDevolucion.nota}
+            porNombre={marcaDevolucion.por_nombre}
+            etapa={marcaDevolucion.etapa}
+          />
+        )}
         <div className="flex items-center gap-2">
           {driveUrl ? (
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />
@@ -760,6 +923,26 @@ export default function BloqueDocumento({
 
   return (
     <div className="space-y-3">
+      {marcaDevolucion && (
+        <BannerDevolucion
+          motivo={marcaDevolucion.motivo}
+          nota={marcaDevolucion.nota}
+          porNombre={marcaDevolucion.por_nombre}
+          etapa={marcaDevolucion.etapa}
+        />
+      )}
+
+      <DialogoDevolucion
+        abierto={dialogoDevolucion}
+        motivo={motivoDevolucion}
+        nota={notaDevolucion}
+        enviando={devolviendo}
+        onMotivo={setMotivoDevolucion}
+        onNota={setNotaDevolucion}
+        onCerrar={() => setDialogoDevolucion(false)}
+        onConfirmar={handleDevolver}
+      />
+
       {/* Upload zone */}
       {uploadState === 'empty' && (
         <button
@@ -910,6 +1093,17 @@ export default function BloqueDocumento({
             >
               Reemplazar
             </button>
+            {puedeDevolver && !marcaDevolucion && (
+              <button
+                type="button"
+                onClick={() => setDialogoDevolucion(true)}
+                title="Devolver a quien lo cargo para que lo corrija"
+                className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50"
+              >
+                <Undo2 className="h-3 w-3" />
+                Devolver
+              </button>
+            )}
           </div>
         </div>
       )}
