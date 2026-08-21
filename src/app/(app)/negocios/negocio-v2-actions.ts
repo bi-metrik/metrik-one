@@ -64,6 +64,7 @@ import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-nego
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { indexarCamposDeBloques, leerCampo, type FilaCampo } from '@/lib/negocios/campos-de-bloques'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -596,56 +597,50 @@ export async function getNegociosV2(
   // Número de factura emitida (bloque documento "Factura emitida", config-driven). Para búsqueda.
   const facturaPorNeg: Record<string, string | null> = {}
   const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque, cardCfg?.radicado_bloque, cardCfg?.factura_bloque].filter(Boolean) as string[]
-  if (cardBloqueNombres.length > 0 && negocioIds.length > 0) {
-    const getVal = (bdata: Record<string, unknown>, slug: string): string | null => {
-      const campos = (bdata.campos as Record<string, { value?: unknown }> | undefined) ?? null
-      const v = campos?.[slug]?.value ?? bdata[slug]
-      const s = v == null ? '' : String(v).trim()
-      return s || null
-    }
-    const { data: cardBloques } = await db(supabase)
-      .from('negocio_bloques')
-      .select('negocio_id, data, bloque_configs!inner(nombre)')
-      .in('negocio_id', negocioIds)
-      .in('bloque_configs.nombre', cardBloqueNombres)
-    for (const row of ((cardBloques ?? []) as Record<string, unknown>[])) {
-      const negId = row.negocio_id as string
-      const bnombre = (row.bloque_configs as { nombre: string } | null)?.nombre ?? ''
-      const bdata = (row.data as Record<string, unknown>) ?? {}
-      // Vehículo + ciudad (del bloque Factura)
-      if (cardCfg?.vehiculo_bloque && bnombre === cardCfg.vehiculo_bloque) {
+  const cardCampos = [
+    ...(cardCfg?.vehiculo_campos ?? []),
+    cardCfg?.ciudad_campo,
+    cardCfg?.cedula_campo,
+    cardCfg?.radicado_campo,
+    cardCfg?.factura_campo,
+  ].filter(Boolean) as string[]
+  if (cardBloqueNombres.length > 0 && cardCampos.length > 0 && negocioIds.length > 0) {
+    // La extraccion vive en Postgres (`negocio_bloques_campos`). Antes esto se
+    // traia la columna `data` COMPLETA de cada bloque para leerle cuatro cadenas
+    // cortas: medido en soena el 2026-08-21, 1.153 kB de jsonb por carga de la
+    // lista para producir 24 kB utiles. La funcion devuelve solo los pares
+    // (campo, valor) pedidos.
+    const { data: filas } = await db(supabase).rpc('negocio_bloques_campos', {
+      p_negocio_ids: negocioIds,
+      p_bloques: cardBloqueNombres,
+      p_campos: cardCampos,
+    })
+
+    // El indice y la regla de "la primera con valor gana" viven en
+    // `lib/negocios/campos-de-bloques`, con pruebas: es logica que se puede
+    // equivocar en silencio (quedarse con la copia vacia = tarjeta sin cedula y
+    // busqueda que no encuentra, sin ningun error visible).
+    const indice = indexarCamposDeBloques((filas ?? []) as FilaCampo[])
+    const val = (negId: string, bloque: string | undefined, campo: string | undefined) =>
+      leerCampo(indice, negId, bloque, campo)
+
+    for (const negId of negocioIds) {
+      if (cardCfg?.vehiculo_bloque) {
         const parts = (cardCfg.vehiculo_campos ?? [])
-          .map(slug => getVal(bdata, slug))
+          .map((slug) => val(negId, cardCfg.vehiculo_bloque, slug))
           .filter(Boolean) as string[]
-        const label = parts.length ? parts.join(' ') : null
-        const ciudad = cardCfg.ciudad_campo ? getVal(bdata, cardCfg.ciudad_campo) : null
-        // SOENA = 100% personas naturales; para Bogotá esto resuelve a la seccional de naturales.
-        const seccional = ciudad ? (mapCiudadASeccional(ciudad, 'natural')?.label ?? null) : null
-        // El bloque origen (Validación) es el único con data extraída; si llega una
-        // instancia heredada vacía, no se pisa un label/seccional ya resuelto.
-        const prev = vehiculoPorNeg[negId]
+        const ciudad = val(negId, cardCfg.vehiculo_bloque, cardCfg.ciudad_campo)
         vehiculoPorNeg[negId] = {
-          label: label ?? prev?.label ?? null,
-          seccional: seccional ?? prev?.seccional ?? null,
-          ciudad: ciudad ?? prev?.ciudad ?? null,
+          label: parts.length ? parts.join(' ') : null,
+          // SOENA = 100% personas naturales; para Bogota esto resuelve a la
+          // seccional de naturales.
+          seccional: ciudad ? (mapCiudadASeccional(ciudad, 'natural')?.label ?? null) : null,
+          ciudad,
         }
       }
-      // Cédula (del bloque RUT). Conserva la primera instancia con valor.
-      if (cardCfg?.cedula_bloque && bnombre === cardCfg.cedula_bloque) {
-        const ced = cardCfg.cedula_campo ? getVal(bdata, cardCfg.cedula_campo) : null
-        cedulaPorNeg[negId] = cedulaPorNeg[negId] ?? ced
-      }
-      // Radicado de certificación (bloque DA22). El origen vive en Cargue y hay
-      // copias readonly heredadas en otras etapas → conserva la primera con valor.
-      if (cardCfg?.radicado_bloque && bnombre === cardCfg.radicado_bloque) {
-        const rad = cardCfg.radicado_campo ? getVal(bdata, cardCfg.radicado_campo) : null
-        radicadoPorNeg[negId] = radicadoPorNeg[negId] ?? rad
-      }
-      // Número de factura emitida (bloque documento "Factura emitida"). Conserva la primera con valor.
-      if (cardCfg?.factura_bloque && bnombre === cardCfg.factura_bloque) {
-        const nf = cardCfg.factura_campo ? getVal(bdata, cardCfg.factura_campo) : null
-        facturaPorNeg[negId] = facturaPorNeg[negId] ?? nf
-      }
+      cedulaPorNeg[negId] = val(negId, cardCfg?.cedula_bloque, cardCfg?.cedula_campo)
+      radicadoPorNeg[negId] = val(negId, cardCfg?.radicado_bloque, cardCfg?.radicado_campo)
+      facturaPorNeg[negId] = val(negId, cardCfg?.factura_bloque, cardCfg?.factura_campo)
     }
   }
 
