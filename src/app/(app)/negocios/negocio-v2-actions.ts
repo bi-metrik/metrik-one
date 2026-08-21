@@ -6575,7 +6575,18 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         if (dataEmpty && autoFillEmpty && inst.estado === 'pendiente' && !esReactivado) continue
 
         const ceBase = esReactivado ? { ...ce, _reactivable: true } : ce
-        const ceEnriched = autoFillEmpty ? ceBase : { ...ceBase, _auto_fill: autoFillHist }
+        const ceEnrichedBase = autoFillEmpty ? ceBase : { ...ceBase, _auto_fill: autoFillHist }
+        // Corregir la aprobacion (valor y/o plan) TAMBIEN desde el historial. El bloque
+        // nativo de la propuesta vive en la etapa 4 y solo hay copias readonly hasta la
+        // 6: en cuanto el caso pasa a Cargue (7) o mas alla, la propuesta deja de ser un
+        // bloque de la etapa actual y el unico lugar donde se ve es este. La capacidad NO
+        // tiene ventana de etapa por diseno — corregir un plan mal elegido es justamente
+        // lo que hace falta cuando el caso ya avanzo — pero el flag solo se ponia en la
+        // rama de la etapa actual, asi que se perdia en silencio. Medido en V0318, que al
+        // avanzar a Cargue se quedo sin el boton. La action revalida el permiso.
+        const ceEnriched = def?.tipo === 'propuesta_economica' && puedeCorregirPrecioWs
+          ? { ...ceEnrichedBase, _puedeCorregirPrecio: true }
+          : ceEnrichedBase
 
         bloquesEtapasPrevias.push({
           etapa_orden: etapaInfo.orden,
