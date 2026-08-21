@@ -39,6 +39,7 @@ import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoN
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { resolverDestinoCompartido } from '@/lib/negocios/casilla-compartida'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
@@ -6689,7 +6690,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // local nunca se usa y no puede divergir.
     if (configExtra.compartido_con_origen === true && b.instancia) {
       const srcSlug = configExtra.source_bloque_slug as string | undefined
-      const srcData = srcSlug ? datosCompartidosPorSlug.get(srcSlug) : undefined
+      // Los dos índices, porque la casilla compartida ya no es solo de `datos`: el
+      // certificado UPME es un DOCUMENTO y su origen vive en `documentoDataPorSlug`.
+      // Sin este segundo intento el espejo se pinta vacío después de una subida
+      // exitosa — el archivo se guardó en la fila del origen — y la pantalla le pide
+      // al operador un papel que acaba de cargar.
+      const srcData = srcSlug
+        ? (datosCompartidosPorSlug.get(srcSlug) ?? documentoDataPorSlug.get(srcSlug))
+        : undefined
       if (srcData) {
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
       }
@@ -6742,7 +6750,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       b.instancia
       && b.instancia.estado !== 'completo'
       && b.es_gate === true
-      && soloLecturaPorDatoLleno(configExtra, b.instancia.data as Record<string, unknown> | null)
+      && (
+        soloLecturaPorDatoLleno(configExtra, b.instancia.data as Record<string, unknown> | null)
+        // El espejo de un DOCUMENTO no pasa por `soloLecturaPorDatoLleno` (no tiene
+        // `fields`) y su fila local nunca la cierra nadie: la escritura se redirigió al
+        // origen. Ver `documentoCompartidoQuedaResuelto`.
+        || documentoCompartidoQuedaResuelto(
+          configExtra,
+          defTipo === 'documento',
+          b.instancia.data as Record<string, unknown> | null,
+        )
+      )
     ) {
       // El `map` es síncrono: aquí solo se marca en memoria y el id se acumula para
       // persistirlo en una sola escritura al salir del recorrido.
