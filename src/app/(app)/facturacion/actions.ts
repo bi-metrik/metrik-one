@@ -3,10 +3,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 async function getWorkspace() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return null
 
   const { data: profile } = await supabase

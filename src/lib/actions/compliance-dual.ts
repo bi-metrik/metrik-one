@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 import { resolverNombresUsuarios } from './_usuarios';
 import { listarSegmentos } from './compliance-segmentos';
@@ -12,6 +12,7 @@ import {
 import type { UniversoSegmentacion } from '@/lib/valida/segmentacion-presets';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // `||` (no `??`): una env vacia ("") debe caer al default igual que si estuviera ausente.
 // Vercel puede inyectar VALIDA_API_BASE="" y `??` la dejaria pasar -> URL relativa rota.
@@ -543,8 +544,7 @@ export async function consultaDualPersistente(
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
   const userId = user?.id ?? null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

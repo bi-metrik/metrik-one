@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import QRCode from 'qrcode'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // Las tablas cert_* aun no estan en database.ts. Usamos el cliente autenticado
 // (RLS aplica por la sesion del usuario) casteado a sin-tipo para esas tablas.
@@ -11,7 +12,7 @@ type AnyDB = SupabaseClient
 
 async function ctx() {
   const sb = await createClient()
-  const { data: { user } } = await sb.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) throw new Error('No autenticado')
   const { data: profile } = await sb
     .from('profiles')

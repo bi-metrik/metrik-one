@@ -2,10 +2,11 @@
 
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export async function getStaff() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return []
 
   const { data: profile } = await supabase
@@ -36,7 +37,7 @@ export async function createStaffMember(formData: {
   rol_plataforma?: string
 }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -88,7 +89,7 @@ export async function updateStaffMember(
   }
 ) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -116,7 +117,7 @@ export async function updateStaffMember(
 
 export async function deleteStaffMember(id: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -145,7 +146,7 @@ export async function deleteStaffMember(id: string) {
 /** Get license usage: used seats vs max_seats */
 export async function getLicenseInfo() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { used: 0, max: 1 }
 
   const { data: profile } = await supabase
@@ -177,7 +178,7 @@ export async function getLicenseInfo() {
 export async function inviteStaffToPlataform(staffId: string, email: string) {
   try {
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getCachedUser()
     if (!user) return { error: 'No autenticado' }
 
     const { data: profile } = await supabase

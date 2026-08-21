@@ -1,17 +1,17 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { ArrowLeft, History as HistoryIcon } from 'lucide-react';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { listarBitacoraSegmentacion } from '@/lib/actions/valida-segmentacion';
 import { PRESET_LABEL, VARIABLE_CONTRAPARTE_LABEL, VARIABLE_EMPLEADO_LABEL } from '@/lib/valida/segmentacion-presets';
 import type { EntradaBitacora } from '@/lib/valida/segmentacion-presets';
 import { formatFecha } from '@/lib/dates/bogota'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export const dynamic = 'force-dynamic';
 
 export default async function BitacoraPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
   if (!user) redirect('/login');
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

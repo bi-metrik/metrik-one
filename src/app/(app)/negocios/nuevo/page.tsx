@@ -2,10 +2,11 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { getAliadosActivos } from '@/app/(app)/directorio/aliados/actions'
 import NuevoNegocioForm from './nuevo-negocio-form'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export default async function NuevoNegocioPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) redirect('/login')
 
   const { data: profile } = await supabase

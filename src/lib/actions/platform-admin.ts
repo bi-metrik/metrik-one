@@ -2,6 +2,7 @@
 
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // ============================================================
 // Tipos compartidos (cliente + servidor)
@@ -36,9 +37,7 @@ type CurrentUserCtx = {
 
 async function getCurrentUserCtx(): Promise<CurrentUserCtx | null> {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user || !user.email) return null
 
   const { data } = await supabase

@@ -2,10 +2,11 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export async function getBankAccounts() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return []
 
   const { data: profile } = await supabase
@@ -31,7 +32,7 @@ export async function createBankAccount(formData: {
   is_primary?: boolean
 }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -78,7 +79,7 @@ export async function updateBankAccount(
   }
 ) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -115,7 +116,7 @@ export async function updateBankAccount(
 
 export async function deleteBankAccount(id: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -149,7 +150,7 @@ export async function recordBalance(formData: {
   notes?: string
 }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -174,7 +175,7 @@ export async function recordBalance(formData: {
 
 export async function getRecentBalances(accountId: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return []
 
   const { data: profile } = await supabase

@@ -2,12 +2,13 @@ import { redirect } from 'next/navigation'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { listCertData } from '@/lib/cert/admin'
 import CertificacionesClient from './certificaciones-client'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CertificacionesPage() {
   const sb = await createClient()
-  const { data: { user } } = await sb.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) redirect('/login')
   const { data: profile } = await sb.from('profiles').select('workspace_id').eq('id', user.id).single()
   if (!profile?.workspace_id) redirect('/')

@@ -1,7 +1,7 @@
 'use server'
 
-import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient } from '@supabase/supabase-js'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 interface OnboardingData {
   fullName: string
@@ -26,8 +26,7 @@ function db(supabase: unknown): any {
 export async function completeOnboarding(data: OnboardingData): Promise<OnboardingResult> {
   try {
     // 1. Verify authenticated user (uses cookies to read session)
-    const supabase = await createServerClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { user, error: authError } = await getCachedUser()
 
     if (authError || !user) {
       return { success: false, error: 'Sesión expirada. Inicia sesión de nuevo.' }

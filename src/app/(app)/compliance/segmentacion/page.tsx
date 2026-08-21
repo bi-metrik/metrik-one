@@ -1,14 +1,14 @@
 import { redirect } from 'next/navigation';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { getSegmentacionConfig } from '@/lib/actions/valida-segmentacion';
 import { getDistribucionSegmentacion } from '@/lib/actions/valida-score';
 import SegmentacionClient from './segmentacion-client';
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export const dynamic = 'force-dynamic';
 
 export default async function SegmentacionPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
   if (!user) redirect('/login');
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

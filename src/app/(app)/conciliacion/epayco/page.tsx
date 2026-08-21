@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { getConciliacionEpayco } from '@/lib/actions/conciliacion-epayco-actions'
 import EpaycoClient from './epayco-client'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export const runtime = 'nodejs'
 
@@ -13,7 +14,7 @@ export default async function ConciliacionEpaycoPage({ searchParams }: Props) {
   const supabase = await createClient()
   const params = await searchParams
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) redirect('/login')
 
   const { data: profile } = await supabase

@@ -3,12 +3,13 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaParts } from '@/lib/dates/bogota'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // ── Fetch expense categories ────────────────────────────
 
 export async function getExpenseCategories() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { categories: [], error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -43,7 +44,7 @@ interface CreateExpenseInput {
 export async function createExpense(input: CreateExpenseInput) {
   try {
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getCachedUser()
     if (!user) return { success: false, error: 'No autenticado' }
 
     const { data: profile } = await supabase
@@ -87,7 +88,7 @@ export async function createExpense(input: CreateExpenseInput) {
 
 export async function getExpenses(filters?: { month?: string; categoryId?: string; projectId?: string }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { expenses: [], error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -143,7 +144,7 @@ export async function getExpenses(filters?: { month?: string; categoryId?: strin
 
 export async function deleteExpense(expenseId: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { success: false, error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -172,7 +173,7 @@ export async function deleteExpense(expenseId: string) {
 
 export async function getFixedExpenses() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { fixedExpenses: [], error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -218,7 +219,7 @@ interface CreateFixedExpenseInput {
 export async function createFixedExpense(input: CreateFixedExpenseInput) {
   try {
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getCachedUser()
     if (!user) return { success: false, error: 'No autenticado' }
 
     const { data: profile } = await supabase
@@ -255,7 +256,7 @@ export async function createFixedExpense(input: CreateFixedExpenseInput) {
 
 export async function deleteFixedExpense(id: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { success: false, error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -283,7 +284,7 @@ export async function deleteFixedExpense(id: string) {
 
 export async function toggleFixedExpense(id: string, isActive: boolean) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { success: false, error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -317,7 +318,7 @@ export async function updateFixedExpense(id: string, input: {
   deducible?: boolean
 }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { success: false, error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -354,7 +355,7 @@ export async function updateFixedExpense(id: string, input: {
 
 export async function getWorkspaceConfig() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { config: null, error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -405,7 +406,7 @@ export async function getWorkspaceConfig() {
 
 export async function getNumerosData() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) return { data: null, error: 'No autenticado' }
 
   const { data: profile } = await supabase
@@ -554,7 +555,7 @@ export async function getNumerosData() {
 export async function saveNumerosSetup(input: { saldoActual?: number; gastosFijosMensual?: number }) {
   try {
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getCachedUser()
     if (!user) return { success: false, error: 'No autenticado' }
 
     const { data: profile } = await supabase

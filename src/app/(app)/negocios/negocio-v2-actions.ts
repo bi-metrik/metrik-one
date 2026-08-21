@@ -62,6 +62,7 @@ import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto
 import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -5865,14 +5866,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .select('id, full_name')
       .eq('workspace_id', workspaceId)
       .order('full_name', { ascending: true }),
-    supabase.auth.getUser(),
+    getCachedUser(),
     supabase
       .from('staff')
       .select('id, full_name, salary')
       .eq('workspace_id', workspaceId),
   ])
   const profilesData = profilesRes.data
-  const currentUserId = userRes.data.user?.id ?? null
+  const currentUserId = userRes.user?.id ?? null
 
   // staffMap: staff.id → nombre (activity_log.autor_id referencia staff.id)
   const staffMap: Record<string, string> = {}

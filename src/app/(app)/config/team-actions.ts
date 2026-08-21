@@ -3,6 +3,7 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { RoleKey } from '@/lib/roles'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // Re-export type for convenience
 export type { RoleKey } from '@/lib/roles'
@@ -20,7 +21,7 @@ interface InviteInput {
 
 async function getAuthContext() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user } = await getCachedUser()
   if (!user) throw new Error('No autenticado')
 
   const { data: profile } = await supabase
@@ -197,7 +198,7 @@ export async function changeTeamMemberRole(memberId: string, newRole: RoleKey) {
     }
 
     // Can't change own role
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getCachedUser()
     if (memberId === user?.id) {
       return { success: false, error: 'No puedes cambiar tu propio rol' }
     }
@@ -226,7 +227,7 @@ export async function removeTeamMember(memberId: string) {
       return { success: false, error: 'Solo el dueño puede eliminar miembros' }
     }
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getCachedUser()
     if (memberId === user?.id) {
       return { success: false, error: 'No puedes eliminarte a ti mismo' }
     }

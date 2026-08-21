@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 import type {
   ConfigPersistida,
@@ -15,6 +15,7 @@ import {
   UMBRALES_DEFAULT,
   pesosSumanUno,
 } from '@/lib/valida/segmentacion-presets';
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -107,8 +108,7 @@ export async function aplicarSegmentacionConfig(input: {
     return { ok: false, error: 'umbrales_empleados_invertidos' };
   }
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
   const userId = user?.id ?? null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,9 +1,10 @@
 'use server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { resolverNombresUsuarios } from './_usuarios';
 import { getWorkspace } from './get-workspace';
 import * as XLSX from 'xlsx';
+import { getCachedUser } from '@/lib/supabase/auth-user'
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
@@ -190,8 +191,7 @@ export async function consultarValida(
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
 
   const apiKey = await getWorkspaceValidaApiKey(workspaceId);
   if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
