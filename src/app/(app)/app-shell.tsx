@@ -162,6 +162,11 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   // Los operadores eligen segmento al consultar, pero no tocan el catalogo — misma
   // regla que riesgos/causas/controles (solo owner/admin editan configuracion).
   { href: '/compliance/segmentos', label: 'Catálogo de segmentos', icon: Tags, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  // Liberacion de contrapartes: decision del oficial sobre los hallazgos. Solo
+  // owner/admin, y no por configuracion sino por confidencialidad — la pantalla
+  // muestra quien quedo reportado en listas restrictivas. Lo que circula por la
+  // organizacion es el PDF de autorizacion, no esta pantalla.
+  { href: '/compliance/liberaciones', label: 'Liberaciones', icon: ShieldCheck, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Comparativa interna MeTRIK — solo workspace metrik
   { href: '/compliance/comparativa-informa', label: 'Comparativa Informa', icon: Scale, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_audit', value: true } },
 ]
