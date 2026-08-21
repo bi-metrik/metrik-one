@@ -191,3 +191,36 @@ export async function resolverDestinoCompartido(
   const destino = await resolverDestino(supabase, negocioBloqueId)
   return destino.id
 }
+
+/**
+ * ¿Este gate espejo de un DOCUMENTO ya está resuelto, aunque su fila siga `pendiente`?
+ *
+ * La casilla compartida redirige la ESCRITURA a la fila del origen, y `procesarDocumento`
+ * cierra únicamente la fila que escribió (`documento-actions.ts`: el `estado: 'completo'`
+ * va contra `bloqueId`, que ya es el destino resuelto). La fila local del espejo nunca se
+ * toca: nace `pendiente` y se queda ahí para siempre.
+ *
+ * Para un espejo de tipo `datos` eso no se nota, porque esos espejos se configuran con
+ * `editable_solo_si_vacio` y el cierre lo hace `soloLecturaPorDatoLleno`. Ese camino no
+ * sirve aquí: evalúa `config_extra.fields`, y un bloque documento no tiene `fields`, así
+ * que devuelve `false` siempre. Un espejo documento con `es_gate` retendría el caso
+ * esperando un papel que YA está cargado — exactamente el defecto que este repo documentó
+ * en `gateVisibleQuedaResuelto` y en `documentoHeredadoNaceCompleto`.
+ *
+ * Por eso el veredicto se toma sobre el ARCHIVO DEL ORIGEN, igual que
+ * `documentoHeredadoNaceCompleto`: el render ya sustituyó la data del espejo por la del
+ * origen, así que `dataResuelta` es la del origen y `drive_url` dice si el papel llegó.
+ *
+ * Devuelve false para todo lo que no sea un espejo documento: un bloque con fila propia lo
+ * cierra quien lo diligencia, y no le corresponde a esto adelantarse.
+ */
+export function documentoCompartidoQuedaResuelto(
+  configExtra: ConfigExtra | null | undefined,
+  esDocumento: boolean,
+  dataResuelta: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!esDocumento) return false
+  if (!origenCompartido(configExtra)) return false
+  const url = (dataResuelta ?? {}).drive_url
+  return typeof url === 'string' && url.length > 0
+}

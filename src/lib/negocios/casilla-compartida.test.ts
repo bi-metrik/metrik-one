@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { origenCompartido, origenUnico } from './casilla-compartida'
+import { origenCompartido, origenUnico, documentoCompartidoQuedaResuelto } from './casilla-compartida'
 
 /**
  * Las dos decisiones puras del módulo: si la casilla es compartida y hacia dónde, y si el
@@ -47,5 +47,41 @@ describe('origenUnico', () => {
     expect(origenUnico([])).toBeNull()
     expect(origenUnico(null)).toBeNull()
     expect(origenUnico(undefined)).toBeNull()
+  })
+})
+
+describe('documentoCompartidoQuedaResuelto', () => {
+  const espejo = { compartido_con_origen: true, source_bloque_slug: 'concepto_upme' }
+
+  it('el gate del espejo se cierra cuando el ORIGEN ya tiene el archivo', () => {
+    // La data que llega aquí es la del origen: el render ya la sustituyó.
+    expect(documentoCompartidoQuedaResuelto(espejo, true, { drive_url: 'https://drive/x' })).toBe(true)
+  })
+
+  it('sin archivo en el origen el gate RETIENE, que es lo que debe hacer', () => {
+    expect(documentoCompartidoQuedaResuelto(espejo, true, {})).toBe(false)
+    expect(documentoCompartidoQuedaResuelto(espejo, true, null)).toBe(false)
+    // Una cadena vacía no es un archivo.
+    expect(documentoCompartidoQuedaResuelto(espejo, true, { drive_url: '' })).toBe(false)
+  })
+
+  it('un bloque que NO es documento no lo cierra esto', () => {
+    // Los espejos de `datos` los cierra `soloLecturaPorDatoLleno`; adelantarse aquí
+    // cerraría gates que su propia regla dejó pendientes a proposito.
+    expect(documentoCompartidoQuedaResuelto(espejo, false, { drive_url: 'https://drive/x' })).toBe(false)
+  })
+
+  it('un documento que no es espejo lo cierra quien lo carga, no esto', () => {
+    expect(documentoCompartidoQuedaResuelto({}, true, { drive_url: 'https://drive/x' })).toBe(false)
+    // Copia heredada de solo lectura (source sin el flag): tampoco es asunto de aquí.
+    expect(documentoCompartidoQuedaResuelto({ source_bloque_slug: 'concepto_upme' }, true, { drive_url: 'u' }))
+      .toBe(false)
+    // Flag sin slug: no hay origen declarado, así que no hay nada que dar por resuelto.
+    expect(documentoCompartidoQuedaResuelto({ compartido_con_origen: true }, true, { drive_url: 'u' })).toBe(false)
+  })
+
+  it('un `drive_url` que no es cadena no cuenta como archivo', () => {
+    expect(documentoCompartidoQuedaResuelto(espejo, true, { drive_url: 1 })).toBe(false)
+    expect(documentoCompartidoQuedaResuelto(espejo, true, { drive_url: true })).toBe(false)
   })
 })
