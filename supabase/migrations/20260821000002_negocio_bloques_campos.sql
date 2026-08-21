@@ -53,3 +53,10 @@ $$;
 
 comment on function negocio_bloques_campos(uuid[], text[], text[]) is
   'Campos de bloques recortados para la tarjeta de /negocios. Evita traer el jsonb completo (medido en soena: 1.153 kB -> ~149 kB).';
+
+-- Toda funcion nace ejecutable por PUBLIC, y `anon` la alcanza por ahi. La RLS
+-- de `negocio_bloques` seguiria filtrando las filas, pero no hay razon para
+-- dejar la puerta abierta: esto lo llama la lista de negocios con la sesion del
+-- usuario, nunca un cliente sin autenticar.
+revoke execute on function public.negocio_bloques_campos(uuid[], text[], text[]) from public, anon;
+grant execute on function public.negocio_bloques_campos(uuid[], text[], text[]) to authenticated;
