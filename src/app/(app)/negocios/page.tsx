@@ -10,6 +10,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
 import { getRolePermissions, puedeMarcarCondicionNegocio } from '@/lib/roles'
 import NegociosClient from './negocios-client'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { SearchParams } from '@/lib/filtros/url-estado'
 
 type StageFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro'
@@ -80,6 +81,7 @@ export default async function NegociosPage({
         canAsignar={canAsignar}
         canMarcar={canMarcar}
         searchParams={sp}
+        hoyISO={todayBogotaISO()}
       />
     </div>
   )

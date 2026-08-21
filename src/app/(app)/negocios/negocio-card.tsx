@@ -380,12 +380,22 @@ export default function NegocioCard({
   staffList = [],
   canAsignar = false,
   canMarcar = false,
+  mostrarLlegada = false,
 }: {
   negocio: NegocioResumen
   staffList?: StaffAsignable[]
   canAsignar?: boolean
   /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */
   canMarcar?: boolean
+  /**
+   * Pinta desde cuándo el negocio está en su etapa.
+   *
+   * Lo pide la lista SOLO cuando NO está agrupada por día de llegada: con los
+   * encabezados de grupo el dato ya está arriba y repetirlo en cada tarjeta es
+   * ruido. Cuando la lista se ordena por atraso, en cambio, la fecha no aparece
+   * en ningún otro lado.
+   */
+  mostrarLlegada?: boolean
 }) {
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
 
@@ -481,6 +491,14 @@ export default function NegocioCard({
                   <span className="truncate uppercase">{negocio.etapa_nombre}</span>
                 </span>
               </>
+            )}
+            {mostrarLlegada && !isCerrado && negocio.etapa_cambiada_at && (
+              <span
+                className="text-[10px] text-[#6B7280]"
+                title={`Está en esta etapa desde el ${formatDateShort(negocio.etapa_cambiada_at)}`}
+              >
+                aquí desde {formatDateShort(negocio.etapa_cambiada_at)}
+              </span>
             )}
             {negocio.pausado && !isCerrado && (
               <span className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]">
