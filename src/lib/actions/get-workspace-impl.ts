@@ -56,13 +56,25 @@ async function getWorkspaceImpl() {
         .eq('slug', devSlug)
         .single()
       if (ws?.id) {
+        // El staff se RESUELVE, no se da por perdido. Antes esta rama devolvia
+        // `staffId: null` fijo, asi que todo lo escrito con el override quedaba sin
+        // autor: el historial mostraba el cambio pero no quien lo hizo, que es
+        // justo lo que lo vuelve inservible. Si el usuario no es staff de ese
+        // workspace sigue siendo null, pero por no existir, no por omision.
+        const { data: devStaff } = await svc
+          .from('staff')
+          .select('id')
+          .eq('profile_id', user.id)
+          .eq('workspace_id', ws.id)
+          .maybeSingle()
+        const devStaffId = (devStaff?.id as string | null) ?? null
         return {
           supabase: svc,
           workspaceId: ws.id as string,
           userId: user.id,
           role: 'owner' as string,
-          staffId: null,
-          areas: [] as string[],
+          staffId: devStaffId,
+          areas: await resolverAreas(svc, devStaffId),
           impersonating: false,
           realRole: 'owner' as string | null,
           error: null,
@@ -145,11 +157,14 @@ async function getWorkspaceImpl() {
       .eq('workspace_id', profile.workspace_id)
       .maybeSingle()
     if (target) {
+      // Sin filtrar `is_active`: un staff inactivo sigue identificando a una
+      // persona, y para "Ver como" lo que importa es de quien es la accion. Con
+      // el filtro, mirar como alguien dado de baja devolvia `staffId = null` y
+      // todo lo que se tocara quedaba anonimo.
       const { data: tStaff } = await supabase
         .from('staff')
         .select('id')
         .eq('profile_id', target.id)
-        .eq('is_active', true)
         .maybeSingle()
       const tStaffId = (tStaff?.id as string | null) ?? null
       return {
