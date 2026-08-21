@@ -130,6 +130,43 @@ tarifa de IVA.
 ⚠️ 6 es el máximo que Siigo documenta para `items[].price`. Subirlo hace que la API
 rechace el campo.
 
+### Los campos editables antes de emitir (2026-08-21)
+
+El principio estaba escrito desde el 2026-08-06 ("ONE sugiere, la financiera edita")
+pero la pantalla de revisión no lo cumplía: mostraba la prefactura de solo lectura.
+Diana lo pidió con dos casos concretos en la reunión del 2026-08-19.
+
+Editable en `/conciliacion` → "Por facturar" → "Revisar y facturar":
+
+| Campo | A dónde va | Por qué importa |
+|-------|-----------|-----------------|
+| Correo | `contactos.email` + `contacts[0].email` del tercero en Siigo | Es la dirección a la que Siigo MANDA la factura electrónica. Mal puesta, la factura sale bien y no llega a nadie |
+| Teléfono | `contactos.telefono` + `phones[]` del tercero | Dato del tercero ante la DIAN |
+| Concepto | `items[0].code` | Es lo que el cliente lee y lo que queda ante la DIAN |
+
+Tres decisiones que van con esto:
+
+1. **El correo y el teléfono se escriben en el CONTACTO de ONE**, no en una copia
+   pegada al negocio: es el mismo dato que el comercial mantiene vivo, y una
+   corrección hecha aquí tiene que valer para el siguiente documento del mismo
+   cliente. Medido el 2026-08-21: los 288 negocios de SOENA tienen contacto, así
+   que no hay caso que se quede sin dónde escribir.
+2. **Si el tercero ya existe en Siigo, se le empuja el cambio con un PUT** a
+   `/v1/customers/{id}` antes de emitir. Sin eso el correo corregido se queda en
+   ONE y la factura sigue saliendo al correo viejo, que es exactamente el problema
+   que se estaba resolviendo. Va ANTES de `asegurarClienteSiigo`, no después.
+3. **Un campo vacío es "no lo toques", nunca "bórralo".** Esta pantalla existe para
+   completar datos antes de facturar; no es el lugar desde donde se vacía el CRM.
+
+El concepto se valida contra el catálogo (`GET /v1/products`) en el servidor antes
+de emitir: la pantalla solo ofrece códigos del catálogo, pero una acción de servidor
+es una puerta pública. Si el catálogo no responde, NO se emite con concepto cambiado.
+
+**Lo que NO es editable: el cliente y su identificación.** Salen del RUT del
+expediente, y cambiarlos es facturarle a otro tercero — una decisión distinta, con
+su propio soporte documental (el RUT del otro). Diana la pidió en la misma reunión
+("eso me pasa demasiado") y queda pendiente como frente aparte.
+
 ### Idempotencia
 
 Header **`Idempotency-Key`**, alfanumérico sin caracteres especiales ni espacios,

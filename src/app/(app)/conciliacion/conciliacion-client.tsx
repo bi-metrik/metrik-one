@@ -1014,6 +1014,7 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
               caso={c}
               descarteAbierto={cola.descarte_abierto}
               siigoConfigurado={cola.siigo_configurado}
+              productos={cola.productos}
               onCambio={() => router.refresh()}
             />
           ))}
@@ -1024,8 +1025,14 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
 }
 
 function FilaPorFacturar({
-  caso, descarteAbierto, siigoConfigurado, onCambio,
-}: { caso: CasoPorFacturar; descarteAbierto: boolean; siigoConfigurado: boolean; onCambio: () => void }) {
+  caso, descarteAbierto, siigoConfigurado, productos, onCambio,
+}: {
+  caso: CasoPorFacturar
+  descarteAbierto: boolean
+  siigoConfigurado: boolean
+  productos: ColaFacturacion['productos']
+  onCambio: () => void
+}) {
   const [isPending, startTransition] = useTransition()
   const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
@@ -1036,10 +1043,29 @@ function FilaPorFacturar({
   const [confirmando, setConfirmando] = useState(false)
   const [duplicados, setDuplicados] = useState<FacturaEnSiigo[] | null>(null)
   const [justificacion, setJustificacion] = useState('')
+  // Los datos que la financiera puede corregir antes de emitir. Arrancan con lo
+  // que ONE tiene: la pantalla no es un formulario en blanco, es una revisión.
+  const [email, setEmail] = useState(caso.email ?? '')
+  const [telefono, setTelefono] = useState(caso.telefono ?? '')
+  const [productoCode, setProductoCode] = useState(caso.concepto.code)
+
+  /**
+   * Solo viaja lo que de verdad cambió. Mandar el valor original en cada emisión
+   * haría que abrir la pantalla reescribiera el contacto en Siigo sin que nadie lo
+   * hubiera pedido.
+   */
+  const datosEditados = () => ({
+    ...(email.trim() && email.trim() !== (caso.email ?? '') ? { email: email.trim() } : {}),
+    ...(telefono.trim() && telefono.trim() !== (caso.telefono ?? '') ? { telefono: telefono.trim() } : {}),
+    ...(productoCode && productoCode !== caso.concepto.code ? { productoCode } : {}),
+  })
 
   const emitir = (justificacionDuplicado?: string) => {
     startTransition(async () => {
-      const r = await emitirFacturaDeNegocio(caso.negocio_id, { justificacionDuplicado })
+      const r = await emitirFacturaDeNegocio(caso.negocio_id, {
+        justificacionDuplicado,
+        datos: datosEditados(),
+      })
       if (r.duplicados) { setDuplicados(r.duplicados); setConfirmando(false); return }
       if (!r.ok) { toast.error(r.error ?? 'No se pudo emitir'); return }
       // Si el PDF no quedó en el negocio hay que decirlo: la factura salió igual,
@@ -1168,13 +1194,11 @@ function FilaPorFacturar({
 
               <dl className="mt-2 space-y-1 text-[12px]">
                 {[
+                  // Cliente e identificación NO se editan aquí: salen del RUT del
+                  // expediente y cambiarlos es facturarle a otro, que es una
+                  // decisión distinta y con su propio soporte documental.
                   ['Cliente', caso.cliente ?? '—'],
                   ['Identificación', caso.identificacion ?? '—'],
-                  // ⚠️ Este renglón estaba escrito a mano ("Incentivos tributarios
-                  // UPME"): la pantalla afirmaba un concepto que podía no ser el
-                  // que se emitía, y habría seguido diciéndolo si alguien
-                  // renombraba el producto en Siigo. Sale del catálogo.
-                  ['Concepto', caso.concepto.nombre ?? `código ${caso.concepto.code}`],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-3">
                     <dt style={{ color: '#6B7280' }}>{k}</dt>
@@ -1197,6 +1221,83 @@ function FilaPorFacturar({
                   <dd style={{ color: '#1A1A1A' }}>{caso.honorario == null ? '—' : fmtCOP(caso.honorario)}</dd>
                 </div>
               </dl>
+
+              {/* ── Lo que la financiera puede corregir antes de emitir ──────────
+                  Es el principio de siempre (ONE sugiere, la financiera edita) en
+                  el único momento en que todavía aplica: después de radicar, una
+                  factura electrónica no se corrige, se anula.
+
+                  ⚠️ El correo NO es cosmético: es la dirección a la que Siigo manda
+                  la factura. Diana lo pidió con un caso concreto (2026-08-19) —
+                  cuando está mal, la factura sale bien y no llega a nadie. */}
+              <div className="mt-3 space-y-1.5 border-t pt-2" style={{ borderColor: '#A7F3D0' }}>
+                <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#047857' }}>
+                  Datos editables
+                </div>
+
+                <label className="block">
+                  <span className="text-[11px]" style={{ color: '#6B7280' }}>Concepto</span>
+                  {/* Sin catálogo no se ofrece cambiarlo: una lista inventada haría
+                      facturar bajo un código que Siigo puede no tener. */}
+                  {productos.length > 0 ? (
+                    <select
+                      value={productoCode}
+                      onChange={e => setProductoCode(e.target.value)}
+                      disabled={isPending}
+                      className="mt-0.5 w-full rounded-md border bg-white px-2 py-1 text-[12px] focus:outline-none disabled:opacity-50"
+                      style={{ borderColor: '#A7F3D0', color: '#1A1A1A' }}
+                    >
+                      {productos.some(pr => pr.code === caso.concepto.code) ? null : (
+                        <option value={caso.concepto.code}>
+                          {caso.concepto.nombre ?? `código ${caso.concepto.code}`}
+                        </option>
+                      )}
+                      {productos.map(pr => (
+                        <option key={pr.code} value={pr.code}>{pr.nombre}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="mt-0.5 text-[12px]" style={{ color: '#1A1A1A' }}>
+                      {caso.concepto.nombre ?? `código ${caso.concepto.code}`}
+                    </div>
+                  )}
+                </label>
+
+                <label className="block">
+                  <span className="text-[11px]" style={{ color: '#6B7280' }}>
+                    Correo (a este le llega la factura)
+                  </span>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    disabled={isPending}
+                    placeholder="Sin correo registrado"
+                    className="mt-0.5 w-full rounded-md border bg-white px-2 py-1 text-[12px] focus:outline-none disabled:opacity-50"
+                    style={{ borderColor: '#A7F3D0', color: '#1A1A1A' }}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-[11px]" style={{ color: '#6B7280' }}>Teléfono</span>
+                  <input
+                    type="tel"
+                    value={telefono}
+                    onChange={e => setTelefono(e.target.value)}
+                    disabled={isPending}
+                    placeholder="Sin teléfono registrado"
+                    className="mt-0.5 w-full rounded-md border bg-white px-2 py-1 text-[12px] focus:outline-none disabled:opacity-50"
+                    style={{ borderColor: '#A7F3D0', color: '#1A1A1A' }}
+                  />
+                </label>
+
+                {(email.trim() !== (caso.email ?? '') || telefono.trim() !== (caso.telefono ?? '')) && (
+                  <p className="text-[10.5px]" style={{ color: '#6B7280' }}>
+                    El correo y el teléfono quedan corregidos también en el contacto del negocio,
+                    no solo en esta factura.
+                  </p>
+                )}
+              </div>
 
               {/* Siigo ya tiene una factura de este servicio para el cliente */}
               {duplicados && (
@@ -1264,6 +1365,7 @@ function FilaPorFacturar({
                 <button
                   onClick={() => {
                     setRevisando(false); setConfirmando(false); setDuplicados(null); setJustificacion('')
+                    setEmail(caso.email ?? ''); setTelefono(caso.telefono ?? ''); setProductoCode(caso.concepto.code)
                   }}
                   disabled={isPending}
                   className="rounded-md border px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"

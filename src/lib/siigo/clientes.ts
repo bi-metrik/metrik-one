@@ -16,7 +16,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { siigoRequest, SiigoError } from './client'
-import { borradorCliente, type BorradorCliente, type RutExtraido } from './mapeo'
+import { borradorCliente, emailPlausible, type BorradorCliente, type RutExtraido } from './mapeo'
 
 /** Config opt-in por línea: `lineas_negocio.config_extra.siigo`. */
 export interface SiigoLineaConfig {
@@ -296,4 +296,90 @@ async function anotar(
     contenido,
   })
   if (error) console.error('[siigo] no se pudo anotar en activity_log:', error.message)
+}
+
+/** Datos que la financiera puede corregir en la pantalla de revisión. */
+export interface ContactoEditado {
+  email?: string
+  telefono?: string
+}
+
+/**
+ * Corrige el email y el teléfono del cliente ANTES de emitir la factura.
+ *
+ * Diana lo pidió con un caso concreto: el correo que ONE tiene guardado es el que
+ * Siigo usa para mandar la factura electrónica, y si está mal la factura sale bien
+ * y no llega a nadie. Corregirlo después no sirve: la factura ya se fue.
+ *
+ * Se escribe en el CONTACTO de ONE, no en una copia pegada al negocio. Es el mismo
+ * dato que el comercial mantiene vivo, y una corrección hecha aquí tiene que valer
+ * también para el siguiente documento del mismo cliente. (Medido el 2026-08-21: los
+ * 288 negocios de SOENA tienen contacto, así que no hay caso que se quede sin dónde
+ * escribir; si apareciera uno, se dice y no se emite.)
+ *
+ * Un campo vacío es "no lo toques", nunca "bórralo": esta pantalla existe para
+ * completar datos antes de facturar, y no es el lugar desde donde se vacía el CRM.
+ *
+ * Si el tercero YA existe en Siigo hay que empujarle el cambio: allá el correo vive
+ * en su propia copia, y sin el PUT la factura seguiría saliendo al correo viejo.
+ */
+export async function corregirContactoParaFactura(
+  workspaceId: string,
+  negocioId: string,
+  datos: ContactoEditado,
+  maxEspera429Ms = 0,
+): Promise<{ ok: true; cambiado: boolean } | { ok: false; mensaje: string }> {
+  const email = (datos.email ?? '').trim()
+  const telefono = (datos.telefono ?? '').trim()
+  if (!email && !telefono) return { ok: true, cambiado: false }
+  if (email && !emailPlausible(email)) {
+    return { ok: false, mensaje: `"${email}" no parece un correo válido` }
+  }
+
+  const svc = createServiceClient()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negRaw, error: errNeg } = await (svc as any)
+    .from('negocios')
+    .select('id, contacto_id, metadata')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  if (errNeg || !negRaw) return { ok: false, mensaje: 'Negocio no encontrado' }
+  const negocio = negRaw as NegocioParaCliente
+
+  if (!negocio.contacto_id) {
+    return { ok: false, mensaje: 'El negocio no tiene contacto: corrige el dato desde el negocio antes de facturar' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errCon } = await (svc as any)
+    .from('contactos')
+    .update({ ...(email ? { email } : {}), ...(telefono ? { telefono } : {}) })
+    .eq('id', negocio.contacto_id)
+    .eq('workspace_id', workspaceId)
+  if (errCon) return { ok: false, mensaje: `No se pudo guardar el contacto: ${errCon.message}` }
+
+  const marca = (negocio.metadata?.siigo_cliente ?? null) as MarcaCliente | null
+  if (!marca?.siigo_id) {
+    // El tercero todavía no existe en Siigo: lo creará `asegurarClienteSiigo`
+    // enseguida, y ya lo leerá corregido.
+    return { ok: true, cambiado: true }
+  }
+
+  try {
+    const { borrador } = await borradorDelNegocio(negocioId, negocio.contacto_id)
+    if (borrador.faltantes.length > 0) {
+      return { ok: false, mensaje: `Falta ${borrador.faltantes.join(', ')} para actualizar el tercero` }
+    }
+    await siigoRequest(workspaceId, `/v1/customers/${marca.siigo_id}`, {
+      method: 'PUT',
+      body: borrador.payload satisfies BorradorCliente,
+      maxEspera429Ms,
+    })
+    return { ok: true, cambiado: true }
+  } catch (e) {
+    const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
+    return { ok: false, mensaje: `El dato quedó en ONE, pero Siigo no aceptó el cambio del tercero: ${mensaje}` }
+  }
 }

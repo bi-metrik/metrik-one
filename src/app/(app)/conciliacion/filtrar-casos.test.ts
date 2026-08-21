@@ -9,7 +9,7 @@ import type { CasoPorFacturar } from '@/lib/actions/facturacion-actions'
  */
 const caso = (p: Partial<CasoPorFacturar>): CasoPorFacturar => ({
   negocio_id: 'x', codigo: null, nombre: null, etapa: null, etapa_numero: null,
-  identificacion: null, cliente: null, telefono: null, honorario: null, valor_upme: null,
+  identificacion: null, cliente: null, telefono: null, email: null, honorario: null, valor_upme: null,
   faltan_factura: [], faltan_cliente: [], faltan_recibo: [],
   ya_facturado: false, factura_numero: null, recibo_numero: null,
   concepto: { code: '22', nombre: null, servicio: null, porDefecto: true },

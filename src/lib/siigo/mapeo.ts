@@ -80,6 +80,19 @@ export interface Borrador<T> {
 const limpiar = (s: string | null | undefined): string => (s ?? '').trim()
 
 /**
+ * ¿Esto se parece a un correo? Es la única validación que ONE hace sobre el email
+ * que la financiera corrige antes de facturar.
+ *
+ * Deliberadamente laxa: un correo válido raro existe, y rechazarlo dejaría un caso
+ * sin facturar por una regex. Lo que sí ataja es el dedo: un espacio, una arroba
+ * suelta o un dominio sin punto, que es como se escriben los correos a los que la
+ * factura electrónica nunca llega. Quien decide de verdad es el servidor de correo.
+ */
+export function emailPlausible(valor: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((valor ?? '').trim())
+}
+
+/**
  * Tipo de documento de Siigo. `13` cédula de ciudadanía, `31` NIT.
  * Se decide por el tipo de persona, no por el largo del número: un NIT de
  * persona natural existe y confundirlos cambia el documento fiscal.

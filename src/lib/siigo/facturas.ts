@@ -16,7 +16,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './client'
 import { borradorFactura, type BorradorFactura } from './mapeo'
 import { resolverConceptoDeNegocio } from './concepto-negocio'
-import { asegurarClienteSiigo } from './clientes'
+import { asegurarClienteSiigo, corregirContactoParaFactura } from './clientes'
 import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
@@ -91,6 +91,24 @@ export interface OpcionesEmision {
    * producto para el cliente. Sin ella, el duplicado BLOQUEA.
    */
   justificacionDuplicado?: string
+  /**
+   * Lo que la financiera corrigió en la pantalla de revisión antes de darle a
+   * facturar. Es la aplicación del principio de siempre (ONE sugiere, la
+   * financiera edita) al único momento en que todavía se puede: después de emitir,
+   * una factura electrónica no se corrige, se anula.
+   *
+   * `email` y `telefono` se guardan en el contacto de ONE y se empujan al tercero
+   * de Siigo; `productoCode` cambia el CONCEPTO que el cliente va a leer.
+   */
+  datos?: {
+    email?: string
+    telefono?: string
+    /**
+     * Producto del catálogo de Siigo. Quien llama tiene que haberlo validado
+     * contra el catálogo: aquí ya no se distingue un código bueno de un typo.
+     */
+    productoCode?: string
+  }
 }
 
 export type ResultadoEmision =
@@ -142,6 +160,12 @@ export interface MarcaFactura {
   por: string | null
   /** Presente solo si se emitió pasando por encima de un duplicado. */
   justificacion_duplicado?: string
+  /**
+   * Producto de Siigo con el que salió el concepto. Se guarda siempre, no solo
+   * cuando lo cambiaron a mano: sin él, saber qué decía una factura vieja obliga
+   * a preguntarle a Siigo.
+   */
+  producto_code?: string
 }
 
 interface DatosNegocio {
@@ -193,6 +217,16 @@ export async function emitirFacturaNegocio(
     return { ok: false, motivo: 'saldo_pendiente', faltante }
   }
 
+  // ── 2.bis. Las correcciones de la pantalla ────────────────────────────────
+  // Van ANTES de asegurar el tercero, y no después: si el tercero se crea primero,
+  // nace con el correo viejo y la factura se le manda ahí mismo. Si esto falla se
+  // corta aquí, con la factura todavía sin emitir, que es el único momento en que
+  // el error todavía se puede arreglar.
+  const correccion = await corregirContactoParaFactura(
+    workspaceId, negocioId, opciones.datos ?? {}, ESPERA_429_EMISION_MS,
+  )
+  if (!correccion.ok) return { ok: false, motivo: 'error', mensaje: correccion.mensaje }
+
   // ── 3. El cliente tiene que existir (y con él, sus datos completos) ───────
   const cliente = await asegurarClienteSiigo(workspaceId, negocioId, 'manual', ESPERA_429_EMISION_MS)
   if (cliente.estado === 'incompleto') return { ok: false, motivo: 'faltan_datos', faltantes: cliente.faltantes }
@@ -208,6 +242,10 @@ export async function emitirFacturaNegocio(
     // la fila y alguien confirma, el servicio contratado pudo corregirse, y la
     // factura tiene que decir lo que el negocio dice hoy.
     const concepto = await resolverConceptoDeNegocio(svc, negocioId, negocio.linea_id, cfg.productoCode)
+    // Si la financiera escogió otro producto en la pantalla, ese gana: lo que ONE
+    // deduce del servicio contratado es una sugerencia, y hay casos que se facturan
+    // bajo otro concepto. Quien llama ya lo validó contra el catálogo de Siigo.
+    const productoCode = opciones.datos?.productoCode?.trim() || concepto.code
 
     // ── 4. ¿Siigo ya tiene una factura de este producto para el cliente? ────
     // Es la barrera que ONE no puede resolver mirándose a sí mismo. Medido el
@@ -217,7 +255,7 @@ export async function emitirFacturaNegocio(
     // Se pregunta por el MISMO producto que se va a emitir: con conceptos por
     // servicio, buscar duplicados del producto base dejaría pasar una segunda
     // factura del concepto real.
-    const existentes = await facturasDelClienteEnSiigo(workspaceId, identificacion, concepto.code, ESPERA_429_EMISION_MS)
+    const existentes = await facturasDelClienteEnSiigo(workspaceId, identificacion, productoCode, ESPERA_429_EMISION_MS)
     const justificacion = opciones.justificacionDuplicado?.trim()
     if (existentes.length > 0 && !justificacion) {
       return { ok: false, motivo: 'duplicado_en_siigo', existentes }
@@ -230,7 +268,7 @@ export async function emitirFacturaNegocio(
       {
         emitir: opciones.emitir,
         enviarCorreo: opciones.enviarCorreo === true,
-        productoCode: concepto.code,
+        productoCode,
       },
     )
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
@@ -279,6 +317,7 @@ export async function emitirFacturaNegocio(
       emitida: opciones.emitir,
       at: new Date().toISOString(),
       por: staffNombre,
+      producto_code: productoCode,
       ...(justificacion ? { justificacion_duplicado: justificacion } : {}),
     }
 

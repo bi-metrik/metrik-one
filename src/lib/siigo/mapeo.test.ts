@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { baseYTotalGravado, borradorFactura } from './mapeo'
+import { baseYTotalGravado, borradorFactura, emailPlausible } from './mapeo'
 import type { SiigoConfig } from './client'
 
 const CFG: SiigoConfig = {
@@ -75,5 +75,30 @@ describe('borradorFactura', () => {
   it('el concepto del catálogo gana sobre el producto por defecto', () => {
     const { payload } = borradorFactura(CFG, '900123456', 318000, FECHA, IVA, { productoCode: '11' })
     expect(payload.items[0].code).toBe('11')
+  })
+})
+
+/**
+ * El correo que se corrige antes de facturar es el que Siigo usa para MANDAR la
+ * factura electrónica. Los casos malos son los que de verdad aparecen escritos a
+ * mano; los buenos incluyen formas raras pero válidas, que la validación no puede
+ * rechazar porque dejarían un caso sin facturar.
+ */
+describe('emailPlausible', () => {
+  it('rechaza lo que nunca va a recibir un correo', () => {
+    for (const malo of ['', '   ', 'diana', 'diana@', '@soena.co', 'diana@soena', 'di ana@soena.co']) {
+      expect(emailPlausible(malo)).toBe(false)
+    }
+  })
+
+  it('acepta lo que sí es un correo, incluidas las formas raras', () => {
+    for (const bueno of [
+      'diana@soena.co',
+      'diana.parra+facturas@soena.com.co',
+      '  diana@soena.co  ',
+      "o'brien@sub.dominio.gov.co",
+    ]) {
+      expect(emailPlausible(bueno)).toBe(true)
+    }
   })
 })
