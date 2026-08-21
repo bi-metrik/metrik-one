@@ -8,6 +8,7 @@ import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import { segmentarNegocios } from '@/lib/negocios/segmentador'
+import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-llegada'
 import { useEstadoUrl } from '@/hooks/use-estado-url'
 import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import type { NegocioResumen } from './negocio-v2-actions'
@@ -47,11 +48,17 @@ type FiltrosLista = {
 /** Valor del filtro para los negocios que no tienen origen registrado. */
 const SIN_ORIGEN = 'sin_origen'
 
-/** Orden de la lista. Default: el del servidor (más reciente primero). */
+/**
+ * Orden de la lista. Default: por llegada a la etapa, agrupado por dia.
+ *
+ * Antes 'reciente' era `created_at desc` — cuando nacio el negocio. Dentro de una
+ * etapa esa es la pregunta equivocada: lo que se necesita ver es que cayo aqui hoy
+ * y que lleva parado, no quien es el cliente mas nuevo.
+ */
 type SortKey = 'reciente' | 'atraso'
 const SORT_VALIDOS: readonly SortKey[] = ['reciente', 'atraso']
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'reciente', label: 'Mas reciente' },
+  { value: 'reciente', label: 'Llegada reciente' },
   { value: 'atraso', label: 'Mas atrasado' },
 ]
 
@@ -150,6 +157,7 @@ export default function NegociosClient({
   canAsignar = false,
   canMarcar = false,
   searchParams,
+  hoyISO,
 }: {
   negocios: NegocioResumen[]
   cerrados: NegocioResumen[]
@@ -164,6 +172,12 @@ export default function NegociosClient({
   canMarcar?: boolean
   /** Parámetros de la URL ya resueltos por el server component: filtros iniciales. */
   searchParams?: SearchParams
+  /**
+   * Hoy en Bogotá ('YYYY-MM-DD'), resuelto en el servidor. No se calcula aquí:
+   * leer el reloj en render rompe la pureza que exige react-hooks, y el servidor
+   * (UTC) y el navegador darían días distintos después de las 19:00 locales.
+   */
+  hoyISO: string
 }) {
   // Segmentador jerárquico: fase (stage) → etapa (numero dentro de la fase).
   //
@@ -242,7 +256,8 @@ export default function NegociosClient({
   const currentFiltradoSinOrden = segmentacion.lista
   const etapaCount = segmentacion.contarEtapa
 
-  // Orden. 'reciente' respeta el orden del servidor (created_at desc).
+  // Orden. 'reciente' se resuelve al agrupar por día de llegada (más abajo), así
+  // que aquí solo hay que respetar el orden del servidor.
   // 'atraso' pone primero al más atrasado; los que no tienen SLA (o van a
   // tiempo) quedan al final, sin reordenarse entre sí.
   const currentFiltrado = useMemo(() => {
@@ -252,6 +267,15 @@ export default function NegociosClient({
     const exceso = (n: NegocioResumen) => n.sla_exceso_horas ?? -1e9
     return [...currentFiltradoSinOrden].sort((a, b) => exceso(b) - exceso(a))
   }, [currentFiltradoSinOrden, sortBy])
+
+  // La lista se parte por día de llegada a la etapa SOLO cuando ese es el orden
+  // vigente. Con 'atraso' mandan los días de retraso, y agrupar por fecha pelearía
+  // con ese orden; en 'cerrados' la etapa actual ya no significa nada.
+  const agrupada = sortBy === 'reciente' && fase !== 'cerrados'
+  const grupos = useMemo(
+    () => (agrupada ? agruparPorLlegada(currentFiltrado, hoyISO) : []),
+    [agrupada, currentFiltrado, hoyISO],
+  )
 
   // Negocios con todos los filtros activos EXCEPTO fase/etapa (responsable + seccional + búsqueda).
   // Base para los contadores de fase: refleja el filtro de responsable, seccional y búsqueda libre
@@ -553,6 +577,34 @@ export default function NegociosClient({
             )}
           </div>
         )
+      ) : agrupada ? (
+        <div className="space-y-5">
+          {grupos.map((g) => (
+            <section key={g.dia || 'sin-fecha'} className="space-y-2">
+              {/* El encabezado lleva el conteo: al mirar una etapa, "cuántos
+                  cayeron hoy" es la pregunta, y obliga a contar tarjetas si no está. */}
+              <div className="flex items-baseline gap-2 px-0.5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">
+                  {g.etiqueta}
+                </h3>
+                <span className="text-[11px] text-[#6B7280]">
+                  {g.items.length} caso{g.items.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {g.items.map((n) => (
+                  <NegocioCard
+                    key={n.id}
+                    negocio={n}
+                    staffList={staffList}
+                    canAsignar={canAsignar}
+                    canMarcar={canMarcar}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       ) : (
         <div className="space-y-3">
           {currentFiltrado.map((n) => (
@@ -562,6 +614,7 @@ export default function NegociosClient({
               staffList={staffList}
               canAsignar={canAsignar}
               canMarcar={canMarcar}
+              mostrarLlegada
             />
           ))}
         </div>
