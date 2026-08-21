@@ -36,6 +36,13 @@ async function registrarCambioSegmento(
 ) {
   if ((anterior ?? null) === (nuevo ?? null)) return
 
+  // Un cambio sin autor es medio registro: dice que paso pero no de quien fue, que
+  // es lo unico que se pidio. Se escribe igual (perder el evento seria peor), pero
+  // queda ruidoso en los logs para no descubrirlo despues mirando la pantalla.
+  if (!staffId) {
+    console.error('[registrarCambioSegmento] cambio de segmento SIN autor', { contactoId, workspaceId })
+  }
+
   const { error } = await supabase.from('activity_log').insert({
     workspace_id: workspaceId,
     entidad_tipo: 'contacto',

@@ -478,6 +478,27 @@ function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id
 
 // ── Change entry (system/automatic) ──
 
+/**
+ * Quien hizo el cambio. Nunca se omite.
+ *
+ * Antes el autor se renderizaba condicionado (`autorName && ...`): si la fila
+ * venia sin autor, la linea simplemente arrancaba por el verbo y el evento se
+ * leia como si nadie lo hubiera hecho. Un historial que no dice quien no sirve
+ * para lo unico que se pide de el, y peor: no se distingue de uno que si lo dice.
+ * Decirlo en voz alta tambien hace visible el defecto cuando lo hay.
+ */
+function Autor({ nombre }: { nombre: string | null | undefined }) {
+  if (nombre) return <span className="font-medium text-foreground">{nombre}</span>
+  return (
+    <span
+      className="italic text-muted-foreground/70"
+      title="El cambio quedo sin autor. Suele pasar cuando lo escribio un proceso automatico."
+    >
+      Sin autor registrado
+    </span>
+  )
+}
+
 function ChangeEntry({ entry }: { entry: ActivityEntry }) {
   const autorName = entry.autor?.full_name
   const timestamp = entry.created_at ? timeAgo(entry.created_at) : ''
@@ -488,7 +509,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <ArrowRight className="h-3.5 w-3.5 text-primary/70 shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span>avanzo a</span>
           <span className="font-medium text-foreground">{entry.valor_nuevo ?? entry.contenido}</span>
           {entry.contenido && (
@@ -527,7 +548,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <Icon className={`h-3.5 w-3.5 shrink-0 ${iconClass}`} />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span className={`font-medium ${labelClass}`}>
             {displayText}
           </span>
@@ -546,7 +567,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span>completo</span>
           <span className="font-medium text-foreground">{entry.contenido ?? entry.valor_nuevo ?? 'bloque'}</span>
           <span className="text-[10px]">{timestamp}</span>
@@ -562,7 +583,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <Shield className={`h-3.5 w-3.5 shrink-0 ${aprobado ? 'text-primary' : 'text-red-500'}`} />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span className={aprobado ? 'text-primary' : 'text-red-500'}>
             {aprobado ? 'aprobo' : 'rechazo'}
           </span>
@@ -579,7 +600,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <Banknote className="h-3.5 w-3.5 text-primary shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span>cambio precio</span>
           <span className="inline-flex items-center gap-1">
             <span className="rounded bg-muted px-1 py-0.5 text-[10px]">{formatCOP(entry.valor_anterior)}</span>
@@ -598,7 +619,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <Banknote className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span>confirmo pago</span>
           {entry.valor_nuevo && (
             <span className="font-medium text-emerald-600">{formatCOP(entry.valor_nuevo)}</span>
@@ -617,7 +638,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <CheckSquare className={`h-3.5 w-3.5 shrink-0 ${checked ? 'text-primary' : 'text-muted-foreground/50'}`} />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span>{checked ? 'completo' : 'desmarco'}</span>
           <span className="font-medium text-foreground">{entry.contenido ?? 'item'}</span>
           <span className="text-[10px]">{timestamp}</span>
@@ -632,7 +653,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <FolderOpen className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span>actualizo carpeta Drive</span>
           <span className="text-[10px]">{timestamp}</span>
         </div>
@@ -646,7 +667,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
         <div className="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+          <Autor nombre={autorName} />
           <span>actualizo datos de bloque</span>
           {entry.contenido && <span className="font-medium text-foreground">{entry.contenido}</span>}
           <span className="text-[10px]">{timestamp}</span>
@@ -662,7 +683,7 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
     <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
       <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30 shrink-0" />
       <div className="flex items-center gap-1 flex-wrap min-w-0">
-        {autorName && <span className="font-medium text-foreground">{autorName}</span>}
+        <Autor nombre={autorName} />
         <span>cambio</span>
         <span className="font-medium text-foreground">{label}</span>
         <span className="inline-flex items-center gap-1">
