@@ -53,6 +53,11 @@ export interface CasoPorFacturar {
    */
   telefono: string | null
   /**
+   * Correo del contacto. Es el que Siigo usa para MANDAR la factura electrónica,
+   * así que se expone para poder revisarlo y corregirlo antes de emitir.
+   */
+  email: string | null
+  /**
    * Qué concepto sale en la factura y por qué. Se muestra ANTES de emitir: es
    * lo que el cliente va a leer y lo que queda ante la DIAN.
    */
@@ -108,6 +113,12 @@ export interface ColaFacturacion {
   descarte_abierto: boolean
   /** Hasta cuándo (para decirlo en pantalla, no para decidir: eso lo hace el servidor). */
   descarte_hasta: string
+  /**
+   * Catálogo de productos de Siigo, para poder cambiar el CONCEPTO de una factura
+   * antes de emitirla. Vacío si Siigo no responde: entonces la pantalla deja el
+   * concepto que ONE dedujo y no ofrece cambiarlo, en vez de inventar una lista.
+   */
+  productos: Array<{ code: string; nombre: string }>
   totales: { listos: number; incompletos: number; ya_facturados: number; descartados: number; valor_listo: number }
 }
 
@@ -169,7 +180,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
   }
   if (desde == null) {
-    return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
+    return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
   }
 
   // ── Negocios candidatos ──
@@ -189,7 +200,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   const candidatos = ((negocios ?? []) as Neg[])
     .filter(n => (n.etapas_negocio?.numero ?? 0) > desde!)
   if (candidatos.length === 0) {
-    return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
+    return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
   }
   const ids = candidatos.map(n => n.id)
 
@@ -305,6 +316,12 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     }
   }
 
+  // Misma fuente que los nombres: el catálogo, ordenado para que la lista de la
+  // pantalla no cambie de orden entre cargas.
+  const productos = [...nombreProducto.entries()]
+    .map(([code, nombre]) => ({ code, nombre }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+
   const cfgEval: SiigoConfig = siigoCfg ?? {
     facturaDocumentId: 0, reciboDocumentId: 0, sellerId: 0,
     productoCode: '', ivaId: 0, facturaPaymentId: 0, reciboPaymentId: 0,
@@ -348,6 +365,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       identificacion: cli.payload.identification || null,
       cliente: cli.payload.name.filter(Boolean).join(' ') || null,
       telefono: contacto.telefono,
+      email: contacto.email,
       concepto: {
         code: concepto.code,
         nombre: nombreProducto.get(concepto.code) ?? null,
@@ -393,6 +411,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       siigo_configurado,
       descarte_abierto: ventanaDescarteAbierta(),
       descarte_hasta: DESCARTE_FACTURACION_HASTA,
+      productos,
       totales: {
         listos: pendientes.filter(listo).length,
         incompletos: pendientes.filter(c => !listo(c)).length,
@@ -544,7 +563,17 @@ export interface ResultadoEmitir {
  */
 export async function emitirFacturaDeNegocio(
   negocioId: string,
-  opciones?: { emitir?: boolean; enviarCorreo?: boolean; justificacionDuplicado?: string },
+  opciones?: {
+    emitir?: boolean
+    enviarCorreo?: boolean
+    justificacionDuplicado?: string
+    /**
+     * Lo que la financiera corrigió en la pantalla de revisión. Son los ÚNICOS
+     * campos que el cliente puede mandar además del id: datos de contacto y el
+     * concepto. El valor, la identificación y el saldo se siguen resolviendo aquí.
+     */
+    datos?: { email?: string; telefono?: string; productoCode?: string }
+  },
 ): Promise<ResultadoEmitir> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { ok: false, error: ctx.error }
@@ -591,12 +620,35 @@ export async function emitirFacturaDeNegocio(
     bloqueFacturaSlug = cfgSiigo?.bloque_factura_slug
   }
 
+  // El concepto que llega de la pantalla se valida contra el CATÁLOGO antes de
+  // emitir. Un código que Siigo no conoce tumbaría la factura a mitad de camino;
+  // uno que sí conoce pero nadie escogió saldría impreso y ya no se corrige. La
+  // pantalla solo ofrece códigos del catálogo, pero una acción de servidor es una
+  // puerta pública y no puede fiarse de eso.
+  const productoCode = opciones?.datos?.productoCode?.trim()
+  if (productoCode) {
+    try {
+      const prods = await siigoRequest<{ results?: Array<{ code?: string }> }>(
+        workspaceId, '/v1/products?page_size=100', { method: 'GET' },
+      )
+      const catalogo = (prods.results ?? []).map(pr => pr.code).filter(Boolean)
+      if (!catalogo.includes(productoCode)) {
+        return { ok: false, error: `El concepto "${productoCode}" no está en el catálogo de Siigo` }
+      }
+    } catch (e) {
+      // Sin catálogo no se emite con concepto cambiado: es preferible que Diana lo
+      // reintente a facturar bajo un concepto que nadie pudo confirmar.
+      return { ok: false, error: `No se pudo verificar el concepto contra Siigo: ${(e as Error).message}` }
+    }
+  }
+
   const r = await emitirFacturaNegocio(
     workspaceId,
     negocioId,
     nombre,
     {
       bloqueFacturaSlug,
+      datos: opciones?.datos,
       // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
       // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
       // sin radicar existe para la primera prueba controlada con Diana.
