@@ -5,6 +5,54 @@ import { getRolePermissions } from '@/lib/roles'
 import { STATUS_CONTACTO } from '@/lib/catalogos/constants'
 import { revalidatePath } from 'next/cache'
 
+type SupabaseDeWorkspace = Awaited<ReturnType<typeof getWorkspace>>['supabase']
+
+/**
+ * Deja constancia de quien movio el segmento de un contacto y cuando.
+ *
+ * Vive aqui y no dentro de una sola action porque el segmento se escribe por DOS
+ * caminos —el chip del listado (`updateContactoSegmento`) y el formulario del
+ * Contacto 360 (`updateContacto`)—. Instrumentar uno solo daria un historial que
+ * miente por omision: el mismo cambio aparece o no segun desde donde se hizo. Ese
+ * doble camino ya mordio una vez, ver el comentario de `updateContactoSegmento`.
+ *
+ * Solo registra cuando el valor CAMBIA. El formulario del 360 reenvia todos los
+ * campos en cada guardado, asi que sin esta comparacion dejaria una fila por
+ * guardado aunque nadie hubiera tocado el segmento, y el historial se volveria
+ * ruido en el que no se encuentra el cambio real.
+ *
+ * Nunca tumba la escritura: el segmento ya quedo guardado cuando esto corre, y
+ * devolver error haria que la pantalla dijera que fallo algo que si ocurrio. Si el
+ * registro falla se reporta por consola y el cambio queda sin rastro, que es
+ * exactamente lo que pasaba antes de esto.
+ */
+async function registrarCambioSegmento(
+  supabase: SupabaseDeWorkspace,
+  workspaceId: string,
+  staffId: string | null,
+  contactoId: string,
+  anterior: string | null,
+  nuevo: string | null,
+) {
+  if ((anterior ?? null) === (nuevo ?? null)) return
+
+  const { error } = await supabase.from('activity_log').insert({
+    workspace_id: workspaceId,
+    entidad_tipo: 'contacto',
+    entidad_id: contactoId,
+    // 'cambio' es uno de los valores del CHECK de `tipo`. Uno que no este en la
+    // lista hace fallar el insert sin ruido.
+    tipo: 'cambio',
+    // staff.id, NO profile.id: es la FK que declara `activity_log_autor_id_fkey`.
+    autor_id: staffId,
+    campo_modificado: 'segmento',
+    valor_anterior: anterior,
+    valor_nuevo: nuevo,
+  })
+
+  if (error) console.error('[registrarCambioSegmento] no se registro el cambio:', error)
+}
+
 // ── Contactos ─────────────────────────────────────────────
 
 // Origen (primer toque) grabado en el contacto desde el webhook (custom_data.origen).
@@ -180,7 +228,7 @@ export async function createContacto(formData: FormData) {
 }
 
 export async function updateContacto(id: string, formData: FormData) {
-  const { supabase, workspaceId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const updates: Record<string, unknown> = {}
@@ -225,12 +273,38 @@ export async function updateContacto(id: string, formData: FormData) {
     }
   }
 
+  // Segmento anterior, solo si este guardado lo trae. El formulario reenvia todos
+  // los campos siempre, asi que la comparacion la hace `registrarCambioSegmento`:
+  // aqui solo se consigue el dato que esa comparacion necesita.
+  let segmentoPrevio: string | null = null
+  const tocaSegmento = updates.segmento !== undefined
+  if (tocaSegmento) {
+    const { data: previo } = await supabase
+      .from('contactos')
+      .select('segmento')
+      .eq('id', id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    segmentoPrevio = (previo as { segmento: string | null } | null)?.segmento ?? null
+  }
+
   const { error: dbError } = await supabase
     .from('contactos')
     .update(updates)
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  if (tocaSegmento) {
+    await registrarCambioSegmento(
+      supabase,
+      workspaceId,
+      staffId ?? null,
+      id,
+      segmentoPrevio,
+      (updates.segmento as string | null) ?? null,
+    )
+  }
 
   revalidatePath('/directorio/contactos')
   revalidatePath(`/directorio/contacto/${id}`)
@@ -253,8 +327,8 @@ export async function deleteContacto(id: string) {
 }
 
 export async function updateContactoSegmento(id: string, segmento: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // La validación sale del catálogo, no de una lista escrita aquí: cuando el
   // juego de valores cambió (2026-07-31) esta copia se quedó con los cuatro
@@ -263,12 +337,29 @@ export async function updateContactoSegmento(id: string, segmento: string) {
   const valid = STATUS_CONTACTO.map(s => s.value) as readonly string[]
   if (!valid.includes(segmento)) return { success: false, error: 'Status invalido' }
 
+  // El valor anterior se lee ANTES de escribir: es la mitad del registro que el
+  // historial necesita ("de que a que"), y despues del update ya no existe.
+  const { data: previo } = await supabase
+    .from('contactos')
+    .select('segmento')
+    .eq('id', id)
+    .maybeSingle()
+
   const { error: dbError } = await supabase
     .from('contactos')
     .update({ segmento })
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  await registrarCambioSegmento(
+    supabase,
+    workspaceId,
+    staffId ?? null,
+    id,
+    (previo as { segmento: string | null } | null)?.segmento ?? null,
+    segmento,
+  )
 
   revalidatePath('/directorio/contactos')
   revalidatePath(`/directorio/contacto/${id}`)

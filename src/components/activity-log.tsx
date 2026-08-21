@@ -9,6 +9,7 @@ import {
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from '@/app/(app)/activity-actions'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
+import { resolverStatusContacto } from '@/lib/catalogos/constants'
 
 /**
  * Equipos etiquetables. Son las áreas que ya gobiernan permisos y routing en el
@@ -36,7 +37,7 @@ interface ActivityEntry {
 }
 
 interface ActivityLogProps {
-  entidadTipo: 'oportunidad' | 'proyecto' | 'negocio'
+  entidadTipo: 'oportunidad' | 'proyecto' | 'negocio' | 'contacto'
   entidadId: string
   staffList: StaffOption[]
   oportunidadId?: string | null
@@ -58,6 +59,7 @@ const CAMPO_LABELS: Record<string, string> = {
   precio_aprobado: 'Precio aprobado',
   carpeta_url: 'Carpeta Drive',
   cobro_confirmado: 'Cobro confirmado',
+  segmento: 'Segmento',
 }
 
 function formatCOP(value: string | null) {
@@ -69,8 +71,15 @@ function formatCOP(value: string | null) {
 
 function formatFieldChange(campo: string, valorAnterior: string | null, valorNuevo: string | null) {
   const label = CAMPO_LABELS[campo] || campo.replace(/_/g, ' ')
-  const from = valorAnterior || '—'
-  const to = valorNuevo || '—'
+  // El segmento se guarda con el valor crudo del catalogo (`sin_contactar`), que es
+  // lo correcto para la base y lo peor posible para leerlo. La etiqueta sale del
+  // MISMO catalogo que pinta el chip en el listado, para que el historial y la
+  // pantalla no puedan llamar distinto a la misma cosa.
+  const humanizar = campo === 'segmento'
+    ? (v: string | null) => (v ? resolverStatusContacto(v).label : null)
+    : (v: string | null) => v
+  const from = humanizar(valorAnterior) || '—'
+  const to = humanizar(valorNuevo) || '—'
   return { label, from, to }
 }
 

@@ -12,6 +12,7 @@ import type { Contacto } from '@/types/database'
 import NotesSection from '@/components/notes-section'
 import { PhoneInput } from '@/components/phone-input'
 import InteraccionesSection from './interacciones-section'
+import ActivityLog from '@/components/activity-log'
 import type { InteraccionContacto, StaffOption } from '../../actions'
 
 interface NegocioRow {
@@ -206,6 +207,14 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
 
       {/* Interacciones (leads sin convertir + timeline) */}
       <InteraccionesSection interacciones={interacciones} />
+
+      {/* Historial de cambios del contacto. Hoy registra el SEGMENTO: quien lo
+          movio y cuando, que es lo que se pidio. El mismo componente del detalle
+          de negocio, sin variante propia: si manana se auditan mas campos del
+          contacto, aparecen aqui sin tocar esta pantalla. */}
+      <div className="rounded-lg border p-4">
+        <ActivityLog entidadTipo="contacto" entidadId={contacto.id} staffList={staff} />
+      </div>
 
       {/* Negocios */}
       <div className="space-y-3 rounded-lg border p-4">
