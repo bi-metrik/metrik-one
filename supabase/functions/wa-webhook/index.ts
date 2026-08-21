@@ -6,7 +6,7 @@
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
-import { sendTextMessage, sendButtons, sendCtaUrl } from '../_shared/wa-respond.ts';
+import { sendTextMessage, sendButtons, sendCtaUrl, sendFlow } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { resolverEstudioChat, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
@@ -16,7 +16,7 @@ import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleActividad } from '../_shared/handlers/actividad.ts';
 import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/handlers/ayuda.ts';
-import type { HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
+import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
 Deno.serve(async (req) => {
@@ -304,9 +304,9 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     updateSession: async (state, context) => {
       await updateSession(supabase, session.id, state, context);
       // Sync in-memory session so subsequent reads see updated data
-      (session as any).state = state;
+      session.state = state;
       if (context) {
-        (session as any).context = { ...(session as any).context, ...context };
+        session.context = { ...session.context, ...context };
       }
     },
   };
@@ -454,13 +454,13 @@ async function handleSessionResponse(
   supabase: ReturnType<typeof getServiceClient>,
   user: WaUser,
   message: IncomingMessage,
-  session: ReturnType<typeof getOrCreateSession> extends Promise<infer T> ? T : never,
+  session: BotSession,
 ): Promise<void> {
   const ctx: HandlerContext = {
     user,
     message,
-    session: session as any,
-    parsed: { intent: (session as any).context?.intent || 'UNCLEAR', confidence: 1, fields: {} },
+    session,
+    parsed: { intent: session.context?.intent || 'UNCLEAR', confidence: 1, fields: {} },
     supabase,
     sendMessage: (text: string) => sendTextMessage(message.phone, text),
     sendOptions: (body: string, options: string[]) => {
@@ -469,15 +469,15 @@ async function handleSessionResponse(
     },
     sendButtons: (body: string, btns: Array<{ id: string; title: string }>) => sendButtons(message.phone, body, btns),
     updateSession: async (state, context) => {
-      await updateSession(supabase, (session as any).id, state, context);
-      (session as any).state = state;
+      await updateSession(supabase, session.id, state, context);
+      session.state = state;
       if (context) {
-        (session as any).context = { ...(session as any).context, ...context };
+        session.context = { ...session.context, ...context };
       }
     },
   };
 
-  const pendingAction = (session as any).context?.pending_action;
+  const pendingAction = session.context?.pending_action ?? '';
 
   // Route to the appropriate handler based on pending action
   if (['W01', 'W06'].includes(pendingAction)) {
@@ -491,7 +491,7 @@ async function handleSessionResponse(
   } else {
     // Unknown state — ask user to start over
     await sendTextMessage(message.phone, 'Perdí el hilo. Cuéntame de nuevo qué necesitas.');
-    await updateSession(supabase, (session as any).id, 'completed');
+    await updateSession(supabase, session.id, 'completed');
   }
 }
 
@@ -577,7 +577,38 @@ async function identifyUser(
 // Meta Webhook Helpers
 // ============================================================
 
-function extractMessage(payload: any): IncomingMessage | null {
+// Forma del webhook de Meta, limitada a lo que extractMessage lee. Los campos
+// base (from/id/timestamp/type) van obligatorios porque el codigo ya los asume;
+// lo que depende del tipo de mensaje va opcional y se lee con `?.`.
+type MetaMensaje = {
+  from: string;
+  id: string;
+  timestamp: string;
+  type: string;
+  text?: { body: string };
+  image?: { id?: string; caption?: string };
+  audio?: { id?: string };
+  interactive?: {
+    type?: string;
+    nfm_reply?: { response_json?: string };
+    button_reply?: { id?: string; title?: string };
+    list_reply?: { id?: string; title?: string };
+  };
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
+};
+
+type MetaWebhookPayload = {
+  entry?: Array<{
+    changes?: Array<{
+      value?: {
+        metadata?: { phone_number_id?: string; display_phone_number?: string };
+        messages?: MetaMensaje[];
+      };
+    }>;
+  }>;
+};
+
+function extractMessage(payload: MetaWebhookPayload): IncomingMessage | null {
   try {
     const entry = payload?.entry?.[0];
     const changes = entry?.changes?.[0];
@@ -597,7 +628,7 @@ function extractMessage(payload: any): IncomingMessage | null {
     const phone = msg.from;
     const botPhone = value?.metadata?.display_phone_number; // numero del bot (para compartir su contacto)
 
-    if (msg.type === 'text') {
+    if (msg.type === 'text' && msg.text) {
       return {
         phone,
         text: msg.text.body,
