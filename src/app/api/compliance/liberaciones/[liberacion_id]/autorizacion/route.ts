@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
+import { getCachedUser } from '@/lib/supabase/auth-user';
 import {
   generarPDFAutorizacion,
   type AutorizacionData,
@@ -32,8 +33,7 @@ export async function GET(
 ) {
   const { liberacion_id } = await params;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
   if (!user) {
     return Response.json({ error: 'no_auth' }, { status: 401 });
   }

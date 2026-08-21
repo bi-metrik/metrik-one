@@ -36,10 +36,13 @@ let workspaceActual: string | null = 'ws-alma';
 const HOY = '2026-08-21';
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: { id: 'user-oficial' } } }) },
-  }),
   createServiceClient: () => servicioFalso(),
+}));
+
+// `getCachedUser` resuelve al usuario verificando la firma del token, no
+// preguntándole al servidor de Auth (ver src/lib/supabase/claims-user.ts).
+vi.mock('@/lib/supabase/auth-user', () => ({
+  getCachedUser: async () => ({ user: { id: 'user-oficial', email: 'oficial@alma.co' } }),
 }));
 
 vi.mock('./get-workspace', () => ({

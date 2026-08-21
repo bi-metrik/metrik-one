@@ -13,7 +13,8 @@
  * preguntar. Si alguna vez hace falta re-consultar, esa es otra acción y se ve.
  */
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
+import { getCachedUser } from '@/lib/supabase/auth-user';
 import { getWorkspace } from './get-workspace';
 import { resolverNombresUsuarios } from './_usuarios';
 import { todayBogotaISO } from '@/lib/dates/bogota';
@@ -56,8 +57,7 @@ async function guardOficial(): Promise<
     return { ok: false, error: 'forbidden_solo_oficial_cumplimiento' };
   }
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCachedUser();
   return { ok: true, workspaceId, userId: user?.id ?? null };
 }
 
