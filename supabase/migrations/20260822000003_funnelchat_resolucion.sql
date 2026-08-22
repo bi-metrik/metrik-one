@@ -82,6 +82,13 @@ as $function$
   where contacto ~ '^3[0-9]{9}$' or rut ~ '^3[0-9]{9}$';
 $function$;
 
+-- `create or replace` conserva los privilegios que la funcion ya tenia, asi que en
+-- produccion el revoke de 20260814000001 sigue en pie (verificado: public, anon y
+-- authenticated en false para las tres funciones de esta migracion). Se repite de
+-- todos modos porque una migracion tiene que valer leida sola: replayada sobre una
+-- base limpia, sin esta linea la funcion naceria ejecutable por PUBLIC.
+revoke execute on function public.telefono_cliente_negocio(uuid) from public, anon, authenticated;
+
 -- ── 2. El veredicto de cada evento ───────────────────────────────────────────
 --
 -- ⚠️ El telefono NO identifica a un contacto por si solo. Medido en SOENA el
