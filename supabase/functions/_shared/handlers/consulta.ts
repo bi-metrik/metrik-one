@@ -6,6 +6,7 @@ import type { HandlerContext } from '../types.ts';
 import { STREAK_MILESTONES } from '../types.ts';
 import { formatCOP, formatCOPShort, bold, formatAgo, daysSince, currentMonthName, currentYear } from '../wa-format.ts';
 import { completeSession, saveLastContext } from '../wa-session.ts';
+import { COLUMNAS_CARTERA, deudasDeCartera } from '../cartera.ts';
 
 export async function handleConsulta(ctx: HandlerContext): Promise<void> {
   const { parsed } = ctx;
@@ -272,46 +273,37 @@ async function handleMisNumeros(ctx: HandlerContext): Promise<void> {
 // W17 — Cartera Pendiente (§10)
 // ============================================================
 
-// Fila de la vista v_facturas_estado, limitada a lo que lee este handler.
-type FacturaRow = {
-  proyecto_id: string;
-  numero_factura: string | null;
-  saldo_pendiente: number;
-  dias_antiguedad: number;
-};
-
+// La cartera sale de `v_cartera_negocio`, no de `v_facturas_estado`: esa se
+// construia sobre `facturas`, vacia en los 15 workspaces, asi que este handler
+// contestaba "todo cobrado" a cualquiera que preguntara. Ver `../cartera.ts`.
 async function handleCartera(ctx: HandlerContext): Promise<void> {
   const { user, supabase } = ctx;
 
-  const { data: facturas } = (await supabase
-    .from('v_facturas_estado')
-    .select('*, proyectos!inner(nombre)')
-    .eq('workspace_id', user.workspace_id)
-    .gt('saldo_pendiente', 0)
-    .order('dias_antiguedad', { ascending: false })) as { data: FacturaRow[] | null };
+  const { data } = await supabase
+    .from('v_cartera_negocio')
+    .select(COLUMNAS_CARTERA)
+    .eq('workspace_id', user.workspace_id);
 
-  if (!facturas || facturas.length === 0) {
+  const deudas = deudasDeCartera(data);
+
+  if (deudas.length === 0) {
     await ctx.sendMessage('✅ No tienes cartera pendiente. ¡Todo cobrado!');
     return;
   }
 
-  const totalCartera = facturas.reduce((s, f) => s + Number(f.saldo_pendiente), 0);
-  const vencidas = facturas.filter((f) => Number(f.dias_antiguedad) > 30);
+  const totalCartera = deudas.reduce((s, d) => s + d.saldo, 0);
+  const vencidas = deudas.filter((d) => d.vencida);
 
   let msg = '💵 Cartera pendiente:\n';
 
-  for (const [i, f] of facturas.slice(0, 5).entries()) {
-    const dias = Number(f.dias_antiguedad);
-    const vencida = dias > 30 ? ' ⚠️' : '';
-    // Get project name
-    const { data: proj } = await supabase.from('proyectos').select('nombre').eq('id', f.proyecto_id).single();
-    const projName = proj?.nombre || 'Proyecto';
-    msg += `\n${i + 1}️⃣ ${bold(projName)} — ${formatCOP(Number(f.saldo_pendiente))} (${f.numero_factura || 'S/N'}, ${dias} días)${vencida}`;
+  // El nombre viene en la misma fila: ya no hay una consulta por deuda.
+  for (const [i, d] of deudas.slice(0, 5).entries()) {
+    msg += `\n${i + 1}️⃣ ${bold(d.nombre)} — ${formatCOP(d.saldo)} (${d.codigo}, ${d.dias} días)${d.vencida ? ' ⚠️' : ''}`;
   }
 
   msg += `\n\n💰 Total cartera: ${formatCOP(totalCartera)}`;
   if (vencidas.length > 0) {
-    msg += `\n⚠️ ${vencidas.length} factura${vencidas.length > 1 ? 's' : ''} con más de 30 días.`;
+    msg += `\n⚠️ ${vencidas.length} negocio${vencidas.length > 1 ? 's' : ''} con más de 30 días.`;
   }
 
   await ctx.sendMessage(msg);
