@@ -700,8 +700,19 @@ function TabSaldos({ data }: { data: ConciliacionV2 }) {
 
   return (
     <div>
-      <p className="mb-3 text-[11px]" style={{ color: '#9CA3AF' }}>
+      <p className="mb-1 text-[11px]" style={{ color: '#9CA3AF' }}>
         Vista de solo lectura de la cartera, ordenada de más viejo a más reciente. Para registrar o repartir un pago, entra al bloque de pagos del negocio.
+      </p>
+      {/*
+        Las dos pantallas miden cosas distintas a propósito y por eso dan cifras
+        distintas. Sin este renglón la diferencia se lee como un error de una de
+        las dos, que es justo lo que hay que evitar.
+      */}
+      <p className="mb-3 text-[11px]" style={{ color: '#9CA3AF' }}>
+        Acá entra <strong>todo negocio con precio aprobado</strong>, incluidos los que no tienen
+        ningún pago registrado: la pregunta es qué casos no cuadran. El <strong>¿Cuánto me
+        deben?</strong> de Números es más bajo porque solo cuenta los ya vendidos, o sea los que
+        recibieron al menos un pago.
       </p>
 
       {/* Tarjetas de resumen */}

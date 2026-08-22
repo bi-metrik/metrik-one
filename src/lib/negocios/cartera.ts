@@ -10,6 +10,11 @@ import { compararPorAntiguedad } from './antiguedad'
  * NEGATIVO: -$88.973.023 en SOENA contra $79.936.645 reales. Una cuenta que se
  * equivoco por $168 millones merece una prueba, no un comentario.
  *
+ * Que cuenta como deuda: **solo los negocios que ya se vendieron**, y un negocio
+ * se vuelve venta con el primer pago (regla de Mauricio, 2026-08-22; misma vara
+ * que `v_venta_mes_comercial`). Un precio aprobado sin un peso encima no es una
+ * venta, asi que no es deuda. El filtro lo aplica la vista, no esta funcion.
+ *
  * La fuente es `v_cartera_negocio`; aca solo se agrega y se ordena.
  */
 
