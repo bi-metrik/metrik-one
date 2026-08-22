@@ -19,27 +19,25 @@ import {
   findProjectByCode,
   findNegocioByCode,
   matchCategory,
+  destinoId,
 } from '../../wa-lookup.ts';
 import { executeRegistro } from './execute.ts';
 import { proponerCentroCostosWA, type PropuestaCC } from '../../centro-costos.ts';
 
-// Destino de un gasto: un negocio o un proyecto. Solo las columnas que lee
-// este handler. `wa-lookup` aliasea `proyecto_id` y normaliza `codigo` sobre
-// los negocios; `presupuesto_total`/`costo_acumulado` solo vienen en la vista
-// de proyectos, por eso son opcionales.
+// Lo que este handler lee de un destino, venga de donde venga. Todo opcional
+// salvo el nombre: un negocio no trae `presupuesto_total` ni `costo_acumulado`,
+// y la llave del proyecto llega como `proyecto_id` o como `id` segun el lookup
+// (por eso destinoId()). De ahi los `Number(...) || 0` de mas abajo.
 type DestinoTipo = 'negocio' | 'proyecto';
 
-type Destino = {
-  id: string;
+type EntidadGasto = {
+  id?: string;
   proyecto_id?: string;
   nombre: string;
   codigo?: string;
   presupuesto_total?: number | null;
   costo_acumulado?: number | null;
 };
-
-/** Lo que devuelven findDestinos()/findActiveDestinos(): cada fila trae `_tipo`. */
-type DestinosResult = { all: (Destino & { _tipo: DestinoTipo })[] };
 
 /** Opcion que se le muestra al usuario: un destino o el gasto de empresa. */
 type GastoOption = {
@@ -88,7 +86,7 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
 
   if (!entity_hint) {
     // No hint — show list of active negocios + projects
-    const destinos = (await findActiveDestinos(supabase, user.workspace_id)) as DestinosResult;
+    const destinos = await findActiveDestinos(supabase, user.workspace_id);
     if (destinos.all.length === 0) {
       // Sin negocios activos → registrar como gasto de empresa
       await proceedEmpresaGasto(ctx, amount, concept || '', categoria);
@@ -96,7 +94,7 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
     }
 
     const options: GastoOption[] = destinos.all.slice(0, 5).map((d) => ({
-      id: d.proyecto_id || d.id,
+      id: destinoId(d),
       label: formatProject(d),
       _tipo: d._tipo,
     }));
@@ -114,18 +112,18 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
   }
 
   // Find matching destinos (negocios + projects)
-  const destinos = (await findDestinos(supabase, user.workspace_id, entity_hint)) as DestinosResult;
+  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
 
   if (destinos.all.length === 0) {
     // No match — show active destinos
-    const allActive = (await findActiveDestinos(supabase, user.workspace_id)) as DestinosResult;
+    const allActive = await findActiveDestinos(supabase, user.workspace_id);
     if (allActive.all.length === 0) {
       await proceedEmpresaGasto(ctx, amount, concept || '', categoria);
       return;
     }
 
     const options: GastoOption[] = allActive.all.slice(0, 4).map((d) => ({
-      id: d.proyecto_id || d.id,
+      id: destinoId(d),
       label: formatProject(d),
       _tipo: d._tipo,
     }));
@@ -155,7 +153,7 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
 
   // Multiple matches
   const options: GastoOption[] = destinos.all.slice(0, 5).map((d) => ({
-    id: d.proyecto_id || d.id,
+    id: destinoId(d),
     label: formatProject(d),
     _tipo: d._tipo,
   }));
@@ -220,7 +218,7 @@ async function resolverCentroCostos(
 
 export async function showGastoConfirmation(
   ctx: HandlerContext,
-  entity: Destino,
+  entity: EntidadGasto,
   amount: number,
   categoria: string,
   concept?: string,
@@ -242,7 +240,7 @@ export async function showGastoConfirmation(
     msg += `\n⚠️ Supera presupuesto restante.`;
   }
 
-  const entityId = entity.proyecto_id || entity.id;
+  const entityId = destinoId(entity);
   const negIdForCC = tipo === 'negocio' ? entityId : null;
   const cc = await resolverCentroCostos(ctx, {
     descripcion: concept,
@@ -283,13 +281,13 @@ export async function showGastoConfirmation(
 /** Auto-register gasto without confirmation (high confidence, single match) */
 async function autoRegisterGasto(
   ctx: HandlerContext,
-  entity: Destino,
+  entity: EntidadGasto,
   amount: number,
   categoria: string,
   concept?: string,
   tipo: DestinoTipo = 'proyecto',
 ): Promise<void> {
-  const entityId = entity.proyecto_id || entity.id;
+  const entityId = destinoId(entity);
   const negIdForCC = tipo === 'negocio' ? entityId : null;
   const cc = await resolverCentroCostos(ctx, {
     descripcion: concept,
