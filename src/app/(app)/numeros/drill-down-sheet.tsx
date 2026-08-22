@@ -382,8 +382,14 @@ function DrillP3({ data }: { data: NumerosData; monthType: string }) {
       <SectionTitle>Alcance</SectionTitle>
       <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
         Solo el honorario es cartera. La tarifa UPME es plata de terceros que se recauda y se
-        gira, así que no entra acá. Entran los negocios vivos con precio aprobado; los días se
-        cuentan desde que nació el negocio.
+        gira, así que no entra acá. Entran los negocios <strong>ya vendidos</strong>, es decir
+        los que recibieron al menos un pago: un precio aprobado sin un peso encima todavía no es
+        una venta. Los días se cuentan desde que nació el negocio.
+      </p>
+      <p className="px-1 pt-1 text-[10px] leading-relaxed text-muted-foreground">
+        Por eso esta cifra es menor que el <strong>Faltante</strong> de Conciliación, que sí
+        incluye los casos sin ningún pago registrado: esa pantalla pregunta qué casos no cuadran,
+        no cuánto se debe.
       </p>
 
       <DrillDownLinks links={[
