@@ -34,22 +34,6 @@ export function sinHoraRegistrada(value: unknown): boolean {
   return typeof value === 'string' && SOLO_DIA.test(value.trim())
 }
 
-/**
- * Valor listo para pintar en un `<input type="datetime-local">`.
- *
- * El input ignora en silencio cualquier cadena que no sea 'YYYY-MM-DDTHH:mm': un
- * valor de solo día se pintaría VACÍO y la pantalla diría que no hay cita cuando
- * sí la hay. Se le añade 'T00:00' para que se vea; que esa medianoche no es una
- * hora real lo avisa la pantalla aparte, con `sinHoraRegistrada`.
- */
-export function paraInputFechaHora(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  const v = value.trim()
-  if (SOLO_DIA.test(v)) return `${v}T00:00`
-  if (CON_HORA.test(v)) return v.slice(0, 16)
-  return ''
-}
-
 /** Instante actual como cadena civil de Bogotá: 'YYYY-MM-DDTHH:mm'. */
 export function ahoraBogotaCivil(d?: Date): string {
   const p = bogotaParts(d)
@@ -116,4 +100,62 @@ export function fechaHoraEnLetras(value: unknown): string {
   const meridiano = h24 < 12 ? 'a. m.' : 'p. m.'
   const h12 = h24 % 12 === 0 ? 12 : h24 % 12
   return `${fecha}, ${h12}:${min} ${meridiano}`
+}
+
+/** 'HH:mm' (los segundos son opcionales: algunos navegadores los emiten). */
+const HORA = /^\d{2}:\d{2}(:\d{2})?$/
+
+/** Las dos casillas visibles del campo: día ('YYYY-MM-DD') y hora ('HH:mm'). */
+export type PartesFechaHora = { dia: string; hora: string }
+
+/**
+ * Parte un valor guardado en las dos casillas que se pintan en pantalla.
+ *
+ * ⚠️ POR QUÉ DOS CASILLAS Y NO UN `datetime-local`
+ *
+ * Un `<input type="datetime-local">` no admite estar a medio llenar: en cuanto se
+ * elige el día, el navegador RELLENA la hora con la del momento y dispara `change`
+ * con un valor completo. El bloque guarda al instante, así que la cita queda
+ * registrada a la hora en que alguien abrió la pantalla — nunca a la que asignó la
+ * DIAN. Medido en SOENA el 2026-08-21: seis casos guardados con la hora exacta del
+ * guardado (V0168 15:19, V0189 20:38, V0188 20:17, V0097 10:11, V0181 09:57,
+ * V0147 09:40). Y en el espejo de Notificación, que es `editable_solo_si_vacio`, el
+ * dato ya llega lleno y queda de solo lectura: la hora inventada no se puede
+ * corregir desde ahí.
+ *
+ * Con día y hora separados no hay nada que rellenar: la hora está vacía hasta que
+ * alguien la escriba.
+ *
+ * Un valor heredado de solo día abre la casilla de hora VACÍA a propósito: esa hora
+ * nunca se registró y fingirla sería el mismo error que esto viene a arreglar.
+ */
+export function partesFechaHora(value: unknown): PartesFechaHora {
+  if (typeof value !== 'string') return { dia: '', hora: '' }
+  const v = value.trim()
+  if (SOLO_DIA.test(v)) return { dia: v, hora: '' }
+  if (CON_HORA.test(v)) return { dia: v.slice(0, 10), hora: v.slice(11, 16) }
+  return { dia: '', hora: '' }
+}
+
+/**
+ * Une las dos casillas en el valor que se guarda, o cadena vacía si aún no hay cita.
+ *
+ * ⚠️ MEDIA CITA NO ES CITA. Un día sin hora devuelve '' — y por lo tanto no cierra
+ * el gate ni avanza el caso. La operación le dice al cliente a qué hora tiene que
+ * enviar los documentos: un día suelto lo dejaría esperando una hora que nadie
+ * asignó. Los 62 valores de solo día que ya existen se siguen leyendo (esto solo
+ * gobierna lo que se escribe ahora), pero no se producen valores nuevos así.
+ */
+export function componerFechaHora(dia: unknown, hora: unknown): string {
+  const d = typeof dia === 'string' ? dia.trim() : ''
+  const h = typeof hora === 'string' ? hora.trim() : ''
+  if (!SOLO_DIA.test(d) || !HORA.test(h)) return ''
+  return `${d}T${h.slice(0, 5)}`
+}
+
+/** Hay día pero falta la hora: el estado que hay que señalar en pantalla. */
+export function faltaHoraDeCita(dia: unknown, hora: unknown): boolean {
+  const d = typeof dia === 'string' ? dia.trim() : ''
+  const h = typeof hora === 'string' ? hora.trim() : ''
+  return SOLO_DIA.test(d) && !HORA.test(h)
 }

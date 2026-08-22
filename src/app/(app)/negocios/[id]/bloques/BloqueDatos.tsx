@@ -17,7 +17,14 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { formatFecha } from '@/lib/dates/bogota'
-import { paraInputFechaHora, sinHoraRegistrada, rechazoPorFechaPasada } from '@/lib/negocios/fecha-hora-campo'
+import {
+  sinHoraRegistrada,
+  rechazoPorFechaPasada,
+  fechaHoraEnLetras,
+  partesFechaHora,
+  componerFechaHora,
+  faltaHoraDeCita,
+} from '@/lib/negocios/fecha-hora-campo'
 
 export interface DatosField {
   slug: string
@@ -262,6 +269,14 @@ export default function BloqueDatos({
   const [aiFilled, setAiFilled] = useState<Record<string, boolean>>({})
   // Rechazo de validación por campo (hoy solo `fecha_hora`). Cadena vacía = sin error.
   const [errorCampo, setErrorCampo] = useState<Record<string, string>>({})
+  // Cita a medio escribir: día ya elegido, hora todavía no. Vive SOLO aquí — un día
+  // sin hora no se guarda (ver `componerFechaHora`), y sin este borrador la casilla
+  // del día se vaciaría sola en cuanto el valor compuesto quedara vacío.
+  const [borradorCita, setBorradorCita] = useState<Record<string, { dia: string; hora: string }>>({})
+  // Espejo en ref del borrador: `blur` puede correr en el mismo lote que su `change`,
+  // y ahí el estado todavía es el viejo — leerlo diría "no falta la hora" justo cuando
+  // falta, que es el caso que hay que atajar.
+  const borradorCitaRef = useRef<Record<string, { dia: string; hora: string }>>({})
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Guardado: estado pasivo + refs para flush al desmontar (cero pérdida de datos).
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -459,16 +474,37 @@ export default function BloqueDatos({
       next['correo_seccional'] = getSeccionalBySlug(value as string)?.email ?? ''
     }
     setValues(next)
-    if (f?.tipo === 'fecha_hora') {
-      // La regla muerde al ESCRIBIR, no al avanzar: el aviso llega donde está el error y
-      // no sobre un botón que no explica nada. Y muerde solo sobre lo que se escribe
-      // ahora — decenas de casos cerrados guardan citas ya cumplidas, y validar el valor
-      // heredado los dejaría trabados sin poder avanzar por algo que ya ocurrió.
-      const rechazo = rechazoPorFechaPasada(value)
-      setErrorCampo(prev => ({ ...prev, [slug]: rechazo ?? '' }))
-      if (rechazo) return
-    }
     void persist(next, true)
+  }
+
+  // La cita se escribe en DOS casillas y se guarda al SALIR del campo, nunca en cada
+  // pulsación. Con un `datetime-local` que guardaba al instante, el navegador rellenaba
+  // la hora con la del momento y esa hora inventada llegaba a la base antes de que
+  // nadie pudiera escribir la real. El detalle y lo medido, en `fecha-hora-campo.ts`.
+  function handleCitaChange(slug: string, dia: string, hora: string) {
+    borradorCitaRef.current = { ...borradorCitaRef.current, [slug]: { dia, hora } }
+    setBorradorCita(prev => ({ ...prev, [slug]: { dia, hora } }))
+    const compuesto = componerFechaHora(dia, hora)
+    const next = { ...valuesRef.current, [slug]: compuesto }
+    valuesRef.current = next
+    setValues(next)
+    dirtyRef.current = true
+    // La regla muerde al ESCRIBIR, no al avanzar: el aviso llega donde está el error y
+    // no sobre un botón que no explica nada. Y muerde solo sobre lo que se escribe
+    // ahora — decenas de casos cerrados guardan citas ya cumplidas, y validar el valor
+    // heredado los dejaría trabados sin poder avanzar por algo que ya ocurrió.
+    setErrorCampo(prev => ({ ...prev, [slug]: rechazoPorFechaPasada(compuesto) ?? '' }))
+  }
+
+  // Salir del campo → guardar. Con la cita a medio escribir (día sí, hora no) NO se
+  // guarda: pasar de una casilla a la otra no es terminar, y guardar ahí revalidaría
+  // el bloque encima de alguien que todavía está escribiendo la hora.
+  function handleCitaBlur(slug: string) {
+    if (!dirtyRef.current) return
+    const b = borradorCitaRef.current[slug]
+    if (b && faltaHoraDeCita(b.dia, b.hora)) return
+    if (rechazoPorFechaPasada(valuesRef.current[slug])) return
+    void persist(valuesRef.current, true)
   }
 
   // Enforcement de lock_when: si un campo quedó bloqueado y su valor difiere del
@@ -636,7 +672,11 @@ export default function BloqueDatos({
               ) : (
                 <div className="flex items-center gap-1.5">
                   <span className={`flex-1 min-w-0 text-xs text-[#1A1A1A] break-words ${f.tipo === 'numero' ? 'tabular-nums' : ''}`}>{
-                    f.tipo === 'numero' && v
+                    // La cita se lee aquí para decírsela al cliente: '2026-09-08T09:40'
+                    // obliga a traducirla mentalmente y se presta a leer mal la hora.
+                    f.tipo === 'fecha_hora' && v
+                      ? fechaHoraEnLetras(v) || (v as string)
+                      : f.tipo === 'numero' && v
                       ? fmt(Number(v))
                       : f.opciones_fuente === 'seccionales_dian' && v
                         ? getSeccionalBySlug(v as string)?.label ?? (v as string)
@@ -844,23 +884,45 @@ export default function BloqueDatos({
           )}
 
           {f.tipo === 'fecha_hora' && (() => {
-            const heredadoSinHora = sinHoraRegistrada(values[f.slug])
+            const guardado = partesFechaHora(values[f.slug])
+            const b = borradorCita[f.slug]
+            const dia = b?.dia ?? guardado.dia
+            const hora = b?.hora ?? guardado.hora
+            // Heredado: el valor guardado es de solo día y nadie lo ha tocado en esta
+            // sesión. Su hora nunca se registró — decirlo evita que el equipo llame al
+            // cliente citándole una hora que la pantalla se inventó.
+            const heredadoSinHora = !b && sinHoraRegistrada(values[f.slug])
+            const falta = !heredadoSinHora && faltaHoraDeCita(dia, hora)
             return (
               <div className="flex flex-col gap-0.5">
-                <input
-                  type="datetime-local"
-                  value={paraInputFechaHora(values[f.slug])}
-                  onChange={e => handleToggleChange(f.slug, e.target.value)}
-                  disabled={isPending}
-                  className={`${inputBaseClass} ${inputBg(f.slug)}`}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={dia}
+                    onChange={e => handleCitaChange(f.slug, e.target.value, hora)}
+                    onBlur={() => handleCitaBlur(f.slug)}
+                    disabled={isPending}
+                    className={`flex-1 ${inputBaseClass} ${inputBg(f.slug)}`}
+                  />
+                  <input
+                    type="time"
+                    value={hora}
+                    aria-label={`Hora de ${f.label}`}
+                    onChange={e => handleCitaChange(f.slug, dia, e.target.value)}
+                    onBlur={() => handleCitaBlur(f.slug)}
+                    disabled={isPending}
+                    className={`w-32 shrink-0 ${inputBaseClass} ${inputBg(f.slug)}`}
+                  />
+                </div>
                 {errorCampo[f.slug] && (
                   <span className="text-[11px] text-red-600 font-medium">{errorCampo[f.slug]}</span>
                 )}
+                {falta && !errorCampo[f.slug] && (
+                  <span className="text-[11px] text-[#B45309]">
+                    Falta la hora que asignó la DIAN. Sin ella la cita no queda registrada.
+                  </span>
+                )}
                 {heredadoSinHora && !errorCampo[f.slug] && (
-                  // El valor viene de cuando el campo era solo día. La medianoche que
-                  // muestra el input es relleno, no la hora real: decirlo evita que el
-                  // equipo llame al cliente citándole las 12:00 de la noche.
                   <span className="text-[11px] text-[#B45309]">
                     Se registró antes de que existiera la hora. Confirma la hora real con la DIAN.
                   </span>
