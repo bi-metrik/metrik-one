@@ -4,7 +4,7 @@ import { Fragment, useState, useTransition } from 'react'
 import { ChevronLeft, ChevronRight, Target } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  Tooltip, CartesianGrid,
+  Tooltip, CartesianGrid, LabelList,
 } from 'recharts'
 import type {
   ComercialResumenRow,
@@ -34,7 +34,9 @@ import { origenNegocioLabel } from '@/lib/catalogos/constants'
 
 const GREEN = '#059669'
 const BLUE = '#2563EB'
-const GRAY = '#9CA3AF'
+// El segundo pago necesita color propio y CONTRASTADO: en gris sobre el verde del
+// primero, $850.000 al lado de $25,9M eran unos seis pixeles indistinguibles.
+const OCRE = '#D97706'
 
 function fmtCOP(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
@@ -210,6 +212,17 @@ export function TabComercialSoena({
       })
     : undefined
 
+  /**
+   * Las ventas 50/50 del mes: son las ÚNICAS que pueden tener un segundo pago.
+   *
+   * Sin este dato, la casilla "2º pago" en cero se lee como "nadie pagó su segunda
+   * mitad" cuando casi siempre significa "ninguna venta de este mes tenía segunda
+   * mitad". En julio de 2026 hubo $850.000 de segundos pagos (V0025 y V0099) y el
+   * tablero no los mostraba en ninguna parte visible.
+   */
+  const filaPlan1 = planPago?.filas.find((f) => f.plan_pago === 1) ?? null
+  const mesSinVentas5050 = filaPlan1 !== null && filaPlan1.ventas === 0
+
   // Quien lidera el equipo toma casos especiales pero no compite: va listado aparte,
   // debajo, para no mezclarlo con la comparacion entre quienes ejecutan. Sus cifras
   // SI cuentan en los totales del equipo, que son del equipo entero.
@@ -315,6 +328,24 @@ export function TabComercialSoena({
                onAbrir={kpis.num_ventas > 0 ? () => abrirVentas({
                  titulo: `Valor vendido · ${MESES_ES[mes - 1]} ${anio}`,
                }) : undefined} />
+          {/* ⚠️ El segundo pago existía, se calculaba bien y no estaba en ninguna parte
+              donde alguien fuera a buscarlo: en julio de 2026 entraron $850.000 (V0025 y
+              V0099) y el tablero dejó leer "no hubo segundos pagos". Se muestra al lado
+              del valor vendido, y en RAYA cuando el mes no tuvo ni una venta 50/50 —
+              ahí un $0 no mide nada, porque no había segundo tramo que pagar. */}
+          <Kpi label="2º pago" value={mesSinVentas5050 ? '—' : fmtCompact(kpis.segundo_pago)}
+               color={mesSinVentas5050 ? undefined : OCRE}
+               sub={mesSinVentas5050
+                 ? 'ninguna venta 50/50 este mes'
+                 : filaPlan1
+                   ? `de ${filaPlan1.ventas} venta${filaPlan1.ventas === 1 ? '' : 's'} 50/50`
+                   : 'solo las ventas 50/50 tienen segundo tramo'}
+               delta={mesSinVentas5050 ? null : delta(kpis.segundo_pago, kpisPrev?.segundo_pago)}
+               onAbrir={filaPlan1 && filaPlan1.ventas > 0 ? () => abrirVentas({
+                 titulo: `Ventas 50/50 · ${MESES_ES[mes - 1]} ${anio}`,
+                 alcance: 'las únicas que pueden tener un segundo pago',
+                 negocioIds: filaPlan1.negocio_ids,
+               }) : undefined} />
           <Kpi label="Ticket promedio" value={fmtCompact(kpis.ticket_promedio)}
                delta={delta(kpis.ticket_promedio, kpisPrev?.ticket_promedio)} />
           <Kpi label="Ventas bonificables" value={kpis.bonificables === null ? '—' : String(kpis.bonificables)}
@@ -412,7 +443,7 @@ export function TabComercialSoena({
                   <th className="px-4 py-3 text-right">Valor (sin IVA)</th>
                   <th className="hidden px-4 py-3 text-right md:table-cell">Valor (con IVA)</th>
                   <th className="hidden px-4 py-3 text-right sm:table-cell">1er pago</th>
-                  <th className="hidden px-4 py-3 text-right lg:table-cell">2o pago</th>
+                  <th className="hidden px-4 py-3 text-right sm:table-cell">2o pago</th>
                   <th className="px-4 py-3 text-right" title="Ventas que pasaron el umbral del proceso: es la cifra que bonifica">Bonificables</th>
                   <th className="hidden px-4 py-3 text-right md:table-cell" title="Ventas cuyo honorario aprobado ya quedó cubierto por el recaudo">Hon. cubierto</th>
                   <th className="hidden px-4 py-3 text-right sm:table-cell">Particip.</th>
@@ -486,7 +517,7 @@ export function TabComercialSoena({
                       onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
                       {fmtCOP(kpis.primer_pago)}
                     </CeldaAbrible>
-                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums lg:table-cell"
+                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums sm:table-cell"
                       onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
                       {fmtCOP(kpis.segundo_pago)}
                     </CeldaAbrible>
@@ -596,17 +627,37 @@ export function TabComercialSoena({
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
+            {/* ⚠️ Apilado y en gris, el segundo pago era invisible: $850.000 encima de
+                $25,9M en 220px de alto son unos seis pixeles pegados al borde de la
+                barra verde. Ahora va en barra APARTE, en ocre, y con su cifra escrita
+                encima en los meses en que hubo alguno — una barra de seis pixeles con
+                su numero al lado si se puede leer; cambiar la escala para agrandarla
+                mentiria sobre la proporcion, que es real. */}
             <ChartCard title="Primer vs segundo pago por mes">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerie}>
+                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 18 }} {...propsSerie}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
                   <Tooltip formatter={(v, name) => [fmtCOP(Number(v)), name === 'primer_pago' ? '1er pago' : '2o pago']} />
-                  <Bar dataKey="primer_pago" stackId="p" fill={GREEN} radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="segundo_pago" stackId="p" fill={GRAY} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="primer_pago" fill={GREEN} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="segundo_pago" fill={OCRE} radius={[4, 4, 0, 0]}>
+                    {/* Solo donde hubo: una fila de ceros escritos sobre cada mes seria
+                        ruido, y ademas afirmaria "cero" en meses sin ventas 50/50, donde
+                        no habia segundo tramo que pagar. */}
+                    <LabelList
+                      dataKey="segundo_pago"
+                      position="top"
+                      formatter={(v: unknown) => (Number(v) > 0 ? fmtCompact(Number(v)) : '')}
+                      style={{ fontSize: 10, fill: OCRE, fontWeight: 600 }}
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              <p className="mt-1 text-[11px] text-gray-500">
+                Solo las ventas 50/50 tienen segundo pago; en las de 100% anticipado no hay
+                segundo tramo que cobrar.
+              </p>
             </ChartCard>
           </div>
         </section>
@@ -783,7 +834,7 @@ function FilaVendedor({ v, onAbrir }: {
                       {fmtCOP(v.primer_pago)}
                     </CeldaAbrible>
                     <CeldaAbrible
-                      className="hidden px-4 py-3 text-right text-gray-600 tabular-nums lg:table-cell"
+                      className="hidden px-4 py-3 text-right text-gray-600 tabular-nums sm:table-cell"
                       onAbrir={abrirTodas}
                       title="Ver las ventas de las que salió este recaudo"
                     >
