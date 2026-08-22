@@ -23,6 +23,15 @@ export interface ComercialResumenRow {
   /** Ventas del negocio = negocios con >=1 pago de honorario recibido (venta = primer pago). */
   num_ventas: number
   /**
+   * Ventas del periodo que ademas pasaron el umbral que declara la linea — la "venta
+   * completa / bonificable" del punto #13. Es la metrica que premia el ranking (#31).
+   *
+   * `null` NO es cero: significa que la linea no declaro su umbral
+   * (`config_extra.venta_bonificable.pasada_etapa_numero`) y por lo tanto no se pudo
+   * medir. Un cero diria "no completo ninguna", que es una afirmacion distinta.
+   */
+  num_bonificables: number | null
+  /**
    * Valor aprobado SIN IVA (base). Lo comercial se mide por el ingreso real: el IVA
    * se recauda para la DIAN y no es ingreso. Sale de `v_negocio_valor`, fuente unica
    * del desglose. Para la cifra que el cliente paga, `valor_aprobado_con_iva`.
@@ -149,6 +158,8 @@ export interface ComercialVendedorMes {
   segundo_pago: number
   casos_completos: number
   tasa_casos_completos: number | null
+  /** Ventas del mes que pasaron el umbral de la linea (#13). `null` = sin medir. */
+  bonificables: number | null
   participacion_pct: number | null
   meta_num_ventas: number | null
   meta_valor: number | null
@@ -165,6 +176,21 @@ export interface ComercialKpisMes {
   tarifa_recaudada: number
   casos_completos: number
   tasa_casos_completos: number | null
+  /**
+   * ── Las TRES definiciones que el negocio distingue (punto #13) ──
+   *
+   * `num_ventas`      = entro dinero (definicion #12, la que aprobo el cliente).
+   * `casos_completos` = el honorario recaudado cubre el aprobado. Es recaudo.
+   * `bonificables`    = paso el umbral que declara la linea. Es la que bonifica.
+   *
+   * Miden cosas distintas y por eso viajan las tres. `bonificables` es `null` cuando
+   * NINGUNA venta del mes se pudo medir (la linea no declaro umbral): la pantalla
+   * pinta raya. `bonificable_sin_medir` dice cuantas de las `num_ventas` quedaron
+   * fuera de la medicion, para que la tasa no se lea sobre un denominador que no es.
+   */
+  bonificables: number | null
+  bonificable_sin_medir: number
+  tasa_bonificables: number | null
   ticket_promedio: number
   mejor_dia: string | null
   mejor_dia_ventas: number
@@ -267,6 +293,17 @@ export interface ComercialVentaCaso {
   campana: string | null
   /** Lo declarado y el rastro no coinciden. Se muestra, no se corrige: decide comision. */
   atribucion_en_conflicto: boolean
+  /**
+   * El subconjunto del conflicto que mueve dinero HACIA AFUERA: se declaro promotor
+   * (20% a un tercero) y el lead entro por Meta (16% de marketing). Mientras este en
+   * true la comision NO se liquida — lo decide una persona, caso por caso (#46).
+   */
+  comision_retenida: boolean
+  /**
+   * Paso el umbral que declara la linea: es una venta bonificable (#13).
+   * `null` = la linea no declaro umbral. NO es "no bonifica".
+   */
+  bonificable: boolean | null
   valor_sin_iva: number
   valor_con_iva: number
   recaudado: number
@@ -292,6 +329,8 @@ export interface ComercialOrigenFila {
   recaudado: number
   /** De esas ventas, cuantas tienen rastro verificable de Meta. */
   con_rastro_meta: number
+  /** De esas ventas, cuantas tienen la comision retenida por origen en disputa (#46). */
+  comision_retenida: number
 }
 
 /** Una fila del desglose por campana de Meta. */
@@ -318,8 +357,90 @@ export interface ComercialOrigenMes {
   meta_sin_campana: number
   /** Lo declarado y el rastro no coinciden. Decide la comision: se muestra. */
   en_conflicto: number
+  /**
+   * El subconjunto del conflicto que decide un pago a un TERCERO: promotor declarado
+   * sobre un lead con rastro de Meta. Va aparte de `en_conflicto` porque son problemas
+   * de gravedad distinta — el resto es atribucion interna, esto es plata que sale.
+   */
+  comision_retenida: number
+  comision_retenida_valor: number
   por_origen: ComercialOrigenFila[]
   por_campana: ComercialCampanaFila[]
+}
+
+// ── Corte por seccional DIAN (puntos #22 y #43 del inventario SOENA) ────────
+
+/**
+ * Una seccional en el corte del mes.
+ *
+ * `seccional` es el nombre CANONICO (ya colapsado con `canonizarSeccional`), y `null`
+ * es el bucket "sin registrar": va visible y en raya, nunca repartido entre las demas
+ * ni escondido. Medido el 2026-08-22: 96 de 289 negocios de la linea no tienen
+ * seccional, un tercio de la cartera — repartirlos inventaria una distribucion que
+ * nadie midio.
+ */
+export interface ComercialSeccionalFila {
+  seccional: string | null
+  ventas: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  primer_pago: number
+  segundo_pago: number
+  recaudado: number
+  casos_completos: number
+  /** `null` = la linea no declaro umbral de bonificacion. No es cero. */
+  bonificables: number | null
+  /**
+   * Los casos exactos que suman esta fila. El drill los abre tal cual, en vez de
+   * recalcular el criterio: la lista no puede discrepar de la cifra por construccion.
+   */
+  negocio_ids: string[]
+}
+
+export interface ComercialSeccionalMes {
+  /** Total del mes, el mismo `num_ventas` del panel. Sirve para cuadrar la suma. */
+  total_ventas: number
+  filas: ComercialSeccionalFila[]
+}
+
+/** Un punto de una serie de capacidad: cuantos hubo en ese mes en esa seccional. */
+export interface CapacidadPunto {
+  /** Nombre canonico; `null` = sin seccional registrada. */
+  seccional: string | null
+  /** 'YYYY-MM'. */
+  mes: string
+  n: number
+}
+
+/**
+ * Cuanto puede procesar cada seccional por mes (punto #43).
+ *
+ * JD: "si en Bogota sacamos 18 citas al mes, el equipo comercial tiene cabida para 18
+ * clientes de Bogota". Lo que importa es la capacidad POR SECCIONAL, no el total.
+ *
+ * ⚠️ Las cuatro series que pidio NO tienen el mismo respaldo, y el tipo lo refleja en
+ * vez de dejar que la pantalla las pinte todas iguales:
+ *
+ *   · `citas` se fecha sola (la fecha de la cita ES el dato).
+ *   · `certificaciones` sale del rastro de cambios de etapa, que NO cubre a todos:
+ *     `certificaciones_cobertura` dice sobre cuantos casos habla realmente.
+ *   · los certificados CON ERROR no tienen ni un registro (`errores_sin_fuente`), asi
+ *     que esa serie no se dibuja: un cero se leeria como "calidad perfecta".
+ *   · `finalizados` cuenta `estado = 'completado'`, que NO es la definicion #17
+ *     (IVA devuelto o certificado entregado y sin saldo), todavia sin acordar.
+ */
+export interface CapacidadSeccional {
+  desde: string
+  hasta: string
+  /** 'YYYY-MM' en que arranca el rastro de etapas. NO es "desde cuando es confiable". */
+  rastro_etapas_desde: string | null
+  /** Sobre cuantos casos habla de verdad la serie de certificaciones. */
+  certificaciones_cobertura: { con_rastro: number; con_evidencia: number }
+  /** No hay ni un reproceso registrado: la serie de errores no se dibuja. */
+  errores_sin_fuente: boolean
+  citas: CapacidadPunto[]
+  certificaciones: CapacidadPunto[]
+  finalizados: CapacidadPunto[]
 }
 
 /** Un negocio perdido del mes: lo que hay detras de la tasa de cancelacion. */
