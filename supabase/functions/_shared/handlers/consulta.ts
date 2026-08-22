@@ -44,6 +44,27 @@ const STAGE_EMPTY_MSG: Record<string, string> = {
   all: '📊 No tienes negocios activos. Escríbeme: "nuevo negocio con [cliente]"',
 };
 
+// Fila de `negocios` limitada a las columnas que pide el select de abajo.
+// `codigo`, `precio_estimado` y `precio_aprobado` son nullables en la tabla.
+type NegocioRow = {
+  id: string;
+  nombre: string;
+  codigo: string | null;
+  precio_estimado: number | null;
+  precio_aprobado: number | null;
+  stage_actual: string;
+  updated_at: string;
+};
+
+// Forma que se guarda en last_context (compatible con LastContextItem).
+type NegocioItem = {
+  id: string;
+  nombre: string;
+  codigo: string | null;
+  precio: number;
+  stage: string;
+};
+
 async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
   const { user, supabase, parsed } = ctx;
   const stageFilter = parsed.fields.stage_filter || 'all';
@@ -59,7 +80,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
     query = query.eq('stage_actual', stageFilter);
   }
 
-  const { data: negocios } = await query;
+  const { data: negocios } = (await query) as { data: NegocioRow[] | null };
 
   if (!negocios || negocios.length === 0) {
     await ctx.sendMessage(STAGE_EMPTY_MSG[stageFilter] || STAGE_EMPTY_MSG.all);
@@ -67,7 +88,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
   }
 
   // Map to LastContextItem format (preserve original order)
-  const allItems = negocios.map((n: any) => ({
+  const allItems: NegocioItem[] = negocios.map((n) => ({
     id: n.id,
     nombre: n.nombre,
     codigo: n.codigo,
@@ -77,7 +98,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
 
   // Single-stage view
   if (stageFilter !== 'all') {
-    const totalValue = allItems.reduce((s: number, n: any) => s + n.precio, 0);
+    const totalValue = allItems.reduce((s, n) => s + n.precio, 0);
     const label = STAGE_LABELS_PLURAL[stageFilter] || stageFilter;
     const shownCount = Math.min(5, allItems.length);
     let msg = `📊 ${label}: ${allItems.length} negocio${allItems.length > 1 ? 's' : ''}`;
@@ -91,7 +112,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
     }
     // Stale warning only for venta
     if (stageFilter === 'venta') {
-      const stale = negocios.filter((n: any) => daysSince(n.updated_at) > 10);
+      const stale = negocios.filter((n) => daysSince(n.updated_at) > 10);
       if (stale.length > 0) {
         const s = stale[0];
         msg += `\n\n⚠️ ${bold(s.nombre)} sin movimiento ${daysSince(s.updated_at)}d`;
@@ -110,14 +131,14 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
 
   // Grouped view (stage_filter === 'all')
   // Maintain insertion order per stage for accurate "shown" tracking
-  const orderedItems: any[] = [];
-  const groups: Record<string, any[]> = { venta: [], ejecucion: [], cobro: [], cierre: [] };
+  const orderedItems: NegocioItem[] = [];
+  const groups: Record<string, NegocioItem[]> = { venta: [], ejecucion: [], cobro: [], cierre: [] };
   for (const stage of ['venta', 'ejecucion', 'cobro', 'cierre'] as const) {
-    const stageItems = allItems.filter((n: any) => (n.stage || 'venta') === stage);
+    const stageItems = allItems.filter((n) => (n.stage || 'venta') === stage);
     groups[stage] = stageItems;
   }
 
-  const totalValue = allItems.reduce((s: number, n: any) => s + n.precio, 0);
+  const totalValue = allItems.reduce((s, n) => s + n.precio, 0);
 
   let msg = `📊 ${allItems.length} negocio${allItems.length > 1 ? 's' : ''} activo${allItems.length > 1 ? 's' : ''}`;
   msg += `\n💰 Total: ${formatCOPShort(totalValue)}\n`;
@@ -162,28 +183,31 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
 // W16 — Mis Números (§10, v2.0 con conciliación)
 // ============================================================
 
+// Solo se pide la columna `monto` en cobros y gastos.
+type MontoRow = { monto: number };
+
 async function handleMisNumeros(ctx: HandlerContext): Promise<void> {
   const { user, supabase } = ctx;
   const mesInicio = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
   const mesFin = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().slice(0, 10);
 
   // Cobros del mes
-  const { data: cobros } = await supabase
+  const { data: cobros } = (await supabase
     .from('cobros')
     .select('monto')
     .eq('workspace_id', user.workspace_id)
     .gte('fecha', mesInicio)
-    .lt('fecha', mesFin);
-  const totalCobros = (cobros || []).reduce((s: number, c: any) => s + Number(c.monto), 0);
+    .lt('fecha', mesFin)) as { data: MontoRow[] | null };
+  const totalCobros = (cobros || []).reduce((s, c) => s + Number(c.monto), 0);
 
   // Gastos del mes
-  const { data: gastos } = await supabase
+  const { data: gastos } = (await supabase
     .from('gastos')
     .select('monto')
     .eq('workspace_id', user.workspace_id)
     .gte('fecha', mesInicio)
-    .lt('fecha', mesFin);
-  const totalGastos = (gastos || []).reduce((s: number, g: any) => s + Number(g.monto), 0);
+    .lt('fecha', mesFin)) as { data: MontoRow[] | null };
+  const totalGastos = (gastos || []).reduce((s, g) => s + Number(g.monto), 0);
 
   const utilidad = totalCobros - totalGastos;
   const impuestos = utilidad * 0.2; // ~20% provision
@@ -248,23 +272,31 @@ async function handleMisNumeros(ctx: HandlerContext): Promise<void> {
 // W17 — Cartera Pendiente (§10)
 // ============================================================
 
+// Fila de la vista v_facturas_estado, limitada a lo que lee este handler.
+type FacturaRow = {
+  proyecto_id: string;
+  numero_factura: string | null;
+  saldo_pendiente: number;
+  dias_antiguedad: number;
+};
+
 async function handleCartera(ctx: HandlerContext): Promise<void> {
   const { user, supabase } = ctx;
 
-  const { data: facturas } = await supabase
+  const { data: facturas } = (await supabase
     .from('v_facturas_estado')
     .select('*, proyectos!inner(nombre)')
     .eq('workspace_id', user.workspace_id)
     .gt('saldo_pendiente', 0)
-    .order('dias_antiguedad', { ascending: false });
+    .order('dias_antiguedad', { ascending: false })) as { data: FacturaRow[] | null };
 
   if (!facturas || facturas.length === 0) {
     await ctx.sendMessage('✅ No tienes cartera pendiente. ¡Todo cobrado!');
     return;
   }
 
-  const totalCartera = facturas.reduce((s: number, f: any) => s + Number(f.saldo_pendiente), 0);
-  const vencidas = facturas.filter((f: any) => Number(f.dias_antiguedad) > 30);
+  const totalCartera = facturas.reduce((s, f) => s + Number(f.saldo_pendiente), 0);
+  const vencidas = facturas.filter((f) => Number(f.dias_antiguedad) > 30);
 
   let msg = '💵 Cartera pendiente:\n';
 
