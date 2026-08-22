@@ -15,11 +15,29 @@
 // La notificación IN-APP ya la creó el trigger. Esto es el refuerzo por correo:
 // el comercial puede estar sin la plataforma abierta.
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
 type Payload = { negocio_id: string };
+
+// Las edge functions no tienen el `Database` generado, y sin el supabase-js
+// resuelve TODA fila como `never`: probado con `deno check`, son 13 errores de
+// tipos. Este `any` es el ESQUEMA, no el cliente — se cambia por el `Database`
+// generado el dia que exista, y mientras tanto vive en un solo sitio en vez de
+// repartido por las firmas.
+// deno-lint-ignore no-explicit-any
+type EsquemaSinGenerar = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+type Supabase = SupabaseClient<EsquemaSinGenerar>;
+
+/** Las columnas del negocio que leen los avisos al cliente. */
+type Negocio = {
+  id: string;
+  codigo: string | null;
+  nombre: string;
+  workspace_id: string;
+};
 
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
@@ -236,11 +254,9 @@ Deno.serve(async (req: Request) => {
  * definicion de "cual es el correo de este cliente" (contacto -> RUT).
  */
 async function enviarAlCliente(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: Supabase,
   resendKey: string,
-  // deno-lint-ignore no-explicit-any
-  negocio: any,
+  negocio: Negocio,
   etapaNombre: string,
   cfg: { titulo?: string; mensaje?: string },
 ): Promise<{ enviadoA: string | null; omitidoPor: string | null; respondeA?: string | null }> {
@@ -338,10 +354,8 @@ async function enviarAlCliente(
  * trámite casi siempre cae fuera de esa ventana.
  */
 async function enviarWhatsAppAlCliente(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  // deno-lint-ignore no-explicit-any
-  negocio: any,
+  supabase: Supabase,
+  negocio: Negocio,
   etapaNombre: string,
   cfg: { titulo?: string; mensaje?: string },
 ): Promise<{ disparadoA: string | null; omitidoPor: string | null }> {
@@ -434,10 +448,8 @@ async function enviarWhatsAppAlCliente(
  * por `staff.profile_id`. Un negocio admite UN comercial (indice unico por rol), asi
  * que no hay que elegir entre varios.
  */
-// deno-lint-ignore no-explicit-any
 async function comercialDelNegocio(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
+  supabase: Supabase,
   negocioId: string,
 ): Promise<{ nombre: string | null; email: string | null } | null> {
   const { data: resp } = await supabase
