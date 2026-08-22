@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { candidatosDeToken, huella, motivoSinToken } from '@/lib/funnelchat/token'
 
 export const dynamic = 'force-dynamic'
 
 // Receptor de lo que FunnelChat manda hacia ONE.
 //
 // Estado: es una BITACORA, no todavia una integracion. Registra lo que llega y no
-// escribe nada del negocio. Existe para resolver por envio real una contradiccion
-// que el soporte no resolvio: el 2026-08-14 FunnelChat respondio que no puede
-// enviar datos salientes desde las automatizaciones de los flujos (nota del
-// 2026-05-04), mientras su documentacion describe un paso de peticion HTTP dentro
-// de los flujos. Si una fila aparece aqui, la funcion existe.
+// escribe nada del negocio.
+//
+// ✅ VEREDICTO (2026-08-22): FunnelChat SI puede enviar datos salientes desde las
+// automatizaciones de un flujo. Su soporte dijo lo contrario el 2026-08-14 (nota
+// del 2026-05-04) y su documentacion decia que si; gano la documentacion. La
+// prueba son 43 envios reales entre el 2026-08-18 y el 2026-08-22, todos POST con
+// `user-agent: GuzzleHttp/7` desde 34.203.154.84. El frente nunca estuvo bloqueado
+// por FunnelChat.
 //
 // ⚠️ Se registra ANTES de validar el token. Un 401 que no deja rastro vuelve
 // indistinguibles "no llego nada" y "llego y lo rechace", y esa ambiguedad es
@@ -22,7 +26,9 @@ export const dynamic = 'force-dynamic'
 //
 // El token vive en `workspaces.config_extra.funnelchat.webhook_token` (server-only,
 // mismo trato que las credenciales de Siigo) y ademas identifica al workspace: es
-// lo unico que trae la peticion para saber de quien es.
+// lo unico que trae la peticion para saber de quien es. Puede llegar por cabecera
+// `x-metrik-token` o por query `?token=`; ver `candidatosDeToken` para por que se
+// prueban todas las vias en vez de quedarse con la primera.
 
 const MAX_BYTES = 64 * 1024
 
@@ -41,19 +47,6 @@ function headersSeguros(request: NextRequest): Record<string, string> {
     out[k] = HEADERS_SENSIBLES.has(k) ? '[redactado]' : valor
   })
   return out
-}
-
-/** El token puede venir por cabecera o por query. La cabecera es la via buena; la
- *  query queda como respaldo porque una herramienta ajena puede no dejar poner
- *  cabeceras, y quedarse sin prueba por ese detalle seria absurdo. Nunca se guarda. */
-function leerToken(request: NextRequest): string | null {
-  const h =
-    request.headers.get('x-metrik-token') ??
-    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
-    null
-  if (h) return h.trim() || null
-  const q = request.nextUrl.searchParams.get('token')
-  return q?.trim() || null
 }
 
 async function registrar(request: NextRequest, crudo: string) {
@@ -75,27 +68,36 @@ async function registrar(request: NextRequest, crudo: string) {
     payload = { _raw: crudo.slice(0, MAX_BYTES) }
   }
 
-  const token = leerToken(request)
+  const candidatos = candidatosDeToken(request.headers, request.nextUrl.searchParams)
   let workspaceId: string | null = null
   let motivo: string | null = null
 
-  if (!token) {
-    motivo = 'sin token'
+  if (candidatos.length === 0) {
+    motivo = motivoSinToken(request.nextUrl.searchParams)
   } else {
-    const { data, error } = await supabase
-      .from('workspaces')
-      .select('id')
-      .eq('config_extra->funnelchat->>webhook_token', token)
-      .maybeSingle()
-    if (error) {
-      // El error de la consulta NO se descarta: sin esto, un fallo de base se
-      // leeria como "token invalido" y mandaria a revisar la configuracion de
-      // FunnelChat, que estaria bien.
-      motivo = `no se pudo resolver el token: ${error.message}`
-    } else if (data) {
-      workspaceId = (data as { id: string }).id
-    } else {
-      motivo = 'token no reconocido'
+    const fallidos: string[] = []
+    for (const c of candidatos) {
+      const { data, error } = await supabase
+        .from('workspaces')
+        .select('id')
+        .eq('config_extra->funnelchat->>webhook_token', c.valor)
+        .maybeSingle()
+      if (error) {
+        // El error de la consulta NO se descarta: sin esto, un fallo de base se
+        // leeria como "token invalido" y mandaria a revisar la configuracion de
+        // FunnelChat, que estaria bien. Y se corta aqui: seguir probando los
+        // demas candidatos contra una base que falla solo inventa un veredicto.
+        motivo = `no se pudo resolver el token (${c.origen}): ${error.message}`
+        break
+      }
+      if (data) {
+        workspaceId = (data as { id: string }).id
+        break
+      }
+      fallidos.push(`${c.origen}(${await huella(c.valor)})`)
+    }
+    if (!workspaceId && !motivo) {
+      motivo = `token no reconocido — probados: ${fallidos.join(', ')}`
     }
   }
 
