@@ -19,6 +19,8 @@ import type {
   ComercialMesResponse,
   ComercialSerieResponse,
   ComercialOrigenMes,
+  ComercialSeccionalMes,
+  CapacidadSeccional,
   MetaComercial,
 } from '../equipo/comercial-types'
 
@@ -44,6 +46,8 @@ export interface ComercialNegociosBundle {
   /** El mes anterior, para la comparación automática del panel. */
   mesAnteriorInicial: ComercialMesResponse | null
   origenInicial: ComercialOrigenMes | null
+  seccionalInicial: ComercialSeccionalMes | null
+  capacidad: CapacidadSeccional | null
   serie: ComercialSerieResponse | null
   metasIniciales: MetaComercial[]
   anioInicial: number
@@ -178,6 +182,8 @@ export default function TablerosClient({
             mesInicial={initialComercialNegocios.mesInicial}
             mesAnteriorInicial={initialComercialNegocios.mesAnteriorInicial}
             origenInicial={initialComercialNegocios.origenInicial}
+            seccionalInicial={initialComercialNegocios.seccionalInicial}
+            capacidad={initialComercialNegocios.capacidad}
             serie={initialComercialNegocios.serie}
             metasIniciales={initialComercialNegocios.metasIniciales}
             anioInicial={initialComercialNegocios.anioInicial}

@@ -368,6 +368,81 @@ export interface ComercialOrigenMes {
   por_campana: ComercialCampanaFila[]
 }
 
+// ── Corte por seccional DIAN (puntos #22 y #43 del inventario SOENA) ────────
+
+/**
+ * Una seccional en el corte del mes.
+ *
+ * `seccional` es el nombre CANONICO (ya colapsado con `canonizarSeccional`), y `null`
+ * es el bucket "sin registrar": va visible y en raya, nunca repartido entre las demas
+ * ni escondido. Medido el 2026-08-22: 96 de 289 negocios de la linea no tienen
+ * seccional, un tercio de la cartera — repartirlos inventaria una distribucion que
+ * nadie midio.
+ */
+export interface ComercialSeccionalFila {
+  seccional: string | null
+  ventas: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  primer_pago: number
+  segundo_pago: number
+  recaudado: number
+  casos_completos: number
+  /** `null` = la linea no declaro umbral de bonificacion. No es cero. */
+  bonificables: number | null
+  /**
+   * Los casos exactos que suman esta fila. El drill los abre tal cual, en vez de
+   * recalcular el criterio: la lista no puede discrepar de la cifra por construccion.
+   */
+  negocio_ids: string[]
+}
+
+export interface ComercialSeccionalMes {
+  /** Total del mes, el mismo `num_ventas` del panel. Sirve para cuadrar la suma. */
+  total_ventas: number
+  filas: ComercialSeccionalFila[]
+}
+
+/** Un punto de una serie de capacidad: cuantos hubo en ese mes en esa seccional. */
+export interface CapacidadPunto {
+  /** Nombre canonico; `null` = sin seccional registrada. */
+  seccional: string | null
+  /** 'YYYY-MM'. */
+  mes: string
+  n: number
+}
+
+/**
+ * Cuanto puede procesar cada seccional por mes (punto #43).
+ *
+ * JD: "si en Bogota sacamos 18 citas al mes, el equipo comercial tiene cabida para 18
+ * clientes de Bogota". Lo que importa es la capacidad POR SECCIONAL, no el total.
+ *
+ * ⚠️ Las cuatro series que pidio NO tienen el mismo respaldo, y el tipo lo refleja en
+ * vez de dejar que la pantalla las pinte todas iguales:
+ *
+ *   · `citas` se fecha sola (la fecha de la cita ES el dato).
+ *   · `certificaciones` sale del rastro de cambios de etapa, que NO cubre a todos:
+ *     `certificaciones_cobertura` dice sobre cuantos casos habla realmente.
+ *   · los certificados CON ERROR no tienen ni un registro (`errores_sin_fuente`), asi
+ *     que esa serie no se dibuja: un cero se leeria como "calidad perfecta".
+ *   · `finalizados` cuenta `estado = 'completado'`, que NO es la definicion #17
+ *     (IVA devuelto o certificado entregado y sin saldo), todavia sin acordar.
+ */
+export interface CapacidadSeccional {
+  desde: string
+  hasta: string
+  /** 'YYYY-MM' en que arranca el rastro de etapas. NO es "desde cuando es confiable". */
+  rastro_etapas_desde: string | null
+  /** Sobre cuantos casos habla de verdad la serie de certificaciones. */
+  certificaciones_cobertura: { con_rastro: number; con_evidencia: number }
+  /** No hay ni un reproceso registrado: la serie de errores no se dibuja. */
+  errores_sin_fuente: boolean
+  citas: CapacidadPunto[]
+  certificaciones: CapacidadPunto[]
+  finalizados: CapacidadPunto[]
+}
+
 /** Un negocio perdido del mes: lo que hay detras de la tasa de cancelacion. */
 export interface ComercialPerdido {
   negocio_id: string

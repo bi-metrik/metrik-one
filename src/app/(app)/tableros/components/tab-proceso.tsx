@@ -157,6 +157,11 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
           </div>
         </div>
 
+        {/* El cuello de botella por seccional, de un vistazo (punto #42). Solo en la
+            vista por seccional: en Totales no hay nada que apilar por ciudad. La
+            barra sale de las MISMAS celdas que la tabla de abajo. */}
+        {detalle === 'seccional' && <BarrasPorSeccional etapas={etapas} />}
+
         <p className="mb-2 text-[11px]" style={{ color: GRIS }}>
           {fechaFotoPrevia
             ? `Cada celda muestra hoy / ${fechaFotoPrevia}`
@@ -482,5 +487,112 @@ function Aviso({ children }: { children: React.ReactNode }) {
       <Info className="mt-0.5 h-3 w-3 shrink-0" />
       <span>{children}</span>
     </p>
+  )
+}
+
+/**
+ * Dónde está atascado el trabajo, de un vistazo (punto #42).
+ *
+ * Una barra por SECCIONAL, con la seccional a la izquierda y cada color una etapa. Es
+ * la transposición de la tabla de abajo, no una consulta nueva: sale de las MISMAS
+ * `data.etapas`, así que la barra y la tabla no pueden contar distinto.
+ *
+ * Por qué la barra y no otra tabla: la pregunta de JD es "en qué ciudad se está
+ * represando", y eso en una tabla de 19 filas por 15 columnas hay que reconstruirlo
+ * leyendo. En la barra el tramo más ancho ES el cuello de botella.
+ *
+ * ⚠️ Las barras están a la MISMA escala (el ancho es proporcional a los casos, no al
+ * 100% de cada fila). Normalizar cada barra a su propio total haría que una seccional
+ * con 3 casos se viera igual de grande que Bogotá con 118, y la lectura sería falsa
+ * justo en la dimensión que importa: el volumen.
+ */
+function BarrasPorSeccional({ etapas }: { etapas: ProcesoSeccionalEtapa[] }) {
+  // Se agrupa por seccional recorriendo las mismas celdas que pinta la tabla.
+  const porSeccional = new Map<string | null, { total: number; tramos: Map<string, number> }>()
+  const etapasConCasos: { id: string; nombre: string; numero: number; total: number }[] = []
+
+  for (const e of etapas) {
+    let totalEtapa = 0
+    for (const c of e.celdas) {
+      if (c.abiertos <= 0) continue
+      totalEtapa += c.abiertos
+      const acc = porSeccional.get(c.seccional) ?? { total: 0, tramos: new Map<string, number>() }
+      acc.total += c.abiertos
+      acc.tramos.set(e.etapaId, (acc.tramos.get(e.etapaId) ?? 0) + c.abiertos)
+      porSeccional.set(c.seccional, acc)
+    }
+    if (totalEtapa > 0) {
+      etapasConCasos.push({ id: e.etapaId, nombre: e.nombre, numero: e.numero, total: totalEtapa })
+    }
+  }
+
+  const filas = [...porSeccional.entries()]
+    // Volumen primero; el bucket sin registrar al final, porque es un hueco de dato y
+    // no una plaza en el ranking de ciudades.
+    .sort(([sa, a], [sb, b]) => {
+      if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1
+      return b.total - a.total
+    })
+
+  if (filas.length === 0) return null
+
+  const maximo = Math.max(...filas.map(([, v]) => v.total))
+  // El orden de las etapas manda el orden de los tramos y el de la leyenda: así el
+  // ojo recorre la barra en el mismo sentido en que avanza el proceso.
+  const orden = etapasConCasos.sort((a, b) => a.numero - b.numero)
+  const colorDe = (i: number) => `hsl(${(i * 47) % 360} 62% 55%)`
+  const colorPorEtapa = new Map(orden.map((e, i) => [e.id, colorDe(i)]))
+
+  return (
+    <div className="mb-6">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-xs font-bold uppercase tracking-wide" style={{ color: GRIS }}>
+          Dónde está represado, por seccional
+        </h3>
+        <span className="text-[11px]" style={{ color: GRIS }}>
+          casos abiertos · misma escala en todas las barras
+        </span>
+      </div>
+
+      <div className="space-y-1.5">
+        {filas.map(([sec, v]) => (
+          <div key={sec ?? 'sin'} className="flex items-center gap-2">
+            <span
+              className={`w-28 shrink-0 truncate text-right text-[11px] ${sec ? '' : 'italic'}`}
+              style={{ color: sec ? CARBON : '#9CA3AF' }}
+              title={sec ?? 'Casos cuya seccional no se ha registrado'}
+            >
+              {sec ?? 'Sin registrar'}
+            </span>
+            <div className="flex h-4 flex-1 items-stretch overflow-hidden rounded"
+                 style={{ width: `${(v.total / maximo) * 100}%`, minWidth: 2 }}>
+              {orden.map((e) => {
+                const n = v.tramos.get(e.id) ?? 0
+                if (n === 0) return null
+                return (
+                  <div
+                    key={e.id}
+                    style={{ width: `${(n / v.total) * 100}%`, backgroundColor: colorPorEtapa.get(e.id) }}
+                    title={`${sec ?? 'Sin registrar'} · ${e.nombre}: ${n}`}
+                  />
+                )
+              })}
+            </div>
+            <span className="w-8 shrink-0 text-right text-[11px] tabular-nums" style={{ color: GRIS }}>
+              {v.total}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+        {orden.map((e) => (
+          <span key={e.id} className="flex items-center gap-1 text-[10px]" style={{ color: GRIS }}>
+            <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: colorPorEtapa.get(e.id) }} />
+            {e.nombre}
+          </span>
+        ))}
+      </div>
+    </div>
   )
 }

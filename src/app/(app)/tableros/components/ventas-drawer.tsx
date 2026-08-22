@@ -42,6 +42,11 @@ export interface CifraSeleccionada {
    * mide si paso el umbral del proceso y la otra si el honorario quedo cubierto.
    */
   soloBonificables?: boolean | null
+  /**
+   * Casos explícitos a mostrar. Lo usa el corte por seccional: el conjunto lo calculó
+   * quien pintó la cifra, así que la lista es la que sumó, no una consulta paralela.
+   */
+  negocioIds?: string[] | null
   /** 'YYYY-MM-DD': abre las ventas de un solo día. */
   dia?: string | null
   /**
@@ -74,6 +79,11 @@ export function VentasDrawer({
 }) {
   const [casos, setCasos] = useState<ComercialVentaCaso[] | null>(null)
 
+  // El conjunto explícito entra a las dependencias por su CONTENIDO, no por la
+  // identidad del arreglo: el padre lo reconstruye en cada render y comparar
+  // referencias dispararía la consulta en bucle.
+  const clavePorIds = cifra.negocioIds?.join(',') ?? null
+
   // El padre monta el panel con `key` por cifra, así que al cambiar de celda el
   // componente se remonta y el estado arranca vacío solo.
   useEffect(() => {
@@ -87,15 +97,18 @@ export function VentasDrawer({
       dia: cifra.dia ?? null,
       campana: cifra.campana ?? null,
       soloBonificables: cifra.soloBonificables ?? null,
+      negocioIds: cifra.negocioIds ?? null,
     }).then(r => {
       if (vivo) setCasos(r)
     })
     return () => {
       vivo = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     cifra.anio, cifra.mes, cifra.responsableId, cifra.soloCompletos,
     cifra.sinResponsable, cifra.dia, cifra.campana, cifra.soloBonificables,
+    clavePorIds,
   ])
 
   useEffect(() => {

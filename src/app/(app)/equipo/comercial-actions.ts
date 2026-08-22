@@ -2,12 +2,17 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
+import { canonizarSeccional } from '@/lib/dian/seccionales'
 import type {
   ComercialResumenRow,
   ComercialPerfil,
   ComercialVentaCaso,
   ComercialOrigenMes,
   ComercialPerdido,
+  ComercialSeccionalFila,
+  ComercialSeccionalMes,
+  CapacidadPunto,
+  CapacidadSeccional,
 } from './comercial-types'
 
 /**
@@ -209,6 +214,13 @@ export async function getComercialVentasMes(input: {
    * filtros: no se sabe de qué lado van, y meterlas en uno sería inventarlo.
    */
   soloBonificables?: boolean | null
+  /**
+   * Acota a un conjunto EXPLÍCITO de casos. Lo usa el corte por seccional (#22): la
+   * canonización vive en TS, así que el servidor no sabe qué negocios son "Bogotá" —
+   * se le pasan los que ya sumaron la cifra, y la lista no puede discrepar de ella.
+   * Un arreglo vacío acota a nada; `null`/ausente no acota.
+   */
+  negocioIds?: string[] | null
 }): Promise<ComercialVentaCaso[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return []
@@ -223,6 +235,7 @@ export async function getComercialVentasMes(input: {
     p_dia: input.dia ?? null,
     p_campana: input.campana ?? null,
     p_solo_bonificables: input.soloBonificables ?? null,
+    p_negocio_ids: input.negocioIds ?? null,
   })
   // El error se lee y se registra: descartarlo devuelve lista vacia y la pantalla diria
   // "no hay casos aqui" sobre una cifra que dice que si los hay — el fallo mudo que este
@@ -284,4 +297,135 @@ export async function getComercialPerdidosMes(
     return []
   }
   return (data as ComercialPerdido[]) ?? []
+}
+
+// ── Corte por seccional DIAN (puntos #22 y #43) ─────────────────────────────
+//
+// ⚠️ La canonización vive AQUÍ y no en SQL a propósito. El catálogo de las 35
+// seccionales está en `src/lib/dian/seccionales.ts`; copiarlo a una función de
+// Postgres crearía una segunda fuente que se desincroniza el día que la DIAN
+// cambie una, y el síntoma sería una ciudad partida en dos columnas — exactamente
+// lo que el PR #236 vino a cerrar. Las RPC devuelven el texto CRUDO y aquí se
+// colapsa, igual que hace `getProcesoPorSeccional` con las fotos históricas.
+
+/** Nombre canónico de una seccional, o `null` si no hay dato. Nunca inventa. */
+function canonizar(cruda: string | null | undefined): string | null {
+  const t = cruda?.trim()
+  if (!t) return null
+  // Si el texto no está en el catálogo se conserva tal cual en vez de descartarlo:
+  // perder la ciudad de un caso es peor que mostrar una grafía inesperada.
+  return canonizarSeccional(t) ?? t
+}
+
+/**
+ * Las cifras del mes abiertas por seccional (punto #22).
+ *
+ * Devuelve `null` cuando la consulta falla, para que la pantalla pueda callar en vez
+ * de pintar una tabla vacía que se leería como "ninguna venta tiene seccional".
+ */
+export async function getComercialSeccionalMes(
+  anio: number,
+  mes: number,
+): Promise<ComercialSeccionalMes | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_seccional_mes_soena', {
+    p_workspace_id: workspaceId,
+    p_anio: anio,
+    p_mes: mes,
+  })
+  if (rpcError) {
+    console.error('[comercial] no se pudo traer el corte por seccional:', rpcError)
+    return null
+  }
+  if (!data) return null
+
+  type Cruda = Omit<ComercialSeccionalFila, 'seccional'> & { seccional_cruda: string | null }
+  const crudas = ((data.filas ?? []) as Cruda[])
+
+  // Dos grafías de la misma ciudad SE SUMAN. Si se dejaran separadas, la comparación
+  // contra el total del panel no cuadraría y aparecerían dos "Bogotá" en la tabla.
+  const porSeccional = new Map<string, ComercialSeccionalFila>()
+  for (const f of crudas) {
+    const seccional = canonizar(f.seccional_cruda)
+    const clave = seccional ?? ' sin-registrar'
+    const acc = porSeccional.get(clave)
+    if (!acc) {
+      porSeccional.set(clave, { ...f, seccional, negocio_ids: [...(f.negocio_ids ?? [])] })
+      continue
+    }
+    acc.ventas += f.ventas
+    acc.valor_sin_iva += f.valor_sin_iva
+    acc.valor_con_iva += f.valor_con_iva
+    acc.primer_pago += f.primer_pago
+    acc.segundo_pago += f.segundo_pago
+    acc.recaudado += f.recaudado
+    acc.casos_completos += f.casos_completos
+    // `null + n` no es `n`: si una de las dos grafías no se pudo medir, la suma
+    // tampoco. Sumar tratando el null como 0 diría que esas ventas no bonifican.
+    acc.bonificables = acc.bonificables === null || f.bonificables === null
+      ? null
+      : acc.bonificables + f.bonificables
+    acc.negocio_ids.push(...(f.negocio_ids ?? []))
+  }
+
+  // Orden de lectura: la seccional con más ventas primero, y el bucket sin registrar
+  // SIEMPRE al final — es un hueco de dato, no una plaza del ranking de ciudades.
+  const filas = [...porSeccional.values()].sort((a, b) => {
+    if ((a.seccional === null) !== (b.seccional === null)) return a.seccional === null ? 1 : -1
+    return b.ventas - a.ventas || (a.seccional ?? '').localeCompare(b.seccional ?? '')
+  })
+
+  return { total_ventas: Number(data.total_ventas ?? 0), filas }
+}
+
+/**
+ * Capacidad mensual por seccional (punto #43).
+ *
+ * `null` = la línea no declaró de dónde sale cada serie (`config_extra.capacidad`), o
+ * la consulta falló. En los dos casos la pantalla calla: dibujar las series vacías
+ * afirmaría que no hubo ni una cita ni un certificado en el periodo.
+ */
+export async function getCapacidadSeccional(
+  desde: string,
+  hasta: string,
+): Promise<CapacidadSeccional | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_capacidad_seccional_soena', {
+    p_workspace_id: workspaceId,
+    p_desde: desde,
+    p_hasta: hasta,
+  })
+  if (rpcError) {
+    console.error('[comercial] no se pudo traer la capacidad por seccional:', rpcError)
+    return null
+  }
+  if (!data) return null
+
+  type PuntoCrudo = { seccional_cruda: string | null; mes: string; n: number }
+  const colapsar = (puntos: PuntoCrudo[] | null | undefined): CapacidadPunto[] => {
+    const acc = new Map<string, CapacidadPunto>()
+    for (const p of puntos ?? []) {
+      const seccional = canonizar(p.seccional_cruda)
+      const clave = `${seccional ?? ' '}::${p.mes}`
+      const prev = acc.get(clave)
+      if (prev) prev.n += Number(p.n)
+      else acc.set(clave, { seccional, mes: p.mes, n: Number(p.n) })
+    }
+    return [...acc.values()]
+  }
+
+  return {
+    desde: data.desde,
+    hasta: data.hasta,
+    rastro_etapas_desde: data.rastro_etapas_desde ?? null,
+    certificaciones_cobertura: data.certificaciones_cobertura ?? { con_rastro: 0, con_evidencia: 0 },
+    errores_sin_fuente: Boolean(data.errores_sin_fuente),
+    citas: colapsar(data.citas),
+    certificaciones: colapsar(data.certificaciones),
+    finalizados: colapsar(data.finalizados),
+  }
 }

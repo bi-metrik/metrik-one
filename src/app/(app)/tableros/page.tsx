@@ -2,7 +2,10 @@ import { redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
-import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales, getComercialOrigenMes } from '../equipo/comercial-actions'
+import {
+  getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales,
+  getComercialOrigenMes, getComercialSeccionalMes, getCapacidadSeccional,
+} from '../equipo/comercial-actions'
 import { getOperacionesBono } from './operaciones-actions'
 import { getDatosDueno } from '../calidad/actions'
 import { bogotaYearMonth, bogotaParts } from '@/lib/dates/bogota'
@@ -73,11 +76,20 @@ export default async function TablerosPage() {
     const prev = mesSel === 1
       ? { anio: anioSel - 1, mes: 12 }
       : { anio: anioSel, mes: mesSel - 1 }
-    const [equipo, mesData, mesPrevio, origen, serie, metas] = await Promise.all([
+    // Ventana de la capacidad por seccional (#43): los 6 meses cerrados hacia atras y
+    // los 3 hacia adelante. Hacia ADELANTE porque una cita se agenda para el futuro y
+    // ahi esta justo el dato que decide cuanto se puede vender este mes.
+    const ventana = (meses: number) => {
+      const d = new Date(Date.UTC(anioSel, mesSel - 1 + meses, 1))
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
+    }
+    const [equipo, mesData, mesPrevio, origen, seccional, capacidad, serie, metas] = await Promise.all([
       getComercialResumen(),
       getComercialMes(anioSel, mesSel),
       getComercialMes(prev.anio, prev.mes),
       getComercialOrigenMes(anioSel, mesSel),
+      getComercialSeccionalMes(anioSel, mesSel),
+      getCapacidadSeccional(ventana(-5), ventana(3)),
       getComercialSerie(12),
       getMetasComerciales(anioSel, mesSel),
     ])
@@ -86,6 +98,8 @@ export default async function TablerosPage() {
       mesInicial: mesData,
       mesAnteriorInicial: mesPrevio,
       origenInicial: origen,
+      seccionalInicial: seccional,
+      capacidad,
       serie,
       metasIniciales: metas,
       anioInicial: anioSel,

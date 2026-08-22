@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Fragment, useState, useTransition } from 'react'
 import { ChevronLeft, ChevronRight, Target } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
@@ -12,10 +12,18 @@ import type {
   ComercialMesResponse,
   ComercialSerieResponse,
   ComercialOrigenMes,
+  ComercialSeccionalFila,
+  ComercialSeccionalMes,
+  CapacidadPunto,
+  CapacidadSeccional,
   MetaComercial,
 } from '../../equipo/comercial-types'
 import { MESES_ES } from '../../equipo/comercial-types'
-import { getComercialMes, getComercialOrigenMes } from '../../equipo/comercial-actions'
+import {
+  getComercialMes,
+  getComercialOrigenMes,
+  getComercialSeccionalMes,
+} from '../../equipo/comercial-actions'
 import MetasModal from '../../equipo/metas-modal'
 import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 import { PerdidosDrawer } from './perdidos-drawer'
@@ -83,6 +91,13 @@ export interface TabComercialSoenaProps {
   /** El mes anterior al inicial, para la comparación automática (punto #41). */
   mesAnteriorInicial: ComercialMesResponse | null
   origenInicial: ComercialOrigenMes | null
+  /** Corte del mes por seccional DIAN (punto #22). `null` = no se pudo traer. */
+  seccionalInicial: ComercialSeccionalMes | null
+  /**
+   * Capacidad mensual por seccional (punto #43). `null` = la linea no declaro de
+   * donde sale cada serie, y entonces la seccion no se dibuja.
+   */
+  capacidad: CapacidadSeccional | null
   serie: ComercialSerieResponse | null
   metasIniciales: MetaComercial[]
   anioInicial: number
@@ -103,6 +118,8 @@ export function TabComercialSoena({
   mesInicial,
   mesAnteriorInicial,
   origenInicial,
+  seccionalInicial,
+  capacidad,
   serie,
   metasIniciales,
   anioInicial,
@@ -116,6 +133,7 @@ export function TabComercialSoena({
   const [mesData, setMesData] = useState<ComercialMesResponse | null>(mesInicial)
   const [mesPrevio, setMesPrevio] = useState<ComercialMesResponse | null>(mesAnteriorInicial)
   const [origen, setOrigen] = useState<ComercialOrigenMes | null>(origenInicial)
+  const [seccional, setSeccional] = useState<ComercialSeccionalMes | null>(seccionalInicial)
   const [metasModalOpen, setMetasModalOpen] = useState(false)
   const [pending, startTransition] = useTransition()
   // Qué cifra se abrió. `null` = panel cerrado. Se monta con `key` para que al pasar de
@@ -131,14 +149,16 @@ export function TabComercialSoena({
     startTransition(async () => {
       // Las tres consultas van juntas: si la comparación llegara después, el panel
       // mostraría por un instante los deltas del mes anterior sobre las cifras nuevas.
-      const [d, p, o] = await Promise.all([
+      const [d, p, o, sec] = await Promise.all([
         getComercialMes(na, nm),
         getComercialMes(prev.a, prev.m),
         getComercialOrigenMes(na, nm),
+        getComercialSeccionalMes(na, nm),
       ])
       setMesData(d)
       setMesPrevio(p)
       setOrigen(o)
+      setSeccional(sec)
     })
   }
 
@@ -333,6 +353,25 @@ export function TabComercialSoena({
           })}
         />
       )}
+
+      {/* El mes abierto por seccional DIAN (punto #22). Mauricio: seccional tal cual,
+          sin agrupar en regiones. */}
+      {seccional && seccional.total_ventas > 0 && (
+        <SeccionSeccional
+          datos={seccional}
+          mesLabel={`${MESES_ES[mes - 1]} ${anio}`}
+          onAbrir={(f) => abrirVentas({
+            titulo: `Ventas · ${f.seccional ?? 'Sin seccional registrada'}`,
+            alcance: `${MESES_ES[mes - 1]} ${anio}`,
+            // El conjunto EXACTO que sumó la fila: la lista no puede discrepar.
+            negocioIds: f.negocio_ids,
+          })}
+        />
+      )}
+
+      {/* Capacidad por seccional (punto #43). No depende del mes elegido: es una
+          ventana propia, porque la pregunta es "cuánto cabe", no "cuánto se vendió". */}
+      {capacidad && <SeccionCapacidad cap={capacidad} />}
 
       {/* Tabla por vendedor del mes */}
       <section className="mb-8">
@@ -991,5 +1030,252 @@ function Row({ label, value, strong, muted, color }: { label: string; value: str
         {value}
       </span>
     </div>
+  )
+}
+
+/**
+ * El mes abierto por SECCIONAL DIAN (punto #22).
+ *
+ * Mauricio cerró el 2026-08-22 que el corte es por seccional tal cual, sin agrupar en
+ * regiones: cero traducción sobre el catálogo canónico que ONE ya escribe.
+ *
+ * ⚠️ El bucket "sin registrar" va ABAJO, visible y con su propia explicación. Medido
+ * el 2026-08-22: 96 de 289 negocios de la línea no tienen seccional, y en las ventas
+ * de agosto ese bucket es el MÁS GRANDE (16 de 38). Repartirlo a prorrata inventaría
+ * una distribución que nadie midió; esconderlo dejaría las columnas sin sumar el total
+ * sin decir por qué.
+ */
+function SeccionSeccional({ datos, mesLabel, onAbrir }: {
+  datos: ComercialSeccionalMes
+  mesLabel: string
+  onAbrir: (fila: ComercialSeccionalFila) => void
+}) {
+  const conSeccional = datos.filas.filter((f) => f.seccional !== null)
+  const sinRegistrar = datos.filas.find((f) => f.seccional === null) ?? null
+  const cubiertas = conSeccional.reduce((s, f) => s + f.ventas, 0)
+
+  return (
+    <section className="mb-8">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-bold text-gray-900">Por seccional DIAN · {mesLabel}</h2>
+        <p className="text-xs text-gray-500">
+          {cubiertas} de {datos.total_ventas} ventas con seccional registrada
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                <th className="px-4 py-3 text-left">Seccional</th>
+                <th className="px-4 py-3 text-right">Cierres</th>
+                <th className="px-4 py-3 text-right">1er pago</th>
+                <th className="hidden px-4 py-3 text-right sm:table-cell">2o pago</th>
+                <th className="px-4 py-3 text-right">Venta total</th>
+                <th className="hidden px-4 py-3 text-right md:table-cell">Bonificables</th>
+              </tr>
+            </thead>
+            <tbody>
+              {conSeccional.map((f) => (
+                <FilaSeccional key={f.seccional} f={f} onAbrir={onAbrir} />
+              ))}
+              {sinRegistrar && (
+                <>
+                  <tr className="border-b border-gray-50 bg-amber-50/40">
+                    <td colSpan={6} className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                      Sin seccional registrada · no se reparte entre las de arriba
+                    </td>
+                  </tr>
+                  <FilaSeccional f={sinRegistrar} onAbrir={onAbrir} />
+                </>
+              )}
+              {datos.filas.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
+                    Sin ventas este mes.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {sinRegistrar && (
+        <p className="mt-2 text-[11px] text-gray-500">
+          La seccional sale de la casilla 12 del RUT. {sinRegistrar.ventas} de{' '}
+          {datos.total_ventas} ventas de este mes no la tienen: no significa que sean de
+          otra ciudad, significa que el dato no está.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function FilaSeccional({ f, onAbrir }: {
+  f: ComercialSeccionalFila
+  onAbrir: (fila: ComercialSeccionalFila) => void
+}) {
+  const abrir = f.ventas > 0 ? () => onAbrir(f) : undefined
+  return (
+    <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+      <td className="px-4 py-3">
+        <span className={f.seccional ? 'font-medium text-gray-900' : 'italic text-gray-400'}>
+          {f.seccional ?? 'Sin registrar'}
+        </span>
+      </td>
+      <CeldaAbrible className="px-4 py-3 text-right font-semibold tabular-nums text-gray-900"
+        onAbrir={abrir} title="Ver estos casos">
+        {f.ventas}
+      </CeldaAbrible>
+      <CeldaAbrible className="px-4 py-3 text-right tabular-nums text-gray-600"
+        onAbrir={abrir} title="Ver los casos de los que salió este recaudo">
+        {fmtCOP(f.primer_pago)}
+      </CeldaAbrible>
+      <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums text-gray-600 sm:table-cell"
+        onAbrir={abrir} title="Ver los casos de los que salió este recaudo">
+        {fmtCOP(f.segundo_pago)}
+      </CeldaAbrible>
+      <CeldaAbrible className="px-4 py-3 text-right font-semibold tabular-nums"
+        style={{ color: GREEN }} onAbrir={abrir} title="Ver los casos que suman este valor">
+        {fmtCOP(f.valor_sin_iva)}
+      </CeldaAbrible>
+      <td className="hidden px-4 py-3 text-right tabular-nums text-gray-700 md:table-cell">
+        {f.bonificables === null
+          ? <span className="text-gray-300" title="La línea no declaró desde qué etapa una venta bonifica">—</span>
+          : f.bonificables}
+      </td>
+    </tr>
+  )
+}
+
+/**
+ * Capacidad mensual por seccional (punto #43).
+ *
+ * JD: "si en Bogotá sacamos 18 citas al mes, el equipo comercial tiene cabida para 18
+ * clientes de Bogotá". Por eso la tabla es POR SECCIONAL y el total va al final, no al
+ * revés: el total no dice nada sobre dónde se puede vender.
+ *
+ * ⚠️ Las series NO tienen el mismo respaldo y la pantalla lo dice en vez de dibujarlas
+ * todas iguales. La de certificados CON ERROR no se dibuja: no hay un solo registro, y
+ * una línea en cero se leería como "calidad perfecta".
+ */
+function SeccionCapacidad({ cap }: { cap: CapacidadSeccional }) {
+  // Los meses que de verdad tienen algún dato, en orden. No se rellenan los vacíos:
+  // un mes sin citas y un mes sin medir se verían igual, y no son lo mismo.
+  const meses = [...new Set([
+    ...cap.citas.map((p) => p.mes),
+    ...cap.certificaciones.map((p) => p.mes),
+    ...cap.finalizados.map((p) => p.mes),
+  ])].sort()
+
+  const seccionales = [...new Set([
+    ...cap.citas.map((p) => p.seccional),
+    ...cap.certificaciones.map((p) => p.seccional),
+    ...cap.finalizados.map((p) => p.seccional),
+  ])]
+  // Sin registrar al final: es un hueco de dato, no una plaza del ranking.
+  seccionales.sort((a, b) => {
+    if ((a === null) !== (b === null)) return a === null ? 1 : -1
+    return (a ?? '').localeCompare(b ?? '')
+  })
+
+  const busca = (serie: CapacidadPunto[], sec: string | null, mes: string): number | null => {
+    const p = serie.find((x) => x.seccional === sec && x.mes === mes)
+    return p ? p.n : null
+  }
+
+  if (meses.length === 0) return null
+
+  const cob = cap.certificaciones_cobertura
+  return (
+    <section className="mb-8">
+      <h2 className="mb-1 text-sm font-bold text-gray-900">Capacidad por seccional</h2>
+      <p className="mb-3 text-xs text-gray-500">
+        Cuántas citas da la DIAN y cuántos certificados salen cada mes en cada seccional.
+        Es el techo de lo que el equipo comercial puede vender ahí.
+      </p>
+
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                <th className="px-4 py-3 text-left">Seccional</th>
+                {meses.map((m) => (
+                  <th key={m} colSpan={3} className="border-l border-gray-100 px-3 py-3 text-center">
+                    {m}
+                  </th>
+                ))}
+              </tr>
+              <tr className="border-b border-gray-100 bg-gray-50/40 text-[10px] uppercase tracking-wide text-gray-400">
+                <th />
+                {meses.map((m) => (
+                  <Fragment key={m}>
+                    <th className="border-l border-gray-100 px-2 py-1.5 text-right font-medium" title="Citas de la DIAN con fecha en este mes">Citas</th>
+                    <th className="px-2 py-1.5 text-right font-medium" title="Casos que entraron a Certificación en este mes">Cert.</th>
+                    <th className="px-2 py-1.5 text-right font-medium" title="Casos que quedaron en estado completado en este mes">Final.</th>
+                  </Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {seccionales.map((sec) => (
+                <tr key={sec ?? 'sin'} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+                  <td className="px-4 py-2.5">
+                    <span className={sec ? 'font-medium text-gray-900' : 'italic text-gray-400'}>
+                      {sec ?? 'Sin registrar'}
+                    </span>
+                  </td>
+                  {meses.map((m) => (
+                    <Fragment key={m}>
+                      <CeldaCapacidad n={busca(cap.citas, sec, m)} borde />
+                      <CeldaCapacidad n={busca(cap.certificaciones, sec, m)} />
+                      <CeldaCapacidad n={busca(cap.finalizados, sec, m)} />
+                    </Fragment>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Lo que la tabla NO puede afirmar, dicho donde se lee la tabla. */}
+      <ul className="mt-2 space-y-1 text-[11px] text-gray-500">
+        <li>
+          <strong>Citas</strong>: se cuentan por la fecha de la propia cita, que es lo que
+          mide el cupo del mes. Un caso sin fecha registrada no aparece.
+        </li>
+        <li>
+          <strong>Certificaciones</strong>: salen del rastro de cambios de etapa, que cubre{' '}
+          <strong>{cob.con_rastro} de {cob.con_evidencia}</strong> casos con evidencia de haber
+          pasado por ahí. Los que llegaron cargados ya avanzados no dejaron rastro
+          {cap.rastro_etapas_desde && <> (el rastro arranca en {cap.rastro_etapas_desde})</>}.
+        </li>
+        <li>
+          <strong>Finalizados</strong>: cuenta el estado <em>completado</em>. Todavía no es la
+          definición acordada de finalizado (IVA devuelto o certificado entregado y sin saldo).
+        </li>
+        {cap.errores_sin_fuente && (
+          <li className="text-amber-700">
+            <strong>Certificados con error</strong>: no se dibuja porque no hay ni un reproceso
+            registrado. No es cero errores — es que nadie los ha registrado todavía.
+          </li>
+        )}
+      </ul>
+    </section>
+  )
+}
+
+/** Una celda de capacidad. Sin dato va en raya, no en cero. */
+function CeldaCapacidad({ n, borde }: { n: number | null; borde?: boolean }) {
+  return (
+    <td className={`px-2 py-2.5 text-right tabular-nums ${borde ? 'border-l border-gray-100' : ''}`}>
+      {n === null
+        ? <span className="text-gray-300" title="Sin dato en este mes">—</span>
+        : <span className="text-gray-800">{n}</span>}
+    </td>
   )
 }
