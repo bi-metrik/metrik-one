@@ -11,6 +11,7 @@ import {
   formatCOP, formatCOPShort, bold, formatDate, daysSince, formatAgo,
 } from '../_shared/wa-format.ts';
 import { STREAK_MILESTONES } from '../_shared/types.ts';
+import { COLUMNAS_CARTERA, deudasDeCartera } from '../_shared/cartera.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
 // `supabase-client.ts` se crea SIN el generico `Database`, asi que lo que
@@ -26,7 +27,6 @@ type FilaNegocio = {
   precio_aprobado: ValorNumerico;
   updated_at: string;
 };
-type FilaCartera = { saldo_pendiente: ValorNumerico; dias_antiguedad: ValorNumerico };
 type ContactoDelNegocio = { nombre?: string | null } | null;
 
 Deno.serve(async (req) => {
@@ -71,34 +71,40 @@ Deno.serve(async (req) => {
 });
 
 // ============================================================
-// W25 — Factura Vencida (>30 días, recordatorio cada 7 días)
+// W25 — Saldo Vencido (>30 días, recordatorio cada 7 días)
 // ============================================================
+//
+// Se llamaba "Factura Vencida" y leia `v_facturas_estado`. Como `facturas`
+// tiene 0 filas en los 15 workspaces, este cron corria todos los dias a las
+// 8am Bogota y no encontraba nunca nada — sin error, sin log de alarma. Ahora
+// lee `v_cartera_negocio`, la misma fuente de /numeros y del tablero. El nombre
+// cambio con la fuente: lo que vence es el saldo del negocio, no una factura,
+// y los dias se cuentan desde que nacio el negocio (no hay fecha de emision).
 
 async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
-  console.log('[wa-alerts] Running W25 — Factura Vencida');
+  console.log('[wa-alerts] Running W25 — Saldo Vencido');
 
-  // Find invoices with pending balance > 0 and emitted > 30 days ago
-  const { data: overdueInvoices } = await supabase
-    .from('v_facturas_estado')
-    .select('factura_id, numero_factura, fecha_emision, saldo_pendiente, proyecto_id, workspace_id, dias_antiguedad')
-    .gt('saldo_pendiente', 0)
-    .gt('dias_antiguedad', 30);
+  const { data } = await supabase
+    .from('v_cartera_negocio')
+    .select(COLUMNAS_CARTERA);
 
-  if (!overdueInvoices || overdueInvoices.length === 0) {
-    console.log('[wa-alerts] W25: No overdue invoices found');
+  // `deudasDeCartera` aplica el piso de materialidad y ordena por antiguedad.
+  const vencidos = deudasDeCartera(data).filter((d) => d.vencida);
+
+  if (vencidos.length === 0) {
+    console.log('[wa-alerts] W25: No overdue balances found');
     return;
   }
 
   // Group by workspace
-  const byWorkspace = new Map<string, typeof overdueInvoices>();
-  for (const inv of overdueInvoices) {
-    const wsId = inv.workspace_id;
-    if (!wsId) continue;
-    if (!byWorkspace.has(wsId)) byWorkspace.set(wsId, []);
-    byWorkspace.get(wsId)!.push(inv);
+  const byWorkspace = new Map<string, typeof vencidos>();
+  for (const d of vencidos) {
+    if (!d.workspaceId) continue;
+    if (!byWorkspace.has(d.workspaceId)) byWorkspace.set(d.workspaceId, []);
+    byWorkspace.get(d.workspaceId)!.push(d);
   }
 
-  for (const [workspaceId, invoices] of byWorkspace) {
+  for (const [workspaceId, deudas] of byWorkspace) {
     const phone = await getOwnerPhone(supabase, workspaceId);
     if (!phone) continue;
 
@@ -107,25 +113,16 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
       continue;
     }
 
-    // Send one message per overdue invoice (max 3 per run)
-    for (const inv of invoices.slice(0, 3)) {
-      const dias = Number(inv.dias_antiguedad);
-      // Get negocio name (fallback to proyecto for legacy rows)
-      let refNombre = 'Negocio';
-      const { data: neg } = await supabase.from('negocios').select('nombre').eq('id', inv.proyecto_id).maybeSingle();
-      if (neg?.nombre) {
-        refNombre = neg.nombre;
-      } else {
-        const { data: proj } = await supabase.from('proyectos').select('nombre').eq('id', inv.proyecto_id).maybeSingle();
-        if (proj?.nombre) refNombre = proj.nombre;
-      }
-
-      let msg = `⚠️ Factura vencida:\n`;
-      msg += `📄 ${inv.numero_factura || 'S/N'} — ${bold(refNombre)}\n`;
-      msg += `💰 Saldo: ${formatCOP(Number(inv.saldo_pendiente))} · ${dias}d`;
+    // Send one message per overdue balance (max 3 per run).
+    // El nombre viene en la misma fila: se van las dos consultas por deuda que
+    // hacia la version anterior para resolver negocio/proyecto.
+    for (const d of deudas.slice(0, 3)) {
+      let msg = `⚠️ Saldo vencido:\n`;
+      msg += `📄 ${d.codigo} — ${bold(d.nombre)}\n`;
+      msg += `💰 Saldo: ${formatCOP(d.saldo)} · ${d.dias}d`;
 
       await sendTextMessage(phone, msg);
-      await logMessage(supabase, phone, 'outbound', workspaceId, 'W25', `Factura ${inv.numero_factura} vencida`);
+      await logMessage(supabase, phone, 'outbound', workspaceId, 'W25', `Saldo ${d.codigo} vencido`);
     }
   }
 }
@@ -268,16 +265,19 @@ async function buildWeeklySummary(
   }
 
   // --- Cartera ---
-  const { data: cartera } = await supabase
-    .from('v_facturas_estado')
-    .select('saldo_pendiente, dias_antiguedad')
-    .eq('workspace_id', workspaceId)
-    .gt('saldo_pendiente', 0);
+  // Salia de `v_facturas_estado` (tabla vacia), asi que este resumen decia
+  // "Cartera: $0" todos los lunes sin importar lo que se debiera.
+  const { data: carteraRows } = await supabase
+    .from('v_cartera_negocio')
+    .select(COLUMNAS_CARTERA)
+    .eq('workspace_id', workspaceId);
+
+  const deudas = deudasDeCartera(carteraRows);
 
   let carteraLine = '';
-  if (cartera && cartera.length > 0) {
-    const totalCartera = cartera.reduce((s: number, f: FilaCartera) => s + Number(f.saldo_pendiente), 0);
-    const vencidas = cartera.filter((f: FilaCartera) => Number(f.dias_antiguedad) > 30).length;
+  if (deudas.length > 0) {
+    const totalCartera = deudas.reduce((s, d) => s + d.saldo, 0);
+    const vencidas = deudas.filter((d) => d.vencida).length;
     carteraLine = `💵 Cartera: ${formatCOP(totalCartera)}`;
     if (vencidas > 0) carteraLine += ` (${vencidas} vencida${vencidas > 1 ? 's' : ''} ⚠️)`;
   } else {
