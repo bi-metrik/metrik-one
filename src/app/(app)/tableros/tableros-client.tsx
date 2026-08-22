@@ -18,6 +18,7 @@ import type {
   ComercialResumenRow,
   ComercialMesResponse,
   ComercialSerieResponse,
+  ComercialOrigenMes,
   MetaComercial,
 } from '../equipo/comercial-types'
 
@@ -40,10 +41,16 @@ const PESTANAS_CON_PERIODO: TabKey[] = ['financiero', 'comercial', 'operativo']
 export interface ComercialNegociosBundle {
   equipo: ComercialResumenRow[]
   mesInicial: ComercialMesResponse | null
+  /** El mes anterior, para la comparación automática del panel. */
+  mesAnteriorInicial: ComercialMesResponse | null
+  origenInicial: ComercialOrigenMes | null
   serie: ComercialSerieResponse | null
   metasIniciales: MetaComercial[]
   anioInicial: number
   mesNumInicial: number
+  /** 'YYYY-MM' del mes en curso en Bogotá, resuelto en el servidor. */
+  mesEnCurso: string
+  diaEnCurso: number
   puedeEditarMetas: boolean
 }
 
@@ -169,10 +176,14 @@ export default function TablerosClient({
           <TabComercialSoena
             equipo={initialComercialNegocios.equipo}
             mesInicial={initialComercialNegocios.mesInicial}
+            mesAnteriorInicial={initialComercialNegocios.mesAnteriorInicial}
+            origenInicial={initialComercialNegocios.origenInicial}
             serie={initialComercialNegocios.serie}
             metasIniciales={initialComercialNegocios.metasIniciales}
             anioInicial={initialComercialNegocios.anioInicial}
             mesNumInicial={initialComercialNegocios.mesNumInicial}
+            mesEnCurso={initialComercialNegocios.mesEnCurso}
+            diaEnCurso={initialComercialNegocios.diaEnCurso}
             puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
           />
         )}

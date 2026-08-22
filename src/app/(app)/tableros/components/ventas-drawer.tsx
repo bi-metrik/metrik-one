@@ -20,6 +20,7 @@ import { X, ExternalLink, AlertTriangle, CheckCircle2, RotateCcw } from 'lucide-
 import Link from 'next/link'
 import { getComercialVentasMes } from '../../equipo/comercial-actions'
 import type { ComercialVentaCaso } from '../../equipo/comercial-types'
+import { origenNegocioLabel } from '@/lib/catalogos/constants'
 
 const CARBON = '#1A1A1A'
 const GRIS = '#6B7280'
@@ -35,6 +36,13 @@ export interface CifraSeleccionada {
   responsableId?: string | null
   sinResponsable?: boolean
   soloCompletos?: boolean | null
+  /** 'YYYY-MM-DD': abre las ventas de un solo día. */
+  dia?: string | null
+  /**
+   * Abre las ventas de una campaña. La cadena vacía abre el bucket de las que
+   * vinieron de Meta sin campaña atribuida — distinto de `null`, que es "todas".
+   */
+  campana?: string | null
   /** Nombre del vendedor, cuando la cifra es de una fila y no del total. */
   alcance?: string | null
 }
@@ -70,13 +78,18 @@ export function VentasDrawer({
       responsableId: cifra.responsableId ?? null,
       soloCompletos: cifra.soloCompletos ?? null,
       sinResponsable: cifra.sinResponsable ?? false,
+      dia: cifra.dia ?? null,
+      campana: cifra.campana ?? null,
     }).then(r => {
       if (vivo) setCasos(r)
     })
     return () => {
       vivo = false
     }
-  }, [cifra.anio, cifra.mes, cifra.responsableId, cifra.soloCompletos, cifra.sinResponsable])
+  }, [
+    cifra.anio, cifra.mes, cifra.responsableId, cifra.soloCompletos,
+    cifra.sinResponsable, cifra.dia, cifra.campana,
+  ])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -208,6 +221,12 @@ export function VentasDrawer({
                           </span>
                         )}
                       </div>
+
+                      {/* De dónde vino. Decide la comisión, así que se muestra en cada
+                          caso y no solo en el agregado. */}
+                      <div className="mt-2 border-t pt-2" style={{ borderColor: BORDE }}>
+                        <Origen caso={c} />
+                      </div>
                     </Link>
                   </li>
                 ))}
@@ -223,6 +242,60 @@ export function VentasDrawer({
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * De dónde vino el caso, en los tres estados que NO se pueden confundir.
+ *
+ * `sin rastro de Meta` no dice "vino directo": dice que no dejó huella. Afirmar el
+ * origen sobre una ausencia es justo lo que decide mal una comisión.
+ */
+export function Origen({ caso }: {
+  caso: Pick<ComercialVentaCaso, 'origen_declarado' | 'tiene_rastro_meta' | 'campana' | 'atribucion_en_conflicto'>
+}) {
+  const declarado = origenNegocioLabel(caso.origen_declarado)
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+      <span style={{ color: '#9CA3AF' }}>Origen</span>
+      <span className="font-medium" style={{ color: declarado ? CARBON : '#9CA3AF' }}>
+        {declarado ?? 'sin declarar'}
+      </span>
+
+      {caso.tiene_rastro_meta ? (
+        caso.campana ? (
+          <span
+            className="truncate rounded px-1.5 py-0.5 font-medium"
+            style={{ backgroundColor: '#1877F2' + '1A', color: '#1877F2', maxWidth: '14rem' }}
+            title={`Campaña de Meta: ${caso.campana}`}
+          >
+            {caso.campana}
+          </span>
+        ) : (
+          <span
+            className="rounded px-1.5 py-0.5 font-medium"
+            style={{ backgroundColor: '#FEF3C7', color: OCRE }}
+            title="El contacto llegó por Meta, pero la interacción no trae campaña: no se pudo atribuir"
+          >
+            Meta sin campaña
+          </span>
+        )
+      ) : (
+        <span style={{ color: '#9CA3AF' }} title="El contacto no tiene ninguna interacción de Meta registrada. No significa que no haya venido de Meta: significa que no dejó rastro.">
+          — sin rastro de Meta
+        </span>
+      )}
+
+      {caso.atribucion_en_conflicto && (
+        <span
+          className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 font-semibold"
+          style={{ backgroundColor: '#FEF3C7', color: OCRE }}
+          title="Lo declarado y el rastro no coinciden. Quién se lleva la comisión lo decide una persona, no el sistema."
+        >
+          <AlertTriangle className="h-2.5 w-2.5" /> Revisar atribución
+        </span>
+      )}
+    </div>
   )
 }
 

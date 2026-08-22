@@ -249,6 +249,24 @@ export interface ComercialVentaCaso {
   /** Ultimo formulario llenado por el contacto. `null` si nunca registro interaccion. */
   ultima_conversion: string | null
   n_conversiones: number
+  /**
+   * De donde vino, en tres piezas que NO se colapsan en una.
+   *
+   * `origen_declarado` es lo que alguien escribio al crear el negocio (catalogo de
+   * `ORIGENES_NEGOCIO`); puede ser null. `tiene_rastro_meta` es lo unico
+   * verificable: hubo una interaccion de Meta del contacto. `campana` sale del
+   * formulario de Meta.
+   *
+   * Los tres estados que la pantalla debe distinguir:
+   *   · rastro + campana        -> atribuido
+   *   · rastro sin campana      -> vino de Meta y no se pudo atribuir
+   *   · sin rastro              -> sin rastro de Meta (NO es "no vino de Meta")
+   */
+  origen_declarado: string | null
+  tiene_rastro_meta: boolean
+  campana: string | null
+  /** Lo declarado y el rastro no coinciden. Se muestra, no se corrige: decide comision. */
+  atribucion_en_conflicto: boolean
   valor_sin_iva: number
   valor_con_iva: number
   recaudado: number
@@ -261,4 +279,60 @@ export interface ComercialVentaCaso {
    * de que quien mira la cifra entienda por que ese caso esta ahi.
    */
   sin_honorario_aprobado: boolean
+}
+
+// ── Origen del lead y campana (punto #23 del inventario SOENA) ──────────────
+
+/** Una fila del desglose por origen declarado. */
+export interface ComercialOrigenFila {
+  /** `null` = el negocio se creo sin declarar origen. Va en raya, no en "otro". */
+  origen: string | null
+  ventas: number
+  valor_sin_iva: number
+  recaudado: number
+  /** De esas ventas, cuantas tienen rastro verificable de Meta. */
+  con_rastro_meta: number
+}
+
+/** Una fila del desglose por campana de Meta. */
+export interface ComercialCampanaFila {
+  /** `null` = vino de Meta y la interaccion no trae campana. Es su propio estado. */
+  campana: string | null
+  ventas: number
+  valor_sin_iva: number
+  recaudado: number
+}
+
+/**
+ * Desglose de las ventas del mes por origen y campana.
+ *
+ * Los tres conteos de arriba no son excluyentes con `por_origen`: son la lectura
+ * honesta de la cobertura. `sin_rastro` NO significa "no vino de Meta" — significa
+ * que no dejo huella en el sistema, que es lo unico que se puede afirmar.
+ */
+export interface ComercialOrigenMes {
+  total: number
+  con_rastro_meta: number
+  sin_rastro: number
+  /** Vino de Meta y aun asi no se le pudo poner campana. */
+  meta_sin_campana: number
+  /** Lo declarado y el rastro no coinciden. Decide la comision: se muestra. */
+  en_conflicto: number
+  por_origen: ComercialOrigenFila[]
+  por_campana: ComercialCampanaFila[]
+}
+
+/** Un negocio perdido del mes: lo que hay detras de la tasa de cancelacion. */
+export interface ComercialPerdido {
+  negocio_id: string
+  codigo: string | null
+  nombre: string | null
+  responsable: string | null
+  fecha: string
+  razon: string | null
+  detalle: string | null
+  etapa: string | null
+  origen_declarado: string | null
+  tiene_rastro_meta: boolean
+  campana: string | null
 }

@@ -2,10 +2,10 @@ import { redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
-import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales } from '../equipo/comercial-actions'
+import { getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales, getComercialOrigenMes } from '../equipo/comercial-actions'
 import { getOperacionesBono } from './operaciones-actions'
 import { getDatosDueno } from '../calidad/actions'
-import { bogotaYearMonth } from '@/lib/dates/bogota'
+import { bogotaYearMonth, bogotaParts } from '@/lib/dates/bogota'
 import { necesitaDatosGenericos } from '@/lib/tableros/pestanas'
 import TablerosClient from './tableros-client'
 import VitrinaPlaceholder from '@/components/vitrina-placeholder'
@@ -67,19 +67,33 @@ export default async function TablerosPage() {
     const [anioStr, mesStr] = bogotaYearMonth().split('-')
     const anioSel = Number(anioStr)
     const mesSel = Number(mesStr)
-    const [equipo, mesData, serie, metas] = await Promise.all([
+    // El mes anterior se trae desde el servidor junto con el actual: la comparación
+    // del panel (#41) tiene que estar en el primer render, o el tablero mostraría un
+    // instante sin deltas que se lee como "no cambió nada".
+    const prev = mesSel === 1
+      ? { anio: anioSel - 1, mes: 12 }
+      : { anio: anioSel, mes: mesSel - 1 }
+    const [equipo, mesData, mesPrevio, origen, serie, metas] = await Promise.all([
       getComercialResumen(),
       getComercialMes(anioSel, mesSel),
+      getComercialMes(prev.anio, prev.mes),
+      getComercialOrigenMes(anioSel, mesSel),
       getComercialSerie(12),
       getMetasComerciales(anioSel, mesSel),
     ])
     comercialNegocios = {
       equipo,
       mesInicial: mesData,
+      mesAnteriorInicial: mesPrevio,
+      origenInicial: origen,
       serie,
       metasIniciales: metas,
       anioInicial: anioSel,
       mesNumInicial: mesSel,
+      // El mes en curso se resuelve en el SERVIDOR y en hora de Bogotá: calcularlo en
+      // el navegador lo ataría al reloj de quien mira, y Vercel corre en UTC.
+      mesEnCurso: bogotaYearMonth(),
+      diaEnCurso: bogotaParts().day,
       puedeEditarMetas: ['owner', 'admin', 'supervisor'].includes(role || ''),
     }
   }
