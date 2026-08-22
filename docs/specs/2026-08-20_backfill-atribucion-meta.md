@@ -1,7 +1,10 @@
 # Spec — Backfill de atribución de campaña en los leads de Meta
 
 **Owner de código:** Max · **Diagnóstico:** Mik (sesión SOENA S12, 2026-08-20)
-**Estado:** construido en `fix/backfill-atribucion-meta`. Corrido en dry run; la escritura real espera el sí de Mauricio.
+**Estado:** ✅ **HECHO.** PR #329 mergeado a `main` y el backfill **ejecutado de verdad** el
+2026-08-20, en dos tandas de 30 y 320 filas (13:49 y 13:50, hora de Bogotá) — las 350 que
+esta spec predecía. Verificado el 2026-08-22: las **518** interacciones de Meta del
+workspace tienen `campaign_id` y `campaign_name`, **cero sin campaña**.
 
 ## El hecho
 
@@ -88,12 +91,37 @@ Respuesta JSON con conteos por categoría, desglose por workspace y hasta 10 eje
 error. En dry run además una muestra de 5 pares `leadgen_id -> campaign_name` que sí se
 escribirían.
 
-## Gate
+## Gate — cumplido
 
-Type check, lint y build en verde. PR abierto. **No mergear.** Desplegar la función (es
-inofensiva: por defecto no escribe) y correr **solo el dry run** contra producción. La
-escritura real toca datos de producción y la autoriza Mauricio con los números a la vista,
-según `.claude/rules/branch-workflow-one.md`.
+El gate original decía *"PR abierto, no mergear: correr solo el dry run"*. Se cumplió en ese
+orden y **ya está cerrado**: el dry run corrió, Mauricio autorizó con los números a la vista
+y la escritura real se ejecutó, según `.claude/rules/branch-workflow-one.md`.
+
+**No hay que volver a correrlo.** La función es idempotente (solo toca filas con
+`campaign_id` en NULL), así que una segunda pasada no rompería nada, pero tampoco haría nada:
+hoy no queda ninguna fila en esa condición.
+
+### Resultado real
+
+| | |
+|---|---|
+| PR | #329, mergeado a `main` |
+| Ejecución | 2026-08-20, 13:49 y 13:50 (Bogotá) |
+| Filas escritas | 30 + 320 = **350** (exactamente lo predicho) |
+| Estado hoy (2026-08-22) | 518 interacciones de Meta en SOENA, **0 sin `campaign_id`** · 4 campañas distintas |
+
+### Lo que el backfill NO alcanza, y hay que tener presente al leer por campaña
+
+Que las 518 interacciones tengan campaña no significa que 518 negocios la tengan. Medido el
+2026-08-22 sobre los **289** negocios del workspace:
+
+- **56** alcanzan una campaña por su contacto (`negocios.contacto_id → contactos → contacto_interacciones`).
+- **14** interacciones traen `negocio_id` directo — o sea, el vínculo fuerte cubre 14 de 289;
+  el resto se resuelve por el contacto.
+- **233** no tienen ninguna interacción de Meta. Eso **no** los declara "directos": solo dice
+  que no hay rastro. El tablero comercial los muestra en raya, no en cero.
+- **21** tienen rastro de Meta y el origen declarado dice otra cosa (14 de ellos marcados
+  como `promotor`). Eso decide de qué bolsa sale la comisión y **no se resuelve solo**.
 
 ## Pendiente que sale de aquí
 

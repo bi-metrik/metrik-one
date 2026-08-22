@@ -2,7 +2,13 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
-import type { ComercialResumenRow, ComercialPerfil, ComercialVentaCaso } from './comercial-types'
+import type {
+  ComercialResumenRow,
+  ComercialPerfil,
+  ComercialVentaCaso,
+  ComercialOrigenMes,
+  ComercialPerdido,
+} from './comercial-types'
 
 /**
  * Resumen comercial por responsable del workspace activo (incluye bucket sin
@@ -189,6 +195,14 @@ export async function getComercialVentasMes(input: {
   soloCompletos?: boolean | null
   /** Abre el bucket de negocios sin comercial atribuido. */
   sinResponsable?: boolean
+  /** 'YYYY-MM-DD'. Abre las ventas de UN dia (la barra del gráfico diario). */
+  dia?: string | null
+  /**
+   * Abre las ventas de UNA campaña. La cadena vacía abre el bucket de las que
+   * vinieron de Meta sin campaña atribuida: es una pregunta distinta de "todas",
+   * y por eso no comparte valor con `null`.
+   */
+  campana?: string | null
 }): Promise<ComercialVentaCaso[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return []
@@ -200,6 +214,8 @@ export async function getComercialVentasMes(input: {
     p_responsable_id: input.responsableId ?? null,
     p_solo_completos: input.soloCompletos ?? null,
     p_sin_responsable: input.sinResponsable ?? false,
+    p_dia: input.dia ?? null,
+    p_campana: input.campana ?? null,
   })
   // El error se lee y se registra: descartarlo devuelve lista vacia y la pantalla diria
   // "no hay casos aqui" sobre una cifra que dice que si los hay — el fallo mudo que este
@@ -209,4 +225,56 @@ export async function getComercialVentasMes(input: {
     return []
   }
   return (data as ComercialVentaCaso[]) ?? []
+}
+
+/**
+ * De dónde vinieron las ventas del mes (punto #23: el origen decide la comisión).
+ *
+ * Consume las MISMAS vistas que la cifra y que su drill, así que el desglose no
+ * puede contradecir al total del panel. Devuelve `null` cuando la consulta falla,
+ * para que la pantalla pueda callar en vez de pintar ceros: un cero aquí se leería
+ * como "ninguna venta vino de Meta", que es una afirmación, no una ausencia.
+ */
+export async function getComercialOrigenMes(
+  anio: number,
+  mes: number,
+): Promise<ComercialOrigenMes | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_origen_mes_soena', {
+    p_workspace_id: workspaceId,
+    p_anio: anio,
+    p_mes: mes,
+  })
+  if (rpcError) {
+    console.error('[comercial] no se pudo traer el origen del mes:', rpcError)
+    return null
+  }
+  return (data as ComercialOrigenMes) ?? null
+}
+
+/**
+ * Los casos detrás de la tasa de cancelación del mes.
+ *
+ * Va por su propia RPC y no por el drill de ventas porque un negocio perdido puede
+ * no tener ningún cobro, y entonces no existe en `v_venta_mes_comercial`.
+ */
+export async function getComercialPerdidosMes(
+  anio: number,
+  mes: number,
+): Promise<ComercialPerdido[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_perdidos_mes_soena', {
+    p_workspace_id: workspaceId,
+    p_anio: anio,
+    p_mes: mes,
+  })
+  if (rpcError) {
+    console.error('[comercial] no se pudieron traer los casos perdidos:', rpcError)
+    return []
+  }
+  return (data as ComercialPerdido[]) ?? []
 }

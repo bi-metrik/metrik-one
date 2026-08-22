@@ -15,6 +15,12 @@ export interface IndicadorRango {
   medibles: number
   /** Casos totales del periodo, incluidos los que no se pudieron medir. */
   eventos: number
+  /**
+   * Solo radicacion: casos que quedaron sin medir porque su unica asignacion tiene
+   * `rol` NULL y el motor no la ve (deuda #57). No es lo mismo que "nunca se asigno",
+   * y por eso se cuenta aparte en vez de sumarse a los cumplidos o a los incumplidos.
+   */
+  sin_rol?: number
 }
 
 export interface IndicadorCorrecciones {
@@ -90,6 +96,19 @@ export interface ParametrosBono {
   piso_operativo: number
   techo_operativo: number
   horas_radicacion: number
+  /**
+   * Con que reloj corren las `horas_radicacion`. `habil` (acordado con la
+   * supervisora) descuenta fines de semana y festivos; `corrido` cuenta calendario.
+   * ⚠️ Solo aplica a radicacion: `horas_antes_cita` es CORRIDA a proposito, porque
+   * mide contra el calendario de la DIAN y no contra el de la oficina.
+   */
+  radicacion_reloj?: 'habil' | 'corrido'
+  /** Hora de Bogota en que arranca la jornada habil. Supuesto sin acordar: 0. */
+  jornada_inicio_hora?: number
+  /** Hora de Bogota en que termina. Supuesto sin acordar: 24 (dia completo). */
+  jornada_fin_hora?: number
+  /** Supuesto sin acordar: false. */
+  jornada_sabado_habil?: boolean
   horas_desde_certificado: number
   horas_antes_cita: number
   bono_max_pct_director: number
@@ -106,6 +125,18 @@ export interface OperacionesBonoData {
   /** false = sin la evidencia que pide `correcciones_cobertura`; el indicador no se calcula. */
   correcciones_medida: boolean
   devoluciones_mes: number
+  /**
+   * Asignaciones del workspace con `rol` sin declarar (deuda #57). No es del mes: es el
+   * pasivo completo. Son invisibles para el motor, asi que un caso asignado solo asi se
+   * queda sin reloj de radicacion. Se expone para que la pantalla lo nombre.
+   */
+  responsables_sin_rol?: number
+  /**
+   * Hasta que anio llega el calendario de `festivos_colombia`. Un anio sin sembrar
+   * cuenta sus festivos como habiles, en contra del operativo y sin avisar; la
+   * pantalla lo advierte cuando el periodo consultado se pasa de ese anio.
+   */
+  festivos_hasta_anio?: number | null
   personas: PersonaOperaciones[]
   supervisor: SupervisorOperaciones | null
 }
@@ -114,10 +145,23 @@ export interface RadicacionDetalle {
   negocio_id: string
   codigo: string | null
   nombre: string | null
+  /** Momento de la asignacion a operaciones. `null` = el caso no se pudo medir. */
   inicio: string | null
   fin: string
+  /** Horas del reloj con el que se juzga (habiles por defecto). */
   horas: number | null
+  /**
+   * Horas de calendario, sin descontar nada. Viaja al lado de `horas` para que la
+   * conversacion no se atasque en "a mi me dio otra cosa": la resta cruda es lo que
+   * cualquiera calcula al mirar las dos fechas.
+   */
+  horas_corridas?: number | null
   a_tiempo: boolean | null
+  /**
+   * Con `inicio` en null, distingue las dos ausencias: `true` = si hubo asignacion
+   * pero con el rol sin declarar (deuda #57); `false` = nadie lo asigno.
+   */
+  sin_rol?: boolean
 }
 
 export interface ReprocesoDetalle {
