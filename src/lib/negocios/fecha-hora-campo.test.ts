@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   sinHoraRegistrada,
-  paraInputFechaHora,
   ahoraBogotaCivil,
   esFechaHoraPasada,
   rechazoPorFechaPasada,
   fechaHoraEnLetras,
+  partesFechaHora,
+  componerFechaHora,
+  faltaHoraDeCita,
 } from './fecha-hora-campo'
 
 // 2026-08-18 15:30 en Bogotá = 20:30 UTC del mismo día.
@@ -17,19 +19,6 @@ describe('valores heredados de cuando el campo era solo día', () => {
     expect(sinHoraRegistrada('2026-08-14T09:30')).toBe(false)
     expect(sinHoraRegistrada('')).toBe(false)
     expect(sinHoraRegistrada(null)).toBe(false)
-  })
-
-  it('lo pinta como medianoche para que el input no lo borre de la pantalla', () => {
-    // Sin esto el `datetime-local` recibe '2026-08-14', no lo entiende y se pinta
-    // vacío: la pantalla diría que no hay cita cuando el caso sí la tiene.
-    expect(paraInputFechaHora('2026-08-14')).toBe('2026-08-14T00:00')
-  })
-
-  it('deja pasar el valor que ya trae hora y descarta la basura', () => {
-    expect(paraInputFechaHora('2026-09-26T09:30')).toBe('2026-09-26T09:30')
-    expect(paraInputFechaHora('2026-09-26T09:30:00')).toBe('2026-09-26T09:30')
-    expect(paraInputFechaHora('14/08/2026')).toBe('')
-    expect(paraInputFechaHora(undefined)).toBe('')
   })
 })
 
@@ -96,5 +85,48 @@ describe('la cita en letras para el cliente', () => {
     expect(fechaHoraEnLetras(null)).toBe('')
     expect(fechaHoraEnLetras('')).toBe('')
     expect(fechaHoraEnLetras('26/09/2026')).toBe('')
+  })
+})
+
+describe('dos casillas: dia y hora', () => {
+  it('parte un valor con hora en sus dos casillas', () => {
+    expect(partesFechaHora('2026-09-26T09:30')).toEqual({ dia: '2026-09-26', hora: '09:30' })
+  })
+
+  it('deja la hora VACIA en un valor heredado de solo dia', () => {
+    // Rellenarla con '00:00' es justo el error que este cambio viene a quitar: la
+    // pantalla diria una hora que nadie registro.
+    expect(partesFechaHora('2026-09-26')).toEqual({ dia: '2026-09-26', hora: '' })
+  })
+
+  it('descarta segundos y basura', () => {
+    expect(partesFechaHora('2026-09-26T09:30:00')).toEqual({ dia: '2026-09-26', hora: '09:30' })
+    expect(partesFechaHora('26/09/2026')).toEqual({ dia: '', hora: '' })
+    expect(partesFechaHora(null)).toEqual({ dia: '', hora: '' })
+    expect(partesFechaHora('')).toEqual({ dia: '', hora: '' })
+  })
+
+  it('compone el valor solo cuando estan las dos casillas', () => {
+    expect(componerFechaHora('2026-09-26', '09:30')).toBe('2026-09-26T09:30')
+    expect(componerFechaHora('2026-09-26', '09:30:00')).toBe('2026-09-26T09:30')
+  })
+
+  it('un dia sin hora NO es una cita', () => {
+    // Media cita no cierra el gate: el cliente tiene que saber a que hora enviar.
+    expect(componerFechaHora('2026-09-26', '')).toBe('')
+    expect(componerFechaHora('', '09:30')).toBe('')
+    expect(componerFechaHora(null, null)).toBe('')
+  })
+
+  it('ida y vuelta: lo que se compone se vuelve a partir igual', () => {
+    const v = componerFechaHora('2026-09-26', '14:05')
+    expect(partesFechaHora(v)).toEqual({ dia: '2026-09-26', hora: '14:05' })
+  })
+
+  it('senala cuando hay dia pero falta la hora', () => {
+    expect(faltaHoraDeCita('2026-09-26', '')).toBe(true)
+    expect(faltaHoraDeCita('2026-09-26', '09:30')).toBe(false)
+    expect(faltaHoraDeCita('', '')).toBe(false)
+    expect(faltaHoraDeCita('', '09:30')).toBe(false)
   })
 })
