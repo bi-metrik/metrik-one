@@ -14,15 +14,18 @@ import type {
   ComercialOrigenMes,
   ComercialSeccionalFila,
   ComercialSeccionalMes,
+  ComercialPlanPagoFila,
+  ComercialPlanPagoMes,
   CapacidadPunto,
   CapacidadSeccional,
   MetaComercial,
 } from '../../equipo/comercial-types'
-import { MESES_ES } from '../../equipo/comercial-types'
+import { MESES_ES, planPagoLabel } from '../../equipo/comercial-types'
 import {
   getComercialMes,
   getComercialOrigenMes,
   getComercialSeccionalMes,
+  getComercialPlanPagoMes,
 } from '../../equipo/comercial-actions'
 import MetasModal from '../../equipo/metas-modal'
 import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
@@ -93,6 +96,8 @@ export interface TabComercialSoenaProps {
   origenInicial: ComercialOrigenMes | null
   /** Corte del mes por seccional DIAN (punto #22). `null` = no se pudo traer. */
   seccionalInicial: ComercialSeccionalMes | null
+  /** Corte del mes por plan de pago (50/50, 100% anticipado, sin declarar). */
+  planPagoInicial: ComercialPlanPagoMes | null
   /**
    * Capacidad mensual por seccional (punto #43). `null` = la linea no declaro de
    * donde sale cada serie, y entonces la seccion no se dibuja.
@@ -119,6 +124,7 @@ export function TabComercialSoena({
   mesAnteriorInicial,
   origenInicial,
   seccionalInicial,
+  planPagoInicial,
   capacidad,
   serie,
   metasIniciales,
@@ -134,6 +140,7 @@ export function TabComercialSoena({
   const [mesPrevio, setMesPrevio] = useState<ComercialMesResponse | null>(mesAnteriorInicial)
   const [origen, setOrigen] = useState<ComercialOrigenMes | null>(origenInicial)
   const [seccional, setSeccional] = useState<ComercialSeccionalMes | null>(seccionalInicial)
+  const [planPago, setPlanPago] = useState<ComercialPlanPagoMes | null>(planPagoInicial)
   const [metasModalOpen, setMetasModalOpen] = useState(false)
   const [pending, startTransition] = useTransition()
   // Qué cifra se abrió. `null` = panel cerrado. Se monta con `key` para que al pasar de
@@ -149,16 +156,18 @@ export function TabComercialSoena({
     startTransition(async () => {
       // Las tres consultas van juntas: si la comparación llegara después, el panel
       // mostraría por un instante los deltas del mes anterior sobre las cifras nuevas.
-      const [d, p, o, sec] = await Promise.all([
+      const [d, p, o, sec, plan] = await Promise.all([
         getComercialMes(na, nm),
         getComercialMes(prev.a, prev.m),
         getComercialOrigenMes(na, nm),
         getComercialSeccionalMes(na, nm),
+        getComercialPlanPagoMes(na, nm),
       ])
       setMesData(d)
       setMesPrevio(p)
       setOrigen(o)
       setSeccional(sec)
+      setPlanPago(plan)
     })
   }
 
@@ -362,6 +371,21 @@ export function TabComercialSoena({
           mesLabel={`${MESES_ES[mes - 1]} ${anio}`}
           onAbrir={(f) => abrirVentas({
             titulo: `Ventas · ${f.seccional ?? 'Sin seccional registrada'}`,
+            alcance: `${MESES_ES[mes - 1]} ${anio}`,
+            // El conjunto EXACTO que sumó la fila: la lista no puede discrepar.
+            negocioIds: f.negocio_ids,
+          })}
+        />
+      )}
+
+      {/* El mes abierto por plan de pago. Es lo que da sentido a la casilla "2o pago":
+          en plan 2 vale cero PORQUE no existe el tramo, no porque nadie haya pagado. */}
+      {planPago && planPago.total_ventas > 0 && (
+        <SeccionPlanPago
+          datos={planPago}
+          mesLabel={`${MESES_ES[mes - 1]} ${anio}`}
+          onAbrir={(f) => abrirVentas({
+            titulo: `Ventas · ${planPagoLabel(f.plan_pago)}`,
             alcance: `${MESES_ES[mes - 1]} ${anio}`,
             // El conjunto EXACTO que sumó la fila: la lista no puede discrepar.
             negocioIds: f.negocio_ids,
@@ -1146,6 +1170,134 @@ function FilaSeccional({ f, onAbrir }: {
           ? <span className="text-gray-300" title="La línea no declaró desde qué etapa una venta bonifica">—</span>
           : f.bonificables}
       </td>
+    </tr>
+  )
+}
+
+/**
+ * El mes cortado por plan de pago.
+ *
+ * Existe porque la casilla "2o pago" del tablero no se puede leer sin saber el plan:
+ *
+ *   Plan 1 (50/50)             tiene segundo tramo. Un $0 ahí significa "no ha pagado".
+ *   Plan 2 (100% anticipado)   NO tiene segundo tramo. Un $0 ahí no mide nada.
+ *   Sin plan declarado         no se sabe si lo tiene. Un $0 ahí miente dos veces.
+ *
+ * Por eso la columna va en RAYA fuera del plan 1, y el grupo sin declarar va aparte y
+ * nunca plegado a plan 2 — que es lo que `v_negocio_valor` hacía en silencio a través
+ * de un `else`, dejando a esos negocios sin posibilidad de tener un segundo pago aunque
+ * el dinero entrara.
+ *
+ * Medido el 2026-08-22 sobre las 93 ventas históricas de la línea: 8 son plan 1, 77 son
+ * plan 2 y 8 no tienen plan declarado. De las 8 de plan 1 solo dos han pagado su segundo
+ * 50%: V0025 y V0099, $425.000 cada una.
+ */
+function SeccionPlanPago({ datos, mesLabel, onAbrir }: {
+  datos: ComercialPlanPagoMes
+  mesLabel: string
+  onAbrir: (fila: ComercialPlanPagoFila) => void
+}) {
+  const sinDeclarar = datos.filas.find((f) => f.plan_pago === null) ?? null
+  const declarados = datos.filas.filter((f) => f.plan_pago !== null)
+  const conPlan = declarados.reduce((s, f) => s + f.ventas, 0)
+
+  return (
+    <section className="mb-8">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-bold text-gray-900">Por plan de pago · {mesLabel}</h2>
+        <p className="text-xs text-gray-500">
+          {conPlan} de {datos.total_ventas} ventas con plan declarado
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                <th className="px-4 py-3 text-left">Plan</th>
+                <th className="px-4 py-3 text-right">Cierres</th>
+                <th className="px-4 py-3 text-right">1er pago</th>
+                <th className="hidden px-4 py-3 text-right sm:table-cell" title="Solo el plan 1 tiene segundo tramo; en los demás no hay nada que medir">
+                  2o pago
+                </th>
+                <th className="px-4 py-3 text-right">Venta total</th>
+                <th className="hidden px-4 py-3 text-right md:table-cell">Hon. cubierto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {declarados.map((f) => (
+                <FilaPlanPago key={f.plan_pago} f={f} onAbrir={onAbrir} />
+              ))}
+              {sinDeclarar && (
+                <>
+                  <tr className="border-b border-gray-50 bg-amber-50/40">
+                    <td colSpan={6} className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                      Sin plan declarado · no se cuenta como 100% anticipado
+                    </td>
+                  </tr>
+                  <FilaPlanPago f={sinDeclarar} onAbrir={onAbrir} />
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p className="mt-2 text-[11px] text-gray-500">
+        El plan se declara al aprobar la propuesta económica.{' '}
+        {sinDeclarar
+          ? `${sinDeclarar.ventas} de ${datos.total_ventas} ventas de este mes no lo tienen: hasta que alguien lo declare no se sabe si les falta un segundo pago, y su segundo tramo no puede aparecer aunque el dinero entre.`
+          : 'Todas las ventas de este mes lo tienen.'}
+      </p>
+    </section>
+  )
+}
+
+function FilaPlanPago({ f, onAbrir }: {
+  f: ComercialPlanPagoFila
+  onAbrir: (fila: ComercialPlanPagoFila) => void
+}) {
+  const abrir = f.ventas > 0 ? () => onAbrir(f) : undefined
+  return (
+    <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+      <td className="px-4 py-3">
+        <span className={f.plan_pago === null ? 'italic text-gray-400' : 'font-medium text-gray-900'}>
+          {f.plan_pago === null ? 'Sin declarar' : planPagoLabel(f.plan_pago)}
+        </span>
+      </td>
+      <CeldaAbrible className="px-4 py-3 text-right font-semibold tabular-nums text-gray-900"
+        onAbrir={abrir} title="Ver estos casos">
+        {f.ventas}
+      </CeldaAbrible>
+      <CeldaAbrible className="px-4 py-3 text-right tabular-nums text-gray-600"
+        onAbrir={abrir} title="Ver los casos de los que salió este recaudo">
+        {fmtCOP(f.primer_pago)}
+      </CeldaAbrible>
+      {/* La raya, y no un $0: fuera del plan 1 el segundo tramo no existe o no se sabe
+          si existe, y en ninguno de los dos casos hay algo medido que valga cero. */}
+      <td className="hidden px-4 py-3 text-right tabular-nums text-gray-600 sm:table-cell">
+        {f.segundo_pago === null ? (
+          <span
+            className="text-gray-300"
+            title={f.plan_pago === 2
+              ? 'El plan 2 se paga completo por adelantado: no hay segundo tramo que medir.'
+              : 'Sin plan declarado no se sabe si existe un segundo tramo. No es cero: es que no se puede medir.'}
+          >
+            —
+          </span>
+        ) : (
+          fmtCOP(f.segundo_pago)
+        )}
+      </td>
+      <CeldaAbrible className="px-4 py-3 text-right font-semibold tabular-nums"
+        style={{ color: GREEN }} onAbrir={abrir} title="Ver los casos que suman este valor">
+        {fmtCOP(f.valor_sin_iva)}
+      </CeldaAbrible>
+      <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums text-gray-700 md:table-cell"
+        onAbrir={abrir} title="Ver los casos con el honorario cubierto">
+        {f.casos_completos}
+      </CeldaAbrible>
     </tr>
   )
 }

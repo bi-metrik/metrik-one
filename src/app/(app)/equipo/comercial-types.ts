@@ -304,6 +304,16 @@ export interface ComercialVentaCaso {
    * `null` = la linea no declaro umbral. NO es "no bonifica".
    */
   bonificable: boolean | null
+  /**
+   * Con que plan se cobra el honorario: 1 = 50/50 (hay segundo pago), 2 = 100%
+   * anticipado (NO hay segundo pago, y eso es un dato). `null` = nadie lo declaro al
+   * aprobar la propuesta, y entonces no se sabe si el segundo pago existe.
+   *
+   * Sin este dato, `segundo_pago: 0` se lee como "no ha pagado" cuando puede significar
+   * "no tiene que pagar" o "no sabemos si tiene que pagar". Las tres frases son
+   * distintas y solo el plan las separa.
+   */
+  plan_pago: number | null
   valor_sin_iva: number
   valor_con_iva: number
   recaudado: number
@@ -401,6 +411,57 @@ export interface ComercialSeccionalMes {
   /** Total del mes, el mismo `num_ventas` del panel. Sirve para cuadrar la suma. */
   total_ventas: number
   filas: ComercialSeccionalFila[]
+}
+
+// ── Corte por plan de pago ──────────────────────────────────────────────────
+
+/**
+ * Los dos planes con los que SOENA cobra el honorario, y el tercer grupo que no es un
+ * plan: el de los negocios donde nadie lo declaro.
+ *
+ * Medido el 2026-08-22 sobre las 93 ventas historicas de la linea GIT EV/HEV: 8 son
+ * plan 1, 77 son plan 2 y 8 no tienen plan declarado. De las 8 de plan 1 solo dos han
+ * pagado su segundo 50% (V0025 y V0099, $425.000 cada una).
+ */
+export const PLAN_PAGO_LABEL: Record<number, string> = {
+  1: 'Plan 1 · 50/50',
+  2: 'Plan 2 · 100% anticipado',
+}
+
+/** Etiqueta corta para una insignia. `null` NO se traduce a un plan. */
+export function planPagoLabel(plan: number | null): string {
+  if (plan === null) return 'Plan sin declarar'
+  return PLAN_PAGO_LABEL[plan] ?? `Plan ${plan}`
+}
+
+/**
+ * Un plan de pago en el corte del mes.
+ *
+ * `plan_pago = null` es el grupo "sin declarar", que va aparte y NUNCA plegado a plan 2:
+ * es justo el error que la vista cometia en silencio. `segundo_pago` es `null` fuera del
+ * plan 1 — en plan 2 el tramo no existe y en "sin declarar" no se sabe si existe, y en
+ * ninguno de los dos casos un $0 seria una medicion.
+ */
+export interface ComercialPlanPagoFila {
+  plan_pago: number | null
+  ventas: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  primer_pago: number
+  /** Solo el plan 1 tiene segundo tramo. `null` = no existe o no se sabe si existe. */
+  segundo_pago: number | null
+  recaudado: number
+  casos_completos: number
+  /** `null` = la linea no declaro umbral de bonificacion. No es cero. */
+  bonificables: number | null
+  /** Los casos exactos que suman esta fila; el drill los abre tal cual. */
+  negocio_ids: string[]
+}
+
+export interface ComercialPlanPagoMes {
+  /** Total del mes, el mismo `num_ventas` del panel. Sirve para cuadrar la suma. */
+  total_ventas: number
+  filas: ComercialPlanPagoFila[]
 }
 
 /** Un punto de una serie de capacidad: cuantos hubo en ese mes en esa seccional. */

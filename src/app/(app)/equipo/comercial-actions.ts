@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import { canonizarSeccional } from '@/lib/dian/seccionales'
+import { normalizarCortePlanPago } from './comercial-plan-pago'
 import type {
   ComercialResumenRow,
   ComercialPerfil,
@@ -11,6 +12,8 @@ import type {
   ComercialPerdido,
   ComercialSeccionalFila,
   ComercialSeccionalMes,
+  ComercialPlanPagoFila,
+  ComercialPlanPagoMes,
   CapacidadPunto,
   CapacidadSeccional,
 } from './comercial-types'
@@ -378,6 +381,45 @@ export async function getComercialSeccionalMes(
   })
 
   return { total_ventas: Number(data.total_ventas ?? 0), filas }
+}
+
+// ── Corte por plan de pago ──────────────────────────────────────────────────
+
+/**
+ * Las ventas del mes cortadas por el plan con el que se cobra el honorario.
+ *
+ * Los dos planes se muestran SIEMPRE, incluso con cero ventas: "ninguna venta de agosto
+ * es 50/50" es un dato del mes, y una fila ausente se lee como si nadie la hubiera
+ * medido. El tercer grupo, `plan_pago = null`, es el de los negocios donde nadie declaró
+ * plan, y no se pliega a plan 2 — que es exactamente lo que la vista hacía en silencio.
+ *
+ * Devuelve `null` cuando la consulta falla, para que la pantalla pueda callar en vez de
+ * pintar una tabla vacía que se leería como "este mes no se vendió nada".
+ */
+export async function getComercialPlanPagoMes(
+  anio: number,
+  mes: number,
+): Promise<ComercialPlanPagoMes | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_plan_pago_mes_soena', {
+    p_workspace_id: workspaceId,
+    p_anio: anio,
+    p_mes: mes,
+  })
+  if (rpcError) {
+    console.error('[comercial] no se pudo traer el corte por plan de pago:', rpcError)
+    return null
+  }
+  if (!data) return null
+
+  // La regla vive en `comercial-plan-pago.ts`, pura y con pruebas: es la que decide si
+  // una casilla se lee como "no pagó" o como "no aplica".
+  return normalizarCortePlanPago(
+    (data.filas ?? []) as ComercialPlanPagoFila[],
+    Number(data.total_ventas ?? 0),
+  )
 }
 
 /**
