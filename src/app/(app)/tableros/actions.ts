@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import { SECCIONALES_DIAN, canonizarSeccional } from '@/lib/dian/seccionales'
+import { resumirCartera } from '@/lib/negocios/cartera'
 import type {
   ComercialData, OperativoData, FinancieroData,
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
@@ -150,12 +151,16 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
       .gte('fecha', curr.start)
       .lt('fecha', curr.end),
 
-    // Cartera total (v_cartera_antiguedad)
-    supabase
-      .from('v_cartera_antiguedad')
-      .select('total_cartera')
-      .eq('workspace_id', workspaceId)
-      .single(),
+    // Cartera total. La fuente era `v_cartera_antiguedad`, construida sobre
+    // `facturas`, que tiene 0 filas en los 15 workspaces (medido 2026-08-22):
+    // devolvia cero para todos. Ahora sale de `v_cartera_negocio`, la misma que
+    // lee /numeros desde el PR #365 — honorario aprobado menos recaudado, solo
+    // sobre negocios que ya se vendieron (#367). Ver 20260822000004/000005.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('v_cartera_negocio')
+      .select('codigo, nombre, honorario, honorario_recaudado, saldo, dias')
+      .eq('workspace_id', workspaceId),
 
     // Gastos por pagar (post-refactor 2026-04-27: todos los gastos son reales)
     supabase
@@ -261,7 +266,9 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     .slice(0, 5)
 
   // Posicion neta de caja
-  const totalCarteraCobrar = Number(carteraRes.data?.total_cartera || 0)
+  // `resumirCartera` aplica el piso de materialidad de /conciliacion, el mismo
+  // que usa /numeros: las dos pantallas dicen la misma cifra o no dicen nada.
+  const totalCarteraCobrar = resumirCartera(carteraRes.data || []).carteraPendiente
   const totalGastosPorPagar = (gastosPorPagarRes.data || []).reduce((s, g) => s + Number(g.monto || 0), 0)
   const posicionNetaCaja = totalCarteraCobrar - totalGastosPorPagar
 
