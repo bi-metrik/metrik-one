@@ -51,6 +51,17 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
 
   const hayAlguienIncompleto = data.personas.some(p => !p.completo)
   const sinSalarios = data.personas.every(p => !p.salario_registrado)
+  // Radicaciones que el reloj no pudo medir porque su unica asignacion tiene el rol
+  // sin declarar. Se declara aparte de "sin casos": una es una deuda de datos que se
+  // puede pagar, la otra es un mes sin trabajo que medir.
+  const radicacionesSinRol = data.personas.reduce((s, p) => s + (p.radicacion.sin_rol ?? 0), 0)
+  const asignacionesSinRol = data.responsables_sin_rol ?? 0
+  // El calendario de festivos esta sembrado hasta cierto año. Pasado ese año los
+  // festivos cuentan como habiles, en contra del operativo. Se avisa en vez de
+  // dejar que el indicador mienta en silencio.
+  const festivosHasta = data.festivos_hasta_anio ?? null
+  const festivosVencidos = festivosHasta !== null && periodo.anio > festivosHasta
+  const relojHabil = (P.radicacion_reloj ?? 'habil') === 'habil'
 
   return (
     <div className={isPending ? 'opacity-50' : ''}>
@@ -90,6 +101,16 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
         <Aviso tono="info"
           titulo="Puntajes incompletos"
           cuerpo="Hay indicadores sin casos que medir en el periodo. Un indicador sin datos no suma ni resta: se deja fuera del puntaje y la fila queda marcada como incompleta." />
+      )}
+      {radicacionesSinRol > 0 && (
+        <Aviso tono="alerta"
+          titulo={`${radicacionesSinRol} ${radicacionesSinRol === 1 ? 'radicación quedó' : 'radicaciones quedaron'} sin medir`}
+          cuerpo={`${radicacionesSinRol === 1 ? 'Ese caso tiene' : 'Esos casos tienen'} un responsable asignado, pero la asignación quedó guardada sin decir de qué área es, y el sistema no puede saber desde cuándo corre el plazo de operaciones. No cuentan como cumplidas ni como incumplidas: quedan fuera del indicador. Hoy hay ${asignacionesSinRol} ${asignacionesSinRol === 1 ? 'asignación así' : 'asignaciones así'} en todo el espacio de trabajo.`} />
+      )}
+      {festivosVencidos && relojHabil && (
+        <Aviso tono="alerta"
+          titulo="El calendario de festivos no cubre este periodo"
+          cuerpo={`El plazo de radicación descuenta festivos, y el calendario está cargado hasta ${festivosHasta}. En ${periodo.anio} los festivos se están contando como días hábiles, así que el indicador es más estricto de lo acordado. Hay que cargar los festivos del año antes de liquidar este bono.`} />
       )}
 
       {/* Tabla del equipo */}
@@ -181,7 +202,8 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
               Con {P.calidad_malos_pierde_todo} o más se pierde <strong>todo</strong> el bono del mes,
               incluidos los otros tres indicadores.</li>
             <li>· <strong>Radicación ({P.peso_radicacion * 100} pts):</strong> radicar dentro
-              de {P.horas_radicacion} horas.</li>
+              de {P.horas_radicacion} horas {relojHabil ? 'hábiles' : 'corridas'} desde que se
+              asigna el caso.</li>
             <li>· <strong>Envío ({P.peso_envio * 100} pts):</strong> dentro
               de {P.horas_desde_certificado} h del certificado bancario y al
               menos {P.horas_antes_cita} h antes de la cita.</li>
@@ -193,12 +215,23 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
             <li>· El piso de <strong>{P.piso_operativo * 100}%</strong> no es proporcional: por debajo
               de ese porcentaje el indicador vale <strong>0</strong>. Con pocos casos al mes, un solo
               fallo puede costar el indicador completo.</li>
-            <li>· Las <strong>{P.horas_radicacion} horas</strong> se cuentan desde que el caso entra a
-              la etapa de Cargue, en horas corridas. El momento en que la supervisora asigna el caso
-              no se registra hoy en el sistema.</li>
+            {relojHabil ? (
+              <li>· Qué cuenta como <strong>hora hábil</strong> no está acordado. Hoy un día hábil
+                vale <strong>{(P.jornada_fin_hora ?? 24) - (P.jornada_inicio_hora ?? 0)} horas</strong>
+                {(P.jornada_inicio_hora ?? 0) === 0 && (P.jornada_fin_hora ?? 24) === 24
+                  ? ' (el día completo, igual que el resto del sistema)'
+                  : ` (de ${P.jornada_inicio_hora}:00 a ${P.jornada_fin_hora}:00)`},
+                el sábado <strong>{P.jornada_sabado_habil ? 'sí' : 'no'}</strong> cuenta, y los festivos
+                colombianos se descuentan. Cambiar la jornada mueve el resultado del indicador.</li>
+            ) : (
+              <li>· Las <strong>{P.horas_radicacion} horas</strong> se están contando
+                <strong> corridas</strong>, aunque lo acordado con operaciones fueron horas hábiles.
+                Se cambia en la configuración, sin tocar el sistema.</li>
+            )}
             <li>· Las <strong>{P.horas_antes_cita} h</strong> antes de la cita y
               las <strong>{P.horas_desde_certificado} h</strong> desde el certificado bancario vienen
-              del archivo de cálculo, no de un acuerdo.</li>
+              del archivo de cálculo, no de un acuerdo. Esas <strong>sí</strong> son horas corridas a
+              propósito: miden contra el calendario de la DIAN, no contra el de la oficina.</li>
           </ul>
         </div>
       )}
@@ -217,8 +250,11 @@ function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: n
         detalle={p.calidad_medida ? `${p.malos} ${p.malos === 1 ? 'malo' : 'malos'}` : 'sin medir'} />
       <ScoreCelda score={p.score_radicacion}
         detalle={p.radicacion.pct === null
-          ? 'sin casos'
-          : `${pct(p.radicacion.pct)} · ${p.radicacion.a_tiempo}/${p.radicacion.medibles}`} />
+          ? (p.radicacion.eventos > 0 ? 'sin fecha de asignación' : 'sin casos')
+          : `${pct(p.radicacion.pct)} · ${p.radicacion.a_tiempo}/${p.radicacion.medibles}`}
+        nota={p.radicacion.sin_rol
+          ? `${p.radicacion.sin_rol} sin área declarada`
+          : undefined} />
       <ScoreCelda score={p.score_envio}
         detalle={p.envio.pct === null
           ? (p.envio.eventos > 0 ? 'sin fecha de cita' : 'sin casos')
@@ -258,7 +294,9 @@ function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: n
  * Un score sin dato se pinta con raya y en gris; un score en cero se pinta rojo.
  * Son dos cosas distintas y la pantalla no las puede confundir.
  */
-function ScoreCelda({ score, detalle }: { score: number | null; detalle: string }) {
+function ScoreCelda({ score, detalle, nota }: {
+  score: number | null; detalle: string; nota?: string
+}) {
   const sinDato = score === null
   const enCero = score === 0
   return (
@@ -268,6 +306,9 @@ function ScoreCelda({ score, detalle }: { score: number | null; detalle: string 
         {sinDato ? '—' : `${(score * 100).toFixed(0)}`}
       </div>
       <div className="text-[10px]" style={{ color: GRIS }}>{detalle}</div>
+      {/* Casos que quedaron fuera del cálculo, no incumplidos. Van aparte del
+          detalle para que no se lean como parte del porcentaje. */}
+      {nota && <div className="text-[10px]" style={{ color: AMBAR }}>{nota}</div>}
     </td>
   )
 }

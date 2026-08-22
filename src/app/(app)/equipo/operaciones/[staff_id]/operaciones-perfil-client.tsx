@@ -51,6 +51,7 @@ export default function OperacionesPerfilClient({
   const completo = persona?.completo ?? supervisor?.completo ?? false
   const bono = persona?.bono ?? supervisor?.bono
   const salarioOk = persona?.salario_registrado ?? supervisor?.salario_registrado ?? false
+  const relojHabil = (P.radicacion_reloj ?? 'habil') === 'habil'
 
   return (
     <div>
@@ -112,9 +113,13 @@ export default function OperacionesPerfilClient({
             peso={P.peso_radicacion * 100}
             score={persona.score_radicacion}
             cuerpo={persona.radicacion.pct === null
-              ? 'No hubo radicaciones que medir en el mes.'
-              : `${persona.radicacion.a_tiempo} de ${persona.radicacion.medibles} dentro de ${P.horas_radicacion} horas`}
-            regla={`Por debajo de ${P.piso_operativo * 100}% el indicador vale 0`}
+              ? (persona.radicacion.eventos > 0
+                ? `Hubo ${persona.radicacion.eventos} radicación(es), pero ninguna tiene registrado el momento en que se asignó el caso, así que no hay desde cuándo contar.`
+                : 'No hubo radicaciones que medir en el mes.')
+              : `${persona.radicacion.a_tiempo} de ${persona.radicacion.medibles} dentro de ${P.horas_radicacion} horas ${relojHabil ? 'hábiles' : 'corridas'}`}
+            regla={persona.radicacion.sin_rol
+              ? `Por debajo de ${P.piso_operativo * 100}% el indicador vale 0 · ${persona.radicacion.sin_rol} caso(s) fuera del cálculo por asignación sin área declarada`
+              : `Por debajo de ${P.piso_operativo * 100}% el indicador vale 0`}
           />
           <TarjetaIndicador
             titulo="Envío de documentación"
@@ -177,7 +182,11 @@ export default function OperacionesPerfilClient({
             Radicaciones del mes ({detalle.radicaciones.length})
           </h3>
           <p className="text-xs mt-0.5" style={{ color: GRIS }}>
-            El reloj arranca cuando el caso entra a la etapa de Cargue. Son horas corridas.
+            El reloj arranca cuando se te asigna el caso y corre en
+            horas <strong>{relojHabil ? 'hábiles' : 'corridas'}</strong>
+            {relojHabil
+              ? `: ${P.jornada_sabado_habil ? 'domingos' : 'fines de semana'} y festivos no cuentan. Al lado va la resta cruda, para comparar.`
+              : ': fines de semana y festivos cuentan igual.'}
           </p>
         </div>
         {detalle.radicaciones.length === 0 ? (
@@ -190,9 +199,12 @@ export default function OperacionesPerfilClient({
               <thead>
                 <tr className="text-left" style={{ backgroundColor: '#F9FAFB', color: GRIS }}>
                   <th className="px-4 py-2 font-medium">Caso</th>
-                  <th className="px-3 py-2 font-medium">Entró a Cargue</th>
+                  <th className="px-3 py-2 font-medium">Se le asignó</th>
                   <th className="px-3 py-2 font-medium">Radicó</th>
-                  <th className="px-3 py-2 font-medium text-right">Horas</th>
+                  <th className="px-3 py-2 font-medium text-right">
+                    {relojHabil ? 'Horas hábiles' : 'Horas'}
+                  </th>
+                  {relojHabil && <th className="px-3 py-2 font-medium text-right">Corridas</th>}
                   <th className="px-4 py-2 font-medium text-center">A tiempo</th>
                 </tr>
               </thead>
@@ -206,13 +218,22 @@ export default function OperacionesPerfilClient({
                       </Link>
                     </td>
                     <td className="px-3 py-2" style={{ color: r.inicio ? GRIS : '#D1D5DB' }}>
-                      {r.inicio ? fecha(r.inicio) : 'sin registro'}
+                      {r.inicio
+                        ? fecha(r.inicio)
+                        : r.sin_rol ? 'asignado sin área' : 'sin asignación'}
                     </td>
                     <td className="px-3 py-2" style={{ color: GRIS }}>{fecha(r.fin)}</td>
                     <td className="px-3 py-2 text-right font-medium"
                       style={{ color: r.horas === null ? '#D1D5DB' : CARBON }}>
                       {r.horas === null ? '—' : `${r.horas} h`}
                     </td>
+                    {relojHabil && (
+                      <td className="px-3 py-2 text-right" style={{ color: GRIS }}>
+                        {r.horas_corridas === null || r.horas_corridas === undefined
+                          ? '—'
+                          : `${r.horas_corridas} h`}
+                      </td>
+                    )}
                     <td className="px-4 py-2 text-center">
                       {r.a_tiempo === null ? (
                         <span className="text-xs" style={{ color: '#D1D5DB' }}>no medible</span>
