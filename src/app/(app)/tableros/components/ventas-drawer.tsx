@@ -36,6 +36,12 @@ export interface CifraSeleccionada {
   responsableId?: string | null
   sinResponsable?: boolean
   soloCompletos?: boolean | null
+  /**
+   * `true` abre solo las ventas BONIFICABLES (#13), `false` solo las que no lo son,
+   * `null`/ausente las abre todas. Es una pregunta distinta de `soloCompletos`: una
+   * mide si paso el umbral del proceso y la otra si el honorario quedo cubierto.
+   */
+  soloBonificables?: boolean | null
   /** 'YYYY-MM-DD': abre las ventas de un solo día. */
   dia?: string | null
   /**
@@ -80,6 +86,7 @@ export function VentasDrawer({
       sinResponsable: cifra.sinResponsable ?? false,
       dia: cifra.dia ?? null,
       campana: cifra.campana ?? null,
+      soloBonificables: cifra.soloBonificables ?? null,
     }).then(r => {
       if (vivo) setCasos(r)
     })
@@ -88,7 +95,7 @@ export function VentasDrawer({
     }
   }, [
     cifra.anio, cifra.mes, cifra.responsableId, cifra.soloCompletos,
-    cifra.sinResponsable, cifra.dia, cifra.campana,
+    cifra.sinResponsable, cifra.dia, cifra.campana, cifra.soloBonificables,
   ])
 
   useEffect(() => {
@@ -202,6 +209,34 @@ export function VentasDrawer({
                             {fmtCOP(c.recaudado)} recaudado
                           </span>
                         )}
+                        {/* La tercera medida, al lado de las otras dos y con su propio
+                            nombre. `null` no se pinta como "no bonifica": se dice que
+                            no se pudo medir, que es lo único que se sabe. */}
+                        {c.bonificable === true ? (
+                          <span
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                            style={{ backgroundColor: '#EFF6FF', color: '#1D4ED8' }}
+                            title="Pasó el umbral que declara la línea: es una venta bonificable"
+                          >
+                            <CheckCircle2 className="h-2.5 w-2.5" /> Bonificable
+                          </span>
+                        ) : c.bonificable === false ? (
+                          <span
+                            className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                            style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                            title="Todavía no pasó el umbral que declara la línea"
+                          >
+                            No bonifica aún
+                          </span>
+                        ) : (
+                          <span
+                            className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                            style={{ backgroundColor: '#F5F4F2', color: '#9CA3AF' }}
+                            title="La línea de este negocio no declaró desde qué etapa una venta bonifica, así que no se pudo medir. No significa que no bonifique."
+                          >
+                            Bonificable —
+                          </span>
+                        )}
                         {c.sin_honorario_aprobado && (
                           <span
                             className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
@@ -253,6 +288,7 @@ export function VentasDrawer({
  */
 export function Origen({ caso }: {
   caso: Pick<ComercialVentaCaso, 'origen_declarado' | 'tiene_rastro_meta' | 'campana' | 'atribucion_en_conflicto'>
+    & Partial<Pick<ComercialVentaCaso, 'comision_retenida'>>
 }) {
   const declarado = origenNegocioLabel(caso.origen_declarado)
   return (
@@ -286,7 +322,18 @@ export function Origen({ caso }: {
         </span>
       )}
 
-      {caso.atribucion_en_conflicto && (
+      {/* Dos avisos de gravedad distinta, y por eso no comparten insignia. El de
+          arriba es un desacuerdo de atribución interna; este es un pago a un tercero
+          (20% promotor contra 16% marketing) sobre un lead que entró por Meta. */}
+      {caso.comision_retenida ? (
+        <span
+          className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 font-semibold"
+          style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}
+          title="Se declaró promotor y el lead entró por Meta. La comisión NO se liquida hasta que alguien decida cuál de los dos orígenes vale."
+        >
+          <AlertTriangle className="h-2.5 w-2.5" /> Comisión retenida
+        </span>
+      ) : caso.atribucion_en_conflicto ? (
         <span
           className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 font-semibold"
           style={{ backgroundColor: '#FEF3C7', color: OCRE }}
@@ -294,7 +341,7 @@ export function Origen({ caso }: {
         >
           <AlertTriangle className="h-2.5 w-2.5" /> Revisar atribución
         </span>
-      )}
+      ) : null}
     </div>
   )
 }

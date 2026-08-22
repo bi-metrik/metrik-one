@@ -203,6 +203,12 @@ export async function getComercialVentasMes(input: {
    * y por eso no comparte valor con `null`.
    */
   campana?: string | null
+  /**
+   * `true` = solo las ventas BONIFICABLES (#13), `false` = solo las que no lo son,
+   * ausente = todas. Las que no se pudieron medir no caen en ninguno de los dos
+   * filtros: no se sabe de qué lado van, y meterlas en uno sería inventarlo.
+   */
+  soloBonificables?: boolean | null
 }): Promise<ComercialVentaCaso[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return []
@@ -216,6 +222,7 @@ export async function getComercialVentasMes(input: {
     p_sin_responsable: input.sinResponsable ?? false,
     p_dia: input.dia ?? null,
     p_campana: input.campana ?? null,
+    p_solo_bonificables: input.soloBonificables ?? null,
   })
   // El error se lee y se registra: descartarlo devuelve lista vacia y la pantalla diria
   // "no hay casos aqui" sobre una cifra que dice que si los hay — el fallo mudo que este

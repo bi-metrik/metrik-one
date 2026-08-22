@@ -6,8 +6,16 @@ metadata:
 ---
 
 Primera ola del frente de TABLEROS de SOENA entregada el 2026-08-22 en el **PR #357**
-(`feat/tableros-soena-ola-1`), 6 checks verdes, **sin mergear** por decisión de Mauricio.
+(`feat/tableros-soena-ola-1`), 6 checks verdes. **Mergeada** a `main` como `bd40d93`.
 Cubre los puntos 21, 23, 25, 27, 35 y 41 de la sección 3 del inventario.
+
+⚠️ **El código se mergeó y desplegó antes de aplicar las migraciones**, y eso degradó la
+pestaña Comercial en producción sin ruido: el front llama
+`get_comercial_ventas_mes_soena` con 8 argumentos (en base hay 6) y llama
+`get_comercial_origen_mes_soena` / `get_comercial_perdidos_mes_soena`, que no existen.
+Las tres rutas de error devuelven `[]`/`null`, así que la pantalla dice "no hay casos"
+sobre una cifra que dice que sí los hay. Lección: cuando un PR trae RPC nuevas o cambia
+firmas, **la migración va antes del merge**, no después.
 
 **Why:** el bono de operaciones de SOENA se liquida con estos indicadores y el tablero
 comercial decide comisiones. Un indicador mal medido no es un bug de pantalla: es plata mal

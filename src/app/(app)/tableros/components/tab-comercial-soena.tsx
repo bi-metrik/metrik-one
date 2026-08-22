@@ -41,6 +41,20 @@ function pct(n: number | null): string {
 }
 
 /**
+ * Cómo se titula el panel según la celda que se abrió.
+ *
+ * Los tres títulos son distintos a propósito: hasta ahora dos cifras distintas se
+ * llamaban "ventas" y "casos completos" sin decir qué medía cada una, y el bono
+ * hablaba de una tercera. El título del panel es donde el usuario confirma qué está
+ * mirando (punto #13).
+ */
+const TITULO_CELDA: Record<AlcanceCelda, string> = {
+  todas: 'Ventas',
+  completos: 'Honorario cubierto',
+  bonificables: 'Ventas bonificables',
+}
+
+/**
  * Variación contra el mismo indicador del mes anterior (punto #41).
  *
  * Devuelve `null` —y la pantalla no pinta nada— en los dos casos en que un número
@@ -156,8 +170,14 @@ export function TabComercialSoena({
     : undefined
   const abrirCompletosDelMes = kpis && kpis.casos_completos > 0
     ? () => abrirVentas({
-        titulo: `Casos completos · ${MESES_ES[mes - 1]} ${anio}`,
+        titulo: `Honorario cubierto · ${MESES_ES[mes - 1]} ${anio}`,
         soloCompletos: true, alcance: 'el honorario aprobado quedó cubierto',
+      })
+    : undefined
+  const abrirBonificablesDelMes = kpis && kpis.bonificables
+    ? () => abrirVentas({
+        titulo: `Ventas bonificables · ${MESES_ES[mes - 1]} ${anio}`,
+        soloBonificables: true, alcance: 'pasaron el umbral que declara la línea',
       })
     : undefined
 
@@ -248,11 +268,17 @@ export function TabComercialSoena({
           de ellas no hay una lista que mostrar. */}
       {kpis && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {/* ⚠️ Tres cifras que se parecen y NO son la misma (punto #13). Cada una
+              dice en su subtítulo qué está contando, porque hasta ahora el tablero
+              decía "ventas" y el bono medía otra cosa con el mismo nombre. */}
           <Kpi label="Ventas del mes" value={String(kpis.num_ventas)}
-               sub={kpis.meta_num_ventas ? `meta ${kpis.meta_num_ventas} · ${pct(kpis.cumplimiento_num)}` : undefined}
+               sub={kpis.meta_num_ventas
+                 ? `entró dinero · meta ${kpis.meta_num_ventas} · ${pct(kpis.cumplimiento_num)}`
+                 : 'entró dinero'}
                delta={delta(kpis.num_ventas, kpisPrev?.num_ventas)}
                onAbrir={kpis.num_ventas > 0 ? () => abrirVentas({
                  titulo: `Ventas · ${MESES_ES[mes - 1]} ${anio}`,
+                 alcance: 'venta = entró dinero (primer pago)',
                }) : undefined} />
           <Kpi label="Valor vendido (sin IVA)" value={fmtCompact(kpis.valor_sin_iva)} color={GREEN}
                sub={kpis.meta_valor ? `meta ${fmtCompact(kpis.meta_valor)} · ${pct(kpis.cumplimiento_valor)}` : undefined}
@@ -262,10 +288,21 @@ export function TabComercialSoena({
                }) : undefined} />
           <Kpi label="Ticket promedio" value={fmtCompact(kpis.ticket_promedio)}
                delta={delta(kpis.ticket_promedio, kpisPrev?.ticket_promedio)} />
-          <Kpi label="Casos completos" value={`${kpis.casos_completos}`} sub={pct(kpis.tasa_casos_completos)}
+          <Kpi label="Ventas bonificables" value={kpis.bonificables === null ? '—' : String(kpis.bonificables)}
+               sub={kpis.bonificables === null
+                 ? 'la línea no declaró desde qué etapa bonifica'
+                 : `pasó el umbral del proceso · ${pct(kpis.tasa_bonificables)}${
+                     kpis.bonificable_sin_medir > 0 ? ` · ${kpis.bonificable_sin_medir} sin medir` : ''}`}
+               delta={kpis.bonificables === null ? null : delta(kpis.bonificables, kpisPrev?.bonificables)}
+               onAbrir={kpis.bonificables ? () => abrirVentas({
+                 titulo: `Ventas bonificables · ${MESES_ES[mes - 1]} ${anio}`,
+                 soloBonificables: true, alcance: 'pasaron el umbral que declara la línea',
+               }) : undefined} />
+          <Kpi label="Honorario cubierto" value={`${kpis.casos_completos}`}
+               sub={`el recaudo cubre lo aprobado · ${pct(kpis.tasa_casos_completos)}`}
                delta={delta(kpis.casos_completos, kpisPrev?.casos_completos)}
                onAbrir={kpis.casos_completos > 0 ? () => abrirVentas({
-                 titulo: `Casos completos · ${MESES_ES[mes - 1]} ${anio}`,
+                 titulo: `Honorario cubierto · ${MESES_ES[mes - 1]} ${anio}`,
                  soloCompletos: true, alcance: 'el honorario aprobado quedó cubierto',
                }) : undefined} />
           <Kpi label="Mejor dia" value={kpis.mejor_dia ? kpis.mejor_dia.slice(8) + '/' + kpis.mejor_dia.slice(5, 7) : 'sin dato'}
@@ -313,7 +350,8 @@ export function TabComercialSoena({
                   <th className="hidden px-4 py-3 text-right md:table-cell">Valor (con IVA)</th>
                   <th className="hidden px-4 py-3 text-right sm:table-cell">1er pago</th>
                   <th className="hidden px-4 py-3 text-right lg:table-cell">2o pago</th>
-                  <th className="px-4 py-3 text-right">Completos</th>
+                  <th className="px-4 py-3 text-right" title="Ventas que pasaron el umbral del proceso: es la cifra que bonifica">Bonificables</th>
+                  <th className="hidden px-4 py-3 text-right md:table-cell" title="Ventas cuyo honorario aprobado ya quedó cubierto por el recaudo">Hon. cubierto</th>
                   <th className="hidden px-4 py-3 text-right sm:table-cell">Particip.</th>
                 </tr>
               </thead>
@@ -322,21 +360,20 @@ export function TabComercialSoena({
                   <FilaVendedor
                     key={v.responsable_id ?? 'sin'}
                     v={v}
-                    onAbrir={(soloCompletos) => setCifra({
+                    onAbrir={(alcanceCelda) => setCifra({
                       anio, mes,
-                      titulo: soloCompletos
-                        ? `Casos completos · ${MESES_ES[mes - 1]} ${anio}`
-                        : `Ventas · ${MESES_ES[mes - 1]} ${anio}`,
+                      titulo: `${TITULO_CELDA[alcanceCelda]} · ${MESES_ES[mes - 1]} ${anio}`,
                       responsableId: v.responsable_id,
                       sinResponsable: v.sin_responsable,
-                      soloCompletos,
+                      soloCompletos: alcanceCelda === 'completos' ? true : null,
+                      soloBonificables: alcanceCelda === 'bonificables' ? true : null,
                       alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
                     })}
                   />
                 ))}
                 {lideresMes.length > 0 && (
                   <tr className="border-b border-gray-50 bg-gray-50/40">
-                    <td colSpan={8} className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                    <td colSpan={9} className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
                       Lideres · fuera de la comparacion
                     </td>
                   </tr>
@@ -345,21 +382,20 @@ export function TabComercialSoena({
                   <FilaVendedor
                     key={v.responsable_id ?? 'sin-lider'}
                     v={v}
-                    onAbrir={(soloCompletos) => setCifra({
+                    onAbrir={(alcanceCelda) => setCifra({
                       anio, mes,
-                      titulo: soloCompletos
-                        ? `Casos completos · ${MESES_ES[mes - 1]} ${anio}`
-                        : `Ventas · ${MESES_ES[mes - 1]} ${anio}`,
+                      titulo: `${TITULO_CELDA[alcanceCelda]} · ${MESES_ES[mes - 1]} ${anio}`,
                       responsableId: v.responsable_id,
                       sinResponsable: v.sin_responsable,
-                      soloCompletos,
+                      soloCompletos: alcanceCelda === 'completos' ? true : null,
+                      soloBonificables: alcanceCelda === 'bonificables' ? true : null,
                       alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
                     })}
                   />
                 ))}
                 {porVendedor.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">
+                    <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-400">
                       Sin ventas registradas este mes.
                     </td>
                   </tr>
@@ -392,6 +428,10 @@ export function TabComercialSoena({
                       {fmtCOP(kpis.segundo_pago)}
                     </CeldaAbrible>
                     <CeldaAbrible className="px-4 py-3 text-right tabular-nums"
+                      onAbrir={abrirBonificablesDelMes} title="Ver las ventas que pasaron el umbral del proceso">
+                      {kpis.bonificables === null ? <span className="text-gray-300">—</span> : kpis.bonificables}
+                    </CeldaAbrible>
+                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums md:table-cell"
                       onAbrir={abrirCompletosDelMes} title="Ver los casos con el honorario cubierto">
                       {kpis.casos_completos}
                     </CeldaAbrible>
@@ -629,15 +669,18 @@ function CeldaAbrible({ children, onAbrir, title, className, style }: {
   )
 }
 
+/** Qué subconjunto de las ventas de un vendedor abre la celda en la que se hizo clic. */
+export type AlcanceCelda = 'todas' | 'completos' | 'bonificables'
+
 /** Fila de la tabla por vendedor. Compartida por la lista de ejecutores y la de lideres. */
 function FilaVendedor({ v, onAbrir }: {
   v: ComercialVendedorMes
-  /** Abre los casos de este vendedor. `soloCompletos` distingue las dos celdas clicables. */
-  onAbrir: (soloCompletos: boolean | null) => void
+  /** Abre los casos de este vendedor, con el subconjunto de la celda. */
+  onAbrir: (alcance: AlcanceCelda) => void
 }) {
   // Todas las columnas de dinero describen las MISMAS ventas de la fila, así que
   // abren la misma lista. Sin ventas no hay nada que abrir.
-  const abrirTodas = v.num_ventas > 0 ? () => onAbrir(null) : undefined
+  const abrirTodas = v.num_ventas > 0 ? () => onAbrir('todas') : undefined
   return (
     <tr className="border-b border-gray-50 hover:bg-gray-50/50">
 
@@ -683,11 +726,30 @@ function FilaVendedor({ v, onAbrir }: {
                     >
                       {fmtCOP(v.segundo_pago)}
                     </CeldaAbrible>
+                    {/* Bonificables: la columna que decide el bono (#13/#31). Raya
+                        cuando la línea no declaró umbral — un 0 diría "no completó
+                        ninguna", que es una afirmación que nadie midió. */}
                     <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                      {v.bonificables === null ? (
+                        <span className="text-gray-300" title="La línea de estos negocios no declaró desde qué etapa una venta bonifica: no se pudo medir">—</span>
+                      ) : v.bonificables > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => onAbrir('bonificables')}
+                          className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+                          title="Ver las ventas que pasaron el umbral del proceso"
+                        >
+                          {v.bonificables}
+                        </button>
+                      ) : (
+                        v.bonificables
+                      )}
+                    </td>
+                    <td className="hidden px-4 py-3 text-right tabular-nums text-gray-700 md:table-cell">
                       {v.casos_completos > 0 ? (
                         <button
                           type="button"
-                          onClick={() => onAbrir(true)}
+                          onClick={() => onAbrir('completos')}
                           className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
                           title="Ver los casos con el honorario cubierto"
                         >
@@ -774,12 +836,27 @@ function SeccionOrigen({ origen, mesLabel, onAbrirCampana }: {
         </p>
       </div>
 
-      {origen.en_conflicto > 0 && (
+      {/* ⚠️ Dos avisos separados a propósito (punto #46). El de abajo es un desacuerdo
+          de atribución interna; el de arriba es plata que sale hacia un tercero, y
+          mientras esté ahí la comisión NO se liquida. Mezclarlos en un solo contador
+          ámbar haría que el caso grave se leyera con el mismo peso que el leve. */}
+      {origen.comision_retenida > 0 && (
+        <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+          <strong>Comisión retenida en {origen.comision_retenida}</strong>{' '}
+          {origen.comision_retenida === 1 ? 'venta' : 'ventas'} por {fmtCOP(origen.comision_retenida_valor)} sin
+          IVA: se declararon como <strong>promotor</strong> (20% a un tercero) y el lead entró
+          por Meta (16% de marketing). No se liquida hasta que alguien decida cuál de los dos
+          orígenes vale — el sistema no elige. Aparecen marcadas al abrir cualquier cifra.
+        </p>
+      )}
+
+      {origen.en_conflicto > origen.comision_retenida && (
         <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          <strong>{origen.en_conflicto}</strong> {origen.en_conflicto === 1 ? 'venta tiene' : 'ventas tienen'} el
-          origen declarado en desacuerdo con el rastro (por ejemplo, marcadas como promotor
-          cuando el lead entró por Meta). Decide de qué bolsa sale la comisión, así que
-          hay que resolverlo caso por caso: aparecen marcadas al abrir cualquier cifra.
+          <strong>{origen.en_conflicto - origen.comision_retenida}</strong>{' '}
+          {origen.en_conflicto - origen.comision_retenida === 1 ? 'venta más tiene' : 'ventas más tienen'} el
+          origen declarado en desacuerdo con el rastro, sin que ningún tercero cobre por ellas
+          (declaradas Meta sin rastro, o con rastro y declaradas de otra forma). No frenan
+          ninguna liquidación, pero ensucian la atribución por campaña.
         </p>
       )}
 
@@ -800,6 +877,14 @@ function SeccionOrigen({ origen, mesLabel, onAbrirCampana }: {
                     {o.con_rastro_meta > 0 && (
                       <span className="ml-1.5 text-[10px] text-gray-400">
                         {o.con_rastro_meta} con rastro
+                      </span>
+                    )}
+                    {o.comision_retenida > 0 && (
+                      <span
+                        className="ml-1.5 rounded bg-red-50 px-1 py-0.5 text-[10px] font-semibold text-red-700"
+                        title="Un tercero cobraría por un lead que entró por Meta: la comisión de estos casos está retenida"
+                      >
+                        {o.comision_retenida} retenida{o.comision_retenida === 1 ? '' : 's'}
                       </span>
                     )}
                   </td>
