@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { extraerTelefono, resolver, contactoDeLaResolucion, type Candidato } from './evento'
 
-const c = (id: string, nombre: string, telefono: string): Candidato => ({ id, nombre, telefono })
+const c = (id: string, nombre: string, telefono: string): Candidato => ({
+  id,
+  nombre,
+  telefono,
+  segmento: 'sin_contactar',
+})
 
 describe('extraerTelefono', () => {
   it('lo encuentra con el nombre que le haya puesto quien armo el flujo', () => {
