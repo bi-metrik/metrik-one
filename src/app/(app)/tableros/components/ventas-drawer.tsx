@@ -19,7 +19,7 @@ import { useEffect, useState } from 'react'
 import { X, ExternalLink, AlertTriangle, CheckCircle2, RotateCcw } from 'lucide-react'
 import Link from 'next/link'
 import { getComercialVentasMes } from '../../equipo/comercial-actions'
-import type { ComercialVentaCaso } from '../../equipo/comercial-types'
+import { planPagoLabel, type ComercialVentaCaso } from '../../equipo/comercial-types'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
 
 const CARBON = '#1A1A1A'
@@ -248,6 +248,31 @@ export function VentasDrawer({
                             title="La línea de este negocio no declaró desde qué etapa una venta bonifica, así que no se pudo medir. No significa que no bonifique."
                           >
                             Bonificable —
+                          </span>
+                        )}
+                        {/* Con qué plan se cobra. Decide si "segundo pago" existe
+                            siquiera para este caso, así que va al lado del recaudo y
+                            no escondido en el negocio. Sin plan declarado se dice
+                            eso —no se supone plan 2, que es lo que hacía la vista. */}
+                        {c.plan_pago === null ? (
+                          <span
+                            className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                            style={{ backgroundColor: '#F5F4F2', color: '#9CA3AF' }}
+                            title="Nadie declaró el plan de pago al aprobar la propuesta. No significa que sea 100% anticipado: significa que no se sabe si falta un segundo pago."
+                          >
+                            Plan —
+                          </span>
+                        ) : (
+                          <span
+                            className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                            style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                            title={
+                              c.plan_pago === 1
+                                ? 'Plan 1: mitad por adelantado y mitad al éxito. Este caso SÍ tiene un segundo pago.'
+                                : 'Plan 2: el honorario se paga completo por adelantado. Este caso no tiene segundo pago.'
+                            }
+                          >
+                            {planPagoLabel(c.plan_pago)}
                           </span>
                         )}
                         {c.sin_honorario_aprobado && (

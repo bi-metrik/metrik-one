@@ -20,6 +20,7 @@ import type {
   ComercialSerieResponse,
   ComercialOrigenMes,
   ComercialSeccionalMes,
+  ComercialPlanPagoMes,
   CapacidadSeccional,
   MetaComercial,
 } from '../equipo/comercial-types'
@@ -47,6 +48,7 @@ export interface ComercialNegociosBundle {
   mesAnteriorInicial: ComercialMesResponse | null
   origenInicial: ComercialOrigenMes | null
   seccionalInicial: ComercialSeccionalMes | null
+  planPagoInicial: ComercialPlanPagoMes | null
   capacidad: CapacidadSeccional | null
   serie: ComercialSerieResponse | null
   metasIniciales: MetaComercial[]
@@ -183,6 +185,7 @@ export default function TablerosClient({
             mesAnteriorInicial={initialComercialNegocios.mesAnteriorInicial}
             origenInicial={initialComercialNegocios.origenInicial}
             seccionalInicial={initialComercialNegocios.seccionalInicial}
+            planPagoInicial={initialComercialNegocios.planPagoInicial}
             capacidad={initialComercialNegocios.capacidad}
             serie={initialComercialNegocios.serie}
             metasIniciales={initialComercialNegocios.metasIniciales}

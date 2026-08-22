@@ -4,7 +4,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import {
   getComercialResumen, getComercialMes, getComercialSerie, getMetasComerciales,
-  getComercialOrigenMes, getComercialSeccionalMes, getCapacidadSeccional,
+  getComercialOrigenMes, getComercialSeccionalMes, getComercialPlanPagoMes, getCapacidadSeccional,
 } from '../equipo/comercial-actions'
 import { getOperacionesBono } from './operaciones-actions'
 import { getDatosDueno } from '../calidad/actions'
@@ -83,12 +83,13 @@ export default async function TablerosPage() {
       const d = new Date(Date.UTC(anioSel, mesSel - 1 + meses, 1))
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
     }
-    const [equipo, mesData, mesPrevio, origen, seccional, capacidad, serie, metas] = await Promise.all([
+    const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serie, metas] = await Promise.all([
       getComercialResumen(),
       getComercialMes(anioSel, mesSel),
       getComercialMes(prev.anio, prev.mes),
       getComercialOrigenMes(anioSel, mesSel),
       getComercialSeccionalMes(anioSel, mesSel),
+      getComercialPlanPagoMes(anioSel, mesSel),
       getCapacidadSeccional(ventana(-5), ventana(3)),
       getComercialSerie(12),
       getMetasComerciales(anioSel, mesSel),
@@ -99,6 +100,7 @@ export default async function TablerosPage() {
       mesAnteriorInicial: mesPrevio,
       origenInicial: origen,
       seccionalInicial: seccional,
+      planPagoInicial: planPago,
       capacidad,
       serie,
       metasIniciales: metas,
