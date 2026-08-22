@@ -1,0 +1,40 @@
+-- `v_cartera_antiguedad` se borra: no medía nada y estaba abierta a `anon`.
+--
+-- Que era. Nacio con el modulo de proyectos (20260221000000) como la cartera
+-- por rangos de antiguedad (0-30, 31-60, 61-90, 90+) sobre `facturas` menos
+-- `cobros`. Pero `facturas` tiene **0 filas en los 15 workspaces** (medido
+-- 2026-08-22), asi que la vista devolvia cero para todos. Es el mismo origen
+-- que ya se corrigio en /numeros con `v_cartera_negocio` (PRs #365 y #367).
+--
+-- Quien la leia. Un solo consumidor: `getFinancieroData` en
+-- `src/app/(app)/tableros/actions.ts`, que alimenta la pestaña Financiero
+-- generica — la que ve cualquier workspace con `modules.business` y sin
+-- tableros propios. SOENA no la pintaba (tiene los suyos). Ese consumidor ya
+-- pasó a `v_cartera_negocio` en este mismo PR, asi que la vista queda sin
+-- nadie que la lea.
+--
+-- De los cuatro rangos de antiguedad no se reconstruye ninguno: **nadie los
+-- pintaba**. La accion solo leia `total_cartera` y `tab-financiero.tsx` solo
+-- muestra ese numero dentro de la posicion neta de caja. Rehacerlos habria
+-- sido codigo muerto nuevo. Si algun dia se piden, `v_cartera_negocio` trae
+-- `dias` por negocio y el corte se hace ahi.
+--
+-- Por que se borra en vez de solo revocar. Con el consumidor movido no queda
+-- ninguno, y una vista viva que devuelve cero es peor que ninguna: la proxima
+-- pantalla que la encuentre va a creerle. La definicion queda en el historial
+-- de migraciones (20260221000000) si alguna vez hace falta.
+--
+-- El grant a `anon`. `v_cartera_antiguedad` tenia SELECT concedido a `anon`,
+-- que ninguna otra vista de dinero tiene: `v_pyl_mes` lo revoca explicito
+-- (20260708000011, 20260709000001) y `v_cartera_negocio`, `v_cobro_valor` y
+-- `v_negocio_valor` solo se lo dan a `authenticated`. Era un resto que la
+-- auditoria de RLS de los PRs #243/#249 no barrio. Al borrarla, el grant se va
+-- con ella. Como red: la vista era `security_invoker` desde 20260317000000, asi
+-- que corria con los permisos de quien consultara y RLS aplicaba igual — la
+-- exposicion era de forma, no de filas. Se cierra de todos modos.
+--
+-- ⚠️ NO se toca `v_facturas_estado`, que sale de la misma tabla vacia: tiene
+-- consumidores vivos (`cobros-horas-rapidos.ts`, `wa-alerts`, el handler de
+-- `consulta`). Que devuelvan vacio es un hallazgo aparte, no de este PR.
+
+drop view if exists public.v_cartera_antiguedad;
