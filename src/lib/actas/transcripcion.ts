@@ -37,50 +37,107 @@ export interface TranscripcionParseada {
   vacia: boolean
 }
 
-const RE_TITULO = /^##\s*\*\*(.+?)\*\*\s*$/m
-const RE_ASISTENTES = /#\s*\*\*Asistentes\*\*\s*\n+([\s\S]*?)(?=\n#\s|\n###\s|$)/
-const RE_FIN = /La reuni[oó]n finaliz[oó] despu[eé]s de\s+(\d{1,2}):(\d{2}):(\d{2})/
-const RE_CUERPO = /#\s*\*\*Transcripci[oó]n\*\*\s*\n([\s\S]*)$/
+// El export de Drive a text/plain NO trae markdown. Verificado contra la
+// transcripcion real de "Daniela Gomez - Trappvel x MeTRIK" (2026-08-20):
+//
+//   \ufeffDaniela Gomez - Trappvel x MeTRIK
+//   Asistentes
+//   Comercial Trappvel, Mauricio Moreno
+//   Transcripcion
+//   Comercial Trappvel: Alo.
+//   ...
+//   00:05:00
+//   ...
+//   La reunion finalizo despues de 01:35:56
+//
+// Los encabezados son lineas sueltas y las marcas de tiempo son `HH:MM:SS`
+// solas, sin `###`. Se toleran igual las variantes con markdown (`## **X**`)
+// porque el mismo Doc exportado por otra via si las trae: la decoracion se
+// quita antes de comparar, en vez de mantener dos juegos de expresiones.
 
-/** Ultimo marcador `### HH:MM:SS` del cuerpo, como respaldo de duracion. */
-const RE_MARCA_TIEMPO = /^###\s+(\d{1,2}):(\d{2}):(\d{2})\s*$/gm
+const RE_FIN = /La reuni[oó]n finaliz[oó] despu[eé]s de\s+(\d{1,2}):(\d{2}):(\d{2})/
+const RE_MARCA_TIEMPO = /^(\d{1,2}):(\d{2}):(\d{2})$/
+const RE_INTERVENCION = /^[^:\n]{2,60}:\s+\S/
+
+const ENCABEZADO_ASISTENTES = /^asistentes$/i
+const ENCABEZADO_CUERPO = /^transcripci[oó]n$/i
+const PIE = /^esta transcripci[oó]n editable/i
 
 function aSegundos(h: string, m: string, s: string): number {
   return Number(h) * 3600 + Number(m) * 60 + Number(s)
 }
 
-export function parseTranscripcion(texto: string): TranscripcionParseada {
-  const titulo = texto.match(RE_TITULO)?.[1]?.trim() ?? null
+/** Quita BOM, vinetas y decoracion markdown para poder comparar la linea. */
+function limpiar(linea: string): string {
+  return linea
+    .replace(/^\ufeff/, '')
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+    .trim()
+}
 
-  const bloqueAsistentes = texto.match(RE_ASISTENTES)?.[1] ?? ''
-  const asistentes = bloqueAsistentes
-    .split(/[,\n]/)
-    .map((n) => n.trim())
-    .filter((n) => n.length > 0 && !n.startsWith('#') && !n.startsWith('*'))
+export function parseTranscripcion(texto: string): TranscripcionParseada {
+  const lineas = texto.replace(/\r\n/g, '\n').split('\n').map(limpiar)
+
+  let titulo: string | null = null
+  const asistentes: string[] = []
+  const cuerpoLineas: string[] = []
+
+  // 'cabecera' hasta el encabezado de asistentes, luego 'asistentes', luego
+  // 'cuerpo'. Un doc sin encabezados deja todo en cabecera y sale vacio, que es
+  // la respuesta correcta: no se inventa una transcripcion que no esta.
+  let zona: 'cabecera' | 'asistentes' | 'cuerpo' = 'cabecera'
+  let ultimaMarca: string | null = null
+
+  for (const linea of lineas) {
+    if (!linea) continue
+
+    if (ENCABEZADO_ASISTENTES.test(linea)) {
+      zona = 'asistentes'
+      continue
+    }
+    if (ENCABEZADO_CUERPO.test(linea)) {
+      zona = 'cuerpo'
+      continue
+    }
+
+    if (zona === 'cabecera') {
+      if (titulo === null) titulo = linea
+      continue
+    }
+
+    if (zona === 'asistentes') {
+      asistentes.push(...linea.split(',').map((n) => n.trim()).filter(Boolean))
+      continue
+    }
+
+    if (PIE.test(linea)) continue
+    if (RE_FIN.test(linea)) continue
+    if (RE_MARCA_TIEMPO.test(linea)) {
+      ultimaMarca = linea
+      continue
+    }
+    cuerpoLineas.push(linea)
+  }
 
   let duracionSegundos: number | null = null
   const fin = texto.match(RE_FIN)
   if (fin) {
     duracionSegundos = aSegundos(fin[1], fin[2], fin[3])
-  } else {
-    // Sin marcador de cierre: usar la ultima marca de tiempo del cuerpo.
-    let ultima: RegExpExecArray | null = null
-    let m: RegExpExecArray | null
-    RE_MARCA_TIEMPO.lastIndex = 0
-    while ((m = RE_MARCA_TIEMPO.exec(texto)) !== null) ultima = m
-    if (ultima) duracionSegundos = aSegundos(ultima[1], ultima[2], ultima[3])
+  } else if (ultimaMarca) {
+    // Sin marcador de cierre: la ultima marca de tiempo es el piso conocido.
+    const [h, m, sg] = ultimaMarca.split(':')
+    duracionSegundos = aSegundos(h, m, sg)
   }
 
-  const cuerpo = (texto.match(RE_CUERPO)?.[1] ?? '').trim()
-
-  // Un doc de transcripcion sin intervenciones trae encabezados y nada mas.
-  const intervenciones = (cuerpo.match(/^[^\n#*][^\n]*?:\s/gm) ?? []).length
+  const intervenciones = cuerpoLineas.filter((l) => RE_INTERVENCION.test(l)).length
 
   return {
     titulo,
     asistentes,
     duracionSegundos,
-    cuerpo,
+    cuerpo: cuerpoLineas.join('\n').trim(),
     vacia: intervenciones < 3,
   }
 }

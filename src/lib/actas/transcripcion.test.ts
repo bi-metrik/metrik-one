@@ -69,8 +69,10 @@ describe('parseTranscripcion', () => {
 
   it('el cuerpo arranca en la transcripcion, sin el bloque de asistentes', () => {
     const t = parseTranscripcion(REAL)
-    expect(t.cuerpo.startsWith('### 00:05:00')).toBe(true)
+    // El cuerpo queda como habla pura: sin encabezados y sin marcas de tiempo.
+    expect(t.cuerpo.startsWith('Daniela Játiva Castro: Hola, Mauro.')).toBe(true)
     expect(t.cuerpo).not.toContain('Asistentes')
+    expect(t.cuerpo).not.toContain('00:05:00')
   })
 
   it('cae a la ultima marca de tiempo cuando falta el marcador de cierre', () => {
@@ -116,5 +118,49 @@ describe('parseNombreArchivo', () => {
     expect(m.esNotasGemini).toBe(true)
     expect(m.esTranscript).toBe(false)
     expect(m.contraparte).toBe('Trappvel')
+  })
+})
+
+
+// Formato REAL que devuelve el export a text/plain (verificado contra
+// "Daniela Gomez - Trappvel x MéTRIK", 2026-08-20, 105 KB, 1192 intervenciones).
+// No trae markdown: los encabezados son lineas sueltas y las marcas de tiempo
+// van solas. Este es el formato que ve el cron en produccion.
+const PLANO = `\ufeffDaniela Gomez - Trappvel x MéTRIK
+Asistentes
+Comercial Trappvel, Mauricio Moreno
+Transcripción
+Comercial Trappvel: Aló.
+Mauricio Moreno: ¿Cómo estás?
+00:05:00
+Comercial Trappvel: Bien, bien.
+Mauricio Moreno: Qué bueno.
+00:10:00
+Mauricio Moreno: Chao.
+La reunión finalizó después de 01:35:56 👋
+Esta transcripción editable se generó automáticamente y puede contener errores.`
+
+describe('parseTranscripcion sobre el export real de Drive', () => {
+  it('lee titulo, asistentes y duracion sin markdown', () => {
+    const t = parseTranscripcion(PLANO)
+    expect(t.titulo).toBe('Daniela Gomez - Trappvel x MéTRIK')
+    expect(t.asistentes).toEqual(['Comercial Trappvel', 'Mauricio Moreno'])
+    expect(t.duracionSegundos).toBe(5756)
+    expect(t.vacia).toBe(false)
+  })
+
+  it('no cuenta como vacia una reunion larga real', () => {
+    const t = parseTranscripcion(PLANO)
+    // 5756 s supera la hora: esta reunion si genera acta.
+    expect(t.duracionSegundos!).toBeGreaterThan(3600)
+  })
+
+  it('el cuerpo excluye encabezados, marcas de tiempo, cierre y pie', () => {
+    const t = parseTranscripcion(PLANO)
+    expect(t.cuerpo).not.toContain('Asistentes')
+    expect(t.cuerpo).not.toContain('00:05:00')
+    expect(t.cuerpo).not.toContain('finalizó después de')
+    expect(t.cuerpo).not.toContain('se generó automáticamente')
+    expect(t.cuerpo.split('\n')).toHaveLength(5)
   })
 })
