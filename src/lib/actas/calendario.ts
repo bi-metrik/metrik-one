@@ -40,6 +40,8 @@ export interface ReunionCalendario {
   /** fileId del Google Doc de transcripcion adjunto, si Meet ya lo subio. */
   transcriptFileId: string | null
   transcriptNombre: string | null
+  /** Por que no hay transcripcion. null cuando si la hay. */
+  motivoSinTranscripcion: MotivoSinTranscripcion | null
   meetUrl: string | null
 }
 
@@ -67,14 +69,71 @@ interface RawEvent {
   conferenceData?: { entryPoints?: { uri?: string; entryPointType?: string }[] }
 }
 
-function adjuntoTranscripcion(ev: RawEvent): { id: string; nombre: string } | null {
-  for (const a of ev.attachments ?? []) {
-    const titulo = a.title ?? ''
-    if (!/-\s*Transcript\s*$/i.test(titulo)) continue
+export type MotivoSinTranscripcion =
+  /** El evento no trae adjuntos: la reunion no se grabo, o Meet aun no subio nada. */
+  | 'sin_adjuntos'
+  /** Hay adjuntos pero ninguno es transcripcion (medido: solo "Recording" + "Notas de Gemini"). */
+  | 'solo_grabacion'
+  /** El adjunto dice ser transcripcion pero su fileUrl no trae fileId de Google Doc. */
+  | 'adjunto_ilegible'
+
+const RE_SUFIJO_TRANSCRIPT = /-\s*Transcript\s*$/i
+
+// Meet estampa la hora en el titulo: "... - 2026/08/18 11:55 GMT-05:00 - Transcript"
+const RE_SELLO = /(\d{4})\/(\d{2})\/(\d{2})\s+(\d{1,2}):(\d{2})\s+GMT([+-]\d{2}):?(\d{2})/
+
+function selloDelTitulo(titulo: string): number | null {
+  const m = titulo.match(RE_SELLO)
+  if (!m) return null
+  const [, anio, mes, dia, hora, min, tzHora, tzMin] = m
+  const t = Date.parse(
+    `${anio}-${mes}-${dia}T${hora.padStart(2, '0')}:${min}:00${tzHora}:${tzMin}`,
+  )
+  return Number.isNaN(t) ? null : t
+}
+
+export interface SeleccionTranscripcion {
+  id: string
+  nombre: string
+}
+
+/**
+ * Un evento puede traer MAS DE UNA transcripcion. Medido sobre el calendario
+ * real: "Temas Marketing + Ventas - Soena x MeTRIK" del 2026-08-18 (evento de
+ * las 12:00) trae una transcripcion sellada 11:55 y otra sellada 17:55. El
+ * orden del arreglo no dice cual corresponde a esta sesion; el sello de tiempo
+ * del titulo si. Se elige la mas cercana al inicio del evento.
+ *
+ * Y puede traer NINGUNA: hay reuniones con "Recording" + "Notas de Gemini" y
+ * sin transcripcion. Esas no generan acta, pero el motivo se devuelve para que
+ * el cron lo registre en vez de fallar en silencio.
+ */
+export function elegirTranscripcion(
+  attachments: RawAttachment[] | undefined,
+  inicioISO: string,
+): { elegida: SeleccionTranscripcion | null; motivo: MotivoSinTranscripcion | null } {
+  const lista = attachments ?? []
+  if (lista.length === 0) return { elegida: null, motivo: 'sin_adjuntos' }
+
+  const candidatos = lista.filter((a) => RE_SUFIJO_TRANSCRIPT.test(a.title ?? ''))
+  if (candidatos.length === 0) return { elegida: null, motivo: 'solo_grabacion' }
+
+  const inicio = Date.parse(inicioISO)
+  const ordenados = candidatos
+    .map((a) => ({ a, sello: selloDelTitulo(a.title ?? '') }))
+    .sort((x, y) => {
+      // Un titulo sin sello no compite: va al final, pero sigue siendo elegible
+      // si es el unico con fileId legible.
+      if (x.sello === null) return y.sello === null ? 0 : 1
+      if (y.sello === null) return -1
+      return Math.abs(x.sello - inicio) - Math.abs(y.sello - inicio)
+    })
+
+  for (const { a } of ordenados) {
     const id = a.fileUrl?.match(RE_ID_DOC)?.[1]
-    if (id) return { id, nombre: titulo }
+    if (id) return { elegida: { id, nombre: a.title ?? '' }, motivo: null }
   }
-  return null
+  return { elegida: null, motivo: 'adjunto_ilegible' }
 }
 
 function normalizar(ev: RawEvent): ReunionCalendario | null {
@@ -83,7 +142,7 @@ function normalizar(ev: RawEvent): ReunionCalendario | null {
   // Eventos de dia completo (sin dateTime) no son reuniones.
   if (!inicio || !fin) return null
 
-  const adjunto = adjuntoTranscripcion(ev)
+  const { elegida, motivo } = elegirTranscripcion(ev.attachments, inicio)
 
   const participantes: Participante[] = (ev.attendees ?? [])
     .filter((a) => !!a.email && !a.resource)
@@ -108,8 +167,9 @@ function normalizar(ev: RawEvent): ReunionCalendario | null {
       Math.round((new Date(fin).getTime() - new Date(inicio).getTime()) / 1000),
     ),
     participantes,
-    transcriptFileId: adjunto?.id ?? null,
-    transcriptNombre: adjunto?.nombre ?? null,
+    transcriptFileId: elegida?.id ?? null,
+    transcriptNombre: elegida?.nombre ?? null,
+    motivoSinTranscripcion: motivo,
     meetUrl,
   }
 }
