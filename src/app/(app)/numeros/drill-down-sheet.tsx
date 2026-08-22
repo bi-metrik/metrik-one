@@ -135,7 +135,13 @@ function DrillP1({ data, monthType, onChangeDrill }: { data: NumerosData; monthT
 
       <Divider />
       <SectionTitle>Recaudo del mes</SectionTitle>
-      <Row label="Recaudado este mes" value={data.recaudoMes} />
+      <Row label="Recaudado este mes (tuyo)" value={data.recaudoMes} />
+      {data.recaudoTercerosMes > 0 && (
+        <>
+          <Row label="Recaudado para terceros" value={data.recaudoTercerosMes} color="muted" />
+          <Row label="Entró a la cuenta" value={data.recaudoMes + data.recaudoTercerosMes} color="muted" />
+        </>
+      )}
       {data.metaRecaudo && <Row label="Meta de recaudo" value={data.metaRecaudo} />}
       {pctRecaudo !== null && <Row label="Avance" value={`${pctRecaudo}%`} color={pctRecaudo >= 80 ? 'green' : pctRecaudo >= 50 ? 'yellow' : 'red'} />}
       <Row label="Recaudo mes anterior" value={data.recaudoMesAnterior} color="muted" />
@@ -336,31 +342,31 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
 // ── P3: ¿Cuánto me deben? ───────────────────────────
 
 function DrillP3({ data }: { data: NumerosData; monthType: string }) {
-  const cobroPct = data.totalFacturado > 0
-    ? Math.round((data.totalCobrado / data.totalFacturado) * 100)
+  const cobroPct = data.honorarioAprobado > 0
+    ? Math.round((data.honorarioRecaudado / data.honorarioAprobado) * 100)
     : 0
 
   return (
     <div className="space-y-1">
       <SectionTitle>Resumen de cartera</SectionTitle>
-      <Row label="Total facturado" value={data.totalFacturado} />
-      <Row label="Total cobrado" value={data.totalCobrado} color="green" />
+      <Row label="Honorario aprobado" value={data.honorarioAprobado} />
+      <Row label="Honorario recaudado" value={data.honorarioRecaudado} color="green" />
       <Divider />
       <Row label="Cartera pendiente" value={data.carteraPendiente} bold color={data.carteraPendiente > 0 ? 'red' : 'green'} />
+      <Row label="Negocios que deben" value={`${data.carteraNegocios}`} color="muted" />
       <Row label="Tasa de cobro" value={`${cobroPct}%`} color={cobroPct >= 80 ? 'green' : cobroPct >= 50 ? 'yellow' : 'red'} />
 
-      {/* COH-3: Cartera detalle por factura */}
       {data.carteraDetalle && data.carteraDetalle.length > 0 && (
         <>
           <Divider />
-          <SectionTitle>Detalle por factura</SectionTitle>
+          <SectionTitle>Detalle por negocio</SectionTitle>
           <div className="space-y-1.5">
             {data.carteraDetalle.map((item, i) => (
               <div key={i} className="flex items-center justify-between rounded-lg border px-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium truncate">{item.proyectoNombre}</p>
+                  <p className="text-xs font-medium truncate">{item.negocioNombre}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    {item.facturaRef}{item.diasVencimiento > 0 ? ` · ${item.diasVencimiento} días` : ' · Hoy'}
+                    {item.negocioCodigo}{item.dias > 0 ? ` · ${item.dias} días` : ' · Hoy'}
                   </p>
                 </div>
                 <span className="text-xs font-semibold tabular-nums text-red-600 dark:text-red-400 shrink-0 ml-2">
@@ -373,13 +379,12 @@ function DrillP3({ data }: { data: NumerosData; monthType: string }) {
       )}
 
       <Divider />
-      <SectionTitle>Tendencia</SectionTitle>
-      <Row label="Cartera mes anterior" value={data.carteraMesAnterior} color="muted" />
-      <Row
-        label="Variacion"
-        value={data.carteraPendiente <= data.carteraMesAnterior ? 'Bajando ✅' : 'Subiendo ⚠️'}
-        color={data.carteraPendiente <= data.carteraMesAnterior ? 'green' : 'red'}
-      />
+      <SectionTitle>Alcance</SectionTitle>
+      <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
+        Solo el honorario es cartera. La tarifa UPME es plata de terceros que se recauda y se
+        gira, así que no entra acá. Entran los negocios vivos con precio aprobado; los días se
+        cuentan desde que nació el negocio.
+      </p>
 
       <DrillDownLinks links={[
         { label: 'Ver todos los negocios', href: '/negocios' },

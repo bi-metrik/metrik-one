@@ -97,7 +97,10 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
   }
 
   // P3 trend is inverted (cartera down = good)
-  const carteraTrend = data.carteraPendiente < data.carteraMesAnterior ? 'down'
+  // Sin foto del mes pasado no hay flecha. La que habia salia siempre "bajando"
+  // porque el mes anterior era `cartera * 0.9`, un 10% escrito a mano.
+  const carteraTrend = data.carteraMesAnterior === null ? 'stable'
+    : data.carteraPendiente < data.carteraMesAnterior ? 'down'
     : data.carteraPendiente > data.carteraMesAnterior * 1.05 ? 'up'
     : 'stable' as const
 
@@ -280,7 +283,7 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
 
           {/* P3 + P4 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* P3: ¿Cuánto me deben? — Cartera (facturas pendientes de cobro) */}
+            {/* P3: ¿Cuánto me deben? — Honorario aprobado y aún no recaudado */}
             <QuestionCard
               questionNumber={3}
               title="¿Cuánto me deben?"
@@ -290,17 +293,17 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
               trendIsPositive={carteraTrend === 'down'}
               barType="progress"
               barData={{
-                current: data.totalCobrado,
-                target: data.totalFacturado || 1,
+                current: data.honorarioRecaudado,
+                target: data.honorarioAprobado || 1,
                 label: 'Cobrado',
-                sublabel: data.totalFacturado > 0
-                  ? `${formatCOP(data.totalCobrado)} de ${formatCOP(data.totalFacturado)} (${Math.round((data.totalCobrado / data.totalFacturado) * 100)}%)`
-                  : 'Sin facturas emitidas',
+                sublabel: data.honorarioAprobado > 0
+                  ? `${formatCOP(data.honorarioRecaudado)} de ${formatCOP(data.honorarioAprobado)} (${Math.round((data.honorarioRecaudado / data.honorarioAprobado) * 100)}%)`
+                  : 'Sin negocios con precio aprobado',
               }}
               barColor={
-                data.totalFacturado > 0
-                  ? (data.totalCobrado / data.totalFacturado) >= 0.7 ? '#10B981'
-                    : (data.totalCobrado / data.totalFacturado) >= 0.5 ? '#F59E0B'
+                data.honorarioAprobado > 0
+                  ? (data.honorarioRecaudado / data.honorarioAprobado) >= 0.7 ? '#10B981'
+                    : (data.honorarioRecaudado / data.honorarioAprobado) >= 0.5 ? '#F59E0B'
                     : '#EF4444'
                   : undefined
               }

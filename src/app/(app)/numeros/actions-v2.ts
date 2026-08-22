@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { FEATURES } from '@/lib/feature-flags'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
+import { resumirCartera, type ItemCartera } from '@/lib/negocios/cartera'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -11,7 +12,8 @@ export interface NumerosData {
   // P1: Cuanta plata tengo
   saldoCaja: number
   saldoEsReal: boolean          // true = from saldos_banco, false = calculated
-  recaudoMes: number             // recaudo CAJA del mes (tesorería, excluye pasante)
+  recaudoMes: number             // recaudo PROPIO del mes, con IVA (v_pyl_mes.ingresos_con_iva)
+  recaudoTercerosMes: number     // plata de terceros recaudada y por girar (tarifa UPME)
   metaRecaudo: number | null
   recaudoMesAnterior: number
 
@@ -25,14 +27,15 @@ export interface NumerosData {
   gastosMesAnterior: number
 
   // P3: Cuanto me deben
-  carteraPendiente: number       // facturas - cobros
-  totalFacturado: number
-  totalCobrado: number
-  carteraMesAnterior: number
-  carteraDetalle: CarteraItem[]  // COH-3: per-project breakdown
+  carteraPendiente: number       // honorario aprobado - honorario recaudado (v_cartera_negocio)
+  honorarioAprobado: number      // universo: negocios vivos con precio aprobado
+  honorarioRecaudado: number     // de ese universo, lo ya imputado a honorario
+  carteraNegocios: number        // cuantos negocios deben por encima de la tolerancia
+  carteraMesAnterior: number | null  // null = no se puede reconstruir la foto del mes pasado
+  carteraDetalle: CarteraItem[]  // negocio por negocio, del mas viejo al mas reciente
 
   // P4: Cuanto necesito vender
-  ventasMes: number              // facturas emitidas del mes
+  ventasMes: number              // ventas del mes (v_venta_mes_comercial: mes del primer cobro)
   metaVentas: number | null
   costosFijosMes: number
   componenteNomina: number       // D129: auto from staff salaries
@@ -111,12 +114,8 @@ export interface ConciliacionData {
   estado: 1 | 2 | 3 | 4         // 4 visual states from spec
 }
 
-export interface CarteraItem {
-  proyectoNombre: string
-  facturaRef: string
-  saldo: number
-  diasVencimiento: number
-}
+// Una sola definicion de la fila de cartera, la del modulo que la calcula.
+export type CarteraItem = ItemCartera
 
 export interface McNegocio {
   negocioId: string
@@ -174,9 +173,8 @@ export async function getNumeros(mesRef?: string) {
     gastosRes,
     gastosPrevRes,
     gastos3mRes,
-    facturasRes,
-    facturasTotalRes,
-    cobrosTotalRes,
+    ventasMesRes,
+    carteraRes,
     configMetasRes,
     gastosFijosRes,
     streakRes,
@@ -257,24 +255,26 @@ export async function getNumeros(mesRef?: string) {
       .gte('fecha', tresMesesAtras)
       .lt('fecha', mesEnd),
 
-    // Facturas emitidas del mes (ventas)
-    supabase
-      .from('facturas')
-      .select('monto, fecha_emision')
+    // Ventas del mes. Antes leia `facturas`, que tiene 0 filas en los 15
+    // workspaces: P4 daba $0 siempre. `v_venta_mes_comercial` ya define que es
+    // una venta (el mes del primer cobro imputado) y es la misma definicion que
+    // usa la pestaña Comercial de /tableros — una sola, no dos.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('v_venta_mes_comercial')
+      .select('honorario_con_iva')
       .eq('workspace_id', workspaceId)
-      .gte('fecha_emision', mesStart)
-      .lt('fecha_emision', mesEnd),
+      .gte('fecha_venta', mesStart)
+      .lt('fecha_venta', mesEnd),
 
-    // All facturas (for cartera) — include project name + numero_factura for COH-3
-    supabase
-      .from('facturas')
-      .select('id, monto, fecha_emision, numero_factura')
-      .eq('workspace_id', workspaceId),
-
-    // All cobros (for cartera)
-    supabase
-      .from('cobros')
-      .select('monto, factura_id')
+    // Cartera negocio por negocio. Antes era `facturas - cobros`, que sin
+    // facturas devolvia el recaudo historico EN NEGATIVO (-$88.973.023 en SOENA
+    // contra $79.936.645 reales). Solo el honorario es cartera; la tarifa UPME
+    // es plata de terceros. Ver la migracion 20260822000004.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('v_cartera_negocio')
+      .select('negocio_id, codigo, nombre, honorario, honorario_recaudado, saldo, dias')
       .eq('workspace_id', workspaceId),
 
     // Metas del mes
@@ -346,18 +346,24 @@ export async function getNumeros(mesRef?: string) {
       .eq('tipo_vinculo', 'empleado'),
 
     // 2026-04-27: PyL del mes desde vista (ingresos, variables, mc, fijos, ebitda)
-    supabase
+    // 2026-08-22: + ingresos_con_iva y recaudo_terceros, para separar la plata
+    // propia de la de terceros en P1. Las dos columnas existen en la vista pero
+    // no en `types/database.ts`, que va por detras del esquema y no se puede
+    // regenerar con las sesiones paralelas escribiendo; de ahi el cast.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
       .from('v_pyl_mes')
-      .select('ingresos, costos_variables, mc, mc_pct, fijos_total, ebitda')
+      .select('ingresos, ingresos_con_iva, recaudo_terceros, costos_variables, mc, mc_pct, fijos_total, ebitda')
       .eq('workspace_id', workspaceId)
       .eq('mes', mesStart)
       .maybeSingle(),
 
     // 2026-07-08 P3 Ola 3: PyL del mes ANTERIOR — solo ingresos (reconocido).
     // Espeja la base de la vista (caja o completitud según opt-in del ws).
-    supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
       .from('v_pyl_mes')
-      .select('ingresos')
+      .select('ingresos, ingresos_con_iva')
       .eq('workspace_id', workspaceId)
       .eq('mes', prevStart)
       .maybeSingle(),
@@ -417,16 +423,38 @@ export async function getNumeros(mesRef?: string) {
   const ultimoSaldo = saldoBancoRes.data?.[0] ?? null
   const saldoEsReal = !!ultimoSaldo
 
-  // Cobros / Recaudo (CAJA) — tesorería. Excluye pasante (Ola 1). Se preserva
-  // como foto de caja para TODOS los workspaces, no cambia con reconocimiento.
-  const recaudoMes = (cobrosRes.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
-  const recaudoMesAnterior = (cobrosPrevRes.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
+  // Toda la plata que entró al banco en el mes, propia y ajena. Alimenta el
+  // saldo estimado, que sí es caja: la tarifa por girar está en la cuenta hasta
+  // que se gira.
+  const cobrosTotalMes = (cobrosRes.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
+  const cobrosTotalMesAnterior = (cobrosPrevRes.data ?? []).reduce((s, c) => s + Number(c.monto), 0)
+
+  // Recaudo PROPIO del mes, con IVA. La consulta de arriba filtraba
+  // `tipo_cobro <> 'pasante'` para sacar la plata de terceros, pero en la base
+  // NO EXISTE un solo cobro con ese tipo (medido 2026-08-22: solo `anticipo`,
+  // `pago` y `externo`), así que el filtro nunca excluyó nada: en agosto SOENA
+  // mostraba $45.305.692 recaudados cuando lo propio eran $20.033.000 y los
+  // otros $25.272.692 son tarifa UPME por girar.
+  //
+  // Quien sí separa es la imputación (`v_cobro_valor`): honorario primero,
+  // tarifa después. `v_pyl_mes` ya la agrega por mes, así que se lee de ahí en
+  // vez de reimplementarla. El fallback a caja cubre el mes sin fila en la
+  // vista, donde ambas cifras coinciden por definición.
+  const recaudoMes = pylMesRes.data?.ingresos_con_iva != null
+    ? Number(pylMesRes.data.ingresos_con_iva)
+    : cobrosTotalMes
+  const recaudoTercerosMes = pylMesRes.data?.recaudo_terceros != null
+    ? Number(pylMesRes.data.recaudo_terceros)
+    : 0
+  const recaudoMesAnterior = prevPylMesRes.data?.ingresos_con_iva != null
+    ? Number(prevPylMesRes.data.ingresos_con_iva)
+    : cobrosTotalMesAnterior
   // Ingreso RECONOCIDO — se lee de v_pyl_mes (fuente única de ingreso→MC→EBITDA).
   // Para ws opt-in (P3 Ola 3) la vista aplica base COMPLETITUD; para el resto es
   // caja idéntica al recaudo → sin cambio. Fallback a caja si la vista no tiene
   // fila del mes (ej. mes sin movimientos en la vista pero con cobros sueltos).
-  const ingresosMes = pylMesRes.data?.ingresos != null ? Number(pylMesRes.data.ingresos) : recaudoMes
-  const ingresosMesAnterior = prevPylMesRes.data?.ingresos != null ? Number(prevPylMesRes.data.ingresos) : recaudoMesAnterior
+  const ingresosMes = pylMesRes.data?.ingresos != null ? Number(pylMesRes.data.ingresos) : cobrosTotalMes
+  const ingresosMesAnterior = prevPylMesRes.data?.ingresos != null ? Number(prevPylMesRes.data.ingresos) : cobrosTotalMesAnterior
 
   // Gastos
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -469,7 +497,9 @@ export async function getNumeros(mesRef?: string) {
   const gastoPromedioMensual = [...monthsMap.values()].reduce((s, v) => s + v, 0) / numMonths
 
   // Saldo caja
-  let saldoTeorico = recaudoMes - gastosMes // simplified
+  // Sobre los cobros TOTALES, no sobre el recaudo propio: la plata de terceros
+  // sigue en la cuenta hasta que se gira, y esta linea estima caja.
+  let saldoTeorico = cobrosTotalMes - gastosMes // simplified
   if (ultimoSaldo) {
     // Calculate theoretical from last real balance
     const lastBalanceDate = ultimoSaldo.fecha ?? ultimoSaldo.created_at ?? new Date().toISOString()
@@ -493,51 +523,30 @@ export async function getNumeros(mesRef?: string) {
 
   const saldoCaja = ultimoSaldo ? Number(ultimoSaldo.saldo_real) : saldoTeorico
 
-  // Cartera
-  const allFacturas = facturasTotalRes.data ?? []
-  const allCobros = cobrosTotalRes.data ?? []
-  const cobrosPorFactura = new Map<string, number>()
-  allCobros.forEach(c => {
-    const fid = c.factura_id
-    if (!fid) return
-    cobrosPorFactura.set(fid, (cobrosPorFactura.get(fid) ?? 0) + Number(c.monto))
-  })
-  const totalFacturado = allFacturas.reduce((s, f) => s + Number(f.monto), 0)
-  const totalCobrado = allCobros.reduce((s, c) => s + Number(c.monto), 0)
-  const carteraPendiente = totalFacturado - totalCobrado
+  // ── Cartera ──────────────────────────────────────
+  //
+  // El universo son los negocios vivos con precio aprobado: uno en Validacion
+  // sin precio no debe nada todavia, y uno perdido tampoco. La cuenta vive en
+  // `lib/negocios/cartera.ts`, con sus pruebas.
+  const {
+    carteraPendiente,
+    honorarioAprobado,
+    honorarioRecaudado,
+    carteraNegocios,
+    carteraVencida,
+    detalle: carteraDetalle,
+  } = resumirCartera(carteraRes.data ?? [])
 
-  // Cartera vencida (>30 days)
-  const today = new Date()
-  let carteraVencida = 0
-  allFacturas.forEach(f => {
-    const cobradoFactura = cobrosPorFactura.get(f.id) ?? 0
-    const saldoF = Number(f.monto) - cobradoFactura
-    if (saldoF > 0) {
-      const dias = Math.floor((today.getTime() - new Date(f.fecha_emision).getTime()) / (86400000))
-      if (dias > 30) carteraVencida += saldoF
-    }
-  })
+  // La foto de la cartera del mes pasado no se puede reconstruir: haria falta
+  // el historico de precios aprobados y de cobros a esa fecha, y no se guarda.
+  // Antes se rellenaba con `carteraPendiente * 0.9`, un 10% inventado que
+  // garantizaba que la flecha SIEMPRE dijera "bajando". Vale mas no dibujarla.
+  const carteraMesAnterior = null
 
-  const carteraMesAnterior = ingresosMesAnterior > 0 ? carteraPendiente * 0.9 : 0 // approximate
-
-  // COH-3: Cartera detail by project
-  const carteraDetalle: CarteraItem[] = allFacturas
-    .map(f => {
-      const cobrado = cobrosPorFactura.get(f.id) ?? 0
-      const saldo = Number(f.monto) - cobrado
-      const dias = Math.floor((today.getTime() - new Date(f.fecha_emision).getTime()) / 86400000)
-      return {
-        proyectoNombre: 'Sin asignar',
-        facturaRef: (f as unknown as { numero_factura: string | null }).numero_factura ?? 'Sin numero',
-        saldo,
-        diasVencimiento: dias,
-      }
-    })
-    .filter(item => item.saldo > 0.01)
-    .sort((a, b) => b.diasVencimiento - a.diasVencimiento)
-
-  // Ventas (facturas emitidas del mes)
-  const ventasMes = (facturasRes.data ?? []).reduce((s, f) => s + Number(f.monto), 0)
+  // Ventas del mes: honorario con IVA de los negocios cuyo primer cobro cayo en
+  // el mes. Antes sumaba `facturas`, tabla vacia en todos los workspaces.
+  const ventasMes = (ventasMesRes.data ?? [])
+    .reduce((s: number, v: { honorario_con_iva: number | string }) => s + Number(v.honorario_con_iva), 0)
 
   // Metas
   let metaVentas = configMetasRes.data?.meta_ventas_mensual ? Number(configMetasRes.data.meta_ventas_mensual) : null
@@ -634,6 +643,7 @@ export async function getNumeros(mesRef?: string) {
   const runwayMeses = gastoTotalMensual > 0 ? saldoCaja / gastoTotalMensual : 99
 
   // ── Conciliación ─────────────────────────────────
+  const today = new Date()
   const streakData = streakRes.data
   const saldoFechaRef = ultimoSaldo?.fecha ?? ultimoSaldo?.created_at
   const diasDesdeUltimo = saldoFechaRef
@@ -727,6 +737,7 @@ export async function getNumeros(mesRef?: string) {
     saldoCaja,
     saldoEsReal,
     recaudoMes,
+    recaudoTercerosMes,
     metaRecaudo,
     recaudoMesAnterior,
     ingresosMes: p2Ingresos,
@@ -736,8 +747,9 @@ export async function getNumeros(mesRef?: string) {
     ingresosMesAnterior,
     gastosMesAnterior,
     carteraPendiente,
-    totalFacturado,
-    totalCobrado,
+    honorarioAprobado,
+    honorarioRecaudado,
+    carteraNegocios,
     carteraMesAnterior,
     carteraDetalle,
     ventasMes,
