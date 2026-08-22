@@ -158,6 +158,15 @@ export interface MetaNombreArchivo {
 const RE_CODIGO_MEET = /^([a-z]{3,4}-[a-z]{3,4}-[a-z]{3,4})\s*\(/
 const RE_CONTRAPARTE = /([^-–—]+?)\s+x\s+M[ée]TRIK/i
 
+/**
+ * Extrae la contraparte del patron "... - Cliente x MeTRIK", que Mauricio usa
+ * al titular los eventos. Sirve igual sobre el nombre del archivo en Drive y
+ * sobre el titulo del evento de Calendar: es el mismo texto.
+ */
+export function contraparteEn(texto: string): string | null {
+  return texto.match(RE_CONTRAPARTE)?.[1]?.trim() || null
+}
+
 export function parseNombreArchivo(nombre: string): MetaNombreArchivo {
   const esNotasGemini = /-\s*Notes by Gemini\s*$/i.test(nombre)
   const esTranscript = /-\s*Transcript\s*$/i.test(nombre)
@@ -175,7 +184,7 @@ export function parseNombreArchivo(nombre: string): MetaNombreArchivo {
         .trim() || null
   }
 
-  const contraparte = (tituloEvento ?? nombre).match(RE_CONTRAPARTE)?.[1]?.trim() ?? null
+  const contraparte = contraparteEn(tituloEvento ?? nombre)
 
   return { tituloEvento, codigoMeet: codigo, contraparte, esTranscript, esNotasGemini }
 }
