@@ -29,8 +29,14 @@ import {
 } from './calendario'
 import { parseTranscripcion, type TranscripcionParseada } from './transcripcion'
 
-/** Decision de Mauricio: el acta formaliza reuniones de trabajo, no llamadas cortas. */
-export const DURACION_MINIMA_SEGUNDOS = 3600
+/**
+ * Decision de Mauricio: el acta formaliza reuniones de trabajo, no llamadas
+ * cortas. Empezo en una hora y bajo a 45 minutos al medirlo contra el
+ * calendario real: de 5 reuniones con transcripcion en tres dias, dos quedaban
+ * fuera por poco (50 y 55 minutos) siendo trabajo real. El umbral separa
+ * reunion de llamada, no premia a la que se alargo.
+ */
+export const DURACION_MINIMA_SEGUNDOS = 45 * 60
 
 export const DOMINIO_METRIK = 'metrik.com.co'
 

@@ -48,7 +48,7 @@ describe('evaluarReunion', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.descarte.motivo).toBe('duracion_insuficiente')
-      expect(r.descarte.detalle).toContain('18 min')
+      expect(r.descarte.detalle).toBe('18 min de 45 requeridos')
     }
   })
 
@@ -114,5 +114,18 @@ describe('evaluarReunion', () => {
       duracionMinimaSegundos: 600,
     })
     expect(r.ok).toBe(true)
+  })
+
+  // Los dos casos que motivaron bajar el umbral: 50 y 55 minutos de trabajo
+  // real que con una hora quedaban sin acta.
+  it('50 y 55 minutos ya generan acta con el umbral en 45', () => {
+    for (const d of ['00:50:12', '00:55:47']) {
+      const r = evaluarReunion(reunion(), transcripcion(d))
+      expect(r.ok).toBe(true)
+    }
+  })
+
+  it('el umbral por defecto son 45 minutos', () => {
+    expect(DURACION_MINIMA_SEGUNDOS).toBe(2700)
   })
 })
