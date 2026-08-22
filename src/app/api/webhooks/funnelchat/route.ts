@@ -7,14 +7,21 @@ import {
   contactoDeLaResolucion,
   type Candidato,
 } from '@/lib/funnelchat/evento'
+import { decidirSegmento, extraerEtiqueta, type DecisionSegmento } from '@/lib/funnelchat/segmento'
 
 export const dynamic = 'force-dynamic'
 
 // Receptor de lo que FunnelChat manda hacia ONE.
 //
-// Estado: bitacora + resolucion. Registra lo que llega y ademas decide A QUIEN
-// pertenece la conversacion (telefono -> contacto). Todavia NO escribe nada del
-// negocio: no mueve etapas, no crea nada. Ese es el paso siguiente y va aparte.
+// Estado: bitacora + resolucion + sincronizacion del segmento. Registra lo que
+// llega, decide A QUIEN pertenece la conversacion (telefono -> contacto) y, si la
+// resolucion es unica, refleja la etiqueta de FunnelChat en el segmento del
+// contacto. Sigue sin tocar negocios ni etapas: eso va aparte.
+//
+// Por que ONE refleja y no manda (decision de Mauricio, 2026-08-22): el comercial
+// etiqueta en el chat, que es donde de verdad trabaja. Antes de esto el campo
+// existia y nadie lo movia — los 62 contactos etiquetados en FunnelChat estaban
+// los 62 en `sin_contactar`.
 //
 // ✅ VEREDICTO (2026-08-22): FunnelChat SI puede enviar datos salientes desde las
 // automatizaciones de un flujo. Su soporte dijo lo contrario el 2026-08-14 (nota
@@ -129,6 +136,52 @@ async function registrar(request: NextRequest, crudo: string) {
     ? resolver(telefono, candidatos, Object.keys(payload))
     : null
 
+  // ── Sincronizacion del segmento ───────────────────────────────────────────
+  //
+  // Solo con resolucion `unico`. Con `ambiguo` no se escribe: el numero apunta a
+  // dos personas distintas y elegir una seria inventar. Medido sobre SOENA, 33
+  // numeros se repiten entre 73 contactos, uno de ellos con cinco nombres
+  // distintos.
+  let sincronizacion: DecisionSegmento | { estado: 'fallo'; etiqueta: string; error: string } | null =
+    null
+  if (workspaceId && resolucion?.estado === 'unico') {
+    const decision = decidirSegmento(extraerEtiqueta(payload), resolucion.contacto.segmento)
+    sincronizacion = decision
+
+    if (decision.estado === 'aplica') {
+      const { error } = await supabase
+        .from('contactos')
+        .update({ segmento: decision.nuevo, updated_at: new Date().toISOString() })
+        .eq('id', resolucion.contacto.id)
+        // El workspace se repite aunque el id ya sea unico: es la barrera de
+        // inquilino, y aqui escribimos con la llave de servicio (sin RLS).
+        .eq('workspace_id', workspaceId)
+
+      if (error) {
+        sincronizacion = { estado: 'fallo', etiqueta: decision.etiqueta, error: error.message }
+      } else {
+        // Mismo rastro que deja un humano moviendo el chip en el directorio, para
+        // que el historial del contacto no tenga cambios sin autor ni origen.
+        const { error: errorLog } = await supabase.from('activity_log').insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'contacto',
+          entidad_id: resolucion.contacto.id,
+          tipo: 'cambio',
+          autor_id: null,
+          campo_modificado: 'segmento',
+          valor_anterior: decision.anterior,
+          valor_nuevo: decision.nuevo,
+          contenido: `FunnelChat — etiqueta: ${decision.etiqueta}`,
+        })
+        if (errorLog) {
+          // El segmento YA quedo escrito. Decir que fallo seria mentir al reves,
+          // asi que se reporta que el rastro es lo que falta.
+          sincronizacion = { ...decision, sin_rastro: errorLog.message } as typeof sincronizacion
+        }
+      }
+    }
+  }
+
   const { data: fila } = await supabase
     .from('funnelchat_eventos')
     .insert({
@@ -142,6 +195,7 @@ async function registrar(request: NextRequest, crudo: string) {
       motivo,
       contacto_id: resolucion ? contactoDeLaResolucion(resolucion) : null,
       resolucion,
+      sincronizacion,
     })
     .select('id')
     .single()
@@ -154,6 +208,7 @@ async function registrar(request: NextRequest, crudo: string) {
     autenticado: workspaceId !== null,
     motivo,
     resolucion,
+    sincronizacion,
     evento_id: (fila as { id: string } | null)?.id ?? null,
   }
 }

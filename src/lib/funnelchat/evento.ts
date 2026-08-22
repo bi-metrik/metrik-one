@@ -85,7 +85,13 @@ export function extraerTelefono(payload: Record<string, unknown>): TelefonoDelEv
   return null
 }
 
-export type Candidato = { id: string; nombre: string | null; telefono: string | null }
+export type Candidato = {
+  id: string
+  nombre: string | null
+  telefono: string | null
+  /** Segmento actual. Lo necesita el sincronizador para no retroceder. */
+  segmento: string | null
+}
 
 export type Resolucion =
   | { estado: 'sin_telefono'; claves_del_cuerpo: string[] }
