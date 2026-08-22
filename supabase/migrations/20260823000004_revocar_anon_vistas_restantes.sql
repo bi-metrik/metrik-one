@@ -1,0 +1,41 @@
+-- Se cierra el resto del grant a `anon` sobre vistas: quedaban tres.
+--
+-- Como aparecieron. Al borrar `v_cartera_antiguedad` (PR #368) por tener SELECT
+-- concedido a `anon` — cosa que ninguna otra vista de dinero tenia — se midio el
+-- resto en produccion y no era un caso aislado: son estas tres, todas con SELECT
+-- y nada mas, todas restos de la epoca en que el default de la base concedia los
+-- siete privilegios a `anon` en cada objeto nuevo. Ese default ya se dio vuelta
+-- en 20260811035858 (`default_privileges_no_conceden_a_anon`), pero los objetos
+-- que nacieron antes se quedaron con lo suyo, y la auditoria de RLS de los PRs
+-- #243/#249 no los barrio.
+--
+-- Verificado antes de escribir esto (2026-08-22, proyecto metrik_one):
+--
+--   · `v_equipo_activo` — CERO consumidores. Ni en `src/`, ni en las edge
+--     functions, ni en otra vista, ni en el cuerpo de ninguna funcion.
+--   · `v_gastos_fijos_mes_actual` — CERO consumidores, igual.
+--   · `v_facturas_estado` — cuatro consumidores vivos, y **ninguno entra como
+--     `anon`**: `cobros-horas-rapidos.ts` corre como el usuario autenticado, y
+--     `wa-alerts` y el handler de `consulta` usan SERVICE_ROLE_KEY
+--     (`_shared/supabase-client.ts`). Revocarle `anon` no le quita lector a nadie.
+--
+-- Ninguna de las tres tiene dependientes en la base (`pg_depend` sobre las tres:
+-- vacio), asi que el revoke no se propaga.
+--
+-- Que tan grave era. Poco, y conviene decirlo sin inflarlo: las tres son
+-- `security_invoker` (20260317000000 y 20260418000000), asi que corrian con los
+-- permisos de quien consultara y RLS filtraba igual. No habia fuga de filas. Lo
+-- que se cierra es superficie: un rol que no tiene por que ver el objeto deja de
+-- verlo, y el inventario de "quien puede leer que" vuelve a ser legible.
+--
+-- Lo que este PR NO hace, a proposito: **no borra las dos vistas muertas.**
+-- Revocar es reversible y no rompe nada; borrar es una decision aparte y se
+-- decide aparte. `v_facturas_estado` ademas se queda como esta por otra razon:
+-- sale de `facturas`, que tiene 0 filas en los 15 workspaces, asi que sus cuatro
+-- consumidores estan devolviendo vacio en silencio — incluidas dos alertas de
+-- WhatsApp. Eso es un defecto de producto, no de permisos, y merece su propio
+-- frente.
+
+revoke select on public.v_equipo_activo from anon;
+revoke select on public.v_facturas_estado from anon;
+revoke select on public.v_gastos_fijos_mes_actual from anon;
