@@ -23,6 +23,31 @@ import {
 import { executeRegistro } from './execute.ts';
 import { proponerCentroCostosWA, type PropuestaCC } from '../../centro-costos.ts';
 
+// Destino de un gasto: un negocio o un proyecto. Solo las columnas que lee
+// este handler. `wa-lookup` aliasea `proyecto_id` y normaliza `codigo` sobre
+// los negocios; `presupuesto_total`/`costo_acumulado` solo vienen en la vista
+// de proyectos, por eso son opcionales.
+type DestinoTipo = 'negocio' | 'proyecto';
+
+type Destino = {
+  id: string;
+  proyecto_id?: string;
+  nombre: string;
+  codigo?: string;
+  presupuesto_total?: number | null;
+  costo_acumulado?: number | null;
+};
+
+/** Lo que devuelven findDestinos()/findActiveDestinos(): cada fila trae `_tipo`. */
+type DestinosResult = { all: (Destino & { _tipo: DestinoTipo })[] };
+
+/** Opcion que se le muestra al usuario: un destino o el gasto de empresa. */
+type GastoOption = {
+  id: string;
+  label: string;
+  _tipo: DestinoTipo | 'empresa';
+};
+
 export async function handleGasto(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
   const { amount, entity_hint, concept, category_hint, project_code } = parsed.fields;
@@ -63,19 +88,19 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
 
   if (!entity_hint) {
     // No hint — show list of active negocios + projects
-    const destinos = await findActiveDestinos(supabase, user.workspace_id);
+    const destinos = (await findActiveDestinos(supabase, user.workspace_id)) as DestinosResult;
     if (destinos.all.length === 0) {
       // Sin negocios activos → registrar como gasto de empresa
       await proceedEmpresaGasto(ctx, amount, concept || '', categoria);
       return;
     }
 
-    const options = destinos.all.slice(0, 5).map((d: any) => ({
+    const options: GastoOption[] = destinos.all.slice(0, 5).map((d) => ({
       id: d.proyecto_id || d.id,
       label: formatProject(d),
       _tipo: d._tipo,
     }));
-    options.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' as any });
+    options.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' });
 
     await ctx.sendOptions(
       `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Para cuál?`,
@@ -89,22 +114,22 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
   }
 
   // Find matching destinos (negocios + projects)
-  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
+  const destinos = (await findDestinos(supabase, user.workspace_id, entity_hint)) as DestinosResult;
 
   if (destinos.all.length === 0) {
     // No match — show active destinos
-    const allActive = await findActiveDestinos(supabase, user.workspace_id);
+    const allActive = (await findActiveDestinos(supabase, user.workspace_id)) as DestinosResult;
     if (allActive.all.length === 0) {
       await proceedEmpresaGasto(ctx, amount, concept || '', categoria);
       return;
     }
 
-    const options = allActive.all.slice(0, 4).map((d: any) => ({
+    const options: GastoOption[] = allActive.all.slice(0, 4).map((d) => ({
       id: d.proyecto_id || d.id,
       label: formatProject(d),
       _tipo: d._tipo,
     }));
-    options.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' as any });
+    options.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' });
 
     await ctx.sendOptions(
       `❌ No encontré "${entity_hint}". Tus negocios:`,
@@ -129,7 +154,7 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
   }
 
   // Multiple matches
-  const options = destinos.all.slice(0, 5).map((d: any) => ({
+  const options: GastoOption[] = destinos.all.slice(0, 5).map((d) => ({
     id: d.proyecto_id || d.id,
     label: formatProject(d),
     _tipo: d._tipo,
@@ -195,11 +220,11 @@ async function resolverCentroCostos(
 
 export async function showGastoConfirmation(
   ctx: HandlerContext,
-  entity: any,
+  entity: Destino,
   amount: number,
   categoria: string,
   concept?: string,
-  tipo: string = 'proyecto',
+  tipo: DestinoTipo = 'proyecto',
 ): Promise<void> {
   const presupuesto = Number(entity.presupuesto_total) || 0;
   const costoActual = Number(entity.costo_acumulado) || 0;
@@ -247,7 +272,7 @@ export async function showGastoConfirmation(
     proyecto_id: tipo === 'proyecto' ? entityId : undefined,
     negocio_id: tipo === 'negocio' ? entityId : undefined,
     proyecto_nombre: entity.nombre,
-    destino_tipo: tipo as any,
+    destino_tipo: tipo,
     amount, categoria,
     parsed_fields: { ...ctx.parsed.fields, concept },
     ...(cc.centro ? { centro_costos: cc.centro } : {}),
@@ -258,11 +283,11 @@ export async function showGastoConfirmation(
 /** Auto-register gasto without confirmation (high confidence, single match) */
 async function autoRegisterGasto(
   ctx: HandlerContext,
-  entity: any,
+  entity: Destino,
   amount: number,
   categoria: string,
   concept?: string,
-  tipo: string = 'proyecto',
+  tipo: DestinoTipo = 'proyecto',
 ): Promise<void> {
   const entityId = entity.proyecto_id || entity.id;
   const negIdForCC = tipo === 'negocio' ? entityId : null;
@@ -277,7 +302,7 @@ async function autoRegisterGasto(
     proyecto_id: tipo === 'proyecto' ? entityId : undefined,
     negocio_id: tipo === 'negocio' ? entityId : undefined,
     proyecto_nombre: entity.nombre,
-    destino_tipo: tipo as any,
+    destino_tipo: tipo,
     amount, categoria,
     parsed_fields: { ...ctx.parsed.fields, concept },
     ...(cc.centro ? { centro_costos: cc.centro } : {}),
