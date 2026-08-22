@@ -4,6 +4,59 @@
 
 import type { SupabaseClient } from './types.ts';
 
+// ── Row shapes ────────────────────────────────────────────────
+// Only the columns these lookups and their callers actually read. The `*`
+// selects return more columns than declared here: the types under-promise,
+// they never over-promise. Nullability comes from `supabase/migrations/`.
+
+/** What a failed PostgREST call puts in `error` (only `code` is inspected). */
+type QueryError = { code?: string } | null;
+
+/** A `negocios` row as requested by the selects in this module. */
+export type NegocioRow = {
+  id: string;
+  nombre: string;
+  codigo: string | null;
+  precio_estimado: number | null;
+  precio_aprobado: number | null;
+  empresa_id: string | null;
+  contacto_id: string | null;
+  stage_actual: string;
+  /** Only findActiveNegocios() asks for it. */
+  updated_at?: string;
+};
+
+/** A negocio normalized so formatProject() can read it like a project. */
+export type NegocioDestino = Omit<NegocioRow, 'codigo'> & {
+  codigo: string;
+  proyecto_id: string;
+};
+
+/**
+ * A project row. Mind the key: `v_proyecto_financiero` exposes `proyecto_id`
+ * and no `id`, while the `wa_find_projects` RPC aliases it back to `id`. That
+ * is why callers resolve it through destinoId() instead of picking one.
+ */
+export type ProyectoDestino = {
+  proyecto_id?: string;
+  id?: string;
+  codigo: string;
+  nombre: string;
+  estado: string;
+  presupuesto_total: number | null;
+  costo_acumulado: number;
+};
+
+/** Any destination for a movement: negocio or project, tagged with `_tipo`. */
+export type Destino =
+  | (NegocioDestino & { _tipo: 'negocio' })
+  | (ProyectoDestino & { _tipo: 'proyecto' });
+
+/** Resolve the id of a destino regardless of which lookup produced it. */
+export function destinoId(d: { proyecto_id?: string; id?: string }): string {
+  return d.proyecto_id || d.id || '';
+}
+
 /** Find a single active project by its code (e.g., "KAE-1", "P-001", or numeric 12 → "P-012") */
 export async function findProjectByCode(
   supabase: SupabaseClient,
@@ -15,13 +68,13 @@ export async function findProjectByCode(
     ? `P-${String(code).padStart(3, '0')}`
     : String(code).toUpperCase();
 
-  const { data, error } = await supabase
+  const { data, error } = (await supabase
     .from('v_proyecto_financiero')
     .select('*')
     .eq('workspace_id', workspaceId)
     .ilike('codigo', codeStr)
     .eq('estado', 'en_ejecucion')
-    .single();
+    .single()) as { data: ProyectoDestino | null; error: QueryError };
   if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findProjectByCode error:', error);
   return data ?? null;
 }
@@ -33,23 +86,23 @@ export async function findProjects(
   entityHint: string,
   limit = 5,
 ) {
-  const { data, error } = await supabase.rpc('wa_find_projects', {
+  const { data, error } = (await supabase.rpc('wa_find_projects', {
     p_workspace_id: workspaceId,
     p_hint: entityHint,
     p_limit: limit,
-  });
+  })) as { data: ProyectoDestino[] | null; error: QueryError };
   if (error) console.error('[wa-lookup] findProjects error:', error);
   return data ?? [];
 }
 
 /** Find all active projects for a workspace (no hint) */
 export async function findActiveProjects(supabase: SupabaseClient, workspaceId: string) {
-  const { data } = await supabase
+  const { data } = (await supabase
     .from('v_proyecto_financiero')
     .select('*')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'en_ejecucion')
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: false })) as { data: ProyectoDestino[] | null };
   return data ?? [];
 }
 
@@ -57,13 +110,13 @@ export async function findActiveProjects(supabase: SupabaseClient, workspaceId: 
 
 /** Find all active negocios for a workspace */
 export async function findActiveNegocios(supabase: SupabaseClient, workspaceId: string) {
-  const { data } = await supabase
+  const { data } = (await supabase
     .from('negocios')
     .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual, updated_at')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
-    .order('updated_at', { ascending: false });
-  return (data ?? []).map((n: any) => ({
+    .order('updated_at', { ascending: false })) as { data: NegocioRow[] | null };
+  return (data ?? []).map((n) => ({
     ...n,
     // Alias fields so formatProject() works seamlessly
     proyecto_id: n.id,
@@ -79,26 +132,26 @@ export async function findNegocioByCode(
 ) {
   const codeStr = String(code).toUpperCase().trim();
   // Try exact match first
-  const { data, error } = await supabase
+  const { data, error } = (await supabase
     .from('negocios')
     .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
     .ilike('codigo', `%${codeStr}%`)
     .limit(1)
-    .single();
+    .single()) as { data: NegocioRow | null; error: QueryError };
 
   if (!data) {
     // Try matching without spaces (user might write "R1261" for "R1 26 1")
     const codeNoSpaces = codeStr.replace(/\s+/g, '');
-    const { data: fuzzy } = await supabase
+    const { data: fuzzy } = (await supabase
       .from('negocios')
       .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
       .eq('workspace_id', workspaceId)
       .eq('estado', 'abierto')
-      .limit(20);
+      .limit(20)) as { data: NegocioRow[] | null };
 
-    const match = (fuzzy ?? []).find((n: any) =>
+    const match = (fuzzy ?? []).find((n) =>
       (n.codigo ?? '').replace(/\s+/g, '').toUpperCase() === codeNoSpaces
     );
 
@@ -120,15 +173,15 @@ export async function findNegocios(
   limit = 5,
 ) {
   // Simple ILIKE search (pg_trgm may not be enabled on negocios yet)
-  const { data, error } = await supabase
+  const { data, error } = (await supabase
     .from('negocios')
     .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
     .ilike('nombre', `%${hint}%`)
-    .limit(limit);
+    .limit(limit)) as { data: NegocioRow[] | null; error: QueryError };
   if (error) console.error('[wa-lookup] findNegocios error:', error);
-  return (data ?? []).map((n: any) => ({
+  return (data ?? []).map((n) => ({
     ...n,
     proyecto_id: n.id,
     codigo: n.codigo ?? '',
@@ -148,8 +201,8 @@ export async function findActiveDestinos(supabase: SupabaseClient, workspaceId: 
     negocios,
     projects,
     all: [
-      ...negocios.map((n: any) => ({ ...n, _tipo: 'negocio' as const })),
-      ...projects.map((p: any) => ({ ...p, _tipo: 'proyecto' as const })),
+      ...negocios.map((n) => ({ ...n, _tipo: 'negocio' as const })),
+      ...projects.map((p) => ({ ...p, _tipo: 'proyecto' as const })),
     ],
   };
 }
@@ -169,8 +222,8 @@ export async function findDestinos(
     negocios,
     projects,
     all: [
-      ...negocios.map((n: any) => ({ ...n, _tipo: 'negocio' as const })),
-      ...projects.map((p: any) => ({ ...p, _tipo: 'proyecto' as const })),
+      ...negocios.map((n) => ({ ...n, _tipo: 'negocio' as const })),
+      ...projects.map((p) => ({ ...p, _tipo: 'proyecto' as const })),
     ],
   };
 }
