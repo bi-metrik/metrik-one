@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { candidatosDeToken, huella, motivoSinToken } from '@/lib/funnelchat/token'
+import {
+  extraerTelefono,
+  resolver,
+  contactoDeLaResolucion,
+  type Candidato,
+} from '@/lib/funnelchat/evento'
 
 export const dynamic = 'force-dynamic'
 
 // Receptor de lo que FunnelChat manda hacia ONE.
 //
-// Estado: es una BITACORA, no todavia una integracion. Registra lo que llega y no
-// escribe nada del negocio.
+// Estado: bitacora + resolucion. Registra lo que llega y ademas decide A QUIEN
+// pertenece la conversacion (telefono -> contacto). Todavia NO escribe nada del
+// negocio: no mueve etapas, no crea nada. Ese es el paso siguiente y va aparte.
 //
 // ✅ VEREDICTO (2026-08-22): FunnelChat SI puede enviar datos salientes desde las
 // automatizaciones de un flujo. Su soporte dijo lo contrario el 2026-08-14 (nota
@@ -68,15 +75,15 @@ async function registrar(request: NextRequest, crudo: string) {
     payload = { _raw: crudo.slice(0, MAX_BYTES) }
   }
 
-  const candidatos = candidatosDeToken(request.headers, request.nextUrl.searchParams)
+  const candidatosToken = candidatosDeToken(request.headers, request.nextUrl.searchParams)
   let workspaceId: string | null = null
   let motivo: string | null = null
 
-  if (candidatos.length === 0) {
+  if (candidatosToken.length === 0) {
     motivo = motivoSinToken(request.nextUrl.searchParams)
   } else {
     const fallidos: string[] = []
-    for (const c of candidatos) {
+    for (const c of candidatosToken) {
       const { data, error } = await supabase
         .from('workspaces')
         .select('id')
@@ -101,6 +108,27 @@ async function registrar(request: NextRequest, crudo: string) {
     }
   }
 
+  // A quien pertenece la conversacion. Solo tiene sentido con workspace resuelto:
+  // buscar el telefono sin saber de quien es la peticion cruzaria inquilinos.
+  const telefono = workspaceId ? extraerTelefono(payload) : null
+  let candidatos: Candidato[] = []
+  if (workspaceId && telefono) {
+    const { data, error } = await supabase.rpc('funnelchat_contactos_por_telefono', {
+      p_workspace_id: workspaceId,
+      p_nacional: telefono.nacional,
+    })
+    // Un fallo de la consulta NO se puede leer como "no hay contacto": eso es la
+    // misma confusion entre ausencia y negacion que este frente viene arrastrando.
+    if (error) {
+      motivo = `${motivo ? motivo + ' · ' : ''}no se pudo buscar el contacto: ${error.message}`
+    } else {
+      candidatos = (data ?? []) as Candidato[]
+    }
+  }
+  const resolucion = workspaceId
+    ? resolver(telefono, candidatos, Object.keys(payload))
+    : null
+
   const { data: fila } = await supabase
     .from('funnelchat_eventos')
     .insert({
@@ -112,14 +140,20 @@ async function registrar(request: NextRequest, crudo: string) {
       bytes: crudo.length,
       autenticado: workspaceId !== null,
       motivo,
+      contacto_id: resolucion ? contactoDeLaResolucion(resolucion) : null,
+      resolucion,
     })
     .select('id')
     .single()
 
+  // La respuesta dice lo que el receptor ENTENDIO, no solo que recibio. Quien
+  // configura el flujo del otro lado ve en su propia pantalla si el telefono
+  // viajo y si engancho, en vez de tener que pedirnos que miremos la base.
   return {
     ok: true,
     autenticado: workspaceId !== null,
     motivo,
+    resolucion,
     evento_id: (fila as { id: string } | null)?.id ?? null,
   }
 }
