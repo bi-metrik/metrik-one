@@ -11,7 +11,7 @@ import type {
   MesIngresosEgresos, GastoAnomalo, ProyectoCartera,
   Periodo, RentabilidadComercialData, RcFiltrosInput,
   ProcesoSemanalData, ProcesoEtapaFoto, ProcesoEtapaConDelta, ProcesoFoto,
-  ProcesoSeccionalData, ProcesoSeccionalEtapa,
+  ProcesoSeccionalData, ProcesoSeccionalEtapa, EtapaStage,
 } from './types'
 
 // ── Helpers ────────────────────────────────────────────────
@@ -843,13 +843,19 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
 
   const { data: etapasRows } = await supabase
     .from('etapas_negocio')
-    .select('id, nombre, numero, config_extra')
+    .select('id, nombre, numero, stage, config_extra')
 
-  const etapaInfo = new Map<string, { nombre: string; numero: number; slaHoras: number | null }>(
-    ((etapasRows ?? []) as Array<{ id: string; nombre: string; numero: number | null; config_extra: Record<string, unknown> | null }>)
+  // `stage` es la fase del proceso y a la vez el area que la atiende (STAGE_TO_AREA).
+  // Solo se acepta uno de los tres valores conocidos: cualquier otra cosa (o `cerrado`,
+  // que no es un area) viaja como null y la tabla la deja sin color en vez de inventarle
+  // uno. Sin dato NO es lo mismo que un dato cualquiera.
+  const STAGES_VALIDOS = new Set(['venta', 'ejecucion', 'cobro'])
+  const etapaInfo = new Map<string, { nombre: string; numero: number; stage: EtapaStage; slaHoras: number | null }>(
+    ((etapasRows ?? []) as Array<{ id: string; nombre: string; numero: number | null; stage: string | null; config_extra: Record<string, unknown> | null }>)
       .map(e => [e.id, {
         nombre: e.nombre,
         numero: e.numero ?? 0,
+        stage: (e.stage && STAGES_VALIDOS.has(e.stage) ? e.stage : null) as EtapaStage,
         slaHoras: (e.config_extra?.sla_horas as number | undefined) ?? null,
       }]),
   )
@@ -967,6 +973,7 @@ export async function getProcesoPorSeccional(): Promise<ProcesoSeccionalData | n
         etapaId,
         numero: info?.numero ?? 0,
         nombre: info?.nombre ?? '\u2014',
+        stage: info?.stage ?? null,
         celdas,
         total,
         reprocesos: reprocesosPorEtapa.get(etapaId) ?? { certificacionUpme: 0, devolucionDian: 0 },
