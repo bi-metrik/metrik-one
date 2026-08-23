@@ -37,6 +37,7 @@ import {
   type ControlParaCobertura,
   type EstadoAceptacionControl,
   type IndicadoresResponsables,
+  BUCKET_SOPORTES,
 } from '@/lib/compliance/responsables';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -47,7 +48,6 @@ const COLUMNAS_ACEPTACION =
 const COLUMNAS_CONTROL =
   'id, referencia, nombre_control, actividad_control, periodicidad, tipo_control, cargo_responsable_id, responsable_id, updated_at';
 
-export const BUCKET_SOPORTES = 'compliance-soportes';
 
 /**
  * Techo de filas de bitácora que se leen para calcular cobertura.

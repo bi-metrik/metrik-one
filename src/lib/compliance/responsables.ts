@@ -159,6 +159,17 @@ export const MEDIO_LABEL: Record<MedioAceptacion, string> = {
   documento_cargado: 'Documento firmado cargado',
 };
 
+/**
+ * Bucket PRIVADO del soporte firmado.
+ *
+ * Vive en el módulo puro y no en las server actions por una razón mecánica: un
+ * archivo `'use server'` solo puede exportar funciones async. Exportar una
+ * constante desde ahí deja al módulo entero SIN exports en el grafo de SSR, y el
+ * error que sale ("The module has no exports at all") no apunta a la constante.
+ * `tsc` no lo ve; el build sí.
+ */
+export const BUCKET_SOPORTES = 'compliance-soportes';
+
 // ─── Bitácora ──────────────────────────────────────────────────────────────
 
 /**
