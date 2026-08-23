@@ -182,11 +182,10 @@ function servicioFalso() {
 
 // La red no existe en estas pruebas: si algo intentara consultar a la fuente,
 // quedaría anotado y la prueba de abajo lo delata.
-const fetchOriginal = globalThis.fetch;
 globalThis.fetch = (async (url: unknown) => {
   llamadasRed.push(String(url));
   throw new Error('la red no está disponible en estas pruebas');
-}) as typeof fetchOriginal;
+}) as typeof globalThis.fetch;
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
