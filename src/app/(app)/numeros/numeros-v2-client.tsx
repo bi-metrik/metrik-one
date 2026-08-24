@@ -162,22 +162,6 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
             </div>
           )}
 
-          {/* En venta + Contratado (KPIs de operacion ONE; se ocultan en modo Rentabilidad Comercial) */}
-          {!data.rentabilidadComercialMode && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border bg-card p-4 shadow-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">En venta</p>
-              <p className="text-base font-bold tabular-nums leading-tight">{formatCOP(data.pipelineActivo)}</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Negocios en etapa de venta</p>
-            </div>
-            <div className="rounded-xl border bg-card p-4 shadow-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Contratado</p>
-              <p className="text-base font-bold tabular-nums leading-tight">{formatCOP(data.valorContratado)}</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Proyectos en ejecucion</p>
-            </div>
-          </div>
-          )}
-
           {/* MC + EBITDA — Norte operativo (decision 2026-04-23). Click → drill P2 */}
           <button
             onClick={() => setActiveDrill(2)}
