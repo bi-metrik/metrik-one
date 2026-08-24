@@ -262,6 +262,7 @@ type DatosCopy = { fecha_cita: string | null; link: string | null };
 
 async function datosDelCopy(
   // deno-lint-ignore no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
   negocioId: string,
   etapaId: string | null,
