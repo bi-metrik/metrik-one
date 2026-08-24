@@ -55,7 +55,12 @@ export interface TranscripcionParseada {
 // porque el mismo Doc exportado por otra via si las trae: la decoracion se
 // quita antes de comparar, en vez de mantener dos juegos de expresiones.
 
-const RE_FIN = /La reuni[oó]n finaliz[oó] despu[eé]s de\s+(\d{1,2}):(\d{2}):(\d{2})/
+// Un documento "- Transcript" cierra con "La reunion finalizo..."; uno de
+// Notas de Gemini (que trae la transcripcion embebida, ver calendario.ts)
+// cierra con "La transcripcion finalizo...". Medido sobre el export real de
+// "Alejandra Lancheros - Trappvel x MeTRIK" (2026-08-19): "La transcripción
+// finalizó después de 01:29:41".
+const RE_FIN = /La (?:reuni[oó]n|transcripci[oó]n) finaliz[oó] despu[eé]s de\s+(\d{1,2}):(\d{2}):(\d{2})/
 const RE_MARCA_TIEMPO = /^(\d{1,2}):(\d{2}):(\d{2})$/
 const RE_INTERVENCION = /^[^:\n]{2,60}:\s+\S/
 

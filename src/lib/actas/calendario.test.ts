@@ -10,9 +10,14 @@ describe('elegirTranscripcion', () => {
     expect(r.motivo).toBe('sin_adjuntos')
   })
 
-  // Medido: "Alejandra Lancheros - Trappvel x MeTRIK" (2026-08-19) quedo con
-  // grabacion y notas de Gemini, sin transcripcion. No debe generar acta.
-  it('grabacion + notas de Gemini no cuentan como transcripcion', () => {
+  // Medido contra el evento real (Calendar API, no el nombre del archivo en
+  // Drive): "Alejandra Lancheros - Trappvel x MeTRIK" (2026-08-19) quedo con
+  // grabacion y notas de Gemini, SIN documento "- Transcript" propio. El
+  // titulo del ADJUNTO de Notas es el literal fijo "Notas de Gemini" — no
+  // lleva el nombre del evento ni fecha, a diferencia del adjunto de
+  // Transcript. Antes esto descartaba la reunion; ahora las Notas son el
+  // fallback porque traen la transcripcion completa embebida (calendario.ts).
+  it('sin "- Transcript", cae al adjunto "Notas de Gemini"', () => {
     const r = elegirTranscripcion(
       [
         {
@@ -20,6 +25,34 @@ describe('elegirTranscripcion', () => {
           fileUrl: 'https://drive.google.com/file/d/1abcRECORDING/view',
         },
         { title: 'Notas de Gemini', fileUrl: doc('1abcNOTAS') },
+      ],
+      '2026-08-19T09:00:00-05:00',
+    )
+    expect(r.elegida?.id).toBe('1abcNOTAS')
+    expect(r.motivo).toBeNull()
+  })
+
+  it('con "- Transcript" Y "Notas de Gemini", gana el Transcript', () => {
+    const r = elegirTranscripcion(
+      [
+        { title: 'Notas de Gemini', fileUrl: doc('1NOTAS') },
+        {
+          title: 'Daniela Gomez - Trappvel x MéTRIK - 2026/08/20 10:01 GMT-05:00 - Transcript',
+          fileUrl: doc('1DANIELA'),
+        },
+      ],
+      '2026-08-20T10:00:00-05:00',
+    )
+    expect(r.elegida?.id).toBe('1DANIELA')
+  })
+
+  it('solo grabacion, sin Transcript ni Notas, no cuenta como transcripcion', () => {
+    const r = elegirTranscripcion(
+      [
+        {
+          title: 'Reunion X - 2026/08/19 09:01 GMT-05:00 - Recording',
+          fileUrl: 'https://drive.google.com/file/d/1abcRECORDING/view',
+        },
       ],
       '2026-08-19T09:00:00-05:00',
     )

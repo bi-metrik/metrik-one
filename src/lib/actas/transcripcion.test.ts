@@ -86,6 +86,65 @@ describe('parseTranscripcion', () => {
     expect(t.duracionSegundos).toBeNull()
   })
 
+  it('cuando el documento es de Notas de Gemini, ignora el resumen y lee solo la transcripcion embebida', () => {
+    // Reproduce, sin markdown (como llega el export text/plain real), la
+    // forma de un documento "Notas de Gemini": Resumen/Decisiones/Detalles
+    // ANTES del encabezado "Transcripcion", que aparece solo una vez y sin
+    // "Asistentes". El texto de un Detalles con dos puntos ("Metodologia: X
+    // explica que...") calzaria con RE_INTERVENCION si se colara al cuerpo —
+    // por eso importa que se descarte entero, no solo el titulo.
+    const NOTAS_GEMINI = `Las notas
+
+ago 19, 2026
+
+Alejandra Lancheros - Trappvel x MéTRIK
+
+Invitado Mauricio Moreno contacto.trappvel@gmail.com
+
+Resumen
+
+Revisión de metodologías de trabajo.
+
+Detalles
+
+Metodología de trabajo: contacto trappvel explica que mantiene un Excel propio.
+
+Transcripción
+
+ago 19, 2026
+
+Alejandra Lancheros - Trappvel x MéTRIK - Transcripción
+
+00:00:06
+
+contacto trappvel: Hola, Mauricio. ¿Me escuchas bien?
+
+Mauricio Moreno: Alejandra, ¿cómo estás?
+
+contacto trappvel: Bien, gracias.
+
+00:01:16
+
+Mauricio Moreno: Perfecto, empecemos.
+
+La transcripción finalizó después de 01:29:41
+
+Esta transcripción editable se generó por computadora y puede contener errores.
+`
+    const t = parseTranscripcion(NOTAS_GEMINI)
+    expect(t.duracionSegundos).toBe(89 * 60 + 41)
+    expect(t.vacia).toBe(false)
+    expect(t.cuerpo).not.toContain('Metodología de trabajo')
+    expect(t.cuerpo).not.toContain('Resumen')
+    // Antes de la primera intervencion quedan la fecha y el titulo repetido
+    // (la linea "Titulo - Transcripcion" que separa Notas del cuerpo real);
+    // ninguna de las dos tiene el patron "Hablante: texto", asi que
+    // alcance.ts las descarta igual al extraer intervenciones.
+    expect(t.cuerpo).toContain('contacto trappvel: Hola, Mauricio. ¿Me escuchas bien?')
+    const primeraLinea = t.cuerpo.split('\n')[0]
+    expect(primeraLinea).not.toMatch(/^[^:\n]{2,60}:\s+\S/)
+  })
+
   it('una reunion de 18 minutos no pasa el umbral de una hora', () => {
     const t = parseTranscripcion(REAL)
     expect(t.duracionSegundos! >= 3600).toBe(false)

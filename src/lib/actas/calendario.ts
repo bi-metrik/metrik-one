@@ -72,12 +72,29 @@ interface RawEvent {
 export type MotivoSinTranscripcion =
   /** El evento no trae adjuntos: la reunion no se grabo, o Meet aun no subio nada. */
   | 'sin_adjuntos'
-  /** Hay adjuntos pero ninguno es transcripcion (medido: solo "Recording" + "Notas de Gemini"). */
+  /** Hay adjuntos pero ninguno sirve: ni "- Transcript" ni "Notas de Gemini" (solo "Recording"). */
   | 'solo_grabacion'
   /** El adjunto dice ser transcripcion pero su fileUrl no trae fileId de Google Doc. */
   | 'adjunto_ilegible'
 
 const RE_SUFIJO_TRANSCRIPT = /-\s*Transcript\s*$/i
+
+/**
+ * Meet no siempre genera el documento "- Transcript": la reunion
+ * "Alejandra Lancheros - Trappvel x MeTRIK" (2026-08-19) quedo solo con
+ * Grabacion y Notas de Gemini. El documento de Notas trae igual la
+ * transcripcion completa mas abajo (exportada a texto plano, sin markdown:
+ * el mismo tratamiento de `parseTranscripcion` ya la separa del resumen
+ * porque el encabezado "Transcripcion" solo aparece una vez, como linea
+ * suelta, antes del cuerpo real). Se usa SOLO cuando no hay "- Transcript".
+ *
+ * El titulo del ADJUNTO de Calendar es el literal fijo "Notas de Gemini"
+ * (medido contra el evento real, sin el nombre del evento ni fecha) — NO el
+ * nombre del ARCHIVO en Drive, que si trae el sufijo ingles
+ * "- Notes by Gemini" (eso lo maneja `parseNombreArchivo` en
+ * transcripcion.ts, para otro caso: leer el nombre del archivo).
+ */
+const RE_SUFIJO_NOTES = /^notas de gemini$/i
 
 // Meet estampa la hora en el titulo: "... - 2026/08/18 11:55 GMT-05:00 - Transcript"
 const RE_SELLO = /(\d{4})\/(\d{2})\/(\d{2})\s+(\d{1,2}):(\d{2})\s+GMT([+-]\d{2}):?(\d{2})/
@@ -104,9 +121,11 @@ export interface SeleccionTranscripcion {
  * orden del arreglo no dice cual corresponde a esta sesion; el sello de tiempo
  * del titulo si. Se elige la mas cercana al inicio del evento.
  *
- * Y puede traer NINGUNA: hay reuniones con "Recording" + "Notas de Gemini" y
- * sin transcripcion. Esas no generan acta, pero el motivo se devuelve para que
- * el cron lo registre en vez de fallar en silencio.
+ * Si no hay ningun "- Transcript", se cae al adjunto "Notas de Gemini" (trae la
+ * transcripcion completa embebida bajo el resumen). Y puede no traer
+ * NINGUNA de las dos: hay reuniones con solo "Recording". Esas no generan
+ * acta, pero el motivo se devuelve para que el cron lo registre en vez de
+ * fallar en silencio.
  */
 export function elegirTranscripcion(
   attachments: RawAttachment[] | undefined,
@@ -115,7 +134,8 @@ export function elegirTranscripcion(
   const lista = attachments ?? []
   if (lista.length === 0) return { elegida: null, motivo: 'sin_adjuntos' }
 
-  const candidatos = lista.filter((a) => RE_SUFIJO_TRANSCRIPT.test(a.title ?? ''))
+  const transcripts = lista.filter((a) => RE_SUFIJO_TRANSCRIPT.test(a.title ?? ''))
+  const candidatos = transcripts.length > 0 ? transcripts : lista.filter((a) => RE_SUFIJO_NOTES.test(a.title ?? ''))
   if (candidatos.length === 0) return { elegida: null, motivo: 'solo_grabacion' }
 
   const inicio = Date.parse(inicioISO)
