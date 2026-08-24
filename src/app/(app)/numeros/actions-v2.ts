@@ -46,7 +46,8 @@ export interface NumerosData {
   costosVariablesMes: number     // sum gastos.clasificacion_costo='variable' del mes
   margenContribucion: number     // mc_pct del mes (0-1) o fallback 0.95 si no hay data
   mcMonto: number                // ingresos - costos_variables del mes (numero absoluto)
-  ebitda: number                 // mc - fijos
+  ebitda: number                 // mc - fijos_total (incluye nomina desde 2026-08-24)
+  fijosTotalMes: number          // fijos_total de v_pyl_mes: el costo fijo que EBITDA si resta
   mcNegociosTop: McNegocio[]     // top-5 negocios por MC (drill-down P2)
   mcLineas: McLinea[]            // 2026-05-04: MC por linea del mes (drill-down P2)
   puntoEquilibrio: number
@@ -606,7 +607,18 @@ export async function getNumeros(mesRef?: string) {
     ? Math.max(0.05, Math.min(0.99, mcPctRaw))
     : 0.95  // fallback cuando no hay data del mes
   const mcMonto = pylMes?.mc ? Number(pylMes.mc) : (ingresosMes - costosVariablesMes)
-  const ebitda = pylMes?.ebitda ? Number(pylMes.ebitda) : (ingresosMes - costosVariablesMes - costosFijosMes)
+  // 2026-08-24: `!= null` en vez de truthy. Un EBITDA de exactamente 0 es un dato, no un
+  // hueco, y con la comparacion anterior caia al fallback y mostraba otro numero.
+  const ebitda = pylMes?.ebitda != null
+    ? Number(pylMes.ebitda)
+    : (ingresosMes - costosVariablesMes - costosFijosMes)
+  // El costo fijo que EBITDA resta de verdad. `costosFijosMes` (nomina + fixed_expenses) es
+  // el compromiso recurrente y alimenta el punto de equilibrio; este ademas trae los gastos
+  // del mes clasificados como fijos. Se expone para que el desglose de P2 cuadre con la resta
+  // que la vista hizo, en vez de mostrar una linea que no da.
+  const fijosTotalMes = pylMes?.fijos_total != null
+    ? Number(pylMes.fijos_total)
+    : costosFijosMes
 
   // 2026-04-28: top-5 negocios por MC. Filtra precio > 0 para excluir negocios sin precio definido
   const mcNegociosTop: McNegocio[] = (mcNegociosRes.data ?? [])
@@ -755,6 +767,7 @@ export async function getNumeros(mesRef?: string) {
     ventasMes,
     metaVentas,
     costosFijosMes,
+    fijosTotalMes,
     componenteNomina,
     componenteOperativo,
     staffNomina,

@@ -191,7 +191,7 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       <Divider />
       <Row label="Margen de contribucion" value={data.mcMonto} bold color={data.mcMonto >= 0 ? 'green' : 'red'} />
       <Row label="MC %" value={`${Math.round(data.margenContribucion * 100)}%`} color={data.margenContribucion >= 0.4 ? 'green' : data.margenContribucion >= 0.2 ? 'yellow' : 'red'} />
-      <Row label="(-) Costos fijos" value={data.costosFijosMes} color="red" indent />
+      <Row label="(-) Costos fijos" value={data.fijosTotalMes} color="red" indent />
       <Divider />
       <Row label="EBITDA" value={data.ebitda} bold color={data.ebitda >= 0 ? 'green' : 'red'} />
 
