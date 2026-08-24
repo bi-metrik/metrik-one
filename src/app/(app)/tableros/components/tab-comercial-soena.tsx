@@ -241,14 +241,63 @@ export function TabComercialSoena({
   // Clic en cualquier punto del histórico = ir a ese mes. El `label` es lo único que
   // recharts devuelve al hacer clic, así que se resuelve contra la serie en vez de
   // parsearlo: el formato de la etiqueta lo decide la RPC y puede cambiar.
-  const irAlMesDeLaSerie = (estado: { activeLabel?: string | number } | null) => {
+  const puntoDeLaSerie = (estado: { activeLabel?: string | number } | null) => {
     const etiqueta = estado?.activeLabel
-    if (etiqueta === undefined || etiqueta === null) return
-    const punto = serieData.find((p) => p.label === String(etiqueta))
+    if (etiqueta === undefined || etiqueta === null) return null
+    return serieData.find((p) => p.label === String(etiqueta)) ?? null
+  }
+
+  const irAlMesDeLaSerie = (estado: { activeLabel?: string | number } | null) => {
+    const punto = puntoDeLaSerie(estado)
     if (!punto || (punto.anio === anio && punto.mes === mes)) return
     irAlMes(punto.anio, punto.mes)
   }
   const propsSerie = { style: { cursor: 'pointer' }, onClick: irAlMesDeLaSerie }
+
+  /**
+   * El mismo clic, encadenado: primero lleva al mes, y ya parado ahi abre los negocios
+   * que suman la barra.
+   *
+   * Encadenar es lo unico que funciona con el dedo. La alternativa era repartir el clic
+   * por zonas —la barra abre la lista, la etiqueta del eje navega—, pero esa etiqueta
+   * mide doce pixeles de alto y el area util del grafico es la tarjeta entera.
+   * Ademas el segundo clic no le quita nada a nadie: hasta hoy, volver a hacer clic
+   * sobre el mes en el que ya estabas no hacia absolutamente nada.
+   *
+   * Va SOLO en los dos graficos cuya barra se puede reconstruir con una lista de ventas.
+   * Recaudo y 1o vs 2o pago se quedan solo con la navegacion: cuentan plata RECIBIDA en
+   * el mes, que viene de ventas de cualquier mes anterior, asi que la lista de las
+   * ventas de ESTE mes entregaria un conjunto distinto del que dibujo la barra. Esos dos
+   * necesitan una consulta de pagos que hoy no existe.
+   */
+  const irAlMesOAbrirVentas = (estado: { activeLabel?: string | number } | null) => {
+    const punto = puntoDeLaSerie(estado)
+    if (!punto) return
+    if (punto.anio !== anio || punto.mes !== mes) {
+      irAlMes(punto.anio, punto.mes)
+      return
+    }
+    // Se reusa el mismo abridor que la cifra de "ventas del mes" de arriba, no una copia:
+    // asi la barra y el KPI no pueden abrir dos listas distintas con el mismo nombre.
+    // Cuando es `undefined` el mes no tuvo ventas y no se abre nada — un panel vacio se
+    // lee como boton roto, no como "ese mes no vendio".
+    abrirTodasDelMes?.()
+  }
+  const propsSerieConLista = { style: { cursor: 'pointer' }, onClick: irAlMesOAbrirVentas }
+
+  /**
+   * Etiqueta del tooltip: dice que va a hacer el clic donde el dedo ya esta.
+   *
+   * Es el unico lugar donde la pista aparece en el momento exacto en que sirve. En tactil
+   * el primer toque abre el tooltip y dispara el clic a la vez, asi que la pista se lee
+   * despues de navegar — justo cuando el siguiente toque si abre la lista.
+   */
+  const pistaDeLaSerie = (label: unknown) => {
+    const punto = serieData.find((p) => p.label === String(label))
+    const esElMesEnPantalla = punto ? punto.anio === anio && punto.mes === mes : false
+    if (!esElMesEnPantalla) return `${label} — clic para verlo arriba`
+    return kpis && kpis.num_ventas > 0 ? `${label} — clic para ver los negocios` : String(label)
+  }
 
   return (
     <div>
@@ -585,7 +634,10 @@ export function TabComercialSoena({
           <div className="mb-3 flex items-center justify-between">
             <div>
               <h2 className="text-sm font-bold text-gray-900">Historico mensual</h2>
-              <p className="text-[11px] text-gray-400">Clic en un mes para verlo en detalle arriba</p>
+              <p className="text-[11px] text-gray-400">
+                Clic en un mes para verlo en detalle arriba. En «Ventas» y «Valor de negocio»,
+                un segundo clic sobre ese mes abre los negocios que hay detras.
+              </p>
             </div>
             {serie?.tasa_recaudo_global !== null && serie?.tasa_recaudo_global !== undefined && (
               <span className="text-xs text-gray-500">
@@ -596,22 +648,22 @@ export function TabComercialSoena({
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Ventas por mes">
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={serieData} margin={{ left: -10, right: 12, top: 8 }} {...propsSerie}>
+                <LineChart data={serieData} margin={{ left: -10, right: 12, top: 8 }} {...propsSerieConLista}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip formatter={(v) => [`${v}`, 'Ventas']} />
+                  <Tooltip formatter={(v) => [`${v}`, 'Ventas']} labelFormatter={pistaDeLaSerie} />
                   <Line type="monotone" dataKey="num_ventas" stroke={GREEN} strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             </ChartCard>
             <ChartCard title="Valor de negocio por mes (sin IVA)">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerie}>
+                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerieConLista}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
-                  <Tooltip formatter={(v) => [fmtCOP(Number(v)), 'Valor sin IVA']} />
+                  <Tooltip formatter={(v) => [fmtCOP(Number(v)), 'Valor sin IVA']} labelFormatter={pistaDeLaSerie} />
                   <Bar dataKey="valor_sin_iva" fill={GREEN} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
