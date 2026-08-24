@@ -275,7 +275,12 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
   }
   if (!contactoId) {
     const { data, error } = await supabase.from('contactos')
-      .insert({ workspace_id: WS, nombre: f.nombre.toUpperCase(), telefono: f.celular || null, email: f.correo || (rut ? val(rut, 'email') : null), cedula: cedulaRut || null })
+      // `contactos` NO tiene columna `cedula`: la cédula del titular va en `custom_data`,
+      // que es el punto de extensión de la tabla (ahí vive también `origen`). El cargue de
+      // julio corrió con una versión anterior de esta línea; el `cedula:` suelto entró
+      // después (#138) y nunca se ejerció contra el esquema real, así que reventaba los 70
+      // casos en el paso 2 — antes de crear el negocio, por fortuna.
+      .insert({ workspace_id: WS, nombre: f.nombre.toUpperCase(), telefono: f.celular || null, email: f.correo || (rut ? val(rut, 'email') : null), custom_data: cedulaRut ? { cedula: cedulaRut } : {} })
       .select('id').single()
     if (error) throw new Error(`contacto: ${error.message}`)
     contactoId = (data as { id: string }).id
