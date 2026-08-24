@@ -266,10 +266,24 @@ export interface ProcesoSeccionalCelda {
   vencidosAntes: number | null
 }
 
+/**
+ * Fase del proceso, que es tambien el area duena (`STAGE_TO_AREA` en
+ * `lib/permissions/can-edit`): venta->comercial, ejecucion->operaciones,
+ * cobro->financiera. `null` = la etapa no la declara.
+ */
+export type EtapaStage = 'venta' | 'ejecucion' | 'cobro' | null
+
 export interface ProcesoSeccionalEtapa {
   etapaId: string
   numero: number
   nombre: string
+  /**
+   * Fase del proceso a la que pertenece la etapa, que es tambien el area que la
+   * atiende (`STAGE_TO_AREA`: venta->comercial, ejecucion->operaciones,
+   * cobro->financiera). La tabla la usa para pintar de quien es la pelota.
+   * `null` cuando la etapa no la tiene declarada: sin dato NO se pinta color.
+   */
+  stage: EtapaStage
   /** Conteo por seccional dentro de esta etapa. */
   celdas: ProcesoSeccionalCelda[]
   /** Total de la etapa: la suma de sus seccionales, para la vista contraída. */

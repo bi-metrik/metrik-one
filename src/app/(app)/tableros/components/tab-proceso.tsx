@@ -1,19 +1,41 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowDown, ArrowUp, Info, Minus, RotateCcw } from 'lucide-react'
-import type { ProcesoSeccionalData, ProcesoSeccionalEtapa, ProcesoSeccionalCelda } from '../types'
+import { ArrowDown, ArrowUp, CalendarClock, Info, Minus, RotateCcw } from 'lucide-react'
+import type { ProcesoSeccionalData, ProcesoSeccionalEtapa, ProcesoSeccionalCelda, EtapaStage } from '../types'
+import { STAGE_COLORS, STAGE_LABELS } from '@/components/workflow/types'
 import { ChartCard } from './chart-card'
 import { CasosDrawer, type CeldaSeleccionada } from './casos-drawer'
 
 // Paleta MeTRIK (tokens del manual de marca, no Tailwind generico).
-const VERDE = '#10B981'
 const CARBON = '#1A1A1A'
 const GRIS = '#6B7280'
 const BORDE = '#E5E7EB'
-const AMBAR = '#F59E0B'
 const ROJO = '#B91C1C'
 const OCRE = '#92400E'
+
+/**
+ * El verde, el naranja y el azul de esta tabla NO son decoracion: son el token canonico
+ * de fase (`STAGE_COLORS`), el mismo que usan /flujo, los listados y el detalle del
+ * negocio. Aqui dicen de que area es la pelota, porque el `stage` de una etapa es
+ * tambien su area duena (`STAGE_TO_AREA`).
+ *
+ * Por eso el ambar dejo de significar "seccional con cita previa": naranja ya significa
+ * ejecucion en toda la app y no puede querer decir dos cosas en la misma pantalla. La
+ * cita previa pasa a ser un icono en el encabezado.
+ *
+ * Una etapa sin `stage` declarado va en gris. Sin dato no se le inventa una fase.
+ */
+const TONO_SIN_FASE = { bg: '#F3F4F6', text: GRIS, border: BORDE }
+const tono = (s: EtapaStage) => (s ? STAGE_COLORS[s] : TONO_SIN_FASE)
+
+/** Que area atiende cada fase. Espeja `STAGE_TO_AREA` de `lib/permissions/can-edit`. */
+const AREA_DE_FASE: Record<'venta' | 'ejecucion' | 'cobro', string> = {
+  venta: 'comercial',
+  ejecucion: 'operaciones',
+  cobro: 'financiera',
+}
+const FASES = ['venta', 'ejecucion', 'cobro'] as const
 
 /**
  * Foto del proceso: UNA sola tabla con dos niveles de detalle.
@@ -27,6 +49,12 @@ const OCRE = '#92400E'
  *
  * La columna de reprocesos son los dos indicadores de calidad del comité directivo:
  * certificados UPME que salieron mal y devoluciones que la DIAN rechazó.
+ *
+ * Las filas van en orden de proceso (01 → 19) y el color dice a qué fase pertenece cada
+ * etapa. NO se agrupan por fase: el proceso rebota entre las tres áreas (Precobro es
+ * comercial, Cita es operaciones, Facturación es financiera) y agruparlas pondría
+ * Precobro al lado de Documentación, rompiendo la lectura del flujo, que es justo lo que
+ * se viene a leer aquí.
  */
 export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
   const {
@@ -99,7 +127,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
 
   if (etapas.length === 0) {
     return (
-      <ChartCard title="Foto del proceso" accentColor={VERDE}>
+      <ChartCard title="Foto del proceso" accentColor={CARBON}>
         <p className="py-4 text-center text-sm" style={{ color: GRIS }}>
           No hay negocios abiertos.
         </p>
@@ -107,6 +135,9 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
     )
   }
 
+  // La leyenda de fases solo aparece si hay al menos una etapa que declare la suya:
+  // una leyenda de tres colores sobre una tabla toda gris promete un codigo que no existe.
+  const hayFases = etapas.some(e => e.stage !== null)
   const totalGeneral = totalColumna(e => ({ hoy: valorDe(e.total), antes: antesDe(e.total) }))
   const totalReprocesos = reprocesosTotal.certificacionUpme + reprocesosTotal.devolucionDian
   const cuello = etapas.reduce<ProcesoSeccionalEtapa>(
@@ -116,7 +147,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
 
   return (
     <div className="space-y-4">
-      <ChartCard title="Foto del proceso" accentColor={VERDE}>
+      <ChartCard title="Foto del proceso" accentColor={CARBON}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-xs" style={{ color: GRIS }}>
             <span>
@@ -157,14 +188,35 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
           </div>
         </div>
 
+        {/* La leyenda va antes que todo lo que pinta color: la barra y la tabla usan el
+            MISMO codigo, asi que se enuncia una sola vez y arriba. */}
+        {hayFases && (
+          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: GRIS }}>
+            <span>Color por fase:</span>
+            {FASES.map(f => (
+              <span
+                key={f}
+                className="inline-flex items-center gap-1"
+                title={`Etapas de ${STAGE_LABELS[f].toLowerCase()} — las atiende el área ${AREA_DE_FASE[f]}`}
+              >
+                <span
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                  style={{ backgroundColor: STAGE_COLORS[f].text }}
+                />
+                {STAGE_LABELS[f]}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* El cuello de botella por seccional, de un vistazo (punto #42). Solo en la
             vista por seccional: en Totales no hay nada que apilar por ciudad. La
             barra sale de las MISMAS celdas que la tabla de abajo. */}
-        {detalle === 'seccional' && <BarrasPorSeccional etapas={etapas} />}
+        {detalle === 'seccional' && <BarrasPorSeccional etapas={etapas} conCita={conCita} />}
 
-        <p className="mb-2 text-[11px]" style={{ color: GRIS }}>
+        <p className="mb-2 text-xs" style={{ color: GRIS }}>
           {fechaFotoPrevia
-            ? `Cada celda muestra hoy / ${fechaFotoPrevia}`
+            ? `Cada celda es la foto de hoy; la flecha compara contra ${fechaFotoPrevia}.`
             : 'La comparación con la semana anterior aparece cuando se tome la siguiente foto.'}
         </p>
 
@@ -172,16 +224,19 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
           <table className="w-full text-sm" style={{ minWidth: detalle === 'seccional' ? 680 : 420 }}>
             <thead>
               <tr className="border-b" style={{ borderColor: BORDE }}>
-                <Th align="left">Etapa</Th>
+                <Th align="left" pegada>Etapa</Th>
                 {detalle === 'seccional' && (
                   <>
                     {conCita.map(c => (
-                      <Th key={c} color={AMBAR} title="Seccional que exige cita previa en la DIAN">
+                      <Th key={c} title="Seccional que exige cita previa en la DIAN">
+                        <CalendarClock className="mr-0.5 inline h-3 w-3 align-[-2px]" />
                         {c}
                       </Th>
                     ))}
                     <Th title={sinCita.join(', ') || 'Sin casos'}>Sin cita</Th>
-                    <Th color={OCRE}>Sin registrar</Th>
+                    <Th title="Casos a los que todavía no se les registró la seccional">
+                      Sin registrar
+                    </Th>
                   </>
                 )}
                 <Th>Total</Th>
@@ -193,15 +248,26 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
             <tbody>
               {etapas.map(e => (
                 <tr key={e.etapaId} className="border-b last:border-0" style={{ borderColor: BORDE }}>
-                  <td className="py-2 pr-3 text-xs" style={{ color: CARBON }}>
-                    <span className="tabular-nums" style={{ color: GRIS }}>
+                  <td
+                    className="sticky left-0 z-10 bg-white py-2 pl-2 pr-3 text-xs"
+                    style={{ color: CARBON, boxShadow: `inset 3px 0 0 ${tono(e.stage).text}` }}
+                    title={
+                      e.stage
+                        ? `${STAGE_LABELS[e.stage]} — la atiende el área ${AREA_DE_FASE[e.stage]}`
+                        : 'Esta etapa no tiene fase declarada'
+                    }
+                  >
+                    <span
+                      className="mr-1.5 inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+                      style={{ backgroundColor: tono(e.stage).bg, color: tono(e.stage).text }}
+                    >
                       {String(e.numero).padStart(2, '0')}
-                    </span>{' '}
+                    </span>
                     {e.nombre}
                     {metrica === 'vencidos' && !e.slaHoras && (
                       <span
-                        className="ml-1 text-[10px]"
-                        style={{ color: BORDE }}
+                        className="ml-1 text-[11px]"
+                        style={{ color: GRIS }}
                         title="Esta etapa no tiene tiempo máximo configurado"
                       >
                         sin SLA
@@ -217,7 +283,6 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
                             key={c}
                             hoy={valorDe(cel)}
                             antes={antesDe(cel)}
-                            color={AMBAR}
                             onClick={() => abrir(e, c)}
                           />
                         )
@@ -226,10 +291,12 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
                         {...sumaGrupo(e, sinCita)}
                         onClick={() => abrir(e, sinCita, false, 'sin cita previa')}
                       />
+                      {/* "Sin registrar" va en gris a proposito: es ausencia de dato, no una
+                          fase ni una alerta. Pintarla de calido la ascendia a categoria. */}
                       <Celda
                         hoy={valorDe(celda(e, null))}
                         antes={antesDe(celda(e, null))}
-                        color={OCRE}
+                        color={GRIS}
                         onClick={() => abrir(e, null)}
                       />
                     </>
@@ -241,7 +308,10 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
             </tbody>
             <tfoot>
               <tr className="border-t-2" style={{ borderColor: BORDE }}>
-                <td className="pt-2 text-[10px] font-bold uppercase tracking-wide" style={{ color: GRIS }}>
+                <td
+                  className="sticky left-0 z-10 bg-white pl-2 pt-2 text-[11px] font-bold uppercase tracking-wide"
+                  style={{ color: GRIS }}
+                >
                   Total ({total})
                 </td>
                 {detalle === 'seccional' && (
@@ -251,7 +321,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
                         hoy: valorDe(celda(e, c)),
                         antes: antesDe(celda(e, c)),
                       }))
-                      return <Celda key={c} hoy={t.hoy} antes={t.antes} color={AMBAR} negrita />
+                      return <Celda key={c} hoy={t.hoy} antes={t.antes} negrita />
                     })}
                     <Celda {...totalColumna(e => sumaGrupo(e, sinCita))} negrita />
                     <Celda
@@ -259,7 +329,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
                         hoy: valorDe(celda(e, null)),
                         antes: antesDe(celda(e, null)),
                       }))}
-                      color={OCRE}
+                      color={GRIS}
                       negrita
                     />
                   </>
@@ -289,7 +359,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
 
       {/* Calidad: los dos cuadros del comité. Se muestran aunque estén en cero, porque su
           ausencia también es información: nadie ha tenido que rehacer trabajo. */}
-      <ChartCard title="Calidad" accentColor={totalReprocesos > 0 ? ROJO : VERDE}>
+      <ChartCard title="Calidad" accentColor={totalReprocesos > 0 ? ROJO : CARBON}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Indicador
             label="Certificados UPME rehechos"
@@ -303,7 +373,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
           />
         </div>
         {totalReprocesos === 0 && (
-          <p className="mt-3 text-[11px]" style={{ color: GRIS }}>
+          <p className="mt-3 text-xs" style={{ color: GRIS }}>
             Ningún caso en reproceso. Solo cuenta el error propio: si la DIAN devuelve por criterio
             del funcionario, no penaliza el indicador.
           </p>
@@ -346,7 +416,7 @@ function Selector<T extends string>({
           key={o.key}
           type="button"
           onClick={() => onChange(o.key)}
-          className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
+          className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-all ${
             valor === o.key ? 'bg-white shadow-sm' : ''
           }`}
           style={{ color: valor === o.key ? CARBON : GRIS }}
@@ -363,15 +433,20 @@ function Th({
   align = 'right',
   color = GRIS,
   title,
+  pegada,
 }: {
   children: React.ReactNode
   align?: 'left' | 'right'
   color?: string
   title?: string
+  /** La columna de etapa se queda fija al hacer scroll lateral en movil. */
+  pegada?: boolean
 }) {
   return (
     <th
-      className={`pb-2 ${align === 'left' ? 'text-left' : 'text-right'} text-[10px] font-bold uppercase tracking-wide`}
+      className={`pb-2 ${align === 'left' ? 'pl-2 text-left' : 'text-right'} text-[11px] font-bold uppercase tracking-wide${
+        pegada ? ' sticky left-0 z-10 bg-white' : ''
+      }`}
       style={{ color }}
       title={title}
     >
@@ -380,7 +455,20 @@ function Th({
   )
 }
 
-/** Celda "hoy / antes" con flecha de cambio. El antes va atenuado: manda el de hoy. */
+/**
+ * Celda de la foto de hoy con flecha de cambio.
+ *
+ * El valor de la foto anterior ya NO se imprime al lado del de hoy. En la vista por
+ * seccional eso ponia una barra, un numero y una flecha en cada celda con dato — decenas
+ * de glifos compitiendo con el unico numero que se viene a leer. Queda la flecha, y el
+ * valor anterior vive en el tooltip de la celda.
+ *
+ * La flecha no usa verde ni ambar: esos dos ya son fases en esta tabla. Sube en rojo
+ * (mas represado pide atencion, igual que un reproceso), baja y sin cambio en gris.
+ *
+ * Tres estados que NO se pueden ver iguales: sin casos (·), medido en cero (0) y sin
+ * foto previa con que comparar (ninguna flecha, ni siquiera el guion de "no cambio").
+ */
 function Celda({
   hoy,
   antes,
@@ -397,37 +485,39 @@ function Celda({
 }) {
   const delta = antes === null ? null : hoy - antes
   const clicable = Boolean(onClick) && hoy > 0
+  const comparacion =
+    delta === null
+      ? null
+      : delta === 0
+        ? `Igual que la foto anterior (${antes})`
+        : `${delta > 0 ? '+' : ''}${delta} contra la foto anterior (${antes})`
+  const titulo = [clicable ? 'Ver los casos' : null, comparacion].filter(Boolean).join(' · ')
+
   return (
-    <td className="py-2 text-right tabular-nums">
+    <td className="py-2 text-right tabular-nums" title={titulo || undefined}>
+      {/* min-h-11 = 44px de area tactil en movil, el minimo para acertarle a un digito
+          con el pulgar. En escritorio no hace falta y estiraria la fila. */}
       <span
         onClick={clicable ? onClick : undefined}
         role={clicable ? 'button' : undefined}
         tabIndex={clicable ? 0 : undefined}
         onKeyDown={clicable ? (ev => { if (ev.key === 'Enter') onClick!() }) : undefined}
-        className={clicable ? 'cursor-pointer underline-offset-2 hover:underline' : ''}
-        title={clicable ? 'Ver los casos' : undefined}
+        className={`inline-flex min-h-11 items-center justify-end gap-0.5 px-1 sm:min-h-0${
+          clicable ? ' cursor-pointer underline-offset-2 hover:underline' : ''
+        }`}
         style={{ color: hoy > 0 ? color : BORDE, fontWeight: negrita || hoy > 0 ? 600 : 400 }}
       >
         {hoy || '·'}
+        {delta !== null && (
+          delta > 0 ? (
+            <ArrowUp className="h-3 w-3 shrink-0" style={{ color: ROJO }} />
+          ) : delta < 0 ? (
+            <ArrowDown className="h-3 w-3 shrink-0" style={{ color: GRIS }} />
+          ) : (
+            <Minus className="h-3 w-3 shrink-0" style={{ color: GRIS }} />
+          )
+        )}
       </span>
-      {antes !== null && (
-        <>
-          <span style={{ color: BORDE }}>{' / '}</span>
-          <span className="text-[11px]" style={{ color: GRIS }}>
-            {antes}
-          </span>
-          {delta !== null && delta !== 0 && (
-            <span
-              className="ml-0.5 inline-flex items-center text-[10px]"
-              style={{ color: delta > 0 ? AMBAR : VERDE }}
-              title={`${delta > 0 ? '+' : ''}${delta} contra la foto anterior`}
-            >
-              {delta > 0 ? <ArrowUp className="h-2.5 w-2.5" /> : <ArrowDown className="h-2.5 w-2.5" />}
-            </span>
-          )}
-          {delta === 0 && <Minus className="ml-0.5 inline h-2.5 w-2.5" style={{ color: BORDE }} />}
-        </>
-      )}
     </td>
   )
 }
@@ -451,7 +541,7 @@ function ReprocesoCelda({
           role={clicable ? 'button' : undefined}
           tabIndex={clicable ? 0 : undefined}
           onKeyDown={clicable ? (ev => { if (ev.key === 'Enter') onClick!() }) : undefined}
-          className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold${clicable ? ' cursor-pointer hover:brightness-95' : ''}`}
+          className={`inline-flex min-h-11 items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold sm:min-h-0${clicable ? ' cursor-pointer hover:brightness-95' : ''}`}
           style={{ backgroundColor: '#FEE2E2', color: ROJO }}
           title={clicable ? 'Ver los casos en reproceso' : `${r.certificacionUpme} por certificado UPME · ${r.devolucionDian} por devolución DIAN`}
         >
@@ -468,13 +558,13 @@ function ReprocesoCelda({
 function Indicador({ label, valor, ayuda }: { label: string; valor: number; ayuda: string }) {
   return (
     <div className="rounded-lg border p-3" style={{ borderColor: BORDE }}>
-      <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: GRIS }}>
+      <p className="text-[11px] font-medium uppercase tracking-wide" style={{ color: GRIS }}>
         {label}
       </p>
       <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: valor > 0 ? ROJO : CARBON }}>
         {valor}
       </p>
-      <p className="mt-0.5 text-[10px]" style={{ color: GRIS }}>
+      <p className="mt-0.5 text-[11px]" style={{ color: GRIS }}>
         {ayuda}
       </p>
     </div>
@@ -483,7 +573,7 @@ function Indicador({ label, valor, ayuda }: { label: string; valor: number; ayud
 
 function Aviso({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-3 flex items-start gap-1.5 text-[11px]" style={{ color: OCRE }}>
+    <p className="mt-3 flex items-start gap-1.5 text-xs" style={{ color: OCRE }}>
       <Info className="mt-0.5 h-3 w-3 shrink-0" />
       <span>{children}</span>
     </p>
@@ -506,42 +596,122 @@ function Aviso({ children }: { children: React.ReactNode }) {
  * con 3 casos se viera igual de grande que Bogotá con 118, y la lectura sería falsa
  * justo en la dimensión que importa: el volumen.
  */
-function BarrasPorSeccional({ etapas }: { etapas: ProcesoSeccionalEtapa[] }) {
-  // Se agrupa por seccional recorriendo las mismas celdas que pinta la tabla.
-  const porSeccional = new Map<string | null, { total: number; tramos: Map<string, number> }>()
-  const etapasConCasos: { id: string; nombre: string; numero: number; total: number }[] = []
+/**
+ * "Donde esta represado, por seccional": una barra apilada por ciudad.
+ *
+ * SEIS filas, no una por ciudad. De 15 ciudades con casos abiertos, 8 tienen exactamente
+ * uno: el 3% del volumen ocupando la mitad del alto del grafico. Ninguna de esas ocho es
+ * un cuello de botella. La seccional importa operativamente por una sola razon — cuatro
+ * de ellas exigen cita previa en la DIAN y ahi esta el 62% de los casos — asi que ese es
+ * el corte: las que exigen cita por nombre, el resto agrupado, y sin registrar al final.
+ * Es el mismo eje que ya usan las columnas de la tabla de abajo, para que el grafico y la
+ * tabla digan lo mismo en la misma forma.
+ *
+ * Los tramos se agrupan por FASE, no por etapa. Antes cada etapa recibia su propio color
+ * de una rueda de tono girada 47 grados por indice — con 16 etapas eso eran 16 colores
+ * arbitrarios, una leyenda de 16 items y ninguna relacion con el verde/naranja/azul que
+ * significan venta/ejecucion/cobro en el resto de la app. Tres colores con significado
+ * responden la pregunta que se hace frente a esta barra ("de quien es la pelota en
+ * Bogota") mejor que dieciseis sin el. El desglose fino no se pierde: vive en el tooltip
+ * y en la tabla de abajo, etapa por etapa y ciudad por ciudad.
+ *
+ * La barra tampoco tenia escala. El relleno llevaba `flex-1`, y en un contenedor flex el
+ * `flex-basis: 0%` gana sobre el `width` en porcentaje, asi que Bogota (118 casos) y
+ * Monteria (1) se dibujaban del mismo largo, bajo un encabezado que prometia "misma
+ * escala en todas las barras". Ahora el riel es el que crece y el relleno es un bloque
+ * con ancho proporcional adentro.
+ */
+function BarrasPorSeccional({
+  etapas,
+  conCita,
+}: {
+  etapas: ProcesoSeccionalEtapa[]
+  /** Seccionales que exigen cita previa: las unicas que van con nombre propio. */
+  conCita: string[]
+}) {
+  type ClaveFase = 'venta' | 'ejecucion' | 'cobro' | 'sin'
+  const CLAVES: ClaveFase[] = [...FASES, 'sin']
+  // Prefijo imposible en un nombre de ciudad: las dos filas sinteticas no pueden
+  // colisionar con una seccional que se llame igual.
+  const SIN_REGISTRAR = '\u0000sin-registrar'
+  const OTRAS = '\u0000otras'
+
+  const exigeCita = new Set(conCita)
+  type Fila = {
+    total: number
+    tramos: Map<ClaveFase, { n: number; etapas: Map<string, number> }>
+    /** Ciudades que cayeron en esta fila. Solo se usa en la fila agrupada. */
+    ciudades: Map<string, number>
+  }
+  const filasPorClave = new Map<string, Fila>()
+  let hayEtapaSinFase = false
 
   for (const e of etapas) {
-    let totalEtapa = 0
+    const fase: ClaveFase = e.stage ?? 'sin'
     for (const c of e.celdas) {
       if (c.abiertos <= 0) continue
-      totalEtapa += c.abiertos
-      const acc = porSeccional.get(c.seccional) ?? { total: 0, tramos: new Map<string, number>() }
-      acc.total += c.abiertos
-      acc.tramos.set(e.etapaId, (acc.tramos.get(e.etapaId) ?? 0) + c.abiertos)
-      porSeccional.set(c.seccional, acc)
-    }
-    if (totalEtapa > 0) {
-      etapasConCasos.push({ id: e.etapaId, nombre: e.nombre, numero: e.numero, total: totalEtapa })
+      if (fase === 'sin') hayEtapaSinFase = true
+      const clave =
+        c.seccional === null ? SIN_REGISTRAR : exigeCita.has(c.seccional) ? c.seccional : OTRAS
+      const fila = filasPorClave.get(clave) ?? {
+        total: 0,
+        tramos: new Map<ClaveFase, { n: number; etapas: Map<string, number> }>(),
+        ciudades: new Map<string, number>(),
+      }
+      fila.total += c.abiertos
+      const tramo = fila.tramos.get(fase) ?? { n: 0, etapas: new Map<string, number>() }
+      tramo.n += c.abiertos
+      tramo.etapas.set(e.nombre, (tramo.etapas.get(e.nombre) ?? 0) + c.abiertos)
+      fila.tramos.set(fase, tramo)
+      if (c.seccional !== null) {
+        fila.ciudades.set(c.seccional, (fila.ciudades.get(c.seccional) ?? 0) + c.abiertos)
+      }
+      filasPorClave.set(clave, fila)
     }
   }
 
-  const filas = [...porSeccional.entries()]
-    // Volumen primero; el bucket sin registrar al final, porque es un hueco de dato y
-    // no una plaza en el ranking de ciudades.
-    .sort(([sa, a], [sb, b]) => {
-      if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1
-      return b.total - a.total
-    })
+  // Las de cita previa por volumen; despues el agrupado; sin registrar de ultimo, porque
+  // es un hueco de dato y no una plaza en el ranking.
+  const rango = (k: string) => (k === SIN_REGISTRAR ? 2 : k === OTRAS ? 1 : 0)
+  const filas = [...filasPorClave.entries()].sort(([ka, a], [kb, b]) =>
+    rango(ka) !== rango(kb) ? rango(ka) - rango(kb) : b.total - a.total,
+  )
 
   if (filas.length === 0) return null
 
   const maximo = Math.max(...filas.map(([, v]) => v.total))
-  // El orden de las etapas manda el orden de los tramos y el de la leyenda: así el
-  // ojo recorre la barra en el mismo sentido en que avanza el proceso.
-  const orden = etapasConCasos.sort((a, b) => a.numero - b.numero)
-  const colorDe = (i: number) => `hsl(${(i * 47) % 360} 62% 55%)`
-  const colorPorEtapa = new Map(orden.map((e, i) => [e.id, colorDe(i)]))
+  const colorFase = (f: ClaveFase) => (f === 'sin' ? '#D1D5DB' : STAGE_COLORS[f].text)
+  const nombreFase = (f: ClaveFase) => (f === 'sin' ? 'Sin fase declarada' : STAGE_LABELS[f])
+
+  const etiqueta = (k: string, v: Fila) =>
+    k === SIN_REGISTRAR
+      ? 'Sin registrar'
+      : k === OTRAS
+        ? `Otras ${v.ciudades.size} ciudad${v.ciudades.size === 1 ? '' : 'es'}`
+        : k
+
+  const ayuda = (k: string, v: Fila) =>
+    k === SIN_REGISTRAR
+      ? 'Casos cuya seccional no se ha registrado'
+      : k === OTRAS
+        ? `Sin cita previa: ${[...v.ciudades.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([c, n]) => `${c} ${n}`)
+            .join(', ')}`
+        : `${k} — exige cita previa en la DIAN`
+
+  /** El tooltip conserva el detalle por etapa que el color ya no carga. */
+  const detalleTramo = (
+    k: string,
+    v: Fila,
+    f: ClaveFase,
+    t: { n: number; etapas: Map<string, number> },
+  ) => {
+    const top = [...t.etapas.entries()].sort((a, b) => b[1] - a[1])
+    const listado = top.slice(0, 3).map(([n, c]) => `${n} ${c}`).join(', ')
+    const resto = top.length > 3 ? `, +${top.length - 3} etapas más` : ''
+    return `${etiqueta(k, v)} · ${nombreFase(f)}: ${t.n} — ${listado}${resto}`
+  }
 
   return (
     <div className="mb-6">
@@ -549,50 +719,69 @@ function BarrasPorSeccional({ etapas }: { etapas: ProcesoSeccionalEtapa[] }) {
         <h3 className="text-xs font-bold uppercase tracking-wide" style={{ color: GRIS }}>
           Dónde está represado, por seccional
         </h3>
-        <span className="text-[11px]" style={{ color: GRIS }}>
+        <span className="text-xs" style={{ color: GRIS }}>
           casos abiertos · misma escala en todas las barras
         </span>
       </div>
 
       <div className="space-y-1.5">
-        {filas.map(([sec, v]) => (
-          <div key={sec ?? 'sin'} className="flex items-center gap-2">
-            <span
-              className={`w-28 shrink-0 truncate text-right text-[11px] ${sec ? '' : 'italic'}`}
-              style={{ color: sec ? CARBON : '#9CA3AF' }}
-              title={sec ?? 'Casos cuya seccional no se ha registrado'}
-            >
-              {sec ?? 'Sin registrar'}
-            </span>
-            <div className="flex h-4 flex-1 items-stretch overflow-hidden rounded"
-                 style={{ width: `${(v.total / maximo) * 100}%`, minWidth: 2 }}>
-              {orden.map((e) => {
-                const n = v.tramos.get(e.id) ?? 0
-                if (n === 0) return null
-                return (
-                  <div
-                    key={e.id}
-                    style={{ width: `${(n / v.total) * 100}%`, backgroundColor: colorPorEtapa.get(e.id) }}
-                    title={`${sec ?? 'Sin registrar'} · ${e.nombre}: ${n}`}
-                  />
-                )
-              })}
+        {filas.map(([k, v]) => {
+          const esCita = k !== SIN_REGISTRAR && k !== OTRAS
+          return (
+            <div key={k} className="flex items-center gap-2">
+              <span
+                className={`flex w-28 shrink-0 items-center justify-end gap-1 text-right text-xs sm:w-32 ${
+                  k === SIN_REGISTRAR ? 'italic' : ''
+                }`}
+                style={{ color: k === SIN_REGISTRAR ? '#9CA3AF' : esCita ? CARBON : GRIS }}
+                title={ayuda(k, v)}
+              >
+                {esCita && <CalendarClock className="h-3 w-3 shrink-0" />}
+                <span className="truncate">{etiqueta(k, v)}</span>
+              </span>
+              {/* El riel es el que ocupa el ancho disponible; el relleno va adentro con el
+                  ancho proporcional. Si el relleno llevara `flex-1`, todas las barras
+                  saldrían del mismo largo. */}
+              <div className="h-4 flex-1 overflow-hidden rounded" style={{ backgroundColor: '#F9FAFB' }}>
+                <div
+                  className="flex h-full items-stretch overflow-hidden rounded"
+                  style={{ width: `${(v.total / maximo) * 100}%`, minWidth: 2 }}
+                >
+                  {CLAVES.map(f => {
+                    const t = v.tramos.get(f)
+                    if (!t || t.n === 0) return null
+                    return (
+                      <div
+                        key={f}
+                        style={{ width: `${(t.n / v.total) * 100}%`, backgroundColor: colorFase(f) }}
+                        title={detalleTramo(k, v, f, t)}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+              <span className="w-8 shrink-0 text-right text-xs tabular-nums" style={{ color: GRIS }}>
+                {v.total}
+              </span>
             </div>
-            <span className="w-8 shrink-0 text-right text-[11px] tabular-nums" style={{ color: GRIS }}>
-              {v.total}
-            </span>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-        {orden.map((e) => (
-          <span key={e.id} className="flex items-center gap-1 text-[10px]" style={{ color: GRIS }}>
-            <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: colorPorEtapa.get(e.id) }} />
-            {e.nombre}
-          </span>
-        ))}
-      </div>
+      <p className="mt-2 text-xs" style={{ color: GRIS }}>
+        <CalendarClock className="mr-0.5 inline h-3 w-3 align-[-2px]" />
+        Con nombre propio van solo las seccionales que exigen cita previa en la DIAN; las
+        demás se agrupan. El detalle ciudad por ciudad está en la tabla de abajo.
+      </p>
+
+      {/* Sin leyenda de color propia: la de fases, arriba, ya rige la barra y la tabla.
+          Solo se agrega el gris cuando de verdad hay etapas sin fase declarada. */}
+      {hayEtapaSinFase && (
+        <p className="mt-1 flex items-center gap-1 text-xs" style={{ color: GRIS }}>
+          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: '#D1D5DB' }} />
+          Gris: etapas sin fase declarada.
+        </p>
+      )}
     </div>
   )
 }
