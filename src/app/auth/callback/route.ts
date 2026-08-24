@@ -3,6 +3,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import type { User } from '@supabase/supabase-js'
 import { landingForWorkspace } from '@/lib/auth/landing'
+import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
 
 // Slugs reservados — mismo set que middleware.ts
 const RESERVED_SLUGS = ['www', 'api', 'admin', 'app', 'test', 'demo', 'staging', 'mail', 'ftp']
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
   const forwardedHost = request.headers.get('x-forwarded-host')
   const requestHost = forwardedHost || request.headers.get('host')
   const hostSlug = extractSlugFromHost(requestHost, baseDomain, isLocalEnv)
+  const mismoHostOrigin = forwardedHost ? `https://${forwardedHost}` : origin
 
   // Helper: post-auth routing (existing user → tenant; pending invite → /accept-invite; else → /onboarding)
   async function routeAfterAuth(user: User) {
@@ -96,8 +98,13 @@ export async function GET(request: Request) {
           safePath = landingForWorkspace(profile.role || undefined, wsModules, wsModoVitrina)
         }
         if (!safePath.startsWith('/')) safePath = landingForWorkspace(profile.role || undefined, wsModules, wsModoVitrina)
-        if (isLocalEnv) return NextResponse.redirect(`${origin}${safePath}`)
-        return NextResponse.redirect(`https://${ws.slug}.${baseDomain}${safePath}`)
+        // Fuente unica con el middleware: en un preview (`*.vercel.app`) no hay
+        // subdominio del tenant al que ir, asi que la sesion se queda en el mismo
+        // host — sin esto el magic link aterrizaba fuera del preview y el QA del PR
+        // moria justo despues de autenticar.
+        const destino = destinoTrasAutenticar(ws.slug, safePath, requestHost, { baseDomain, isDev: isLocalEnv })
+        if (!esRelativo(destino)) return NextResponse.redirect(destino)
+        return NextResponse.redirect(`${mismoHostOrigin}${destino}`)
       }
     }
 
