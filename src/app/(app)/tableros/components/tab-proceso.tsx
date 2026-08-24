@@ -212,7 +212,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
         {/* El cuello de botella por seccional, de un vistazo (punto #42). Solo en la
             vista por seccional: en Totales no hay nada que apilar por ciudad. La
             barra sale de las MISMAS celdas que la tabla de abajo. */}
-        {detalle === 'seccional' && <BarrasPorSeccional etapas={etapas} />}
+        {detalle === 'seccional' && <BarrasPorSeccional etapas={etapas} conCita={conCita} />}
 
         <p className="mb-2 text-xs" style={{ color: GRIS }}>
           {fechaFotoPrevia
@@ -599,55 +599,83 @@ function Aviso({ children }: { children: React.ReactNode }) {
 /**
  * "Donde esta represado, por seccional": una barra apilada por ciudad.
  *
+ * SEIS filas, no una por ciudad. De 15 ciudades con casos abiertos, 8 tienen exactamente
+ * uno: el 3% del volumen ocupando la mitad del alto del grafico. Ninguna de esas ocho es
+ * un cuello de botella. La seccional importa operativamente por una sola razon — cuatro
+ * de ellas exigen cita previa en la DIAN y ahi esta el 62% de los casos — asi que ese es
+ * el corte: las que exigen cita por nombre, el resto agrupado, y sin registrar al final.
+ * Es el mismo eje que ya usan las columnas de la tabla de abajo, para que el grafico y la
+ * tabla digan lo mismo en la misma forma.
+ *
  * Los tramos se agrupan por FASE, no por etapa. Antes cada etapa recibia su propio color
  * de una rueda de tono girada 47 grados por indice — con 16 etapas eso eran 16 colores
  * arbitrarios, una leyenda de 16 items y ninguna relacion con el verde/naranja/azul que
  * significan venta/ejecucion/cobro en el resto de la app. Tres colores con significado
  * responden la pregunta que se hace frente a esta barra ("de quien es la pelota en
- * Bogota") mejor que dieciseis sin el. El desglose por etapa no se pierde: vive en el
- * tooltip del tramo y en la tabla de abajo, etapa por etapa.
+ * Bogota") mejor que dieciseis sin el. El desglose fino no se pierde: vive en el tooltip
+ * y en la tabla de abajo, etapa por etapa y ciudad por ciudad.
  *
- * La barra tampoco tenia escala: el relleno llevaba `flex-1`, y en un contenedor flex el
+ * La barra tampoco tenia escala. El relleno llevaba `flex-1`, y en un contenedor flex el
  * `flex-basis: 0%` gana sobre el `width` en porcentaje, asi que Bogota (118 casos) y
- * Monteria (1) se dibujaban del mismo largo. Ahora el riel es el que crece y el relleno
- * es un bloque con ancho proporcional adentro.
+ * Monteria (1) se dibujaban del mismo largo, bajo un encabezado que prometia "misma
+ * escala en todas las barras". Ahora el riel es el que crece y el relleno es un bloque
+ * con ancho proporcional adentro.
  */
-function BarrasPorSeccional({ etapas }: { etapas: ProcesoSeccionalEtapa[] }) {
+function BarrasPorSeccional({
+  etapas,
+  conCita,
+}: {
+  etapas: ProcesoSeccionalEtapa[]
+  /** Seccionales que exigen cita previa: las unicas que van con nombre propio. */
+  conCita: string[]
+}) {
   type ClaveFase = 'venta' | 'ejecucion' | 'cobro' | 'sin'
   const CLAVES: ClaveFase[] = [...FASES, 'sin']
+  // Prefijo imposible en un nombre de ciudad: las dos filas sinteticas no pueden
+  // colisionar con una seccional que se llame igual.
+  const SIN_REGISTRAR = '\u0000sin-registrar'
+  const OTRAS = '\u0000otras'
 
-  // Se agrupa por seccional recorriendo las mismas celdas que pinta la tabla.
-  const porSeccional = new Map<
-    string | null,
-    { total: number; tramos: Map<ClaveFase, { n: number; etapas: Map<string, number> }> }
-  >()
-  const fasesConCasos = new Set<ClaveFase>()
+  const exigeCita = new Set(conCita)
+  type Fila = {
+    total: number
+    tramos: Map<ClaveFase, { n: number; etapas: Map<string, number> }>
+    /** Ciudades que cayeron en esta fila. Solo se usa en la fila agrupada. */
+    ciudades: Map<string, number>
+  }
+  const filasPorClave = new Map<string, Fila>()
+  let hayEtapaSinFase = false
 
   for (const e of etapas) {
     const fase: ClaveFase = e.stage ?? 'sin'
     for (const c of e.celdas) {
       if (c.abiertos <= 0) continue
-      fasesConCasos.add(fase)
-      const acc = porSeccional.get(c.seccional) ?? {
+      if (fase === 'sin') hayEtapaSinFase = true
+      const clave =
+        c.seccional === null ? SIN_REGISTRAR : exigeCita.has(c.seccional) ? c.seccional : OTRAS
+      const fila = filasPorClave.get(clave) ?? {
         total: 0,
         tramos: new Map<ClaveFase, { n: number; etapas: Map<string, number> }>(),
+        ciudades: new Map<string, number>(),
       }
-      acc.total += c.abiertos
-      const tramo = acc.tramos.get(fase) ?? { n: 0, etapas: new Map<string, number>() }
+      fila.total += c.abiertos
+      const tramo = fila.tramos.get(fase) ?? { n: 0, etapas: new Map<string, number>() }
       tramo.n += c.abiertos
       tramo.etapas.set(e.nombre, (tramo.etapas.get(e.nombre) ?? 0) + c.abiertos)
-      acc.tramos.set(fase, tramo)
-      porSeccional.set(c.seccional, acc)
+      fila.tramos.set(fase, tramo)
+      if (c.seccional !== null) {
+        fila.ciudades.set(c.seccional, (fila.ciudades.get(c.seccional) ?? 0) + c.abiertos)
+      }
+      filasPorClave.set(clave, fila)
     }
   }
 
-  const filas = [...porSeccional.entries()]
-    // Volumen primero; el bucket sin registrar al final, porque es un hueco de dato y
-    // no una plaza en el ranking de ciudades.
-    .sort(([sa, a], [sb, b]) => {
-      if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1
-      return b.total - a.total
-    })
+  // Las de cita previa por volumen; despues el agrupado; sin registrar de ultimo, porque
+  // es un hueco de dato y no una plaza en el ranking.
+  const rango = (k: string) => (k === SIN_REGISTRAR ? 2 : k === OTRAS ? 1 : 0)
+  const filas = [...filasPorClave.entries()].sort(([ka, a], [kb, b]) =>
+    rango(ka) !== rango(kb) ? rango(ka) - rango(kb) : b.total - a.total,
+  )
 
   if (filas.length === 0) return null
 
@@ -655,12 +683,34 @@ function BarrasPorSeccional({ etapas }: { etapas: ProcesoSeccionalEtapa[] }) {
   const colorFase = (f: ClaveFase) => (f === 'sin' ? '#D1D5DB' : STAGE_COLORS[f].text)
   const nombreFase = (f: ClaveFase) => (f === 'sin' ? 'Sin fase declarada' : STAGE_LABELS[f])
 
+  const etiqueta = (k: string, v: Fila) =>
+    k === SIN_REGISTRAR
+      ? 'Sin registrar'
+      : k === OTRAS
+        ? `Otras ${v.ciudades.size} ciudad${v.ciudades.size === 1 ? '' : 'es'}`
+        : k
+
+  const ayuda = (k: string, v: Fila) =>
+    k === SIN_REGISTRAR
+      ? 'Casos cuya seccional no se ha registrado'
+      : k === OTRAS
+        ? `Sin cita previa: ${[...v.ciudades.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([c, n]) => `${c} ${n}`)
+            .join(', ')}`
+        : `${k} — exige cita previa en la DIAN`
+
   /** El tooltip conserva el detalle por etapa que el color ya no carga. */
-  const detalleTramo = (sec: string | null, f: ClaveFase, t: { n: number; etapas: Map<string, number> }) => {
+  const detalleTramo = (
+    k: string,
+    v: Fila,
+    f: ClaveFase,
+    t: { n: number; etapas: Map<string, number> },
+  ) => {
     const top = [...t.etapas.entries()].sort((a, b) => b[1] - a[1])
     const listado = top.slice(0, 3).map(([n, c]) => `${n} ${c}`).join(', ')
     const resto = top.length > 3 ? `, +${top.length - 3} etapas más` : ''
-    return `${sec ?? 'Sin registrar'} · ${nombreFase(f)}: ${t.n} — ${listado}${resto}`
+    return `${etiqueta(k, v)} · ${nombreFase(f)}: ${t.n} — ${listado}${resto}`
   }
 
   return (
@@ -675,47 +725,59 @@ function BarrasPorSeccional({ etapas }: { etapas: ProcesoSeccionalEtapa[] }) {
       </div>
 
       <div className="space-y-1.5">
-        {filas.map(([sec, v]) => (
-          <div key={sec ?? 'sin'} className="flex items-center gap-2">
-            <span
-              className={`w-24 shrink-0 truncate text-right text-xs sm:w-28 ${sec ? '' : 'italic'}`}
-              style={{ color: sec ? CARBON : '#9CA3AF' }}
-              title={sec ?? 'Casos cuya seccional no se ha registrado'}
-            >
-              {sec ?? 'Sin registrar'}
-            </span>
-            {/* El riel es el que ocupa el ancho disponible; el relleno va adentro con el
-                ancho proporcional. Si el relleno llevara `flex-1`, todas las barras
-                saldrían del mismo largo. */}
-            <div className="h-4 flex-1 overflow-hidden rounded" style={{ backgroundColor: '#F9FAFB' }}>
-              <div
-                className="flex h-full items-stretch overflow-hidden rounded"
-                style={{ width: `${(v.total / maximo) * 100}%`, minWidth: 2 }}
+        {filas.map(([k, v]) => {
+          const esCita = k !== SIN_REGISTRAR && k !== OTRAS
+          return (
+            <div key={k} className="flex items-center gap-2">
+              <span
+                className={`flex w-28 shrink-0 items-center justify-end gap-1 text-right text-xs sm:w-32 ${
+                  k === SIN_REGISTRAR ? 'italic' : ''
+                }`}
+                style={{ color: k === SIN_REGISTRAR ? '#9CA3AF' : esCita ? CARBON : GRIS }}
+                title={ayuda(k, v)}
               >
-                {CLAVES.map(f => {
-                  const t = v.tramos.get(f)
-                  if (!t || t.n === 0) return null
-                  return (
-                    <div
-                      key={f}
-                      style={{ width: `${(t.n / v.total) * 100}%`, backgroundColor: colorFase(f) }}
-                      title={detalleTramo(sec, f, t)}
-                    />
-                  )
-                })}
+                {esCita && <CalendarClock className="h-3 w-3 shrink-0" />}
+                <span className="truncate">{etiqueta(k, v)}</span>
+              </span>
+              {/* El riel es el que ocupa el ancho disponible; el relleno va adentro con el
+                  ancho proporcional. Si el relleno llevara `flex-1`, todas las barras
+                  saldrían del mismo largo. */}
+              <div className="h-4 flex-1 overflow-hidden rounded" style={{ backgroundColor: '#F9FAFB' }}>
+                <div
+                  className="flex h-full items-stretch overflow-hidden rounded"
+                  style={{ width: `${(v.total / maximo) * 100}%`, minWidth: 2 }}
+                >
+                  {CLAVES.map(f => {
+                    const t = v.tramos.get(f)
+                    if (!t || t.n === 0) return null
+                    return (
+                      <div
+                        key={f}
+                        style={{ width: `${(t.n / v.total) * 100}%`, backgroundColor: colorFase(f) }}
+                        title={detalleTramo(k, v, f, t)}
+                      />
+                    )
+                  })}
+                </div>
               </div>
+              <span className="w-8 shrink-0 text-right text-xs tabular-nums" style={{ color: GRIS }}>
+                {v.total}
+              </span>
             </div>
-            <span className="w-8 shrink-0 text-right text-xs tabular-nums" style={{ color: GRIS }}>
-              {v.total}
-            </span>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
-      {/* Sin leyenda propia: la de fases, arriba, ya rige la barra y la tabla. Solo se
-          agrega el gris cuando de verdad hay etapas sin fase declarada. */}
-      {fasesConCasos.has('sin') && (
-        <p className="mt-2 flex items-center gap-1 text-xs" style={{ color: GRIS }}>
+      <p className="mt-2 text-xs" style={{ color: GRIS }}>
+        <CalendarClock className="mr-0.5 inline h-3 w-3 align-[-2px]" />
+        Con nombre propio van solo las seccionales que exigen cita previa en la DIAN; las
+        demás se agrupan. El detalle ciudad por ciudad está en la tabla de abajo.
+      </p>
+
+      {/* Sin leyenda de color propia: la de fases, arriba, ya rige la barra y la tabla.
+          Solo se agrega el gris cuando de verdad hay etapas sin fase declarada. */}
+      {hayEtapaSinFase && (
+        <p className="mt-1 flex items-center gap-1 text-xs" style={{ color: GRIS }}>
           <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: '#D1D5DB' }} />
           Gris: etapas sin fase declarada.
         </p>
