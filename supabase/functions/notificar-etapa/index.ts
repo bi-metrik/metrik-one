@@ -239,6 +239,96 @@ Deno.serve(async (req: Request) => {
 });
 
 
+// ── Datos que el copy puede citar ────────────────────────────────────────────
+// La fecha de la cita y el enlace al documento no viven en columnas de `negocios`:
+// viven en bloques. La cita en `fecha_cita_dian` (etapa Cita, pero el aviso sale
+// dos etapas despues) y el documento en el bloque de la etapa que lo pide, que en
+// SOENA es el Certificado UPME en Entrega. Se leen aqui porque el copy es lo unico
+// que sabe si los necesita.
+//
+// El enlace es el `drive_url` que ya quedo publico-por-enlace al subirlo. FunnelChat
+// no puede mandar el archivo — su paso de Documento exige subir un PDF fijo, igual
+// para todos — asi que el cliente recibe el enlace al suyo.
+
+const MESES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+/**
+ * "2026-09-09T08:00" -> "9 de septiembre de 2026 a las 8:00 a. m."
+ * "2026-09-26"       -> "26 de septiembre de 2026"
+ *
+ * Los dos formatos conviven en produccion: el bloque acepta fecha sola y fecha con
+ * hora. Un formato que no reconozca devuelve null y el aviso se omite antes que
+ * mandarle al cliente una fecha cruda o a medias.
+ */
+function formatearCita(valor: string): string | null {
+  const m = valor.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
+  if (!m) return null;
+  const [, anio, mes, dia, hh, mm] = m;
+  const nombreMes = MESES[Number(mes) - 1];
+  if (!nombreMes) return null;
+  const fecha = `${Number(dia)} de ${nombreMes} de ${anio}`;
+  if (!hh) return fecha;
+  const h = Number(hh);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${fecha} a las ${h12}:${mm} ${h < 12 ? 'a. m.' : 'p. m.'}`;
+}
+
+type DatosCopy = { fecha_cita: string | null; link: string | null };
+
+async function datosDelCopy(
+  // deno-lint-ignore no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioId: string,
+  etapaId: string | null,
+): Promise<DatosCopy> {
+  const { data: filas } = await supabase
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug, etapa_id)')
+    .eq('negocio_id', negocioId);
+
+  const out: DatosCopy = { fecha_cita: null, link: null };
+  for (const fila of filas ?? []) {
+    const cfg = fila?.bloque_configs as { slug?: string; etapa_id?: string } | null;
+    const data = (fila?.data ?? {}) as Record<string, unknown>;
+    const cita = data.fecha_cita_dian;
+    if (cfg?.slug === 'fecha_cita_dian' && typeof cita === 'string') {
+      out.fecha_cita = formatearCita(cita);
+    }
+    const url = data.drive_url;
+    if (etapaId && cfg?.etapa_id === etapaId && typeof url === 'string' && url) {
+      out.link = url;
+    }
+  }
+  return out;
+}
+
+/**
+ * Mete `{fecha_cita}` y `{link}` en el copy, y dice cual falto.
+ *
+ * Si el copy pide un dato que no existe, NO se manda el aviso: un WhatsApp que dice
+ * "tu cita es el " o que trae un enlace vacio es peor que no mandar nada, y ademas
+ * se ve como exito en el log. El que falta sale como motivo de omision.
+ *
+ * Los reemplazos viejos ({etapa}, {codigo}, {negocio}) siguen siendo sustitucion
+ * simple: llevan meses saliendo con codigo vacio y no es esta la sesion para
+ * cambiarles el comportamiento.
+ */
+function aplicarDatosDelCopy(texto: string, datos: DatosCopy): { texto: string; falta: string | null } {
+  let out = texto;
+  for (const clave of ['fecha_cita', 'link'] as const) {
+    const marca = `{${clave}}`;
+    if (!out.includes(marca)) continue;
+    const valor = datos[clave];
+    if (!valor) return { texto: out, falta: clave };
+    out = out.replaceAll(marca, valor);
+  }
+  return { texto: out, falta: null };
+}
+
 /**
  * Aviso de avance al CLIENTE.
  *
@@ -292,10 +382,16 @@ async function enviarAlCliente(
   const cuerpoDefault = replyTo
     ? 'Te contamos que tu tramite paso a la etapa "{etapa}". Cualquier duda, responde a este correo.'
     : 'Te contamos que tu tramite paso a la etapa "{etapa}".';
-  const cuerpo = (cfg.mensaje ?? cuerpoDefault)
+  const base = (cfg.mensaje ?? cuerpoDefault)
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
+  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, negocio.etapa_actual_id ?? null));
+  if (resuelto.falta) {
+    console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
+    return { enviadoA: null, omitidoPor: `sin_${resuelto.falta}` };
+  }
+  const cuerpo = resuelto.texto;
 
   const html = `<!DOCTYPE html>
 <html lang="es"><body style="margin:0;padding:24px;background:#F5F4F2;font-family:Helvetica,Arial,sans-serif;color:#1A1A1A">
@@ -400,10 +496,18 @@ async function enviarWhatsAppAlCliente(
 
   // El mismo copy del correo, con los mismos reemplazos: si los dos canales dijeran
   // cosas distintas sobre el mismo hecho, el cliente creería la peor de las dos.
-  const cuerpo = (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}".')
+  const base = (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}".')
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
+  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, negocio.etapa_actual_id ?? null));
+  if (resuelto.falta) {
+    // El dato que el copy prometia no existe. Se omite y se dice cual: mandarlo a
+    // medias deja al cliente peor que no mandarlo, y en el log parece un exito.
+    console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
+    return { disparadoA: null, omitidoPor: `sin_${resuelto.falta}` };
+  }
+  const cuerpo = resuelto.texto;
 
   try {
     const res = await fetch(url, {
