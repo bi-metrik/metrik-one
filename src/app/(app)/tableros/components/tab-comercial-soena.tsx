@@ -30,6 +30,7 @@ import {
 import MetasModal from '../../equipo/metas-modal'
 import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 import { PerdidosDrawer } from './perdidos-drawer'
+import { PagosDrawer, type MesSeleccionado } from './pagos-drawer'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
 
 const GREEN = '#059669'
@@ -149,6 +150,9 @@ export function TabComercialSoena({
   // una cifra a otra el panel se remonte y no muestre por un instante la lista anterior.
   const [cifra, setCifra] = useState<CifraSeleccionada | null>(null)
   const [verPerdidos, setVerPerdidos] = useState(false)
+  // Que mes de recaudo se abrio. Va aparte de `cifra` porque su unidad es el COBRO y no
+  // el negocio: mezclarlos obligaria al panel a adivinar cual de las dos listas pintar.
+  const [pagosDe, setPagosDe] = useState<MesSeleccionado | null>(null)
 
   /** Salta a un mes concreto. El navegador de flechas y el histórico usan lo mismo. */
   function irAlMes(na: number, nm: number) {
@@ -247,13 +251,6 @@ export function TabComercialSoena({
     return serieData.find((p) => p.label === String(etiqueta)) ?? null
   }
 
-  const irAlMesDeLaSerie = (estado: { activeLabel?: string | number } | null) => {
-    const punto = puntoDeLaSerie(estado)
-    if (!punto || (punto.anio === anio && punto.mes === mes)) return
-    irAlMes(punto.anio, punto.mes)
-  }
-  const propsSerie = { style: { cursor: 'pointer' }, onClick: irAlMesDeLaSerie }
-
   /**
    * El mismo clic, encadenado: primero lleva al mes, y ya parado ahi abre los negocios
    * que suman la barra.
@@ -286,6 +283,27 @@ export function TabComercialSoena({
   const propsSerieConLista = { style: { cursor: 'pointer' }, onClick: irAlMesOAbrirVentas }
 
   /**
+   * Las dos barras de RECAUDO, con el mismo encadenado y otra lista.
+   *
+   * Cuentan plata recibida en el mes, que viene de ventas de cualquier mes anterior, asi
+   * que la unidad de la respuesta es el cobro y no el negocio. Por eso abre `PagosDrawer`
+   * y no el panel de ventas: una lista de las ventas de ESTE mes sumaria otra cosa.
+   */
+  const irAlMesOAbrirPagos = (estado: { activeLabel?: string | number } | null) => {
+    const punto = puntoDeLaSerie(estado)
+    if (!punto) return
+    if (punto.anio !== anio || punto.mes !== mes) {
+      irAlMes(punto.anio, punto.mes)
+      return
+    }
+    // El panel se abre aunque el mes no tenga recaudo propio: puede haber entrado plata
+    // que sea toda tarifa de terceros, y ese caso es precisamente el que hay que poder
+    // mirar. Si no entro NADA, el panel lo dice con sus palabras.
+    setPagosDe({ anio, mes })
+  }
+  const propsSerieConPagos = { style: { cursor: 'pointer' }, onClick: irAlMesOAbrirPagos }
+
+  /**
    * Etiqueta del tooltip: dice que va a hacer el clic donde el dedo ya esta.
    *
    * Es el unico lugar donde la pista aparece en el momento exacto en que sirve. En tactil
@@ -297,6 +315,12 @@ export function TabComercialSoena({
     const esElMesEnPantalla = punto ? punto.anio === anio && punto.mes === mes : false
     if (!esElMesEnPantalla) return `${label} — clic para verlo arriba`
     return kpis && kpis.num_ventas > 0 ? `${label} — clic para ver los negocios` : String(label)
+  }
+
+  const pistaDeRecaudo = (label: unknown) => {
+    const punto = serieData.find((p) => p.label === String(label))
+    const esElMesEnPantalla = punto ? punto.anio === anio && punto.mes === mes : false
+    return esElMesEnPantalla ? `${label} — clic para ver los pagos` : `${label} — clic para verlo arriba`
   }
 
   return (
@@ -635,8 +659,9 @@ export function TabComercialSoena({
             <div>
               <h2 className="text-sm font-bold text-gray-900">Historico mensual</h2>
               <p className="text-[11px] text-gray-400">
-                Clic en un mes para verlo en detalle arriba. En «Ventas» y «Valor de negocio»,
-                un segundo clic sobre ese mes abre los negocios que hay detras.
+                Clic en un mes para verlo en detalle arriba; un segundo clic sobre ese mes abre
+                lo que hay detras — los negocios en «Ventas» y «Valor de negocio», los pagos en
+                los dos de recaudo.
               </p>
             </div>
             {serie?.tasa_recaudo_global !== null && serie?.tasa_recaudo_global !== undefined && (
@@ -670,11 +695,11 @@ export function TabComercialSoena({
             </ChartCard>
             <ChartCard title="Recaudo por mes (honorario)">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerie}>
+                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerieConPagos}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
-                  <Tooltip formatter={(v) => [fmtCOP(Number(v)), 'Recaudo']} />
+                  <Tooltip formatter={(v) => [fmtCOP(Number(v)), 'Recaudo']} labelFormatter={pistaDeRecaudo} />
                   <Bar dataKey="honorario_recaudado" fill={BLUE} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -687,11 +712,14 @@ export function TabComercialSoena({
                 mentiria sobre la proporcion, que es real. */}
             <ChartCard title="Primer vs segundo pago por mes">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 18 }} {...propsSerie}>
+                <BarChart data={serieData} margin={{ left: -4, right: 12, top: 18 }} {...propsSerieConPagos}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
-                  <Tooltip formatter={(v, name) => [fmtCOP(Number(v)), name === 'primer_pago' ? '1er pago' : '2o pago']} />
+                  <Tooltip
+                    formatter={(v, name) => [fmtCOP(Number(v)), name === 'primer_pago' ? '1er pago' : '2o pago']}
+                    labelFormatter={pistaDeRecaudo}
+                  />
                   <Bar dataKey="primer_pago" fill={GREEN} radius={[4, 4, 0, 0]} />
                   <Bar dataKey="segundo_pago" fill={OCRE} radius={[4, 4, 0, 0]}>
                     {/* Solo donde hubo: una fila de ceros escritos sobre cada mes seria
@@ -779,6 +807,14 @@ export function TabComercialSoena({
           key={`${cifra.anio}-${cifra.mes}-${cifra.responsableId ?? 'todos'}-${cifra.sinResponsable ? 'sr' : ''}-${String(cifra.soloCompletos)}-${cifra.dia ?? ''}-${cifra.campana ?? 'todas'}`}
           cifra={cifra}
           onClose={() => setCifra(null)}
+        />
+      )}
+
+      {pagosDe && (
+        <PagosDrawer
+          key={`pagos-${pagosDe.anio}-${pagosDe.mes}`}
+          periodo={pagosDe}
+          onClose={() => setPagosDe(null)}
         />
       )}
 

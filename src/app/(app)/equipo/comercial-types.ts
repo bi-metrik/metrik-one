@@ -518,3 +518,29 @@ export interface ComercialPerdido {
   tiene_rastro_meta: boolean
   campana: string | null
 }
+
+/**
+ * Un pago que entro en el mes, con la franja a la que se abono.
+ *
+ * Es la unidad de las DOS barras de recaudo del historico, y no es un negocio: un pago
+ * de agosto puede abonarse a una venta de junio, asi que la lista de ventas del mes
+ * nunca reconstruye esas barras. Por eso este tipo existe aparte de `ComercialVentaCaso`.
+ *
+ * `monto` es lo que entro a la cuenta; `honorario` (tramo 1 + tramo 2) es lo unico que
+ * es ingreso propio. La diferencia es tarifa UPME —plata de terceros— o excedente.
+ */
+export interface ComercialPagoMes {
+  cobro_id: string
+  fecha: string
+  monto: number
+  honorario: number
+  a_tramo1: number
+  a_tramo2: number
+  a_tarifa: number
+  excedente: number
+  negocio_id: string | null
+  codigo: string | null
+  nombre: string | null
+  /** De que mes es la venta a la que se abona. NULL si el cobro no cuelga de un negocio. */
+  fecha_venta: string | null
+}
