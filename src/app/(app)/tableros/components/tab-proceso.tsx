@@ -81,8 +81,8 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
     seccionalLabel?: string,
   ) =>
     setSeleccion({
-      etapaId: e.etapaId,
-      etapaNombre: e.nombre,
+      etapaIds: [e.etapaId],
+      titulo: e.nombre,
       etapaNumero: e.numero,
       seccional,
       seccionalLabel,
@@ -212,7 +212,16 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
         {/* El cuello de botella por seccional, de un vistazo (punto #42). Solo en la
             vista por seccional: en Totales no hay nada que apilar por ciudad. La
             barra sale de las MISMAS celdas que la tabla de abajo. */}
-        {detalle === 'seccional' && <BarrasPorSeccional etapas={etapas} conCita={conCita} />}
+        {detalle === 'seccional' && (
+          <BarrasPorSeccional
+            etapas={etapas}
+            conCita={conCita}
+            /* El grafico cuenta SIEMPRE casos abiertos, no sigue al selector de metrica.
+               Si abriera "solo atrasados" entregaria una lista mas corta que la barra
+               en la que se acaba de hacer clic. */
+            onAbrir={sel => setSeleccion({ ...sel, soloVencidos: false })}
+          />
+        )}
 
         <p className="mb-2 text-xs" style={{ color: GRIS }}>
           {fechaFotoPrevia
@@ -383,7 +392,7 @@ export function TabProceso({ data }: { data: ProcesoSeccionalData }) {
       {seleccion && (
         <CasosDrawer
           key={[
-            seleccion.etapaId,
+            seleccion.etapaIds.join('+'),
             Array.isArray(seleccion.seccional)
               ? seleccion.seccional.join('+')
               : seleccion.seccional ?? 'todas',
@@ -624,10 +633,21 @@ function Aviso({ children }: { children: React.ReactNode }) {
 function BarrasPorSeccional({
   etapas,
   conCita,
+  onAbrir,
 }: {
   etapas: ProcesoSeccionalEtapa[]
   /** Seccionales que exigen cita previa: las unicas que van con nombre propio. */
   conCita: string[]
+  /**
+   * Abre el panel con los casos detras de lo que se toco: un tramo (una fase de una
+   * seccional) o la fila entera. El grafico no sabe de paneles — dice que se pidio.
+   */
+  onAbrir: (sel: {
+    etapaIds: string[]
+    titulo: string
+    seccional?: string | string[] | null
+    seccionalLabel?: string
+  }) => void
 }) {
   type ClaveFase = 'venta' | 'ejecucion' | 'cobro' | 'sin'
   const CLAVES: ClaveFase[] = [...FASES, 'sin']
@@ -637,9 +657,11 @@ function BarrasPorSeccional({
   const OTRAS = '\u0000otras'
 
   const exigeCita = new Set(conCita)
+  /** Etapas que aportan a un tramo, por id: el panel consulta por id, no por nombre. */
+  type Tramo = { n: number; etapas: Map<string, { nombre: string; n: number }> }
   type Fila = {
     total: number
-    tramos: Map<ClaveFase, { n: number; etapas: Map<string, number> }>
+    tramos: Map<ClaveFase, Tramo>
     /** Ciudades que cayeron en esta fila. Solo se usa en la fila agrupada. */
     ciudades: Map<string, number>
   }
@@ -655,13 +677,14 @@ function BarrasPorSeccional({
         c.seccional === null ? SIN_REGISTRAR : exigeCita.has(c.seccional) ? c.seccional : OTRAS
       const fila = filasPorClave.get(clave) ?? {
         total: 0,
-        tramos: new Map<ClaveFase, { n: number; etapas: Map<string, number> }>(),
+        tramos: new Map<ClaveFase, Tramo>(),
         ciudades: new Map<string, number>(),
       }
       fila.total += c.abiertos
-      const tramo = fila.tramos.get(fase) ?? { n: 0, etapas: new Map<string, number>() }
+      const tramo = fila.tramos.get(fase) ?? { n: 0, etapas: new Map<string, { nombre: string; n: number }>() }
       tramo.n += c.abiertos
-      tramo.etapas.set(e.nombre, (tramo.etapas.get(e.nombre) ?? 0) + c.abiertos)
+      const acumulado = tramo.etapas.get(e.etapaId)
+      tramo.etapas.set(e.etapaId, { nombre: e.nombre, n: (acumulado?.n ?? 0) + c.abiertos })
       fila.tramos.set(fase, tramo)
       if (c.seccional !== null) {
         fila.ciudades.set(c.seccional, (fila.ciudades.get(c.seccional) ?? 0) + c.abiertos)
@@ -701,16 +724,35 @@ function BarrasPorSeccional({
         : `${k} — exige cita previa en la DIAN`
 
   /** El tooltip conserva el detalle por etapa que el color ya no carga. */
-  const detalleTramo = (
-    k: string,
-    v: Fila,
-    f: ClaveFase,
-    t: { n: number; etapas: Map<string, number> },
-  ) => {
-    const top = [...t.etapas.entries()].sort((a, b) => b[1] - a[1])
-    const listado = top.slice(0, 3).map(([n, c]) => `${n} ${c}`).join(', ')
+  const detalleTramo = (k: string, v: Fila, f: ClaveFase, t: Tramo) => {
+    const top = [...t.etapas.values()].sort((a, b) => b.n - a.n)
+    const listado = top.slice(0, 3).map(e => `${e.nombre} ${e.n}`).join(', ')
     const resto = top.length > 3 ? `, +${top.length - 3} etapas más` : ''
     return `${etiqueta(k, v)} · ${nombreFase(f)}: ${t.n} — ${listado}${resto}`
+  }
+
+  /**
+   * Como se le pide al panel "los casos de esta fila".
+   *
+   * La fila agrupada manda las ciudades que la sumaron, no un comodin: el panel filtra
+   * por la misma lista que se dibujo, asi que la cuenta de la lista no puede diferir de
+   * la que dice la barra.
+   */
+  const alcanceDeFila = (k: string, v: Fila): { seccional: string | string[] | null; seccionalLabel?: string } =>
+    k === SIN_REGISTRAR
+      ? { seccional: null }
+      : k === OTRAS
+        ? { seccional: [...v.ciudades.keys()], seccionalLabel: etiqueta(k, v) }
+        : { seccional: k }
+
+  const abrirTramo = (k: string, v: Fila, f: ClaveFase, t: Tramo) =>
+    onAbrir({ etapaIds: [...t.etapas.keys()], titulo: nombreFase(f), ...alcanceDeFila(k, v) })
+
+  const abrirFila = (k: string, v: Fila) => {
+    const ids = new Set<string>()
+    for (const t of v.tramos.values()) for (const id of t.etapas.keys()) ids.add(id)
+    const unaSola = v.tramos.size === 1 ? nombreFase([...v.tramos.keys()][0]) : 'Todas las fases'
+    onAbrir({ etapaIds: [...ids], titulo: unaSola, ...alcanceDeFila(k, v) })
   }
 
   return (
@@ -720,7 +762,7 @@ function BarrasPorSeccional({
           Dónde está represado, por seccional
         </h3>
         <span className="text-xs" style={{ color: GRIS }}>
-          casos abiertos · misma escala en todas las barras
+          casos abiertos · misma escala · clic abre la lista
         </span>
       </div>
 
@@ -729,20 +771,26 @@ function BarrasPorSeccional({
           const esCita = k !== SIN_REGISTRAR && k !== OTRAS
           return (
             <div key={k} className="flex items-center gap-2">
-              <span
-                className={`flex w-28 shrink-0 items-center justify-end gap-1 text-right text-xs sm:w-32 ${
+              {/* La etiqueta es el objetivo grande: 44px de alto en movil, y abre la fila
+                  entera. Los tramos son el corte fino, pero un tramo de un caso dentro de
+                  una fila de 118 mide dos pixeles y no se puede tocar con el dedo — por eso
+                  la respuesta completa nunca depende de acertarle a un tramo. */}
+              <button
+                type="button"
+                onClick={() => abrirFila(k, v)}
+                className={`flex w-28 min-h-11 shrink-0 items-center justify-end gap-1 text-right text-xs hover:underline sm:min-h-0 sm:w-32 ${
                   k === SIN_REGISTRAR ? 'italic' : ''
                 }`}
                 style={{ color: k === SIN_REGISTRAR ? '#9CA3AF' : esCita ? CARBON : GRIS }}
-                title={ayuda(k, v)}
+                title={`${ayuda(k, v)} — clic abre los ${v.total} casos`}
               >
                 {esCita && <CalendarClock className="h-3 w-3 shrink-0" />}
                 <span className="truncate">{etiqueta(k, v)}</span>
-              </span>
+              </button>
               {/* El riel es el que ocupa el ancho disponible; el relleno va adentro con el
                   ancho proporcional. Si el relleno llevara `flex-1`, todas las barras
                   saldrían del mismo largo. */}
-              <div className="h-4 flex-1 overflow-hidden rounded" style={{ backgroundColor: '#F9FAFB' }}>
+              <div className="h-6 flex-1 overflow-hidden rounded sm:h-4" style={{ backgroundColor: '#F9FAFB' }}>
                 <div
                   className="flex h-full items-stretch overflow-hidden rounded"
                   style={{ width: `${(v.total / maximo) * 100}%`, minWidth: 2 }}
@@ -750,11 +798,16 @@ function BarrasPorSeccional({
                   {CLAVES.map(f => {
                     const t = v.tramos.get(f)
                     if (!t || t.n === 0) return null
+                    const detalle = detalleTramo(k, v, f, t)
                     return (
-                      <div
+                      <button
                         key={f}
+                        type="button"
+                        onClick={() => abrirTramo(k, v, f, t)}
+                        className="h-full transition-opacity hover:opacity-70"
                         style={{ width: `${(t.n / v.total) * 100}%`, backgroundColor: colorFase(f) }}
-                        title={detalleTramo(k, v, f, t)}
+                        title={`${detalle} — clic abre estos casos`}
+                        aria-label={detalle}
                       />
                     )
                   })}
