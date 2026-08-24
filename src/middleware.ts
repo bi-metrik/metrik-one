@@ -2,9 +2,8 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import { landingForWorkspace } from '@/lib/auth/landing'
 import { extractSlug } from '@/lib/tenant/extract-slug'
+import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
 
-// Base domain — dev: localhost, prod: metrikone.co
-const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
 const IS_DEV = process.env.NODE_ENV === 'development'
 
 /**
@@ -164,10 +163,13 @@ export async function middleware(request: NextRequest) {
 
         if (ws?.slug) {
           const landing = await getLanding(supabase, profile.role ?? undefined, profile.workspace_id ?? undefined)
-          if (IS_DEV) {
-            return withAuthCookies(NextResponse.redirect(new URL(landing, request.url)), supabaseResponse)
-          }
-          return withAuthCookies(NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`), supabaseResponse)
+          // Fuente unica: en un preview (`*.vercel.app`) no hay subdominio del tenant
+          // al que ir, asi que el destino se queda en el mismo host.
+          const destino = destinoTrasAutenticar(ws.slug, landing, hostname)
+          return withAuthCookies(
+            NextResponse.redirect(esRelativo(destino) ? new URL(destino, request.url) : destino),
+            supabaseResponse
+          )
         }
       }
 
@@ -195,10 +197,13 @@ export async function middleware(request: NextRequest) {
 
         if (ws?.slug) {
           const landing = await getLanding(supabase, profile.role ?? undefined, profile.workspace_id ?? undefined)
-          if (IS_DEV) {
-            return withAuthCookies(NextResponse.redirect(new URL(landing, request.url)), supabaseResponse)
-          }
-          return withAuthCookies(NextResponse.redirect(`https://${ws.slug}.${BASE_DOMAIN}${landing}`), supabaseResponse)
+          // Fuente unica: en un preview (`*.vercel.app`) no hay subdominio del tenant
+          // al que ir, asi que el destino se queda en el mismo host.
+          const destino = destinoTrasAutenticar(ws.slug, landing, hostname)
+          return withAuthCookies(
+            NextResponse.redirect(esRelativo(destino) ? new URL(destino, request.url) : destino),
+            supabaseResponse
+          )
         }
       }
 
