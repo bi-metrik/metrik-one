@@ -147,6 +147,11 @@ const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
   { href: '/riesgos', label: 'Riesgos', icon: ShieldAlert, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
   { href: '/controles', label: 'Controles', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'read_only', 'operator', 'contador'] },
   { href: '/matriz', label: 'Matriz', icon: Grid3X3, roles: ['owner', 'admin', 'supervisor', 'read_only'] },
+  // Responsable por control + bitacora de aceptacion. Solo owner/admin, y no por
+  // configuracion sino por confidencialidad: la pantalla lista nombres y
+  // documentos de identidad de los responsables. Lo que circula por la
+  // organizacion es la carta en PDF, no esta pantalla.
+  { href: '/compliance/responsables', label: 'Responsables', icon: UserCheck, roles: ['owner', 'admin'] },
 ]
 
 // Validacion — segmentacion + consulta de listas restrictivas. Mismo gating que compliance

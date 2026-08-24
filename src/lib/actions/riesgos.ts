@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { operadorVeControl, COLUMNA_VISIBILIDAD_OPERADOR } from '@/lib/compliance/responsables'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import * as XLSX from 'xlsx'
@@ -750,10 +751,22 @@ export async function getControles() {
     .eq('workspace_id', workspaceId)
     .order('referencia', { ascending: true })
 
-  // operator/contador: solo controles donde son responsable
+  // operator/contador: solo controles donde son responsable.
+  //
+  // La columna sale de `COLUMNA_VISIBILIDAD_OPERADOR`, no escrita a mano, y su
+  // espejo en memoria es `operadorVeControl` (el detalle de abajo lo usa). Es la
+  // MISMA regla en los dos sitios: escrita dos veces se desincroniza, y el
+  // sintoma seria un operador entrando por URL a un control que su lista no
+  // muestra.
+  //
+  // Decision de R2 (responsable por control): la visibilidad sigue colgando del
+  // USUARIO responsable, no del cargo nominado. Nominar un cargo dice quien
+  // responde ante un auditor; no reparte accesos, y derivar el acceso del cargo
+  // exigiria el vinculo persona-cargo que el dictamen descarta justamente para
+  // no darle cuenta de ONE a cada responsable.
   if (!perms.canViewRiesgos && perms.canViewControlesAsignados) {
     if (!userId) return []
-    query = query.eq('responsable_id', userId)
+    query = query.eq(COLUMNA_VISIBILIDAD_OPERADOR, userId)
   }
 
   const { data: controles } = await query
@@ -836,9 +849,10 @@ export async function getControl(controlId: string) {
 
   if (!control) return null
 
-  // operator/contador: solo si son responsable de este control
+  // operator/contador: solo si son responsable de este control. Misma regla que
+  // el filtro del listado, resuelta por la misma funcion.
   if (!perms.canViewRiesgos && perms.canViewControlesAsignados) {
-    if (!userId || control.responsable_id !== userId) return null
+    if (!operadorVeControl(control, userId)) return null
   }
 
   // Fetch assigned causas via junction
