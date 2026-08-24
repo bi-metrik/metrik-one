@@ -65,6 +65,7 @@ export async function getComercialPerfil(
 import { revalidatePath } from 'next/cache'
 import type {
   ComercialMesResponse,
+  ComercialPagoMes,
   ComercialSerieResponse,
   MetaComercial,
 } from './comercial-types'
@@ -248,6 +249,36 @@ export async function getComercialVentasMes(input: {
     return []
   }
   return (data as ComercialVentaCaso[]) ?? []
+}
+
+/**
+ * Los pagos que entraron en un mes, con la franja a la que se abono cada peso.
+ *
+ * Hermana de `getComercialVentasMes` y pregunta distinta: aquella abre las VENTAS del
+ * mes, esta los COBROS del mes, que es lo que cuentan las dos barras de recaudo del
+ * historico. No son el mismo conjunto — un pago de agosto puede abonarse a una venta de
+ * junio — y confundirlos es justo lo que hacia que esas barras no se pudieran abrir.
+ */
+export async function getComercialPagosMes(input: {
+  anio: number
+  mes: number
+}): Promise<ComercialPagoMes[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_pagos_mes_soena', {
+    p_workspace_id: workspaceId,
+    p_anio: input.anio,
+    p_mes: input.mes,
+  })
+  // Mismo criterio que la hermana: el error se registra en vez de degradar a lista
+  // vacia, que en pantalla se leeria como "este mes no entro plata" sobre una barra
+  // que dice lo contrario.
+  if (rpcError) {
+    console.error('[comercial] no se pudieron traer los pagos del mes:', rpcError)
+    return []
+  }
+  return (data as ComercialPagoMes[]) ?? []
 }
 
 /**
