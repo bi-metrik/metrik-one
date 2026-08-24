@@ -1,11 +1,16 @@
 'use client'
 
 /**
- * Panel lateral con los casos detrás de un número de la tabla de proceso.
+ * Panel lateral con los casos detrás de una cifra de la pestaña de proceso.
  *
  * El tablero dice "17 en Precobro" y hasta ahora había que ir a buscarlos a mano. Al
  * hacer clic en cualquier número mayor que cero se abre esta lista, ya filtrada por la
  * misma etapa, seccional y métrica de la celda en la que se hizo clic.
+ *
+ * Lo abren DOS superficies, y por eso la selección lleva un arreglo de etapas y no una:
+ * las celdas de la tabla (una etapa) y los tramos del gráfico de represados (todas las
+ * etapas de una fase). Un tramo que agrupa cinco etapas y abriera solo una mostraría
+ * una lista más corta que el número en el que se hizo clic.
  *
  * Se carga bajo demanda: la tabla no arrastra el detalle de los 77 casos por si acaso.
  */
@@ -22,9 +27,12 @@ const ROJO = '#B91C1C'
 const OCRE = '#92400E'
 
 export interface CeldaSeleccionada {
-  etapaId: string
-  etapaNombre: string
-  etapaNumero: number
+  /** Las etapas que suma la cifra en la que se hizo clic. Nunca vacío. */
+  etapaIds: string[]
+  /** Encabezado del panel, con las palabras de la pantalla que lo abrió. */
+  titulo: string
+  /** Prefijo "07". Solo cuando la selección es UNA etapa; en un tramo no hay uno solo. */
+  etapaNumero?: number
   /**
    * `undefined` = todas las seccionales. `null` = solo los que no la tienen.
    * Un arreglo abre una columna que agrupa varias (el caso de "Sin cita").
@@ -51,7 +59,7 @@ export function CasosDrawer({
   useEffect(() => {
     let vivo = true
     void getCasosDeEtapa({
-      etapaId: celda.etapaId,
+      etapaIds: celda.etapaIds,
       seccional: celda.seccional,
       soloVencidos: celda.soloVencidos,
       soloReproceso: celda.soloReproceso,
@@ -61,7 +69,10 @@ export function CasosDrawer({
     return () => {
       vivo = false
     }
-  }, [celda.etapaId, celda.seccional, celda.soloVencidos, celda.soloReproceso])
+    // `etapaIds` se compara por contenido: es un arreglo nuevo en cada render del padre
+    // y como dependencia cruda relanzaría la consulta en bucle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [celda.etapaIds.join('|'), celda.seccional, celda.soloVencidos, celda.soloReproceso])
 
   // Escape cierra, como el resto de los paneles del producto.
   useEffect(() => {
@@ -71,6 +82,9 @@ export function CasosDrawer({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Un tramo del grafico agrupa varias etapas; entonces cada fila tiene que decir la suya.
+  const variasEtapas = celda.etapaIds.length > 1
 
   const alcanceSeccional =
     celda.seccional === undefined
@@ -99,10 +113,12 @@ export function CasosDrawer({
           >
             <div className="min-w-0">
               <h2 className="truncate text-sm font-bold" style={{ color: CARBON }}>
-                <span className="tabular-nums" style={{ color: GRIS }}>
-                  {String(celda.etapaNumero).padStart(2, '0')}
-                </span>{' '}
-                {celda.etapaNombre}
+                {celda.etapaNumero !== undefined && (
+                  <span className="tabular-nums" style={{ color: GRIS }}>
+                    {String(celda.etapaNumero).padStart(2, '0')}{' '}
+                  </span>
+                )}
+                {celda.titulo}
               </h2>
               {alcance && (
                 <p className="mt-0.5 text-[11px]" style={{ color: GRIS }}>
@@ -149,7 +165,13 @@ export function CasosDrawer({
                             {c.nombre}
                           </p>
                           <p className="mt-0.5 truncate text-[11px]" style={{ color: GRIS }}>
-                            {[c.seccional ?? 'Sin seccional', c.responsable ?? 'Sin responsable'].join(' · ')}
+                            {[
+                              variasEtapas ? c.etapaNombre : null,
+                              c.seccional ?? 'Sin seccional',
+                              c.responsable ?? 'Sin responsable',
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
                           </p>
                         </div>
                         <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: BORDE }} />

@@ -1018,6 +1018,9 @@ export interface CasoEnEtapa {
   id: string
   codigo: string | null
   nombre: string
+  /** En que etapa esta parado. Solo se pinta cuando la seleccion abarca varias. */
+  etapaNombre: string
+  etapaNumero: number
   seccional: string | null
   responsable: string | null
   horasEnEtapa: number | null
@@ -1028,7 +1031,12 @@ export interface CasoEnEtapa {
 }
 
 export async function getCasosDeEtapa(input: {
-  etapaId: string
+  /**
+   * Las etapas que suma la cifra en la que se hizo clic. Una celda de la tabla trae
+   * UNA; un tramo del grafico de represados trae TODAS las de esa fase, porque el
+   * color de ese tramo agrupa varias etapas de la misma area.
+   */
+  etapaIds: string[]
   /**
    * `undefined` = todas las seccionales. `null` = solo los que no la tienen registrada.
    * Un ARREGLO abre las columnas que agrupan varias: "Sin cita" son las catorce
@@ -1042,19 +1050,21 @@ export async function getCasosDeEtapa(input: {
 }): Promise<CasoEnEtapa[]> {
   const { supabase, workspaceId } = await getWorkspace()
   if (!supabase || !workspaceId) return []
+  if (input.etapaIds.length === 0) return []
 
   const { data: negocios } = await supabase
     .from('negocios')
-    .select('id, codigo, nombre, metadata, etapa_cambiada_at, responsable_id, created_at')
+    .select('id, codigo, nombre, metadata, etapa_actual_id, etapa_cambiada_at, responsable_id, created_at')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
-    .eq('etapa_actual_id', input.etapaId)
+    .in('etapa_actual_id', input.etapaIds)
 
   const filas = (negocios ?? []) as unknown as Array<{
     id: string
     codigo: string | null
     nombre: string | null
     metadata: Record<string, unknown> | null
+    etapa_actual_id: string | null
     etapa_cambiada_at: string | null
     responsable_id: string | null
     created_at: string | null
@@ -1064,12 +1074,24 @@ export async function getCasosDeEtapa(input: {
   // El tiempo máximo y el cálculo de atraso son los MISMOS que usa la tabla: horas
   // hábiles contra el sla de la etapa. Si difirieran, el drill-down mostraría una
   // lista que no cuadra con el número en el que el usuario hizo clic.
-  const { data: etapa } = await supabase
+  //
+  // Cada etapa trae el suyo: un tramo del grafico mezcla etapas con topes distintos, y
+  // aplicarles un solo sla marcaria atrasados que no lo estan (o al reves).
+  const { data: etapasSel } = await supabase
     .from('etapas_negocio')
-    .select('config_extra')
-    .eq('id', input.etapaId)
-    .single()
-  const slaHoras = ((etapa as { config_extra?: { sla_horas?: number } } | null)?.config_extra?.sla_horas) ?? null
+    .select('id, nombre, numero, config_extra')
+    .in('id', input.etapaIds)
+  const infoEtapa = new Map(
+    ((etapasSel ?? []) as Array<{
+      id: string
+      nombre: string | null
+      numero: number | null
+      config_extra?: { sla_horas?: number } | null
+    }>).map(e => [
+      e.id,
+      { nombre: e.nombre ?? '\u2014', numero: e.numero ?? 0, sla: e.config_extra?.sla_horas ?? null },
+    ]),
+  )
 
   const staffIds = Array.from(new Set(filas.map(f => f.responsable_id).filter((v): v is string => !!v)))
   const nombrePorStaff = new Map<string, string>()
@@ -1080,8 +1102,11 @@ export async function getCasosDeEtapa(input: {
     }
   }
 
+  // Cuanto lleva el caso parado aqui. Se pide SIEMPRE, tenga o no sla la etapa: el dato
+  // es cierto igual, y antes una etapa sin tope declarado abria una lista sin tiempos.
+  // Lo que depende del sla es marcarlo atrasado, no medirlo.
   let horasPorNegocio = new Map<string, number>()
-  if (slaHoras && slaHoras > 0) {
+  {
     // Se pide el cálculo a la misma función SQL que alimenta la vista de SLA, en vez de
     // replicarlo en TypeScript: ya hay dos implementaciones del algoritmo y no conviene
     // una tercera.
@@ -1121,11 +1146,15 @@ export async function getCasosDeEtapa(input: {
 
   const casos: CasoEnEtapa[] = filas.map(f => {
     const h = horasPorNegocio.get(f.id) ?? null
+    const info = f.etapa_actual_id ? infoEtapa.get(f.etapa_actual_id) : undefined
+    const sla = info?.sla ?? null
     const marca = f.metadata?.reproceso as { activo?: boolean; tipo?: string } | undefined
     return {
       id: f.id,
       codigo: f.codigo,
       nombre: f.nombre ?? '—',
+      etapaNombre: info?.nombre ?? '—',
+      etapaNumero: info?.numero ?? 0,
       // Canonizada, igual que en la tabla: el filtro de abajo compara contra el nombre
       // de la columna en la que se hizo clic, y ese nombre es el canónico.
       seccional: (() => {
@@ -1134,7 +1163,7 @@ export async function getCasosDeEtapa(input: {
       })(),
       responsable: f.responsable_id ? (nombrePorStaff.get(f.responsable_id) ?? null) : null,
       horasEnEtapa: h,
-      vencido: Boolean(slaHoras && slaHoras > 0 && h !== null && h > slaHoras),
+      vencido: Boolean(sla && sla > 0 && h !== null && h > sla),
       reproceso: marca?.activo === true ? (marca.tipo ?? null) : null,
       diasInactivo: diasDesde(ultimaActividad.get(f.id) ?? f.created_at),
     }
