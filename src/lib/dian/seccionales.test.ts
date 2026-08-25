@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { requiereCitaDian, seccionalDesdeRut, mapCiudadASeccional, SECCIONALES_DIAN } from './seccionales'
+import { requiereCitaDian, seccionalDesdeRut, mapCiudadASeccional, SECCIONALES_DIAN, presetKeySeccional, presetKeySeccionalExacta, resolverSeccionalOficial } from './seccionales'
 
 /**
  * Los textos de entrada son los valores REALES que la extracción del RUT
@@ -112,5 +112,43 @@ describe('catalogo', () => {
       'cali',
       'medellin',
     ])
+  })
+})
+
+
+/**
+ * Las claves reales del preset del 010 de SOENA (`config_extra.seccionales`): solo
+ * las seccionales con particularidades propias, mas el cajon "Otras seccionales".
+ */
+const KEYS_010 = ['Cali', 'Tuluá', 'Bogotá', 'Medellín', 'Bucaramanga', 'Barranquilla', 'Otras seccionales']
+
+describe('preset del 010 vs seccional real (casilla 12)', () => {
+  it('una seccional CON preset propio se reconoce por las dos vias', () => {
+    expect(presetKeySeccionalExacta('Impuestos de Bogotá', KEYS_010)).toBe('Bogotá')
+    expect(presetKeySeccional('Bogota', KEYS_010)).toBe('Bogotá')
+  })
+
+  it('una seccional SIN preset cae al generico solo en la via con fallback', () => {
+    // Es la distincion que faltaba: quien pregunta por el preset recibe el cajon
+    // compartido, pero quien necesita la seccional del solicitante recibe null y
+    // sabe que tiene que mirar la real.
+    expect(presetKeySeccional('Manizales', KEYS_010)).toBe('Otras seccionales')
+    expect(presetKeySeccionalExacta('Manizales', KEYS_010)).toBeNull()
+    expect(presetKeySeccionalExacta('Montería', KEYS_010)).toBeNull()
+    expect(presetKeySeccionalExacta('Ibagué', KEYS_010)).toBeNull()
+  })
+
+  it('la seccional real sigue teniendo nombre oficial y codigo en el catalogo', () => {
+    // Lo que iba a la casilla 12 era el literal "Otras seccionales" y el codigo
+    // vacio, teniendo el catalogo la respuesta para cada una de estas.
+    for (const nombre of ['Manizales', 'Montería', 'Cartagena', 'Ibagué', 'Palmira', 'Tunja']) {
+      const oficial = resolverSeccionalOficial(nombre, null)
+      expect(oficial?.nombre_oficial, nombre).toBeTruthy()
+      expect(oficial?.codigo, nombre).toBeTruthy()
+    }
+  })
+
+  it('"Otras seccionales" NO resuelve a ninguna seccional del catalogo', () => {
+    expect(resolverSeccionalOficial('Otras seccionales', null)).toBeNull()
   })
 })

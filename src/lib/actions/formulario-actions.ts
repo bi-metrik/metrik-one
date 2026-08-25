@@ -16,7 +16,7 @@ import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
-import { resolverSeccionalOficial, presetKeySeccional } from '@/lib/dian/seccionales'
+import { resolverSeccionalOficial, presetKeySeccional, presetKeySeccionalExacta } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { createElement } from 'react'
 
@@ -116,6 +116,10 @@ async function aplicarSeccionalPreset(
   // "Bogota" sin tilde o "Bogotá — Personas naturales" no encontraban el preset de
   // "Bogotá" y el 010 se quedaba sin casilla 12 resuelta, sin avisar. Medido el
   // 2026-08-10 en SOENA: 107 de los negocios abiertos con seccional registrada.
+  // `exacta` = la seccional TIENE preset propio. Si es null, el preset que se aplica
+  // es el genérico "Otras seccionales", que aporta particularidades compartidas pero
+  // NO es una seccional: su `direccion_seccional` no puede terminar en la casilla 12.
+  const exacta = presetKeySeccionalExacta(elegida, keys)
   const seleccion = presetKeySeccional(elegida, keys) ?? elegida
   const preset = seccionales[seleccion]
   if (preset) {
@@ -134,9 +138,19 @@ async function aplicarSeccionalPreset(
     // reemplaza el nombre corto del preset ("Cali") — es lo que exige la DIAN.
     // Fallback: si no hay match en el catálogo (ej. "Otras seccionales"), se usa
     // el `direccion_seccional` del preset tal cual y el código queda editable.
-    const oficial = resolverSeccionalOficial(String(preset.direccion_seccional ?? seleccion), null)
+    // Con preset propio, la casilla 12 se resuelve desde el preset. Con el genérico,
+    // desde la seccional REAL del solicitante (la elegida, o la que trajo el RUT):
+    // el literal "Otras seccionales" estuvo imprimiéndose como si fuera la seccional
+    // desde el #236 (10-ago), en todo caso fuera de las 6 que tienen preset.
+    const baseCasilla12 = exacta
+      ? String(preset.direccion_seccional ?? seleccion)
+      : (elegida || datosFinal.direccion_seccional || '')
+    const oficial = resolverSeccionalOficial(baseCasilla12, null)
     if (!('direccion_seccional' in overrides)) {
-      datosFinal.direccion_seccional = oficial?.nombre_oficial ?? String(preset.direccion_seccional ?? '')
+      // Sin match en el catálogo se conserva lo que traiga el RUT; nunca se degrada
+      // a un genérico, que es lo que la DIAN lee como seccional equivocada.
+      datosFinal.direccion_seccional =
+        oficial?.nombre_oficial ?? (exacta ? String(preset.direccion_seccional ?? '') : (datosFinal.direccion_seccional ?? ''))
     }
     if (!('codigo_seccional' in overrides)) {
       datosFinal.codigo_seccional = oficial?.codigo ?? null
