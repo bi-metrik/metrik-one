@@ -8,6 +8,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
 import { nitSinDv, calcularDvNit } from '@/lib/dian/nit'
+import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { estadoVigencia, type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -462,6 +463,29 @@ function aplicarNormalizaciones(
         if (cr) cr.value = dvCalc
         else resultado[campo.slug] = { value: dvCalc, confidence: 1, manual: false }
       }
+    }
+  }
+  // Pasada 3: divipola_desde_nombres (códigos de ubicación desde los NOMBRES).
+  // Mismo criterio que el DV: el código es función del nombre y el nombre se lee
+  // bien. Se hace UNA vez para los tres códigos porque el municipio solo se puede
+  // resolver dentro de su departamento (hay 67 nombres repetidos en el país).
+  if (campos.some((c) => c.normalizar === 'divipola_desde_nombres')) {
+    const valor = (slug: string) => (resultado[slug]?.value ?? null) as string | null
+    const codes = resolverCodigosUbicacion(
+      valor('pais'), valor('departamento'), valor('municipio'),
+      {
+        codigo_pais: valor('codigo_pais'),
+        codigo_departamento: valor('codigo_departamento'),
+        codigo_municipio: valor('codigo_municipio'),
+      },
+    )
+    for (const campo of campos) {
+      if (campo.normalizar !== 'divipola_desde_nombres') continue
+      const nuevo = codes[campo.slug as keyof typeof codes]
+      if (nuevo == null) continue
+      const cr = resultado[campo.slug]
+      if (cr) { cr.value = nuevo; cr.confidence = 1 }
+      else resultado[campo.slug] = { value: nuevo, confidence: 1, manual: false }
     }
   }
 }

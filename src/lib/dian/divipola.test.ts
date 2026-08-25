@@ -134,3 +134,27 @@ describe('integridad del catálogo generado', () => {
     }
   })
 })
+
+
+describe('el codigo leido del RUT no manda sobre el nombre (V0263, 2026-08-25)', () => {
+  it('descarta el codigo de PAIS metido en el departamento', () => {
+    // Lo que Gemini devolvia leyendo el bloque de expedicion del documento:
+    // departamento "169" (que es Colombia) y municipio "001".
+    const codes = resolverCodigosUbicacion('COLOMBIA', 'Antioquia', 'Rionegro', {
+      codigo_pais: '169', codigo_departamento: '169', codigo_municipio: '001',
+    })
+    expect(codes.codigo_pais).toBe('169')
+    expect(codes.codigo_departamento).toBe('05')
+    expect(codes.codigo_municipio).toBe('615')
+  })
+
+  it('sin nombre que resuelva, el codigo leido se conserva', () => {
+    // No se inventa ubicacion: si el catalogo no reconoce el nombre, lo unico que
+    // hay es lo que leyo la IA, y borrarlo seria peor que dejarlo para revision.
+    const codes = resolverCodigosUbicacion('COLOMBIA', 'Departamento Inexistente', 'Villa Rara', {
+      codigo_departamento: '77', codigo_municipio: '999',
+    })
+    expect(codes.codigo_departamento).toBe('77')
+    expect(codes.codigo_municipio).toBe('999')
+  })
+})

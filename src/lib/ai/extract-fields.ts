@@ -33,8 +33,14 @@ export interface CampoExtraccion {
    *  - `dv_desde_nit`: ignora el DV que leyó la IA y lo RECALCULA por módulo 11
    *    DIAN a partir del NIT base (campo indicado en `normalizar_desde`, o `nit`
    *    por defecto). El DV es una función matemática del NIT, no debe confiarse a
-   *    la lectura (Gemini lo lee inestable en las casillas 5/6 del RUT). */
-  normalizar?: 'nit_sin_dv' | 'dv_desde_nit'
+   *    la lectura (Gemini lo lee inestable en las casillas 5/6 del RUT).
+   *  - `divipola_desde_nombres`: ignora el código leído y lo RESUELVE del catálogo
+   *    DIVIPOLA a partir de los NOMBRES ya extraídos (`pais`, `departamento`,
+   *    `municipio`). El código es función del nombre, y el nombre se lee bien: el
+   *    código no. Caso que lo motivó (V0263, 2026-08-25): el RUT devolvía
+   *    `codigo_departamento = "169"`, que es el código de PAÍS. Si el nombre no
+   *    resuelve en el catálogo se conserva el código leído. */
+  normalizar?: 'nit_sin_dv' | 'dv_desde_nit' | 'divipola_desde_nombres'
   /** Para `dv_desde_nit`: slug del campo que contiene el NIT/cédula base desde el
    *  cual recalcular el DV. Default `nit`. */
   normalizar_desde?: string
