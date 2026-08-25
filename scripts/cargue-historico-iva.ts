@@ -318,7 +318,10 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
     // La seccional se guarda CANONIZADA: el cargue de julio metió el texto del Excel
     // tal cual ("Bogota", "Medellin") y partió en dos cada ciudad del tablero, además
     // de dejar sin preset al 010. Ver `seccional-negocio.ts`.
-    metadata: { id_hubspot: f.id_hubspot, fuente_cargue: FUENTE, seccional: canonizarSeccional(f.seccional) },
+    // Si la hoja no trae seccional (los casos del bloque UPME no la tienen), se lee del
+    // RUT: el renglón 12 ES la dirección seccional, y `canonizarSeccional` ya está hecha
+    // para ese texto. Sigue devolviendo null si no reconoce — nunca se inventa una.
+    metadata: { id_hubspot: f.id_hubspot, fuente_cargue: FUENTE, seccional: canonizarSeccional(f.seccional ?? (rut ? String(val(rut, 'direccion_seccional') ?? '') : null)) },
   }).select('id').single()
   if (nerr) throw new Error(`negocio: ${nerr.message}`)
   const negocioId = (neg as { id: string }).id
