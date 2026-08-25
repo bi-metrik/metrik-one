@@ -17,9 +17,11 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from './get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
+  debeMoverElCaso,
   devolucionHabilitada,
   esMotivoValido,
   leerDevolucion,
+  origenDeCopiaHeredada,
   puedeDevolverBloque,
   LABEL_MOTIVO,
   type MarcaDevolucion,
@@ -51,20 +53,33 @@ type BloqueRow = {
     slug: string | null
     nombre: string | null
     config_extra: Record<string, unknown> | null
-    etapas_negocio: { nombre: string | null; stage: string | null } | null
+    etapas_negocio: {
+      id: string
+      nombre: string | null
+      stage: string | null
+      numero: number | null
+    } | null
   } | null
 }
 
+const SELECT_BLOQUE = `
+  id, negocio_id, estado, data,
+  bloque_configs!inner(slug, nombre, config_extra, etapas_negocio!inner(id, nombre, stage, numero))
+`
+
 /**
- * Marca el bloque como devuelto: lo reabre, deja el motivo visible para quien corrige,
- * asienta el hecho y avisa al área dueña del bloque.
+ * Marca el bloque como devuelto: lo reabre, devuelve el CASO a la etapa del bloque, deja
+ * el motivo visible para quien corrige, asienta el hecho y avisa al área dueña.
  *
- * El caso NO se mueve de etapa. Ver `@/lib/negocios/devolucion` para el porqué.
+ * Recibe el id de la casilla que el usuario tenía en pantalla, que casi nunca es la que
+ * hay que reabrir: operaciones mira la copia heredada en su propia etapa. Lo primero que
+ * se hace es redirigir al ORIGEN. Ver `@/lib/negocios/devolucion` para el porqué de cada
+ * decisión.
  */
 export async function devolverBloque(
   negocioBloqueId: string,
   input: { motivo: MotivoDevolucion; nota?: string },
-): Promise<{ ok: boolean; error?: string; bloqueNombre?: string }> {
+): Promise<{ ok: boolean; error?: string; bloqueNombre?: string; movidoA?: string | null }> {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
 
@@ -75,15 +90,36 @@ export async function devolverBloque(
 
   const { data: bloque } = await db(supabase)
     .from('negocio_bloques')
-    .select(`
-      id, negocio_id, estado, data,
-      bloque_configs!inner(slug, nombre, config_extra, etapas_negocio!inner(nombre, stage))
-    `)
+    .select(SELECT_BLOQUE)
     .eq('id', negocioBloqueId)
     .maybeSingle()
 
-  const b = bloque as BloqueRow | null
+  let b = bloque as BloqueRow | null
   if (!b) return { ok: false, error: 'Bloque no encontrado' }
+
+  // ── Redirigir a la casilla del ORIGEN ─────────────────────────────────
+  // La copia heredada tiene fila propia, pero solo su `data` se intercambia por la del
+  // origen al pintarla: reabrir la copia dejaría pendiente una casilla que nadie mira,
+  // mientras el documento malo sigue marcado como bueno donde de verdad vive. Es el mismo
+  // criterio de `casilla-compartida.resolverDestino`, aplicado a la herencia readonly.
+  const slugOrigen = origenDeCopiaHeredada(b.bloque_configs?.config_extra)
+  if (slugOrigen) {
+    const { data: filas } = await db(supabase)
+      .from('negocio_bloques')
+      .select(SELECT_BLOQUE)
+      .eq('negocio_id', b.negocio_id)
+      .eq('bloque_configs.slug', slugOrigen)
+      .limit(2)
+    const candidatos = (filas ?? []) as BloqueRow[]
+    // Ambiguo o inexistente: NO se elige por cuenta propia ni se cae a la copia local.
+    // Devolver sobre la fila equivocada es peor que no devolver, porque el aviso sale
+    // igual y el documento malo se queda donde está.
+    if (candidatos.length !== 1) {
+      console.error('[devolucion] origen no resoluble:', slugOrigen, negocioBloqueId, candidatos.length)
+      return { ok: false, error: 'No se encontró la casilla original de este documento. Avisa a soporte.' }
+    }
+    b = candidatos[0]
+  }
 
   const cfg = b.bloque_configs
   const bloqueNombre = cfg?.nombre ?? 'Documento'
@@ -162,13 +198,16 @@ export async function devolverBloque(
   // Dónde estaba el CASO al devolver, que no es donde vive el documento. Responde "en qué
   // punto se detecta el error", que es la pregunta con la que se arregla el proceso.
   let etapaAlDevolver: string | null = null
+  let numeroEtapaActual: number | null = null
   if (n.etapa_actual_id) {
     const { data: et } = await db(supabase)
       .from('etapas_negocio')
-      .select('nombre')
+      .select('nombre, numero')
       .eq('id', n.etapa_actual_id)
       .maybeSingle()
-    etapaAlDevolver = (et as { nombre: string | null } | null)?.nombre ?? null
+    const e = et as { nombre: string | null; numero: number | null } | null
+    etapaAlDevolver = e?.nombre ?? null
+    numeroEtapaActual = e?.numero ?? null
   }
 
   // ── El hecho, antes que la marca ──────────────────────────────────────
@@ -232,6 +271,54 @@ export async function devolverBloque(
     return { ok: false, error: 'No se pudo devolver el documento. Intenta de nuevo.' }
   }
 
+  // ── Devolver el CASO a la etapa del bloque ────────────────────────────
+  // Reabrir la casilla sola no resolvía el dolor: el caso seguía en la bandeja de
+  // operaciones, así que perseguir al cliente seguía siendo trabajo de operaciones. El
+  // destino NO se enumera en código — es la etapa donde vive el bloque que se devolvió,
+  // que en los tres habilitados hoy es de venta y por eso el caso vuelve al comercial.
+  //
+  // ⚠️ Se compara por `numero`, nunca por `orden`: ver `debeMoverElCaso`.
+  //
+  // Va DESPUÉS de reabrir la casilla y no antes. Al revés, un fallo al marcar el bloque
+  // dejaría el caso movido a una etapa cuyo gate ya está satisfecho: el comercial lo
+  // recibe sin nada que corregir y lo empuja de vuelta.
+  //
+  // Si la etapa no se puede mover, la devolución NO se revierte. La casilla reabierta y
+  // el aviso ya hacen el trabajo principal, y deshacerlas por esto dejaría al operador
+  // sin ninguna de las dos. Se registra el fallo y se sigue.
+  let movidoA: string | null = null
+  const etapaOrigen = cfg?.etapas_negocio ?? null
+  if (etapaOrigen && debeMoverElCaso(numeroEtapaActual, etapaOrigen.numero)) {
+    const { error: errMover } = await db(supabase)
+      .from('negocios')
+      .update({
+        etapa_actual_id: etapaOrigen.id,
+        stage_actual: etapaOrigen.stage,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', b.negocio_id)
+      .eq('workspace_id', workspaceId)
+
+    if (errMover) {
+      console.error('[devolucion] no se pudo mover el caso:', errMover)
+    } else {
+      movidoA = etapaOrigen.nombre
+      if (staffId) {
+        await db(supabase).from('activity_log').insert({
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: b.negocio_id,
+          tipo: 'cambio_etapa',
+          autor_id: staffId,
+          campo_modificado: 'etapa_actual_id',
+          valor_anterior: etapaAlDevolver,
+          valor_nuevo: etapaOrigen.nombre,
+          contenido: `Volvió a ${etapaOrigen.nombre ?? 'la etapa de origen'} por devolución de "${bloqueNombre}".`.slice(0, 280),
+        })
+      }
+    }
+  }
+
   // ── Traza en el timeline del negocio ──────────────────────────────────
   // ⚠️ `tipo` DEBE existir en el CHECK de `activity_log` (comentario, cambio, sistema,
   // cambio_etapa, cambio_estado, solicitud_conciliacion, conciliacion_atendida). Un tipo
@@ -247,7 +334,7 @@ export async function devolverBloque(
       campo_modificado: 'devolucion_bloque',
       valor_anterior: bloqueNombre,
       valor_nuevo: input.motivo,
-      contenido: `Devolvió "${bloqueNombre}": ${LABEL_MOTIVO[input.motivo]}.${nota ? ` ${nota}` : ''}`.slice(0, 280),
+      contenido: `Devolvió "${bloqueNombre}": ${LABEL_MOTIVO[input.motivo]}.${movidoA ? ` El caso volvió a ${movidoA}.` : ''}${nota ? ` ${nota}` : ''}`.slice(0, 280),
     })
     if (errLog) console.error('[devolucion] no se pudo escribir la traza:', errLog)
   }
@@ -305,5 +392,5 @@ export async function devolverBloque(
 
   revalidatePath(`/negocios/${b.negocio_id}`)
   revalidatePath('/negocios')
-  return { ok: true, bloqueNombre }
+  return { ok: true, bloqueNombre, movidoA }
 }

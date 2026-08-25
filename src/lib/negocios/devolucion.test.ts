@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
+  debeMoverElCaso,
   devolucionHabilitada,
   esMotivoValido,
   leerDevolucion,
   limpiarDevolucion,
+  origenDeCopiaHeredada,
   puedeDevolverBloque,
   LABEL_MOTIVO,
   MOTIVOS_DEVOLUCION,
@@ -152,5 +154,60 @@ describe('puedeDevolverBloque', () => {
   it('sin rol resuelto manda el ser responsable', () => {
     expect(puedeDevolverBloque(null, true)).toBe(true)
     expect(puedeDevolverBloque(undefined, undefined)).toBe(false)
+  })
+})
+
+describe('origenDeCopiaHeredada', () => {
+  it('devuelve el slug del original cuando la copia es readonly', () => {
+    expect(origenDeCopiaHeredada({
+      readonly: true,
+      heredado: true,
+      source_bloque_slug: 'certificado_bancario',
+      source_etapa_orden: 18,
+    })).toBe('certificado_bancario')
+  })
+
+  it('el bloque original no tiene origen: se devuelve sobre si mismo', () => {
+    expect(origenDeCopiaHeredada({ devolucion_habilitada: true })).toBeNull()
+  })
+
+  it('readonly sin slug no dice a donde redirigir, y no se adivina', () => {
+    expect(origenDeCopiaHeredada({ readonly: true, source_etapa_orden: 18 })).toBeNull()
+    expect(origenDeCopiaHeredada({ readonly: true, source_bloque_slug: '' })).toBeNull()
+  })
+
+  it('un slug sin readonly tampoco alcanza', () => {
+    expect(origenDeCopiaHeredada({ source_bloque_slug: 'certificado_bancario' })).toBeNull()
+  })
+
+  it('tolera config vacia', () => {
+    expect(origenDeCopiaHeredada(null)).toBeNull()
+    expect(origenDeCopiaHeredada(undefined)).toBeNull()
+  })
+})
+
+describe('debeMoverElCaso', () => {
+  // El caso real: Generacion (numero 16) devuelve el certificado bancario, que vive en
+  // Anexos (numero 15). Por `orden` seria 13 contra 18 y no se moveria nada.
+  it('desde Generacion hacia Anexos: mueve', () => {
+    expect(debeMoverElCaso(16, 15)).toBe(true)
+  })
+
+  it('desde Seguimiento hacia Anexos: mueve', () => {
+    expect(debeMoverElCaso(18, 15)).toBe(true)
+  })
+
+  it('ya esta en la etapa del origen: no mueve, solo reabre', () => {
+    expect(debeMoverElCaso(15, 15)).toBe(false)
+  })
+
+  it('el caso va mas atras que el origen: no se empuja hacia adelante', () => {
+    expect(debeMoverElCaso(5, 15)).toBe(false)
+  })
+
+  it('sin numero resuelto no se mueve nada', () => {
+    expect(debeMoverElCaso(null, 15)).toBe(false)
+    expect(debeMoverElCaso(16, null)).toBe(false)
+    expect(debeMoverElCaso(undefined, undefined)).toBe(false)
   })
 })

@@ -567,7 +567,13 @@ export default function BloqueDocumento({
     setDialogoDevolucion(false)
     setMotivoDevolucion('')
     setNotaDevolucion('')
-    toast.success(`"${res.bloqueNombre}" quedo devuelto para correccion`)
+    // Decir a donde volvio el caso, no solo que se devolvio el documento: quien devuelve
+    // esta soltando el caso, y tiene que saber que dejo de ser suyo.
+    toast.success(
+      res.movidoA
+        ? `"${res.bloqueNombre}" quedo devuelto. El caso volvio a ${res.movidoA}.`
+        : `"${res.bloqueNombre}" quedo devuelto para correccion`,
+    )
     router.refresh()
   }
 
@@ -799,11 +805,41 @@ export default function BloqueDocumento({
                 <Download className="h-3 w-3" />
                 Descargar
               </a>
+              {/* ⚠️ Devolver TIENE que existir en modo visible, y es la razón por la que
+                  `devolucion_eventos` estuvo en cero desde que se construyó. Quien detecta
+                  el documento malo es operaciones, y operaciones ve este bloque SIEMPRE de
+                  solo lectura: la copia heredada se pinta visible por `readonly`, y el
+                  original de comercial se pinta visible por `_areaReadonly`. El botón solo
+                  vivía en el modo editable, así que la única persona que podía verlo era la
+                  misma que había cargado mal el archivo. El servidor nunca tuvo ese límite
+                  (ver `puedeDevolverBloque`): el corte era de pantalla. */}
+              {puedeDevolver && !marcaDevolucion && (
+                <button
+                  type="button"
+                  onClick={() => setDialogoDevolucion(true)}
+                  title="Devolver a quien lo cargo para que lo corrija"
+                  className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-50"
+                >
+                  <Undo2 className="h-3 w-3" />
+                  Devolver
+                </button>
+              )}
             </div>
           ) : (
             <span className="ml-auto text-[11px] text-muted-foreground italic">Sin archivo</span>
           )}
         </div>
+
+        <DialogoDevolucion
+          abierto={dialogoDevolucion}
+          motivo={motivoDevolucion}
+          nota={notaDevolucion}
+          enviando={devolviendo}
+          onMotivo={setMotivoDevolucion}
+          onNota={setNotaDevolucion}
+          onCerrar={() => setDialogoDevolucion(false)}
+          onConfirmar={handleDevolver}
+        />
         {/* La causa se elige antes de habilitar la edición, igual que en los bloques de
             datos: el servidor la exige cuando el bloque es de una etapa ya superada. */}
         {corregirGerencial && puedeCorregirVisible && !causaDoc && (

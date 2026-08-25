@@ -10,9 +10,16 @@
  *
  * ── Tres decisiones de diseño ───────────────────────────────────────────────────────
  *
- * 1. **Se devuelve el BLOQUE, no la etapa.** Mover el caso hacia atrás borra el avance de
- *    operaciones, y ese costo es justo lo que empuja al equipo al atajo por fuera. Aquí el
- *    caso se queda donde está; lo único que se reabre es la casilla mal diligenciada.
+ * 1. **Se devuelve el BLOQUE, y con él vuelve el CASO a manos de quien lo cargó.** La
+ *    primera versión dejaba el caso quieto en operaciones para no borrarle el avance. En
+ *    la práctica eso no resolvía el dolor: el documento quedaba pendiente pero el caso
+ *    seguía apareciendo en la bandeja de operaciones, así que el trabajo de perseguir al
+ *    cliente seguía siendo de operaciones. El caso vuelve a la etapa donde vive el bloque
+ *    ORIGINAL, que en los tres bloques habilitados hoy es una etapa de venta.
+ *
+ *    El avance NO se borra: los bloques ya diligenciados de las etapas de ejecución se
+ *    quedan como están, y el caso los vuelve a encontrar completos al avanzar. Devolver
+ *    mueve el dueño, no la memoria.
  *
  * 2. **Esto NO es un reproceso** (`reproceso-actions.ts`). Un reproceso existe porque un
  *    TERCERO rechazó el trabajo (la UPME emite un certificado malo, la DIAN devuelve la
@@ -145,4 +152,48 @@ export function puedeDevolverBloque(
 ): boolean {
   if (role === 'owner' || role === 'admin' || role === 'supervisor') return true
   return esResponsable === true
+}
+
+/**
+ * Slug del bloque ORIGINAL cuando esta config es una copia heredada de solo lectura.
+ *
+ * ⚠️ La copia heredada tiene fila propia en `negocio_bloques`, pero solo su `data` se
+ * intercambia por la del origen al pintarla. Devolver sobre la fila de la copia reabriría
+ * una casilla que nadie mira: quien corrige sube el documento en la etapa del origen. Por
+ * eso la devolución se redirige al origen antes de tocar nada, igual que
+ * `casilla-compartida` redirige la escritura.
+ *
+ * Exige las dos mitades (`readonly` Y el slug) por la misma razón que `origenCompartido`:
+ * un flag sin slug no dice a dónde redirigir, y adivinar el destino de una devolución la
+ * dejaría cayendo en la casilla equivocada sin que nadie se entere.
+ */
+export function origenDeCopiaHeredada(
+  configExtra: Record<string, unknown> | null | undefined,
+): string | null {
+  const ce = configExtra ?? {}
+  if (ce.readonly !== true) return null
+  const slug = ce.source_bloque_slug
+  return typeof slug === 'string' && slug.length > 0 ? slug : null
+}
+
+/**
+ * ¿Hay que mover el caso hacia atrás, o ya está en la etapa del origen (o antes)?
+ *
+ * ⚠️ Se compara por `etapas_negocio.numero`, NUNCA por `orden`. En SOENA VE las dos
+ * columnas divergen: Anexos es `numero` 15 pero `orden` 18, y Generación es `numero` 16
+ * pero `orden` 13. Comparar por `orden` diría que Generación va ANTES de Anexos y la
+ * devolución desde Generación no movería nada — que es justo el caso que existe para
+ * resolver. `numero` es la secuencia que el equipo ve en pantalla y la única que ordena
+ * el flujo real.
+ *
+ * Si el caso ya está en la etapa del origen o más atrás, no se mueve: solo se reabre la
+ * casilla. Empujarlo hacia adelante para "llevarlo al origen" sería avanzar un caso por
+ * una corrección, que es lo contrario de lo que se pidió.
+ */
+export function debeMoverElCaso(
+  numeroEtapaActual: number | null | undefined,
+  numeroEtapaOrigen: number | null | undefined,
+): boolean {
+  if (typeof numeroEtapaActual !== 'number' || typeof numeroEtapaOrigen !== 'number') return false
+  return numeroEtapaActual > numeroEtapaOrigen
 }
