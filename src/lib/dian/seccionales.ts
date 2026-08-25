@@ -145,6 +145,84 @@ function normalize(s: string): string {
 }
 
 /**
+ * Prefijos con los que la DIAN nombra una seccional. El RUT escribe la casilla 12 como
+ * "<prefijo> <Ciudad>" y el prefijo varía ("Impuestos de Cali", "Impuestos y Aduanas de
+ * Bucaramanga", el nombre oficial completo, o la ciudad sola).
+ *
+ * Están normalizados y ordenados del más largo al más corto: "impuestos y aduanas de"
+ * tiene que intentarse ANTES que "impuestos", o el primero nunca se alcanzaría.
+ */
+const PREFIJOS_DIAN = [
+  'direccion seccional de impuestos y aduanas de',
+  'direccion seccional de impuestos y aduanas',
+  'direccion seccional de impuestos de',
+  'direccion seccional de aduanas de',
+  'direccion seccional de',
+  'direccion operativa de',
+  'seccional de impuestos y aduanas de',
+  'seccional de impuestos de',
+  'seccional de',
+  'impuestos y aduanas de',
+  'impuestos y aduanas',
+  'impuestos de',
+  'aduanas de',
+  'seccional',
+].sort((a, b) => b.length - a.length)
+
+/**
+ * Reduce un texto de seccional a su NÚCLEO: le quita el prefijo con que la DIAN la
+ * nombra y el sufijo "D.C." de Bogotá, para poder comparar por IGUALDAD en vez de por
+ * subcadena.
+ *
+ * ⚠️ Por qué no basta `includes`: la comparación por subcadena aceptaba cualquier texto
+ * que CONTUVIERA el nombre de una ciudad. Medido en SOENA el 2026-08-25,
+ * "Cámara de Comercio de Medellín para Antioquia" —que es una cámara de comercio, no una
+ * seccional— entraba como Medellín, y de ese dato cuelgan la casilla 12 del Formato 010,
+ * el buzón de la Guía de Devolución y el corte con/sin cita del tablero. Quitar el
+ * prefijo y exigir igualdad conserva TODAS las formas reales del RUT y deja fuera las
+ * que solo mencionan una ciudad de paso.
+ */
+function nucleoSeccional(texto: string): string {
+  let n = normalize(texto).replace(/[.,;:]+$/g, '').trim()
+  for (const pref of PREFIJOS_DIAN) {
+    if (n === pref) return ''
+    if (n.startsWith(pref + ' ')) { n = n.slice(pref.length).trim(); break }
+  }
+  // "Bogotá D.C." y sus variantes de puntuación.
+  n = n.replace(/[,\s]+d\.?\s?c\.?$/i, '').trim()
+  return n
+}
+
+/** Las formas por las que una seccional se deja reconocer, ya normalizadas. */
+function clavesDe(s: SeccionalDIAN): string[] {
+  const claves = [
+    normalize(s.label),
+    nucleoSeccional(s.nombre_oficial),
+    normalize(labelCanonicoSeccional(s)),
+    // El slug es la identidad del catálogo y hay superficies que lo guardan tal cual
+    // (el bloque "Preparar correo al cliente" escribe `data.seccional = 'bogota-naturales'`).
+    // Aceptarlo es una igualdad exacta, no una coincidencia difusa.
+    normalize(s.slug),
+  ]
+  if (s.ciudad) claves.push(normalize(s.ciudad))
+  return claves.filter(Boolean)
+}
+
+/**
+ * Resuelve un texto de seccional a la entrada del catálogo, por IGUALDAD del núcleo.
+ * Es el único punto donde se decide si un texto ES una seccional; `seccionalDesdeRut`,
+ * `resolverSeccionalOficial` y `nombreOficialSeccional` cuelgan de aquí para que no
+ * puedan dar veredictos distintos sobre el mismo texto.
+ */
+function buscarSeccionalExacta(input: string | null | undefined): SeccionalDIAN | null {
+  if (!input) return null
+  const nucleo = nucleoSeccional(input)
+  if (!nucleo) return null
+  return SECCIONALES_DIAN.find(s => clavesDe(s).includes(nucleo)) ?? null
+}
+
+
+/**
  * Mapea ciudad de factura (ej. "Bogotá", "Medellin", "BARRANQUILLA") al slug
  * de seccional DIAN correspondiente.
  *
@@ -276,36 +354,8 @@ export function resolverSeccionalOficial(
   input: string | null | undefined,
   tipo_persona?: string | null,
 ): { nombre_oficial: string; codigo: string } | null {
-  if (!input) return null
-  const n = normalize(input)
-  if (!n) return null
-
-  // Bogotá: elegir el buzón por tipo_persona (código/nombre son iguales igual).
-  if (n.includes('bogota')) {
-    const tp = normalize(tipo_persona ?? '')
-    const slug = tp.includes('juridic') ? 'bogota-juridicas' : 'bogota-naturales'
-    const s = SECCIONALES_DIAN.find(x => x.slug === slug)
-    return s ? { nombre_oficial: s.nombre_oficial, codigo: s.codigo } : null
-  }
-
-  // 1) match por nombre oficial (contenido en cualquier dirección)
-  const porNombre = SECCIONALES_DIAN.find(s => {
-    const no = normalize(s.nombre_oficial)
-    return no === n || no.includes(n) || n.includes(no)
-  })
-  if (porNombre) return { nombre_oficial: porNombre.nombre_oficial, codigo: porNombre.codigo }
-
-  // 2) match por ciudad (el preset SOENA guarda la ciudad: "Cali", "Tuluá"…)
-  const porCiudad = SECCIONALES_DIAN.find(
-    s => s.ciudad && (normalize(s.ciudad) === n || n.includes(normalize(s.ciudad))),
-  )
-  if (porCiudad) return { nombre_oficial: porCiudad.nombre_oficial, codigo: porCiudad.codigo }
-
-  // 3) match por label (ej. "Bucaramanga")
-  const porLabel = SECCIONALES_DIAN.find(s => normalize(s.label) === n)
-  if (porLabel) return { nombre_oficial: porLabel.nombre_oficial, codigo: porLabel.codigo }
-
-  return null
+  const s = seccionalDesdeRut(input, tipo_persona)
+  return s ? { nombre_oficial: s.nombre_oficial, codigo: s.codigo } : null
 }
 
 /**
@@ -316,19 +366,10 @@ export function resolverSeccionalOficial(
  */
 export function nombreOficialSeccional(input: string | null | undefined): string | null {
   if (!input) return null
-  const n = normalize(input)
-  if (!n) return null
-  // 1) match por nombre oficial contenido (o que contenga al input)
-  const porNombre = SECCIONALES_DIAN.find(s => {
-    const no = normalize(s.nombre_oficial)
-    return no === n || no.includes(n) || n.includes(no)
-  })
-  if (porNombre) return porNombre.nombre_oficial
-  // 2) match por ciudad (el RUT suele traer solo la ciudad de la seccional)
-  const porCiudad = SECCIONALES_DIAN.find(s => s.ciudad && (normalize(s.ciudad) === n || n.includes(normalize(s.ciudad))))
-  if (porCiudad) return porCiudad.nombre_oficial
-  // 3) sin match: devolver el original tal cual (operador puede corregir)
-  return input
+  if (!normalize(input)) return null
+  // Sin match se devuelve el texto original, no un genérico: el operador lo corrige en
+  // la casilla, y suponer una seccional sería inventar un dato que viaja a la DIAN.
+  return buscarSeccionalExacta(input)?.nombre_oficial ?? input
 }
 
 /**
@@ -343,29 +384,15 @@ export function seccionalDesdeRut(
   input: string | null | undefined,
   tipo_persona?: string | null,
 ): SeccionalDIAN | null {
-  if (!input) return null
-  const n = normalize(input)
-  if (!n) return null
-
+  const s = buscarSeccionalExacta(input)
+  if (!s) return null
   // Bogotá: dos buzones con el mismo código; tipo_persona elige cuál.
-  if (n.includes('bogota')) {
+  if (s.ciudad === 'bogota') {
     const tp = normalize(tipo_persona ?? '')
     const slug = tp.includes('juridic') ? 'bogota-juridicas' : 'bogota-naturales'
-    return SECCIONALES_DIAN.find(s => s.slug === slug) ?? null
+    return SECCIONALES_DIAN.find(x => x.slug === slug) ?? s
   }
-
-  const porNombre = SECCIONALES_DIAN.find(s => {
-    const no = normalize(s.nombre_oficial)
-    return no === n || no.includes(n) || n.includes(no)
-  })
-  if (porNombre) return porNombre
-
-  const porCiudad = SECCIONALES_DIAN.find(
-    s => s.ciudad && (normalize(s.ciudad) === n || n.includes(normalize(s.ciudad))),
-  )
-  if (porCiudad) return porCiudad
-
-  return SECCIONALES_DIAN.find(s => normalize(s.label) === n) ?? null
+  return s
 }
 
 export type ResolucionCitaDian = {
