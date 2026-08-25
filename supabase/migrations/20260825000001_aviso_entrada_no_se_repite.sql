@@ -157,3 +157,9 @@ where e.linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8'
   and e.nombre = 'Anexos'
   and e.config_extra ? 'avisar_al_entrar'
   and e.config_extra ? 'avisar_al_cliente';
+
+-- Funcion de trigger: la invoca el motor al hacer UPDATE sobre `negocios`, nunca un
+-- cliente. `create or replace` la vuelve a dejar ejecutable por PUBLIC, y por ahi la
+-- alcanza `anon`. Es `security definer`, asi que una llamada suelta correria con los
+-- permisos del dueño.
+revoke execute on function public.avisar_entrada_etapa() from public, anon;
