@@ -228,7 +228,24 @@ export function presetKeySeccional(
   keys: string[],
 ): string | null {
   if (keys.length === 0) return null
-  const otras = keys.find(k => normalize(k) === 'otras seccionales') ?? null
+  return presetKeySeccionalExacta(input, keys) ?? keys.find(k => normalize(k) === 'otras seccionales') ?? null
+}
+
+/**
+ * Igual que `presetKeySeccional` pero SIN caer a "Otras seccionales": devuelve null
+ * cuando la seccional no tiene preset propio.
+ *
+ * La distinción importa y costó documentos mal emitidos: "Otras seccionales" es el
+ * cajón de las particularidades compartidas, NO una seccional. Quien necesite el
+ * nombre de la seccional del solicitante (la casilla 12 del 010) tiene que saber si
+ * el preset que le respondieron es el suyo o el genérico — si no, imprime el texto
+ * "Otras seccionales" donde va "Dirección Seccional de Impuestos de Manizales".
+ */
+export function presetKeySeccionalExacta(
+  input: string | null | undefined,
+  keys: string[],
+): string | null {
+  if (keys.length === 0) return null
   const canonico = canonizarSeccional(input)
   // Se busca por el canónico y también por el texto crudo: una clave del preset puede
   // no existir en el catálogo (configuración libre del workspace) y aun así ser válida.
@@ -238,7 +255,7 @@ export function presetKeySeccional(
     const hit = keys.find(k => normalize(k) === n)
     if (hit) return hit
   }
-  return otras
+  return null
 }
 
 /**
