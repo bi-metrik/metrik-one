@@ -31,6 +31,21 @@ type EsquemaSinGenerar = any; // eslint-disable-line @typescript-eslint/no-expli
 
 type Supabase = SupabaseClient<EsquemaSinGenerar>;
 
+/**
+ * El aviso al cliente, tal como lo declara la etapa en `config_extra`.
+ *
+ * `link_bloque_slug` dice de QUE bloque sale el `{link}` del copy. Es opt-in y no tiene
+ * default a proposito: sin el, un copy que promete un documento se omite en vez de
+ * mandar el que la base devuelva primero.
+ */
+type AvisoCliente = {
+  email?: boolean;
+  whatsapp?: boolean;
+  titulo?: string;
+  mensaje?: string;
+  link_bloque_slug?: string;
+};
+
 /** Las columnas del negocio que leen los avisos al cliente. */
 type Negocio = {
   id: string;
@@ -92,9 +107,7 @@ Deno.serve(async (req: Request) => {
   // 20260813000001). Ausente = encendido, que es como se comportó siempre.
   const aviso = avisoRaw?.activo === false ? undefined : avisoRaw;
 
-  const avisoCliente = cfgEtapa?.avisar_al_cliente as
-    | { email?: boolean; whatsapp?: boolean; titulo?: string; mensaje?: string }
-    | undefined;
+  const avisoCliente = cfgEtapa?.avisar_al_cliente as AvisoCliente | undefined;
 
   // Dos destinos independientes, y el del cliente tiene dos canales que también son
   // independientes: se puede querer WhatsApp sin correo. Si nadie pide nada no hay
@@ -241,10 +254,31 @@ Deno.serve(async (req: Request) => {
 
 // ── Datos que el copy puede citar ────────────────────────────────────────────
 // La fecha de la cita y el enlace al documento no viven en columnas de `negocios`:
-// viven en bloques. La cita en `fecha_cita_dian` (etapa Cita, pero el aviso sale
-// dos etapas despues) y el documento en el bloque de la etapa que lo pide, que en
-// SOENA es el Certificado UPME en Entrega. Se leen aqui porque el copy es lo unico
-// que sabe si los necesita.
+// viven en bloques. Se leen aqui porque el copy es lo unico que sabe si los necesita.
+//
+// Los dos se resuelven por el SLUG del bloque, que es la identidad estable de la
+// linea (ver la convencion de referencias por slug en CLAUDE.md). La cita por el
+// slug fijo `fecha_cita_dian`; el enlace por el slug que DECLARA la etapa en
+// `avisar_al_cliente.link_bloque_slug`.
+//
+// ⚠️ Antes el enlace se buscaba recorriendo los bloques de la etapa actual y
+// quedandose con el ultimo que tuviera `drive_url`. Sin `order by` y sin filtrar por
+// slug, con dos documentos en la misma etapa el que ganaba lo decidia el orden en que
+// la base devolvia las filas. Medido: 10 etapas de la base tienen mas de un bloque con
+// `drive_url` — en Entrega de SOENA son el Certificado UPME y la Factura emitida, y
+// 16 de los 58 casos que pasaron por ahi tenian archivo en LOS DOS. El copy promete el
+// certificado y el cliente podia recibir la factura. Un enlace equivocado a un tercero
+// no se puede deshacer, asi que el bloque se DECLARA y, si no esta declarado, el aviso
+// se omite en vez de adivinar.
+//
+// El slug declarado es el del bloque ORIGEN, no el de la copia heredada de la etapa
+// donde sale el aviso: las copias readonly nacen con `slug` NULL (apuntan a su origen)
+// y, ademas, `getNegocioDetalle` le hace swap a su `data` por la del origen antes de
+// pintarlas. O sea que lo que el operador ve en pantalla es el archivo del origen; leer
+// la copia mandaria un archivo que la plataforma no muestra en ninguna parte. Medido en
+// SOENA: en 11 de 42 casos la copia de Entrega tiene guardado un `drive_url` distinto
+// del origen — data vieja de la ruta que llego a escribir en copias readonly, la misma
+// que CLAUDE.md documenta.
 //
 // El enlace es el `drive_url` que ya quedo publico-por-enlace al subirlo. FunnelChat
 // no puede mandar el archivo — su paso de Documento exige subir un PDF fijo, igual
@@ -278,28 +312,41 @@ function formatearCita(valor: string): string | null {
 
 type DatosCopy = { fecha_cita: string | null; link: string | null };
 
+const SLUG_CITA = 'fecha_cita_dian';
+
+/**
+ * @param linkSlug slug del bloque ORIGEN cuyo `drive_url` es el `{link}` del copy, tal
+ *   como lo declara la etapa. `null` si no lo declaro: entonces no hay enlace y el aviso
+ *   se omite antes que mandar el documento de otro tramite.
+ */
 async function datosDelCopy(
-  // deno-lint-ignore no-explicit-any
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
+  supabase: Supabase,
   negocioId: string,
-  etapaId: string | null,
+  linkSlug: string | null,
 ): Promise<DatosCopy> {
+  // Se piden los slugs concretos en vez de traer todos los bloques del negocio: Postgres
+  // descomprime el jsonb `data` completo en cada fila, y por eso este mismo campo ya
+  // costo una consulta de 22 MB en la lista de negocios (CLAUDE.md, PR #124).
+  const slugs = [SLUG_CITA, ...(linkSlug ? [linkSlug] : [])];
+
   const { data: filas } = await supabase
     .from('negocio_bloques')
-    .select('data, bloque_configs!inner(slug, etapa_id)')
-    .eq('negocio_id', negocioId);
+    .select('data, bloque_configs!inner(slug)')
+    .eq('negocio_id', negocioId)
+    .in('bloque_configs.slug', slugs);
 
   const out: DatosCopy = { fecha_cita: null, link: null };
   for (const fila of filas ?? []) {
-    const cfg = fila?.bloque_configs as { slug?: string; etapa_id?: string } | null;
+    const slug = (fila?.bloque_configs as { slug?: string } | null)?.slug;
     const data = (fila?.data ?? {}) as Record<string, unknown>;
+
     const cita = data.fecha_cita_dian;
-    if (cfg?.slug === 'fecha_cita_dian' && typeof cita === 'string') {
+    if (slug === SLUG_CITA && typeof cita === 'string') {
       out.fecha_cita = formatearCita(cita);
     }
+
     const url = data.drive_url;
-    if (etapaId && cfg?.etapa_id === etapaId && typeof url === 'string' && url) {
+    if (linkSlug && slug === linkSlug && typeof url === 'string' && url) {
       out.link = url;
     }
   }
@@ -348,7 +395,7 @@ async function enviarAlCliente(
   resendKey: string,
   negocio: Negocio,
   etapaNombre: string,
-  cfg: { titulo?: string; mensaje?: string },
+  cfg: AvisoCliente,
 ): Promise<{ enviadoA: string | null; omitidoPor: string | null; respondeA?: string | null }> {
   const { data: email } = await supabase.rpc('email_cliente_negocio', { p_negocio_id: negocio.id });
   if (!email || typeof email !== 'string') {
@@ -386,7 +433,7 @@ async function enviarAlCliente(
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
-  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, negocio.etapa_actual_id ?? null));
+  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, cfg.link_bloque_slug ?? null));
   if (resuelto.falta) {
     console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
     return { enviadoA: null, omitidoPor: `sin_${resuelto.falta}` };
@@ -453,7 +500,7 @@ async function enviarWhatsAppAlCliente(
   supabase: Supabase,
   negocio: Negocio,
   etapaNombre: string,
-  cfg: { titulo?: string; mensaje?: string },
+  cfg: AvisoCliente,
 ): Promise<{ disparadoA: string | null; omitidoPor: string | null }> {
   const { data: ws } = await supabase
     .from('workspaces')
@@ -500,7 +547,7 @@ async function enviarWhatsAppAlCliente(
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
-  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, negocio.etapa_actual_id ?? null));
+  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, cfg.link_bloque_slug ?? null));
   if (resuelto.falta) {
     // El dato que el copy prometia no existe. Se omite y se dice cual: mandarlo a
     // medias deja al cliente peor que no mandarlo, y en el log parece un exito.
