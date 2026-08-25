@@ -632,6 +632,8 @@ export interface CasillaEditable {
   es_constante: boolean
   faltante: boolean
   editado: boolean
+  /** Determinista: la calcula el sistema y NO se edita (casilla 20 = NIT 31). */
+  fijo?: boolean
 }
 
 export interface FormularioVersionItem {
@@ -713,6 +715,10 @@ export async function resolverFormularioParaEdicion(
   // generará (misma lógica que la generación real).
   aplicarDeterministas(template, datosEd, overrides)
   valorBase.dv = datosEd.dv ?? valorBase.dv
+  // Sin esta linea la casilla 20 se ve VACIA aunque el PDF estampe 31: no tiene
+  // campos_fuente ni constante, asi que su unico valor viene del determinista.
+  // Una casilla vacia en pantalla es justo lo que invita a llenarla a mano.
+  valorBase.tipo_documento = datosEd.tipo_documento ?? valorBase.tipo_documento
   valorBase.codigo_pais = datosEd.codigo_pais ?? valorBase.codigo_pais
   valorBase.codigo_departamento = datosEd.codigo_departamento ?? valorBase.codigo_departamento
   valorBase.codigo_municipio = datosEd.codigo_municipio ?? valorBase.codigo_municipio
@@ -733,7 +739,11 @@ export async function resolverFormularioParaEdicion(
     // Un override vacío de 'dv' NO se muestra en blanco: el DV es determinista y la
     // generación lo recalcula, así que la UI debe reflejar el calculado (evita el
     // drift display⟺generación). Mismo criterio que aplicarDeterministas.
-    const editado = Object.prototype.hasOwnProperty.call(overrides, slug)
+    // La casilla 20 es determinista: un override viejo NO se muestra ni se marca
+    // como editado, o la pantalla diria "13" mientras el PDF estampa "31".
+    const fijo = slug === 'tipo_documento' && (template === 'formulario-010' || template === 'formulario-1668')
+    const editado = !fijo
+      && Object.prototype.hasOwnProperty.call(overrides, slug)
       && !(slug === 'dv' && (rawOverride ?? '').trim() === '')
     const value = editado ? (rawOverride ?? '') : (valorBase[slug] ?? '')
     return {
@@ -745,6 +755,7 @@ export async function resolverFormularioParaEdicion(
       es_constante: esConstante[slug],
       faltante: !esConstante[slug] && !value && faltantes.includes(slug),
       editado,
+      fijo,
     }
   })
 

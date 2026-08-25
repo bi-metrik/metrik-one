@@ -225,14 +225,19 @@ export default function BloqueFormulario({
                     {c.casilla && <span className="rounded bg-muted px-1 font-mono">{c.casilla}</span>}
                     {c.label}
                     {c.editado && <span className="text-[9px] font-normal text-primary">editado</span>}
+                    {c.fijo && <span className="text-[9px] font-normal text-muted-foreground">fijo</span>}
                   </span>
                   <input
                     type="text"
                     value={valores[c.slug] ?? ''}
                     onChange={(e) => handleChange(c.slug, e.target.value)}
                     onBlur={() => void flushOverrides()}
+                    readOnly={c.fijo}
+                    title={c.fijo ? 'Lo fija el sistema: el solicitante se identifica con NIT (31)' : undefined}
                     className={`w-full rounded-md border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/15 ${
-                      c.faltante && !valores[c.slug] ? 'border-amber-400 bg-amber-50/40' : 'border-border focus:border-primary'
+                      c.fijo
+                        ? 'border-border bg-muted/60 text-muted-foreground cursor-not-allowed'
+                        : c.faltante && !valores[c.slug] ? 'border-amber-400 bg-amber-50/40' : 'border-border focus:border-primary'
                     }`}
                   />
                 </label>
