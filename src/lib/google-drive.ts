@@ -491,3 +491,91 @@ export async function deleteDriveFile(
     throw new Error(`Error eliminando archivo de Drive (${res.status})`)
   }
 }
+
+// ── Listado y export (transcripciones de Meet) ───────────────────────────────
+
+export interface DriveFileMeta {
+  id: string
+  name: string
+  mimeType: string
+  createdTime: string
+  modifiedTime: string
+  webViewLink?: string
+}
+
+/**
+ * Lista archivos de una carpeta de Drive.
+ *
+ * `modifiedAfter` filtra por fecha ISO (Drive espera RFC 3339). Se usa para
+ * traer solo lo que llego en la ventana del cron, no la carpeta completa.
+ * Pagina hasta agotar; el volumen esperado por dia es de unidades.
+ */
+export async function listDriveFolderFiles(
+  folderId: string,
+  opts: { modifiedAfter?: string; mimeType?: string } = {},
+  workspaceId?: string,
+): Promise<DriveFileMeta[]> {
+  const token = await getAccessToken(workspaceId)
+
+  const clauses = [`'${folderId}' in parents`, 'trashed = false']
+  if (opts.modifiedAfter) clauses.push(`modifiedTime > '${opts.modifiedAfter}'`)
+  if (opts.mimeType) clauses.push(`mimeType = '${opts.mimeType}'`)
+
+  const out: DriveFileMeta[] = []
+  let pageToken: string | undefined
+
+  do {
+    const params = new URLSearchParams({
+      q: clauses.join(' and '),
+      fields: 'nextPageToken, files(id,name,mimeType,createdTime,modifiedTime,webViewLink)',
+      orderBy: 'createdTime',
+      pageSize: '100',
+      supportsAllDrives: 'true',
+      includeItemsFromAllDrives: 'true',
+    })
+    if (pageToken) params.set('pageToken', pageToken)
+
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error('[google-drive] List failed:', res.status, errBody.slice(0, 500))
+      throw new Error(`Error listando carpeta de Drive (${res.status})`)
+    }
+
+    const data = await res.json()
+    out.push(...((data.files ?? []) as DriveFileMeta[]))
+    pageToken = data.nextPageToken as string | undefined
+  } while (pageToken)
+
+  return out
+}
+
+/**
+ * Exporta un Google Doc nativo a texto plano.
+ *
+ * Las transcripciones de Meet se guardan como Google Doc, no como archivo
+ * binario: `?alt=media` devuelve 403 sobre ellas. La ruta correcta es
+ * `/export`, que no acepta `supportsAllDrives` (no lo necesita).
+ */
+export async function exportGoogleDocAsText(
+  fileId: string,
+  workspaceId?: string,
+): Promise<string> {
+  const token = await getAccessToken(workspaceId)
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text%2Fplain`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    console.error('[google-drive] Export failed:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error exportando Google Doc (${res.status})`)
+  }
+
+  return await res.text()
+}
