@@ -37,11 +37,45 @@ export type DualDecision =
   | 'informa_falso_positivo'
   | 'inconcluso';
 
+/**
+ * Lo que el proveedor manda DENTRO de cada coincidencia.
+ *
+ * Estos campos ya están persistidos en `consultas_listas_dual.matches[].detalle`
+ * desde el primer día (verificado contra producción el 2026-08-25: 50 de 50
+ * coincidencias traen `fuente`). El tipo los escondía, no la base.
+ *
+ * Los tres que importan y por qué:
+ *
+ *   - `fuente` es la LLAVE de clasificación por tier. Para todo lo que no es
+ *     medios es un código estable (`OFAC`, `PEPINT`, `CSL`, `NAREWUSA`…); el
+ *     nombre visible de la lista NO sirve como llave porque en producción ya hay
+ *     mojibake (`USA WANTED: NARCOTICS REWARDS PROGRAM—MISCELLANEOUS TARGETS`,
+ *     guion largo UTF-8 leído como latin-1). Ver `@/lib/compliance/tier-fuentes`.
+ *   - `coincidencia` dice si el cruce fue por documento o por nombre. Es el eje
+ *     de identidad: solo 4 de 50 coincidencias medidas tienen documento.
+ *   - `porcentajeDeCoincidencia` llega como TEXTO (`"80"`), no como número.
+ *
+ * Todo opcional y el resto abierto con index signature: `matches` se lee del
+ * jsonb con un cast, sin validar, así que declarar un campo como obligatorio
+ * sería afirmar algo que nadie verifica en tiempo de ejecución.
+ */
+export type InformaMatchDetalle = {
+  fuente?: string | null;
+  coincidencia?: string | null;
+  porcentajeDeCoincidencia?: string | null;
+  nombreEncontrado?: string | null;
+  identificacionEncontrada?: string | null;
+  delitoOCausa?: string | null;
+  lista?: string | null;
+  [k: string]: unknown;
+};
+
 export type InformaMatch = {
   lista: string;
   nombre: string;
   documento: string | null;
   fundamento: string | null;
+  detalle?: InformaMatchDetalle;
 };
 
 export type InformaResult = {
